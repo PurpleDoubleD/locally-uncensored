@@ -1,0 +1,52 @@
+{
+  "name": "locally-uncensored",
+  "version": "1.0.0",
+  "private": false,
+  "description": "Private, local AI chat & image/video generation. No cloud, no censorship, no data collection. Powered by Ollama & ComfyUI.",
+  "license": "MIT",
+  "author": "purpledoubled",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/purpledoubled/locally-uncensored.git"
+  },
+  "keywords": ["ai", "local", "ollama", "comfyui", "uncensored", "private", "chat", "image-generation", "video-generation"],
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "lint": "eslint .",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@react-three/drei": "^10.7.7",
+    "@react-three/fiber": "^9.5.0",
+    "@tailwindcss/vite": "^4.2.2",
+    "@types/react-syntax-highlighter": "^15.5.13",
+    "@types/uuid": "^10.0.0",
+    "framer-motion": "^12.38.0",
+    "lucide-react": "^1.0.1",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "react-markdown": "^10.1.0",
+    "react-syntax-highlighter": "^16.1.1",
+    "remark-gfm": "^4.0.1",
+    "tailwindcss": "^4.2.2",
+    "three": "^0.183.2",
+    "uuid": "^13.0.0",
+    "zustand": "^5.0.12"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.4",
+    "@types/node": "^24.12.0",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.1",
+    "eslint": "^9.39.4",
+    "eslint-plugin-react-hooks": "^7.0.1",
+    "eslint-plugin-react-refresh": "^0.5.2",
+    "globals": "^17.4.0",
+    "typescript": "~5.9.3",
+    "typescript-eslint": "^8.57.0",
+    "vite": "^8.0.1"
+  }
+}
