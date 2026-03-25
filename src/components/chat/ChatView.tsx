@@ -20,8 +20,8 @@ export function ChatView() {
   })
   const hasUserMessages = conversation?.messages.some((m) => m.role === 'user') ?? false
 
-  // Show welcome + personas when: no conversation OR conversation has no user messages yet
-  if (!activeConversationId || !hasUserMessages) {
+  // Show welcome + personas only when no conversation is selected (homepage)
+  if (!activeConversationId) {
     const hasModels = models.length > 0
 
     return (

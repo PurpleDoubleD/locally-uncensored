@@ -1,6 +1,7 @@
 import { Menu, Settings, Cpu, Sun, Moon, MessageSquare, Film, Layers } from 'lucide-react'
 import { useUIStore } from '../../stores/uiStore'
 import { useSettingsStore } from '../../stores/settingsStore'
+import { useChatStore } from '../../stores/chatStore'
 import { ModelSelector } from '../models/ModelSelector'
 
 export function Header() {
@@ -22,7 +23,10 @@ export function Header() {
           <Menu size={20} />
         </button>
         <button
-          onClick={() => setView('chat')}
+          onClick={() => {
+            useChatStore.getState().setActiveConversation(null)
+            setView('chat')
+          }}
           className="flex items-center gap-2 text-gray-800 dark:text-gray-200 hover:opacity-80 transition"
         >
           <Cpu size={20} />

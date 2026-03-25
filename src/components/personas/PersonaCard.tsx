@@ -1,7 +1,15 @@
 import { motion } from 'framer-motion'
-import { Bot, Code, Feather, BarChart3, Zap, User } from 'lucide-react'
+import {
+  Bot, Code, Feather, BarChart3, Zap, User, Globe, Shield, Flame,
+  Skull, GraduationCap, Sword, Clock, Laugh, Crown, Brain, Anchor,
+  HelpCircle, Sparkles, Heart, MessageCircle, Search, Mic
+} from 'lucide-react'
 
-const iconMap: Record<string, typeof Bot> = { Bot, Code, Feather, BarChart3, Zap, User }
+const iconMap: Record<string, typeof Bot> = {
+  Bot, Code, Feather, BarChart3, Zap, User, Globe, Shield, Flame,
+  Skull, GraduationCap, Sword, Clock, Laugh, Crown, Brain, Anchor,
+  HelpCircle, Sparkles, Heart, MessageCircle, Search, Mic
+}
 
 interface Props {
   name: string
