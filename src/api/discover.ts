@@ -106,56 +106,110 @@ function getCuratedTextModels(): DiscoverModel[] {
   ]
 }
 
-// ─── Image Models (with direct HuggingFace download URLs) ───
+// ─── Image Model Bundles ───
 
-export function getImageModelsDiscover(): DiscoverModel[] {
+export function getImageBundles(): ModelBundle[] {
   return [
     {
-      name: 'Juggernaut XL V9',
-      description: 'Best photorealistic SDXL checkpoint.',
-      pulls: 'Top Rated', tags: ['SDXL', '6.5 GB', 'Photorealistic'], updated: 'civitai.com',
+      name: 'Juggernaut XL V9 (Photorealistic)',
+      description: 'Best photorealistic SDXL checkpoint. All-in-one — just install and generate.',
+      tags: ['SDXL', 'Photorealistic', '1024px'],
+      totalSizeGB: 6.5,
+      vramRequired: '6-8 GB',
+      workflow: 'wan', // not used for image, just satisfies type
       url: 'https://civitai.com/models/133005/juggernaut-xl',
-      downloadUrl: 'https://huggingface.co/RunDiffusion/Juggernaut-XL-v9/resolve/main/Juggernaut-XL_v9_RunDiffusion.safetensors',
-      filename: 'Juggernaut-XL_v9.safetensors', subfolder: 'checkpoints', sizeGB: 6.5,
+      files: [
+        {
+          name: 'Juggernaut XL V9',
+          description: 'SDXL checkpoint — includes VAE and CLIP.',
+          pulls: '', tags: ['Checkpoint', '6.5 GB'], updated: '',
+          downloadUrl: 'https://huggingface.co/RunDiffusion/Juggernaut-XL-v9/resolve/main/Juggernaut-XL_v9_RunDiffusion.safetensors',
+          filename: 'Juggernaut-XL_v9.safetensors', subfolder: 'checkpoints', sizeGB: 6.5,
+        },
+      ],
     },
     {
-      name: 'RealVisXL V5',
-      description: 'Photorealistic SDXL. Great for portraits and landscapes.',
-      pulls: 'Popular', tags: ['SDXL', '6.5 GB', 'Photorealistic'], updated: 'civitai.com',
+      name: 'RealVisXL V5 (Photorealistic)',
+      description: 'Great for portraits, landscapes, and product photos. Ready to use.',
+      tags: ['SDXL', 'Photorealistic', '1024px'],
+      totalSizeGB: 6.5,
+      vramRequired: '6-8 GB',
+      workflow: 'wan',
       url: 'https://civitai.com/models/139562/realvisxl',
-      downloadUrl: 'https://huggingface.co/SG161222/RealVisXL_V5.0/resolve/main/RealVisXL_V5.0.safetensors',
-      filename: 'RealVisXL_V5.safetensors', subfolder: 'checkpoints', sizeGB: 6.5,
+      files: [
+        {
+          name: 'RealVisXL V5',
+          description: 'SDXL checkpoint — includes VAE and CLIP.',
+          pulls: '', tags: ['Checkpoint', '6.5 GB'], updated: '',
+          downloadUrl: 'https://huggingface.co/SG161222/RealVisXL_V5.0/resolve/main/RealVisXL_V5.0.safetensors',
+          filename: 'RealVisXL_V5.safetensors', subfolder: 'checkpoints', sizeGB: 6.5,
+        },
+      ],
     },
     {
-      name: 'Pony Diffusion V6 XL',
-      description: 'Anime/stylized art. Huge LoRA ecosystem.',
-      pulls: 'Top Rated', tags: ['SDXL', '6.5 GB', 'Anime'], updated: 'civitai.com',
-      url: 'https://civitai.com/models/257749/pony-diffusion-v6-xl',
-    },
-    {
-      name: 'FLUX.1 [schnell] (FP8)',
-      description: 'Fast FLUX. 1-4 step generation. Place in diffusion_models.',
-      pulls: 'State-of-art', tags: ['FLUX', '~12 GB', 'Fast'], updated: 'huggingface.co',
+      name: 'FLUX.1 [schnell] (Fast & Modern)',
+      description: 'State-of-the-art image gen. 1-4 steps for fast results. Needs FLUX VAE + CLIP.',
+      tags: ['FLUX', 'Fast', '1024px'],
+      totalSizeGB: 11.8,
+      vramRequired: '10-12 GB',
+      workflow: 'wan',
       url: 'https://huggingface.co/black-forest-labs/FLUX.1-schnell',
-      downloadUrl: 'https://huggingface.co/black-forest-labs/FLUX.1-schnell/resolve/main/flux1-schnell.safetensors',
-      filename: 'flux1-schnell.safetensors', subfolder: 'diffusion_models', sizeGB: 11.5,
+      files: [
+        {
+          name: 'FLUX.1 schnell Model',
+          description: 'The main FLUX diffusion model.',
+          pulls: '', tags: ['Model', '11.5 GB'], updated: '',
+          downloadUrl: 'https://huggingface.co/black-forest-labs/FLUX.1-schnell/resolve/main/flux1-schnell.safetensors',
+          filename: 'flux1-schnell.safetensors', subfolder: 'diffusion_models', sizeGB: 11.5,
+        },
+        {
+          name: 'FLUX VAE',
+          description: 'Required autoencoder for FLUX.',
+          pulls: '', tags: ['VAE', '335 MB'], updated: '',
+          downloadUrl: 'https://huggingface.co/black-forest-labs/FLUX.1-schnell/resolve/main/ae.safetensors',
+          filename: 'flux-ae.safetensors', subfolder: 'vae', sizeGB: 0.3,
+        },
+      ],
     },
     {
-      name: 'FLUX.1 [dev] (FP8)',
-      description: 'High quality FLUX. Needs FP8 for 12GB VRAM.',
-      pulls: 'State-of-art', tags: ['FLUX', '~12 GB', 'Quality'], updated: 'huggingface.co',
+      name: 'FLUX.1 [dev] (High Quality)',
+      description: 'Highest quality FLUX. More steps but better results. Needs FLUX VAE + CLIP.',
+      tags: ['FLUX', 'Quality', '1024px'],
+      totalSizeGB: 11.8,
+      vramRequired: '10-12 GB',
+      workflow: 'wan',
       url: 'https://huggingface.co/black-forest-labs/FLUX.1-dev',
-      downloadUrl: 'https://huggingface.co/black-forest-labs/FLUX.1-dev/resolve/main/flux1-dev.safetensors',
-      filename: 'flux1-dev.safetensors', subfolder: 'diffusion_models', sizeGB: 11.5,
-    },
-    {
-      name: 'FLUX VAE',
-      description: 'Required VAE for FLUX models.',
-      pulls: 'Required', tags: ['VAE', '335 MB'], updated: 'huggingface.co',
-      downloadUrl: 'https://huggingface.co/black-forest-labs/FLUX.1-schnell/resolve/main/ae.safetensors',
-      filename: 'flux-ae.safetensors', subfolder: 'vae', sizeGB: 0.3,
+      files: [
+        {
+          name: 'FLUX.1 dev Model',
+          description: 'The main FLUX diffusion model (dev variant).',
+          pulls: '', tags: ['Model', '11.5 GB'], updated: '',
+          downloadUrl: 'https://huggingface.co/black-forest-labs/FLUX.1-dev/resolve/main/flux1-dev.safetensors',
+          filename: 'flux1-dev.safetensors', subfolder: 'diffusion_models', sizeGB: 11.5,
+        },
+        {
+          name: 'FLUX VAE',
+          description: 'Required autoencoder for FLUX.',
+          pulls: '', tags: ['VAE', '335 MB'], updated: '',
+          downloadUrl: 'https://huggingface.co/black-forest-labs/FLUX.1-schnell/resolve/main/ae.safetensors',
+          filename: 'flux-ae.safetensors', subfolder: 'vae', sizeGB: 0.3,
+        },
+      ],
     },
   ]
+}
+
+// Flat list for backwards compat
+export function getImageModelsDiscover(): DiscoverModel[] {
+  const bundles = getImageBundles()
+  const files: DiscoverModel[] = []
+  for (const b of bundles) files.push(...b.files)
+  const seen = new Set<string>()
+  return files.filter(f => {
+    if (!f.filename || seen.has(f.filename)) return false
+    seen.add(f.filename)
+    return true
+  })
 }
 
 // ─── Video Model Bundles ───

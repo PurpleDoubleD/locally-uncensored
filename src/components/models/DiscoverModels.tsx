@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { motion } from 'framer-motion'
 import { Download, RefreshCw, ExternalLink, Search, Info, CheckCircle, XCircle, Loader2 } from 'lucide-react'
 import {
-  fetchAbliteratedModels, getImageModelsDiscover, getVideoBundles,
+  fetchAbliteratedModels, getImageBundles, getVideoBundles,
   startModelDownload, getDownloadProgress,
   type DiscoverModel, type DownloadProgress, type ModelBundle,
 } from '../../api/discover'
@@ -53,16 +53,16 @@ export function DiscoverModels({ category }: Props) {
   const isText = category === 'text'
   const isImage = category === 'image'
   const isVideo = category === 'video'
-  const allModels = isText ? textModels : isImage ? getImageModelsDiscover() : []
-  const videoBundles = isVideo ? getVideoBundles() : []
+  const allModels = isText ? textModels : []
+  const bundles = isImage ? getImageBundles() : isVideo ? getVideoBundles() : []
 
   const filtered = search
     ? allModels.filter((m) => m.name.toLowerCase().includes(search.toLowerCase()) || m.description.toLowerCase().includes(search.toLowerCase()))
     : allModels
 
   const filteredBundles = search
-    ? videoBundles.filter((b) => b.name.toLowerCase().includes(search.toLowerCase()) || b.description.toLowerCase().includes(search.toLowerCase()))
-    : videoBundles
+    ? bundles.filter((b) => b.name.toLowerCase().includes(search.toLowerCase()) || b.description.toLowerCase().includes(search.toLowerCase()))
+    : bundles
 
   const isInstalled = (name: string) => installedModels.some((m) => m.name.startsWith(name.split(':')[0]))
 
@@ -117,8 +117,8 @@ export function DiscoverModels({ category }: Props) {
   const subtitle = isText
     ? 'Abliterated models from the Ollama registry. Click to install.'
     : isImage
-      ? 'Download checkpoints directly into your ComfyUI models folder.'
-      : 'Download video models directly into your ComfyUI models folder.'
+      ? 'Complete packages — each bundle includes everything you need to generate images.'
+      : 'Complete packages — each bundle includes Model + VAE + CLIP for video generation.'
 
   return (
     <div className="space-y-4">
@@ -188,8 +188,8 @@ export function DiscoverModels({ category }: Props) {
         </div>
       )}
 
-      {/* Video Bundles */}
-      {isVideo && filteredBundles.length > 0 && (
+      {/* Model Bundles (Image + Video) */}
+      {(isImage || isVideo) && filteredBundles.length > 0 && (
         <div className="space-y-4">
           {filteredBundles.map((bundle, bi) => {
             const complete = isBundleComplete(bundle)
