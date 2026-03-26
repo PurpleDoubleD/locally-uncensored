@@ -155,7 +155,31 @@ export function ModelManager() {
           </>
         )}
 
-        {tab === 'discover' && <DiscoverModels />}
+        {tab === 'discover' && (
+          <>
+            {/* Category filter for Discover too */}
+            <div className="flex gap-0.5 mb-6 p-1 bg-gray-100 dark:bg-white/5 rounded-lg w-fit">
+              {CATEGORY_TABS.filter(t => t.key !== 'all').map((catTab) => {
+                const Icon = catTab.icon
+                return (
+                  <button
+                    key={catTab.key}
+                    onClick={() => setCategoryFilter(catTab.key)}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${
+                      categoryFilter === catTab.key
+                        ? 'bg-white dark:bg-white/10 text-gray-900 dark:text-white shadow-sm'
+                        : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-white/5'
+                    }`}
+                  >
+                    <Icon size={12} />
+                    {catTab.label}
+                  </button>
+                )
+              })}
+            </div>
+            <DiscoverModels category={categoryFilter === 'all' ? 'text' : categoryFilter} />
+          </>
+        )}
       </div>
 
       <PullModelDialog open={pullOpen} onClose={() => setPullOpen(false)} />

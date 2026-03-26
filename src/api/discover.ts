@@ -4,6 +4,7 @@ export interface DiscoverModel {
   pulls: string
   tags: string[]
   updated: string
+  url?: string
 }
 
 export async function fetchAbliteratedModels(): Promise<DiscoverModel[]> {
