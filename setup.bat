@@ -2,24 +2,8 @@
 title Locally Uncensored - Setup
 echo.
 echo.
-powershell -NoProfile -Command "Write-Host '    ##        #######   ######     ###    ##       ##       ##    ##' -F Magenta"
-powershell -NoProfile -Command "Write-Host '    ##       ##     ## ##    ##   ## ##   ##       ##        ##  ##' -F Magenta"
-powershell -NoProfile -Command "Write-Host '    ##       ##     ## ##        ##   ##  ##       ##         ####' -F DarkMagenta"
-powershell -NoProfile -Command "Write-Host '    ##       ##     ## ##       ##     ## ##       ##          ##' -F DarkMagenta"
-powershell -NoProfile -Command "Write-Host '    ##       ##     ## ##       ######### ##       ##          ##' -F DarkMagenta"
-powershell -NoProfile -Command "Write-Host '    ##       ##     ## ##    ## ##     ## ##       ##          ##' -F Magenta"
-powershell -NoProfile -Command "Write-Host '    ########  #######   ######  ##     ## ######## ########   ##' -F Magenta"
-echo.
-powershell -NoProfile -Command "Write-Host '    ##  ## ##  ##  ######  ######## ##  ##  ######   #######  ########  ######## ########' -F Magenta"
-powershell -NoProfile -Command "Write-Host '    ##  ## ### ## ##    ## ##       ### ## ##    ## ##     ## ##     ## ##       ##     ##' -F Magenta"
-powershell -NoProfile -Command "Write-Host '    ##  ## ####   ##       ##       ####   ##       ##     ## ##     ## ##       ##     ##' -F DarkMagenta"
-powershell -NoProfile -Command "Write-Host '    ##  ## ## ##  ##       ######   ## ##   ######  ##     ## ########  ######   ##     ##' -F DarkMagenta"
-powershell -NoProfile -Command "Write-Host '    ##  ## ##  ## ##       ##       ##  ##       ## ##     ## ##   ##   ##       ##     ##' -F DarkMagenta"
-powershell -NoProfile -Command "Write-Host '    ##  ## ##  ## ##    ## ##       ##  ## ##    ## ##     ## ##    ##  ##       ##     ##' -F Magenta"
-powershell -NoProfile -Command "Write-Host '     ####  ##  ##  ######  ######## ##  ##  ######   #######  ##    ## ######## ########' -F Magenta"
-echo.
-powershell -NoProfile -Command "Write-Host '    Private, local AI. No cloud. No censorship.' -F DarkGray"
-powershell -NoProfile -Command "Write-Host '    =================================================' -F Magenta"
+powershell -NoProfile -Command ^
+  "Write-Host '    ##        #######   ######     ###    ##       ##       ##    ##' -F Magenta;Write-Host '    ##       ##     ## ##    ##   ## ##   ##       ##        ##  ##' -F Magenta;Write-Host '    ##       ##     ## ##        ##   ##  ##       ##         ####' -F DarkMagenta;Write-Host '    ##       ##     ## ##       ##     ## ##       ##          ##' -F DarkMagenta;Write-Host '    ##       ##     ## ##       ######### ##       ##          ##' -F DarkMagenta;Write-Host '    ##       ##     ## ##    ## ##     ## ##       ##          ##' -F Magenta;Write-Host '    ########  #######   ######  ##     ## ######## ########   ##' -F Magenta;Write-Host '';Write-Host '    ##  ## ##  ##  ######  ######## ##  ##  ######   #######  ########  ######## ########' -F Magenta;Write-Host '    ##  ## ### ## ##    ## ##       ### ## ##    ## ##     ## ##     ## ##       ##     ##' -F Magenta;Write-Host '    ##  ## ####   ##       ##       ####   ##       ##     ## ##     ## ##       ##     ##' -F DarkMagenta;Write-Host '    ##  ## ## ##  ##       ######   ## ##   ######  ##     ## ########  ######   ##     ##' -F DarkMagenta;Write-Host '    ##  ## ##  ## ##       ##       ##  ##       ## ##     ## ##   ##   ##       ##     ##' -F DarkMagenta;Write-Host '    ##  ## ##  ## ##    ## ##       ##  ## ##    ## ##     ## ##    ##  ##       ##     ##' -F Magenta;Write-Host '     ####  ##  ##  ######  ######## ##  ##  ######   #######  ##    ## ######## ########' -F Magenta;Write-Host '';Write-Host '    Private, local AI. No cloud. No censorship.' -F DarkGray;Write-Host '    =================================================' -F Magenta"
 echo.
 
 where node >nul 2>nul
@@ -78,9 +62,7 @@ if %errorlevel% neq 0 (
 )
 
 echo.
-powershell -NoProfile -Command "Write-Host '    =================================================' -F Green"
-powershell -NoProfile -Command "Write-Host '    Setup complete! Starting app...' -F White"
-powershell -NoProfile -Command "Write-Host '    =================================================' -F Green"
+powershell -NoProfile -Command "Write-Host '    =================================================' -F Green;Write-Host '    Setup complete! Starting app...' -F White;Write-Host '    =================================================' -F Green"
 echo.
 
 start http://localhost:5173
