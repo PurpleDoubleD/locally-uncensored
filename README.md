@@ -61,7 +61,7 @@ Tired of switching between Ollama for chat, ComfyUI for images, and another tool
 - **Video Generation** — Text-to-video with Wan 2.1/2.2 and AnimateDiff support
 - **25+ Personas** — From Helpful Assistant to Roast Master, ready out of the box
 - **Model Manager** — Browse, install, and switch models with one click
-- **Discover Models** — Find and install uncensored models from the Ollama registry
+- **Discover & Install Models** — Browse and one-click install text, image, and video models directly in the app
 - **Thinking Display** — See the AI's reasoning in collapsible blocks
 - **Dark/Light Mode** — Beautiful glassmorphism UI that actually looks good
 - **100% Local** — Everything runs on your machine, nothing touches the internet
@@ -116,13 +116,12 @@ Open **http://localhost:5173** — the app recommends models on first launch.
 
 ### Image/Video Generation (Optional)
 
-1. Install [ComfyUI](https://github.com/comfyanonymous/ComfyUI)
-2. Create a `.env` file in the project root:
-   ```
-   COMFYUI_PATH=/path/to/your/ComfyUI
-   ```
-3. Click **Start ComfyUI** in the Create tab, or start it manually
-4. Download image models (e.g., SDXL checkpoints) into ComfyUI's `models/checkpoints` folder
+1. Install [ComfyUI](https://github.com/comfyanonymous/ComfyUI) anywhere on your system
+2. Open the **Create** tab in the app — it will auto-detect ComfyUI or ask you to enter the path
+3. Go to **Model Manager → Discover → Image/Video** and click **Install All** on any bundle
+4. That's it — models are downloaded directly into the right ComfyUI folders
+
+No manual `.env` editing needed. The app handles everything.
 
 ### One-Click Start (Windows)
 
