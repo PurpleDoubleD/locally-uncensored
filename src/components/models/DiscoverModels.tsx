@@ -2,9 +2,9 @@ import { useState, useEffect, useRef } from 'react'
 import { motion } from 'framer-motion'
 import { Download, RefreshCw, ExternalLink, Search, Info, CheckCircle, XCircle, Loader2 } from 'lucide-react'
 import {
-  fetchAbliteratedModels, getImageModelsDiscover, getVideoModelsDiscover,
+  fetchAbliteratedModels, getImageModelsDiscover, getVideoBundles,
   startModelDownload, getDownloadProgress,
-  type DiscoverModel, type DownloadProgress,
+  type DiscoverModel, type DownloadProgress, type ModelBundle,
 } from '../../api/discover'
 import { useModels } from '../../hooks/useModels'
 import { GlassCard } from '../ui/GlassCard'
@@ -52,11 +52,17 @@ export function DiscoverModels({ category }: Props) {
 
   const isText = category === 'text'
   const isImage = category === 'image'
-  const allModels = isText ? textModels : isImage ? getImageModelsDiscover() : getVideoModelsDiscover()
+  const isVideo = category === 'video'
+  const allModels = isText ? textModels : isImage ? getImageModelsDiscover() : []
+  const videoBundles = isVideo ? getVideoBundles() : []
 
   const filtered = search
     ? allModels.filter((m) => m.name.toLowerCase().includes(search.toLowerCase()) || m.description.toLowerCase().includes(search.toLowerCase()))
     : allModels
+
+  const filteredBundles = search
+    ? videoBundles.filter((b) => b.name.toLowerCase().includes(search.toLowerCase()) || b.description.toLowerCase().includes(search.toLowerCase()))
+    : videoBundles
 
   const isInstalled = (name: string) => installedModels.some((m) => m.name.startsWith(name.split(':')[0]))
 
@@ -64,10 +70,38 @@ export function DiscoverModels({ category }: Props) {
     if (!model.downloadUrl || !model.filename || !model.subfolder) return
     const result = await startModelDownload(model.downloadUrl, model.subfolder, model.filename)
     if (result.status === 'started' || result.status === 'already_exists') {
-      // Start polling
       const prog = await getDownloadProgress()
       setDownloads(prog)
     }
+  }
+
+  const handleBundleInstall = async (bundle: ModelBundle) => {
+    for (const file of bundle.files) {
+      if (file.downloadUrl && file.filename && file.subfolder) {
+        await startModelDownload(file.downloadUrl, file.subfolder, file.filename)
+      }
+    }
+    const prog = await getDownloadProgress()
+    setDownloads(prog)
+  }
+
+  const isBundleComplete = (bundle: ModelBundle): boolean => {
+    return bundle.files.every(f => f.filename && downloads[f.filename]?.status === 'complete')
+  }
+
+  const isBundleDownloading = (bundle: ModelBundle): boolean => {
+    return bundle.files.some(f => f.filename && (downloads[f.filename]?.status === 'downloading' || downloads[f.filename]?.status === 'connecting'))
+  }
+
+  const getBundleProgress = (bundle: ModelBundle): number => {
+    let totalBytes = 0, downloadedBytes = 0
+    for (const f of bundle.files) {
+      if (f.filename && downloads[f.filename]) {
+        totalBytes += downloads[f.filename].total
+        downloadedBytes += downloads[f.filename].progress
+      }
+    }
+    return totalBytes > 0 ? (downloadedBytes / totalBytes) * 100 : 0
   }
 
   const getModelDownloadState = (model: DiscoverModel): DownloadProgress | null => {
@@ -154,9 +188,112 @@ export function DiscoverModels({ category }: Props) {
         </div>
       )}
 
+      {/* Video Bundles */}
+      {isVideo && filteredBundles.length > 0 && (
+        <div className="space-y-4">
+          {filteredBundles.map((bundle, bi) => {
+            const complete = isBundleComplete(bundle)
+            const downloading = isBundleDownloading(bundle)
+            const bundleProgress = getBundleProgress(bundle)
+
+            return (
+              <motion.div key={bundle.name} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: bi * 0.05 }}>
+                <GlassCard className="p-4">
+                  <div className="flex items-start justify-between gap-3 mb-3">
+                    <div>
+                      <h3 className="text-sm font-semibold text-gray-900 dark:text-white">{bundle.name}</h3>
+                      <p className="text-xs text-gray-500 mt-0.5">{bundle.description}</p>
+                      <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+                        {bundle.tags.map(t => (
+                          <span key={t} className="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 dark:bg-white/5 text-gray-600 dark:text-gray-400">{t}</span>
+                        ))}
+                        <span className="text-[10px] text-gray-400">Total: {bundle.totalSizeGB} GB</span>
+                        <span className="text-[10px] text-orange-500">Requires {bundle.vramRequired} VRAM</span>
+                      </div>
+                    </div>
+                    <div className="shrink-0">
+                      {complete ? (
+                        <span className="flex items-center gap-1 text-xs text-green-500 px-3 py-1.5 rounded-lg bg-green-50 dark:bg-green-500/10">
+                          <CheckCircle size={14} /> Ready
+                        </span>
+                      ) : downloading ? (
+                        <span className="flex items-center gap-1 text-xs text-blue-500 px-3 py-1.5">
+                          <Loader2 size={14} className="animate-spin" /> Installing...
+                        </span>
+                      ) : (
+                        <button
+                          onClick={() => handleBundleInstall(bundle)}
+                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-green-600 hover:bg-green-700 text-white text-xs font-medium transition-colors"
+                        >
+                          <Download size={14} /> Install All ({bundle.totalSizeGB} GB)
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Bundle progress */}
+                  {downloading && (
+                    <div className="mb-3">
+                      <ProgressBar progress={bundleProgress} />
+                      <p className="text-[10px] text-gray-400 mt-1">{Math.round(bundleProgress)}% complete</p>
+                    </div>
+                  )}
+
+                  {/* Individual files */}
+                  <div className="space-y-2 border-t border-gray-200 dark:border-white/5 pt-3">
+                    <p className="text-[10px] text-gray-400 uppercase tracking-wider font-medium">Included files ({bundle.files.length})</p>
+                    {bundle.files.map((file) => {
+                      const dlState = file.filename ? downloads[file.filename] : null
+                      const fileDl = dlState?.status === 'downloading' || dlState?.status === 'connecting'
+                      const fileDone = dlState?.status === 'complete'
+                      const fileErr = dlState?.status === 'error'
+
+                      return (
+                        <div key={file.filename} className="flex items-center justify-between gap-2 py-1">
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs text-gray-700 dark:text-gray-300 truncate">{file.name}</span>
+                              {file.sizeGB && <span className="text-[10px] text-gray-400 shrink-0">{file.sizeGB} GB</span>}
+                            </div>
+                            {fileDl && dlState && dlState.total > 0 && (
+                              <div className="mt-1">
+                                <ProgressBar progress={(dlState.progress / dlState.total) * 100} />
+                                <span className="text-[10px] text-gray-400">{formatBytes(dlState.progress)} / {formatBytes(dlState.total)}{dlState.speed > 0 ? ` · ${formatBytes(dlState.speed)}/s` : ''}</span>
+                              </div>
+                            )}
+                            {fileErr && <span className="text-[10px] text-red-500">Failed: {dlState?.error}</span>}
+                          </div>
+                          <div className="shrink-0">
+                            {fileDone ? (
+                              <CheckCircle size={14} className="text-green-500" />
+                            ) : fileDl ? (
+                              <Loader2 size={14} className="animate-spin text-blue-400" />
+                            ) : (
+                              <button onClick={() => handleDownload(file)} className="p-1 rounded text-gray-400 hover:text-green-500 transition-colors" title="Download this file">
+                                <Download size={14} />
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+
+                  {bundle.url && (
+                    <a href={bundle.url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-[10px] text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 mt-2 transition-colors">
+                      <ExternalLink size={10} /> View on HuggingFace
+                    </a>
+                  )}
+                </GlassCard>
+              </motion.div>
+            )
+          })}
+        </div>
+      )}
+
       {loading ? (
         <div className="text-center py-8 text-gray-500">Loading models...</div>
-      ) : (
+      ) : !isVideo && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           {filtered.map((model, i) => {
             const dlState = getModelDownloadState(model)
@@ -267,7 +404,7 @@ export function DiscoverModels({ category }: Props) {
         </div>
       )}
 
-      {!loading && filtered.length === 0 && (
+      {!loading && filtered.length === 0 && filteredBundles.length === 0 && (
         <p className="text-center text-gray-500 py-4">No models found</p>
       )}
     </div>

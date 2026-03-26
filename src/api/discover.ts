@@ -158,51 +158,102 @@ export function getImageModelsDiscover(): DiscoverModel[] {
   ]
 }
 
-// ─── Video Models (with direct download URLs) ───
+// ─── Video Model Bundles ───
+// Each bundle contains ALL files needed for a working video workflow.
+// "Install All" downloads model + VAE + CLIP together.
 
-export function getVideoModelsDiscover(): DiscoverModel[] {
+export interface ModelBundle {
+  name: string
+  description: string
+  tags: string[]
+  totalSizeGB: number
+  vramRequired: string
+  workflow: 'wan' | 'animatediff'
+  files: DiscoverModel[]
+  url?: string
+}
+
+export function getVideoBundles(): ModelBundle[] {
   return [
     {
-      name: 'Wan 2.1 T2V 1.3B',
-      description: 'Lightweight text-to-video. Best for 8-10 GB VRAM.',
-      pulls: '8-10 GB VRAM', tags: ['Wan', '1.3B', '480p'], updated: 'huggingface.co',
-      url: 'https://huggingface.co/Wan-AI/Wan2.1-T2V-1.3B-diffusers',
-      downloadUrl: 'https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/diffusion_models/wan2.1_t2v_1.3B_bf16.safetensors',
-      filename: 'wan2.1_t2v_1.3B_bf16.safetensors', subfolder: 'diffusion_models', sizeGB: 2.5,
-    },
-    {
-      name: 'Wan 2.1 T2V 14B (FP8)',
-      description: 'High quality text-to-video. FP8 quantized for 12GB GPUs.',
-      pulls: '10-12 GB VRAM', tags: ['Wan', '14B', '720p'], updated: 'huggingface.co',
+      name: 'Wan 2.1 — 1.3B (Lightweight)',
+      description: 'Best for 8-10 GB VRAM GPUs. Generates 480p video. Fast and lightweight.',
+      tags: ['Wan 2.1', '480p', 'Fast'],
+      totalSizeGB: 7.6,
+      vramRequired: '8-10 GB',
+      workflow: 'wan',
       url: 'https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged',
-      downloadUrl: 'https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/diffusion_models/wan2.1_t2v_14B_fp8_e4m3fn.safetensors',
-      filename: 'wan2.1_t2v_14B_fp8.safetensors', subfolder: 'diffusion_models', sizeGB: 14.0,
+      files: [
+        {
+          name: 'Wan 2.1 T2V 1.3B Model',
+          description: 'The main video generation model.',
+          pulls: '', tags: ['Model', '2.5 GB'], updated: '',
+          downloadUrl: 'https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/diffusion_models/wan2.1_t2v_1.3B_bf16.safetensors',
+          filename: 'wan2.1_t2v_1.3B_bf16.safetensors', subfolder: 'diffusion_models', sizeGB: 2.5,
+        },
+        {
+          name: 'Wan 2.1 VAE',
+          description: 'Required video encoder/decoder.',
+          pulls: '', tags: ['VAE', '200 MB'], updated: '',
+          downloadUrl: 'https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/vae/wan_2.1_vae.safetensors',
+          filename: 'wan_2.1_vae.safetensors', subfolder: 'vae', sizeGB: 0.2,
+        },
+        {
+          name: 'Wan 2.1 CLIP (UMT5-XXL FP8)',
+          description: 'Required text encoder.',
+          pulls: '', tags: ['CLIP', '4.9 GB'], updated: '',
+          downloadUrl: 'https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors',
+          filename: 'umt5_xxl_fp8_e4m3fn_scaled.safetensors', subfolder: 'text_encoders', sizeGB: 4.9,
+        },
+      ],
     },
     {
-      name: 'Wan 2.1 VAE',
-      description: 'Required VAE for Wan models.',
-      pulls: 'Required', tags: ['VAE', '200 MB'], updated: 'huggingface.co',
-      downloadUrl: 'https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/vae/wan_2.1_vae.safetensors',
-      filename: 'wan_2.1_vae.safetensors', subfolder: 'vae', sizeGB: 0.2,
-    },
-    {
-      name: 'Wan 2.1 CLIP (UMT5-XXL)',
-      description: 'Required text encoder for Wan models.',
-      pulls: 'Required', tags: ['CLIP', '~10 GB'], updated: 'huggingface.co',
-      downloadUrl: 'https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors',
-      filename: 'umt5_xxl_fp8_e4m3fn_scaled.safetensors', subfolder: 'text_encoders', sizeGB: 4.9,
-    },
-    {
-      name: 'Hunyuan Video',
-      description: 'Tencent video generation. Compatible with Wan workflow.',
-      pulls: '12+ GB VRAM', tags: ['Hunyuan', '13B', '720p'], updated: 'huggingface.co',
-      url: 'https://huggingface.co/tencent/HunyuanVideo',
-    },
-    {
-      name: 'AnimateDiff v3',
-      description: 'Motion model for SD 1.5 checkpoints. Install via ComfyUI Manager.',
-      pulls: '6-8 GB VRAM', tags: ['AnimateDiff', 'SD1.5', 'MP4'], updated: 'github.com',
-      url: 'https://github.com/Kosinkadink/ComfyUI-AnimateDiff-Evolved',
+      name: 'Wan 2.1 — 14B FP8 (High Quality)',
+      description: 'Best quality for 12+ GB VRAM. Generates up to 720p. Slower but much better results.',
+      tags: ['Wan 2.1', '720p', 'Quality'],
+      totalSizeGB: 19.1,
+      vramRequired: '12+ GB',
+      workflow: 'wan',
+      url: 'https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged',
+      files: [
+        {
+          name: 'Wan 2.1 T2V 14B (FP8)',
+          description: 'The main video generation model (quantized).',
+          pulls: '', tags: ['Model', '14 GB'], updated: '',
+          downloadUrl: 'https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/diffusion_models/wan2.1_t2v_14B_fp8_e4m3fn.safetensors',
+          filename: 'wan2.1_t2v_14B_fp8.safetensors', subfolder: 'diffusion_models', sizeGB: 14.0,
+        },
+        {
+          name: 'Wan 2.1 VAE',
+          description: 'Required video encoder/decoder.',
+          pulls: '', tags: ['VAE', '200 MB'], updated: '',
+          downloadUrl: 'https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/vae/wan_2.1_vae.safetensors',
+          filename: 'wan_2.1_vae.safetensors', subfolder: 'vae', sizeGB: 0.2,
+        },
+        {
+          name: 'Wan 2.1 CLIP (UMT5-XXL FP8)',
+          description: 'Required text encoder.',
+          pulls: '', tags: ['CLIP', '4.9 GB'], updated: '',
+          downloadUrl: 'https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors',
+          filename: 'umt5_xxl_fp8_e4m3fn_scaled.safetensors', subfolder: 'text_encoders', sizeGB: 4.9,
+        },
+      ],
     },
   ]
+}
+
+// Flat list for backwards compatibility (individual files)
+export function getVideoModelsDiscover(): DiscoverModel[] {
+  const bundles = getVideoBundles()
+  const files: DiscoverModel[] = []
+  for (const b of bundles) {
+    files.push(...b.files)
+  }
+  // Deduplicate by filename
+  const seen = new Set<string>()
+  return files.filter(f => {
+    if (!f.filename || seen.has(f.filename)) return false
+    seen.add(f.filename)
+    return true
+  })
 }
