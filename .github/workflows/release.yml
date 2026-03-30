@@ -1,8 +1,9 @@
 name: Build & Release Desktop App
 
 on:
-  release:
-    types: [published]
+  push:
+    tags:
+      - 'v*'
 
 permissions:
   contents: write
@@ -49,7 +50,12 @@ jobs:
             patchelf \
             libgtk-3-dev \
             libsoup-3.0-dev \
-            libjavascriptcoregtk-4.1-dev
+            libjavascriptcoregtk-4.1-dev \
+            build-essential \
+            curl \
+            wget \
+            file \
+            libssl-dev
 
       - name: Install npm dependencies
         run: npm ci
@@ -60,7 +66,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tagName: ${{ github.ref_name }}
-          releaseName: 'Locally Uncensored v__VERSION__'
+          releaseName: 'Locally Uncensored ${{ github.ref_name }}'
           releaseBody: |
             ## Download
 
