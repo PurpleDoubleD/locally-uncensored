@@ -17,9 +17,9 @@ jobs:
             args: ''
           - platform: windows-latest
             args: ''
-          - platform: macos-latest
+          - platform: macos-14
             args: '--target aarch64-apple-darwin'
-          - platform: macos-latest
+          - platform: macos-14
             args: '--target x86_64-apple-darwin'
 
     runs-on: ${{ matrix.platform }}
@@ -36,7 +36,12 @@ jobs:
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+          targets: ${{ matrix.platform == 'macos-14' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
 
       - name: Install Linux dependencies
         if: matrix.platform == 'ubuntu-22.04'
@@ -44,12 +49,13 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             libwebkit2gtk-4.1-dev \
-            libappindicator3-dev \
+            libayatana-appindicator3-dev \
             librsvg2-dev \
             patchelf \
             libgtk-3-dev \
             libsoup-3.0-dev \
             libjavascriptcoregtk-4.1-dev \
+            libxdo-dev \
             build-essential \
             curl \
             wget \
