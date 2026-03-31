@@ -2,6 +2,32 @@
 
 All notable changes to Locally Uncensored are documented here.
 
+## [1.3.0] - 2026-03-31
+
+### Added
+- **RAG Document Chat**: Upload PDF, DOCX, or TXT files to chat with your documents
+  - Hybrid search (vector + BM25 keyword matching) for better retrieval
+  - Confidence score display with color-coded badges
+  - Ollama context window warning when model has insufficient context
+  - Automatic embedding model download (nomic-embed-text)
+  - Per-conversation RAG toggle and source citations
+- **Voice Integration**: Talk to your AI and hear responses
+  - Push-to-talk microphone button with Web Speech API
+  - Text-to-speech on any assistant message with sentence-level streaming
+  - Voice settings (voice selection, rate, pitch)
+  - Auto-send transcribed text option
+- **AI Agents**: Autonomous task execution with local tools
+  - ReAct-style reasoning loop with 5 built-in tools
+  - Web search, file read/write, Python code execution, image generation
+  - User approval required for destructive actions
+  - Task breakdown visualization and color-coded execution log
+  - Robust JSON parsing with 4-tier fallback and error recovery
+
+### Fixed
+- Cross-platform Python detection for code execution (Windows Store alias handling)
+- Web search now falls back to Brave Search when DuckDuckGo returns CAPTCHA
+
+
 ## [1.0.2] - 2026-03-25
 
 ### Fixed

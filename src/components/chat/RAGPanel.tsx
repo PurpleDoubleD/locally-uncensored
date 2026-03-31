@@ -12,6 +12,7 @@ import {
   ChevronDown,
   ChevronRight,
   AlertTriangle,
+  Download,
 } from 'lucide-react'
 import { useRAG } from '../../hooks/useRAG'
 import { useRAGStore } from '../../stores/ragStore'
@@ -46,6 +47,7 @@ export function RAGPanel({ conversationId }: Props) {
     isIndexing,
     indexingProgress,
     contextWarning,
+    pullingEmbeddingModel,
     uploadDocument,
     removeDocument,
     toggleRAG,
@@ -168,6 +170,25 @@ export function RAGPanel({ conversationId }: Props) {
               <AlertTriangle size={12} className="text-yellow-500 shrink-0 mt-0.5" />
               <span className="text-[0.6rem] text-yellow-400 leading-tight">
                 {contextWarning}
+              </span>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Embedding model pull progress */}
+      <AnimatePresence>
+        {pullingEmbeddingModel && (
+          <motion.div
+            className="px-3 py-2"
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            exit={{ opacity: 0, height: 0 }}
+          >
+            <div className="flex items-center gap-1.5 p-2 rounded-lg bg-blue-500/10 border border-blue-500/20">
+              <Download size={12} className="text-blue-400 animate-bounce" />
+              <span className="text-[0.6rem] text-blue-400 leading-tight">
+                Downloading embedding model (nomic-embed-text)...
               </span>
             </div>
           </motion.div>

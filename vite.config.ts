@@ -642,7 +642,7 @@ function comfyLauncher(): Plugin {
         })
       })
 
-      // API: Web search via DuckDuckGo lite
+      // API: Web search with DuckDuckGo + Brave Search fallback
       server.middlewares.use('/local-api/web-search', (req, res) => {
         if (req.method !== 'POST') { res.writeHead(405); res.end(); return }
         let body = ''
@@ -657,59 +657,97 @@ function comfyLauncher(): Plugin {
             }
 
             const maxResults = count || 5
-            const searchUrl = 'https://lite.duckduckgo.com/lite/?q=' + encodeURIComponent(query)
+            const browserUA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
 
-            https.get(searchUrl, { headers: { 'User-Agent': 'LocallyUncensored/1.1' } }, (response) => {
-              let html = ''
-              response.on('data', (chunk: Buffer) => { html += chunk.toString() })
-              response.on('end', () => {
-                try {
-                  const results: { title: string; url: string; snippet: string }[] = []
+            const parseDDGResults = (html: string): { title: string; url: string; snippet: string }[] => {
+              const results: { title: string; url: string; snippet: string }[] = []
+              const linkRegex = /<a[^>]+class="result-link"[^>]*href="([^"]*)"[^>]*>([\s\S]*?)<\/a>/gi
+              const snippetRegex = /<td[^>]+class="result-snippet"[^>]*>([\s\S]*?)<\/td>/gi
+              const links: { url: string; title: string }[] = []
+              let m
+              while ((m = linkRegex.exec(html)) !== null) {
+                const url = m[1].replace(/&amp;/g, '&')
+                const title = m[2].replace(/<[^>]*>/g, '').trim()
+                if (url && title) links.push({ url, title })
+              }
+              const snippets: string[] = []
+              while ((m = snippetRegex.exec(html)) !== null) {
+                snippets.push(m[1].replace(/<[^>]*>/g, '').trim())
+              }
+              for (let i = 0; i < Math.min(links.length, maxResults); i++) {
+                results.push({ title: links[i].title, url: links[i].url, snippet: snippets[i] || '' })
+              }
+              return results
+            }
 
-                  // Parse DuckDuckGo lite HTML results
-                  const linkRegex = /<a[^>]+class="result-link"[^>]*href="([^"]*)"[^>]*>([\s\S]*?)<\/a>/gi
-                  const snippetRegex = /<td[^>]+class="result-snippet"[^>]*>([\s\S]*?)<\/td>/gi
+            const parseBraveResults = (html: string): { title: string; url: string; snippet: string }[] => {
+              const results: { title: string; url: string; snippet: string }[] = []
+              const titleRegex = /<a[^>]*class="[^"]*snippet-title[^"]*"[^>]*href="([^"]*)"[^>]*>([\s\S]*?)<\/a>/gi
+              const descRegex = /<p[^>]*class="[^"]*snippet-description[^"]*"[^>]*>([\s\S]*?)<\/p>/gi
+              const links: { url: string; title: string }[] = []
+              let m
+              while ((m = titleRegex.exec(html)) !== null) {
+                const url = m[1].replace(/&amp;/g, '&')
+                const title = m[2].replace(/<[^>]*>/g, '').replace(/<!---->/g, '').trim()
+                if (url && title && !url.startsWith('javascript:')) links.push({ url, title })
+              }
+              const snippets: string[] = []
+              while ((m = descRegex.exec(html)) !== null) {
+                snippets.push(m[1].replace(/<[^>]*>/g, '').replace(/<!---->/g, '').trim())
+              }
+              for (let i = 0; i < Math.min(links.length, maxResults); i++) {
+                results.push({ title: links[i].title, url: links[i].url, snippet: snippets[i] || '' })
+              }
+              return results
+            }
 
-                  const links: { url: string; title: string }[] = []
-                  let linkMatch
-                  while ((linkMatch = linkRegex.exec(html)) !== null) {
-                    const linkUrl = linkMatch[1].replace(/&amp;/g, '&')
-                    const title = linkMatch[2].replace(/<[^>]*>/g, '').trim()
-                    if (linkUrl && title) links.push({ url: linkUrl, title })
+            const fetchHTML = (url: string, headers: Record<string, string>): Promise<string> => {
+              return new Promise((resolve, reject) => {
+                const proto = url.startsWith('https') ? https : http
+                proto.get(url, { headers }, (response) => {
+                  if (response.statusCode && response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
+                    fetchHTML(response.headers.location, headers).then(resolve, reject)
+                    return
                   }
-
-                  const snippets: string[] = []
-                  let snippetMatch
-                  while ((snippetMatch = snippetRegex.exec(html)) !== null) {
-                    snippets.push(snippetMatch[1].replace(/<[^>]*>/g, '').trim())
-                  }
-
-                  for (let i = 0; i < Math.min(links.length, maxResults); i++) {
-                    results.push({
-                      title: links[i].title,
-                      url: links[i].url,
-                      snippet: snippets[i] || '',
-                    })
-                  }
-
-                  res.writeHead(200, { 'Content-Type': 'application/json' })
-                  res.end(JSON.stringify({ results }))
-                } catch (parseErr) {
-                  res.writeHead(200, { 'Content-Type': 'application/json' })
-                  res.end(JSON.stringify({ results: [], error: 'Failed to parse results' }))
-                }
+                  let data = ''
+                  response.on('data', (chunk: Buffer) => { data += chunk.toString() })
+                  response.on('end', () => resolve(data))
+                }).on('error', reject)
               })
-            }).on('error', (err) => {
-              res.writeHead(200, { 'Content-Type': 'application/json' })
-              res.end(JSON.stringify({ results: [], error: err.message }))
-            })
+            }
+
+            // Try DuckDuckGo lite first
+            const ddgUrl = 'https://lite.duckduckgo.com/lite/?q=' + encodeURIComponent(query)
+            fetchHTML(ddgUrl, { 'User-Agent': browserUA, 'Accept': 'text/html', 'Accept-Language': 'en-US,en;q=0.9' })
+              .then((html) => {
+                if (html.includes('anomaly-modal') || html.includes('challenge-form')) {
+                  console.log('[WebSearch] DuckDuckGo returned CAPTCHA, falling back to Brave Search')
+                  throw new Error('DDG_CAPTCHA')
+                }
+                const results = parseDDGResults(html)
+                if (results.length === 0) throw new Error('DDG_EMPTY')
+                return results
+              })
+              .catch(() => {
+                // Fallback: Brave Search HTML scraping
+                const braveUrl = 'https://search.brave.com/search?q=' + encodeURIComponent(query) + '&source=web'
+                return fetchHTML(braveUrl, { 'User-Agent': browserUA, 'Accept': 'text/html', 'Accept-Language': 'en-US,en;q=0.9' })
+                  .then((html) => parseBraveResults(html))
+              })
+              .then((results) => {
+                res.writeHead(200, { 'Content-Type': 'application/json' })
+                res.end(JSON.stringify({ results: results.slice(0, maxResults) }))
+              })
+              .catch((err) => {
+                res.writeHead(200, { 'Content-Type': 'application/json' })
+                res.end(JSON.stringify({ results: [], error: (err as Error).message || 'Search failed' }))
+              })
           } catch (err) {
             res.writeHead(400, { 'Content-Type': 'application/json' })
             res.end(JSON.stringify({ error: String(err) }))
           }
         })
       })
-
     },
   }
 }

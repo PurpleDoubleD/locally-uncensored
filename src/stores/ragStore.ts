@@ -11,6 +11,7 @@ interface RAGState {
   indexingProgress: { current: number; total: number } | null
   lastRetrievedChunks: { chunk: TextChunk; score: number }[]
   contextWarning: string | null
+  pullingEmbeddingModel: boolean
 
   addDocument: (conversationId: string, meta: DocumentMeta) => void
   removeDocument: (conversationId: string, docId: string) => void
@@ -23,6 +24,7 @@ interface RAGState {
   clearConversationDocs: (conversationId: string) => void
   setLastRetrievedChunks: (chunks: { chunk: TextChunk; score: number }[]) => void
   setContextWarning: (warning: string | null) => void
+  setPullingEmbeddingModel: (pulling: boolean) => void
 }
 
 export const useRAGStore = create<RAGState>()(
@@ -36,6 +38,7 @@ export const useRAGStore = create<RAGState>()(
       indexingProgress: null,
       lastRetrievedChunks: [],
       contextWarning: null,
+      pullingEmbeddingModel: false,
 
       addDocument: (conversationId, meta) =>
         set((state) => ({
@@ -93,6 +96,8 @@ export const useRAGStore = create<RAGState>()(
       setLastRetrievedChunks: (chunks) => set({ lastRetrievedChunks: chunks }),
 
       setContextWarning: (warning) => set({ contextWarning: warning }),
+
+      setPullingEmbeddingModel: (pulling) => set({ pullingEmbeddingModel: pulling }),
     }),
     {
       name: "rag-store",
