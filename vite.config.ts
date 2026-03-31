@@ -523,7 +523,7 @@ function comfyLauncher(): Plugin {
             let stderr = ''
             let killed = false
 
-            const proc = spawn('python3', ['-c', code], {
+            const proc = spawn(process.platform === 'win32' ? 'python' : 'python3', ['-c', code], {
               cwd: tmpDir,
               stdio: ['ignore', 'pipe', 'pipe'],
               shell: false,
