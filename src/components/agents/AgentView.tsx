@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Bot, Play, Square, Trash2, Clock } from 'lucide-react'
 import { GlowButton } from '../ui/GlowButton'
@@ -39,6 +39,14 @@ function statusLabel(status: AgentRun['status']): string {
 export function AgentView() {
   const [goal, setGoal] = useState('')
   const [selectedModel, setSelectedModel] = useState<string | null>(null)
+  const [searxngAvailable, setSearxngAvailable] = useState<boolean | null>(null)
+
+  useEffect(() => {
+    fetch('/local-api/search-status')
+      .then(r => r.json())
+      .then(data => setSearxngAvailable(data.searxng))
+      .catch(() => setSearxngAvailable(false))
+  }, [])
   const { activeRun, isRunning, startAgent, stopAgent, approveToolCall, rejectToolCall } = useAgent()
   const { runs, setActiveRun, deleteRun } = useAgentStore()
   const { models, activeModel } = useModelStore()
@@ -107,6 +115,12 @@ export function AgentView() {
           </div>
         </div>
       </GlassCard>
+
+      {searxngAvailable === false && (
+        <div className="text-[0.7rem] text-gray-500 px-1 -mt-1.5">
+          Tip: Install <a href="https://docs.searxng.org/" target="_blank" rel="noopener noreferrer" className="text-blue-400/70 hover:text-blue-400 underline">SearXNG</a> on port 8888 for better web search results
+        </div>
+      )}
 
       {/* Main Content */}
       <div className="flex-1 flex gap-3 min-h-0 overflow-hidden">

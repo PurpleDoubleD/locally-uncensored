@@ -642,7 +642,34 @@ function comfyLauncher(): Plugin {
         })
       })
 
-      // API: Web search with DuckDuckGo + Brave Search fallback
+      // --- SearXNG availability check ---
+      let searxngAvailable = false
+      const checkSearXNG = () => {
+        const checkReq = http.get('http://localhost:8888/search?q=test&format=json', { timeout: 2000 }, (response) => {
+          searxngAvailable = response.statusCode === 200
+          console.log('[WebSearch] SearXNG ' + (searxngAvailable ? 'detected and available' : 'responded but returned non-200'))
+          response.resume()
+        })
+        checkReq.on('error', () => {
+          searxngAvailable = false
+          console.log('[WebSearch] SearXNG not available (connection refused or timeout)')
+        })
+        checkReq.on('timeout', () => {
+          checkReq.destroy()
+          searxngAvailable = false
+          console.log('[WebSearch] SearXNG not available (timeout)')
+        })
+      }
+      checkSearXNG()
+
+      // API: Search status (for frontend to check SearXNG availability)
+      server.middlewares.use('/local-api/search-status', (req, res) => {
+        if (req.method !== 'GET') { res.writeHead(405); res.end(); return }
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ searxng: searxngAvailable }))
+      })
+
+      // API: Multi-tier web search (SearXNG > DDG Instant Answer API > Wikipedia)
       server.middlewares.use('/local-api/web-search', (req, res) => {
         if (req.method !== 'POST') { res.writeHead(405); res.end(); return }
         let body = ''
@@ -657,96 +684,122 @@ function comfyLauncher(): Plugin {
             }
 
             const maxResults = count || 5
-            const browserUA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
 
-            const parseDDGResults = (html: string): { title: string; url: string; snippet: string }[] => {
-              const results: { title: string; url: string; snippet: string }[] = []
-              // DDG lite uses class="result__a" with tracking redirect URLs
-              const linkRegex = /<a[^>]+class="result__a"[^>]*href="([^"]*)"[^>]*>([\/\s\S]*?)<\/a>/gi
-              const snippetRegex = /<a[^>]+class="result__snippet"[^>]*>([\/\s\S]*?)<\/a>/gi
-              const links: { url: string; title: string }[] = []
-              let m
-              while ((m = linkRegex.exec(html)) !== null) {
-                let url = decodeURIComponent(m[1]).replace(/&amp;/g, '&')
-                // Extract real URL from DDG tracking redirect
-                const uddgMatch = url.match(/uddg=([^&]+)/)
-                if (uddgMatch) url = decodeURIComponent(uddgMatch[1])
-                // Skip ads (contain duckduckgo.com/y.js)
-                if (url.includes('duckduckgo.com/y.js')) continue
-                const title = m[2].replace(/<[^>]*>/g, '').trim()
-                if (url && title) links.push({ url, title })
-              }
-              const snippets: string[] = []
-              while ((m = snippetRegex.exec(html)) !== null) {
-                snippets.push(m[1].replace(/<[^>]*>/g, '').trim())
-              }
-              for (let i = 0; i < Math.min(links.length, maxResults); i++) {
-                results.push({ title: links[i].title, url: links[i].url, snippet: snippets[i] || '' })
-              }
-              return results
-            }
-
-            const parseBraveResults = (html: string): { title: string; url: string; snippet: string }[] => {
-              const results: { title: string; url: string; snippet: string }[] = []
-              const titleRegex = /<a[^>]*class="[^"]*snippet-title[^"]*"[^>]*href="([^"]*)"[^>]*>([\s\S]*?)<\/a>/gi
-              const descRegex = /<p[^>]*class="[^"]*snippet-description[^"]*"[^>]*>([\s\S]*?)<\/p>/gi
-              const links: { url: string; title: string }[] = []
-              let m
-              while ((m = titleRegex.exec(html)) !== null) {
-                const url = m[1].replace(/&amp;/g, '&')
-                const title = m[2].replace(/<[^>]*>/g, '').replace(/<!---->/g, '').trim()
-                if (url && title && !url.startsWith('javascript:')) links.push({ url, title })
-              }
-              const snippets: string[] = []
-              while ((m = descRegex.exec(html)) !== null) {
-                snippets.push(m[1].replace(/<[^>]*>/g, '').replace(/<!---->/g, '').trim())
-              }
-              for (let i = 0; i < Math.min(links.length, maxResults); i++) {
-                results.push({ title: links[i].title, url: links[i].url, snippet: snippets[i] || '' })
-              }
-              return results
-            }
-
-            const fetchHTML = (url: string, headers: Record<string, string>): Promise<string> => {
+            const fetchJSON = (url: string): Promise<any> => {
               return new Promise((resolve, reject) => {
                 const proto = url.startsWith('https') ? https : http
-                proto.get(url, { headers }, (response) => {
+                const httpReq = proto.get(url, { headers: { 'User-Agent': 'locally-uncensored/1.0', 'Accept': 'application/json' }, timeout: 8000 }, (response) => {
                   if (response.statusCode && response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
-                    fetchHTML(response.headers.location, headers).then(resolve, reject)
+                    fetchJSON(response.headers.location).then(resolve, reject)
+                    return
+                  }
+                  if (response.statusCode !== 200) {
+                    reject(new Error('HTTP ' + response.statusCode))
+                    response.resume()
                     return
                   }
                   let data = ''
                   response.on('data', (chunk: Buffer) => { data += chunk.toString() })
-                  response.on('end', () => resolve(data))
-                }).on('error', reject)
+                  response.on('end', () => {
+                    try { resolve(JSON.parse(data)) } catch (e) { reject(e) }
+                  })
+                })
+                httpReq.on('error', reject)
+                httpReq.on('timeout', () => { httpReq.destroy(); reject(new Error('timeout')) })
               })
             }
 
-            // Try DuckDuckGo lite first
-            const ddgUrl = 'https://lite.duckduckgo.com/lite/?q=' + encodeURIComponent(query)
-            fetchHTML(ddgUrl, { 'User-Agent': browserUA, 'Accept': 'text/html', 'Accept-Language': 'en-US,en;q=0.9' })
-              .then((html) => {
-                if (html.includes('anomaly-modal') || html.includes('challenge-form')) {
-                  console.log('[WebSearch] DuckDuckGo returned CAPTCHA, falling back to Brave Search')
-                  throw new Error('DDG_CAPTCHA')
+            // Tier 1: SearXNG (local instance)
+            const trySearXNG = (): Promise<{ title: string; url: string; snippet: string }[]> => {
+              if (!searxngAvailable) return Promise.reject(new Error('SearXNG not available'))
+              const searxUrl = 'http://localhost:8888/search?q=' + encodeURIComponent(query) + '&format=json'
+              return fetchJSON(searxUrl).then((data: any) => {
+                if (!data.results || data.results.length === 0) throw new Error('SearXNG returned no results')
+                console.log('[WebSearch] SearXNG returned ' + data.results.length + ' results')
+                return data.results.slice(0, maxResults).map((r: any) => ({
+                  title: r.title || '',
+                  url: r.url || '',
+                  snippet: r.content || '',
+                }))
+              })
+            }
+
+            // Tier 2: DuckDuckGo Instant Answer API (official, no CAPTCHA)
+            const tryDDGInstant = (): Promise<{ title: string; url: string; snippet: string }[]> => {
+              const ddgUrl = 'https://api.duckduckgo.com/?q=' + encodeURIComponent(query) + '&format=json&no_html=1&skip_disambig=1'
+              return fetchJSON(ddgUrl).then((data: any) => {
+                const results: { title: string; url: string; snippet: string }[] = []
+
+                // Abstract (main answer)
+                if (data.AbstractText && data.AbstractURL) {
+                  results.push({
+                    title: data.Heading || query,
+                    url: data.AbstractURL,
+                    snippet: data.AbstractText,
+                  })
                 }
-                const results = parseDDGResults(html)
-                if (results.length === 0) throw new Error('DDG_EMPTY')
-                return results
+
+                // Related topics
+                if (Array.isArray(data.RelatedTopics)) {
+                  for (const topic of data.RelatedTopics) {
+                    if (results.length >= maxResults) break
+                    if (topic.Text && topic.FirstURL) {
+                      results.push({
+                        title: topic.Text.split(' - ')[0] || topic.Text.substring(0, 80),
+                        url: topic.FirstURL,
+                        snippet: topic.Text,
+                      })
+                    }
+                    // Handle sub-topics (grouped results)
+                    if (Array.isArray(topic.Topics)) {
+                      for (const sub of topic.Topics) {
+                        if (results.length >= maxResults) break
+                        if (sub.Text && sub.FirstURL) {
+                          results.push({
+                            title: sub.Text.split(' - ')[0] || sub.Text.substring(0, 80),
+                            url: sub.FirstURL,
+                            snippet: sub.Text,
+                          })
+                        }
+                      }
+                    }
+                  }
+                }
+
+                if (results.length === 0) throw new Error('DDG Instant returned no results')
+                console.log('[WebSearch] DDG Instant Answer returned ' + results.length + ' results')
+                return results.slice(0, maxResults)
               })
-              .catch(() => {
-                // Fallback: Brave Search HTML scraping
-                const braveUrl = 'https://search.brave.com/search?q=' + encodeURIComponent(query) + '&source=web'
-                return fetchHTML(braveUrl, { 'User-Agent': browserUA, 'Accept': 'text/html', 'Accept-Language': 'en-US,en;q=0.9' })
-                  .then((html) => parseBraveResults(html))
+            }
+
+            // Tier 3: Wikipedia API (always works)
+            const tryWikipedia = (): Promise<{ title: string; url: string; snippet: string }[]> => {
+              const wikiUrl = 'https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=' + encodeURIComponent(query) + '&format=json&srlimit=' + maxResults + '&utf8=1'
+              return fetchJSON(wikiUrl).then((data: any) => {
+                if (!data.query || !data.query.search || data.query.search.length === 0) {
+                  throw new Error('Wikipedia returned no results')
+                }
+                console.log('[WebSearch] Wikipedia returned ' + data.query.search.length + ' results')
+                return data.query.search.slice(0, maxResults).map((r: any) => ({
+                  title: r.title || '',
+                  url: 'https://en.wikipedia.org/wiki/' + encodeURIComponent(r.title.replace(/ /g, '_')),
+                  snippet: (r.snippet || '').replace(/<[^>]*>/g, ''),
+                }))
               })
+            }
+
+            // Execute tiers in order
+            trySearXNG()
+              .catch(() => tryDDGInstant())
+              .catch(() => tryWikipedia())
               .then((results) => {
                 res.writeHead(200, { 'Content-Type': 'application/json' })
-                res.end(JSON.stringify({ results: results.slice(0, maxResults) }))
+                res.end(JSON.stringify({ results }))
               })
               .catch((err) => {
+                console.error('[WebSearch] All tiers failed:', (err as Error).message)
                 res.writeHead(200, { 'Content-Type': 'application/json' })
-                res.end(JSON.stringify({ results: [], error: (err as Error).message || 'Search failed' }))
+                res.end(JSON.stringify({ results: [], error: 'All search tiers failed: ' + (err as Error).message }))
               })
           } catch (err) {
             res.writeHead(400, { 'Content-Type': 'application/json' })

@@ -4,7 +4,7 @@ export const AGENT_TOOLS: Tool[] = [
   {
     name: "web_search",
     description:
-      "Search the web for information. Returns relevant search results with titles, snippets, and URLs.",
+      "Search the web for information using a multi-tier approach. SearXNG (if installed locally) gives the best results with full search capabilities. Falls back to DuckDuckGo Instant Answers and Wikipedia. Returns results with titles, snippets, and URLs.",
     parameters: [
       {
         name: "query",
