@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { ArrowLeft, RotateCcw, Sun, Moon, Mic, Volume2, Check, X } from 'lucide-react'
+import { ArrowLeft, RotateCcw, Sun, Moon, Mic, Volume2, Check, X, Loader2 } from 'lucide-react'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { useUIStore } from '../../stores/uiStore'
 import { GlassCard } from '../ui/GlassCard'
@@ -8,14 +8,16 @@ import { SliderControl } from './SliderControl'
 import { ApiConfig } from './ApiConfig'
 import { PersonaPanel } from '../personas/PersonaPanel'
 import { useVoiceStore } from '../../stores/voiceStore'
+import { checkWhisperAvailable } from '../../api/voice'
 
 export function SettingsPage() {
   const { settings, updateSettings, resetSettings } = useSettingsStore()
   const { setView } = useUIStore()
   const voiceSettings = useVoiceStore()
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([])
+  const [whisperStatus, setWhisperStatus] = useState<{ available: boolean; backend: string | null; error?: string } | null>(null)
+  const [whisperLoading, setWhisperLoading] = useState(true)
 
-  const sttSupported = typeof window !== 'undefined' && ('SpeechRecognition' in window || 'webkitSpeechRecognition' in window)
   const ttsSupported = typeof window !== 'undefined' && 'speechSynthesis' in window
 
   useEffect(() => {
@@ -28,6 +30,14 @@ export function SettingsPage() {
     speechSynthesis.addEventListener('voiceschanged', loadVoices)
     return () => speechSynthesis.removeEventListener('voiceschanged', loadVoices)
   }, [ttsSupported])
+
+  // Check Whisper availability on mount
+  useEffect(() => {
+    setWhisperLoading(true)
+    checkWhisperAvailable()
+      .then(setWhisperStatus)
+      .finally(() => setWhisperLoading(false))
+  }, [])
 
   return (
     <div className="h-full overflow-y-auto scrollbar-thin p-6">
@@ -117,15 +127,19 @@ export function SettingsPage() {
         <GlassCard>
           <h2 className="text-sm font-semibold text-gray-900 dark:text-white mb-4 uppercase tracking-wider">Voice</h2>
           <div className="space-y-4">
-            {/* Support indicators */}
+            {/* Local STT status */}
             <div className="flex items-center gap-4">
               <div className="flex items-center gap-1.5">
-                {sttSupported ? (
+                {whisperLoading ? (
+                  <Loader2 size={14} className="animate-spin text-gray-400" />
+                ) : whisperStatus?.available ? (
                   <Check size={14} className="text-green-500" />
                 ) : (
                   <X size={14} className="text-red-500" />
                 )}
-                <span className="text-xs text-gray-600 dark:text-gray-300">Speech-to-Text</span>
+                <span className="text-xs text-gray-600 dark:text-gray-300">
+                  Local STT{whisperStatus?.backend ? `: ${whisperStatus.backend}` : ''}
+                </span>
               </div>
               <div className="flex items-center gap-1.5">
                 {ttsSupported ? (
@@ -136,6 +150,13 @@ export function SettingsPage() {
                 <span className="text-xs text-gray-600 dark:text-gray-300">Text-to-Speech</span>
               </div>
             </div>
+
+            {/* Whisper install hint */}
+            {whisperStatus && !whisperStatus.available && (
+              <div className="text-xs text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20 rounded-lg px-3 py-2">
+                Whisper not installed. Run: <code className="font-mono bg-amber-100 dark:bg-amber-900/40 px-1 rounded">pip install faster-whisper</code>
+              </div>
+            )}
 
             {/* TTS Enabled toggle */}
             <div className="flex items-center justify-between">

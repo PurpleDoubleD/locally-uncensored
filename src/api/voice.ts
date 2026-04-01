@@ -1,12 +1,12 @@
 /**
- * Voice API wrapper for Speech Recognition and Speech Synthesis
+ * Voice API — 100% local
+ * STT: Local Whisper (faster-whisper or openai-whisper) via /local-api/transcribe
+ * TTS: Browser SpeechSynthesis (runs locally in the browser, no cloud)
  */
 
 export function isSpeechRecognitionSupported(): boolean {
-  return !!(
-    (window as any).SpeechRecognition ||
-    (window as any).webkitSpeechRecognition
-  );
+  // Always true — we use local Whisper, not browser SpeechRecognition API
+  return true;
 }
 
 export function isSpeechSynthesisSupported(): boolean {
@@ -134,29 +134,48 @@ export function stopSpeaking(): void {
   }
 }
 
-export interface AudioRecorderOptions {
-  onInterimTranscript?: (text: string) => void;
+// --- Local Whisper STT ---
+
+export async function checkWhisperAvailable(): Promise<{
+  available: boolean;
+  backend: string | null;
+  error?: string;
+}> {
+  try {
+    const res = await fetch("/local-api/transcribe-status");
+    return res.json();
+  } catch {
+    return { available: false, backend: null, error: "Failed to reach transcribe-status endpoint" };
+  }
 }
 
-interface AudioRecorder {
+export async function transcribeAudio(audioBlob: Blob): Promise<string> {
+  const res = await fetch("/local-api/transcribe", {
+    method: "POST",
+    headers: { "Content-Type": audioBlob.type || "audio/webm" },
+    body: audioBlob,
+  });
+  const data = await res.json();
+  if (data.error) throw new Error(data.error);
+  return data.transcript || "";
+}
+
+// --- Audio Recorder (MediaRecorder only, NO SpeechRecognition) ---
+
+export interface AudioRecorder {
   start: () => Promise<void>;
-  stop: () => Promise<{ blob: Blob; transcript: string }>;
+  stop: () => Promise<Blob>;
   isRecording: () => boolean;
 }
 
-export function createAudioRecorder(options?: AudioRecorderOptions): AudioRecorder {
+export function createAudioRecorder(): AudioRecorder {
   let mediaRecorder: MediaRecorder | null = null;
-  let recognition: any = null;
   let audioChunks: Blob[] = [];
-  let currentTranscript = "";
   let recording = false;
 
   return {
     start: async () => {
       audioChunks = [];
-      currentTranscript = "";
-
-      // Start MediaRecorder for audio blob
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       mediaRecorder = new MediaRecorder(stream, {
         mimeType: MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
@@ -171,88 +190,13 @@ export function createAudioRecorder(options?: AudioRecorderOptions): AudioRecord
       };
 
       mediaRecorder.start(250); // Collect data every 250ms
-
-      // Start SpeechRecognition in parallel for transcript
-      const SpeechRecognition =
-        (window as any).SpeechRecognition ||
-        (window as any).webkitSpeechRecognition;
-
-      if (SpeechRecognition) {
-        recognition = new SpeechRecognition();
-        recognition.continuous = true;
-        recognition.interimResults = true;
-        // Auto-detect user language instead of hardcoding en-US
-        recognition.lang = navigator.language || "en-US";
-        console.log("[Voice] SpeechRecognition starting with lang:", recognition.lang);
-
-        recognition.onstart = () => {
-          console.log("[Voice] SpeechRecognition started successfully");
-        };
-
-        recognition.onresult = (event: any) => {
-          console.log("[Voice] onresult fired, results count:", event.results?.length);
-          if (!event.results) {
-            console.warn("[Voice] onresult: event.results is undefined");
-            return;
-          }
-
-          let interim = "";
-          let final = "";
-          for (let i = 0; i < event.results.length; i++) {
-            const result = event.results[i];
-            if (!result || !result[0]) continue;
-            if (result.isFinal) {
-              final += result[0].transcript;
-            } else {
-              interim += result[0].transcript;
-            }
-          }
-          currentTranscript = final + interim;
-          console.log("[Voice] Transcript update:", currentTranscript.slice(0, 80));
-
-          // Fire interim transcript callback for live updates
-          if (options?.onInterimTranscript) {
-            options.onInterimTranscript(currentTranscript);
-          }
-        };
-
-        recognition.onerror = (event: any) => {
-          console.error("[Voice] SpeechRecognition error:", event.error, event.message);
-          // If offline or network error, the transcript will just be empty
-          // but audio blob still captures
-        };
-
-        recognition.onend = () => {
-          console.log("[Voice] SpeechRecognition ended");
-        };
-
-        try {
-          recognition.start();
-        } catch (err) {
-          console.error("[Voice] Failed to start SpeechRecognition:", err);
-        }
-      } else {
-        console.warn("[Voice] SpeechRecognition API not available in this browser");
-      }
-
       recording = true;
     },
 
     stop: () => {
-      return new Promise((resolve) => {
+      return new Promise<Blob>((resolve) => {
         recording = false;
 
-        // Stop recognition
-        if (recognition) {
-          try {
-            recognition.stop();
-          } catch {
-            // Already stopped
-          }
-          recognition = null;
-        }
-
-        // Stop media recorder and collect blob
         if (mediaRecorder && mediaRecorder.state !== "inactive") {
           mediaRecorder.onstop = () => {
             const blob = new Blob(audioChunks, {
@@ -263,15 +207,12 @@ export function createAudioRecorder(options?: AudioRecorderOptions): AudioRecord
             mediaRecorder?.stream.getTracks().forEach((track) => track.stop());
             mediaRecorder = null;
 
-            resolve({ blob, transcript: currentTranscript });
+            resolve(blob);
           };
 
           mediaRecorder.stop();
         } else {
-          resolve({
-            blob: new Blob([], { type: "audio/webm" }),
-            transcript: currentTranscript,
-          });
+          resolve(new Blob([], { type: "audio/webm" }));
         }
       });
     },

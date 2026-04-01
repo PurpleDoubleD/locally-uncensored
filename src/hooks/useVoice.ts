@@ -8,28 +8,21 @@ import {
   stopSpeaking as stopSpeakingApi,
   getVoicesAsync,
   createAudioRecorder,
+  transcribeAudio,
+  type AudioRecorder,
 } from "../api/voice";
 
 export function useVoice() {
   const store = useVoiceStore();
-  const recorderRef = useRef<ReturnType<typeof createAudioRecorder> | null>(null);
-  const onInterimRef = useRef<((text: string) => void) | null>(null);
+  const recorderRef = useRef<AudioRecorder | null>(null);
 
   const sttSupported = isSpeechRecognitionSupported();
   const ttsSupported = isSpeechSynthesisSupported();
 
-  const startRecording = useCallback(async (onInterimTranscript?: (text: string) => void) => {
+  const startRecording = useCallback(async () => {
     if (recorderRef.current?.isRecording()) return;
 
-    onInterimRef.current = onInterimTranscript || null;
-
-    const recorder = createAudioRecorder({
-      onInterimTranscript: (text: string) => {
-        if (onInterimRef.current) {
-          onInterimRef.current(text);
-        }
-      },
-    });
+    const recorder = createAudioRecorder();
     recorderRef.current = recorder;
 
     try {
@@ -46,17 +39,30 @@ export function useVoice() {
     if (!recorderRef.current) return "";
 
     try {
-      const { transcript } = await recorderRef.current.stop();
+      // Stop recording and get the audio blob
+      const blob = await recorderRef.current.stop();
       store.setRecording(false);
-      store.setTranscript(transcript);
       recorderRef.current = null;
-      onInterimRef.current = null;
-      return transcript;
+
+      if (blob.size === 0) return "";
+
+      // Transcribe locally via Whisper
+      store.setTranscribing(true);
+      try {
+        const transcript = await transcribeAudio(blob);
+        store.setTranscript(transcript);
+        return transcript;
+      } catch (err) {
+        console.error("Whisper transcription error:", err);
+        return "";
+      } finally {
+        store.setTranscribing(false);
+      }
     } catch (err) {
       console.error("Failed to stop recording:", err);
       store.setRecording(false);
+      store.setTranscribing(false);
       recorderRef.current = null;
-      onInterimRef.current = null;
       return "";
     }
   }, [store]);
@@ -114,6 +120,7 @@ export function useVoice() {
 
   return {
     isRecording: store.isRecording,
+    isTranscribing: store.isTranscribing,
     isSpeaking: store.isSpeaking,
     transcript: store.transcript,
     sttSupported,

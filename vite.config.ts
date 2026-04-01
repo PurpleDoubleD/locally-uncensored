@@ -9,6 +9,7 @@ import http from 'http'
 import { config } from 'dotenv'
 import { fileURLToPath } from 'url'
 import { dirname } from 'path'
+import os from 'os'
 
 // Load .env file from project root
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -971,6 +972,158 @@ function comfyLauncher(): Plugin {
           }
         })
       })
+
+      // --- Whisper STT Endpoints ---
+
+      // API: Check if Whisper is available
+      server.middlewares.use('/local-api/transcribe-status', (req, res) => {
+        if (req.method !== 'GET') { res.writeHead(405); res.end(); return }
+
+        const pythonBin = (() => {
+          if (process.platform !== 'win32') return 'python3'
+          try {
+            const paths = execSync('where python', { encoding: 'utf8' }).trim().split('\n')
+            const real = paths.find((p: string) => !p.includes('WindowsApps'))
+            return real ? real.trim() : 'python'
+          } catch { return 'python' }
+        })()
+
+        // Try faster-whisper first
+        try {
+          execSync(`${pythonBin} -c "import faster_whisper; print('ok')"`, { encoding: 'utf8', timeout: 10000 })
+          res.writeHead(200, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ available: true, backend: 'faster-whisper' }))
+          return
+        } catch { /* not installed */ }
+
+        // Try openai-whisper
+        try {
+          execSync(`${pythonBin} -c "import whisper; print('ok')"`, { encoding: 'utf8', timeout: 10000 })
+          res.writeHead(200, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ available: true, backend: 'whisper' }))
+          return
+        } catch { /* not installed */ }
+
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ available: false, backend: null, error: 'Install faster-whisper: pip install faster-whisper' }))
+      })
+
+      // API: Transcribe audio via local Whisper
+      server.middlewares.use('/local-api/transcribe', (req, res) => {
+        if (req.method !== 'POST') { res.writeHead(405); res.end(); return }
+
+        const chunks: Buffer[] = []
+        req.on('data', (chunk: Buffer) => chunks.push(chunk))
+        req.on('end', () => {
+          try {
+            const audioBuffer = Buffer.concat(chunks)
+            if (audioBuffer.length === 0) {
+              res.writeHead(400, { 'Content-Type': 'application/json' })
+              res.end(JSON.stringify({ error: 'Empty audio data', transcript: '' }))
+              return
+            }
+
+            // Determine file extension from content-type
+            const contentType = req.headers['content-type'] || 'audio/webm'
+            let ext = '.webm'
+            if (contentType.includes('wav')) ext = '.wav'
+            else if (contentType.includes('mp3') || contentType.includes('mpeg')) ext = '.mp3'
+            else if (contentType.includes('ogg')) ext = '.ogg'
+            else if (contentType.includes('mp4') || contentType.includes('m4a')) ext = '.m4a'
+
+            const tmpFile = join(os.tmpdir(), `whisper-${Date.now()}${ext}`)
+            const fs = require('fs')
+            fs.writeFileSync(tmpFile, audioBuffer)
+
+            const pythonBin = (() => {
+              if (process.platform !== 'win32') return 'python3'
+              try {
+                const paths = execSync('where python', { encoding: 'utf8' }).trim().split('\n')
+                const real = paths.find((p: string) => !p.includes('WindowsApps'))
+                return real ? real.trim() : 'python'
+              } catch { return 'python' }
+            })()
+
+            // Build Python scripts as temp files to avoid shell escaping issues
+            const fwScript = join(os.tmpdir(), `fw-${Date.now()}.py`)
+            const owScript = join(os.tmpdir(), `ow-${Date.now()}.py`)
+            const audioPath = tmpFile.replace(/\\/g, '/')
+
+            fs.writeFileSync(fwScript,
+              "from faster_whisper import WhisperModel\n" +
+              "model = WhisperModel('base', device='cpu', compute_type='int8')\n" +
+              "segments, info = model.transcribe('" + audioPath + "')\n" +
+              "text = ' '.join([s.text for s in segments]).strip()\n" +
+              "print(text)\n" +
+              "print('LANG:' + info.language)\n"
+            )
+
+            fs.writeFileSync(owScript,
+              "import whisper\n" +
+              "model = whisper.load_model('base')\n" +
+              "result = model.transcribe('" + audioPath + "')\n" +
+              "print(result['text'].strip())\n" +
+              "print('LANG:' + result.get('language', 'en'))\n"
+            )
+
+            let transcript = ''
+            let language = 'en'
+            let success = false
+
+            // Try faster-whisper
+            try {
+              const output = execSync(`${pythonBin} ${fwScript}`, {
+                encoding: 'utf8',
+                timeout: 30000,
+              }).trim()
+              const lines = output.split('\n')
+              const langLine = lines.find((l: string) => l.startsWith('LANG:'))
+              if (langLine) {
+                language = langLine.replace('LANG:', '')
+                lines.splice(lines.indexOf(langLine), 1)
+              }
+              transcript = lines.join(' ').trim()
+              success = true
+            } catch { /* try fallback */ }
+
+            // Try openai-whisper
+            if (!success) {
+              try {
+                const output = execSync(`${pythonBin} ${owScript}`, {
+                  encoding: 'utf8',
+                  timeout: 60000,
+                }).trim()
+                const lines = output.split('\n')
+                const langLine = lines.find((l: string) => l.startsWith('LANG:'))
+                if (langLine) {
+                  language = langLine.replace('LANG:', '')
+                  lines.splice(lines.indexOf(langLine), 1)
+                }
+                transcript = lines.join(' ').trim()
+                success = true
+              } catch { /* neither works */ }
+            }
+
+            // Clean up temp files
+            try { fs.unlinkSync(tmpFile) } catch { /* ignore */ }
+            try { fs.unlinkSync(fwScript) } catch { /* ignore */ }
+            try { fs.unlinkSync(owScript) } catch { /* ignore */ }
+
+            if (!success) {
+              res.writeHead(200, { 'Content-Type': 'application/json' })
+              res.end(JSON.stringify({ error: 'Install faster-whisper: pip install faster-whisper', transcript: '' }))
+              return
+            }
+
+            res.writeHead(200, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ transcript, language }))
+          } catch (err) {
+            res.writeHead(500, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ error: String(err), transcript: '' }))
+          }
+        })
+      })
+
     },
   }
 }

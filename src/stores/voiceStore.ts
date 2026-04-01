@@ -4,6 +4,7 @@ import { persist } from "zustand/middleware";
 interface VoiceState {
   // Transient state (not persisted)
   isRecording: boolean;
+  isTranscribing: boolean;
   isSpeaking: boolean;
   transcript: string;
 
@@ -17,6 +18,7 @@ interface VoiceState {
 
   // Actions
   setRecording: (recording: boolean) => void;
+  setTranscribing: (transcribing: boolean) => void;
   setSpeaking: (speaking: boolean) => void;
   setTranscript: (transcript: string) => void;
   updateVoiceSettings: (
@@ -37,6 +39,7 @@ export const useVoiceStore = create<VoiceState>()(
     (set) => ({
       // Transient state
       isRecording: false,
+      isTranscribing: false,
       isSpeaking: false,
       transcript: "",
 
@@ -50,6 +53,7 @@ export const useVoiceStore = create<VoiceState>()(
 
       // Actions
       setRecording: (recording) => set({ isRecording: recording }),
+      setTranscribing: (transcribing) => set({ isTranscribing: transcribing }),
       setSpeaking: (speaking) => set({ isSpeaking: speaking }),
       setTranscript: (transcript) => set({ transcript }),
 
@@ -58,6 +62,7 @@ export const useVoiceStore = create<VoiceState>()(
       resetTransient: () =>
         set({
           isRecording: false,
+          isTranscribing: false,
           isSpeaking: false,
           transcript: "",
         }),

@@ -1,46 +1,28 @@
-import { useEffect } from "react"
 import { motion } from "framer-motion"
-import { Mic, MicOff } from "lucide-react"
+import { Mic, MicOff, Loader2 } from "lucide-react"
 import { useVoice } from "../../hooks/useVoice"
 
 interface Props {
   onTranscript: (text: string) => void
-  onInterimTranscript?: (text: string) => void
   onRecordingChange?: (isRecording: boolean) => void
-  onStopRegistered?: (stopFn: () => Promise<string>) => void
   disabled?: boolean
 }
 
-export function VoiceButton({ onTranscript, onInterimTranscript, onRecordingChange, onStopRegistered, disabled }: Props) {
-  const { isRecording, sttSupported, startRecording, stopRecording } = useVoice()
-
-  // Register stop function whenever recording state changes
-  useEffect(() => {
-    if (isRecording && onStopRegistered) {
-      onStopRegistered(async () => {
-        const transcript = await stopRecording()
-        onRecordingChange?.(false)
-        if (transcript.trim()) {
-          onTranscript(transcript.trim())
-        }
-        return transcript
-      })
-    }
-  }, [isRecording, onStopRegistered, stopRecording, onRecordingChange, onTranscript])
+export function VoiceButton({ onTranscript, onRecordingChange, disabled }: Props) {
+  const { isRecording, isTranscribing, sttSupported, startRecording, stopRecording } = useVoice()
 
   const handleClick = async () => {
-    if (disabled) return
+    if (disabled || isTranscribing) return
 
     if (isRecording) {
-      const transcript = await stopRecording()
       onRecordingChange?.(false)
+      const transcript = await stopRecording()
       if (transcript.trim()) {
         onTranscript(transcript.trim())
       }
     } else {
-      // Notify parent BEFORE starting (so UI updates immediately)
       onRecordingChange?.(true)
-      await startRecording(onInterimTranscript)
+      await startRecording()
     }
   }
 
@@ -54,9 +36,21 @@ export function VoiceButton({ onTranscript, onInterimTranscript, onRecordingChan
           <MicOff size={15} />
         </button>
         <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2 py-1 bg-gray-800 dark:bg-gray-700 text-white text-[0.6rem] rounded whitespace-nowrap opacity-0 group-hover/mic:opacity-100 transition-opacity pointer-events-none">
-          Speech recognition not supported
+          Speech recognition not available
         </div>
       </div>
+    )
+  }
+
+  // Transcribing state — show spinner
+  if (isTranscribing) {
+    return (
+      <motion.button
+        disabled
+        className="p-2 rounded-lg bg-blue-100 dark:bg-blue-500/20 border border-blue-300 dark:border-blue-500/40 text-blue-600 dark:text-blue-400 shrink-0 relative"
+      >
+        <Loader2 size={15} className="animate-spin" />
+      </motion.button>
     )
   }
 
