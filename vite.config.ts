@@ -530,7 +530,7 @@ function comfyLauncher(): Plugin {
                 const { execSync } = require('child_process')
                 const paths = execSync('where python', { encoding: 'utf8' }).trim().split('\n')
                 const real = paths.find((p) => !p.includes('WindowsApps'))
-                return real ? real.trim() : 'python'
+                return real ? ' + real.trim() + ' : 'python'
               } catch { return 'python' }
             })()
             const proc = spawn(pythonBin, ['-c', code], {
@@ -984,7 +984,7 @@ function comfyLauncher(): Plugin {
           try {
             const paths = execSync('where python', { encoding: 'utf8' }).trim().split('\n')
             const real = paths.find((p: string) => !p.includes('WindowsApps'))
-            return real ? real.trim() : 'python'
+            return real ? ' + real.trim() + ' : 'python'
           } catch { return 'python' }
         })()
 
@@ -1040,7 +1040,7 @@ function comfyLauncher(): Plugin {
               try {
                 const paths = execSync('where python', { encoding: 'utf8' }).trim().split('\n')
                 const real = paths.find((p: string) => !p.includes('WindowsApps'))
-                return real ? real.trim() : 'python'
+                return real ? ' + real.trim() + ' : 'python'
               } catch { return 'python' }
             })()
 
