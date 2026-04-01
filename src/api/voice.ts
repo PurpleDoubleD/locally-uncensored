@@ -181,13 +181,26 @@ export function createAudioRecorder(options?: AudioRecorderOptions): AudioRecord
         recognition = new SpeechRecognition();
         recognition.continuous = true;
         recognition.interimResults = true;
-        recognition.lang = "en-US";
+        // Auto-detect user language instead of hardcoding en-US
+        recognition.lang = navigator.language || "en-US";
+        console.log("[Voice] SpeechRecognition starting with lang:", recognition.lang);
+
+        recognition.onstart = () => {
+          console.log("[Voice] SpeechRecognition started successfully");
+        };
 
         recognition.onresult = (event: any) => {
+          console.log("[Voice] onresult fired, results count:", event.results?.length);
+          if (!event.results) {
+            console.warn("[Voice] onresult: event.results is undefined");
+            return;
+          }
+
           let interim = "";
           let final = "";
           for (let i = 0; i < event.results.length; i++) {
             const result = event.results[i];
+            if (!result || !result[0]) continue;
             if (result.isFinal) {
               final += result[0].transcript;
             } else {
@@ -195,6 +208,7 @@ export function createAudioRecorder(options?: AudioRecorderOptions): AudioRecord
             }
           }
           currentTranscript = final + interim;
+          console.log("[Voice] Transcript update:", currentTranscript.slice(0, 80));
 
           // Fire interim transcript callback for live updates
           if (options?.onInterimTranscript) {
@@ -203,11 +217,22 @@ export function createAudioRecorder(options?: AudioRecorderOptions): AudioRecord
         };
 
         recognition.onerror = (event: any) => {
-          // Silently handle recognition errors — audio blob still captures
-          console.warn("SpeechRecognition error:", event.error);
+          console.error("[Voice] SpeechRecognition error:", event.error, event.message);
+          // If offline or network error, the transcript will just be empty
+          // but audio blob still captures
         };
 
-        recognition.start();
+        recognition.onend = () => {
+          console.log("[Voice] SpeechRecognition ended");
+        };
+
+        try {
+          recognition.start();
+        } catch (err) {
+          console.error("[Voice] Failed to start SpeechRecognition:", err);
+        }
+      } else {
+        console.warn("[Voice] SpeechRecognition API not available in this browser");
       }
 
       recording = true;

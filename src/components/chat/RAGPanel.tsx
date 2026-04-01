@@ -13,6 +13,7 @@ import {
   ChevronRight,
   AlertTriangle,
   Download,
+  MessageSquarePlus,
 } from 'lucide-react'
 import { useRAG } from '../../hooks/useRAG'
 import { useRAGStore } from '../../stores/ragStore'
@@ -41,20 +42,45 @@ function ScoreBadge({ score }: { score: number }) {
 }
 
 export function RAGPanel({ conversationId }: Props) {
-  const {
-    documents,
-    isEnabled,
-    isIndexing,
-    indexingProgress,
-    contextWarning,
-    pullingEmbeddingModel,
-    uploadDocument,
-    removeDocument,
-    toggleRAG,
-  } = useRAG(conversationId)
+  // Show placeholder when no conversation is active
+  if (!conversationId) {
+    return (
+      <motion.div
+        className="w-[280px] shrink-0 h-full border-l border-gray-200 dark:border-white/5 bg-white dark:bg-[#2a2a2a] flex flex-col items-center justify-center"
+        initial={{ width: 0, opacity: 0 }}
+        animate={{ width: 280, opacity: 1 }}
+        exit={{ width: 0, opacity: 0 }}
+        transition={{ duration: 0.2 }}
+      >
+        <MessageSquarePlus size={32} className="text-gray-300 dark:text-gray-600 mb-3" />
+        <p className="text-sm text-gray-400 dark:text-gray-500 text-center px-6">
+          Start a conversation first
+        </p>
+        <p className="text-[0.6rem] text-gray-300 dark:text-gray-600 text-center px-6 mt-1">
+          Document chat will be available once a conversation is active.
+        </p>
+      </motion.div>
+    )
+  }
 
-  const embeddingModel = useRAGStore((s) => s.embeddingModel)
-  const lastRetrievedChunks = useRAGStore((s) => s.lastRetrievedChunks)
+  return <RAGPanelInner conversationId={conversationId} />
+}
+
+function RAGPanelInner({ conversationId }: { conversationId: string }) {
+  const rag = useRAG(conversationId)
+  const documents = rag.documents ?? []
+  const isEnabled = rag.isEnabled ?? false
+  const isIndexing = rag.isIndexing ?? false
+  const indexingProgress = rag.indexingProgress ?? null
+  const contextWarning = rag.contextWarning ?? null
+  const pullingEmbeddingModel = rag.pullingEmbeddingModel ?? false
+  const uploadDocument = rag.uploadDocument
+  const removeDocument = rag.removeDocument
+  const toggleRAG = rag.toggleRAG
+
+  const embeddingModelReactive = useRAGStore((s) => s.embeddingModel)
+  const lastRetrievedChunksReactive = useRAGStore((s) => s.lastRetrievedChunks)
+
   const [isDragging, setIsDragging] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [chunksExpanded, setChunksExpanded] = useState(false)
@@ -127,7 +153,7 @@ export function RAGPanel({ conversationId }: Props) {
     return 'Unknown'
   }
 
-  if (!conversationId) return null
+  const safeChunks = Array.isArray(lastRetrievedChunksReactive) ? lastRetrievedChunksReactive : []
 
   const progressPercent = indexingProgress
     ? String((indexingProgress.current / indexingProgress.total) * 100) + '%'
@@ -310,7 +336,7 @@ export function RAGPanel({ conversationId }: Props) {
       </div>
 
       {/* Retrieved Chunks section */}
-      {lastRetrievedChunks.length > 0 && isEnabled && (
+      {safeChunks.length > 0 && isEnabled && (
         <div className="border-t border-gray-200 dark:border-white/5">
           <button
             onClick={() => setChunksExpanded(!chunksExpanded)}
@@ -322,7 +348,7 @@ export function RAGPanel({ conversationId }: Props) {
               <ChevronRight size={12} className="text-gray-400" />
             )}
             <span className="text-[0.6rem] font-medium text-gray-600 dark:text-gray-300">
-              Retrieved Chunks ({lastRetrievedChunks.length})
+              Retrieved Chunks ({safeChunks.length})
             </span>
           </button>
 
@@ -334,20 +360,20 @@ export function RAGPanel({ conversationId }: Props) {
                 animate={{ opacity: 1, height: 'auto' }}
                 exit={{ opacity: 0, height: 0 }}
               >
-                {lastRetrievedChunks.map((result, idx) => (
+                {safeChunks.map((result, idx) => (
                   <div
-                    key={result.chunk.id + '-' + idx}
+                    key={(result?.chunk?.id ?? idx) + '-' + idx}
                     className="p-2 rounded-lg bg-gray-50 dark:bg-white/5 space-y-1"
                   >
                     <div className="flex items-center gap-1.5">
-                      <ScoreBadge score={result.score} />
+                      <ScoreBadge score={result?.score ?? 0} />
                       <span className="text-[0.55rem] text-gray-500 dark:text-gray-400 truncate">
-                        {getDocName(result.chunk.documentId)}
+                        {getDocName(result?.chunk?.documentId ?? '')}
                       </span>
                     </div>
                     <p className="text-[0.55rem] text-gray-600 dark:text-gray-300 leading-relaxed">
-                      {result.chunk.content.slice(0, 80)}
-                      {result.chunk.content.length > 80 ? '...' : ''}
+                      {(result?.chunk?.content ?? '').slice(0, 80)}
+                      {(result?.chunk?.content ?? '').length > 80 ? '...' : ''}
                     </p>
                   </div>
                 ))}
@@ -360,7 +386,7 @@ export function RAGPanel({ conversationId }: Props) {
       {/* Footer: embedding model */}
       <div className="px-3 py-2 border-t border-gray-200 dark:border-white/5">
         <p className="text-[0.55rem] text-gray-400 dark:text-gray-500 truncate">
-          Embedding: {embeddingModel}
+          Embedding: {embeddingModelReactive ?? 'nomic-embed-text'}
         </p>
       </div>
     </motion.div>

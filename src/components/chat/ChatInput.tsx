@@ -13,7 +13,7 @@ export function ChatInput({ onSend, onStop, isGenerating }: Props) {
   const [input, setInput] = useState('')
   const [isVoiceRecording, setIsVoiceRecording] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
-  const voiceButtonRef = useRef<{ stopRecording: () => void } | null>(null)
+  const stopVoiceRef = useRef<(() => Promise<string>) | null>(null)
 
   useEffect(() => {
     if (textareaRef.current) {
@@ -41,7 +41,15 @@ export function ChatInput({ onSend, onStop, isGenerating }: Props) {
   }
 
   const handleInterimTranscript = useCallback((text: string) => {
+    console.log('[Voice] Interim:', text)
     setInput(text)
+    // Force textarea height recalculation after interim update
+    requestAnimationFrame(() => {
+      if (textareaRef.current) {
+        textareaRef.current.style.height = 'auto'
+        textareaRef.current.style.height = Math.min(textareaRef.current.scrollHeight, 200) + 'px'
+      }
+    })
   }, [])
 
   const handleRecordingChange = useCallback((recording: boolean) => {
@@ -53,13 +61,16 @@ export function ChatInput({ onSend, onStop, isGenerating }: Props) {
     setInput(text)
   }, [])
 
-  // When the checkmark is clicked, we need to trigger the VoiceButton to stop
-  // We do this by simulating a click on the VoiceButton
-  const handleConfirmRecording = () => {
-    // The VoiceButton click handler will stop recording and call onTranscript
-    // which sets the final text. We just need to trigger it.
-    const voiceBtn = document.querySelector('[data-voice-button]') as HTMLElement
-    if (voiceBtn) voiceBtn.click()
+  const handleStopRegistered = useCallback((stopFn: () => Promise<string>) => {
+    stopVoiceRef.current = stopFn
+  }, [])
+
+  // When the checkmark is clicked, stop voice recording via the registered stop function
+  const handleConfirmRecording = async () => {
+    if (stopVoiceRef.current) {
+      await stopVoiceRef.current()
+      stopVoiceRef.current = null
+    }
   }
 
   return (
@@ -69,6 +80,7 @@ export function ChatInput({ onSend, onStop, isGenerating }: Props) {
           onTranscript={handleVoiceTranscript}
           onInterimTranscript={handleInterimTranscript}
           onRecordingChange={handleRecordingChange}
+          onStopRegistered={handleStopRegistered}
           disabled={isGenerating}
         />
         <textarea

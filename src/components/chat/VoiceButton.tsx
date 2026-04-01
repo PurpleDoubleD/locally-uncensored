@@ -1,3 +1,4 @@
+import { useEffect } from "react"
 import { motion } from "framer-motion"
 import { Mic, MicOff } from "lucide-react"
 import { useVoice } from "../../hooks/useVoice"
@@ -6,11 +7,26 @@ interface Props {
   onTranscript: (text: string) => void
   onInterimTranscript?: (text: string) => void
   onRecordingChange?: (isRecording: boolean) => void
+  onStopRegistered?: (stopFn: () => Promise<string>) => void
   disabled?: boolean
 }
 
-export function VoiceButton({ onTranscript, onInterimTranscript, onRecordingChange, disabled }: Props) {
+export function VoiceButton({ onTranscript, onInterimTranscript, onRecordingChange, onStopRegistered, disabled }: Props) {
   const { isRecording, sttSupported, startRecording, stopRecording } = useVoice()
+
+  // Register stop function whenever recording state changes
+  useEffect(() => {
+    if (isRecording && onStopRegistered) {
+      onStopRegistered(async () => {
+        const transcript = await stopRecording()
+        onRecordingChange?.(false)
+        if (transcript.trim()) {
+          onTranscript(transcript.trim())
+        }
+        return transcript
+      })
+    }
+  }, [isRecording, onStopRegistered, stopRecording, onRecordingChange, onTranscript])
 
   const handleClick = async () => {
     if (disabled) return
@@ -22,8 +38,9 @@ export function VoiceButton({ onTranscript, onInterimTranscript, onRecordingChan
         onTranscript(transcript.trim())
       }
     } else {
-      await startRecording(onInterimTranscript)
+      // Notify parent BEFORE starting (so UI updates immediately)
       onRecordingChange?.(true)
+      await startRecording(onInterimTranscript)
     }
   }
 
