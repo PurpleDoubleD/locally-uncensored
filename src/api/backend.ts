@@ -110,3 +110,26 @@ export function comfyuiUrl(path: string): string {
 export function comfyuiWsUrl(): string {
   return "ws://localhost:8188/ws";
 }
+
+/** Fetch an external URL as text — works in both Tauri and dev mode */
+export async function fetchExternal(url: string): Promise<string> {
+  if (isTauri()) {
+    const invoke = await getInvoke();
+    return invoke('fetch_external', { url }) as Promise<string>;
+  }
+  const res = await fetch(`/local-api/proxy-download?url=${encodeURIComponent(url)}`);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.text();
+}
+
+/** Fetch an external URL as bytes — works in both Tauri and dev mode */
+export async function fetchExternalBytes(url: string): Promise<ArrayBuffer> {
+  if (isTauri()) {
+    const invoke = await getInvoke();
+    const bytes = await invoke('fetch_external_bytes', { url }) as number[];
+    return new Uint8Array(bytes).buffer;
+  }
+  const res = await fetch(`/local-api/proxy-download?url=${encodeURIComponent(url)}`);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.arrayBuffer();
+}

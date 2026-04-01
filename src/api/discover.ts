@@ -1,4 +1,4 @@
-import { backendCall } from "./backend"
+import { backendCall, fetchExternal } from "./backend"
 
 export interface DiscoverModel {
   name: string
@@ -326,10 +326,8 @@ export async function searchCivitaiModels(
       limit: '20',
       sort: 'Most Downloaded',
     })
-    const resp = await fetch(`/civitai-api/v1/models?${params}`)
-    if (!resp.ok) return []
-
-    const data = await resp.json()
+    const text = await fetchExternal(`https://civitai.com/api/v1/models?${params}`)
+    const data = JSON.parse(text)
     const items: any[] = data.items ?? []
 
     return items.map((item) => {

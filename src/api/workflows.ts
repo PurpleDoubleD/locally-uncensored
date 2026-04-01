@@ -2,6 +2,7 @@ import JSZip from 'jszip'
 import type { ModelType } from './comfyui'
 import type { GenerateParams, VideoParams } from './comfyui'
 import { findMatchingVAE, findMatchingCLIP } from './comfyui'
+import { fetchExternal, fetchExternalBytes } from './backend'
 import type {
   WorkflowTemplate,
   WorkflowSearchResult,
@@ -397,16 +398,19 @@ export async function fetchWorkflowFromUrl(url: string, apiKey?: string): Promis
     const sep = url.includes('?') ? '&' : '?'
     finalUrl = `${url}${sep}token=${apiKey}`
   }
-  // Route external URLs through the server-side proxy to avoid CORS/redirect issues
-  const fetchUrl = finalUrl.startsWith('/') ? finalUrl : `/local-api/proxy-download?url=${encodeURIComponent(finalUrl)}`
-  const resp = await fetch(fetchUrl)
-  if (!resp.ok) throw new Error(`Failed to fetch workflow: ${resp.status} ${resp.statusText}`)
+  // Route through backend proxy (works in both Tauri and dev mode)
+  let buffer: ArrayBuffer
+  try {
+    buffer = await fetchExternalBytes(finalUrl)
+  } catch (err) {
+    throw new Error(`Failed to fetch workflow: ${err instanceof Error ? err.message : String(err)}`)
+  }
 
-  const contentType = resp.headers.get('content-type') || ''
+  // Detect content type from URL or try parsing
+  const isLikelyZip = url.endsWith('.zip') || finalUrl.includes('/download/')
 
   // Handle ZIP archives (CivitAI downloads workflows as .zip)
-  if (contentType.includes('zip') || contentType.includes('octet-stream') || url.endsWith('.zip')) {
-    const buffer = await resp.arrayBuffer()
+  if (isLikelyZip) {
     try {
       const zip = await JSZip.loadAsync(buffer)
       // Try all files in the ZIP that could contain workflow JSON
@@ -438,10 +442,13 @@ export async function fetchWorkflowFromUrl(url: string, apiKey?: string): Promis
     }
   }
 
-  // Regular JSON
-  const json = await resp.json()
-  const resolved = resolveWorkflowJson(json)
-  if (resolved) return resolved
+  // Try parsing as JSON
+  try {
+    const text = new TextDecoder().decode(buffer)
+    const json = JSON.parse(text)
+    const resolved = resolveWorkflowJson(json)
+    if (resolved) return resolved
+  } catch { /* not JSON */ }
 
   throw new Error('Invalid workflow format. Expected ComfyUI API or web format.')
 }
@@ -596,13 +603,12 @@ export async function searchCivitai(query: string): Promise<WorkflowSearchResult
       limit: '20',
       sort: 'Most Downloaded',
     })
-    const resp = await fetch(`/civitai-api/v1/models?${params}`)
-    if (!resp.ok) {
-      console.warn(`[workflows] CivitAI returned ${resp.status}`)
+    const text = await fetchExternal(`https://civitai.com/api/v1/models?${params}`)
+    const data = JSON.parse(text)
+    if (!data.items) {
+      console.warn('[workflows] CivitAI returned no items')
       return []
     }
-
-    const data = await resp.json()
     const items: CivitAIModel[] = data.items ?? []
 
     return items.map((item) => {

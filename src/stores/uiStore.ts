@@ -11,7 +11,7 @@ interface UIState {
 }
 
 export const useUIStore = create<UIState>()((set) => ({
-  currentView: 'chat',
+  currentView: 'models',
   sidebarOpen: true,
 
   setView: (view) => set({ currentView: view }),

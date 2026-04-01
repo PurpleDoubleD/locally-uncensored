@@ -42,6 +42,8 @@ fn main() {
             commands::search::searxng_status,
             // Proxy
             commands::proxy::ollama_search,
+            commands::proxy::fetch_external,
+            commands::proxy::fetch_external_bytes,
         ])
         .setup(|app| {
             let state = app.state::<AppState>();
