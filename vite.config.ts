@@ -1014,7 +1014,7 @@ function comfyLauncher(): Plugin {
 
         const chunks: Buffer[] = []
         req.on('data', (chunk: Buffer) => chunks.push(chunk))
-        req.on('end', () => {
+        req.on('end', async () => {
           try {
             const audioBuffer = Buffer.concat(chunks)
             if (audioBuffer.length === 0) {
@@ -1066,16 +1066,40 @@ function comfyLauncher(): Plugin {
               "print('LANG:' + result.get('language', 'en'))\n"
             )
 
+            // Use async spawn instead of execSync to avoid blocking the server
+            const runWhisper = (scriptPath: string, timeoutMs: number): Promise<string> => {
+              return new Promise((resolve, reject) => {
+                const proc = spawn(pythonBin, [scriptPath], {
+                  shell: true,
+                  stdio: ['ignore', 'pipe', 'pipe'],
+                })
+                let stdout = ''
+                let stderr = ''
+                const timer = setTimeout(() => {
+                  try { proc.kill('SIGKILL') } catch {}
+                  reject(new Error('Whisper timed out'))
+                }, timeoutMs)
+                proc.stdout?.on('data', (d: Buffer) => { stdout += d.toString() })
+                proc.stderr?.on('data', (d: Buffer) => { stderr += d.toString() })
+                proc.on('close', (code: number) => {
+                  clearTimeout(timer)
+                  if (code === 0) resolve(stdout.trim())
+                  else reject(new Error(stderr || 'Exit code ' + code))
+                })
+                proc.on('error', (err: Error) => {
+                  clearTimeout(timer)
+                  reject(err)
+                })
+              })
+            }
+
             let transcript = ''
             let language = 'en'
             let success = false
 
-            // Try faster-whisper
+            // Try faster-whisper (async)
             try {
-              const output = execSync(`${pythonBin} ${fwScript}`, {
-                encoding: 'utf8',
-                timeout: 120000,
-              }).trim()
+              const output = await runWhisper(fwScript, 120000)
               const lines = output.split('\n')
               const langLine = lines.find((l: string) => l.startsWith('LANG:'))
               if (langLine) {
@@ -1085,7 +1109,7 @@ function comfyLauncher(): Plugin {
               transcript = lines.join(' ').trim()
               success = true
             } catch (fwErr) {
-              console.error('[Transcribe] faster-whisper failed:', (fwErr as any).stderr || (fwErr as any).message)
+              console.error('[Transcribe] faster-whisper failed:', (fwErr as any).message)
               /* try fallback */
             }
 
