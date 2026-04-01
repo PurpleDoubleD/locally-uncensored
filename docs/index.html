@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Locally Uncensored — Run Uncensored AI Locally | Chat, Images & Video Generation</title>
-<meta name="description" content="The only local AI app that combines uncensored chat, image generation, and video creation in one interface. Powered by Ollama and ComfyUI. 100% offline, open source, MIT licensed. Supports Llama, Mistral, FLUX, Wan 2.1, Stable Diffusion.">
+<meta name="description" content="The only local AI app that combines uncensored chat, image generation, video creation, document chat (RAG), voice, and AI agents in one interface. Powered by Ollama and ComfyUI. 100% offline, open source, MIT licensed. Supports Llama, Mistral, FLUX, Wan 2.1, Stable Diffusion.">
 <meta name="keywords" content="uncensored AI local, local AI app, ollama frontend, comfyui alternative, run AI locally uncensored, local AI image generation, local AI video generation, private AI desktop app, all in one local AI app, abliterated models app, nsfw AI local, ollama GUI, self-hosted AI, offline AI chat, uncensored stable diffusion UI, ollama comfyui combined, free uncensored AI offline, local LLM frontend">
 <meta property="og:title" content="Locally Uncensored — Chat, Images & Video. All Local. All Uncensored.">
 <meta property="og:description" content="The only open-source local AI app combining uncensored chat, image generation, and video creation in one interface. No cloud, no censorship, no data collection.">
@@ -204,6 +204,13 @@ footer a:hover{color:var(--text)}
 </section>
 
 <section class="install reveal" id="install">
+  <p style="margin-bottom:1.5rem;font-size:1.1rem;color:#ededed;font-weight:600">Download v1.3.0</p>
+  <div style="display:flex;gap:1rem;justify-content:center;margin-bottom:2rem;flex-wrap:wrap">
+    <a href="https://github.com/PurpleDoubleD/locally-uncensored/releases/download/v1.3.0/Locally.Uncensored_1.3.0_x64-setup.exe" class="btn btn-primary" style="font-size:.9rem;padding:.6rem 1.5rem">Windows (.exe)</a>
+    <a href="https://github.com/PurpleDoubleD/locally-uncensored/releases/download/v1.3.0/Locally.Uncensored_1.3.0_amd64.AppImage" class="btn btn-primary" style="font-size:.9rem;padding:.6rem 1.5rem">Linux (.AppImage)</a>
+    <a href="https://github.com/PurpleDoubleD/locally-uncensored/releases/download/v1.3.0/Locally.Uncensored_1.3.0_amd64.deb" class="btn" style="font-size:.9rem;padding:.6rem 1.5rem">Linux (.deb)</a>
+  </div>
+  <p style="color:var(--text-tertiary);font-size:.8rem;margin-bottom:2rem">macOS: <a href="https://github.com/PurpleDoubleD/locally-uncensored#-build-from-source-all-platforms">Build from source</a></p>
   <div class="install-cmd" onclick="navigator.clipboard.writeText('git clone https://github.com/PurpleDoubleD/locally-uncensored.git && cd locally-uncensored && setup.bat')">
     $ git clone https://github.com/PurpleDoubleD/locally-uncensored.git && <span>setup.bat</span>
   </div>
@@ -261,6 +268,21 @@ footer a:hover{color:var(--text)}
       <h3>100% Private & Offline</h3>
       <p>Everything runs on localhost. No telemetry, no cloud, no accounts, no Docker required. Your conversations, images, and videos never leave your machine.</p>
     </div>
+    <div class="feature-cell">
+      <div class="feature-icon">📄</div>
+      <h3>Document Chat (RAG)</h3>
+      <p>Upload PDFs, DOCX, or TXT files and chat with your documents. Hybrid search with confidence scores and source citations.</p>
+    </div>
+    <div class="feature-cell">
+      <div class="feature-icon">🎤</div>
+      <h3>Voice Chat</h3>
+      <p>Talk to your AI with push-to-talk and hear responses with sentence-level text-to-speech streaming.</p>
+    </div>
+    <div class="feature-cell">
+      <div class="feature-icon">🤖</div>
+      <h3>AI Agents</h3>
+      <p>Give your AI a goal — it plans, searches the web, reads/writes files, and executes Python code autonomously.</p>
+    </div>
   </div>
 </section>
 
@@ -301,6 +323,9 @@ footer a:hover{color:var(--text)}
       <tr><td>Built-in Personas</td><td class="check">25+</td><td class="cross">No</td><td class="cross">No</td><td class="check">Manual</td></tr>
       <tr><td>Open Source</td><td class="check">MIT</td><td class="check">MIT</td><td class="cross">No</td><td class="check">AGPL</td></tr>
       <tr><td>No Docker Required</td><td class="check">Yes</td><td class="cross">No</td><td class="check">Yes</td><td class="check">Yes</td></tr>
+      <tr><td>Document Chat (RAG)</td><td class="check hl">Yes</td><td class="check">Yes</td><td class="cross">No</td><td class="cross">No</td></tr>
+      <tr><td>Voice (STT + TTS)</td><td class="check hl">Yes</td><td class="check">Partial</td><td class="cross">No</td><td class="cross">No</td></tr>
+      <tr><td>AI Agents</td><td class="check hl">Yes</td><td class="cross">No</td><td class="cross">No</td><td class="cross">No</td></tr>
     </tbody>
   </table>
 </section>

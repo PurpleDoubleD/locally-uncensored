@@ -111,7 +111,7 @@ footer .links{display:flex;justify-content:center;gap:2rem;margin-bottom:1rem}
 
 <section class="hero">
   <h1>Locally Uncensored</h1>
-  <p class="tagline"><span>Chat.</span> <span>Images.</span> <span>Video.</span> All Local. All Yours.</p>
+  <p class="tagline"><span>Chat.</span> <span>Images.</span> <span>Video.</span> <span>RAG.</span> <span>Voice.</span> <span>Agents.</span> All Local.</p>
   <div class="hero-cta">
     <a href="#start" class="btn btn-primary">Get Started</a>
     <a href="https://github.com/PurpleDoubleD/locally-uncensored" class="btn btn-secondary" target="_blank">View on GitHub</a>
@@ -157,6 +157,21 @@ footer .links{display:flex;justify-content:center;gap:2rem;margin-bottom:1rem}
       <h3>One-Click Setup</h3>
       <p>Run setup.bat (Windows) or setup.sh (Linux/Mac). No Docker, no Terminal wizardry.</p>
     </div>
+    <div class="feature-card">
+      <div class="icon">📄</div>
+      <h3>Document Chat (RAG)</h3>
+      <p>Upload PDFs, DOCX, or TXT files and chat with your documents. Hybrid search with confidence scores and source citations.</p>
+    </div>
+    <div class="feature-card">
+      <div class="icon">🎤</div>
+      <h3>Voice Chat</h3>
+      <p>Talk to your AI with push-to-talk and hear responses with sentence-level text-to-speech streaming.</p>
+    </div>
+    <div class="feature-card">
+      <div class="icon">🤖</div>
+      <h3>AI Agents</h3>
+      <p>Give your AI a goal — it plans, searches the web, reads/writes files, and executes Python code autonomously.</p>
+    </div>
   </div>
 </section>
 
@@ -175,6 +190,9 @@ footer .links{display:flex;justify-content:center;gap:2rem;margin-bottom:1rem}
       <tr><td>Open Source</td><td class="yes">✅</td><td class="yes">✅</td><td class="no">❌</td><td class="yes">✅</td></tr>
       <tr><td>No Docker Required</td><td class="yes">✅</td><td class="no">❌</td><td class="yes">✅</td><td class="yes">✅</td></tr>
       <tr><td>100% Offline</td><td class="yes">✅</td><td class="yes">✅</td><td class="yes">✅</td><td class="yes">✅</td></tr>
+      <tr><td>Document Chat (RAG)</td><td class="yes">✅</td><td class="yes">✅</td><td class="no">❌</td><td class="no">❌</td></tr>
+      <tr><td>Voice (STT + TTS)</td><td class="yes">✅</td><td class="maybe">⚠️</td><td class="no">❌</td><td class="no">❌</td></tr>
+      <tr><td>AI Agents</td><td class="yes">✅</td><td class="no">❌</td><td class="no">❌</td><td class="no">❌</td></tr>
     </table>
   </div>
 </section>
@@ -183,6 +201,13 @@ footer .links{display:flex;justify-content:center;gap:2rem;margin-bottom:1rem}
   <h2 class="section-title">Get Started in 60 Seconds</h2>
   <p class="section-sub">Clone, run, done.</p>
   <div class="get-started">
+    <p style="margin-bottom:1.5rem;font-size:1.1rem;color:#e0e0f0;font-weight:600">Download v1.3.0</p>
+    <div style="display:flex;gap:1rem;justify-content:center;margin-bottom:2rem;flex-wrap:wrap">
+      <a href="https://github.com/PurpleDoubleD/locally-uncensored/releases/download/v1.3.0/Locally.Uncensored_1.3.0_x64-setup.exe" class="btn btn-primary" style="font-size:.9rem;padding:.6rem 1.5rem">Windows (.exe)</a>
+      <a href="https://github.com/PurpleDoubleD/locally-uncensored/releases/download/v1.3.0/Locally.Uncensored_1.3.0_amd64.AppImage" class="btn btn-primary" style="font-size:.9rem;padding:.6rem 1.5rem">Linux (.AppImage)</a>
+      <a href="https://github.com/PurpleDoubleD/locally-uncensored/releases/download/v1.3.0/Locally.Uncensored_1.3.0_amd64.deb" class="btn btn-secondary" style="font-size:.9rem;padding:.6rem 1.5rem">Linux (.deb)</a>
+    </div>
+    <p style="color:#9ca3af;font-size:.8rem;margin-bottom:2rem">macOS: <a href="https://github.com/PurpleDoubleD/locally-uncensored#-build-from-source-all-platforms">Build from source</a></p>
     <div class="install-tabs">
       <div class="tab active" onclick="switchTab('win')">Windows</div>
       <div class="tab" onclick="switchTab('linux')">Linux / macOS</div>
