@@ -73,13 +73,15 @@ Tired of switching between Ollama for chat, ComfyUI for images, and another tool
 - **Document Chat (RAG)** — Upload PDFs, DOCX, or TXT files and chat with your documents. Hybrid search with confidence scores.
 - **Voice Chat** — Talk to your AI with push-to-talk and hear responses with text-to-speech. Sentence-level streaming.
 - **AI Agents** — Give your AI a goal and watch it plan, search the web, read/write files, and execute Python code autonomously.
+- **Standalone Desktop App** — Full Tauri v2 Rust backend. Download the .exe, run it — no terminal, no dev server, no Node.js.
 
 ## Tech Stack
 
+- **Desktop**: Tauri v2 (Rust backend, standalone .exe — no Node.js required)
 - **Frontend**: React 19, TypeScript, Tailwind CSS 4, Framer Motion
 - **State**: Zustand with localStorage persistence
-- **AI Backend**: Ollama (text), ComfyUI (images/video)
-- **Build**: Vite 8
+- **AI Backend**: Ollama (text), ComfyUI (images/video), faster-whisper (voice)
+- **Build**: Vite 8 (dev), Tauri CLI (production)
 
 ---
 

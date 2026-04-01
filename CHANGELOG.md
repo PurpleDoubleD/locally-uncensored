@@ -11,8 +11,14 @@ All notable changes to Locally Uncensored are documented here.
   - Ollama context window warning when model has insufficient context
   - Automatic embedding model download (nomic-embed-text)
   - Per-conversation RAG toggle and source citations
+- **Standalone Desktop App**: Full Tauri v2 Rust backend — .exe runs without Node.js or dev server
+  - 15 Rust commands replacing Vite middleware (process management, downloads, search, agents, voice)
+  - Frontend auto-detects Tauri vs browser and routes accordingly
+  - Ollama, ComfyUI, and Whisper auto-start on app launch
+  - Clean process shutdown on app exit
 - **Voice Integration**: Talk to your AI and hear responses
-  - Push-to-talk microphone button with Web Speech API
+  - Persistent Whisper server loads model once (~2.5 min), then transcribes in ~2s
+  - Push-to-talk microphone button with local faster-whisper (100% offline, no cloud)
   - Text-to-speech on any assistant message with sentence-level streaming
   - Voice settings (voice selection, rate, pitch)
   - Auto-send transcribed text option
@@ -26,6 +32,9 @@ All notable changes to Locally Uncensored are documented here.
 ### Fixed
 - Cross-platform Python detection for code execution (Windows Store alias handling)
 - Web search now falls back to Brave Search when DuckDuckGo returns CAPTCHA
+- ComfyUI auto-discovery now scans up to 4 levels deep (finds nested installs with spaces in path)
+- Ollama/ComfyUI spawn no longer opens extra console windows on Windows
+- Whisper transcription no longer times out (was re-loading 145MB model on every request)
 
 
 ## [1.0.2] - 2026-03-25
