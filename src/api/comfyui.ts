@@ -291,9 +291,10 @@ export async function findMatchingVAE(modelType: ModelType): Promise<string> {
   const lower = (s: string) => s.toLowerCase()
 
   if (modelType === 'flux' || modelType === 'flux2') {
-    const match = vaes.find(v => lower(v).includes('flux') || lower(v).includes('ae'))
+    const match = vaes.find(v => lower(v).includes('flux2') || lower(v).includes('flux'))
+      || vaes.find(v => lower(v).includes('ae'))
     if (match) return match
-    throw new Error(`No FLUX VAE found. Download "ae.safetensors" from the Model Manager (FLUX bundles include it).`)
+    throw new Error(`No FLUX VAE found. Download "flux2-vae.safetensors" from the Model Manager.`)
   }
   if (modelType === 'hunyuan') {
     // HunyuanVideo has its own VAE — prefer it, fall back to Wan VAE
@@ -318,7 +319,14 @@ export async function findMatchingCLIP(modelType: ModelType): Promise<string> {
   if (clips.length === 0) throw new Error('No text encoder models found. Download a CLIP/T5 model for your model type from the Model Manager.')
   const lower = (s: string) => s.toLowerCase()
 
-  if (modelType === 'flux' || modelType === 'flux2') {
+  if (modelType === 'flux2') {
+    // FLUX 2 uses Qwen or Mistral text encoders, NOT T5
+    const match = clips.find(c => lower(c).includes('qwen') && !lower(c).includes('qwen_2.5_vl'))
+      || clips.find(c => lower(c).includes('mistral'))
+    if (match) return match
+    throw new Error(`No FLUX 2 text encoder found. Download "qwen_3_4b_fp4_flux2.safetensors" from the Model Manager.`)
+  }
+  if (modelType === 'flux') {
     const match = clips.find(c => lower(c).includes('t5') && !lower(c).includes('umt5'))
       || clips.find(c => lower(c).includes('clip_l'))
     if (match) return match

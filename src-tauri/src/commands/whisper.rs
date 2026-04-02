@@ -45,8 +45,8 @@ impl WhisperServer {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
-        #[cfg(target_os = "windows")]
-        cmd.creation_flags(CREATE_NO_WINDOW);
+        // Note: DO NOT use CREATE_NO_WINDOW for Python — libraries need valid stderr.
+        // Piped stderr already hides the console window.
         let mut child = cmd.spawn()
             .map_err(|e| format!("Failed to start whisper server: {}", e))?;
 

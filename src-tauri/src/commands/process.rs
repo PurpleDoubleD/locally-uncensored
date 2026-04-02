@@ -225,8 +225,8 @@ pub fn start_comfyui(state: State<'_, AppState>) -> Result<serde_json::Value, St
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    #[cfg(target_os = "windows")]
-    cmd.creation_flags(CREATE_NO_WINDOW);
+    // Note: DO NOT use CREATE_NO_WINDOW for ComfyUI — tqdm needs a valid stderr handle.
+    // Piped stdout/stderr already hides the console window.
     let mut child = cmd.spawn()
         .map_err(|e| format!("Failed to start ComfyUI (python={}): {}", python, e))?;
 
@@ -415,8 +415,7 @@ pub fn auto_start_comfyui(state: &AppState) {
                 .stdin(Stdio::null())
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped());
-            #[cfg(target_os = "windows")]
-            cmd.creation_flags(CREATE_NO_WINDOW);
+            // Note: DO NOT use CREATE_NO_WINDOW for ComfyUI — tqdm needs a valid stderr handle.
             match cmd.spawn() {
                 Ok(mut child) => {
                     // Drain stdout/stderr in background threads to prevent buffer deadlock

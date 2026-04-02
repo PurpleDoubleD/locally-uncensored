@@ -303,8 +303,15 @@ export function useCreate() {
               resolve()
             } else if (history.status?.status_str === 'error') {
               if (pollRef.current) clearInterval(pollRef.current)
-              const errMsg = history.status?.messages?.[0]?.[1]?.message ?? 'Unknown ComfyUI error'
-              reject(new Error(errMsg))
+              // Find the execution_error message which has the actual error details
+              const messages: [string, any][] = history.status?.messages ?? []
+              const errorEntry = messages.find(([t]) => t === 'execution_error')
+              const errMsg = errorEntry?.[1]?.exception_message
+                || errorEntry?.[1]?.message
+                || messages[messages.length - 1]?.[1]?.message
+                || 'Unknown ComfyUI error'
+              const nodeType = errorEntry?.[1]?.node_type ? ` (${errorEntry[1].node_type})` : ''
+              reject(new Error(errMsg.trim() + nodeType))
             }
           } catch (err) {
             console.warn('[useCreate] Poll error:', err)
