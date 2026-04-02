@@ -4,9 +4,9 @@
 
 # Locally Uncensored
 
-**The only local AI app that does Chat + Images + Video — all in one beautiful UI.**
+**The only local AI app that does Chat + Agent Mode + Images + Video — all in one.**
 
-No cloud. No censorship. No data collection. Just you and your AI.
+No cloud. No censorship. No data collection. Your AI, your rules.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![GitHub stars](https://img.shields.io/github/stars/PurpleDoubleD/locally-uncensored?style=social)](https://github.com/PurpleDoubleD/locally-uncensored/stargazers)
@@ -44,18 +44,16 @@ Tired of switching between Ollama for chat, ComfyUI for images, and another tool
 | Feature | Locally Uncensored | Open WebUI | LM Studio | SillyTavern |
 |---------|:-:|:-:|:-:|:-:|
 | AI Chat | ✅ | ✅ | ✅ | ✅ |
+| **Agent Mode (Tool Calling)** | **✅** | ❌ | ❌ | ❌ |
 | Image Generation | ✅ | ❌ | ❌ | ❌ |
 | Video Generation | ✅ | ❌ | ❌ | ❌ |
 | Uncensored by Default | ✅ | ❌ | ❌ | ⚠️ |
+| Memory System | ✅ | ❌ | ❌ | ❌ |
 | One-Click Setup | ✅ | ❌ (Docker) | ✅ | ❌ (Node.js) |
 | 25+ Built-in Personas | ✅ | ❌ | ❌ | ⚠️ (manual) |
-| Modern UI | ✅ | ✅ | ✅ | ❌ |
-| Open Source | ✅ | ✅ | ❌ | ✅ |
-| Portable / No-Install | ✅ | ❌ | ✅ | ❌ |
-| No Docker Required | ✅ | ❌ | ✅ | ✅ |
 | RAG / Document Chat | ✅ | ✅ | ❌ | ❌ |
 | Voice (STT + TTS) | ✅ | ⚠️ | ❌ | ❌ |
-| AI Agents | ✅ | ❌ | ❌ | ❌ |
+| Open Source | ✅ | ✅ | ❌ | ✅ |
 | 100% Offline | ✅ | ✅ | ✅ | ✅ |
 
 ---
@@ -63,23 +61,19 @@ Tired of switching between Ollama for chat, ComfyUI for images, and another tool
 ## ✨ Features
 
 - **Uncensored AI Chat** — Run abliterated models locally with zero restrictions
+- **Agent Mode (Beta)** — Give your AI tools: web search, web fetch, file I/O, code execution, image generation. It chains tools autonomously to answer questions with real data. Best with [Hermes 3](https://ollama.com/library/hermes3).
+- **Memory System** — Agent Mode auto-saves tool results. Persistent across sessions. Export/import as .md.
 - **Image Generation** — Text-to-image via ComfyUI with full parameter control
-- **Video Generation** — Text-to-video with Wan 2.1/2.2 and AnimateDiff support
-- **Workflow Finder** — Auto-detects your model type and builds the right ComfyUI workflow. Search CivitAI or use built-in templates.
-- **Dynamic Workflow Builder** — No hardcoded pipelines. Queries ComfyUI's available nodes and constructs the optimal workflow automatically.
-- **Model Marketplace** — Search and download models from CivitAI directly into ComfyUI. One click, right folder, auto-detected.
-- **25+ Personas** — From Helpful Assistant to Roast Master, ready out of the box
-- **Model Manager** — Browse, install, and switch models with one click
+- **Video Generation** — Text-to-video with Wan 2.1/2.2, HunyuanVideo, LTX support
+- **Document Chat (RAG)** — Upload PDFs, DOCX, or TXT files and chat with your documents
+- **Voice Chat** — Talk to your AI with push-to-talk and hear responses with TTS
+- **25+ Personas** — From Helpful Assistant to Roast Master, switchable via dropdown
+- **Model Manager** — Browse, install, and switch models. HOT badges for recommended models. Variant selector for multi-size downloads.
 - **Thinking Display** — See the AI's reasoning in collapsible blocks
-- **Dark/Light Mode** — Deep black dark mode with sharp contrasts, clean light mode
-- **Privacy First** — Zero external tracking. All API calls proxied locally. No Google Fonts, no CDN scripts, no analytics.
-- **100% Local** — Everything runs on your machine, nothing touches the internet
-- **Conversation History** — All chats saved locally in your browser
-- **VRAM Management** — Unload models from GPU memory with one click after generation
-- **Document Chat (RAG)** *(work in progress)* — Upload PDFs, DOCX, or TXT files and chat with your documents.
-- **Voice Chat** *(work in progress)* — Talk to your AI with push-to-talk and hear responses with text-to-speech.
-- **AI Agents** *(work in progress)* — Give your AI a goal and watch it plan, search the web, and execute code autonomously.
-- **Standalone Desktop App** — Full Tauri v2 Rust backend. Download the .exe, run it — no terminal, no dev server, no Node.js.
+- **Linear/Arc UI** — Compact, monochrome, collapsible settings. Premium feel.
+- **Privacy First** — Zero tracking. All API calls proxied locally. No analytics.
+- **100% Local** — Everything runs on your machine
+- **Standalone Desktop App** — Tauri v2 Rust backend. Download the .exe, run it.
 
 ## Tech Stack
 
@@ -194,12 +188,13 @@ Just install models in the standard locations and the app picks them up.
 
 | Model | Size | VRAM | Best For |
 |-------|------|------|----------|
-| Qwen 3 30B Abliterated | 18 GB | 16 GB | Best overall intelligence |
+| **Hermes 3 8B** | 4.3 GB | 6 GB | **Agent Mode** — uncensored + native tool calling |
+| **Hermes 3 70B** | 42 GB | 48 GB | **Best Agent** — maximum power |
+| Qwen 3.5 Abliterated | 5–18 GB | 6–16 GB | Best overall intelligence |
 | Qwen 3 8B Abliterated | 5.2 GB | 6 GB | Fast, great for coding |
 | DeepSeek R1 (8B–70B) | 5–42 GB | 6–48 GB | Chain-of-thought reasoning |
-| GLM 4.6 9B Abliterated | 6 GB | 8 GB | Newest, strong coding |
+| GLM 4.6 9B Abliterated | 6 GB | 8 GB | Strong coding |
 | Llama 3.1 8B Abliterated | 5.7 GB | 6 GB | Fastest all-rounder |
-| Gemma 3 (4B–27B) | 3–18 GB | 4–16 GB | Vision support, multilingual |
 | Llama 3.3 70B Abliterated | 42 GB | 48 GB | Maximum intelligence |
 
 ### Image (ComfyUI)
@@ -245,13 +240,13 @@ COMFYUI_PATH=/path/to/your/ComfyUI
 ## 🗺️ Roadmap
 
 - [x] **RAG / Document Chat** — Upload PDFs and chat with your documents
+- [x] **Agent Mode (Beta)** — Tool calling with web search, file I/O, code execution
+- [x] **Memory System** — Persistent agent memory with export/import
+- [x] **Voice Chat** — STT + TTS with local Whisper
 - [ ] **Audio Generation** — Text-to-speech and music generation
 - [ ] **Plugin System** — Extend the app with community plugins
 - [ ] **Multi-User Mode** — Share your local AI server with your household
 - [ ] **Mobile UI** — Responsive layout for phone/tablet access
-- [ ] **Docker Support** — For those who prefer containerized deployments
-- [ ] **Custom Persona Creator** — Build and share your own personas
-- [ ] **Export/Import** — Backup and restore your chats and settings
 
 Have an idea? [Open a discussion](https://github.com/PurpleDoubleD/locally-uncensored/discussions)!
 

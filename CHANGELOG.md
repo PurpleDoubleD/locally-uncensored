@@ -2,6 +2,42 @@
 
 All notable changes to Locally Uncensored are documented here.
 
+## [1.9.0] - 2026-04-03
+
+### Added
+- **Agent Mode (Beta)** — AI can use tools: web_search, web_fetch, file_read, file_write, code_execute, image_generate
+- **Two-phase search** — web_search finds URLs, web_fetch reads actual page content for accurate answers
+- **Tool approval system** — safe tools auto-execute, dangerous tools require user confirmation
+- **Live tool-call blocks** — inline status with expandable arguments and results
+- **Agent onboarding tutorial** — 4-step walkthrough for first-time users
+- **Memory system** — auto-saves tool results, keyword search, category filters, export/import as .md
+- **Context compaction** — automatic message compression to prevent context window overflow
+- **Model auto-fix** — abliterated models get tool-calling template restored via Ollama Modelfile
+- **Hermes XML fallback** — prompt-based tool calling for models without native support
+- **Persona dropdown** — quick persona switching in chat top bar
+- **Variant selector** — dropdown for multi-size model downloads in Discover
+- **HOT/AGENT badges** — recommended models highlighted in Model Manager
+- **web_fetch tool** — fetches URLs and extracts readable text content (HTML → text)
+
+### Changed
+- **UI redesign (Linear/Arc style)** — compact header, collapsible settings, list-view models, minimal borders
+- **Sidebar** — narrower, minimal hover states, smaller text
+- **Settings** — collapsible sections, inline sliders, compact toggles
+- **Model Manager** — list layout instead of card grid
+- **Start screen** — clean LU logo only, smooth transition to chat
+- **Header** — renamed to LUncensored, removed old Agents tab
+- **Tool call display** — inline colored text instead of colored boxes
+
+### Fixed
+- DuckDuckGo search snippet truncation (regex now captures full HTML content)
+- DDG URL extraction from redirect wrappers
+- Context window exhaustion after many tool calls ("Failed to fetch" error)
+
+### Removed
+- Old standalone Agent View (replaced by in-chat Agent Mode)
+
+---
+
 ## [1.5.5] - 2026-04-02
 
 ### Added

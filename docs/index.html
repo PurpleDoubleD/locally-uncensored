@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Locally Uncensored — Run Uncensored AI Locally | Chat, Images & Video Generation</title>
-<meta name="description" content="The only local AI app that combines uncensored chat, image generation, video creation, document chat (RAG), voice, and AI agents in one interface. Powered by Ollama and ComfyUI. 100% offline, open source, MIT licensed. Supports Llama, Mistral, FLUX, Wan 2.1, Stable Diffusion.">
+<meta name="description" content="The only local AI app with Agent Mode, uncensored chat, image generation, video creation, document chat (RAG), and memory system in one interface. Powered by Ollama and ComfyUI. 100% offline, open source, MIT licensed. Supports Llama, Mistral, FLUX, Wan 2.1, Stable Diffusion.">
 <meta name="keywords" content="uncensored AI local, local AI app, ollama frontend, comfyui alternative, run AI locally uncensored, local AI image generation, local AI video generation, private AI desktop app, all in one local AI app, abliterated models app, nsfw AI local, ollama GUI, self-hosted AI, offline AI chat, uncensored stable diffusion UI, ollama comfyui combined, free uncensored AI offline, local LLM frontend">
 <meta property="og:title" content="Locally Uncensored — Chat, Images & Video. All Local. All Uncensored.">
 <meta property="og:description" content="The only open-source local AI app combining uncensored chat, image generation, and video creation in one interface. No cloud, no censorship, no data collection.">
@@ -27,7 +27,7 @@
 <!-- Setup: docker compose up -d on your server, then replace YOUR-DOMAIN below -->
 <script defer data-domain="YOUR-DOMAIN.com" src="https://plausible.YOUR-DOMAIN.com/js/script.js"></script>
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"SoftwareApplication","name":"Locally Uncensored","applicationCategory":"DeveloperApplication","applicationSubCategory":"Artificial Intelligence","operatingSystem":"Windows, macOS, Linux","description":"All-in-one local AI desktop app for uncensored chat, image generation, and video creation. Run Llama, Mistral, Qwen, FLUX, Stable Diffusion, and Wan 2.1 models locally with zero cloud dependency.","url":"https://locallyuncensored.com/","downloadUrl":"https://github.com/PurpleDoubleD/locally-uncensored","softwareVersion":"1.5.3","license":"https://opensource.org/licenses/MIT","author":{"@type":"Person","name":"PurpleDoubleD","url":"https://github.com/PurpleDoubleD"},"offers":{"@type":"Offer","price":"0","priceCurrency":"USD"},"featureList":["Uncensored AI Chat via Ollama","Image Generation via ComfyUI and Stable Diffusion","Video Generation with Wan 2.1 and AnimateDiff","25+ Built-in AI Personas","One-Click Setup on Windows, macOS, Linux","Model Auto-Detection","100% Offline and Private","No Docker Required"],"screenshot":"https://raw.githubusercontent.com/PurpleDoubleD/locally-uncensored/master/docs/screenshots/marketing_03_chat_personas.png","softwareRequirements":"Node.js 18+, Ollama","memoryRequirements":"8 GB RAM minimum","storageRequirements":"6 GB for default model"}
+{"@context":"https://schema.org","@type":"SoftwareApplication","name":"Locally Uncensored","applicationCategory":"DeveloperApplication","applicationSubCategory":"Artificial Intelligence","operatingSystem":"Windows, macOS, Linux","description":"All-in-one local AI desktop app for uncensored chat, image generation, and video creation. Run Llama, Mistral, Qwen, FLUX, Stable Diffusion, and Wan 2.1 models locally with zero cloud dependency.","url":"https://locallyuncensored.com/","downloadUrl":"https://github.com/PurpleDoubleD/locally-uncensored","softwareVersion":"1.9.0","license":"https://opensource.org/licenses/MIT","author":{"@type":"Person","name":"PurpleDoubleD","url":"https://github.com/PurpleDoubleD"},"offers":{"@type":"Offer","price":"0","priceCurrency":"USD"},"featureList":["Uncensored AI Chat via Ollama","Image Generation via ComfyUI and Stable Diffusion","Video Generation with Wan 2.1 and AnimateDiff","25+ Built-in AI Personas","One-Click Setup on Windows, macOS, Linux","Model Auto-Detection","100% Offline and Private","No Docker Required"],"screenshot":"https://raw.githubusercontent.com/PurpleDoubleD/locally-uncensored/master/docs/screenshots/marketing_03_chat_personas.png","softwareRequirements":"Node.js 18+, Ollama","memoryRequirements":"8 GB RAM minimum","storageRequirements":"6 GB for default model"}
 </script>
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"Organization","name":"PurpleDoubleD","url":"https://github.com/PurpleDoubleD","sameAs":["https://github.com/PurpleDoubleD","https://reddit.com/user/GroundbreakingMall54"]}
@@ -232,12 +232,19 @@ footer a:hover{color:var(--text)}
   <div class="section-desc">Stop switching between Ollama for chat, ComfyUI for images, and AnimateDiff for video in separate tabs.</div>
 
   <div class="feature-grid">
+    <div class="feature-cell" style="border-color:rgba(139,92,246,0.3);background:rgba(139,92,246,0.03)">
+      <div class="feature-icon" style="color:#8b5cf6">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a4 4 0 0 1 4 4v1a2 2 0 0 1 2 2v1a3 3 0 0 1-3 3H9a3 3 0 0 1-3-3V9a2 2 0 0 1 2-2V6a4 4 0 0 1 4-4z"/><path d="M8 14v2a4 4 0 0 0 8 0v-2"/></svg>
+      </div>
+      <h3>Agent Mode <span style="font-size:10px;background:rgba(139,92,246,0.2);padding:1px 6px;border-radius:4px;vertical-align:middle">BETA</span></h3>
+      <p>Your AI uses tools autonomously — web search, page fetching, file I/O, code execution. Multi-step chains with live tool-call blocks. Powered by Hermes 3.</p>
+    </div>
     <div class="feature-cell">
       <div class="feature-icon">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
       </div>
       <h3>Uncensored AI Chat</h3>
-      <p>Powered by Ollama. Run abliterated models like Llama 3.1, Mistral Nemo, Qwen 3, or DeepSeek R1 locally — uncensored, private, with streaming responses and thinking display.</p>
+      <p>Powered by Ollama. Run abliterated models like Llama 3.1, Qwen 3.5, or DeepSeek R1 locally — uncensored, private, with streaming responses and thinking display.</p>
     </div>
     <div class="feature-cell">
       <div class="feature-icon">
