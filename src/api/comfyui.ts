@@ -105,6 +105,27 @@ export async function checkComfyConnection(): Promise<boolean> {
   }
 }
 
+// ─── System VRAM Detection ───
+
+let cachedVRAM: number | null = null
+
+export async function getSystemVRAM(): Promise<number | null> {
+  if (cachedVRAM !== null) return cachedVRAM
+  try {
+    const res = await localFetch(comfyuiUrl('/system_stats'))
+    if (!res.ok) return null
+    const data = await res.json()
+    // ComfyUI returns devices[].vram_total in bytes
+    const devices = data?.system?.devices ?? data?.devices ?? []
+    if (devices.length > 0) {
+      const vramBytes = devices[0]?.vram_total ?? 0
+      cachedVRAM = Math.round(vramBytes / (1024 * 1024 * 1024)) // bytes → GB
+      return cachedVRAM
+    }
+  } catch { /* ComfyUI not running */ }
+  return null
+}
+
 // Check if a specific node exists in ComfyUI (lightweight, single node check)
 async function nodeExists(nodeName: string): Promise<boolean> {
   try {

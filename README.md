@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="logo-concepts/concept_3_LU_monogram_bw.png" alt="Locally Uncensored" width="80">
+<img src="logos/LU-monogram-bw.png" alt="Locally Uncensored" width="80">
 
 # Locally Uncensored
 
@@ -190,31 +190,35 @@ Just install models in the standard locations and the app picks them up.
 
 ## 🎭 Recommended Models
 
-### Text (Ollama)
+### Text (Ollama) — scales to your hardware
 
 | Model | Size | VRAM | Best For |
 |-------|------|------|----------|
-| Llama 3.1 8B Abliterated | 5.7 GB | 6 GB | Fast all-rounder |
-| Qwen3 8B Abliterated | 5.2 GB | 6 GB | Coding |
-| Mistral Nemo 12B Abliterated | 6.8 GB | 8 GB | Multilingual |
-| DeepSeek R1 8B Abliterated | 5 GB | 6 GB | Reasoning |
-| Qwen3 14B Abliterated | 9 GB | 12 GB | High intelligence |
+| Qwen 3 30B Abliterated | 18 GB | 16 GB | Best overall intelligence |
+| Qwen 3 8B Abliterated | 5.2 GB | 6 GB | Fast, great for coding |
+| DeepSeek R1 (8B–70B) | 5–42 GB | 6–48 GB | Chain-of-thought reasoning |
+| GLM 4.6 9B Abliterated | 6 GB | 8 GB | Newest, strong coding |
+| Llama 3.1 8B Abliterated | 5.7 GB | 6 GB | Fastest all-rounder |
+| Gemma 3 (4B–27B) | 3–18 GB | 4–16 GB | Vision support, multilingual |
+| Llama 3.3 70B Abliterated | 42 GB | 48 GB | Maximum intelligence |
 
 ### Image (ComfyUI)
 
 | Model | VRAM | Notes |
 |-------|------|-------|
-| Juggernaut XL V9 | 8 GB | Best photorealistic |
-| FLUX.1 Schnell | 10-12 GB | State-of-the-art |
-| Pony Diffusion V6 XL | 8 GB | Anime/stylized |
+| FLUX 2 Klein 4B | 8 GB | Next-gen, fastest FLUX |
+| FLUX.1 Dev / Schnell | 8–10 GB | Best text-to-image |
+| Juggernaut XL V9 | 6 GB | Best photorealistic SDXL |
+| Pony Diffusion V6 XL | 6 GB | Anime/stylized |
 
 ### Video (ComfyUI)
 
 | Model | VRAM | Output | Notes |
 |-------|------|--------|-------|
-| Wan 2.1 T2V 1.3B | 8-10 GB | 480p WEBP | Built-in nodes, no extras needed |
-| Wan 2.2 T2V 14B (FP8) | 10-12 GB | 480-720p | Higher quality, quantized |
-| AnimateDiff v3 + SD1.5 | 6-8 GB | MP4 | Requires AnimateDiff custom nodes |
+| Wan 2.1 T2V 1.3B | 8–10 GB | 480p | Best entry point, fast |
+| Wan 2.1 T2V 14B FP8 | 12+ GB | 720p | High quality |
+| HunyuanVideo 1.5 FP8 | 12+ GB | 480p | Excellent temporal consistency |
+| LTX Video 2.3 22B FP8 | 16+ GB | 480p+ | Latest, fast inference |
 
 ---
 

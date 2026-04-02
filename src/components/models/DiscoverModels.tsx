@@ -8,6 +8,7 @@ import {
   pauseDownload, cancelDownload, resumeDownload,
   type DiscoverModel, type DownloadProgress, type ModelBundle, type CivitAIModelResult,
 } from '../../api/discover'
+import { getSystemVRAM } from '../../api/comfyui'
 import { useModels } from '../../hooks/useModels'
 import { GlassCard } from '../ui/GlassCard'
 import { GlowButton } from '../ui/GlowButton'
@@ -29,6 +30,7 @@ export function DiscoverModels({ category }: Props) {
   const [search, setSearch] = useState('')
   const [downloads, setDownloads] = useState<Record<string, DownloadProgress>>({})
   const [downloadMeta, setDownloadMeta] = useState<Record<string, { url: string; subfolder: string }>>({})
+  const [systemVRAM, setSystemVRAM] = useState<number | null>(null)
   const { pullModel, isPulling, pullProgress, models: installedModels } = useModels()
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
@@ -39,6 +41,11 @@ export function DiscoverModels({ category }: Props) {
       fetchAbliteratedModels().then(m => { setTextModels(m); setLoading(false) })
     }
   }, [category])
+
+  // Detect system VRAM
+  useEffect(() => {
+    getSystemVRAM().then(v => setSystemVRAM(v))
+  }, [])
 
   // Poll download progress
   useEffect(() => {
@@ -74,9 +81,26 @@ export function DiscoverModels({ category }: Props) {
     ? allModels.filter((m) => m.name.toLowerCase().includes(search.toLowerCase()) || m.description.toLowerCase().includes(search.toLowerCase()))
     : allModels
 
+  // Parse VRAM requirement string to min GB number for sorting
+  const parseVRAM = (s: string): number => {
+    const match = s.match(/(\d+)/)
+    return match ? parseInt(match[1]) : 99
+  }
+
+  // Sort bundles: recommended first (fits in VRAM), then by size ascending
+  const sortedBundles = [...bundles].sort((a, b) => {
+    if (systemVRAM) {
+      const aFits = parseVRAM(a.vramRequired) <= systemVRAM
+      const bFits = parseVRAM(b.vramRequired) <= systemVRAM
+      if (aFits && !bFits) return -1
+      if (!aFits && bFits) return 1
+    }
+    return parseVRAM(a.vramRequired) - parseVRAM(b.vramRequired)
+  })
+
   const filteredBundles = search
-    ? bundles.filter((b) => b.name.toLowerCase().includes(search.toLowerCase()) || b.description.toLowerCase().includes(search.toLowerCase()))
-    : bundles
+    ? sortedBundles.filter((b) => b.name.toLowerCase().includes(search.toLowerCase()) || b.description.toLowerCase().includes(search.toLowerCase()))
+    : sortedBundles
 
   const isInstalled = (name: string) => installedModels.some((m) => m.name.startsWith(name.split(':')[0]))
 
@@ -287,6 +311,12 @@ export function DiscoverModels({ category }: Props) {
                         ))}
                         <span className="text-[10px] text-gray-400">Total: {bundle.totalSizeGB} GB</span>
                         <span className="text-[10px] text-orange-500">Requires {bundle.vramRequired} VRAM</span>
+                        {systemVRAM && parseVRAM(bundle.vramRequired) <= systemVRAM && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-500 font-medium">Fits your GPU</span>
+                        )}
+                        {systemVRAM && parseVRAM(bundle.vramRequired) > systemVRAM && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-red-500/10 text-red-400 font-medium">Needs more VRAM</span>
+                        )}
                       </div>
                     </div>
                     <div className="shrink-0">

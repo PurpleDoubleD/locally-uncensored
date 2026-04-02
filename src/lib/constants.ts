@@ -206,6 +206,7 @@ export const ONBOARDING_MODELS: OnboardingModel[] = [
   { name: 'huihui_ai/deepseek-r1-abliterated:8b', label: 'DeepSeek R1 8B', description: 'Reasoning & chain-of-thought', size: '5 GB', vram: '6 GB' },
   { name: 'huihui_ai/phi4-abliterated:14b', label: 'Phi-4 14B', description: 'Microsoft, great at math & logic', size: '9 GB', vram: '12 GB' },
   { name: 'huihui_ai/mistral-small-abliterated:24b', label: 'Mistral Small 24B', description: 'Powerful, needs 16GB+ VRAM', size: '14 GB', vram: '16 GB' },
+  { name: 'huihui_ai/glm4.6-abliterated:9b', label: 'GLM 4.6 9B', description: 'Newest model, strong coding', size: '6 GB', vram: '8 GB' },
   { name: 'huihui_ai/qwen2.5-abliterated:7b', label: 'Qwen 2.5 7B', description: 'Lightweight & capable', size: '4.7 GB', vram: '6 GB' },
   { name: 'huihui_ai/llama3.3-abliterated:70b-q4_K_M', label: 'Llama 3.3 70B', description: 'Maximum intelligence, needs 48GB', size: '42 GB', vram: '48 GB' },
 ]
