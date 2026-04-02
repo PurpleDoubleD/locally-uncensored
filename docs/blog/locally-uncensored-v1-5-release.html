@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Locally Uncensored v1.5 Release: Dynamic Workflows, CivitAI Marketplace &amp; Desktop App — Locally Uncensored</title>
+<meta name="description" content="Locally Uncensored v1.5.3 brings a dynamic workflow builder, CivitAI model marketplace, privacy hardening, Tauri v2 desktop app, 6 model bundles, local Whisper STT, and more. The biggest update yet for the only local AI app that does chat, images, and video in one UI.">
+<meta name="keywords" content="locally uncensored v1.5 release, local AI app desktop, locally uncensored update, comfyui workflow builder, civitai model download, tauri desktop app, local whisper STT, privacy local AI">
+<meta property="og:title" content="Locally Uncensored v1.5 Release: Dynamic Workflows, CivitAI Marketplace & Desktop App">
+<meta property="og:description" content="The biggest update yet — dynamic workflow builder, CivitAI marketplace, Tauri v2 desktop app, privacy hardening, and 6 ready-to-go model bundles.">
+<meta property="og:image" content="https://raw.githubusercontent.com/PurpleDoubleD/locally-uncensored/master/docs/social-preview.png">
+<meta property="og:url" content="https://purpledoubled.github.io/locally-uncensored/blog/locally-uncensored-v1-5-release">
+<meta property="og:type" content="article">
+<meta property="article:published_time" content="2026-04-02">
+<meta property="article:author" content="PurpleDoubleD">
+<meta property="article:tag" content="Release">
+<meta property="article:tag" content="Local AI">
+<meta property="article:tag" content="Desktop App">
+<meta property="article:tag" content="ComfyUI">
+<meta property="article:tag" content="Privacy">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Locally Uncensored v1.5 Release: Dynamic Workflows, CivitAI Marketplace & Desktop App">
+<meta name="twitter:description" content="The biggest update yet for the only local AI app that does chat, images, and video in one UI.">
+<link rel="canonical" href="https://purpledoubled.github.io/locally-uncensored/blog/locally-uncensored-v1-5-release">
+<meta name="robots" content="index, follow">
+<meta name="theme-color" content="#0a0a0a">
+<link rel="icon" href="../favicon.svg">
+<!-- Privacy: No external fonts loaded. Using system fonts. -->
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"BlogPosting","headline":"Locally Uncensored v1.5 Release: Dynamic Workflows, CivitAI Marketplace & Desktop App","description":"Locally Uncensored v1.5.3 brings a dynamic workflow builder, CivitAI model marketplace, privacy hardening, Tauri v2 desktop app, 6 model bundles, local Whisper STT, and more.","image":"https://raw.githubusercontent.com/PurpleDoubleD/locally-uncensored/master/docs/social-preview.png","datePublished":"2026-04-02","dateModified":"2026-04-02","author":{"@type":"Person","name":"PurpleDoubleD","url":"https://github.com/PurpleDoubleD"},"publisher":{"@type":"Organization","name":"Locally Uncensored","url":"https://purpledoubled.github.io/locally-uncensored/"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://purpledoubled.github.io/locally-uncensored/blog/locally-uncensored-v1-5-release"},"keywords":"locally uncensored v1.5 release, local AI app desktop, comfyui workflow builder, civitai model marketplace, tauri desktop app, local whisper STT"}
+</script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{--bg:#0a0a0a;--bg-subtle:#111;--bg-card:#161616;--border:#222;--border-hover:#333;--text:#ededed;--text-secondary:#888;--text-tertiary:#555;--accent:#8b5cf6;--accent-dim:rgba(139,92,246,0.08);--radius:12px;--font:'Inter',system-ui,-apple-system,sans-serif}
+body{font-family:var(--font);background:var(--bg);color:var(--text);-webkit-font-smoothing:antialiased;line-height:1.6}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+::selection{background:var(--accent);color:#fff}
+
+nav{position:fixed;top:0;width:100%;padding:0 24px;height:56px;display:flex;align-items:center;justify-content:space-between;background:rgba(10,10,10,0.8);backdrop-filter:blur(12px);border-bottom:1px solid var(--border);z-index:100}
+.nav-left{display:flex;align-items:center;gap:32px}
+.nav-logo{font-weight:700;font-size:15px;letter-spacing:-0.3px;display:flex;align-items:center;gap:8px;color:var(--text)}
+.nav-logo:hover{text-decoration:none}
+.nav-logo svg{width:18px;height:18px;opacity:0.7}
+.nav-links{display:flex;gap:24px}
+.nav-links a{font-size:14px;color:var(--text-secondary);transition:color 0.15s}
+.nav-links a:hover{color:var(--text);text-decoration:none}
+.nav-links a.active{color:var(--text)}
+.nav-right{display:flex;align-items:center;gap:12px}
+.btn-nav{font-size:13px;font-weight:500;padding:6px 14px;border-radius:8px;border:1px solid var(--border);color:var(--text-secondary);transition:all 0.15s;background:transparent;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center;gap:6px}
+.btn-nav:hover{border-color:var(--border-hover);color:var(--text);text-decoration:none}
+.btn-nav-primary{background:#fff;color:#000;border-color:#fff}
+.btn-nav-primary:hover{opacity:0.9}
+
+.container{max-width:720px;margin:0 auto;padding:120px 24px 80px}
+
+.breadcrumb{font-size:13px;color:var(--text-tertiary);margin-bottom:32px}
+.breadcrumb a{color:var(--text-secondary);border-bottom:1px solid var(--border)}
+.breadcrumb a:hover{color:var(--text);text-decoration:none}
+
+.post-meta{display:flex;align-items:center;gap:12px;margin-bottom:24px;font-size:13px;color:var(--text-tertiary)}
+.post-tag{display:inline-block;padding:2px 8px;border-radius:6px;background:var(--accent-dim);color:var(--accent);font-size:12px;font-weight:500}
+
+article h1{font-size:clamp(28px,4vw,40px);font-weight:700;letter-spacing:-1px;line-height:1.2;margin-bottom:24px}
+article h2{font-size:24px;font-weight:600;letter-spacing:-0.5px;margin-top:48px;margin-bottom:16px;padding-top:16px;border-top:1px solid var(--border)}
+article h3{font-size:18px;font-weight:600;margin-top:32px;margin-bottom:12px}
+article p{font-size:16px;color:var(--text-secondary);line-height:1.8;margin-bottom:16px}
+article p strong{color:var(--text)}
+article ul,article ol{margin:0 0 16px 24px;color:var(--text-secondary);line-height:1.8}
+article li{margin-bottom:6px;font-size:16px}
+article li strong{color:var(--text)}
+article code{font-family:'SF Mono',SFMono-Regular,Consolas,'Liberation Mono',Menlo,monospace;background:var(--bg-card);border:1px solid var(--border);padding:2px 6px;border-radius:4px;font-size:14px;color:var(--accent)}
+article pre{background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);padding:20px;margin:16px 0 24px;overflow-x:auto}
+article pre code{background:none;border:none;padding:0;font-size:14px;color:var(--text-secondary);line-height:1.7}
+
+article table{width:100%;border-collapse:collapse;margin:16px 0 24px;font-size:14px}
+article th{text-align:left;padding:10px 16px;background:var(--bg-card);border:1px solid var(--border);font-weight:600;color:var(--text);font-size:13px;text-transform:uppercase;letter-spacing:0.5px}
+article td{padding:10px 16px;border:1px solid var(--border);color:var(--text-secondary)}
+article tr:hover td{background:var(--bg-card)}
+
+article hr{border:none;border-top:1px solid var(--border);margin:48px 0 24px}
+
+.post-footer{margin-top:48px;padding:24px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);text-align:center}
+.post-footer p{font-size:14px;color:var(--text-secondary);margin-bottom:12px}
+.post-footer a.cta-btn{display:inline-flex;align-items:center;gap:8px;font-size:14px;font-weight:500;padding:10px 20px;border-radius:10px;background:#fff;color:#000;transition:opacity 0.15s}
+.post-footer a.cta-btn:hover{opacity:0.9;text-decoration:none}
+
+footer{max-width:720px;margin:0 auto;padding:40px 24px;border-top:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;font-size:13px;color:var(--text-tertiary)}
+footer a{color:var(--text-secondary);transition:color 0.15s}
+footer a:hover{color:var(--text);text-decoration:none}
+.footer-links{display:flex;gap:16px}
+
+@media(max-width:640px){
+  .nav-links{display:none}
+  .container{padding:100px 16px 60px}
+  article table{font-size:13px}
+  article th,article td{padding:8px 10px}
+}
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="nav-left">
+    <a href="../" class="nav-logo">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+      Locally Uncensored
+    </a>
+    <div class="nav-links">
+      <a href="../#features">Features</a>
+      <a href="../#models">Models</a>
+      <a href="../#compare">Compare</a>
+      <a href="../#faq">FAQ</a>
+      <a href="./" class="active">Blog</a>
+    </div>
+  </div>
+  <div class="nav-right">
+    <a href="https://github.com/PurpleDoubleD/locally-uncensored" class="btn-nav" target="_blank">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z"/></svg>
+      GitHub
+    </a>
+    <a href="https://github.com/PurpleDoubleD/locally-uncensored/releases" class="btn-nav btn-nav-primary" target="_blank">Download</a>
+  </div>
+</nav>
+
+<div class="container">
+  <div class="breadcrumb"><a href="../">Locally Uncensored</a> / <a href="./">Blog</a> / This Post</div>
+
+  <div class="post-meta">
+    <span class="post-tag">Release</span>
+    <span>April 2, 2026</span>
+    <span>&middot;</span>
+    <span>12 min read</span>
+  </div>
+
+  <article>
+    <h1>Locally Uncensored v1.5 Release: Dynamic Workflows, CivitAI Marketplace &amp; Standalone Desktop App</h1>
+
+    <p>Today we're shipping the biggest update in the history of <a href="https://purpledoubled.github.io/locally-uncensored/">Locally Uncensored</a> &mdash; versions 1.5.0 through 1.5.3, collectively bringing seven major features that transform this from a capable <strong>local AI app</strong> into a complete creative workstation. If you've been following the project since the early days of chat + image + video in one UI, this is the update where everything clicks into place.</p>
+
+    <p>The <strong>Locally Uncensored v1.5 release</strong> introduces a dynamic workflow builder that queries 600+ ComfyUI nodes in real time, an integrated CivitAI model marketplace, a standalone Tauri v2 desktop <code>.exe</code> with its own CORS proxy and download manager, full privacy hardening with zero external dependencies, six ready-to-go model bundles, local Whisper speech-to-text, and a collection of UI polish improvements that make daily use smoother.</p>
+
+    <p>Let's walk through every major feature.</p>
+
+    <h2>Dynamic Workflow Builder</h2>
+
+    <p>This is the headline feature of v1.5.0 and the one that took the longest to build. The <strong>dynamic workflow builder</strong> fundamentally changes how Locally Uncensored talks to ComfyUI.</p>
+
+    <p>Previously, the app shipped with a set of hardcoded workflow templates &mdash; one for SDXL text-to-image, one for FLUX, one for Wan 2.1 video, and so on. If you wanted to use a different sampler, add ControlNet, or chain together multiple models, you were out of luck without opening ComfyUI's node editor directly.</p>
+
+    <p><strong>That's gone.</strong> The new workflow builder queries your running ComfyUI instance at startup, discovers all installed nodes (typically 600+ in a standard install with ComfyUI-Manager), and auto-constructs the correct pipeline based on what you're trying to do. Pick a checkpoint, pick a resolution, type a prompt, and the app figures out the right node graph automatically.</p>
+
+    <h3>How It Works Under the Hood</h3>
+
+    <p>When ComfyUI boots, it exposes an <code>/object_info</code> endpoint that returns metadata for every registered node &mdash; inputs, outputs, types, defaults. The workflow builder parses this schema and builds a dependency graph. When you hit generate, it walks the graph from your selected output node backward, resolving each dependency and injecting your parameters (prompt, negative prompt, seed, steps, CFG, dimensions) into the appropriate node slots.</p>
+
+    <p>This means the app automatically supports:</p>
+    <ul>
+      <li><strong>Any checkpoint format</strong> &mdash; SD 1.5, SDXL, FLUX, Wan 2.1, future architectures</li>
+      <li><strong>Any custom node</strong> &mdash; ControlNet, IP-Adapter, upscalers, face restoration</li>
+      <li><strong>Any sampler or scheduler</strong> &mdash; pulled dynamically from ComfyUI's registry</li>
+      <li><strong>LoRA stacking</strong> &mdash; load multiple LoRAs with individual weight controls</li>
+    </ul>
+
+    <p>No more workflow JSON files. No more "this model isn't supported yet" messages. If ComfyUI can run it, Locally Uncensored can drive it.</p>
+
+    <h2>CivitAI Model Marketplace</h2>
+
+    <p>Finding and downloading models has always been the most annoying part of local AI. You hunt through CivitAI's website, copy a download link, figure out which directory it goes in, rename it, restart ComfyUI. Version 1.5.1 eliminates all of that.</p>
+
+    <p>The new <strong>CivitAI model marketplace</strong> is built directly into the app. Open the Models tab, search for any checkpoint, LoRA, embedding, or VAE on CivitAI, preview the thumbnail (privacy-proxied &mdash; more on that below), and hit download. The model lands in the correct ComfyUI subdirectory automatically. No manual file management.</p>
+
+    <h3>Privacy-First Thumbnails</h3>
+
+    <p>Here's where it gets interesting from a privacy standpoint. CivitAI serves model preview images from their CDN. Loading those images directly would leak your IP address and browsing patterns to CivitAI's servers. In the <strong>Locally Uncensored v1.5 release</strong>, all CivitAI thumbnails are proxied through the app's local backend. The user's browser never contacts CivitAI directly &mdash; the Tauri sidecar (or the dev server in browser mode) fetches the image and serves it from localhost. Your IP stays private.</p>
+
+    <p>This is a small detail that no other <strong>local AI app desktop</strong> client gets right. Most tools either skip CivitAI integration entirely or load external resources without a second thought.</p>
+
+    <h2>Privacy Hardening</h2>
+
+    <p>The CivitAI proxy is part of a broader privacy overhaul in v1.5.2. We went through every line of code and eliminated external dependencies:</p>
+
+    <ul>
+      <li><strong>No CDN resources</strong> &mdash; every CSS, JS, and font file is bundled locally. No calls to cdnjs, unpkg, or any third-party CDN.</li>
+      <li><strong>No Google Fonts</strong> &mdash; the app uses system font stacks exclusively. No requests to fonts.googleapis.com or fonts.gstatic.com. Ever.</li>
+      <li><strong>Zero telemetry</strong> &mdash; no analytics, no crash reporting, no usage tracking. The app makes exactly zero network requests that aren't initiated by you (model downloads, ComfyUI communication, Ollama API calls).</li>
+      <li><strong>Proxied external images</strong> &mdash; CivitAI thumbnails, model previews, and any external image reference goes through the local proxy.</li>
+      <li><strong>CSP headers</strong> &mdash; Content Security Policy headers restrict all resource loading to localhost origins.</li>
+    </ul>
+
+    <p>This isn't theoretical privacy. Run Wireshark while using the app &mdash; you'll see connections to <code>127.0.0.1</code> and your Ollama/ComfyUI ports. Nothing else. If you've read our guide on <a href="run-uncensored-ai-locally.html">how to run uncensored AI locally</a>, you know privacy is foundational to the project. This release makes that guarantee airtight.</p>
+
+    <h2>Tauri v2 Standalone Desktop App</h2>
+
+    <p>Until now, Locally Uncensored ran as a Vite dev server that opened in your browser. That works &mdash; and it's still supported &mdash; but v1.5.0 adds a proper standalone <strong>local AI app desktop</strong> executable built with <strong>Tauri v2</strong>.</p>
+
+    <p>The tech stack: <strong>React 19 + TypeScript + Tailwind CSS 4 + Vite 8</strong> for the frontend, <strong>Tauri 2 (Rust)</strong> for the native shell. The result is a single <code>.exe</code> on Windows (with macOS and Linux builds also available) that weighs under 15 MB installed. Compare that to Electron-based alternatives that start at 150+ MB.</p>
+
+    <h3>Built-in CORS Proxy</h3>
+
+    <p>The Tauri backend includes a Rust-powered CORS proxy. This solves one of the most persistent headaches in local AI development: ComfyUI and Ollama don't set CORS headers by default, so browser-based frontends either need you to launch backends with special flags or use a separate proxy tool. The Tauri app handles this transparently &mdash; all API requests route through the Rust sidecar, which adds the correct headers.</p>
+
+    <h3>Download Manager with Pause/Resume</h3>
+
+    <p>Model files are large. A FLUX checkpoint is 12 GB. Wan 2.1 is 10 GB. If your connection drops halfway through, you shouldn't have to start over. The Tauri app includes a download manager with <strong>pause and resume</strong> support using HTTP range requests. It also shows real-time progress, speed, and ETA. Downloads run in a background thread so the UI stays responsive.</p>
+
+    <h2>6 Complete Model Bundles</h2>
+
+    <p>New users shouldn't have to research which models to download or worry about missing dependencies. Version 1.5.1 introduces six curated <strong>model bundles</strong> &mdash; three for image generation and three for video generation &mdash; each containing everything needed for a specific workflow.</p>
+
+    <h3>Image Bundles</h3>
+    <table>
+      <thead><tr><th>Bundle</th><th>Includes</th><th>VRAM</th><th>Best For</th></tr></thead>
+      <tbody>
+        <tr><td>FLUX Schnell</td><td>FLUX.1 Schnell + T5 encoder + CLIP + VAE</td><td>10 GB</td><td>Fastest high-quality generation</td></tr>
+        <tr><td>Juggernaut XL</td><td>Juggernaut XL V9 + SDXL VAE + refiner</td><td>8 GB</td><td>Photorealistic portraits and scenes</td></tr>
+        <tr><td>Pony Diffusion</td><td>Pony V6 + SDXL VAE + style LoRAs</td><td>8 GB</td><td>Stylized and anime content</td></tr>
+      </tbody>
+    </table>
+
+    <h3>Video Bundles</h3>
+    <table>
+      <thead><tr><th>Bundle</th><th>Includes</th><th>VRAM</th><th>Best For</th></tr></thead>
+      <tbody>
+        <tr><td>Wan 2.1 T2V</td><td>Wan 2.1 text-to-video + T5 + CLIP + VAE</td><td>10 GB</td><td>Text prompt to video</td></tr>
+        <tr><td>Wan 2.1 I2V</td><td>Wan 2.1 image-to-video + CLIP Vision + VAE</td><td>10 GB</td><td>Animate a still image</td></tr>
+        <tr><td>AnimateDiff</td><td>AnimateDiff v3 + motion module + SDXL base</td><td>8 GB</td><td>Short animated loops</td></tr>
+      </tbody>
+    </table>
+
+    <p>Each bundle is a one-click install from the Models tab. The app downloads all required files, places them in the correct directories, and pre-validates that the workflow will execute before you generate anything. No "missing model" errors on your first attempt.</p>
+
+    <h2>Local Whisper Speech-to-Text</h2>
+
+    <p>Version 1.5.2 adds <strong>local Whisper STT</strong> (speech-to-text) directly in the chat interface. Click the microphone icon, speak your prompt, and it transcribes locally using a Whisper model running on your machine. No audio sent to any server.</p>
+
+    <p>The implementation uses whisper.cpp under the hood with the <code>base.en</code> model by default (smaller and faster for English). You can swap in the larger <code>medium</code> or <code>large-v3</code> models if you need better accuracy or multilingual support. Transcription runs on your GPU if CUDA is available, otherwise falls back to CPU.</p>
+
+    <p>This is a natural fit for the project's privacy-first philosophy. Cloud speech-to-text services (Google, OpenAI Whisper API, Azure) are convenient but mean your voice data hits external servers. Local Whisper keeps everything on your hardware.</p>
+
+    <h2>UI Polish &amp; Quality of Life</h2>
+
+    <p>The v1.5.x series also includes a stack of UI improvements that don't get their own headline but make a real difference in daily use:</p>
+
+    <h3>VRAM Unload</h3>
+    <p>A new button in the generation panel lets you <strong>unload models from VRAM</strong> with one click. This is essential if you're switching between chat and image generation on a GPU with limited memory. Previously you'd need to restart ComfyUI or use the API directly. Now it's a button.</p>
+
+    <h3>Execution Timer</h3>
+    <p>Every generation now shows an <strong>execution timer</strong> &mdash; both elapsed time during generation and total time on completion. Useful for benchmarking different models, samplers, and step counts. The timer persists in the generation history so you can compare runs later.</p>
+
+    <h3>Additional Improvements</h3>
+    <ul>
+      <li>Redesigned model selector with search, filtering by type, and file size display</li>
+      <li>Improved dark mode contrast ratios for better accessibility</li>
+      <li>Keyboard shortcuts for common actions (Ctrl+Enter to send, Escape to cancel generation)</li>
+      <li>Generation queue &mdash; batch multiple prompts and let them run sequentially</li>
+      <li>Image gallery with fullscreen view, metadata overlay, and one-click copy of generation parameters</li>
+    </ul>
+
+    <h2>What's New vs. Competitors</h2>
+
+    <p>Here's how the <strong>Locally Uncensored v1.5 release</strong> stacks up against other popular <strong>local AI app desktop</strong> tools as of April 2026:</p>
+
+    <table>
+      <thead><tr><th>Feature</th><th>Locally Uncensored v1.5</th><th>Open WebUI</th><th>LM Studio</th><th>Jan.ai</th><th>GPT4All</th></tr></thead>
+      <tbody>
+        <tr><td>Chat</td><td>&#10003;</td><td>&#10003;</td><td>&#10003;</td><td>&#10003;</td><td>&#10003;</td></tr>
+        <tr><td>Image generation</td><td>&#10003;</td><td>&#10007;</td><td>&#10007;</td><td>&#10007;</td><td>&#10007;</td></tr>
+        <tr><td>Video generation</td><td>&#10003;</td><td>&#10007;</td><td>&#10007;</td><td>&#10007;</td><td>&#10007;</td></tr>
+        <tr><td>Dynamic workflow builder</td><td>&#10003;</td><td>&#10007;</td><td>&#10007;</td><td>&#10007;</td><td>&#10007;</td></tr>
+        <tr><td>CivitAI marketplace</td><td>&#10003;</td><td>&#10007;</td><td>&#10007;</td><td>&#10007;</td><td>&#10007;</td></tr>
+        <tr><td>Local Whisper STT</td><td>&#10003;</td><td>&#10003;</td><td>&#10007;</td><td>&#10007;</td><td>&#10007;</td></tr>
+        <tr><td>Zero telemetry</td><td>&#10003;</td><td>&#10003;</td><td>&#10007;</td><td>&#10003;</td><td>&#10003;</td></tr>
+        <tr><td>No external CDN/fonts</td><td>&#10003;</td><td>&#10007;</td><td>&#10007;</td><td>&#10007;</td><td>&#10003;</td></tr>
+        <tr><td>Standalone desktop app</td><td>&#10003; (Tauri)</td><td>&#10007; (Docker)</td><td>&#10003; (Electron)</td><td>&#10003; (Electron)</td><td>&#10003; (Qt)</td></tr>
+        <tr><td>Download manager (pause/resume)</td><td>&#10003;</td><td>&#10007;</td><td>&#10003;</td><td>&#10003;</td><td>&#10003;</td></tr>
+        <tr><td>Model bundles</td><td>&#10003; (6 bundles)</td><td>&#10007;</td><td>&#10007;</td><td>&#10007;</td><td>&#10007;</td></tr>
+        <tr><td>VRAM management</td><td>&#10003;</td><td>&#10007;</td><td>&#10003;</td><td>&#10007;</td><td>&#10007;</td></tr>
+        <tr><td>Open source</td><td>MIT</td><td>MIT</td><td>Proprietary</td><td>AGPL</td><td>MIT</td></tr>
+        <tr><td>App size</td><td>&lt; 15 MB</td><td>Docker image</td><td>~200 MB</td><td>~180 MB</td><td>~120 MB</td></tr>
+      </tbody>
+    </table>
+
+    <p>The pattern is clear. Other tools do one thing well &mdash; chat. Locally Uncensored is the only <strong>local AI app desktop</strong> that combines chat, image generation, video generation, and a model marketplace into a single interface, all while maintaining strict privacy guarantees. For a deeper dive into individual comparisons, check out our posts on <a href="locally-uncensored-vs-open-webui.html">Locally Uncensored vs Open WebUI</a>, <a href="locally-uncensored-vs-lm-studio.html">vs LM Studio</a>, <a href="locally-uncensored-vs-jan.html">vs Jan.ai</a>, and <a href="locally-uncensored-vs-gpt4all.html">vs GPT4All</a>.</p>
+
+    <h2>Upgrade Guide</h2>
+
+    <p>If you're already running Locally Uncensored, upgrading is straightforward:</p>
+
+    <pre><code>cd locally-uncensored
+git pull
+npm install
+npm run dev</code></pre>
+
+    <p>For the standalone desktop app, download the latest <code>.exe</code> (or <code>.dmg</code> / <code>.AppImage</code>) from the <a href="https://github.com/PurpleDoubleD/locally-uncensored/releases">releases page</a>. Your existing models, chat history, and settings carry over automatically &mdash; they're stored in your OS's app data directory, not inside the app bundle.</p>
+
+    <p>New users can follow the full setup guide in our <a href="run-uncensored-ai-locally.html">how to run uncensored AI locally</a> article, or just clone and run:</p>
+
+    <pre><code>git clone https://github.com/PurpleDoubleD/locally-uncensored.git
+cd locally-uncensored
+# Windows: setup.bat | macOS/Linux: ./setup.sh</code></pre>
+
+    <h2>What's Next</h2>
+
+    <p>The v1.5.x cycle focused on making the generation pipeline dynamic and the app self-contained. The next milestone targets:</p>
+
+    <ul>
+      <li><strong>RAG (Retrieval-Augmented Generation)</strong> &mdash; chat with your local documents</li>
+      <li><strong>Image-to-image and inpainting</strong> &mdash; edit existing images with AI, driven by the dynamic workflow builder</li>
+      <li><strong>Multi-GPU support</strong> &mdash; split generation workloads across multiple GPUs</li>
+      <li><strong>Plugin system</strong> &mdash; extend the app with community-built modules</li>
+    </ul>
+
+    <p>Follow the <a href="https://github.com/PurpleDoubleD/locally-uncensored">GitHub repo</a> for updates, or join the <a href="https://github.com/PurpleDoubleD/locally-uncensored/discussions">Discussions</a> to share feedback and feature requests.</p>
+
+    <h2>FAQ</h2>
+
+    <h3>What versions are included in this release?</h3>
+    <p>This post covers versions 1.5.0 through 1.5.3. The dynamic workflow builder and Tauri app landed in v1.5.0. CivitAI marketplace and model bundles came in v1.5.1. Privacy hardening and local Whisper STT arrived in v1.5.2. UI polish fixes and stability improvements rounded things out in v1.5.3.</p>
+
+    <h3>Do I need to use the Tauri desktop app or can I still use the browser version?</h3>
+    <p>Both are fully supported. The browser version (<code>npm run dev</code>) works exactly as before. The Tauri app adds native features like the built-in CORS proxy and download manager with pause/resume, but all core functionality &mdash; chat, image gen, video gen, workflow builder &mdash; works in both modes.</p>
+
+    <h3>Does the dynamic workflow builder require any extra setup?</h3>
+    <p>No. If ComfyUI is running and reachable, the builder queries it automatically on startup. It works with a stock ComfyUI install and gets even more powerful if you install additional nodes through ComfyUI-Manager. No configuration required.</p>
+
+    <h3>How does the CivitAI integration affect my privacy?</h3>
+    <p>All CivitAI API requests and thumbnail fetches are proxied through the app's local backend. Your browser never contacts CivitAI servers directly. Your IP address is not exposed to CivitAI when browsing models inside the app. The only direct connection to CivitAI happens when you initiate a model download, which is unavoidable since the files are hosted on their servers.</p>
+
+    <h3>Can I use the model bundles if I already have some models downloaded?</h3>
+    <p>Yes. The bundle installer checks for existing files before downloading. If you already have the FLUX.1 Schnell checkpoint, for example, the FLUX bundle will skip that file and only download the missing components (encoder, VAE, etc.).</p>
+
+    <h3>What Whisper model should I use for speech-to-text?</h3>
+    <p>The default <code>base.en</code> model is fine for English-only use &mdash; it's fast and accurate enough for dictating prompts. If you need multilingual transcription or higher accuracy for technical terms, switch to <code>medium</code> or <code>large-v3</code> in settings. The larger models need more VRAM and take longer to transcribe but produce noticeably better results.</p>
+
+    <h3>How big is the Tauri desktop app?</h3>
+    <p>Under 15 MB installed on Windows. That's the full application with the Rust backend, CORS proxy, and download manager included. Compare that to Electron-based alternatives like LM Studio (~200 MB) or Jan (~180 MB). Tauri compiles to native code and doesn't bundle a separate Chromium instance.</p>
+
+    <h3>Is this update free?</h3>
+    <p>Yes. Locally Uncensored is MIT licensed and completely free. No paid tiers, no pro features behind a paywall, no subscriptions. The full source code is on <a href="https://github.com/PurpleDoubleD/locally-uncensored">GitHub</a>.</p>
+
+    <hr>
+
+    <p><em>Locally Uncensored v1.5.3 is available now. MIT licensed and free to use. Built by <a href="https://github.com/PurpleDoubleD">PurpleDoubleD</a>.</em></p>
+  </article>
+
+  <div class="post-footer">
+    <p>Ready to try the biggest update yet?</p>
+    <a href="https://github.com/PurpleDoubleD/locally-uncensored/releases" class="cta-btn" target="_blank">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z"/></svg>
+      Download v1.5.3
+    </a>
+  </div>
+</div>
+
+<footer>
+  <span>MIT License. Built by <a href="https://github.com/PurpleDoubleD" target="_blank">PurpleDoubleD</a>.</span>
+  <div class="footer-links">
+    <a href="https://github.com/PurpleDoubleD/locally-uncensored" target="_blank">GitHub</a>
+    <a href="https://github.com/PurpleDoubleD/locally-uncensored/discussions" target="_blank">Discussions</a>
+    <a href="../">Home</a>
+  </div>
+</footer>
+
+</body>
+</html>
