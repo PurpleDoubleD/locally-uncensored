@@ -163,6 +163,7 @@ export function ParamPanel({ imageModels, videoModels, samplerList, schedulerLis
             onClick={() => store.setSeed(-1)}
             className="p-1.5 rounded-lg bg-gray-100 dark:bg-white/5 border border-gray-200 dark:border-white/8 text-gray-500 hover:text-gray-900 dark:hover:text-white transition-colors"
             title="Random"
+            aria-label="Random seed"
           >
             <Dice5 size={12} />
           </button>
@@ -184,6 +185,7 @@ export function ParamPanel({ imageModels, videoModels, samplerList, schedulerLis
             <button
               onClick={() => { const s = snapToVideoGrid(store.width, store.height); store.setSize(s.width, s.height) }}
               className="flex items-center gap-1 text-[10px] text-yellow-400 hover:underline"
+              aria-label="Fix video dimensions"
             >
               <AlertTriangle size={10} /> Fix to {snapToVideoGrid(store.width, store.height).width}x{snapToVideoGrid(store.width, store.height).height}
             </button>

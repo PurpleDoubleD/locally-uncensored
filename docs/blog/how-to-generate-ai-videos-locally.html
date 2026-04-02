@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>How to Generate AI Videos Locally with Wan 2.1 and HunyuanVideo</title>
+<meta name="description" content="Generate AI videos on your own hardware with Wan 2.1 and HunyuanVideo. Full local setup guide — no cloud API, no subscriptions, no content filters.">
+<meta name="keywords" content="ai video generation local, wan 2.1 tutorial, hunyuan video local, local ai video, generate ai videos free, comfyui video generation">
+<meta property="og:title" content="How to Generate AI Videos Locally with Wan 2.1 and HunyuanVideo">
+<meta property="og:description" content="Generate AI videos locally with Wan 2.1 and HunyuanVideo. No cloud API, no subscriptions, no content filters.">
+<meta property="og:image" content="https://raw.githubusercontent.com/PurpleDoubleD/locally-uncensored/master/docs/social-preview.png">
+<meta property="og:url" content="https://purpledoubled.github.io/locally-uncensored/blog/how-to-generate-ai-videos-locally.html">
+<meta property="og:type" content="article">
+<meta property="article:published_time" content="2026-04-02">
+<meta property="article:author" content="PurpleDoubleD">
+<meta property="article:tag" content="AI Video">
+<meta property="article:tag" content="Wan 2.1">
+<meta property="article:tag" content="HunyuanVideo">
+<meta property="article:tag" content="ComfyUI">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="How to Generate AI Videos Locally with Wan 2.1 and HunyuanVideo">
+<meta name="twitter:description" content="Generate AI videos on your own hardware. Full local setup guide with Wan 2.1 and HunyuanVideo.">
+<link rel="canonical" href="https://purpledoubled.github.io/locally-uncensored/blog/how-to-generate-ai-videos-locally.html">
+<meta name="robots" content="index, follow">
+<meta name="theme-color" content="#0a0a0a">
+<link rel="icon" href="../favicon.svg">
+<!-- Privacy: No external fonts loaded. Using system fonts. -->
+<script defer data-domain="YOUR-DOMAIN.com" src="https://plausible.YOUR-DOMAIN.com/js/script.js"></script>
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"Article","headline":"How to Generate AI Videos Locally with Wan 2.1 and HunyuanVideo","description":"Generate AI videos on your own hardware with Wan 2.1 and HunyuanVideo. Full local setup guide — no cloud API, no subscriptions, no content filters.","image":"https://raw.githubusercontent.com/PurpleDoubleD/locally-uncensored/master/docs/social-preview.png","datePublished":"2026-04-02","dateModified":"2026-04-02","author":{"@type":"Person","name":"PurpleDoubleD","url":"https://github.com/PurpleDoubleD"},"publisher":{"@type":"Organization","name":"Locally Uncensored","url":"https://purpledoubled.github.io/locally-uncensored/"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://purpledoubled.github.io/locally-uncensored/blog/how-to-generate-ai-videos-locally.html"},"keywords":"ai video generation local, wan 2.1 tutorial, hunyuan video local, local ai video, generate ai videos free, comfyui video generation"}
+</script>
+<style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:#0a0a0a;color:#ededed;line-height:1.8;-webkit-font-smoothing:antialiased}a{color:#8b5cf6;text-decoration:none}a:hover{text-decoration:underline}nav{position:fixed;top:0;width:100%;padding:0 24px;height:56px;display:flex;align-items:center;justify-content:space-between;background:rgba(10,10,10,0.9);backdrop-filter:blur(12px);border-bottom:1px solid #222;z-index:100}.nav-logo{font-weight:700;font-size:15px;color:#ededed;letter-spacing:-0.3px}.nav-links a{font-size:14px;color:#888;margin-left:24px}.nav-links a:hover{color:#ededed}article{max-width:720px;margin:0 auto;padding:100px 24px 80px}h1{font-size:clamp(28px,4vw,40px);font-weight:800;letter-spacing:-1px;line-height:1.2;margin-bottom:16px;background:linear-gradient(180deg,#fff,#999);-webkit-background-clip:text;-webkit-text-fill-color:transparent}h2{font-size:24px;font-weight:700;margin:48px 0 16px;letter-spacing:-0.5px}h3{font-size:18px;font-weight:600;margin:32px 0 12px}p{margin-bottom:16px;color:#ccc;font-size:16px}.meta{font-size:14px;color:#555;margin-bottom:32px}table{width:100%;border-collapse:collapse;margin:24px 0;font-size:14px}th{text-align:left;padding:12px;font-weight:600;color:#888;border-bottom:1px solid #222;text-transform:uppercase;font-size:12px;letter-spacing:0.5px}td{padding:12px;border-bottom:1px solid #1a1a1a}.check{color:#22c55e}.cross{color:#555}.hl{color:#8b5cf6;font-weight:600}ul{margin:12px 0 16px 24px;color:#ccc}li{margin-bottom:8px;font-size:15px}.cta{text-align:center;padding:48px 0;margin-top:48px;border-top:1px solid #222}.btn{display:inline-block;padding:12px 24px;background:#fff;color:#000;border-radius:10px;font-weight:600;font-size:14px}.btn:hover{opacity:0.9;text-decoration:none}.verdict{background:#161616;border:1px solid #222;border-radius:12px;padding:24px;margin:32px 0}.verdict h3{margin:0 0 8px;color:#8b5cf6}code{background:#161616;padding:2px 8px;border-radius:6px;font-size:14px;color:#8b5cf6;border:1px solid #222}pre{background:#161616;border:1px solid #222;border-radius:8px;padding:16px;overflow-x:auto;margin:16px 0;font-size:13px;line-height:1.6;color:#ccc}@media(max-width:768px){article{padding:80px 16px 40px}h1{font-size:28px}}</style>
+</head>
+<body>
+<nav>
+<a href="https://purpledoubled.github.io/locally-uncensored/" class="nav-logo">Locally Uncensored</a>
+<div>
+<a href="../" class="nav-links">Home</a>
+<a href="./" class="nav-links">Blog</a>
+</div>
+</nav>
+<article>
+<h1>How to Generate AI Videos Locally</h1>
+<div class="meta">Published April 2, 2026 &middot; PurpleDoubleD &middot; 9 min read</div>
+
+<p>Local AI video generation crossed the usability threshold in 2025. Models like Wan 2.1 and HunyuanVideo can produce coherent video clips on consumer hardware, and you do not need a cloud subscription or API key to use them. This guide covers the complete setup: hardware requirements, model selection, installation, and practical tips for getting good results.</p>
+
+<h2>The Current State of Local Video Generation</h2>
+
+<p>AI video generation is roughly where image generation was two years ago. The outputs are impressive but not perfect. You will see occasional artifacts, limb distortions, and temporal inconsistencies. That said, the quality has improved dramatically. Short clips (2-5 seconds) at 480p-720p are now reliably coherent, and the models keep getting better.</p>
+
+<p>Two model families dominate local video generation in 2026:</p>
+
+<ul>
+<li><strong>Wan 2.1</strong> by Alibaba -- Available in 1.3B and 14B parameter sizes. The most accessible option for consumer GPUs.</li>
+<li><strong>HunyuanVideo 1.5</strong> by Tencent -- The quality leader. Produces more cinematic results but requires more VRAM and generation time.</li>
+</ul>
+
+<h2>Hardware Requirements</h2>
+
+<p>Video generation is the most demanding local AI task. It requires significantly more VRAM and time than image generation because the model must produce multiple coherent frames.</p>
+
+<table>
+<tr><th>Model</th><th>Min VRAM</th><th>Recommended VRAM</th><th>Time per Clip</th></tr>
+<tr><td>Wan 2.1 1.3B</td><td>8 GB</td><td>10 GB</td><td>30-60 seconds</td></tr>
+<tr><td>Wan 2.1 14B FP8</td><td>14 GB</td><td>16 GB</td><td>2-5 minutes</td></tr>
+<tr><td>HunyuanVideo 1.5 FP8</td><td>14 GB</td><td>16 GB</td><td>3-8 minutes</td></tr>
+</table>
+
+<p>System RAM matters too. Budget at least 32 GB of system RAM for video generation. The models need working memory beyond what sits on the GPU, and running out of RAM will either crash the process or force slow disk swapping.</p>
+
+<p>Storage: Wan 2.1 14B requires approximately 15 GB of model files. HunyuanVideo requires roughly 20 GB. Plan for 40+ GB of free disk space to accommodate models and generated output.</p>
+
+<h2>Wan 2.1 1.3B vs 14B vs HunyuanVideo</h2>
+
+<table>
+<tr><th>Feature</th><th>Wan 1.3B</th><th>Wan 14B FP8</th><th>HunyuanVideo FP8</th></tr>
+<tr><td>Output Resolution</td><td>480p</td><td>720p</td><td>720p</td></tr>
+<tr><td>Motion Coherence</td><td>Good</td><td>Very Good</td><td>Excellent</td></tr>
+<tr><td>Prompt Following</td><td>Basic</td><td>Good</td><td>Very Good</td></tr>
+<tr><td>Camera Motion</td><td>Limited</td><td>Moderate</td><td>Strong</td></tr>
+<tr><td>VRAM Required</td><td>8 GB</td><td>16 GB</td><td>16 GB</td></tr>
+<tr><td>Speed</td><td>Fast</td><td>Moderate</td><td>Slow</td></tr>
+<tr><td>Model Files</td><td>3 files</td><td>3 files</td><td>4 files</td></tr>
+</table>
+
+<div class="verdict">
+<h3>Which Model Should You Start With?</h3>
+<p>If you have 8-10 GB VRAM, <strong>Wan 2.1 1.3B</strong> is your only option and it is a good one. Quick generation times let you iterate on prompts rapidly. If you have 16+ GB VRAM, start with <strong>Wan 2.1 14B</strong> for the best balance of quality and speed, then try <strong>HunyuanVideo</strong> when you want maximum quality and are willing to wait longer.</p>
+</div>
+
+<h2>Step 1: Set Up the Backend</h2>
+
+<p>All three video models run through ComfyUI, which handles the actual inference. <a href="https://github.com/PurpleDoubleD/locally-uncensored">Locally Uncensored</a> provides the frontend and automates workflow construction so you never need to touch ComfyUI's node editor.</p>
+
+<pre><code>git clone https://github.com/PurpleDoubleD/locally-uncensored.git
+cd locally-uncensored
+npm install
+npm run dev</code></pre>
+
+<p>The app auto-detects ComfyUI on your system. If ComfyUI is not installed, download the portable release from the <a href="https://github.com/comfyanonymous/ComfyUI">ComfyUI GitHub page</a>. Locally Uncensored scans common installation paths automatically, or you can set the path manually in Settings.</p>
+
+<h2>Step 2: Download Video Models</h2>
+
+<p>Open the <strong>Model Manager</strong> tab in Locally Uncensored. Under the Video section, you will find pre-configured bundles for all three models. Click <strong>Install All</strong> on your chosen bundle.</p>
+
+<p>Each bundle downloads the correct set of files:</p>
+
+<h3>Wan 2.1 (1.3B or 14B) -- 3 files</h3>
+<ul>
+<li><strong>Model weights</strong> -- The core video generation model</li>
+<li><strong>VAE</strong> -- Video encoder/decoder for frame reconstruction</li>
+<li><strong>UMT5</strong> -- Text encoder for prompt understanding</li>
+</ul>
+
+<h3>HunyuanVideo 1.5 -- 4 files</h3>
+<ul>
+<li><strong>Model weights</strong> -- The core video generation model</li>
+<li><strong>VAE</strong> -- HunyuanVideo-specific VAE (not interchangeable with Wan)</li>
+<li><strong>Qwen2.5</strong> -- Primary text encoder</li>
+<li><strong>CLIP_L</strong> -- Secondary text encoder</li>
+</ul>
+
+<p>The distinction matters: Wan and HunyuanVideo use completely different VAE and text encoder architectures. They cannot share these components. Locally Uncensored handles matching automatically -- it identifies the model type and loads the correct supporting files.</p>
+
+<h2>Step 3: Generate Your First Video</h2>
+
+<p>Switch to the <strong>Create</strong> tab. Select your video model from the model dropdown. Write a prompt describing the scene you want, then click Generate.</p>
+
+<p>Behind the scenes, the app:</p>
+
+<ul>
+<li>Classifies the selected model (Wan vs HunyuanVideo)</li>
+<li>Locates the matching VAE and text encoders</li>
+<li>Builds the appropriate ComfyUI workflow</li>
+<li>Submits the workflow and polls until the video is complete</li>
+<li>Displays the result in the gallery with generation time</li>
+</ul>
+
+<p>For your first generation, keep the prompt simple. Something like "a cat walking through a garden, sunny day, gentle breeze" will test whether the pipeline works before you invest time in complex prompts.</p>
+
+<h2>Prompt Tips for Video Generation</h2>
+
+<p>Video prompts work differently than image prompts. You need to describe motion, not just a static scene.</p>
+
+<h3>Describe the Action</h3>
+<p>Be explicit about what moves and how. "A woman walks toward the camera" is better than "a woman standing outside." The model needs motion cues to generate coherent temporal sequences.</p>
+
+<h3>Specify Camera Behavior</h3>
+<p>Camera descriptions help significantly, especially with HunyuanVideo: "slow pan left across a mountain range," "tracking shot following a car on a highway," or "static wide shot of a cityscape at sunset."</p>
+
+<h3>Keep It Short and Clear</h3>
+<p>Unlike image generation where long descriptive prompts can help, video models perform better with concise, focused descriptions. One clear action in one clear setting produces more coherent results than a paragraph of details.</p>
+
+<h3>Example Prompts</h3>
+<pre><code>A golden retriever running through shallow ocean waves at sunset, slow motion, cinematic
+
+Aerial drone shot slowly descending over a dense forest, morning fog between the trees
+
+Close-up of coffee being poured into a white ceramic cup, steam rising, soft lighting</code></pre>
+
+<h2>Troubleshooting VRAM Issues</h2>
+
+<div class="verdict">
+<h3>CUDA Out of Memory</h3>
+<p>Video generation consumes VRAM in bursts. If you are near the limit, reduce the output resolution or frame count. Close all other GPU applications including browser hardware acceleration (disable it in browser settings). For Wan 14B, ensure you are using the FP8 quantized version, not the full precision weights.</p>
+</div>
+
+<div class="verdict">
+<h3>Generation Takes Extremely Long</h3>
+<p>Verify that ComfyUI is using your GPU and not falling back to CPU. Check the ComfyUI terminal output at startup -- it should list your CUDA device. CPU-based video generation is not practical; a single clip could take hours.</p>
+</div>
+
+<div class="verdict">
+<h3>Output Has Artifacts or Flickering</h3>
+<p>This is common with the 1.3B model and shorter frame counts. Increasing the step count (try 30-40 for Wan) improves temporal coherence at the cost of speed. If artifacts persist, the prompt may be too complex for the model's capacity -- simplify it.</p>
+</div>
+
+<div class="verdict">
+<h3>Wrong VAE or Text Encoder Error</h3>
+<p>This occurs when the app cannot find the matching support files for your video model. Open the Model Manager and verify all files in the bundle are downloaded. Wan requires UMT5; HunyuanVideo requires Qwen2.5. They are not interchangeable.</p>
+</div>
+
+<h2>What to Expect Going Forward</h2>
+
+<p>Local video generation is improving rapidly. New models are released every few months with better motion coherence, longer clip durations, and lower VRAM requirements. The workflow in Locally Uncensored remains the same regardless of which model you use -- select, prompt, generate. As new video models become available, they will be integrated through the same ComfyUI backend and dynamic workflow builder.</p>
+
+<p>If you are new to local AI entirely, start with <a href="comfyui-beginners-guide.html">our ComfyUI beginners guide</a> to understand the foundation, then come back here once you are comfortable with image generation.</p>
+
+<div class="cta">
+<h2>Try Locally Uncensored</h2>
+<p>Free, open source, MIT licensed. One command to get started.</p>
+<a href="https://github.com/PurpleDoubleD/locally-uncensored" class="btn">View on GitHub</a>
+</div>
+</article>
+</body>
+</html>

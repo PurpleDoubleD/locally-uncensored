@@ -24,6 +24,7 @@ export function ThinkingBlock({ thinking }: Props) {
                 <button
                     onClick={() => setOpen(!open)}
                     className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-blue-100/50 dark:hover:bg-blue-500/10 transition-colors"
+                    aria-label="Toggle thinking details"
                 >
                     <Brain size={13} className="text-blue-400 dark:text-blue-300/70 shrink-0" />
                     <span className="text-[0.7rem] font-medium text-blue-500 dark:text-blue-300/80 tracking-wide">

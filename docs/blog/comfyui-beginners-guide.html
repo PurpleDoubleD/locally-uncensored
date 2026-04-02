@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ComfyUI Beginners Guide — Your First AI Image in 5 Minutes</title>
+<meta name="description" content="Get started with ComfyUI for AI image generation. This beginners guide walks you through setup, your first image, and the basics of workflows — in 5 minutes.">
+<meta name="keywords" content="comfyui beginners guide, comfyui tutorial 2026, comfyui getting started, comfyui first image, comfyui easy setup">
+<meta property="og:title" content="ComfyUI Beginners Guide — Your First AI Image in 5 Minutes">
+<meta property="og:description" content="Get started with ComfyUI for AI image generation. Setup, first image, and workflow basics in 5 minutes.">
+<meta property="og:image" content="https://raw.githubusercontent.com/PurpleDoubleD/locally-uncensored/master/docs/social-preview.png">
+<meta property="og:url" content="https://purpledoubled.github.io/locally-uncensored/blog/comfyui-beginners-guide.html">
+<meta property="og:type" content="article">
+<meta property="article:published_time" content="2026-04-02">
+<meta property="article:author" content="PurpleDoubleD">
+<meta property="article:tag" content="ComfyUI">
+<meta property="article:tag" content="AI Image Generation">
+<meta property="article:tag" content="Tutorial">
+<meta property="article:tag" content="Beginners">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="ComfyUI Beginners Guide — Your First AI Image in 5 Minutes">
+<meta name="twitter:description" content="Get started with ComfyUI. Your first AI image in 5 minutes.">
+<link rel="canonical" href="https://purpledoubled.github.io/locally-uncensored/blog/comfyui-beginners-guide.html">
+<meta name="robots" content="index, follow">
+<meta name="theme-color" content="#0a0a0a">
+<link rel="icon" href="../favicon.svg">
+<!-- Privacy: No external fonts loaded. Using system fonts. -->
+<script defer data-domain="YOUR-DOMAIN.com" src="https://plausible.YOUR-DOMAIN.com/js/script.js"></script>
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"Article","headline":"ComfyUI Beginners Guide — Your First AI Image in 5 Minutes","description":"Get started with ComfyUI for AI image generation. This beginners guide walks you through setup, your first image, and the basics of workflows — in 5 minutes.","image":"https://raw.githubusercontent.com/PurpleDoubleD/locally-uncensored/master/docs/social-preview.png","datePublished":"2026-04-02","dateModified":"2026-04-02","author":{"@type":"Person","name":"PurpleDoubleD","url":"https://github.com/PurpleDoubleD"},"publisher":{"@type":"Organization","name":"Locally Uncensored","url":"https://purpledoubled.github.io/locally-uncensored/"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://purpledoubled.github.io/locally-uncensored/blog/comfyui-beginners-guide.html"},"keywords":"comfyui beginners guide, comfyui tutorial 2026, comfyui getting started, comfyui first image, comfyui easy setup"}
+</script>
+<style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:#0a0a0a;color:#ededed;line-height:1.8;-webkit-font-smoothing:antialiased}a{color:#8b5cf6;text-decoration:none}a:hover{text-decoration:underline}nav{position:fixed;top:0;width:100%;padding:0 24px;height:56px;display:flex;align-items:center;justify-content:space-between;background:rgba(10,10,10,0.9);backdrop-filter:blur(12px);border-bottom:1px solid #222;z-index:100}.nav-logo{font-weight:700;font-size:15px;color:#ededed;letter-spacing:-0.3px}.nav-links a{font-size:14px;color:#888;margin-left:24px}.nav-links a:hover{color:#ededed}article{max-width:720px;margin:0 auto;padding:100px 24px 80px}h1{font-size:clamp(28px,4vw,40px);font-weight:800;letter-spacing:-1px;line-height:1.2;margin-bottom:16px;background:linear-gradient(180deg,#fff,#999);-webkit-background-clip:text;-webkit-text-fill-color:transparent}h2{font-size:24px;font-weight:700;margin:48px 0 16px;letter-spacing:-0.5px}h3{font-size:18px;font-weight:600;margin:32px 0 12px}p{margin-bottom:16px;color:#ccc;font-size:16px}.meta{font-size:14px;color:#555;margin-bottom:32px}table{width:100%;border-collapse:collapse;margin:24px 0;font-size:14px}th{text-align:left;padding:12px;font-weight:600;color:#888;border-bottom:1px solid #222;text-transform:uppercase;font-size:12px;letter-spacing:0.5px}td{padding:12px;border-bottom:1px solid #1a1a1a}.check{color:#22c55e}.cross{color:#555}.hl{color:#8b5cf6;font-weight:600}ul{margin:12px 0 16px 24px;color:#ccc}li{margin-bottom:8px;font-size:15px}.cta{text-align:center;padding:48px 0;margin-top:48px;border-top:1px solid #222}.btn{display:inline-block;padding:12px 24px;background:#fff;color:#000;border-radius:10px;font-weight:600;font-size:14px}.btn:hover{opacity:0.9;text-decoration:none}.verdict{background:#161616;border:1px solid #222;border-radius:12px;padding:24px;margin:32px 0}.verdict h3{margin:0 0 8px;color:#8b5cf6}code{background:#161616;padding:2px 8px;border-radius:6px;font-size:14px;color:#8b5cf6;border:1px solid #222}pre{background:#161616;border:1px solid #222;border-radius:8px;padding:16px;overflow-x:auto;margin:16px 0;font-size:13px;line-height:1.6;color:#ccc}@media(max-width:768px){article{padding:80px 16px 40px}h1{font-size:28px}}</style>
+</head>
+<body>
+<nav>
+<a href="https://purpledoubled.github.io/locally-uncensored/" class="nav-logo">Locally Uncensored</a>
+<div>
+<a href="../" class="nav-links">Home</a>
+<a href="./" class="nav-links">Blog</a>
+</div>
+</nav>
+<article>
+<h1>ComfyUI Beginners Guide</h1>
+<div class="meta">Published April 2, 2026 &middot; PurpleDoubleD &middot; 8 min read</div>
+
+<p>ComfyUI is the most powerful open-source backend for AI image and video generation. It supports every major model architecture -- Stable Diffusion 1.5, SDXL, FLUX, Wan 2.1, HunyuanVideo -- and offers fine-grained control over every step of the generation process. The catch: its default interface is a node-based graph editor that overwhelms most beginners. This guide explains what ComfyUI is, how it works, and how to generate your first image without touching a single node.</p>
+
+<h2>What Is ComfyUI?</h2>
+
+<p>ComfyUI is a modular inference engine for AI image and video generation. Think of it as the engine under the hood. You give it a model, a prompt, and a set of parameters. It runs the diffusion process and produces the output.</p>
+
+<p>What makes ComfyUI different from alternatives like Automatic1111 or Fooocus:</p>
+
+<ul>
+<li><strong>Node-based architecture</strong> -- Every operation (loading a model, encoding a prompt, sampling, decoding) is a separate node. Nodes connect together to form a workflow.</li>
+<li><strong>Universal model support</strong> -- One backend for SD 1.5, SDXL, FLUX, video models, and more. No need to switch tools when you switch architectures.</li>
+<li><strong>600+ built-in nodes</strong> -- From basic generation to advanced operations like ControlNet, IP-Adapter, regional prompting, and upscaling.</li>
+<li><strong>Lightweight and fast</strong> -- Written in Python with efficient VRAM management. It loads and unloads models as needed.</li>
+</ul>
+
+<p>The node editor is powerful but not beginner-friendly. For most people, the learning curve is the only real barrier to using ComfyUI.</p>
+
+<h2>The Easy Path: Skip the Node Editor</h2>
+
+<p><a href="https://github.com/PurpleDoubleD/locally-uncensored">Locally Uncensored</a> solves the complexity problem by providing a conventional UI on top of ComfyUI. It builds the workflows automatically based on which model you select. You interact with a prompt box, a parameter panel, and a generate button -- the same interface pattern you know from Midjourney or DALL-E, but running entirely on your machine.</p>
+
+<p>Here is how the abstraction works:</p>
+
+<ul>
+<li>You select a model (e.g., Juggernaut XL, FLUX schnell, Wan 2.1)</li>
+<li>The app classifies the model type (SDXL, FLUX, Wan, HunyuanVideo)</li>
+<li>It queries ComfyUI's <code>/object_info</code> endpoint to discover available nodes</li>
+<li>It builds the correct workflow graph automatically, selecting the right loader, sampler, VAE, and text encoders</li>
+<li>It submits the workflow to ComfyUI and polls for results</li>
+</ul>
+
+<p>You get the full power of ComfyUI without needing to understand the node graph. If you later want to create custom workflows, that option is available through the Workflow Finder.</p>
+
+<h2>Installing ComfyUI</h2>
+
+<h3>Windows (Portable Release)</h3>
+<p>The easiest method. Download the latest portable release from the <a href="https://github.com/comfyanonymous/ComfyUI">ComfyUI GitHub repository</a>. Extract the archive to any location. The portable release bundles Python, PyTorch, and all dependencies. No separate installation needed.</p>
+
+<h3>Manual Installation (Any OS)</h3>
+<p>If you prefer a manual setup or are on Linux/macOS:</p>
+
+<pre><code>git clone https://github.com/comfyanonymous/ComfyUI.git
+cd ComfyUI
+pip install -r requirements.txt
+python main.py</code></pre>
+
+<p>Ensure you have Python 3.10+ and PyTorch with CUDA support installed. ComfyUI starts a local web server on port 8188 by default.</p>
+
+<h3>Automatic Detection</h3>
+<p>When you launch Locally Uncensored, it scans common paths on your system to find ComfyUI. If it is already installed, the app connects to it automatically. If not found, you can specify the path manually in Settings, or let the app guide you through setup.</p>
+
+<h2>Your First Image in 5 Minutes</h2>
+
+<p>Follow these steps to go from zero to your first generated image:</p>
+
+<h3>Minute 1-2: Install</h3>
+<pre><code>git clone https://github.com/PurpleDoubleD/locally-uncensored.git
+cd locally-uncensored
+npm install
+npm run dev</code></pre>
+
+<h3>Minute 2-3: Download a Model</h3>
+<p>Open the <strong>Model Manager</strong> tab. Under Image models, click <strong>Install All</strong> on the <strong>Juggernaut XL V9</strong> bundle. This is a single file (about 7 GB) that includes everything needed for high-quality SDXL generation. It works on GPUs with 6+ GB VRAM.</p>
+
+<p>Wait for the download to complete. The progress bar shows download speed and remaining time.</p>
+
+<h3>Minute 3-4: Generate</h3>
+<p>Switch to the <strong>Create</strong> tab. Your newly downloaded model appears in the model dropdown on the right panel. Select it.</p>
+
+<p>Type a prompt in the text box at the bottom:</p>
+
+<pre><code>portrait of an astronaut in a lush garden, golden hour lighting, detailed, sharp focus</code></pre>
+
+<p>Click <strong>Generate</strong>. The app builds the workflow, sends it to ComfyUI, and shows a progress indicator. On a modern GPU, a 1024x1024 SDXL image takes about 10-15 seconds.</p>
+
+<h3>Minute 4-5: Iterate</h3>
+<p>Your image appears in the gallery above the prompt box. Try changing the prompt, adjusting the seed (for variation), or tweaking the step count in the right panel. Each generation adds to your gallery, so you can compare results side by side.</p>
+
+<h2>Understanding Workflows (Conceptually)</h2>
+
+<p>Even if you never edit a workflow manually, understanding the concept helps you make better decisions about parameters. Every AI image generation follows this pipeline:</p>
+
+<table>
+<tr><th>Step</th><th>Node Type</th><th>What It Does</th></tr>
+<tr><td>1</td><td>Model Loader</td><td>Loads the diffusion model weights into GPU memory</td></tr>
+<tr><td>2</td><td>Text Encoder (CLIP)</td><td>Converts your text prompt into numerical embeddings the model understands</td></tr>
+<tr><td>3</td><td>Latent Image</td><td>Creates the initial noise pattern (controlled by the seed)</td></tr>
+<tr><td>4</td><td>Sampler</td><td>Iteratively denoises the latent image using the model and prompt embeddings</td></tr>
+<tr><td>5</td><td>VAE Decoder</td><td>Converts the final latent representation into a visible pixel image</td></tr>
+</table>
+
+<p>Parameters you control in the UI map directly to these nodes:</p>
+
+<ul>
+<li><strong>Steps</strong> -- How many denoising iterations the sampler runs. More steps generally means more detail, with diminishing returns past 25-30.</li>
+<li><strong>CFG Scale</strong> -- How strongly the model follows your prompt vs exploring freely. Low values (1-3) produce natural but loose results. High values (7-12) produce tight prompt adherence but can look artificial.</li>
+<li><strong>Seed</strong> -- The random starting point. Same seed + same parameters = same image. Change the seed to explore variations.</li>
+<li><strong>Sampler</strong> -- The algorithm used for denoising. <code>euler</code> is the default and works well for most cases. <code>dpmpp_2m</code> is a common alternative with slightly different characteristics.</li>
+<li><strong>Resolution</strong> -- The output image size. Stick to the model's training resolution (1024x1024 for SDXL and FLUX) for best results.</li>
+</ul>
+
+<h2>When You Might Want Custom Workflows</h2>
+
+<p>The automatic workflow builder covers standard text-to-image and text-to-video generation. For advanced use cases, you can import custom ComfyUI workflows:</p>
+
+<ul>
+<li><strong>ControlNet</strong> -- Guide generation with reference images (poses, edges, depth maps)</li>
+<li><strong>IP-Adapter</strong> -- Use a reference image to influence the style or subject</li>
+<li><strong>Inpainting</strong> -- Edit specific regions of an existing image</li>
+<li><strong>Upscaling</strong> -- Increase resolution of generated images with dedicated upscaling models</li>
+<li><strong>LoRA</strong> -- Apply fine-tuned style or subject modifications on top of base models</li>
+</ul>
+
+<p>Locally Uncensored includes a <strong>Workflow Finder</strong> that lets you search and import workflows from CivitAI. The app parses the workflow, identifies which parameters can be adjusted, and presents them in the UI. This gives you the flexibility of custom workflows without manually editing the node graph.</p>
+
+<h2>ComfyUI vs Other Backends</h2>
+
+<table>
+<tr><th>Feature</th><th>ComfyUI</th><th>Automatic1111</th><th>Fooocus</th></tr>
+<tr><td>Model Support</td><td>SD 1.5, SDXL, FLUX, Video</td><td>SD 1.5, SDXL</td><td>SDXL only</td></tr>
+<tr><td>Interface</td><td>Node graph (or frontend apps)</td><td>Web UI</td><td>Simplified Web UI</td></tr>
+<tr><td>VRAM Efficiency</td><td>Excellent</td><td>Good</td><td>Good</td></tr>
+<tr><td>Custom Workflows</td><td>Full node editor</td><td>Extensions/scripts</td><td>Limited</td></tr>
+<tr><td>Video Generation</td><td class="check">Yes</td><td class="cross">No</td><td class="cross">No</td></tr>
+<tr><td>Active Development</td><td>Very active</td><td>Slowing</td><td>Moderate</td></tr>
+</table>
+
+<p>ComfyUI has become the standard backend for a reason. It supports more model architectures than any alternative, receives updates faster when new models release, and its modular design means new capabilities are added as nodes without breaking existing workflows.</p>
+
+<h2>Next Steps</h2>
+
+<p>Once you are comfortable generating images, explore these topics:</p>
+
+<ul>
+<li><a href="how-to-run-flux-locally.html">Run FLUX locally</a> for state-of-the-art image quality</li>
+<li><a href="how-to-generate-ai-videos-locally.html">Generate AI videos</a> with Wan 2.1 and HunyuanVideo</li>
+<li><a href="best-uncensored-ai-models-2026.html">Best uncensored models in 2026</a> for a complete overview of available models</li>
+</ul>
+
+<div class="cta">
+<h2>Try Locally Uncensored</h2>
+<p>Free, open source, MIT licensed. One command to get started.</p>
+<a href="https://github.com/PurpleDoubleD/locally-uncensored" class="btn">View on GitHub</a>
+</div>
+</article>
+</body>
+</html>

@@ -19,6 +19,7 @@ export function Header() {
         <button
           onClick={toggleSidebar}
           className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-white/10 text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors"
+          aria-label="Toggle sidebar"
         >
           <Menu size={20} />
         </button>
@@ -42,6 +43,7 @@ export function Header() {
           onClick={toggleTheme}
           className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-white/10 text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors"
           title={settings.theme === 'dark' ? 'Light Mode' : 'Dark Mode'}
+          aria-label={settings.theme === 'dark' ? 'Light Mode' : 'Dark Mode'}
         >
           {settings.theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
         </button>

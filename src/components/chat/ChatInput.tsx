@@ -78,6 +78,7 @@ export function ChatInput({ onSend, onStop, isGenerating }: Props) {
             onClick={onStop}
             className="p-2 rounded-lg bg-red-100 dark:bg-red-500/20 border border-red-300 dark:border-red-500/40 text-red-600 dark:text-red-400 hover:bg-red-200 dark:hover:bg-red-500/30 transition-all shrink-0"
             whileTap={{ scale: 0.9 }}
+            aria-label="Stop generation"
           >
             <Square size={15} />
           </motion.button>
@@ -87,6 +88,7 @@ export function ChatInput({ onSend, onStop, isGenerating }: Props) {
             disabled={!input.trim() || isTranscribing}
             className="p-2 rounded-lg bg-gray-800 dark:bg-white/10 border border-gray-700 dark:border-white/15 text-white hover:bg-gray-700 dark:hover:bg-white/15 disabled:opacity-30 disabled:cursor-not-allowed transition-all shrink-0"
             whileTap={{ scale: 0.9 }}
+            aria-label="Send message"
           >
             <Send size={15} />
           </motion.button>

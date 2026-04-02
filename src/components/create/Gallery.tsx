@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Trash2, Download, ChevronDown, ChevronUp, X } from 'lucide-react'
+import { Trash2, Download, ChevronDown, ChevronUp } from 'lucide-react'
 import { getImageUrl } from '../../api/comfyui'
 import { useCreateStore, type GalleryItem } from '../../stores/createStore'
 
@@ -40,6 +40,7 @@ export function Gallery() {
         <button
           onClick={() => setExpanded(!expanded)}
           className="flex items-center justify-between w-full px-4 py-2 text-xs font-medium text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-white/5 transition-colors"
+          aria-label="Toggle gallery"
         >
           <span>Gallery ({gallery.length})</span>
           <div className="flex items-center gap-2">
@@ -47,6 +48,8 @@ export function Gallery() {
               <span
                 onClick={(e) => { e.stopPropagation(); if (confirm('Clear all gallery items?')) clearGallery() }}
                 className="text-red-400 hover:text-red-500 transition-colors"
+                role="button"
+                aria-label="Clear gallery"
               >
                 Clear
               </span>
@@ -94,6 +97,7 @@ export function Gallery() {
                           onClick={(e) => { e.stopPropagation(); handleDownload(item) }}
                           className="p-1.5 rounded bg-white/20 text-white hover:bg-white/30"
                           title="Download"
+                          aria-label="Download image"
                         >
                           <Download size={12} />
                         </button>
@@ -101,6 +105,7 @@ export function Gallery() {
                           onClick={(e) => { e.stopPropagation(); removeFromGallery(item.id) }}
                           className="p-1.5 rounded bg-red-500/50 text-white hover:bg-red-500/70"
                           title="Delete"
+                          aria-label="Delete image"
                         >
                           <Trash2 size={12} />
                         </button>
@@ -117,6 +122,7 @@ export function Gallery() {
                     onClick={() => setPage(Math.max(0, page - 1))}
                     disabled={page === 0}
                     className="disabled:opacity-30"
+                    aria-label="Previous page"
                   >
                     Prev
                   </button>
@@ -125,6 +131,7 @@ export function Gallery() {
                     onClick={() => setPage(Math.min(totalPages - 1, page + 1))}
                     disabled={page >= totalPages - 1}
                     className="disabled:opacity-30"
+                    aria-label="Next page"
                   >
                     Next
                   </button>

@@ -65,6 +65,7 @@ export function MessageBubble({ message }: Props) {
             <button
               onClick={handleCopy}
               className="p-0.5 rounded opacity-0 group-hover:opacity-100 hover:bg-gray-200 dark:hover:bg-white/10 text-gray-400 hover:text-gray-700 dark:hover:text-white transition-all"
+              aria-label="Copy message"
             >
               {copied ? <Check size={12} /> : <Copy size={12} />}
             </button>

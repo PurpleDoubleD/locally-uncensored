@@ -186,7 +186,7 @@ export function DiscoverModels({ category }: Props) {
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-semibold text-gray-900 dark:text-white">{title}</h2>
         {isText && (
-          <GlowButton variant="secondary" onClick={() => { setLoading(true); fetchAbliteratedModels().then(m => { setTextModels(m); setLoading(false) }) }} disabled={loading}>
+          <GlowButton variant="secondary" onClick={() => { setLoading(true); fetchAbliteratedModels().then(m => { setTextModels(m); setLoading(false) }) }} disabled={loading} aria-label="Refresh">
             <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
           </GlowButton>
         )}
@@ -221,17 +221,17 @@ export function DiscoverModels({ category }: Props) {
                   </span>
                   {/* Pause/Resume button */}
                   {(d.status === 'downloading' || d.status === 'connecting') && (
-                    <button onClick={() => handlePause(id)} className="p-1 rounded hover:bg-gray-200 dark:hover:bg-white/10 text-gray-400 hover:text-yellow-500 transition-colors" title="Pause">
+                    <button onClick={() => handlePause(id)} className="p-1 rounded hover:bg-gray-200 dark:hover:bg-white/10 text-gray-400 hover:text-yellow-500 transition-colors" title="Pause" aria-label="Pause">
                       <Pause size={12} />
                     </button>
                   )}
                   {d.status === 'paused' && (
-                    <button onClick={() => handleResume(id)} className="p-1 rounded hover:bg-gray-200 dark:hover:bg-white/10 text-gray-400 hover:text-green-500 transition-colors" title="Resume">
+                    <button onClick={() => handleResume(id)} className="p-1 rounded hover:bg-gray-200 dark:hover:bg-white/10 text-gray-400 hover:text-green-500 transition-colors" title="Resume" aria-label="Resume">
                       <Play size={12} />
                     </button>
                   )}
                   {/* Cancel button */}
-                  <button onClick={() => handleCancel(id)} className="p-1 rounded hover:bg-gray-200 dark:hover:bg-white/10 text-gray-400 hover:text-red-500 transition-colors" title="Cancel">
+                  <button onClick={() => handleCancel(id)} className="p-1 rounded hover:bg-gray-200 dark:hover:bg-white/10 text-gray-400 hover:text-red-500 transition-colors" title="Cancel" aria-label="Cancel">
                     <X size={12} />
                   </button>
                 </div>
@@ -347,24 +347,24 @@ export function DiscoverModels({ category }: Props) {
                             ) : fileDl ? (
                               <>
                                 <Loader2 size={14} className="animate-spin text-blue-400" />
-                                <button onClick={() => file.filename && handlePause(file.filename)} className="p-0.5 rounded text-gray-400 hover:text-yellow-500" title="Pause">
+                                <button onClick={() => file.filename && handlePause(file.filename)} className="p-0.5 rounded text-gray-400 hover:text-yellow-500" title="Pause" aria-label="Pause">
                                   <Pause size={12} />
                                 </button>
-                                <button onClick={() => file.filename && handleCancel(file.filename)} className="p-0.5 rounded text-gray-400 hover:text-red-500" title="Cancel">
+                                <button onClick={() => file.filename && handleCancel(file.filename)} className="p-0.5 rounded text-gray-400 hover:text-red-500" title="Cancel" aria-label="Cancel">
                                   <X size={12} />
                                 </button>
                               </>
                             ) : dlState?.status === 'paused' ? (
                               <>
-                                <button onClick={() => file.filename && handleResume(file.filename)} className="p-0.5 rounded text-gray-400 hover:text-green-500" title="Resume">
+                                <button onClick={() => file.filename && handleResume(file.filename)} className="p-0.5 rounded text-gray-400 hover:text-green-500" title="Resume" aria-label="Resume">
                                   <Play size={12} />
                                 </button>
-                                <button onClick={() => file.filename && handleCancel(file.filename)} className="p-0.5 rounded text-gray-400 hover:text-red-500" title="Cancel">
+                                <button onClick={() => file.filename && handleCancel(file.filename)} className="p-0.5 rounded text-gray-400 hover:text-red-500" title="Cancel" aria-label="Cancel">
                                   <X size={12} />
                                 </button>
                               </>
                             ) : (
-                              <button onClick={() => handleDownload(file)} className="p-1 rounded text-gray-400 hover:text-green-500 transition-colors" title="Download this file">
+                              <button onClick={() => handleDownload(file)} className="p-1 rounded text-gray-400 hover:text-green-500 transition-colors" title="Download this file" aria-label="Download this file">
                                 <Download size={14} />
                               </button>
                             )}
@@ -438,11 +438,11 @@ export function DiscoverModels({ category }: Props) {
                       ) : isDl ? (
                         <Loader2 size={16} className="animate-spin text-gray-400" />
                       ) : model.downloadUrl ? (
-                        <button onClick={() => handleCivitaiDownload(model)} className="p-2 rounded-lg bg-green-100 dark:bg-green-500/15 hover:bg-green-200 dark:hover:bg-green-500/25 text-green-700 dark:text-green-400 transition-all" title="Download">
+                        <button onClick={() => handleCivitaiDownload(model)} className="p-2 rounded-lg bg-green-100 dark:bg-green-500/15 hover:bg-green-200 dark:hover:bg-green-500/25 text-green-700 dark:text-green-400 transition-all" title="Download" aria-label="Download">
                           <Download size={14} />
                         </button>
                       ) : null}
-                      <a href={model.sourceUrl} target="_blank" rel="noopener noreferrer" className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-white/10 text-gray-500 transition-all" title="View on CivitAI">
+                      <a href={model.sourceUrl} target="_blank" rel="noopener noreferrer" className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-white/10 text-gray-500 transition-all" title="View on CivitAI" aria-label="View on CivitAI">
                         <ExternalLink size={14} />
                       </a>
                     </div>

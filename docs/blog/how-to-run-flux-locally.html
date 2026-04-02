@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>How to Run Flux Locally — Step-by-Step Guide for AI Image Generation</title>
+<meta name="description" content="Learn how to run FLUX.1 locally on your own GPU for free AI image generation. Complete setup guide with Locally Uncensored and ComfyUI. No cloud needed.">
+<meta name="keywords" content="run flux locally, flux local setup, flux ai image generation local, flux.1 local, free ai image generation, comfyui flux guide">
+<meta property="og:title" content="How to Run Flux Locally — Step-by-Step Guide for AI Image Generation">
+<meta property="og:description" content="Run FLUX.1 locally on your own GPU for free AI image generation. Complete setup guide with ComfyUI and Locally Uncensored.">
+<meta property="og:image" content="https://raw.githubusercontent.com/PurpleDoubleD/locally-uncensored/master/docs/social-preview.png">
+<meta property="og:url" content="https://purpledoubled.github.io/locally-uncensored/blog/how-to-run-flux-locally.html">
+<meta property="og:type" content="article">
+<meta property="article:published_time" content="2026-04-02">
+<meta property="article:author" content="PurpleDoubleD">
+<meta property="article:tag" content="FLUX">
+<meta property="article:tag" content="AI Image Generation">
+<meta property="article:tag" content="ComfyUI">
+<meta property="article:tag" content="Local AI">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="How to Run Flux Locally — Step-by-Step Guide for AI Image Generation">
+<meta name="twitter:description" content="Run FLUX.1 locally on your own GPU. Complete step-by-step setup guide.">
+<link rel="canonical" href="https://purpledoubled.github.io/locally-uncensored/blog/how-to-run-flux-locally.html">
+<meta name="robots" content="index, follow">
+<meta name="theme-color" content="#0a0a0a">
+<link rel="icon" href="../favicon.svg">
+<!-- Privacy: No external fonts loaded. Using system fonts. -->
+<script defer data-domain="YOUR-DOMAIN.com" src="https://plausible.YOUR-DOMAIN.com/js/script.js"></script>
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"Article","headline":"How to Run Flux Locally — Step-by-Step Guide for AI Image Generation","description":"Learn how to run FLUX.1 locally on your own GPU for free AI image generation. Complete setup guide with Locally Uncensored and ComfyUI.","image":"https://raw.githubusercontent.com/PurpleDoubleD/locally-uncensored/master/docs/social-preview.png","datePublished":"2026-04-02","dateModified":"2026-04-02","author":{"@type":"Person","name":"PurpleDoubleD","url":"https://github.com/PurpleDoubleD"},"publisher":{"@type":"Organization","name":"Locally Uncensored","url":"https://purpledoubled.github.io/locally-uncensored/"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://purpledoubled.github.io/locally-uncensored/blog/how-to-run-flux-locally.html"},"keywords":"run flux locally, flux local setup, flux ai image generation local, flux.1 local, free ai image generation, comfyui flux guide"}
+</script>
+<style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:#0a0a0a;color:#ededed;line-height:1.8;-webkit-font-smoothing:antialiased}a{color:#8b5cf6;text-decoration:none}a:hover{text-decoration:underline}nav{position:fixed;top:0;width:100%;padding:0 24px;height:56px;display:flex;align-items:center;justify-content:space-between;background:rgba(10,10,10,0.9);backdrop-filter:blur(12px);border-bottom:1px solid #222;z-index:100}.nav-logo{font-weight:700;font-size:15px;color:#ededed;letter-spacing:-0.3px}.nav-links a{font-size:14px;color:#888;margin-left:24px}.nav-links a:hover{color:#ededed}article{max-width:720px;margin:0 auto;padding:100px 24px 80px}h1{font-size:clamp(28px,4vw,40px);font-weight:800;letter-spacing:-1px;line-height:1.2;margin-bottom:16px;background:linear-gradient(180deg,#fff,#999);-webkit-background-clip:text;-webkit-text-fill-color:transparent}h2{font-size:24px;font-weight:700;margin:48px 0 16px;letter-spacing:-0.5px}h3{font-size:18px;font-weight:600;margin:32px 0 12px}p{margin-bottom:16px;color:#ccc;font-size:16px}.meta{font-size:14px;color:#555;margin-bottom:32px}table{width:100%;border-collapse:collapse;margin:24px 0;font-size:14px}th{text-align:left;padding:12px;font-weight:600;color:#888;border-bottom:1px solid #222;text-transform:uppercase;font-size:12px;letter-spacing:0.5px}td{padding:12px;border-bottom:1px solid #1a1a1a}.check{color:#22c55e}.cross{color:#555}.hl{color:#8b5cf6;font-weight:600}ul{margin:12px 0 16px 24px;color:#ccc}li{margin-bottom:8px;font-size:15px}.cta{text-align:center;padding:48px 0;margin-top:48px;border-top:1px solid #222}.btn{display:inline-block;padding:12px 24px;background:#fff;color:#000;border-radius:10px;font-weight:600;font-size:14px}.btn:hover{opacity:0.9;text-decoration:none}.verdict{background:#161616;border:1px solid #222;border-radius:12px;padding:24px;margin:32px 0}.verdict h3{margin:0 0 8px;color:#8b5cf6}code{background:#161616;padding:2px 8px;border-radius:6px;font-size:14px;color:#8b5cf6;border:1px solid #222}pre{background:#161616;border:1px solid #222;border-radius:8px;padding:16px;overflow-x:auto;margin:16px 0;font-size:13px;line-height:1.6;color:#ccc}@media(max-width:768px){article{padding:80px 16px 40px}h1{font-size:28px}}</style>
+</head>
+<body>
+<nav>
+<a href="https://purpledoubled.github.io/locally-uncensored/" class="nav-logo">Locally Uncensored</a>
+<div>
+<a href="../" class="nav-links">Home</a>
+<a href="./" class="nav-links">Blog</a>
+</div>
+</nav>
+<article>
+<h1>How to Run Flux Locally</h1>
+<div class="meta">Published April 2, 2026 &middot; PurpleDoubleD &middot; 8 min read</div>
+
+<p>FLUX.1 by Black Forest Labs changed the AI image generation landscape when it launched. It produces images that rival Midjourney and DALL-E 3, but with one key difference: you can run it entirely on your own hardware. No cloud API, no per-image charges, no content filters. This guide walks you through the complete setup from scratch.</p>
+
+<h2>What Is FLUX.1?</h2>
+
+<p>FLUX.1 is an open-weight text-to-image model built by Black Forest Labs, the team behind Stable Diffusion. It uses a flow-matching architecture (hence the name) rather than the traditional diffusion approach. The result is faster convergence, better text rendering inside images, and stronger prompt adherence compared to SDXL.</p>
+
+<p>There are two variants that matter for local use:</p>
+
+<ul>
+<li><strong>FLUX.1 schnell</strong> -- The fast variant. Generates a 1024x1024 image in about 4 steps. Ideal for iteration and experimentation. FP8 quantized version fits in roughly 12 GB VRAM.</li>
+<li><strong>FLUX.1 dev</strong> -- The quality variant. Needs 20-30 steps for best results. Produces more detailed, coherent images. Same VRAM footprint as schnell when quantized to FP8.</li>
+</ul>
+
+<p>Both variants are available as FP8 quantized UNETs, which cut the VRAM requirement roughly in half compared to the full BF16 weights.</p>
+
+<h2>Hardware Requirements</h2>
+
+<p>FLUX is a 12-billion parameter model. Even with FP8 quantization, it needs a capable GPU. Here is what you need:</p>
+
+<table>
+<tr><th>Component</th><th>Minimum</th><th>Recommended</th></tr>
+<tr><td>GPU VRAM</td><td>10 GB (RTX 3080)</td><td>12+ GB (RTX 4070 Ti / RTX 3090)</td></tr>
+<tr><td>System RAM</td><td>16 GB</td><td>32 GB</td></tr>
+<tr><td>Storage</td><td>20 GB free</td><td>40+ GB free</td></tr>
+<tr><td>GPU Brand</td><td>NVIDIA (CUDA)</td><td>NVIDIA (CUDA)</td></tr>
+</table>
+
+<p>AMD GPUs can work through ROCm, but NVIDIA with CUDA remains the most stable path. If you have 8 GB VRAM, FLUX will struggle -- consider SDXL models like Juggernaut XL instead, which produce excellent results at 6 GB.</p>
+
+<h2>Step 1: Install Locally Uncensored</h2>
+
+<p>The fastest path to running FLUX locally is through <a href="https://github.com/PurpleDoubleD/locally-uncensored">Locally Uncensored</a>, which handles the entire backend stack for you. It bundles Ollama for chat and ComfyUI for image and video generation into a single interface.</p>
+
+<pre><code>git clone https://github.com/PurpleDoubleD/locally-uncensored.git
+cd locally-uncensored
+npm install
+npm run dev</code></pre>
+
+<p>On first launch, the app will detect whether ComfyUI is installed. If it is not found, the Model Manager will guide you through setup. ComfyUI runs as the backend engine that actually loads and executes FLUX -- Locally Uncensored provides the frontend and automates the workflow construction.</p>
+
+<h2>Step 2: Install ComfyUI</h2>
+
+<p>If you do not already have ComfyUI installed, download the latest portable release from the <a href="https://github.com/comfyanonymous/ComfyUI">ComfyUI GitHub repository</a>. Extract it anywhere on your drive. Locally Uncensored will auto-detect it by scanning common paths, or you can point to it manually in Settings.</p>
+
+<p>ComfyUI needs Python 3.10+ and PyTorch with CUDA support. The portable release bundles everything, so in most cases you do not need to install anything separately.</p>
+
+<h2>Step 3: Download FLUX Models</h2>
+
+<p>FLUX requires four separate model files, unlike SDXL which uses a single checkpoint. This is because FLUX splits the architecture into separate components:</p>
+
+<ul>
+<li><strong>UNET</strong> -- The core diffusion model (the largest file, roughly 12 GB for FP8)</li>
+<li><strong>VAE</strong> -- The image encoder/decoder (ae.safetensors)</li>
+<li><strong>CLIP_L</strong> -- The first text encoder</li>
+<li><strong>T5-XXL</strong> -- The second text encoder (handles complex prompts)</li>
+</ul>
+
+<p>In Locally Uncensored, open the <strong>Model Manager</strong> tab. You will find pre-configured FLUX bundles under the Image section. Click <strong>Install All</strong> on either the FLUX.1 schnell FP8 or FLUX.1 dev FP8 bundle. The app downloads all four files to the correct ComfyUI directories automatically.</p>
+
+<p>If you prefer manual download, place the files in these ComfyUI subdirectories:</p>
+
+<pre><code>ComfyUI/models/diffusion_models/   -- UNET file
+ComfyUI/models/vae/                -- VAE file
+ComfyUI/models/text_encoders/      -- CLIP_L and T5-XXL files</code></pre>
+
+<h2>Step 4: Generate Your First Image</h2>
+
+<p>Once the models are downloaded, switch to the <strong>Create</strong> tab in Locally Uncensored. The app auto-detects all installed models. Select your FLUX model from the model dropdown in the right-side parameter panel.</p>
+
+<p>Type a prompt and click Generate. The app automatically:</p>
+
+<ul>
+<li>Classifies the model as FLUX type</li>
+<li>Finds the matching VAE and text encoders</li>
+<li>Builds the correct ComfyUI workflow (no node editing required)</li>
+<li>Submits the workflow and polls for results</li>
+</ul>
+
+<p>For FLUX schnell, use 4 steps. For FLUX dev, use 20 steps as a starting point. The default resolution is 1024x1024, which is the native training resolution for FLUX.</p>
+
+<h2>FLUX Schnell vs FLUX Dev: Which Should You Use?</h2>
+
+<table>
+<tr><th>Feature</th><th>FLUX.1 schnell</th><th>FLUX.1 dev</th></tr>
+<tr><td>Speed (1024x1024)</td><td>~5 seconds</td><td>~30 seconds</td></tr>
+<tr><td>Recommended Steps</td><td>4</td><td>20-30</td></tr>
+<tr><td>Image Quality</td><td>Good</td><td>Excellent</td></tr>
+<tr><td>Text in Images</td><td>Decent</td><td>Very good</td></tr>
+<tr><td>Prompt Adherence</td><td>Good</td><td>Excellent</td></tr>
+<tr><td>License</td><td>Apache 2.0</td><td>Non-commercial</td></tr>
+<tr><td>VRAM (FP8)</td><td>~12 GB</td><td>~12 GB</td></tr>
+</table>
+
+<p>Start with <strong>schnell</strong> for quick iteration. Switch to <strong>dev</strong> when you want the best possible output for a prompt you have refined. The VRAM usage is identical since they share the same architecture.</p>
+
+<h2>Parameter Tuning Tips</h2>
+
+<h3>Resolution</h3>
+<p>FLUX was trained on 1024x1024. You can generate at other aspect ratios (e.g., 1024x768 for landscape, 768x1024 for portrait) without significant quality loss. Going above 1024 on either dimension increases VRAM usage and can cause artifacts unless you use tiling or a high-res fix workflow.</p>
+
+<h3>CFG Scale</h3>
+<p>FLUX schnell works best with a CFG of 1.0 -- it was designed for low-step, low-guidance generation. FLUX dev responds well to CFG values between 3.0 and 5.0. Higher values increase prompt adherence but can introduce saturation artifacts.</p>
+
+<h3>Sampler and Scheduler</h3>
+<p>The default sampler (<code>euler</code>) and scheduler (<code>normal</code>) work well for both variants. FLUX schnell specifically benefits from the <code>sgm_uniform</code> scheduler. For dev, the <code>simple</code> scheduler at 20 steps is a reliable baseline.</p>
+
+<h3>Seed Control</h3>
+<p>Fix the seed to reproduce results. Change only one parameter at a time when comparing outputs. This is the fastest way to learn how FLUX responds to different settings.</p>
+
+<h2>Troubleshooting</h2>
+
+<div class="verdict">
+<h3>Out of Memory Errors</h3>
+<p>If you get CUDA out of memory errors, try reducing the resolution to 768x768. Close other GPU-intensive applications. If the problem persists, you may need to switch to an SDXL model like Juggernaut XL, which runs comfortably at 6 GB VRAM.</p>
+</div>
+
+<div class="verdict">
+<h3>Black or Broken Images</h3>
+<p>This usually means the VAE or text encoder is missing or mismatched. Verify that all four model files are present and that the app detected them correctly in the Model Manager. FLUX requires its own specific VAE (ae.safetensors) -- it cannot share a VAE with SDXL or SD 1.5 models.</p>
+</div>
+
+<div class="verdict">
+<h3>Slow Generation</h3>
+<p>Ensure PyTorch is using CUDA and not falling back to CPU. In the ComfyUI terminal output, look for the CUDA device being listed at startup. Generation on CPU is roughly 50x slower and not practical for FLUX.</p>
+</div>
+
+<h2>What About SDXL?</h2>
+
+<p>If your GPU has less than 10 GB VRAM, SDXL is the better choice. Models like <strong>Juggernaut XL V9</strong> produce excellent photorealistic results and run as a single checkpoint file -- no separate VAE or text encoder downloads needed. Locally Uncensored includes Juggernaut XL as a one-click install bundle in the Model Manager.</p>
+
+<p>FLUX produces better results at complex prompts and text rendering. SDXL is more forgiving on hardware and has a larger ecosystem of LoRA fine-tunes. Both are valid choices depending on your setup.</p>
+
+<div class="cta">
+<h2>Try Locally Uncensored</h2>
+<p>Free, open source, MIT licensed. One command to get started.</p>
+<a href="https://github.com/PurpleDoubleD/locally-uncensored" class="btn">View on GitHub</a>
+</div>
+</article>
+</body>
+</html>

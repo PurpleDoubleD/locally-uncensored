@@ -20,6 +20,9 @@
     "image-generation",
     "video-generation"
   ],
+  "engines": {
+    "node": ">=22"
+  },
   "type": "module",
   "scripts": {
     "dev": "vite",

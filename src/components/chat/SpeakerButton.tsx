@@ -23,6 +23,7 @@ export function SpeakerButton({ text }: Props) {
       onClick={handleClick}
       className="p-0.5 rounded opacity-0 group-hover:opacity-100 hover:bg-gray-200 dark:hover:bg-white/10 text-gray-400 hover:text-gray-700 dark:hover:text-white transition-all"
       title={isSpeaking ? "Stop speaking" : "Read aloud"}
+      aria-label={isSpeaking ? "Stop speaking" : "Read aloud"}
     >
       {isSpeaking ? <VolumeX size={12} /> : <Volume2 size={12} />}
     </button>

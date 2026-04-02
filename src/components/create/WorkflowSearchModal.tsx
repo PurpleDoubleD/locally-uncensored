@@ -293,6 +293,7 @@ export function WorkflowSearchModal({ open, onClose, modelName, modelType }: Pro
                   : 'bg-white/5 border-white/10 text-gray-500 hover:text-white'
               }`}
               title={civitaiApiKey ? 'API key set' : 'Add CivitAI API key (required for downloads)'}
+              aria-label="CivitAI API key"
             >
               <Key size={16} />
             </button>
@@ -312,6 +313,7 @@ export function WorkflowSearchModal({ open, onClose, modelName, modelType }: Pro
                 <button
                   onClick={() => setShowApiKey(!showApiKey)}
                   className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 hover:text-white"
+                  aria-label="Toggle API key visibility"
                 >
                   {showApiKey ? <EyeOff size={14} /> : <Eye size={14} />}
                 </button>
@@ -444,6 +446,7 @@ export function WorkflowSearchModal({ open, onClose, modelName, modelType }: Pro
                 <button
                   onClick={() => setShowApiKey(!showApiKey)}
                   className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 hover:text-white"
+                  aria-label="Toggle API key visibility"
                 >
                   {showApiKey ? <EyeOff size={14} /> : <Eye size={14} />}
                 </button>

@@ -52,8 +52,8 @@ export function CreateView() {
         if (wasConnected) fetchModels()
         return true
       }
-    } catch (err) {
-      console.warn('[CreateView] Status poll failed:', err)
+    } catch {
+      // Status poll failed silently
     }
     return false
   }, [checkConnection, fetchModels])
@@ -275,6 +275,7 @@ export function CreateView() {
                   }}
                   className="flex items-center gap-1 px-2 py-1 rounded-lg hover:bg-gray-100 dark:hover:bg-white/10 text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 text-[10px] transition-colors"
                   title="Unload models and free memory"
+                  aria-label="Unload models and free memory"
                 >
                   <HardDriveDownload size={12} />
                   <span id="unload-btn"></span>
@@ -283,6 +284,7 @@ export function CreateView() {
               <button
                 onClick={() => setShowParams(!showParams)}
                 className="lg:hidden p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-white/10 text-gray-500"
+                aria-label="Toggle settings panel"
               >
                 <Settings size={14} />
               </button>
@@ -335,7 +337,7 @@ export function CreateView() {
               onClick={(e) => e.stopPropagation()}>
               <div className="flex items-center justify-between mb-3">
                 <p className="text-[10px] font-medium text-gray-600 uppercase tracking-widest">Parameters</p>
-                <button onClick={() => setShowParams(false)} className="p-1 text-gray-500 hover:text-gray-300">
+                <button onClick={() => setShowParams(false)} className="p-1 text-gray-500 hover:text-gray-300" aria-label="Close settings panel">
                   <Settings size={12} />
                 </button>
               </div>

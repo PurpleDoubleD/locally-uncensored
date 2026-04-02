@@ -174,6 +174,7 @@ function RAGPanelInner({ conversationId }: { conversationId: string }) {
           onClick={toggleRAG}
           className="flex items-center gap-1 text-xs"
           title={isEnabled ? 'Disable RAG' : 'Enable RAG'}
+          aria-label={isEnabled ? 'Disable RAG' : 'Enable RAG'}
         >
           {isEnabled ? (
             <ToggleRight size={20} className="text-green-500" />
@@ -321,6 +322,7 @@ function RAGPanelInner({ conversationId }: { conversationId: string }) {
               <button
                 onClick={() => removeDocument(doc.id)}
                 className="p-0.5 rounded opacity-0 group-hover:opacity-100 hover:bg-red-100 dark:hover:bg-red-500/15 text-gray-400 hover:text-red-500 transition-all"
+                aria-label="Remove document"
               >
                 <Trash2 size={12} />
               </button>
@@ -341,6 +343,7 @@ function RAGPanelInner({ conversationId }: { conversationId: string }) {
           <button
             onClick={() => setChunksExpanded(!chunksExpanded)}
             className="w-full px-3 py-2 flex items-center gap-1.5 hover:bg-gray-50 dark:hover:bg-white/5 transition-colors"
+            aria-label="Toggle retrieved chunks"
           >
             {chunksExpanded ? (
               <ChevronDown size={12} className="text-gray-400" />

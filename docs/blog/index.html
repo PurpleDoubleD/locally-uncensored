@@ -6,6 +6,7 @@
 <link rel="canonical" href="https://purpledoubled.github.io/locally-uncensored/blog/">
 <meta name="robots" content="index, follow">
 <!-- Privacy: No external fonts loaded. Using system fonts. -->
+<script defer data-domain="YOUR-DOMAIN.com" src="https://plausible.YOUR-DOMAIN.com/js/script.js"></script>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 body{font-family:'Inter',system-ui,sans-serif;background:#0a0a0a;color:#ededed;line-height:1.6}
@@ -21,6 +22,14 @@ h1{font-size:36px;font-weight:800;letter-spacing:-1px;margin-bottom:32px}
 .post-card h2 a{color:#ededed}
 .post-card p{color:#888;font-size:14px}
 .post-card .meta{font-size:12px;color:#555;margin-top:8px}
+.post-card .tag{display:inline-block;font-size:11px;padding:2px 8px;border-radius:6px;margin-right:6px;font-weight:500}
+.tag-tutorial{background:rgba(34,197,94,0.1);color:#22c55e;border:1px solid rgba(34,197,94,0.2)}
+.tag-guide{background:rgba(59,130,246,0.1);color:#3b82f6;border:1px solid rgba(59,130,246,0.2)}
+.tag-comparison{background:rgba(139,92,246,0.1);color:#8b5cf6;border:1px solid rgba(139,92,246,0.2)}
+.tag-opinion{background:rgba(249,115,22,0.1);color:#f97316;border:1px solid rgba(249,115,22,0.2)}
+.filters{display:flex;gap:8px;margin-bottom:24px;flex-wrap:wrap}
+.filter-btn{font-size:13px;padding:6px 14px;border-radius:8px;border:1px solid #222;background:transparent;color:#888;cursor:pointer;transition:all 0.15s;font-family:'Inter',system-ui,sans-serif}
+.filter-btn:hover,.filter-btn.active{border-color:#8b5cf6;color:#ededed;background:rgba(139,92,246,0.08)}
 </style></head><body>
 <nav>
 <a href="https://purpledoubled.github.io/locally-uncensored/" class="nav-logo">Locally Uncensored</a>
@@ -28,14 +37,30 @@ h1{font-size:36px;font-weight:800;letter-spacing:-1px;margin-bottom:32px}
 </nav>
 <main>
 <h1>Blog</h1>
-<div class="post-card"><h2><a href="locally-uncensored-v1-5-release.html">Locally Uncensored v1.5 Release: Dynamic Workflows, CivitAI Marketplace & Desktop App</a></h2><p>The biggest update yet — dynamic workflow builder, CivitAI model marketplace, Tauri v2 desktop app, privacy hardening, 6 model bundles, and local Whisper STT.</p><div class="meta">April 2, 2026 · 12 min read</div></div>
-<div class="post-card"><h2><a href="best-local-ai-apps-2026.html">Best Local AI Apps in 2026 — Run AI on Your Own Hardware</a></h2><p>Complete comparison of GPT4All, Open WebUI, LM Studio, Jan, Kobold.cpp, SillyTavern, Msty, and Locally Uncensored.</p><div class="meta">March 30, 2026 · 10 min read</div></div>
-<div class="post-card"><h2><a href="locally-uncensored-vs-gpt4all.html">Locally Uncensored vs GPT4All</a></h2><p>All-in-one AI creative suite vs the most popular local chatbot with document RAG.</p><div class="meta">March 30, 2026 · 6 min read</div></div>
-<div class="post-card"><h2><a href="locally-uncensored-vs-koboldcpp.html">Locally Uncensored vs Kobold.cpp</a></h2><p>Full ComfyUI image/video generation vs the best creative writing AI tool.</p><div class="meta">March 30, 2026 · 6 min read</div></div>
-<div class="post-card"><h2><a href="locally-uncensored-vs-jan.html">Locally Uncensored vs Jan.ai</a></h2><p>Lightweight Tauri app with image gen vs polished Electron chat client with cloud API support.</p><div class="meta">March 30, 2026 · 6 min read</div></div>
-<div class="post-card"><h2><a href="locally-uncensored-vs-msty.html">Locally Uncensored vs Msty</a></h2><p>Fully open source MIT app with creative AI vs proprietary multi-provider chat hub.</p><div class="meta">March 30, 2026 · 6 min read</div></div>
-<div class="post-card"><h2><a href="run-uncensored-ai-locally.html">How to Run Uncensored AI Locally: Chat, Images & Video in One App</a></h2><p>A complete guide to running AI locally without restrictions. Setup, models, and why local beats cloud.</p><div class="meta">March 29, 2026 · 8 min read</div></div>
-<div class="post-card"><h2><a href="locally-uncensored-vs-open-webui.html">Locally Uncensored vs Open WebUI</a></h2><p>Both are MIT-licensed Ollama frontends. Only one combines chat, image gen, and video generation.</p><div class="meta">March 29, 2026 · 5 min read</div></div>
-<div class="post-card"><h2><a href="locally-uncensored-vs-lm-studio.html">Locally Uncensored vs LM Studio</a></h2><p>Open source all-in-one vs polished closed-source chat client. Which local AI app should you pick?</p><div class="meta">March 29, 2026 · 5 min read</div></div>
-<div class="post-card"><h2><a href="locally-uncensored-vs-sillytavern.html">Locally Uncensored vs SillyTavern</a></h2><p>Both run uncensored AI locally. One is built for roleplay, the other for everything else.</p><div class="meta">March 29, 2026 · 5 min read</div></div>
-</main></body></html>
+<div class="filters">
+<button class="filter-btn active" onclick="filterPosts('all')">All</button>
+<button class="filter-btn" onclick="filterPosts('tutorial')">Tutorials</button>
+<button class="filter-btn" onclick="filterPosts('guide')">Guides</button>
+<button class="filter-btn" onclick="filterPosts('comparison')">Comparisons</button>
+<button class="filter-btn" onclick="filterPosts('opinion')">Opinion</button>
+</div>
+<div class="post-card" data-category="guide"><h2><a href="locally-uncensored-v1-5-release.html">Locally Uncensored v1.5 Release: Dynamic Workflows, CivitAI Marketplace & Desktop App</a></h2><p>The biggest update yet — dynamic workflow builder, CivitAI model marketplace, Tauri v2 desktop app, privacy hardening, 6 model bundles, and local Whisper STT.</p><div class="meta"><span class="tag tag-guide">Release</span>April 2, 2026 · 12 min read</div></div>
+<div class="post-card" data-category="tutorial"><h2><a href="how-to-run-flux-locally.html">How to Run Flux Locally — Step-by-Step Guide for AI Image Generation</a></h2><p>Learn how to run FLUX.1 locally on your own GPU for free AI image generation. Complete setup guide with ComfyUI.</p><div class="meta"><span class="tag tag-tutorial">Tutorial</span>April 2, 2026 · 8 min read</div></div>
+<div class="post-card" data-category="guide"><h2><a href="best-uncensored-ai-models-2026.html">Best Uncensored AI Models in 2026 — Complete Guide</a></h2><p>The definitive guide to uncensored and abliterated AI models. Chat, image, and video models ranked by quality and VRAM.</p><div class="meta"><span class="tag tag-guide">Guide</span>April 2, 2026 · 10 min read</div></div>
+<div class="post-card" data-category="tutorial"><h2><a href="how-to-generate-ai-videos-locally.html">How to Generate AI Videos Locally with Wan 2.1 and HunyuanVideo</a></h2><p>Generate AI videos on your own hardware. Full local setup guide — no cloud API, no subscriptions.</p><div class="meta"><span class="tag tag-tutorial">Tutorial</span>April 2, 2026 · 8 min read</div></div>
+<div class="post-card" data-category="tutorial"><h2><a href="comfyui-beginners-guide.html">ComfyUI Beginners Guide — Your First AI Image in 5 Minutes</a></h2><p>Get started with ComfyUI for AI image generation. Setup, your first image, and workflow basics.</p><div class="meta"><span class="tag tag-tutorial">Tutorial</span>April 2, 2026 · 7 min read</div></div>
+<div class="post-card" data-category="opinion"><h2><a href="why-run-ai-locally.html">Why Run AI Locally? Privacy, Freedom, and No Subscriptions</a></h2><p>Running AI locally means full privacy, no content filters, and zero recurring costs. The case for local AI.</p><div class="meta"><span class="tag tag-opinion">Opinion</span>April 2, 2026 · 6 min read</div></div>
+<div class="post-card" data-category="guide"><h2><a href="best-local-ai-apps-2026.html">Best Local AI Apps in 2026 — Run AI on Your Own Hardware</a></h2><p>Complete comparison of GPT4All, Open WebUI, LM Studio, Jan, Kobold.cpp, SillyTavern, Msty, and Locally Uncensored.</p><div class="meta"><span class="tag tag-guide">Guide</span>March 30, 2026 · 10 min read</div></div>
+<div class="post-card" data-category="comparison"><h2><a href="locally-uncensored-vs-gpt4all.html">Locally Uncensored vs GPT4All</a></h2><p>All-in-one AI creative suite vs the most popular local chatbot with document RAG.</p><div class="meta"><span class="tag tag-comparison">Comparison</span>March 30, 2026 · 6 min read</div></div>
+<div class="post-card" data-category="comparison"><h2><a href="locally-uncensored-vs-koboldcpp.html">Locally Uncensored vs Kobold.cpp</a></h2><p>Full ComfyUI image/video generation vs the best creative writing AI tool.</p><div class="meta"><span class="tag tag-comparison">Comparison</span>March 30, 2026 · 6 min read</div></div>
+<div class="post-card" data-category="comparison"><h2><a href="locally-uncensored-vs-jan.html">Locally Uncensored vs Jan.ai</a></h2><p>Lightweight Tauri app with image gen vs polished Electron chat client with cloud API support.</p><div class="meta"><span class="tag tag-comparison">Comparison</span>March 30, 2026 · 6 min read</div></div>
+<div class="post-card" data-category="comparison"><h2><a href="locally-uncensored-vs-msty.html">Locally Uncensored vs Msty</a></h2><p>Fully open source MIT app with creative AI vs proprietary multi-provider chat hub.</p><div class="meta"><span class="tag tag-comparison">Comparison</span>March 30, 2026 · 6 min read</div></div>
+<div class="post-card" data-category="tutorial"><h2><a href="run-uncensored-ai-locally.html">How to Run Uncensored AI Locally: Chat, Images & Video in One App</a></h2><p>A complete guide to running AI locally without restrictions. Setup, models, and why local beats cloud.</p><div class="meta"><span class="tag tag-tutorial">Tutorial</span>March 29, 2026 · 8 min read</div></div>
+<div class="post-card" data-category="comparison"><h2><a href="locally-uncensored-vs-open-webui.html">Locally Uncensored vs Open WebUI</a></h2><p>Both are MIT-licensed Ollama frontends. Only one combines chat, image gen, and video generation.</p><div class="meta"><span class="tag tag-comparison">Comparison</span>March 29, 2026 · 5 min read</div></div>
+<div class="post-card" data-category="comparison"><h2><a href="locally-uncensored-vs-lm-studio.html">Locally Uncensored vs LM Studio</a></h2><p>Open source all-in-one vs polished closed-source chat client. Which local AI app should you pick?</p><div class="meta"><span class="tag tag-comparison">Comparison</span>March 29, 2026 · 5 min read</div></div>
+<div class="post-card" data-category="comparison"><h2><a href="locally-uncensored-vs-sillytavern.html">Locally Uncensored vs SillyTavern</a></h2><p>Both run uncensored AI locally. One is built for roleplay, the other for everything else.</p><div class="meta"><span class="tag tag-comparison">Comparison</span>March 29, 2026 · 5 min read</div></div>
+</main>
+<script>
+function filterPosts(cat){document.querySelectorAll('.filter-btn').forEach(b=>b.classList.toggle('active',b.textContent.toLowerCase()===cat||cat==='all'&&b.textContent==='All'));document.querySelectorAll('.post-card').forEach(c=>{c.style.display=cat==='all'||c.dataset.category===cat?'':'none'})}
+</script>
+</body></html>

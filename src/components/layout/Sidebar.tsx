@@ -97,8 +97,8 @@ export function Sidebar() {
                         autoFocus
                         onClick={(e) => e.stopPropagation()}
                       />
-                      <button onClick={(e) => { e.stopPropagation(); handleRename(conv.id) }} className="text-green-400"><Check size={14} /></button>
-                      <button onClick={(e) => { e.stopPropagation(); setEditingId(null) }} className="text-gray-400"><X size={14} /></button>
+                      <button onClick={(e) => { e.stopPropagation(); handleRename(conv.id) }} className="text-green-400" aria-label="Confirm rename"><Check size={14} /></button>
+                      <button onClick={(e) => { e.stopPropagation(); setEditingId(null) }} className="text-gray-400" aria-label="Cancel rename"><X size={14} /></button>
                     </div>
                   ) : (
                     <>
@@ -116,6 +116,7 @@ export function Sidebar() {
                         setEditTitle(conv.title)
                       }}
                       className="p-1 rounded hover:bg-white/10 text-gray-400"
+                      aria-label="Rename conversation"
                     >
                       <Edit3 size={12} />
                     </button>
@@ -125,6 +126,7 @@ export function Sidebar() {
                         deleteConversation(conv.id)
                       }}
                       className="p-1 rounded hover:bg-red-500/20 text-gray-400 hover:text-red-400"
+                      aria-label="Delete conversation"
                     >
                       <Trash2 size={12} />
                     </button>

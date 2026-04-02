@@ -23,6 +23,9 @@
 <meta name="theme-color" content="#0a0a0a">
 <link rel="icon" href="./favicon.svg">
 <!-- Privacy: No external fonts loaded. Using system fonts. -->
+<!-- Analytics: Self-hosted Plausible (privacy-friendly, no cookies, GDPR compliant) -->
+<!-- Setup: docker compose up -d on your server, then replace YOUR-DOMAIN below -->
+<script defer data-domain="YOUR-DOMAIN.com" src="https://plausible.YOUR-DOMAIN.com/js/script.js"></script>
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"SoftwareApplication","name":"Locally Uncensored","applicationCategory":"DeveloperApplication","applicationSubCategory":"Artificial Intelligence","operatingSystem":"Windows, macOS, Linux","description":"All-in-one local AI desktop app for uncensored chat, image generation, and video creation. Run Llama, Mistral, Qwen, FLUX, Stable Diffusion, and Wan 2.1 models locally with zero cloud dependency.","url":"https://purpledoubled.github.io/locally-uncensored/","downloadUrl":"https://github.com/PurpleDoubleD/locally-uncensored","softwareVersion":"1.1.0","license":"https://opensource.org/licenses/MIT","author":{"@type":"Person","name":"PurpleDoubleD","url":"https://github.com/PurpleDoubleD"},"offers":{"@type":"Offer","price":"0","priceCurrency":"USD"},"featureList":["Uncensored AI Chat via Ollama","Image Generation via ComfyUI and Stable Diffusion","Video Generation with Wan 2.1 and AnimateDiff","25+ Built-in AI Personas","One-Click Setup on Windows, macOS, Linux","Model Auto-Detection","100% Offline and Private","No Docker Required"],"screenshot":"https://raw.githubusercontent.com/PurpleDoubleD/locally-uncensored/master/docs/screenshots/marketing_03_chat_personas.png","softwareRequirements":"Node.js 18+, Ollama","memoryRequirements":"8 GB RAM minimum","storageRequirements":"6 GB for default model"}
 </script>
@@ -199,7 +202,10 @@ footer a:hover{color:var(--text)}
     </a>
   </div>
   <div class="hero-image">
-    <img src="screenshots/chat_personas_dark.jpg" alt="Locally Uncensored — Uncensored AI Chat Interface with Ollama, showing persona selection and private local conversation" loading="eager">
+    <picture>
+      <source srcset="screenshots/chat_personas_dark.webp" type="image/webp">
+      <img src="screenshots/chat_personas_dark.jpg" alt="Locally Uncensored — Uncensored AI Chat Interface with Ollama, showing persona selection and private local conversation" loading="eager" width="1280" height="630">
+    </picture>
   </div>
 </section>
 
@@ -289,11 +295,17 @@ footer a:hover{color:var(--text)}
 <section class="showcase reveal">
   <div class="showcase-grid">
     <div class="showcase-card">
-      <img src="screenshots/create_dark.jpg" alt="Locally Uncensored — Local AI image and video generation with ComfyUI backend, Stable Diffusion and Wan 2.1 support" loading="lazy">
+      <picture>
+        <source srcset="screenshots/create_dark.webp" type="image/webp">
+        <img src="screenshots/create_dark.jpg" alt="Locally Uncensored — Local AI image and video generation with ComfyUI backend, Stable Diffusion and Wan 2.1 support" loading="lazy" width="1280" height="609">
+      </picture>
       <div class="showcase-card-label">Image and video generation with full parameter control — no content filters</div>
     </div>
     <div class="showcase-card">
-      <img src="screenshots/model_manager_dark.jpg" alt="Locally Uncensored — AI Model Manager showing one-click install for Ollama and ComfyUI models" loading="lazy">
+      <picture>
+        <source srcset="screenshots/model_manager_dark.webp" type="image/webp">
+        <img src="screenshots/model_manager_dark.jpg" alt="Locally Uncensored — AI Model Manager showing one-click install for Ollama and ComfyUI models" loading="lazy" width="1280" height="607">
+      </picture>
       <div class="showcase-card-label">One-click model installation with hardware-aware recommendations</div>
     </div>
   </div>

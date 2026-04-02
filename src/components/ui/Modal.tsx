@@ -32,6 +32,7 @@ export function Modal({ open, onClose, title, children }: Props) {
               <button
                 onClick={onClose}
                 className="p-1 rounded-lg hover:bg-white/10 text-gray-400 hover:text-white transition-colors"
+                aria-label="Close"
               >
                 <X size={20} />
               </button>

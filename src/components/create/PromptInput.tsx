@@ -50,6 +50,7 @@ export function PromptInput({ onGenerate, onCancel, disabled }: Props) {
               onClick={() => setShowHistory(!showHistory)}
               className="absolute top-2 right-2 p-1 rounded text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-white/10 transition-colors"
               title="Prompt history"
+              aria-label="Prompt history"
             >
               <History size={14} />
             </button>
@@ -88,7 +89,7 @@ export function PromptInput({ onGenerate, onCancel, disabled }: Props) {
           </button>
           <div className="flex items-center gap-2">
             {prompt.trim() && !isGenerating && (
-              <button onClick={() => setPrompt('')} className="p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">
+              <button onClick={() => setPrompt('')} className="p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300" aria-label="Clear prompt">
                 <X size={14} />
               </button>
             )}

@@ -24,6 +24,7 @@ export function CodeBlock({ code, language }: Props) {
         <button
           onClick={handleCopy}
           className="flex items-center gap-1 text-xs text-gray-400 hover:text-white transition-colors"
+          aria-label="Copy code"
         >
           {copied ? <Check size={14} /> : <Copy size={14} />}
           {copied ? 'Copied' : 'Copy'}

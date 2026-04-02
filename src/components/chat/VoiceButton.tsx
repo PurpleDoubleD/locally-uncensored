@@ -32,6 +32,7 @@ export function VoiceButton({ onTranscript, onRecordingChange, disabled }: Props
         <button
           disabled
           className="p-2 rounded-lg text-gray-300 dark:text-gray-600 cursor-not-allowed shrink-0"
+          aria-label="Microphone unavailable"
         >
           <MicOff size={15} />
         </button>
@@ -48,6 +49,7 @@ export function VoiceButton({ onTranscript, onRecordingChange, disabled }: Props
       <motion.button
         disabled
         className="p-2 rounded-lg bg-blue-100 dark:bg-blue-500/20 border border-blue-300 dark:border-blue-500/40 text-blue-600 dark:text-blue-400 shrink-0 relative"
+        aria-label="Transcribing audio"
       >
         <Loader2 size={15} className="animate-spin" />
       </motion.button>
@@ -65,6 +67,7 @@ export function VoiceButton({ onTranscript, onRecordingChange, disabled }: Props
       } disabled:opacity-30 disabled:cursor-not-allowed`}
       data-voice-button
       whileTap={{ scale: 0.9 }}
+      aria-label={isRecording ? "Stop recording" : "Start voice input"}
     >
       {isRecording && (
         <motion.span
