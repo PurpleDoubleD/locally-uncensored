@@ -8,6 +8,7 @@ interface Props {
   onSelect: () => void
   onDelete: () => void
   onInfo: () => void
+  canDelete?: boolean
 }
 
 const TYPE_CONFIG = {
@@ -16,7 +17,7 @@ const TYPE_CONFIG = {
   video: { label: 'Video', icon: Video, color: 'text-green-400' },
 }
 
-export function ModelCard({ model, isActive, onSelect, onDelete, onInfo }: Props) {
+export function ModelCard({ model, isActive, onSelect, onDelete, onInfo, canDelete = true }: Props) {
   const typeInfo = TYPE_CONFIG[model.type] || TYPE_CONFIG.text
   const TypeIcon = typeInfo.icon
 
@@ -62,13 +63,15 @@ export function ModelCard({ model, isActive, onSelect, onDelete, onInfo }: Props
         >
           <Info size={12} />
         </button>
-        <button
-          onClick={(e) => { e.stopPropagation(); onDelete() }}
-          className="p-1 rounded hover:bg-red-500/20 text-gray-500 hover:text-red-400 transition-colors"
-          title="Delete"
-        >
-          <Trash2 size={12} />
-        </button>
+        {canDelete && (
+          <button
+            onClick={(e) => { e.stopPropagation(); onDelete() }}
+            className="p-1 rounded hover:bg-red-500/20 text-gray-500 hover:text-red-400 transition-colors"
+            title="Delete"
+          >
+            <Trash2 size={12} />
+          </button>
+        )}
       </div>
     </div>
   )

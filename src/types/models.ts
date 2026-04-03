@@ -1,5 +1,6 @@
+import type { ProviderId } from '../api/providers/types'
 
-// Text model (Ollama)
+// Text model (Ollama or cloud provider)
 export interface OllamaModel {
   name: string
   model: string
@@ -15,6 +16,23 @@ export interface OllamaModel {
     quantization_level: string
   }
   type: 'text'
+  provider?: ProviderId       // 'ollama' | 'openai' | 'anthropic'
+  providerName?: string       // Display: "Ollama", "OpenRouter", "Anthropic"
+  contextLength?: number      // Known context window size
+  supportsTools?: boolean     // Native tool calling support
+}
+
+// Cloud text model (OpenAI-compat or Anthropic) — lighter than OllamaModel
+export interface CloudModel {
+  name: string
+  model: string
+  size: number
+  type: 'text'
+  provider: ProviderId
+  providerName: string
+  contextLength?: number
+  supportsTools?: boolean
+  supportsVision?: boolean
 }
 
 // Image model (e.g. Stable Diffusion, SDXL, Fooocus, ComfyUI)
@@ -30,6 +48,8 @@ export interface ImageModel {
   updated_at?: string
   compatibleWith?: string[]
   type: 'image'
+  provider?: ProviderId
+  providerName?: string
 }
 
 // Video model (e.g. SVD, AnimateDiff, VideoCrafter, ComfyUI)
@@ -45,10 +65,12 @@ export interface VideoModel {
   updated_at?: string
   compatibleWith?: string[]
   type: 'video'
+  provider?: ProviderId
+  providerName?: string
 }
 
 // Generic model type
-export type AIModel = OllamaModel | ImageModel | VideoModel;
+export type AIModel = OllamaModel | CloudModel | ImageModel | VideoModel;
 
 export interface PullProgress {
   status: string

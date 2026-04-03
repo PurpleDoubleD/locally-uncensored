@@ -1,11 +1,12 @@
 /**
- * Model Compatibility for Agent Mode
+ * Model Compatibility for Agent Mode — now provider-aware.
  *
- * Agent Mode ONLY works with models that have native Ollama tool calling.
- * No workarounds, no fallbacks — if Ollama says no tools, no agent mode.
- *
- * Face of Agent Mode: Hermes 3 (uncensored + native tool calling)
+ * Cloud providers (OpenAI, Anthropic) always support native tool calling.
+ * Ollama models need explicit compatibility checks.
  */
+
+import { getProviderIdFromModel } from '../api/providers'
+import type { ProviderId } from '../api/providers/types'
 
 const AGENT_COMPATIBLE = [
   // ── Hermes: THE uncensored agent model ──
@@ -24,9 +25,15 @@ const AGENT_COMPATIBLE = [
 
 /**
  * Check if a model supports Agent Mode.
- * Must have native Ollama tool calling. No abliterated, no uncensored.
+ * Cloud providers always support tools. Ollama needs explicit check.
  */
 export function isAgentCompatible(modelName: string): boolean {
+  const providerId = getProviderIdFromModel(modelName)
+
+  // Cloud providers always support tool calling
+  if (providerId === 'openai' || providerId === 'anthropic') return true
+
+  // Ollama: check compatibility list
   const name = modelName.toLowerCase()
   if (name.includes('abliterated') || name.includes('uncensored')) return false
   const baseName = name.replace(/^[^/]+\//, '').replace(/-instruct/g, '').replace(/-chat/g, '').replace(/:.*$/, '')
@@ -38,7 +45,17 @@ export const hasNativeToolCalling = isAgentCompatible
 
 export type ToolCallingStrategy = 'native' | 'template_fix' | 'hermes_xml'
 
+/**
+ * Determine tool calling strategy for a model.
+ * Cloud providers → native. Ollama → check compatibility.
+ */
 export function getToolCallingStrategy(modelName: string): ToolCallingStrategy {
+  const providerId = getProviderIdFromModel(modelName)
+
+  // Cloud providers always use native tool calling
+  if (providerId === 'openai' || providerId === 'anthropic') return 'native'
+
+  // Ollama
   return isAgentCompatible(modelName) ? 'native' : 'hermes_xml'
 }
 
@@ -47,13 +64,16 @@ export interface RecommendedModel {
   label: string
   reason: string
   hot?: boolean
+  provider?: ProviderId
 }
 
 export function getRecommendedAgentModels(): RecommendedModel[] {
   return [
-    { name: 'hermes3:8b', label: 'Hermes 3 8B', reason: 'Uncensored + native tool calling. THE agent model.', hot: true },
-    { name: 'hermes3:70b', label: 'Hermes 3 70B', reason: 'Maximum power uncensored agent. Needs 48GB+.', hot: true },
-    { name: 'qwen2.5:7b', label: 'Qwen 2.5 7B', reason: 'Fast, reliable tool calling' },
-    { name: 'llama3.1:8b', label: 'Llama 3.1 8B', reason: 'Proven tool calling all-rounder' },
+    { name: 'hermes3:8b', label: 'Hermes 3 8B', reason: 'Uncensored + native tool calling. THE agent model.', hot: true, provider: 'ollama' },
+    { name: 'hermes3:70b', label: 'Hermes 3 70B', reason: 'Maximum power uncensored agent. Needs 48GB+.', hot: true, provider: 'ollama' },
+    { name: 'qwen2.5:7b', label: 'Qwen 2.5 7B', reason: 'Fast, reliable tool calling', provider: 'ollama' },
+    { name: 'llama3.1:8b', label: 'Llama 3.1 8B', reason: 'Proven tool calling all-rounder', provider: 'ollama' },
+    { name: 'openai::gpt-4o', label: 'GPT-4o', reason: 'Cloud: powerful tool calling', provider: 'openai' },
+    { name: 'anthropic::claude-sonnet-4-20250514', label: 'Claude Sonnet 4', reason: 'Cloud: fast + smart', provider: 'anthropic' },
   ]
 }

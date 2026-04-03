@@ -13,15 +13,17 @@ import { FEATURE_FLAGS } from '../../lib/constants'
 import { AGENT_TOOL_DEFS } from '../../api/tool-registry'
 import { getRecommendedAgentModels } from '../../lib/model-compatibility'
 import { MemorySettings } from './MemorySettings'
+import { ProviderSettings } from './ProviderConfig'
 
 // ── Collapsible Section ─────────────────────────────────────────
 
 function Section({ title, children, defaultOpen = false }: { title: string; children: ReactNode; defaultOpen?: boolean }) {
   const [open, setOpen] = useState(defaultOpen)
+  const [animating, setAnimating] = useState(false)
   return (
     <div className="border-b border-gray-100 dark:border-white/[0.04]">
       <button
-        onClick={() => setOpen(!open)}
+        onClick={() => { setOpen(!open); setAnimating(true) }}
         className="w-full flex items-center justify-between py-2.5 group"
       >
         <span className="text-[0.65rem] font-semibold uppercase tracking-[0.15em] text-gray-400 dark:text-gray-500 group-hover:text-gray-600 dark:group-hover:text-gray-300 transition-colors">
@@ -36,7 +38,8 @@ function Section({ title, children, defaultOpen = false }: { title: string; chil
             animate={{ height: 'auto', opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
             transition={{ duration: 0.15 }}
-            className="overflow-hidden"
+            onAnimationComplete={() => setAnimating(false)}
+            className={animating ? 'overflow-hidden' : 'overflow-visible'}
           >
             <div className="pb-3 space-y-2">
               {children}
@@ -151,8 +154,13 @@ export function SettingsPage() {
           </div>
         </Section>
 
-        {/* ── API ────────────────────────────────────── */}
-        <Section title="API">
+        {/* ── Providers ──────────────────────────────── */}
+        <Section title="Providers" defaultOpen>
+          <ProviderSettings />
+        </Section>
+
+        {/* ── API (Ollama legacy) ────────────────────── */}
+        <Section title="Ollama Endpoint">
           <ApiConfig endpoint={settings.apiEndpoint} onChange={(v) => updateSettings({ apiEndpoint: v })} />
         </Section>
 

@@ -9,6 +9,7 @@
  */
 
 import { getModelContext } from '../api/ollama'
+import { getProviderForModel, getProviderIdFromModel } from '../api/providers'
 import type { OllamaChatMessage } from '../types/agent-mode'
 
 // ── Token Estimation ────────────────────────────────────────────
@@ -39,10 +40,20 @@ export function estimateMessageTokens(messages: OllamaChatMessage[]): number {
 // ── Model Context Lookup ────────────────────────────────────────
 
 /**
- * Get the max context window for a model. Falls back to 4096 if unknown.
+ * Get the max context window for a model. Provider-aware.
+ * Cloud models have known large context windows.
  */
 export async function getModelMaxTokens(modelName: string): Promise<number> {
   try {
+    const providerId = getProviderIdFromModel(modelName)
+
+    if (providerId === 'openai' || providerId === 'anthropic') {
+      // Use provider's getContextLength for cloud models
+      const { provider, modelId } = getProviderForModel(modelName)
+      return await provider.getContextLength(modelId)
+    }
+
+    // Ollama: use existing endpoint
     return await getModelContext(modelName)
   } catch {
     return 4096

@@ -3,6 +3,7 @@ import { motion } from 'framer-motion'
 import { Download, ArrowLeft, RefreshCw, MessageSquare, Image, Video, Layers, AlertTriangle, FolderOpen } from 'lucide-react'
 import { useModels } from '../../hooks/useModels'
 import { useUIStore } from '../../stores/uiStore'
+import { useProviderStore } from '../../stores/providerStore'
 import { ModelCard } from './ModelCard'
 import { PullModelDialog } from './PullModelDialog'
 import { DiscoverModels } from './DiscoverModels'
@@ -22,6 +23,7 @@ const CATEGORY_TABS: { key: ModelCategory; label: string; icon: typeof Layers }[
 export function ModelManager() {
   const { models, activeModel, setActiveModel, fetchModels, removeModel, categoryFilter, setCategoryFilter } = useModels()
   const { setView } = useUIStore()
+  const ollamaEnabled = useProviderStore(s => s.providers.ollama.enabled)
   const [pullOpen, setPullOpen] = useState(false)
   const [infoOpen, setInfoOpen] = useState(false)
   const [modelInfo, setModelInfo] = useState<any>(null)
@@ -34,7 +36,6 @@ export function ModelManager() {
 
   useEffect(() => {
     fetchModels()
-    // Check ComfyUI status
     backendCall('comfyui_status').then(setComfyStatus).catch(() => {})
   }, [fetchModels])
 
@@ -72,74 +73,80 @@ export function ModelManager() {
     setConfirmDelete(null)
   }
 
-  const filteredModels = categoryFilter === 'all'
-    ? models
-    : models.filter((m: AIModel) => m.type === categoryFilter)
+  const filteredModels = models.filter((m: AIModel) => {
+    if (categoryFilter !== 'all' && m.type !== categoryFilter) return false
+    return true
+  })
 
   return (
-    <div className="h-full overflow-y-auto scrollbar-thin p-6">
+    <div className="h-full overflow-y-auto scrollbar-thin p-4">
       <div className="max-w-4xl mx-auto">
-        <div className="flex items-center justify-between mb-6">
-          <div className="flex items-center gap-3">
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-2">
             <button
               onClick={() => setView('chat')}
-              className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-white/10 text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors"
+              className="p-1 rounded-lg hover:bg-gray-100 dark:hover:bg-white/10 text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors"
             >
-              <ArrowLeft size={20} />
+              <ArrowLeft size={16} />
             </button>
-            <h1 className="text-[0.85rem] font-semibold text-gray-800 dark:text-gray-200">Model Manager</h1>
+            <h1 className="text-[0.8rem] font-semibold text-gray-800 dark:text-gray-200">Model Manager</h1>
           </div>
-          <div className="flex items-center gap-2">
-            <GlowButton variant="secondary" onClick={fetchModels}>
-              <RefreshCw size={16} />
-            </GlowButton>
-            <GlowButton onClick={() => setPullOpen(true)} className="flex items-center gap-2">
-              <Download size={16} /> Pull Model
-            </GlowButton>
+          <div className="flex items-center gap-1.5">
+            <button onClick={fetchModels} className="p-1.5 rounded-lg hover:bg-white/10 text-gray-500 hover:text-white transition-colors">
+              <RefreshCw size={13} />
+            </button>
+            {ollamaEnabled && (
+              <button
+                onClick={() => setPullOpen(true)}
+                className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-white/5 border border-white/10 text-[0.65rem] text-gray-300 hover:bg-white/10 transition-colors"
+              >
+                <Download size={12} /> Pull Model
+              </button>
+            )}
           </div>
         </div>
 
         {/* ComfyUI path warning */}
         {comfyStatus && !comfyStatus.found && !comfyStatus.path && (
-          <div className="mb-4 p-4 rounded-lg bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/20">
-            <div className="flex items-start gap-2 mb-2">
-              <AlertTriangle size={16} className="text-amber-500 shrink-0 mt-0.5" />
+          <div className="mb-3 p-2.5 rounded-lg bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/20">
+            <div className="flex items-start gap-2 mb-1.5">
+              <AlertTriangle size={12} className="text-amber-500 shrink-0 mt-0.5" />
               <div>
-                <p className="text-sm font-medium text-amber-800 dark:text-amber-300">ComfyUI not found</p>
-                <p className="text-xs text-amber-600 dark:text-amber-400 mt-0.5">Image/Video model downloads need the ComfyUI path. Enter it below or install ComfyUI first.</p>
+                <p className="text-[0.7rem] font-medium text-amber-800 dark:text-amber-300">ComfyUI not found</p>
+                <p className="text-[0.6rem] text-amber-600 dark:text-amber-400 mt-0.5">Image/Video model downloads need the ComfyUI path.</p>
               </div>
             </div>
-            <div className="flex gap-2 mt-2">
-              <div className="flex-1 flex items-center gap-2">
-                <FolderOpen size={16} className="text-amber-500 shrink-0" />
+            <div className="flex gap-1.5 mt-1.5">
+              <div className="flex-1 flex items-center gap-1.5">
+                <FolderOpen size={12} className="text-amber-500 shrink-0" />
                 <input
                   value={comfyPathInput}
                   onChange={(e) => { setComfyPathInput(e.target.value); setComfyPathError('') }}
                   placeholder="C:\Users\you\ComfyUI"
-                  className="flex-1 px-3 py-1.5 rounded-lg bg-white dark:bg-black/20 border border-amber-300 dark:border-amber-500/30 text-sm text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none"
+                  className="flex-1 px-2 py-1 rounded bg-white dark:bg-black/20 border border-amber-300 dark:border-amber-500/30 text-[0.65rem] text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none"
                 />
               </div>
               <button
                 onClick={handleSetComfyPath}
                 disabled={comfyPathSaving}
-                className="px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-600 text-white text-sm font-medium transition-colors disabled:opacity-50"
+                className="px-2 py-1 rounded bg-amber-500 hover:bg-amber-600 text-white text-[0.6rem] font-medium transition-colors disabled:opacity-50"
               >
-                {comfyPathSaving ? 'Saving...' : 'Set Path'}
+                {comfyPathSaving ? '...' : 'Set Path'}
               </button>
             </div>
-            {comfyPathError && <p className="text-xs text-red-500 mt-1">{comfyPathError}</p>}
+            {comfyPathError && <p className="text-[0.55rem] text-red-500 mt-1">{comfyPathError}</p>}
           </div>
         )}
 
         {comfyStatus?.path && (
-          <p className="text-xs text-gray-400 mb-4">ComfyUI: {comfyStatus.path}</p>
+          <p className="text-[0.55rem] text-gray-500 mb-3 font-mono">ComfyUI: {comfyStatus.path}</p>
         )}
 
         {/* Main tabs: Installed / Discover */}
-        <div className="flex gap-1 mb-4 p-1 bg-gray-100 dark:bg-white/5 rounded-lg w-fit">
+        <div className="flex gap-0.5 mb-3 p-0.5 bg-gray-100 dark:bg-white/5 rounded-lg w-fit">
           <button
             onClick={() => setTab('installed')}
-            className={`px-4 py-2 rounded-md text-sm font-medium transition-all ${
+            className={`px-3 py-1 rounded-md text-[0.65rem] font-medium transition-all ${
               tab === 'installed'
                 ? 'bg-white dark:bg-white/10 text-gray-900 dark:text-white shadow-sm'
                 : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-white'
@@ -149,7 +156,7 @@ export function ModelManager() {
           </button>
           <button
             onClick={() => setTab('discover')}
-            className={`px-4 py-2 rounded-md text-sm font-medium transition-all ${
+            className={`px-3 py-1 rounded-md text-[0.65rem] font-medium transition-all ${
               tab === 'discover'
                 ? 'bg-white dark:bg-white/10 text-gray-900 dark:text-white shadow-sm'
                 : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-white'
@@ -161,7 +168,7 @@ export function ModelManager() {
 
         {/* Category filter tabs */}
         {tab === 'installed' && (
-          <div className="flex gap-0.5 mb-6 p-1 bg-gray-100 dark:bg-white/5 rounded-lg w-fit">
+          <div className="flex gap-0.5 mb-4 p-0.5 bg-gray-100 dark:bg-white/5 rounded-lg w-fit">
             {CATEGORY_TABS.map((catTab) => {
               const Icon = catTab.icon
               const count = catTab.key === 'all' ? models.length : models.filter((m) => m.type === catTab.key).length
@@ -169,13 +176,13 @@ export function ModelManager() {
                 <button
                   key={catTab.key}
                   onClick={() => setCategoryFilter(catTab.key)}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${
+                  className={`flex items-center gap-1 px-2 py-1 rounded-md text-[0.6rem] font-medium transition-all ${
                     categoryFilter === catTab.key
                       ? 'bg-white dark:bg-white/10 text-gray-900 dark:text-white shadow-sm'
                       : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-white/5'
                   }`}
                 >
-                  <Icon size={12} />
+                  <Icon size={10} />
                   {catTab.label} ({count})
                 </button>
               )
@@ -199,19 +206,25 @@ export function ModelManager() {
                     onSelect={() => setActiveModel(model.name)}
                     onDelete={() => setConfirmDelete(model.name)}
                     onInfo={() => handleInfo(model.name)}
+                    canDelete={ollamaEnabled && model.type === 'text' && (!('provider' in model) || model.provider === 'ollama')}
                   />
                 </motion.div>
               ))}
             </div>
 
             {filteredModels.length === 0 && (
-              <div className="text-center py-16">
-                <p className="text-gray-500 mb-4">
+              <div className="text-center py-10">
+                <p className="text-[0.7rem] text-gray-500 mb-3">
                   {categoryFilter === 'all'
                     ? 'No models installed'
                     : `No ${categoryFilter === 'text' ? 'Text' : categoryFilter === 'image' ? 'Image' : 'Video'} models installed`}
                 </p>
-                <GlowButton onClick={() => setTab('discover')}>Discover uncensored models</GlowButton>
+                <button
+                  onClick={() => setTab('discover')}
+                  className="px-3 py-1.5 rounded-lg bg-white/5 border border-white/10 text-[0.65rem] text-gray-300 hover:bg-white/10 transition-colors"
+                >
+                  Discover uncensored models
+                </button>
               </div>
             )}
           </>
@@ -219,21 +232,20 @@ export function ModelManager() {
 
         {tab === 'discover' && (
           <>
-            {/* Category filter for Discover too */}
-            <div className="flex gap-0.5 mb-6 p-1 bg-gray-100 dark:bg-white/5 rounded-lg w-fit">
+            <div className="flex gap-0.5 mb-4 p-0.5 bg-gray-100 dark:bg-white/5 rounded-lg w-fit">
               {CATEGORY_TABS.filter(t => t.key !== 'all').map((catTab) => {
                 const Icon = catTab.icon
                 return (
                   <button
                     key={catTab.key}
                     onClick={() => setCategoryFilter(catTab.key)}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${
+                    className={`flex items-center gap-1 px-2 py-1 rounded-md text-[0.6rem] font-medium transition-all ${
                       categoryFilter === catTab.key
                         ? 'bg-white dark:bg-white/10 text-gray-900 dark:text-white shadow-sm'
                         : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-white/5'
                     }`}
                   >
-                    <Icon size={12} />
+                    <Icon size={10} />
                     {catTab.label}
                   </button>
                 )
@@ -247,10 +259,10 @@ export function ModelManager() {
       <PullModelDialog open={pullOpen} onClose={() => setPullOpen(false)} />
 
       <Modal open={!!confirmDelete} onClose={() => setConfirmDelete(null)} title="Delete Model">
-        <p className="text-gray-600 dark:text-gray-300 mb-4">
+        <p className="text-[0.7rem] text-gray-600 dark:text-gray-300 mb-3">
           Are you sure you want to delete <span className="text-gray-900 dark:text-white font-mono">{confirmDelete}</span>?
         </p>
-        <div className="flex gap-3">
+        <div className="flex gap-2">
           <GlowButton variant="secondary" onClick={() => setConfirmDelete(null)} className="flex-1">
             Cancel
           </GlowButton>
@@ -262,7 +274,7 @@ export function ModelManager() {
 
       <Modal open={infoOpen} onClose={() => setInfoOpen(false)} title={modelInfo?.name || 'Model Info'}>
         {modelInfo && (
-          <pre className="text-xs text-gray-600 dark:text-gray-300 bg-gray-100 dark:bg-black/30 rounded-lg p-4 overflow-auto max-h-96 scrollbar-thin font-mono">
+          <pre className="text-[0.6rem] text-gray-600 dark:text-gray-300 bg-gray-100 dark:bg-black/30 rounded-lg p-3 overflow-auto max-h-80 scrollbar-thin font-mono">
             {JSON.stringify(modelInfo, null, 2)}
           </pre>
         )}

@@ -1,7 +1,5 @@
 import { useRef, useState, useCallback } from "react"
 import { v4 as uuid } from "uuid"
-import { chatStream } from "../api/ollama"
-import { parseNDJSONStream } from "../api/stream"
 import { useChatStore } from "../stores/chatStore"
 import { useModelStore } from "../stores/modelStore"
 import { useSettingsStore } from "../stores/settingsStore"
@@ -11,11 +9,8 @@ import { retrieveContext } from "../api/rag"
 import { speakStreaming, isSpeechSynthesisSupported, getVoicesAsync } from "../api/voice"
 import { useAgentChat } from "./useAgentChat"
 import { useAgentModeStore } from "../stores/agentModeStore"
-
-interface ChatChunk {
-  message?: { content: string }
-  done?: boolean
-}
+import { getProviderForModel } from "../api/providers"
+import type { ChatStreamChunk } from "../api/providers/types"
 
 export function useChat() {
   const [isGenerating, setIsGenerating] = useState(false)
@@ -101,10 +96,10 @@ export function useChat() {
     }
 
     const messages = [
-      ...(systemPrompt ? [{ role: "system", content: systemPrompt }] : []),
+      ...(systemPrompt ? [{ role: "system" as const, content: systemPrompt }] : []),
       ...conv.messages
         .filter((m) => m.content.trim() !== '')
-        .map((m) => ({ role: m.role, content: m.content })),
+        .map((m) => ({ role: m.role as 'user' | 'assistant' | 'system' | 'tool', content: m.content })),
     ]
 
     const abort = new AbortController()
@@ -116,27 +111,32 @@ export function useChat() {
     isThinkingRef.current = false
 
     try {
-      const response = await chatStream(
-        activeModel,
+      // ── Multi-Provider: resolve provider for active model ──
+      const { provider, modelId } = getProviderForModel(activeModel)
+
+      const stream = provider.chatStream(
+        modelId,
         messages,
         {
           temperature: settings.temperature,
-          top_p: settings.topP,
-          top_k: settings.topK,
-          num_predict: settings.maxTokens || undefined,
+          topP: settings.topP,
+          topK: settings.topK,
+          maxTokens: settings.maxTokens || undefined,
+          signal: abort.signal,
         },
-        abort.signal
       )
 
       let frameScheduled = false
       let firstChunk = true
-      for await (const chunk of parseNDJSONStream<ChatChunk>(response)) {
+
+      for await (const chunk of stream) {
         if (firstChunk) {
           firstChunk = false
           setIsLoadingModel(false)
         }
-        if (chunk.message?.content) {
-          const text = chunk.message.content
+
+        if (chunk.content) {
+          const text = chunk.content
 
           for (const char of text) {
             if (!isThinkingRef.current) {
@@ -167,6 +167,7 @@ export function useChat() {
             })
           }
         }
+
         if (chunk.done) {
           useChatStore
             .getState()
@@ -180,10 +181,16 @@ export function useChat() {
       }
     } catch (err) {
       if ((err as Error).name !== "AbortError") {
+        const errorMsg = (err as any).code === 'auth'
+          ? (err as Error).message
+          : (err as any).code === 'rate_limit'
+            ? (err as Error).message
+            : `Error: ${(err as Error).message || 'Connection failed'}`
+
         useChatStore.getState().updateMessageContent(
           convId!,
           assistantMessage.id,
-          contentRef.current + "\n\n⚠️ Error: Connection failed"
+          contentRef.current + "\n\n" + errorMsg
         )
       }
     } finally {

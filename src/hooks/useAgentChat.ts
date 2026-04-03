@@ -1,6 +1,5 @@
 import { useRef, useState, useCallback } from 'react'
 import { v4 as uuid } from 'uuid'
-import { chatWithTools } from '../api/ollama'
 import { chatNonStreaming } from '../api/agents'
 import { useChatStore } from '../stores/chatStore'
 import { agentVariantExists, createAgentVariant, getAgentModelName, canFixModel } from '../api/model-template-fix'
@@ -15,15 +14,17 @@ import { getToolCallingStrategy, type ToolCallingStrategy } from '../lib/model-c
 import { buildHermesToolPrompt, buildHermesToolResult, parseHermesToolCalls, stripToolCallTags, hasToolCallTags } from '../api/hermes-tool-calling'
 import { compactMessages, getModelMaxTokens } from '../lib/context-compaction'
 import { useMemoryStore } from '../stores/memoryStore'
+import { getProviderForModel, getProviderIdFromModel } from '../api/providers'
 import type { AgentBlock, AgentToolCall, OllamaChatMessage } from '../types/agent-mode'
+import type { ChatMessage, ToolCall, ToolDefinition } from '../api/providers/types'
 
-// ── Approval promise management ───────────────────────────────────
+// ── Approval promise management ───────────────────────────────
 
 interface ApprovalResolver {
   resolve: (approved: boolean) => void
 }
 
-// ── Hook ──────────────────────────────────────────────────────────
+// ── Hook ──────────────────────────────────────────────────────
 
 export function useAgentChat() {
   const [isAgentRunning, setIsAgentRunning] = useState(false)
@@ -33,11 +34,10 @@ export function useAgentChat() {
   const approvalRef = useRef<ApprovalResolver | null>(null)
   const contentRef = useRef('')
   const thinkingRef = useRef('')
-  const isThinkingRef = useRef(false)
   const blocksRef = useRef<AgentBlock[]>([])
   const runningRef = useRef(false)
 
-  // ── Approval callbacks ────────────────────────────────────────
+  // ── Approval callbacks ────────────────────────────────────
 
   const approveToolCall = useCallback(() => {
     approvalRef.current?.resolve(true)
@@ -51,7 +51,7 @@ export function useAgentChat() {
     setPendingApproval(null)
   }, [])
 
-  // ── Wait for user approval ────────────────────────────────────
+  // ── Wait for user approval ────────────────────────────────
 
   function waitForApproval(toolCall: AgentToolCall): Promise<boolean> {
     return new Promise((resolve) => {
@@ -60,22 +60,14 @@ export function useAgentChat() {
     })
   }
 
-  // ── Add agent block and sync to store ─────────────────────────
+  // ── Add agent block and sync to store ─────────────────────
 
-  function addBlock(
-    convId: string,
-    msgId: string,
-    block: AgentBlock
-  ) {
+  function addBlock(convId: string, msgId: string, block: AgentBlock) {
     blocksRef.current = [...blocksRef.current, block]
     useChatStore.getState().updateMessageAgentBlocks(convId, msgId, blocksRef.current)
   }
 
-  function updateLastBlock(
-    convId: string,
-    msgId: string,
-    updates: Partial<AgentBlock>
-  ) {
+  function updateLastBlock(convId: string, msgId: string, updates: Partial<AgentBlock>) {
     const blocks = [...blocksRef.current]
     const last = blocks[blocks.length - 1]
     if (last) {
@@ -85,72 +77,7 @@ export function useAgentChat() {
     }
   }
 
-  // ── Stream a single LLM turn ──────────────────────────────────
-
-  async function streamOneTurn(
-    model: string,
-    messages: OllamaChatMessage[],
-    signal: AbortSignal
-  ): Promise<{ content: string; thinking: string; toolCalls: { name: string; arguments: Record<string, any> }[] }> {
-    const response = await chatStreamWithTools(
-      model,
-      messages,
-      getOllamaTools(),
-      {
-        temperature: useSettingsStore.getState().settings.temperature,
-        top_p: useSettingsStore.getState().settings.topP,
-        top_k: useSettingsStore.getState().settings.topK,
-        num_predict: useSettingsStore.getState().settings.maxTokens || undefined,
-      },
-      signal
-    )
-
-    let accContent = ''
-    let accThinking = ''
-    let isInThinking = false
-    let toolCalls: { name: string; arguments: Record<string, any> }[] = []
-
-    for await (const chunk of parseNDJSONStream<AgentChatChunk>(response)) {
-      if (signal.aborted) break
-
-      // Collect tool calls from the response
-      if (chunk.message?.tool_calls) {
-        for (const tc of chunk.message.tool_calls) {
-          toolCalls.push({
-            name: tc.function.name,
-            arguments: tc.function.arguments,
-          })
-        }
-      }
-
-      // Stream text content with <think> tag parsing
-      if (chunk.message?.content) {
-        for (const char of chunk.message.content) {
-          if (!isInThinking) {
-            accContent += char
-            if (accContent.endsWith('<think>')) {
-              accContent = accContent.slice(0, -7)
-              isInThinking = true
-            }
-          } else {
-            accThinking += char
-            if (accThinking.endsWith('</think>')) {
-              accThinking = accThinking.slice(0, -8)
-              isInThinking = false
-            }
-          }
-        }
-
-        // Update refs for UI batching
-        contentRef.current = accContent
-        thinkingRef.current = accThinking
-      }
-    }
-
-    return { content: accContent, thinking: accThinking, toolCalls }
-  }
-
-  // ── Main agent message handler ────────────────────────────────
+  // ── Main agent message handler ────────────────────────────
 
   const sendAgentMessage = useCallback(async (userContent: string) => {
     const { activeModel } = useModelStore.getState()
@@ -160,29 +87,40 @@ export function useAgentChat() {
 
     if (!activeModel) return
 
-    // ── Pre-flight: determine tool calling strategy ──────────
-    let modelToUse = activeModel
-    let strategy: ToolCallingStrategy = getToolCallingStrategy(activeModel)
+    // ── Resolve provider ────────────────────────────────────
+    const providerId = getProviderIdFromModel(activeModel)
+    const { provider, modelId } = getProviderForModel(activeModel)
 
-    if (strategy === 'template_fix') {
-      // Try to use existing agent variant, or create one
-      const agentName = getAgentModelName(activeModel)
-      const exists = await agentVariantExists(activeModel)
+    // ── Pre-flight: determine tool calling strategy ─────────
+    let modelToUse = modelId
+    let strategy: ToolCallingStrategy
 
-      if (exists) {
-        modelToUse = agentName
-        strategy = 'native' // template-fixed models use native API
-      } else {
-        const { fixable } = await canFixModel(activeModel)
-        if (fixable) {
-          try {
-            modelToUse = await createAgentVariant(activeModel)
-            strategy = 'native'
-          } catch {
-            strategy = 'hermes_xml' // fallback to prompt-based
-          }
+    if (providerId === 'openai' || providerId === 'anthropic') {
+      // Cloud providers always support native tool calling
+      strategy = 'native'
+    } else {
+      // Ollama: check model compatibility
+      strategy = getToolCallingStrategy(modelId)
+
+      if (strategy === 'template_fix') {
+        const agentName = getAgentModelName(modelId)
+        const exists = await agentVariantExists(modelId)
+
+        if (exists) {
+          modelToUse = agentName
+          strategy = 'native'
         } else {
-          strategy = 'hermes_xml'
+          const { fixable } = await canFixModel(modelId)
+          if (fixable) {
+            try {
+              modelToUse = await createAgentVariant(modelId)
+              strategy = 'native'
+            } catch {
+              strategy = 'hermes_xml'
+            }
+          } else {
+            strategy = 'hermes_xml'
+          }
         }
       }
     }
@@ -202,7 +140,7 @@ export function useAgentChat() {
     }
     useChatStore.getState().addMessage(convId, userMessage)
 
-    // Add empty assistant message (will be updated with streaming content + blocks)
+    // Add empty assistant message
     const assistantMessage = {
       id: uuid(),
       role: 'assistant' as const,
@@ -217,7 +155,7 @@ export function useAgentChat() {
     const conv = useChatStore.getState().conversations.find((c) => c.id === convId)
     if (!conv) return
 
-    // RAG context injection (same as useChat)
+    // RAG context injection
     let systemPrompt = conv.systemPrompt
     const ragState = useRAGStore.getState()
     const ragEnabled = ragState.ragEnabled[convId] ?? false
@@ -227,9 +165,7 @@ export function useAgentChat() {
       const chunks = ragState.getConversationChunks(convId)
       if (chunks.length > 0) {
         try {
-          const { context: ragContext } = await retrieveContext(
-            userContent, chunks, ragState.embeddingModel
-          )
+          const { context: ragContext } = await retrieveContext(userContent, chunks, ragState.embeddingModel)
           if (ragContext.chunks.length > 0) {
             const contextBlock = ragContext.chunks
               .map((c: any, i: number) => `[Source ${i + 1}]\n${c.content}`)
@@ -248,17 +184,17 @@ export function useAgentChat() {
       systemPrompt = (systemPrompt || '') + `\n\n## Remembered Context\n${memoryContext}`
     }
 
-    // Build the agent system prompt — Hermes XML mode gets tool defs in the prompt
+    // Build agent system prompt
     const agentSystemPrompt = strategy === 'hermes_xml'
       ? buildHermesToolPrompt(AGENT_TOOL_DEFS) + (systemPrompt ? `\n\n${systemPrompt}` : '')
       : buildAgentSystemPrompt(systemPrompt)
 
-    // Build messages array for Ollama (internal, includes tool messages)
-    let ollamaMessages: OllamaChatMessage[] = [
-      ...(agentSystemPrompt ? [{ role: 'system', content: agentSystemPrompt }] : []),
+    // Build messages array
+    let agentMessages: ChatMessage[] = [
+      ...(agentSystemPrompt ? [{ role: 'system' as const, content: agentSystemPrompt }] : []),
       ...conv.messages
         .filter((m) => m.role !== 'system' && m.content.trim() !== '')
-        .map((m) => ({ role: m.role, content: m.content })),
+        .map((m) => ({ role: m.role as 'user' | 'assistant' | 'tool', content: m.content })),
     ]
 
     // Setup
@@ -272,7 +208,6 @@ export function useAgentChat() {
 
     let frameScheduled = false
 
-    // Schedule UI updates via requestAnimationFrame
     function scheduleUIUpdate() {
       if (!frameScheduled) {
         frameScheduled = true
@@ -291,51 +226,51 @@ export function useAgentChat() {
     try {
       // ── Agent Loop ──────────────────────────────────────────
       while (runningRef.current && !abort.signal.aborted) {
-        let toolCalls: { name: string; arguments: Record<string, any> }[] = []
+        let toolCalls: ToolCall[] = []
         let turnContent = ''
         let turnThinking = ''
 
         const chatOptions = {
-          temperature: useSettingsStore.getState().settings.temperature,
-          top_p: useSettingsStore.getState().settings.topP,
-          top_k: useSettingsStore.getState().settings.topK,
-          num_predict: useSettingsStore.getState().settings.maxTokens || undefined,
+          temperature: settings.temperature,
+          topP: settings.topP,
+          topK: settings.topK,
+          maxTokens: settings.maxTokens || undefined,
+          signal: abort.signal,
         }
 
-        // Context compaction — prevent "Failed to fetch" from context overflow
-        const maxCtx = await getModelMaxTokens(modelToUse)
-        ollamaMessages = compactMessages(ollamaMessages, Math.floor(maxCtx * 0.8))
+        // Context compaction
+        const maxCtx = await getModelMaxTokens(activeModel)
+        agentMessages = compactMessages(
+          agentMessages as OllamaChatMessage[],
+          Math.floor(maxCtx * 0.8)
+        ) as ChatMessage[]
 
         if (strategy === 'native') {
-          // ── Native Ollama tool calling (non-streaming for reliability) ──
-          const turn = await chatWithTools(
-            modelToUse, ollamaMessages, getOllamaTools(), chatOptions,
-          )
+          // ── Native tool calling (works with Ollama, OpenAI, Anthropic) ──
+          const tools: ToolDefinition[] = getOllamaTools()
+          const turn = await provider.chatWithTools(modelToUse, agentMessages, tools, chatOptions)
 
-          toolCalls = (turn.tool_calls || []).map((tc: any) => ({
-            name: tc.function.name,
-            arguments: tc.function.arguments,
-          }))
+          toolCalls = turn.toolCalls
           turnContent = turn.content || ''
 
         } else {
-          // ── Hermes XML prompt-based tool calling ──
-          // Tools are already in the system prompt, just do a normal chat
+          // ── Hermes XML prompt-based tool calling (Ollama fallback) ──
           const rawContent = await chatNonStreaming(
             modelToUse,
-            ollamaMessages.map(m => ({ role: m.role, content: m.content })),
+            agentMessages.map(m => ({ role: m.role, content: m.content })),
           )
 
-          // Parse <tool_call> tags from output
           if (hasToolCallTags(rawContent)) {
-            toolCalls = parseHermesToolCalls(rawContent)
+            toolCalls = parseHermesToolCalls(rawContent).map(tc => ({
+              function: { name: tc.name, arguments: tc.arguments },
+            }))
             turnContent = stripToolCallTags(rawContent)
           } else {
             turnContent = rawContent
           }
         }
 
-        // Parse think tags from content (both strategies)
+        // Parse think tags
         const thinkMatch = turnContent.match(/<think>([\s\S]*?)<\/think>/)
         if (thinkMatch) {
           turnThinking = thinkMatch[1]
@@ -348,9 +283,7 @@ export function useAgentChat() {
         scheduleUIUpdate()
 
         // If no tool calls, the model is done
-        if (toolCalls.length === 0) {
-          break
-        }
+        if (toolCalls.length === 0) break
 
         // Process each tool call
         for (const tc of toolCalls) {
@@ -359,22 +292,21 @@ export function useAgentChat() {
           const toolCallId = uuid()
           const agentToolCall: AgentToolCall = {
             id: toolCallId,
-            toolName: tc.name,
-            args: tc.arguments,
+            toolName: tc.function.name,
+            args: tc.function.arguments,
             status: 'running',
             timestamp: Date.now(),
           }
 
           // Check permission
-          const permission = getToolPermission(tc.name)
+          const permission = getToolPermission(tc.function.name)
 
           if (permission === 'confirm') {
-            // Needs user approval
             agentToolCall.status = 'pending_approval'
             addBlock(convId!, assistantMessage.id, {
               id: uuid(),
               phase: 'tool_call',
-              content: `Requesting approval: ${tc.name}`,
+              content: `Requesting approval: ${tc.function.name}`,
               toolCall: agentToolCall,
               timestamp: Date.now(),
             })
@@ -382,49 +314,49 @@ export function useAgentChat() {
             const approved = await waitForApproval(agentToolCall)
 
             if (!approved) {
-              // User rejected
               agentToolCall.status = 'rejected'
               updateLastBlock(convId!, assistantMessage.id, {
                 toolCall: { ...agentToolCall, status: 'rejected' },
-                content: `Rejected: ${tc.name}`,
+                content: `Rejected: ${tc.function.name}`,
               })
 
-              // Feed rejection back to model
-              if (strategy === 'native') {
-                ollamaMessages.push({
-                  role: 'assistant',
-                  content: '',
-                  tool_calls: [{ function: { name: tc.name, arguments: tc.arguments } }],
+              // Feed rejection back
+              agentMessages.push({
+                role: 'assistant',
+                content: turnContent || '',
+                tool_calls: [tc],
+              })
+
+              if (providerId === 'openai' || providerId === 'anthropic') {
+                agentMessages.push({
+                  role: 'tool',
+                  content: 'User rejected this action. Try a different approach.',
+                  tool_call_id: tc.id,
                 })
-                ollamaMessages.push({
+              } else if (strategy === 'native') {
+                agentMessages.push({
                   role: 'tool',
                   content: 'User rejected this action. Try a different approach.',
                 })
               } else {
-                ollamaMessages.push({
-                  role: 'assistant',
-                  content: `<tool_call>\n{"name": "${tc.name}", "arguments": ${JSON.stringify(tc.arguments)}}\n</tool_call>`,
-                })
-                ollamaMessages.push({
+                agentMessages.push({
                   role: 'user',
-                  content: buildHermesToolResult(tc.name, 'User rejected this action. Try a different approach.'),
+                  content: buildHermesToolResult(tc.function.name, 'User rejected this action. Try a different approach.'),
                 })
               }
               continue
             }
 
-            // Approved — mark as running
             agentToolCall.status = 'running'
             updateLastBlock(convId!, assistantMessage.id, {
               toolCall: { ...agentToolCall, status: 'running' },
-              content: `Running: ${tc.name}`,
+              content: `Running: ${tc.function.name}`,
             })
           } else {
-            // Auto-approved
             addBlock(convId!, assistantMessage.id, {
               id: uuid(),
               phase: 'tool_call',
-              content: `Running: ${tc.name}`,
+              content: `Running: ${tc.function.name}`,
               toolCall: agentToolCall,
               timestamp: Date.now(),
             })
@@ -432,7 +364,7 @@ export function useAgentChat() {
 
           // Execute the tool
           const startTime = Date.now()
-          const result = await executeAgentTool(tc.name, tc.arguments)
+          const result = await executeAgentTool(tc.function.name, tc.function.arguments)
           const duration = Date.now() - startTime
 
           // Update block with result
@@ -444,57 +376,78 @@ export function useAgentChat() {
 
           updateLastBlock(convId!, assistantMessage.id, {
             toolCall: { ...agentToolCall },
-            content: isError ? `Failed: ${tc.name}` : `Completed: ${tc.name}`,
+            content: isError ? `Failed: ${tc.function.name}` : `Completed: ${tc.function.name}`,
           })
 
           // Auto-save tool result to memory
           if (!isError) {
-            const argsShort = JSON.stringify(tc.arguments).substring(0, 100)
+            const argsShort = JSON.stringify(tc.function.arguments).substring(0, 100)
             const resultShort = result.substring(0, 200)
             useMemoryStore.getState().addEntry(
               'tool_result',
-              `${tc.name}(${argsShort}) → ${resultShort}`,
-              `agent:${tc.name}`
+              `${tc.function.name}(${argsShort}) → ${resultShort}`,
+              `agent:${tc.function.name}`
             )
           }
 
           // Append tool call + result to messages for next iteration
-          if (strategy === 'native') {
-            ollamaMessages.push({
+          if (providerId === 'openai') {
+            // OpenAI format: assistant with tool_calls, then tool role with tool_call_id
+            agentMessages.push({
               role: 'assistant',
               content: turnContent || '',
-              tool_calls: [{ function: { name: tc.name, arguments: tc.arguments } }],
+              tool_calls: [tc],
             })
-            ollamaMessages.push({
+            agentMessages.push({
+              role: 'tool',
+              content: result,
+              tool_call_id: tc.id,
+            })
+          } else if (providerId === 'anthropic') {
+            // Anthropic format: same structure, tool_call_id maps to tool_use id
+            agentMessages.push({
+              role: 'assistant',
+              content: turnContent || '',
+              tool_calls: [tc],
+            })
+            agentMessages.push({
+              role: 'tool',
+              content: result,
+              tool_call_id: tc.id,
+            })
+          } else if (strategy === 'native') {
+            // Ollama native
+            agentMessages.push({
+              role: 'assistant',
+              content: turnContent || '',
+              tool_calls: [{ function: { name: tc.function.name, arguments: tc.function.arguments } }],
+            })
+            agentMessages.push({
               role: 'tool',
               content: result,
             })
           } else {
-            // Hermes XML: assistant had <tool_call> tags, result goes as user <tool_response>
-            ollamaMessages.push({
+            // Hermes XML
+            agentMessages.push({
               role: 'assistant',
-              content: `<tool_call>\n{"name": "${tc.name}", "arguments": ${JSON.stringify(tc.arguments)}}\n</tool_call>`,
+              content: `<tool_call>\n{"name": "${tc.function.name}", "arguments": ${JSON.stringify(tc.function.arguments)}}\n</tool_call>`,
             })
-            ollamaMessages.push({
+            agentMessages.push({
               role: 'user',
-              content: buildHermesToolResult(tc.name, result),
+              content: buildHermesToolResult(tc.function.name, result),
             })
           }
         }
 
-        // Reset content for next iteration (model will produce new content)
+        // Reset content for next iteration
         contentRef.current = ''
         thinkingRef.current = ''
       }
 
       // Final store update
-      useChatStore.getState().updateMessageContent(
-        convId!, assistantMessage.id, contentRef.current
-      )
+      useChatStore.getState().updateMessageContent(convId!, assistantMessage.id, contentRef.current)
       if (thinkingRef.current) {
-        useChatStore.getState().updateMessageThinking(
-          convId!, assistantMessage.id, thinkingRef.current
-        )
+        useChatStore.getState().updateMessageThinking(convId!, assistantMessage.id, thinkingRef.current)
       }
 
     } catch (err) {
@@ -504,12 +457,12 @@ export function useAgentChat() {
         if (errorMsg.includes('does not support tools')) {
           useChatStore.getState().updateMessageContent(
             convId!, assistantMessage.id,
-            `⚠️ This model does not support tool calling.\n\nThe auto-fix could not be applied. Try pulling a standard model like:\n• qwen2.5:7b\n• llama3.1:8b\n• mistral:7b`
+            `This model does not support tool calling.\n\nThe auto-fix could not be applied. Try pulling a standard model like:\n• qwen2.5:7b\n• llama3.1:8b\n• mistral:7b`
           )
         } else {
           useChatStore.getState().updateMessageContent(
             convId!, assistantMessage.id,
-            contentRef.current + '\n\n⚠️ Agent error: ' + errorMsg
+            contentRef.current + '\n\nAgent error: ' + errorMsg
           )
         }
       }
@@ -542,7 +495,6 @@ export function useAgentChat() {
   const stopAgent = useCallback(() => {
     runningRef.current = false
     abortRef.current?.abort()
-    // Also resolve any pending approval to unblock the loop
     approvalRef.current?.resolve(false)
     approvalRef.current = null
     setPendingApproval(null)
