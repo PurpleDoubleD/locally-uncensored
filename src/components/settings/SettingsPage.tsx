@@ -27,7 +27,7 @@ function Section({ title, children, defaultOpen = false }: { title: string; chil
         onClick={() => { setOpen(!open); setAnimating(true) }}
         className="w-full flex items-center justify-between py-2.5 group"
       >
-        <span className="text-[0.65rem] font-semibold uppercase tracking-[0.15em] text-gray-400 dark:text-gray-500 group-hover:text-gray-600 dark:group-hover:text-gray-300 transition-colors">
+        <span className="text-[0.65rem] font-semibold uppercase tracking-[0.15em] text-gray-600 dark:text-gray-500 group-hover:text-gray-800 dark:group-hover:text-gray-300 transition-colors">
           {title}
         </span>
         <ChevronRight size={12} className={`text-gray-400 transition-transform duration-200 ${open ? 'rotate-90' : ''}`} />
@@ -59,7 +59,7 @@ function InlineToggle({ label, enabled, onChange, icon }: { label: string; enabl
     <div className="flex items-center justify-between py-0.5">
       <div className="flex items-center gap-1.5">
         {icon}
-        <span className="text-[0.7rem] text-gray-500 dark:text-gray-400">{label}</span>
+        <span className="text-[0.7rem] text-gray-700 dark:text-gray-400">{label}</span>
       </div>
       <button
         onClick={onChange}
@@ -131,7 +131,7 @@ export function SettingsPage() {
       <div className="max-w-lg mx-auto px-4 py-4">
         {/* Header */}
         <div className="flex items-center gap-2 mb-4">
-          <button onClick={() => setView('chat')} className="p-1 rounded hover:bg-white/5 text-gray-500 hover:text-white transition-colors">
+          <button onClick={() => setView('chat')} className="p-1 rounded hover:bg-gray-200 dark:hover:bg-white/5 text-gray-500 hover:text-gray-900 dark:hover:text-white transition-colors">
             <ArrowLeft size={16} />
           </button>
           <h1 className="text-[0.8rem] font-semibold text-gray-800 dark:text-gray-200">Settings</h1>
@@ -140,12 +140,12 @@ export function SettingsPage() {
         {/* ── Appearance ─────────────────────────────── */}
         <Section title="Appearance" defaultOpen>
           <div className="flex items-center justify-between">
-            <span className="text-[0.7rem] text-gray-500 dark:text-gray-400">Theme</span>
+            <span className="text-[0.7rem] text-gray-700 dark:text-gray-400">Theme</span>
             <div className="flex gap-1">
               <button
                 onClick={() => updateSettings({ theme: 'light' })}
                 className={`flex items-center gap-1 px-2 py-1 rounded text-[0.65rem] transition-colors ${
-                  settings.theme === 'light' ? 'bg-white/10 text-white' : 'text-gray-500 hover:text-gray-300'
+                  settings.theme === 'light' ? 'bg-gray-200 dark:bg-white/10 text-gray-900 dark:text-white' : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
                 }`}
               >
                 <Sun size={11} /> Light
@@ -153,7 +153,7 @@ export function SettingsPage() {
               <button
                 onClick={() => updateSettings({ theme: 'dark' })}
                 className={`flex items-center gap-1 px-2 py-1 rounded text-[0.65rem] transition-colors ${
-                  settings.theme === 'dark' ? 'bg-white/10 text-white' : 'text-gray-500 hover:text-gray-300'
+                  settings.theme === 'dark' ? 'bg-gray-200 dark:bg-white/10 text-gray-900 dark:text-white' : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
                 }`}
               >
                 <Moon size={11} /> Dark
@@ -168,7 +168,7 @@ export function SettingsPage() {
           <SliderControl label="Top P" value={settings.topP} min={0} max={1} step={0.05} onChange={(v) => updateSettings({ topP: v })} />
           <SliderControl label="Top K" value={settings.topK} min={1} max={100} step={1} onChange={(v) => updateSettings({ topK: v })} />
           <div className="flex items-center justify-between">
-            <span className="text-[0.7rem] text-gray-500 dark:text-gray-400">Max Tokens</span>
+            <span className="text-[0.7rem] text-gray-700 dark:text-gray-400">Max Tokens</span>
             <input
               type="number"
               value={settings.maxTokens}
