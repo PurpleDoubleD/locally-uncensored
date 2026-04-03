@@ -53,7 +53,8 @@ pub fn execute_code(
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    // Piped stderr already hides console; CREATE_NO_WINDOW breaks Python stderr
+    #[cfg(target_os = "windows")]
+    cmd.creation_flags(CREATE_NO_WINDOW);
     let mut child = cmd.spawn()
         .map_err(|e| format!("Spawn Python: {}", e))?;
 

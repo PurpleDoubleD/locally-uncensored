@@ -415,7 +415,8 @@ pub fn auto_start_comfyui(state: &AppState) {
                 .stdin(Stdio::null())
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped());
-            // Note: DO NOT use CREATE_NO_WINDOW for ComfyUI — tqdm needs a valid stderr handle.
+            #[cfg(target_os = "windows")]
+            cmd.creation_flags(CREATE_NO_WINDOW);
             match cmd.spawn() {
                 Ok(mut child) => {
                     // Drain stdout/stderr in background threads to prevent buffer deadlock

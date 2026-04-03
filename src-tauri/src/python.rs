@@ -1,6 +1,12 @@
 use std::path::Path;
 use std::process::Command;
 
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
+
+#[cfg(target_os = "windows")]
+const CREATE_NO_WINDOW: u32 = 0x08000000;
+
 /// Resolve the real Python binary path, filtering out Windows Store alias.
 pub fn get_python_bin() -> String {
     if cfg!(not(target_os = "windows")) {
@@ -16,14 +22,22 @@ pub fn get_python_bin() -> String {
     }
 
     // Windows: use `where python` and filter out WindowsApps alias
-    if let Ok(output) = Command::new("where").arg("python").output() {
+    let mut where_cmd = Command::new("where");
+    where_cmd.arg("python");
+    #[cfg(target_os = "windows")]
+    where_cmd.creation_flags(CREATE_NO_WINDOW);
+    if let Ok(output) = where_cmd.output() {
         if output.status.success() {
             let stdout = String::from_utf8_lossy(&output.stdout);
             for line in stdout.lines() {
                 let path = line.trim();
                 if !path.is_empty() && !path.contains("WindowsApps") {
                     // Verify it actually runs
-                    if let Ok(check) = Command::new(path).arg("--version").output() {
+                    let mut check_cmd = Command::new(path);
+                    check_cmd.arg("--version");
+                    #[cfg(target_os = "windows")]
+                    check_cmd.creation_flags(CREATE_NO_WINDOW);
+                    if let Ok(check) = check_cmd.output() {
                         if check.status.success() {
                             println!("[Python] Found via `where`: {}", path);
                             return path.to_string();
