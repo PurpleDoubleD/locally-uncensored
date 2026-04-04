@@ -34,11 +34,11 @@ No cloud. No censorship. No data collection. Your AI, your rules.
 
 ---
 
-## v2.2 — Latest Release
+## v2.2.1 — Latest Release (Hotfix)
 
-**New:** Custom dark titlebar (no more Windows chrome), branded NSIS installer, Qwen3-Coder integration, Download Manager with multi-pull + pause/resume, auto-unload on model switch, redesigned Model Selector, Update Checker
+**Fixed:** Model unloading now works correctly, GPU offloading enabled by default (`num_gpu: 99`), silent error swallowing replaced with console logging. Resolves high CPU/RAM usage on systems with dedicated GPUs.
 
-See the full [Release Notes](https://github.com/PurpleDoubleD/locally-uncensored/releases/tag/v2.2.0).
+See the full [Release Notes](https://github.com/PurpleDoubleD/locally-uncensored/releases/tag/v2.2.1).
 
 ---
 

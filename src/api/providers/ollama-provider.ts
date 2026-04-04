@@ -66,12 +66,12 @@ export class OllamaProvider implements ProviderClient {
       stream: true,
     }
 
-    const ollamaOptions: Record<string, any> = {}
+    const ollamaOptions: Record<string, any> = { num_gpu: 99 }
     if (options?.temperature !== undefined) ollamaOptions.temperature = options.temperature
     if (options?.topP !== undefined) ollamaOptions.top_p = options.topP
     if (options?.topK !== undefined) ollamaOptions.top_k = options.topK
     if (options?.maxTokens) ollamaOptions.num_predict = options.maxTokens
-    if (Object.keys(ollamaOptions).length > 0) body.options = ollamaOptions
+    body.options = ollamaOptions
 
     const res = await localFetchStream(this.apiUrl('/chat'), {
       method: 'POST',
@@ -119,12 +119,12 @@ export class OllamaProvider implements ProviderClient {
       stream: false,
     }
 
-    const ollamaOptions: Record<string, any> = {}
+    const ollamaOptions: Record<string, any> = { num_gpu: 99 }
     if (options?.temperature !== undefined) ollamaOptions.temperature = options.temperature
     if (options?.topP !== undefined) ollamaOptions.top_p = options.topP
     if (options?.topK !== undefined) ollamaOptions.top_k = options.topK
     if (options?.maxTokens) ollamaOptions.num_predict = options.maxTokens
-    if (Object.keys(ollamaOptions).length > 0) body.options = ollamaOptions
+    body.options = ollamaOptions
 
     const res = await localFetch(this.apiUrl('/chat'), {
       method: 'POST',

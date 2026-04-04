@@ -36,9 +36,10 @@ export async function chatStream(
   options: { temperature?: number; top_p?: number; top_k?: number; num_predict?: number } = {},
   signal?: AbortSignal
 ): Promise<Response> {
+  const opts = { num_gpu: 99, ...options }
   const res = await localFetchStream(ollamaUrl("/chat"), {
     method: "POST",
-    body: JSON.stringify({ model, messages, options, stream: true }),
+    body: JSON.stringify({ model, messages, options: opts, stream: true }),
   })
   if (!res.ok) throw new Error("Failed to start chat")
   return res
@@ -52,9 +53,10 @@ export async function chatStreamWithTools(
   options: { temperature?: number; top_p?: number; top_k?: number; num_predict?: number } = {},
   signal?: AbortSignal
 ): Promise<Response> {
+  const opts = { num_gpu: 99, ...options }
   const res = await localFetchStream(ollamaUrl("/chat"), {
     method: "POST",
-    body: JSON.stringify({ model, messages, tools, options, stream: true }),
+    body: JSON.stringify({ model, messages, tools, options: opts, stream: true }),
   })
   if (!res.ok) {
     // Try to extract Ollama's error message
@@ -79,7 +81,7 @@ export async function chatWithTools(
   const res = await localFetch(ollamaUrl("/chat"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ model, messages, tools, options, stream: false }),
+    body: JSON.stringify({ model, messages, tools, options: { num_gpu: 99, ...options }, stream: false }),
   })
   if (!res.ok) {
     try {
@@ -170,16 +172,19 @@ export async function listRunningModels(): Promise<string[]> {
 }
 
 export async function unloadModel(name: string): Promise<void> {
-  await localFetch(ollamaUrl("/generate"), {
+  const res = await localFetch(ollamaUrl("/generate"), {
     method: "POST",
-    body: JSON.stringify({ model: name, keep_alive: 0 }),
+    body: JSON.stringify({ model: name, prompt: "", keep_alive: 0 }),
   })
+  if (!res.ok) {
+    console.warn(`[ollama] failed to unload model "${name}":`, res.status)
+  }
 }
 
 export async function unloadAllModels(): Promise<number> {
   const running = await listRunningModels()
   for (const name of running) {
-    try { await unloadModel(name) } catch { /* continue */ }
+    try { await unloadModel(name) } catch (e) { console.warn(`[ollama] unloadAll: failed for "${name}":`, e) }
   }
   return running.length
 }

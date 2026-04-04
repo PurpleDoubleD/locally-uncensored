@@ -2,6 +2,13 @@
 
 All notable changes to Locally Uncensored are documented here.
 
+## [2.2.1] - 2026-04-04
+
+### Fixed
+- **Model unloading broken** — unload button and automatic unload on model switch silently failed (missing `prompt` field in Ollama `/generate` call), causing models to stay in RAM indefinitely
+- **No GPU offloading** — models ran entirely on CPU/RAM instead of GPU; added `num_gpu: 99` to all Ollama chat calls so layers are offloaded to GPU automatically (Ollama splits between GPU and CPU if VRAM is insufficient)
+- **Silent error swallowing** — unload errors were caught and discarded with `.catch(() => {})`; now logged to console for debugging
+
 ## [1.9.0] - 2026-04-03
 
 ### Added

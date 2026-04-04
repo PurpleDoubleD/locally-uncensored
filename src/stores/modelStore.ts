@@ -46,7 +46,7 @@ export const useModelStore = create<ModelState>()(
         const prev = get().activeModel
         set({ activeModel: name })
         if (prev && prev !== name && !prev.includes('::')) {
-          unloadModel(prev).catch(() => {})
+          unloadModel(prev).catch((e) => console.warn('[modelStore] failed to unload previous model:', prev, e))
         }
       },
 

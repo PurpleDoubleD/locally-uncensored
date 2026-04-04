@@ -1,6 +1,6 @@
 {
   "name": "locally-uncensored",
-  "version": "2.2.0",
+  "version": "2.2.1",
   "private": false,
   "description": "Private, local AI chat & image/video generation. No cloud, no censorship, no data collection. Powered by Ollama & ComfyUI.",
   "license": "MIT",
