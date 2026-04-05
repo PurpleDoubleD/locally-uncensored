@@ -39,7 +39,7 @@ No cloud. No censorship. No data collection. Auto-detects 12 local backends. You
 **Plug & Play Setup, Multi-Provider Overhaul, Codex Agent, MCP Tools**
 
 - **Plug & Play Setup** — First-launch wizard auto-detects 12 local backends (Ollama, LM Studio, vLLM, KoboldCpp, Jan, GPT4All, llama.cpp, LocalAI, text-generation-webui, TabbyAPI, Aphrodite, SGLang). Nothing installed? One-click install links. Re-Scan after install. Zero config.
-- **25+ Provider Presets** — Every local and cloud backend pre-configured. Just pick and go.
+- **20+ Provider Presets** — Every local and cloud backend pre-configured. Just pick and go.
 - **Codex Coding Agent** — Three-tab system (LU | Codex | OpenClaw). Dedicated coding mode with file tree, native folder picker, shell execution, up to 20 iterations per task.
 - **13 MCP Tools** — Dynamic tool registry: web_search, web_fetch, file_read, file_write, file_list, file_search, shell_execute, code_execute, system_info, process_list, screenshot, image_generate, run_workflow.
 - **Granular Permissions** — 7 categories (web, filesystem, terminal, system, desktop, image, workflow) with blocked/confirm/auto levels. Per-conversation overrides.
@@ -63,7 +63,7 @@ See [Release Notes](https://github.com/PurpleDoubleD/locally-uncensored/releases
 | **Coding Agent (Codex)** | **Yes** | No | No | No |
 | **13 MCP Agent Tools** | **Yes** | No | No | No |
 | **Plug & Play Setup** | **12 Backends** | No | Built-in | No |
-| **Multi-Provider** (25+ Presets) | **Yes** | Yes | Yes | No |
+| **Multi-Provider** (20+ Presets) | **Yes** | Yes | Yes | No |
 | **A/B Model Compare** | **Yes** | No | No | No |
 | **Local Benchmark** | **Yes** | No | No | No |
 | Image Generation | **Yes** | No | No | No |
@@ -86,7 +86,7 @@ See [Release Notes](https://github.com/PurpleDoubleD/locally-uncensored/releases
 ### Core
 - **Plug & Play Setup** — First-launch wizard auto-detects 12 local backends. Nothing installed? One-click install links for every backend. Re-Scan after install. Zero config needed.
 - **Uncensored AI Chat** — Abliterated models with zero restrictions. Streaming + thinking display.
-- **Multi-Provider** — 25+ presets. Local: Ollama, LM Studio, vLLM, KoboldCpp, llama.cpp, LocalAI, Jan, TabbyAPI, GPT4All, Aphrodite, SGLang, TGI. Cloud: OpenAI, Anthropic, OpenRouter, Groq, Together, DeepSeek, Mistral. Switch per conversation.
+- **Multi-Provider** — 20+ presets. Local: Ollama, LM Studio, vLLM, KoboldCpp, llama.cpp, LocalAI, Jan, TabbyAPI, GPT4All, Aphrodite, SGLang, TGI. Cloud: OpenAI, Anthropic, OpenRouter, Groq, Together, DeepSeek, Mistral. Switch per conversation.
 - **Codex Coding Agent** — Reads codebase, writes code, runs shell commands. File tree with native folder picker. Up to 20 tool iterations.
 - **Agent Mode** — 13 MCP tools: web search, file I/O, shell, code execution, screenshots, system info. Native + Hermes XML fallback.
 - **Image Generation** — FLUX.1, Juggernaut XL, Pony Diffusion via ComfyUI. Full parameter control, no content filter.
@@ -105,7 +105,7 @@ See [Release Notes](https://github.com/PurpleDoubleD/locally-uncensored/releases
 - **Local Benchmark** — One-click benchmark any model. Tokens/sec leaderboard.
 - **Document Chat (RAG)** — Upload PDFs, DOCX, TXT. Hybrid search with source citations.
 - **Voice Chat** — Push-to-talk STT + sentence-level TTS streaming.
-- **25+ Personas** — Pre-built characters. Switch without prompt engineering.
+- **20+ Personas** — Pre-built characters. Switch without prompt engineering.
 - **Chat Export** — Markdown or JSON. Token counter. Keyboard shortcuts.
 
 ### Polish
@@ -120,7 +120,7 @@ See [Release Notes](https://github.com/PurpleDoubleD/locally-uncensored/releases
 - **Desktop**: Tauri v2 (Rust backend, standalone .exe)
 - **Frontend**: React 19, TypeScript, Tailwind CSS 4, Framer Motion
 - **State**: Zustand with localStorage persistence
-- **AI Backend**: 25+ providers (Ollama, LM Studio, vLLM, KoboldCpp, llama.cpp, LocalAI, Jan, OpenAI, Anthropic, OpenRouter, Groq, and more), ComfyUI, faster-whisper
+- **AI Backend**: 20+ providers (Ollama, LM Studio, vLLM, KoboldCpp, llama.cpp, LocalAI, Jan, OpenAI, Anthropic, OpenRouter, Groq, and more), ComfyUI, faster-whisper
 - **Build**: Vite 8 (dev), Tauri CLI (production)
 
 ---
@@ -206,7 +206,7 @@ Open the **Create** tab → click **"Install ComfyUI Automatically"**. One click
 - [x] File Upload + Vision
 - [x] Thinking Mode (provider-agnostic)
 - [x] Model Load/Unload from header
-- [x] Multi-Provider (25+ presets: Ollama, LM Studio, vLLM, KoboldCpp, OpenAI, Anthropic, and more)
+- [x] Multi-Provider (20+ presets: Ollama, LM Studio, vLLM, KoboldCpp, OpenAI, Anthropic, and more)
 - [x] Agent Mode + Workflows
 - [x] Memory System
 - [x] A/B Compare + Local Benchmark
