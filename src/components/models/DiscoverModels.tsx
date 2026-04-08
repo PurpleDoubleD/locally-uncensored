@@ -13,6 +13,7 @@ import {
   type DiscoverModel, type DownloadProgress, type ModelBundle, type CivitAIModelResult,
 } from '../../api/discover'
 import { getSystemVRAM } from '../../api/comfyui'
+import { openExternal } from '../../api/backend'
 import { useDownloadStore } from '../../stores/downloadStore'
 import { useModels } from '../../hooks/useModels'
 import { useProviderStore } from '../../stores/providerStore'
@@ -201,9 +202,9 @@ function ModelDiscoverCard({ model, index, isText, getModelDownloadState, pullMo
                   </button>
                 ) : null}
                 {model.url && (
-                  <a href={model.url} target="_blank" rel="noopener noreferrer" className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-white/10 text-gray-500 transition-all" title="View on website">
+                  <button onClick={() => openExternal(model.url!)} className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-white/10 text-gray-500 transition-all" title="View on website">
                     <ExternalLink size={14} />
-                  </a>
+                  </button>
                 )}
               </>
             )}
@@ -259,10 +260,20 @@ export function DiscoverModels({ category }: Props) {
 
   // Check which bundles are REALLY installed (file size validated, not just file existence)
   const [bundleStatuses, setBundleStatuses] = useState<Record<string, boolean>>({})
-  useEffect(() => {
+  const refreshBundleStatuses = () => {
     if (category !== 'image' && category !== 'video') return
     const allBundles = [...getImageBundles(), ...getVideoBundles()]
     checkBundlesInstalled(allBundles).then(statuses => setBundleStatuses(statuses))
+  }
+  useEffect(() => {
+    refreshBundleStatuses()
+  }, [category])
+
+  // Re-check bundle statuses when a download completes
+  useEffect(() => {
+    const handler = () => refreshBundleStatuses()
+    window.addEventListener('comfyui-model-downloaded', handler)
+    return () => window.removeEventListener('comfyui-model-downloaded', handler)
   }, [category])
 
   // Start polling on mount if there are active downloads
@@ -408,6 +419,9 @@ export function DiscoverModels({ category }: Props) {
   }
 
   const isBundleComplete = (bundle: ModelBundle): boolean => {
+    // If any file has error status, bundle is NOT complete
+    const hasError = bundle.files.some(f => f.filename && downloads[f.filename]?.status === 'error')
+    if (hasError) return false
     // Check 1: Download store says all files complete (current session downloads)
     const dlComplete = bundle.files.every(f => f.filename && downloads[f.filename]?.status === 'complete')
     if (dlComplete) return true
@@ -417,6 +431,20 @@ export function DiscoverModels({ category }: Props) {
 
   const isBundleDownloading = (bundle: ModelBundle): boolean => {
     return bundle.files.some(f => f.filename && (downloads[f.filename]?.status === 'downloading' || downloads[f.filename]?.status === 'connecting'))
+  }
+
+  const hasBundleErrors = (bundle: ModelBundle): boolean => {
+    // Check for explicit error status in download store
+    if (bundle.files.some(f => f.filename && downloads[f.filename]?.status === 'error')) return true
+    // Also check: some files show complete in store but bundle is NOT fully installed on disk
+    // This catches the case where error entries were dismissed but the bundle is still incomplete
+    const hasAnyDownloadEntry = bundle.files.some(f => f.filename && downloads[f.filename])
+    if (hasAnyDownloadEntry && !bundleStatuses[bundle.name]) {
+      const someComplete = bundle.files.some(f => f.filename && downloads[f.filename]?.status === 'complete')
+      const allComplete = bundle.files.every(f => f.filename && downloads[f.filename]?.status === 'complete')
+      if (someComplete && !allComplete) return true
+    }
+    return false
   }
 
   const getBundleProgress = (bundle: ModelBundle): number => {
@@ -672,12 +700,34 @@ export function DiscoverModels({ category }: Props) {
                     </div>
 
                     <div className="flex items-center gap-1 shrink-0">
-                      {complete ? (
-                        <span className="text-xs text-green-500 px-2 py-1">Installed</span>
-                      ) : downloading ? (
+                      {complete ? null : downloading ? (
                         <span className="p-2 text-gray-400">
                           <Loader2 size={14} className="animate-spin" />
                         </span>
+                      ) : hasBundleErrors(bundle) ? (
+                        <button
+                          onClick={() => {
+                            // Retry only the files that are NOT complete
+                            for (const f of bundle.files) {
+                              if (!f.filename || !f.downloadUrl || !f.subfolder) continue
+                              const dl = downloads[f.filename]
+                              // Retry if: explicit error, OR no download entry and not on disk
+                              if (dl?.status === 'error') {
+                                dlStore.getState().retry(f.filename)
+                              } else if (!dl || (dl.status !== 'complete' && dl.status !== 'downloading' && dl.status !== 'connecting')) {
+                                // File has no active download — start fresh
+                                dlStore.getState().setMeta(f.filename, f.downloadUrl, f.subfolder)
+                                startModelDownload(f.downloadUrl, f.subfolder, f.filename, f.sizeGB ? Math.round(f.sizeGB * 1_073_741_824) : undefined)
+                                dlStore.getState().startPolling()
+                              }
+                            }
+                          }}
+                          className="flex items-center gap-1 px-2 py-1.5 rounded-lg bg-red-100 dark:bg-red-500/15 hover:bg-red-200 dark:hover:bg-red-500/25 text-red-700 dark:text-red-400 transition-all text-xs"
+                          title="Retry failed downloads"
+                        >
+                          <RefreshCw size={12} />
+                          <span>Retry</span>
+                        </button>
                       ) : (
                         <button
                           onClick={() => handleBundleInstall(bundle)}
@@ -688,9 +738,9 @@ export function DiscoverModels({ category }: Props) {
                         </button>
                       )}
                       {bundle.url && (
-                        <a href={bundle.url} target="_blank" rel="noopener noreferrer" className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-white/10 text-gray-500 transition-all" title="View on HuggingFace">
+                        <button onClick={() => openExternal(bundle.url!)} className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-white/10 text-gray-500 transition-all" title="View on HuggingFace">
                           <ExternalLink size={14} />
-                        </a>
+                        </button>
                       )}
                     </div>
                   </div>
@@ -761,9 +811,9 @@ export function DiscoverModels({ category }: Props) {
                           <Download size={14} />
                         </button>
                       ) : null}
-                      <a href={model.sourceUrl} target="_blank" rel="noopener noreferrer" className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-white/10 text-gray-500 transition-all" title="View on CivitAI" aria-label="View on CivitAI">
+                      <button onClick={() => openExternal(model.sourceUrl)} className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-white/10 text-gray-500 transition-all" title="View on CivitAI" aria-label="View on CivitAI">
                         <ExternalLink size={14} />
-                      </a>
+                      </button>
                     </div>
                   </div>
                 )

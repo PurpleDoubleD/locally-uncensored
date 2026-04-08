@@ -122,12 +122,15 @@ pub fn install_comfyui_status(state: State<'_, AppState>) -> Result<serde_json::
     }))
 }
 
+#[allow(non_snake_case)]
 #[tauri::command]
 pub fn install_custom_node(
     state: State<'_, AppState>,
-    repo_url: String,
-    node_name: String,
+    repoUrl: String,
+    nodeName: String,
 ) -> Result<serde_json::Value, String> {
+    let repo_url = repoUrl;
+    let node_name = nodeName;
     // Find ComfyUI path from state
     let comfy_path = {
         let path = state.comfy_path.lock().unwrap();

@@ -2,6 +2,7 @@ import { Download, Check, ExternalLink, RotateCcw, Star } from 'lucide-react'
 import type { WorkflowSearchResult } from '../../types/workflows'
 import type { ModelType } from '../../api/comfyui'
 import { proxyImageUrl } from '../../lib/privacy'
+import { openExternal } from '../../api/backend'
 
 interface Props {
   result: WorkflowSearchResult
@@ -95,14 +96,12 @@ export function WorkflowCard({ result, isInstalled, isActive, currentModelType, 
             </button>
           )}
           {result.sourceUrl && (
-            <a
-              href={result.sourceUrl}
-              target="_blank"
-              rel="noopener noreferrer"
+            <button
+              onClick={() => openExternal(result.sourceUrl!)}
               className="flex items-center gap-1 px-2 py-1 rounded-lg bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white text-xs transition-colors"
             >
               <ExternalLink size={12} /> Source
-            </a>
+            </button>
           )}
         </div>
       </div>

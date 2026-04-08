@@ -8,6 +8,7 @@ import { ONBOARDING_MODELS, type OnboardingModel } from '../../lib/constants'
 import { PROVIDER_PRESETS } from '../../api/providers/types'
 import { detectLocalBackends, type DetectedBackend } from '../../lib/backend-detector'
 import { ProgressBar } from '../ui/ProgressBar'
+import { openExternal } from '../../api/backend'
 import { formatBytes } from '../../lib/formatters'
 import { backendCall } from '../../api/backend'
 import { getSystemVRAM } from '../../api/comfyui'
@@ -310,12 +311,10 @@ export function Onboarding() {
 
                 <div className="space-y-1 text-left max-h-[45vh] overflow-y-auto scrollbar-thin pr-1">
                   {LOCAL_BACKENDS.map(b => (
-                    <a
+                    <button
                       key={b.id}
-                      href={b.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className={`flex items-center gap-2.5 px-2.5 py-2 rounded-lg border transition-all group ${
+                      onClick={() => openExternal(b.url)}
+                      className={`flex items-center gap-2.5 px-2.5 py-2 rounded-lg border transition-all group text-left ${
                         isDark
                           ? 'border-white/[0.06] hover:border-white/15 hover:bg-white/[0.03]'
                           : 'border-gray-200 hover:border-gray-400 hover:bg-gray-50'
@@ -330,7 +329,7 @@ export function Onboarding() {
                         <p className={`text-[0.55rem] ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>{b.description}</p>
                       </div>
                       <span className={`text-[0.5rem] font-mono shrink-0 ${isDark ? 'text-gray-600' : 'text-gray-300'}`}>:{b.port}</span>
-                    </a>
+                    </button>
                   ))}
                 </div>
 

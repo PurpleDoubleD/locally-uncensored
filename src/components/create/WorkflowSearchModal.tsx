@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect, useRef } from 'react'
 import { Search, Upload, Loader2, AlertCircle, Key, Eye, EyeOff } from 'lucide-react'
 import { v4 as uuid } from 'uuid'
 import { Modal } from '../ui/Modal'
+import { openExternal } from '../../api/backend'
 import { WorkflowCard } from './WorkflowCard'
 import { useWorkflowStore } from '../../stores/workflowStore'
 import {
@@ -424,14 +425,12 @@ export function WorkflowSearchModal({ open, onClose, modelName, modelType }: Pro
             <p className="text-xs text-gray-300 leading-relaxed">
               CivitAI requires an API key to download workflows. You can create one for free in about a minute:
             </p>
-            <a
-              href="https://civitai.com/user/account"
-              target="_blank"
-              rel="noopener noreferrer"
+            <button
+              onClick={() => openExternal('https://civitai.com/user/account')}
               className="block w-full px-3 py-2 rounded-lg bg-white/10 hover:bg-white/15 border border-white/20 text-white text-sm font-medium text-center transition-colors"
             >
               Get Free API Key on CivitAI
-            </a>
+            </button>
             <div>
               <label className="text-[10px] font-medium text-gray-500 uppercase tracking-wider mb-1 block">Paste your key here</label>
               <div className="relative">

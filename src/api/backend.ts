@@ -270,3 +270,19 @@ export async function fetchExternalBytes(url: string): Promise<ArrayBuffer> {
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.arrayBuffer();
 }
+
+/** Open a URL in the system's default browser (works in both dev and Tauri) */
+export async function openExternal(url: string): Promise<void> {
+  if (isTauri()) {
+    // Use Tauri's invoke to open URL in system browser via shell plugin
+    const invoke = await getInvoke()
+    try {
+      await invoke('plugin:shell|open', { path: url })
+    } catch {
+      // Fallback if plugin command format differs
+      window.open(url, '_blank')
+    }
+  } else {
+    window.open(url, '_blank')
+  }
+}

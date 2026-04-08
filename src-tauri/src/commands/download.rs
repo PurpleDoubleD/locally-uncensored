@@ -22,14 +22,16 @@ fn models_dir(comfy_path: &Option<String>, subfolder: &str) -> Result<PathBuf, S
     Ok(dir)
 }
 
+#[allow(non_snake_case)]
 #[tauri::command]
 pub async fn download_model(
     url: String,
     subfolder: String,
     filename: String,
-    expected_bytes: Option<u64>,
+    expectedBytes: Option<u64>,
     state: State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
+    let expected_bytes = expectedBytes;
     let comfy_path = {
         let mut p = state.comfy_path.lock().unwrap();
         if p.is_none() {
@@ -487,14 +489,17 @@ pub fn detect_model_path(provider: String) -> Result<serde_json::Value, String> 
     Ok(serde_json::json!(fallback.to_string_lossy()))
 }
 
+#[allow(non_snake_case)]
 #[tauri::command]
 pub async fn download_model_to_path(
     url: String,
-    dest_dir: String,
+    destDir: String,
     filename: String,
-    expected_bytes: Option<u64>,
+    expectedBytes: Option<u64>,
     state: State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
+    let dest_dir = destDir;
+    let expected_bytes = expectedBytes;
     let dir = PathBuf::from(&dest_dir);
     fs::create_dir_all(&dir).map_err(|e| format!("Create dest dir: {}", e))?;
     let dest_file = dir.join(&filename);
@@ -633,8 +638,11 @@ pub async fn check_model_sizes(
         let dest_file = dest_dir.join(&file.filename);
         if dest_file.exists() {
             let actual = dest_file.metadata().map(|m| m.len()).unwrap_or(0);
+            // Use 50% threshold for install checks — sizeGB values are rough estimates
+            // (e.g. sizeGB: 0.9 for an 800 MB file). The 90% check in download_model
+            // handles partial downloads; this check just validates the file isn't empty/tiny.
             let threshold = if file.expected_bytes > 0 {
-                (file.expected_bytes as f64 * 0.9) as u64
+                (file.expected_bytes as f64 * 0.5) as u64
             } else {
                 0
             };

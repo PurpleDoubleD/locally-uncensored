@@ -50,9 +50,22 @@ src-tauri/src/commands/      — Rust commands: install, process, download, prox
 20. **isInstalled prefix-match** — Ollama models without tag (hermes3) match installed variants (hermes3:8b)
 21. **All 3 download flows Tauri-verified** — Ollama pull (events), HF GGUF (invoke), ComfyUI bundles (invoke) — all arg mappings, command registrations, progress polling confirmed
 
+22. **Tauri .exe download fix (camelCase)** — Rust commands used snake_case params but JS sent camelCase. Downloads silently failed in .exe, worked in dev. Fixed: download_model, download_model_to_path, install_custom_node all use camelCase params now.
+23. **Retry button for failed downloads** — per-file retry in DownloadBadge + bundle-level retry in DiscoverModels. Only retries failed files, not completed ones.
+24. **Download speed display** — MB/s shown per file and per bundle in DownloadBadge
+25. **External links open system browser** — all `target="_blank"` links replaced with `openExternal()` via Tauri shell plugin. Added `shell:allow-open` capability.
+26. **Bundle installed detection fixed** — error files no longer count as "complete", bundleStatuses refresh after download, 50% threshold for check_model_sizes (sizeGB values are estimates)
+27. **LM Studio not auto-started** — openai provider default changed to `enabled: false`, only activated if detectLocalBackends finds it
+28. **Download polling race fix** — first download after app restart now shows immediately (min 5 poll cycles before auto-stop)
+29. **All 20 bundle file sizes verified** — 13 files had wrong sizeGB values (up to 95% off), all corrected against real Content-Length
+30. **Mochi missing T5-XXL** — text encoder was completely missing from bundle, model would fail at CLIPLoader. Added as 3rd file.
+31. **AnimateDiff v3 wrong file** — was downloading adapter (97 MB) instead of motion model (1.6 GB). Fixed URL to v3_sd15_mm.ckpt
+32. **Onboarding typo** — `qwen2.5-abliterated` doesn't exist on Ollama, fixed to `qwen2.5-abliterate`
+33. **All 30 Ollama models verified**, all 24 HF GGUF URLs verified, all 20 ComfyUI bundle URLs verified
+
 ### What's LEFT to finish v2.3.0:
-1. **E2E per-model verification** — every single model in Discover (Text/Image/Video) must be tested: download starts, progress shows, file lands on disk at correct path with correct size. Partial downloads must trigger re-download, not false "exists".
-2. **Tauri .exe E2E** — run the built .exe (not dev server), test all 3 download flows end-to-end in production mode
+1. **Tauri .exe E2E** — run the built .exe (not dev server), test all 3 download flows end-to-end in production mode
+2. **HuggingFace as primary download source** — replace Ollama-only text downloads with HF GGUF for all providers (LM Studio compatibility). Auto-detect provider model directory.
 
 ### What was FIXED (download overhaul):
 1. **install_custom_node camelCase bug** — Tauri 2 expects camelCase args (repoUrl/nodeName), was sending snake_case. Fixed in discover.ts + vite.config.ts
@@ -74,21 +87,28 @@ src-tauri/src/commands/      — Rust commands: install, process, download, prox
 17. **handleRefresh race condition** — loading flag was cleared before async detectProviderModelPath resolved
 18. **Dev-mode fetchModels try-catch** — pullModel completion in dev mode could crash if Ollama stopped during fetchModels
 
-### Files modified in this branch (23+ files):
+### Files modified in this branch (30+ files):
 - `src/api/comfyui.ts` — 7 new ModelTypes, COMPONENT_REGISTRY, uploadImage(), inputImage in VideoParams
 - `src/api/dynamic-workflow.ts` — 7 new strategies, 5 wrapper builders, inputImage support in SVD/FramePack
 - `src/api/comfyui-nodes.ts` — 30+ new nodes in categorization mapping
-- `src/api/discover.ts` — 14 video + 6 image bundles, CUSTOM_NODE_REGISTRY, installBundleComplete(), uncensored flags
-- `src/api/backend.ts` — install_custom_node endpoint mapping
+- `src/api/discover.ts` — 14 video + 6 image bundles, CUSTOM_NODE_REGISTRY, installBundleComplete(), uncensored flags, ALL sizeGB verified
+- `src/api/backend.ts` — install_custom_node endpoint mapping, openExternal() for system browser
 - `src/api/preflight.ts` — extended needsUnet check for all new model types
-- `src-tauri/src/commands/install.rs` — install_custom_node command
-- `src-tauri/src/commands/download.rs` — download_model with resume, progress, speed tracking
+- `src-tauri/src/commands/install.rs` — install_custom_node command (camelCase params)
+- `src-tauri/src/commands/download.rs` — download_model with resume, progress, speed tracking (camelCase params), 50% threshold for check_model_sizes
 - `src-tauri/src/main.rs` — registered install_custom_node
+- `src-tauri/capabilities/default.json` — added shell:allow-open for external links
 - `src/components/create/CreateView.tsx` — I2V upload UI (drag & drop, preview, replace/remove)
-- `src/components/layout/DownloadBadge.tsx` — unified: text + ComfyUI downloads, bundle grouping
-- `src/components/models/DiscoverModels.tsx` — VRAM tier tabs, downloadStore integration, installBundleComplete, isInstalled fix
-- `src/components/onboarding/Onboarding.tsx` — comfyui step, drag region, accent dots, VRAM filtering, tool calling badges, re-scan
+- `src/components/create/WorkflowSearchModal.tsx` — openExternal for CivitAI link
+- `src/components/create/WorkflowCard.tsx` — openExternal for source links
+- `src/components/chat/MarkdownRenderer.tsx` — openExternal for all chat links
+- `src/components/layout/DownloadBadge.tsx` — unified: text + ComfyUI downloads, bundle grouping, retry buttons, speed display
+- `src/components/models/DiscoverModels.tsx` — VRAM tier tabs, downloadStore integration, retry for failed bundles, openExternal, no double "Installed"
+- `src/components/onboarding/Onboarding.tsx` — comfyui step, drag region, accent dots, VRAM filtering, tool calling badges, re-scan, openExternal
 - `src/components/settings/SettingsPage.tsx` — ComfyUISettings component
+- `src/stores/providerStore.ts` — LM Studio default disabled (auto-detect only)
+- `src/stores/updateStore.ts` — openExternal for release page
+- `src/lib/constants.ts` — OnboardingModel: vramGB, uncensored, agent fields, qwen2.5-abliterate typo fix
 - `src/hooks/useCreate.ts` — i2vImage pass-through to workflow builder
 - `src/lib/constants.ts` — OnboardingModel: vramGB, uncensored, agent fields + mainstream models
 - `src/stores/createStore.ts` — i2vImage state

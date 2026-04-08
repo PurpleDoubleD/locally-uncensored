@@ -4,6 +4,7 @@ import remarkMath from 'remark-math'
 import rehypeKatex from 'rehype-katex'
 import 'katex/dist/katex.min.css'
 import { CodeBlock } from './CodeBlock'
+import { openExternal } from '../../api/backend'
 import type { Components } from 'react-markdown'
 
 interface Props {
@@ -65,9 +66,12 @@ const components: Components = {
   },
   a({ href, children }) {
     return (
-      <a href={href} target="_blank" rel="noopener noreferrer" className="text-blue-600 dark:text-blue-400 hover:underline">
+      <button
+        onClick={(e) => { e.preventDefault(); if (href) openExternal(href) }}
+        className="text-blue-600 dark:text-blue-400 hover:underline cursor-pointer inline"
+      >
         {children}
-      </a>
+      </button>
     )
   },
 }

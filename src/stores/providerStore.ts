@@ -47,7 +47,7 @@ const DEFAULT_PROVIDERS: Record<ProviderId, ProviderConfig> = {
   openai: {
     id: 'openai',
     name: 'LM Studio',
-    enabled: true,
+    enabled: false,
     baseUrl: 'http://localhost:1234/v1',
     apiKey: '',
     isLocal: true,

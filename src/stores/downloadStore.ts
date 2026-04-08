@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { getDownloadProgress, pauseDownload, cancelDownload, resumeDownload, type DownloadProgress } from '../api/discover'
+import { getDownloadProgress, pauseDownload, cancelDownload, resumeDownload, startModelDownload, type DownloadProgress } from '../api/discover'
 
 // Maps filename → bundle name for grouped display
 type BundleMap = Record<string, string>
@@ -20,6 +20,7 @@ interface DownloadStoreState {
   pause: (id: string) => Promise<void>
   cancel: (id: string) => Promise<void>
   resume: (id: string) => Promise<void>
+  retry: (id: string) => Promise<void>
   dismiss: (id: string) => void
 }
 
@@ -37,6 +38,8 @@ export const useDownloadStore = create<DownloadStoreState>()((set, get) => ({
   polling: false,
   pollInterval: null,
 
+  pollCount: 0,
+
   refresh: async () => {
     try {
       const prog = await getDownloadProgress()
@@ -49,13 +52,15 @@ export const useDownloadStore = create<DownloadStoreState>()((set, get) => ({
         }
       }
 
-      set({ downloads: prog })
+      const count = get().pollCount + 1
+      set({ downloads: prog, pollCount: count })
 
       // Auto-stop polling when no active downloads
+      // BUT wait at least 5 polls before stopping — gives Rust time to register new downloads
       const hasActive = Object.values(prog).some(d =>
         d.status === 'downloading' || d.status === 'connecting' || d.status === 'pausing'
       )
-      if (!hasActive) {
+      if (!hasActive && count >= 5) {
         get().stopPolling()
       }
     } catch {
@@ -67,7 +72,7 @@ export const useDownloadStore = create<DownloadStoreState>()((set, get) => ({
     const state = get()
     if (state.polling) return
     const interval = setInterval(() => get().refresh(), 1000)
-    set({ polling: true, pollInterval: interval })
+    set({ polling: true, pollInterval: interval, pollCount: 0 })
     // Immediate first fetch
     get().refresh()
   },
@@ -117,6 +122,20 @@ export const useDownloadStore = create<DownloadStoreState>()((set, get) => ({
     const meta = get().downloadMeta[id]
     if (!meta) return
     await resumeDownload(id, meta.url, meta.subfolder)
+    get().startPolling()
+  },
+
+  retry: async (id: string) => {
+    const meta = get().downloadMeta[id]
+    if (!meta) return
+    // Clear the error state first
+    set(s => {
+      const updated = { ...s.downloads }
+      delete updated[id]
+      return { downloads: updated }
+    })
+    // Re-start the download from scratch
+    await startModelDownload(meta.url, meta.subfolder, id)
     get().startPolling()
   },
 

@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { version as currentVersion } from '../../package.json'
+import { openExternal } from '../api/backend'
 
 // ── Types ─────────────────────────────────────────────────────
 
@@ -116,7 +117,7 @@ export const useUpdateStore = create<UpdateState>()(
       },
 
       openReleasePage: () => {
-        window.open('https://locallyuncensored.com', '_blank')
+        openExternal('https://locallyuncensored.com')
       },
     }),
     {

@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { ArrowDownToLine, Pause, Play, X, CheckCircle } from 'lucide-react'
+import { ArrowDownToLine, Pause, Play, X, CheckCircle, RotateCcw } from 'lucide-react'
 import { useModels } from '../../hooks/useModels'
 import { useDownloadStore } from '../../stores/downloadStore'
 import { formatBytes } from '../../lib/formatters'
@@ -162,6 +162,7 @@ export function DownloadBadge() {
                 const totalBytes = files.reduce((s, f) => s + f.d.total, 0)
                 const doneBytes = files.reduce((s, f) => s + f.d.progress, 0)
                 const bundleProg = totalBytes > 0 ? (doneBytes / totalBytes) * 100 : 0
+                const bundleSpeed = files.reduce((s, f) => s + (f.d.status === 'downloading' ? (f.d.speed || 0) : 0), 0)
                 const isBundle = files.length > 1
 
                 return (
@@ -170,6 +171,9 @@ export function DownloadBadge() {
                     <div className="flex items-center justify-between gap-2 mb-1">
                       <p className={`${isBundle ? 'text-[0.7rem] font-medium' : 'text-[0.7rem] font-mono'} text-gray-700 dark:text-gray-300 truncate`}>{bundleName}</p>
                       <div className="flex items-center gap-0.5 shrink-0">
+                        {files.some(f => f.d.status === 'error') && (
+                          <button onClick={() => files.filter(f => f.d.status === 'error').forEach(f => useDownloadStore.getState().retry(f.id))} className="p-0.5 rounded hover:bg-red-500/20 text-red-400 hover:text-red-300 transition-colors" title="Retry failed"><RotateCcw size={11} /></button>
+                        )}
                         {allComplete ? (
                           <button onClick={() => files.forEach(f => useDownloadStore.getState().dismiss(f.id))} className="p-0.5 rounded hover:bg-white/10 text-gray-500 hover:text-gray-300 transition-colors" title="Dismiss"><X size={11} /></button>
                         ) : (
@@ -183,21 +187,44 @@ export function DownloadBadge() {
                     ) : (
                       <>
                         {totalBytes > 0 && <ProgressBar progress={bundleProg} />}
-                        <p className="text-[0.55rem] text-gray-500 mt-0.5">
-                          {totalBytes > 0 ? `${formatBytes(doneBytes)} / ${formatBytes(totalBytes)}` : 'Starting...'}
-                          {bundleProg > 0 && <span className="ml-1.5 text-blue-400">{Math.round(bundleProg)}%</span>}
-                        </p>
+                        <div className="flex items-center justify-between mt-0.5">
+                          <p className="text-[0.55rem] text-gray-500">
+                            {totalBytes > 0 ? `${formatBytes(doneBytes)} / ${formatBytes(totalBytes)}` : 'Starting...'}
+                            {bundleProg > 0 && <span className="ml-1.5 text-blue-400">{Math.round(bundleProg)}%</span>}
+                            {bundleSpeed > 0 && <span className="ml-1.5 text-gray-400">{formatBytes(bundleSpeed)}/s</span>}
+                          </p>
+                          {/* Retry all failed files in bundle */}
+                          {files.some(f => f.d.status === 'error') && (
+                            <button
+                              onClick={() => files.filter(f => f.d.status === 'error').forEach(f => useDownloadStore.getState().retry(f.id))}
+                              className="flex items-center gap-1 text-[0.55rem] text-red-400 hover:text-red-300 transition-colors"
+                              title="Retry failed downloads"
+                            >
+                              <RotateCcw size={9} />
+                              <span>Retry failed</span>
+                            </button>
+                          )}
+                        </div>
                         {/* Individual file rows */}
                         {isBundle && (
                           <div className="mt-1.5 space-y-0.5">
                             {files.map(({ id, d }) => (
                               <div key={id} className="flex items-center justify-between text-[0.55rem] text-gray-500">
                                 <span className="truncate flex-1 font-mono">{d.filename || id}</span>
-                                <span className="shrink-0 ml-2">
+                                <span className="shrink-0 ml-2 flex items-center gap-1">
                                   {d.status === 'complete' ? <span className="text-green-400">Done</span>
-                                    : d.status === 'error' ? <span className="text-red-400" title={d.error}>Error</span>
+                                    : d.status === 'error' ? (
+                                      <button
+                                        onClick={() => useDownloadStore.getState().retry(id)}
+                                        className="flex items-center gap-0.5 text-red-400 hover:text-red-300 transition-colors"
+                                        title={d.error || 'Download failed — click to retry'}
+                                      >
+                                        <RotateCcw size={8} />
+                                        <span>Retry</span>
+                                      </button>
+                                    )
                                     : d.status === 'paused' ? <span className="text-yellow-400">Paused</span>
-                                    : d.total > 0 ? `${Math.round((d.progress / d.total) * 100)}%`
+                                    : d.total > 0 ? <>{Math.round((d.progress / d.total) * 100)}%{d.speed > 0 && <span className="ml-1 text-gray-400">{formatBytes(d.speed)}/s</span>}</>
                                     : d.status === 'connecting' ? 'Connecting' : '...'}
                                 </span>
                               </div>
