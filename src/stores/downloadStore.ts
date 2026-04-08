@@ -16,10 +16,18 @@ interface DownloadStoreState {
   stopPolling: () => void
   setMeta: (filename: string, url: string, subfolder: string) => void
   setBundleGroup: (bundleName: string, filenames: string[]) => void
+  markComplete: (filename: string) => void
   pause: (id: string) => Promise<void>
   cancel: (id: string) => Promise<void>
   resume: (id: string) => Promise<void>
   dismiss: (id: string) => void
+}
+
+// Listen for "exists" events from installBundleComplete — mark files as complete immediately
+if (typeof window !== 'undefined') {
+  window.addEventListener('comfyui-download-exists', ((e: CustomEvent<{ filename: string }>) => {
+    useDownloadStore.getState().markComplete(e.detail.filename)
+  }) as EventListener)
 }
 
 export const useDownloadStore = create<DownloadStoreState>()((set, get) => ({
@@ -80,6 +88,15 @@ export const useDownloadStore = create<DownloadStoreState>()((set, get) => ({
       for (const f of filenames) updated[f] = bundleName
       return { bundleMap: updated }
     })
+  },
+
+  markComplete: (filename: string) => {
+    set(s => ({
+      downloads: {
+        ...s.downloads,
+        [filename]: { progress: 1, total: 1, speed: 0, filename, status: 'complete' },
+      },
+    }))
   },
 
   pause: async (id: string) => {

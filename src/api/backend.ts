@@ -120,6 +120,8 @@ export async function backendCall<T = any>(
     file_read: { path: "/local-api/file-read", method: "POST" },
     file_write: { path: "/local-api/file-write", method: "POST" },
     download_model: { path: "/local-api/download-model", method: "POST" },
+    download_model_to_path: { path: "/local-api/download-model-to-path", method: "POST" },
+    detect_model_path: { path: "/local-api/detect-model-path", method: "POST" },
     download_progress: { path: "/local-api/download-progress" },
     pause_download: { path: "/local-api/pause-download", method: "POST" },
     cancel_download: { path: "/local-api/cancel-download", method: "POST" },
@@ -172,6 +174,10 @@ export async function backendCall<T = any>(
   }
 
   const res = await fetch(url, fetchOptions);
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+    throw new Error(body.error || `HTTP ${res.status}`);
+  }
   return res.json();
 }
 

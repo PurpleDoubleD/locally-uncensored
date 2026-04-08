@@ -12,7 +12,12 @@ use crate::state::{AppState, DownloadProgress};
 
 fn models_dir(comfy_path: &Option<String>, subfolder: &str) -> Result<PathBuf, String> {
     let base = comfy_path.as_ref().ok_or("ComfyUI path not set. Please set it in settings or install ComfyUI first.")?;
-    let dir = PathBuf::from(base).join("models").join(subfolder);
+    // Subfolders starting with "custom_nodes/" are relative to ComfyUI root, not models/
+    let dir = if subfolder.starts_with("custom_nodes/") || subfolder.starts_with("custom_nodes\\") {
+        PathBuf::from(base).join(subfolder)
+    } else {
+        PathBuf::from(base).join("models").join(subfolder)
+    };
     fs::create_dir_all(&dir).map_err(|e| format!("Create models dir: {}", e))?;
     Ok(dir)
 }

@@ -396,12 +396,14 @@ function comfyLauncher(): Plugin {
               res.end(JSON.stringify({ error: 'ComfyUI not found' }))
               return
             }
-            const destDir = join(comfyPath, 'models', subfolder)
+            const destDir = subfolder.startsWith('custom_nodes/') || subfolder.startsWith('custom_nodes\\')
+              ? join(comfyPath, subfolder)
+              : join(comfyPath, 'models', subfolder)
             const destPath = join(destDir, filename)
 
             if (existsSync(destPath)) {
               res.writeHead(200, { 'Content-Type': 'application/json' })
-              res.end(JSON.stringify({ status: 'already_exists', id: filename }))
+              res.end(JSON.stringify({ status: 'exists', id: filename }))
               return
             }
 
@@ -429,6 +431,75 @@ function comfyLauncher(): Plugin {
         }
         res.writeHead(200, { 'Content-Type': 'application/json' })
         res.end(JSON.stringify(downloads))
+      })
+
+      // API: Detect model path for non-Ollama providers (LM Studio, etc.)
+      server.middlewares.use('/local-api/detect-model-path', (req, res) => {
+        if (req.method !== 'POST') { res.writeHead(405); res.end(); return }
+        let body = ''
+        req.on('data', (c: any) => { body += c })
+        req.on('end', () => {
+          try {
+            const { provider } = JSON.parse(body)
+            // Try common paths for LM Studio / other providers
+            const { existsSync } = require('fs')
+            const { join } = require('path')
+            const home = require('os').homedir()
+            const candidates = [
+              join(home, '.cache', 'lm-studio', 'models'),
+              join(home, 'AppData', 'Local', 'LM Studio', 'models'),
+              join(home, '.local', 'share', 'lm-studio', 'models'),
+            ]
+            const found = candidates.find(p => existsSync(p))
+            if (found) {
+              res.writeHead(200, { 'Content-Type': 'application/json' })
+              res.end(JSON.stringify(found))
+            } else {
+              res.writeHead(200, { 'Content-Type': 'application/json' })
+              res.end(JSON.stringify(null))
+            }
+          } catch {
+            res.writeHead(200, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify(null))
+          }
+        })
+      })
+
+      // API: Download model to a specific path (for HuggingFace GGUF → LM Studio etc.)
+      server.middlewares.use('/local-api/download-model-to-path', (req, res) => {
+        if (req.method !== 'POST') { res.writeHead(405); res.end(); return }
+        let body = ''
+        req.on('data', (c: any) => { body += c })
+        req.on('end', () => {
+          try {
+            const parsed = JSON.parse(body)
+            const url = parsed.url
+            const destDir = parsed.destDir || parsed.dest_dir
+            const filename = parsed.filename
+            if (!url || !destDir || !filename) {
+              res.writeHead(400, { 'Content-Type': 'application/json' })
+              res.end(JSON.stringify({ error: 'Missing url, destDir, or filename' }))
+              return
+            }
+            const { existsSync, mkdirSync } = require('fs')
+            const { join } = require('path')
+            if (!existsSync(destDir)) mkdirSync(destDir, { recursive: true })
+            const destPath = join(destDir, filename)
+            if (existsSync(destPath)) {
+              res.writeHead(200, { 'Content-Type': 'application/json' })
+              res.end(JSON.stringify({ status: 'exists', id: filename }))
+              return
+            }
+            const id = filename
+            console.log(`[Download] Starting to path: ${filename} → ${destDir}`)
+            downloadFile(url, destPath, id).catch(err => console.error(`[Download] Failed: ${err.message}`))
+            res.writeHead(200, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ status: 'started', id }))
+          } catch (err) {
+            res.writeHead(500, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ error: String(err) }))
+          }
+        })
       })
 
       // API: Pause download (dev mode stub — sets status to paused)
@@ -474,6 +545,58 @@ function comfyLauncher(): Plugin {
           }
           res.writeHead(200, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify({ status: 'resuming' }))
+        })
+      })
+
+      // API: Install custom node (git clone into ComfyUI/custom_nodes/)
+      server.middlewares.use('/local-api/install-custom-node', (req, res) => {
+        if (req.method !== 'POST') { res.writeHead(405); res.end(); return }
+        let body = ''
+        req.on('data', (c: any) => { body += c })
+        req.on('end', () => {
+          try {
+            const _parsed = JSON.parse(body)
+            const repo_url = _parsed.repoUrl || _parsed.repo_url
+            const node_name = _parsed.nodeName || _parsed.node_name
+            const comfyPath = findComfyUI()
+            if (!comfyPath) {
+              res.writeHead(404, { 'Content-Type': 'application/json' })
+              res.end(JSON.stringify({ error: 'ComfyUI not found. Install ComfyUI first.' }))
+              return
+            }
+            const customNodesDir = join(comfyPath, 'custom_nodes')
+            if (!existsSync(customNodesDir)) mkdirSync(customNodesDir, { recursive: true })
+            const targetDir = join(customNodesDir, node_name || basename(repo_url, '.git'))
+            if (existsSync(targetDir)) {
+              console.log(`[CustomNode] Already installed: ${node_name}`)
+              res.writeHead(200, { 'Content-Type': 'application/json' })
+              res.end(JSON.stringify({ status: 'already_installed', path: targetDir }))
+              return
+            }
+            console.log(`[CustomNode] Installing ${node_name} from ${repo_url}...`)
+            try {
+              execSync(`git clone "${repo_url}" "${targetDir}"`, { timeout: 120000 })
+              // Try pip install if requirements.txt exists
+              const reqFile = join(targetDir, 'requirements.txt')
+              if (existsSync(reqFile)) {
+                try {
+                  execSync(`pip install -r "${reqFile}"`, { cwd: targetDir, timeout: 300000 })
+                } catch (pipErr: any) {
+                  console.warn(`[CustomNode] pip install failed for ${node_name}:`, pipErr.message)
+                }
+              }
+              console.log(`[CustomNode] Installed: ${node_name}`)
+              res.writeHead(200, { 'Content-Type': 'application/json' })
+              res.end(JSON.stringify({ status: 'installed', path: targetDir }))
+            } catch (gitErr: any) {
+              console.error(`[CustomNode] Git clone failed:`, gitErr.message)
+              res.writeHead(500, { 'Content-Type': 'application/json' })
+              res.end(JSON.stringify({ error: `Git clone failed: ${gitErr.message}` }))
+            }
+          } catch (err) {
+            res.writeHead(400, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ error: String(err) }))
+          }
         })
       })
 

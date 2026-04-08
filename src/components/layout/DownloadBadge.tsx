@@ -26,7 +26,7 @@ export function DownloadBadge() {
 
   // ComfyUI (image/video) entries — group by bundle
   const comfyEntries = Object.entries(comfyDownloads).filter(([, d]) =>
-    d.status === 'downloading' || d.status === 'connecting' || d.status === 'pausing' || d.status === 'paused' || d.status === 'complete'
+    d.status === 'downloading' || d.status === 'connecting' || d.status === 'pausing' || d.status === 'paused' || d.status === 'complete' || d.status === 'error'
   )
   const comfyActiveCount = comfyEntries.filter(([, d]) => d.status === 'downloading' || d.status === 'connecting').length
 
@@ -195,6 +195,7 @@ export function DownloadBadge() {
                                 <span className="truncate flex-1 font-mono">{d.filename || id}</span>
                                 <span className="shrink-0 ml-2">
                                   {d.status === 'complete' ? <span className="text-green-400">Done</span>
+                                    : d.status === 'error' ? <span className="text-red-400" title={d.error}>Error</span>
                                     : d.status === 'paused' ? <span className="text-yellow-400">Paused</span>
                                     : d.total > 0 ? `${Math.round((d.progress / d.total) * 100)}%`
                                     : d.status === 'connecting' ? 'Connecting' : '...'}

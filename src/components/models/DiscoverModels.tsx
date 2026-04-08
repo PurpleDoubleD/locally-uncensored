@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { motion } from 'framer-motion'
 import { Download, RefreshCw, ExternalLink, Search, Info, CheckCircle, XCircle, Loader2 } from 'lucide-react'
-import { Pause, Play, X } from 'lucide-react'
+import { X } from 'lucide-react'
 import {
   fetchAbliteratedModels, searchOllamaModels, searchHuggingFaceModels,
   getImageBundles, getVideoBundles,
@@ -153,20 +153,7 @@ function ModelDiscoverCard({ model, index, isText, getModelDownloadState, pullMo
               )}
             </div>
 
-            {isDownloading && dlState && (
-              <div className="mt-2 space-y-1">
-                <ProgressBar progress={dlState.total > 0 ? (dlState.progress / dlState.total) * 100 : 0} />
-                <div className="flex items-center justify-between text-[10px] text-gray-400">
-                  <span>{dlState.total > 0 ? `${formatBytes(dlState.progress)} / ${formatBytes(dlState.total)}` : 'Connecting...'}</span>
-                  {dlState.speed > 0 && <span>{formatBytes(dlState.speed)}/s</span>}
-                </div>
-              </div>
-            )}
-            {isError && dlState && (
-              <div className="mt-1 flex items-center gap-1 text-[10px] text-red-500">
-                <XCircle size={10} /> {dlState.error || 'Download failed'}
-              </div>
-            )}
+            {/* Download progress shown exclusively in DownloadBadge (header) */}
           </div>
 
           <div className="flex items-center gap-1 shrink-0">
@@ -341,6 +328,7 @@ export function DiscoverModels({ category }: Props) {
   }
 
   const [installingBundle, setInstallingBundle] = useState<string | null>(null)
+  const [installError, setInstallError] = useState<string | null>(null)
 
   const handleBundleInstall = async (bundle: ModelBundle) => {
     setInstallingBundle(bundle.name)
@@ -352,18 +340,18 @@ export function DiscoverModels({ category }: Props) {
       }
     }
     dlStore.getState().setBundleGroup(bundle.name, filenames)
+    // Start polling BEFORE install so progress is tracked immediately
+    dlStore.getState().startPolling()
     try {
       await installBundleComplete(bundle)
     } catch (err) {
       console.error('[DiscoverModels] Bundle install failed:', err)
+      setInstallError(`${bundle.name}: ${err instanceof Error ? err.message : String(err)}`)
     }
-    dlStore.getState().startPolling()
-    setInstallingBundle(null)
+    // Keep installingBundle set until polling confirms downloads are active
+    // (small delay to let first poll complete)
+    setTimeout(() => setInstallingBundle(null), 1500)
   }
-
-  const handlePause = async (id: string) => { await dlStore.getState().pause(id) }
-  const handleCancel = async (id: string) => { await dlStore.getState().cancel(id) }
-  const handleResume = async (id: string) => { await dlStore.getState().resume(id) }
 
   const handleCivitaiSearch = async () => {
     if (!civitaiQuery.trim()) return
@@ -459,13 +447,18 @@ export function DiscoverModels({ category }: Props) {
   const handleHfDownload = async (model: DiscoverModel) => {
     if (!model.downloadUrl || !model.filename) return
     const destDir = hfModelPath || (await detectProviderModelPath(providers.openai?.name || 'fallback'))
-    if (!destDir) return
+    if (!destDir) {
+      setInstallError('No model directory found. Install LM Studio or configure an OpenAI-compatible provider with a local model path first.')
+      return
+    }
     setHfModelPath(destDir)
     try {
+      dlStore.getState().setMeta(model.filename, model.downloadUrl, 'gguf')
       await startModelDownloadToPath(model.downloadUrl, destDir, model.filename)
       dlStore.getState().startPolling()
     } catch (e) {
       console.error('HF download failed:', e)
+      setInstallError(`Download failed: ${e instanceof Error ? e.message : String(e)}`)
     }
   }
 
@@ -521,45 +514,7 @@ export function DiscoverModels({ category }: Props) {
         />
       </div>
 
-      {/* Download Manager */}
-      {Object.values(downloads).some(d => d.status === 'downloading' || d.status === 'connecting' || d.status === 'pausing' || d.status === 'paused') && (
-        <GlassCard className="p-3 space-y-2">
-          <h3 className="text-sm font-medium text-gray-900 dark:text-white flex items-center gap-2">
-            <Loader2 size={14} className={Object.values(downloads).some(d => d.status === 'downloading') ? 'animate-spin' : ''} /> Downloads
-          </h3>
-          {Object.entries(downloads).filter(([, d]) => d.status === 'downloading' || d.status === 'connecting' || d.status === 'pausing' || d.status === 'paused').map(([id, d]) => (
-            <div key={id} className="space-y-1">
-              <div className="flex items-center justify-between text-xs text-gray-500">
-                <span className="truncate flex-1">{d.filename}</span>
-                <div className="flex items-center gap-2 shrink-0">
-                  <span>
-                    {d.status === 'paused' ? 'Paused' : d.status === 'pausing' ? 'Pausing...' : d.total > 0 ? `${formatBytes(d.progress)} / ${formatBytes(d.total)}` : 'Connecting...'}
-                    {d.speed > 0 && d.status === 'downloading' && ` · ${formatBytes(d.speed)}/s`}
-                  </span>
-                  {/* Pause/Resume button */}
-                  {(d.status === 'downloading' || d.status === 'connecting') && (
-                    <button onClick={() => handlePause(id)} className="p-1 rounded hover:bg-gray-200 dark:hover:bg-white/10 text-gray-400 hover:text-yellow-500 transition-colors" title="Pause" aria-label="Pause">
-                      <Pause size={12} />
-                    </button>
-                  )}
-                  {d.status === 'paused' && (
-                    <button onClick={() => handleResume(id)} className="p-1 rounded hover:bg-gray-200 dark:hover:bg-white/10 text-gray-400 hover:text-green-500 transition-colors" title="Resume" aria-label="Resume">
-                      <Play size={12} />
-                    </button>
-                  )}
-                  {/* Cancel button */}
-                  <button onClick={() => handleCancel(id)} className="p-1 rounded hover:bg-gray-200 dark:hover:bg-white/10 text-gray-400 hover:text-red-500 transition-colors" title="Cancel" aria-label="Cancel">
-                    <X size={12} />
-                  </button>
-                </div>
-              </div>
-              {d.total > 0 && <ProgressBar progress={(d.progress / d.total) * 100} />}
-            </div>
-          ))}
-        </GlassCard>
-      )}
-
-      {/* Download progress moved to DownloadBadge in Header */}
+      {/* All download progress is shown exclusively in the DownloadBadge (header) */}
 
       {!isText && (
         <p className="text-[0.65rem] text-gray-500">
@@ -618,6 +573,17 @@ export function DiscoverModels({ category }: Props) {
         </div>
       )}
 
+      {/* Install error banner */}
+      {installError && (
+        <div className="flex items-center gap-2 p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-sm">
+          <XCircle size={16} className="shrink-0" />
+          <span className="flex-1">{installError}</span>
+          <button onClick={() => setInstallError(null)} className="text-red-400 hover:text-red-300 shrink-0">
+            <X size={14} />
+          </button>
+        </div>
+      )}
+
       {/* Model Bundles (Image + Video) — same grid style as text models */}
       {(isImage || isVideo) && filteredBundles.length > 0 && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -652,12 +618,7 @@ export function DiscoverModels({ category }: Props) {
                         )}
                       </div>
 
-                      {downloading && (
-                        <div className="mt-2">
-                          <ProgressBar progress={bundleProgress} />
-                          <p className="text-[10px] text-gray-400 mt-0.5">{Math.round(bundleProgress)}%</p>
-                        </div>
-                      )}
+                      {/* Progress shown exclusively in DownloadBadge (header) */}
                     </div>
 
                     <div className="flex items-center gap-1 shrink-0">

@@ -7,8 +7,9 @@ describe('Video Bundle Definitions', () => {
     bundles = getVideoBundles()
   })
 
-  it('has 14 video bundles', () => {
-    expect(bundles.length).toBe(14)
+  it('has 13 video bundles', () => {
+    // 14 original - Allegro (diffusers only) + CogVideoX 2B replaced by 5B I2V
+    expect(bundles.length).toBe(13)
   })
 
   it('every bundle has required fields', () => {
@@ -63,7 +64,7 @@ describe('Video Bundle Definitions', () => {
 
   it('I2V bundles have i2v: true', () => {
     const i2vBundles = bundles.filter(b => b.i2v)
-    expect(i2vBundles.length).toBe(2) // SVD + FramePack
+    expect(i2vBundles.length).toBe(3) // SVD + FramePack + CogVideoX 5B I2V
     const i2vNames = i2vBundles.map(b => b.name)
     expect(i2vNames.some(n => n.includes('SVD'))).toBe(true)
     expect(i2vNames.some(n => n.includes('FramePack'))).toBe(true)
@@ -129,12 +130,12 @@ describe('Shared File Deduplication', () => {
     expect(new Set(urls).size).toBe(1)
   })
 
-  it('cogvideox_vae.safetensors is shared between CogVideoX bundles', () => {
+  it('cogvideox_vae is shared between CogVideoX bundles', () => {
     const cogBundles = bundles.filter(b => b.workflow === 'cogvideo')
-    expect(cogBundles.length).toBe(2) // 2B + 1.5 5B
+    expect(cogBundles.length).toBe(2) // 5B I2V + 1.5 5B
 
     for (const b of cogBundles) {
-      const vae = b.files.find(f => f.filename === 'cogvideox_vae.safetensors')
+      const vae = b.files.find(f => f.filename === 'cogvideox_vae_bf16.safetensors')
       expect(vae).toBeDefined()
     }
   })

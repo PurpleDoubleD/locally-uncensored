@@ -48,9 +48,20 @@ src-tauri/src/commands/      — Rust commands: install, process, download, prox
 18. **LTX bug fixed** — workflow was 'wan' instead of 'ltx'
 
 ### What's LEFT to finish v2.3.0:
-1. **Broken download UI** — User reports clicking Download on video bundles (Wan 2.1, FramePack, CogVideoX) doesn't visibly start. URLs are confirmed valid (HTTP 200). The `handleBundleInstall` → `installBundleComplete` flow now has error handling + `installingBundle` loading state, but needs E2E verification with real ComfyUI. May be a Rust backend issue with `download_model` command not finding ComfyUI path.
-2. **Some bundle URLs are gated** — CogVideoX (Kijai repo, 401), SVD (Stability AI, 401), Cosmos (401), PyramidFlow (404). These need alternative public URLs or require HF token auth.
-3. **Manual E2E test** with real ComfyUI instance — verify all downloads, workflows, I2V upload
+1. **Text model download UX** — Ollama pull works, HF GGUF downloads need LM Studio or compatible provider path. Error message added but could be more user-friendly.
+2. **E2E workflow test** — verify that downloaded models actually generate images/videos in ComfyUI (all files confirmed on disk in correct paths)
+
+### What was FIXED (download overhaul):
+1. **install_custom_node camelCase bug** — Tauri 2 expects camelCase args (repoUrl/nodeName), was sending snake_case. Fixed in discover.ts + vite.config.ts
+2. **installBundleComplete per-file error handling** — single file failure no longer stops all downloads. Each file has independent try/catch
+3. **"exists" status tracking** — files already on disk now properly marked as complete in downloadStore via comfyui-download-exists event
+4. **Download UI consolidated** — removed duplicate progress display from DiscoverModels, all downloads exclusively shown in DownloadBadge (header)
+5. **AnimateDiff subfolder bug** — models_dir() now routes custom_nodes/ paths to ComfyUI root instead of models/
+6. **Broken URLs fixed** — Pony Diffusion (401) replaced with DreamShaper XL Turbo, SigCLIP (404) fixed filename
+7. **Image bundle workflow types** — all were 'wan', now correctly sdxl/flux/flux2
+8. **Dev-mode endpoints added** — detect_model_path + download_model_to_path for HF GGUF downloads
+9. **All 38 ComfyUI URLs verified HTTP 200, all 24 HF GGUF URLs verified, all 29 Ollama models exist**
+10. **All 19 bundles tested in live app — 0 errors, all files confirmed on disk**
 
 ### Files modified in this branch (23 files, +3051 lines):
 - `src/api/comfyui.ts` — 7 new ModelTypes, COMPONENT_REGISTRY, uploadImage(), inputImage in VideoParams

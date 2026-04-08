@@ -68,7 +68,7 @@ export async function installCustomNodes(nodeKeys: string[]): Promise<void> {
       continue
     }
     try {
-      await backendCall('install_custom_node', { repo_url: entry.repo, node_name: entry.name })
+      await backendCall('install_custom_node', { repoUrl: entry.repo, nodeName: entry.name })
       console.log(`[discover] Installed custom node: ${entry.name}`)
     } catch (err) {
       console.error(`[discover] Failed to install ${entry.name}:`, err)
@@ -78,15 +78,38 @@ export async function installCustomNodes(nodeKeys: string[]): Promise<void> {
 }
 
 export async function installBundleComplete(bundle: ModelBundle): Promise<void> {
-  // Step 1: Install custom nodes if needed
+  const errors: string[] = []
+
+  // Step 1: Install custom nodes if needed (non-blocking — don't prevent downloads)
   if (bundle.customNodes && bundle.customNodes.length > 0) {
-    await installCustomNodes(bundle.customNodes)
+    for (const key of bundle.customNodes) {
+      try {
+        const entry = CUSTOM_NODE_REGISTRY[key]
+        if (!entry) continue
+        await backendCall('install_custom_node', { repoUrl: entry.repo, nodeName: entry.name })
+        console.log(`[discover] Installed custom node: ${entry.name}`)
+      } catch (err) {
+        console.warn('[discover] Custom node install failed (continuing with downloads):', err)
+        errors.push(`Custom node ${key}: ${err}`)
+      }
+    }
   }
 
-  // Step 2: Download all model files
+  // Step 2: Download all model files — each file independently (don't let one failure stop others)
+  let startedDownloads = 0
   for (const file of bundle.files) {
-    if (file.downloadUrl && file.filename && file.subfolder) {
-      await startModelDownload(file.downloadUrl, file.subfolder, file.filename)
+    if (!file.downloadUrl || !file.filename || !file.subfolder) continue
+    try {
+      const result = await startModelDownload(file.downloadUrl, file.subfolder, file.filename)
+      if (result.status === 'exists') {
+        // File already on disk — emit synthetic 'complete' so UI reflects it
+        window.dispatchEvent(new CustomEvent('comfyui-download-exists', { detail: { filename: file.filename } }))
+      } else {
+        startedDownloads++
+      }
+    } catch (err) {
+      console.error(`[discover] Download failed for ${file.filename}:`, err)
+      errors.push(`${file.filename}: ${err}`)
     }
   }
 
@@ -94,12 +117,15 @@ export async function installBundleComplete(bundle: ModelBundle): Promise<void> 
   if (bundle.customNodes && bundle.customNodes.length > 0) {
     try {
       await backendCall('stop_comfyui')
-      // Small delay before restart
       await new Promise(resolve => setTimeout(resolve, 2000))
       await backendCall('start_comfyui')
     } catch (err) {
       console.warn('[discover] ComfyUI restart after custom node install failed:', err)
     }
+  }
+
+  if (errors.length > 0) {
+    throw new Error(`Bundle install had ${errors.length} issue(s): ${errors.join('; ')}`)
   }
 }
 
@@ -486,7 +512,7 @@ export async function detectProviderModelPath(providerName: string): Promise<str
 
 /** Download a GGUF model to a specific directory (for non-Ollama providers) */
 export async function startModelDownloadToPath(url: string, destDir: string, filename: string): Promise<{ status: string; id: string; error?: string }> {
-  return backendCall('download_model_to_path', { url, dest_dir: destDir, filename })
+  return backendCall('download_model_to_path', { url, destDir, filename })
 }
 
 // ─── Image Model Bundles ───
@@ -500,7 +526,7 @@ export function getImageBundles(): ModelBundle[] {
       uncensored: true,
       totalSizeGB: 6.5,
       vramRequired: '6-8 GB',
-      workflow: 'wan',
+      workflow: 'sdxl',
       url: 'https://huggingface.co/RunDiffusion/Juggernaut-XL-v9',
       files: [
         {
@@ -519,7 +545,7 @@ export function getImageBundles(): ModelBundle[] {
       uncensored: true,
       totalSizeGB: 3.5,
       vramRequired: '6-8 GB',
-      workflow: 'wan',
+      workflow: 'sdxl',
       url: 'https://huggingface.co/SG161222/RealVisXL_V5.0',
       files: [
         {
@@ -538,7 +564,7 @@ export function getImageBundles(): ModelBundle[] {
       hot: true,
       totalSizeGB: 16,
       vramRequired: '8-10 GB',
-      workflow: 'wan',
+      workflow: 'flux',
       url: 'https://huggingface.co/Comfy-Org/flux1-schnell',
       files: [
         {
@@ -577,7 +603,7 @@ export function getImageBundles(): ModelBundle[] {
       tags: ['FLUX', 'Quality', 'FP8', '1024px'],
       totalSizeGB: 16,
       vramRequired: '8-10 GB',
-      workflow: 'wan',
+      workflow: 'flux',
       url: 'https://huggingface.co/Comfy-Org/flux1-dev',
       files: [
         {
@@ -617,7 +643,7 @@ export function getImageBundles(): ModelBundle[] {
       hot: true,
       totalSizeGB: 8,
       vramRequired: '8-10 GB',
-      workflow: 'wan',
+      workflow: 'flux2',
       url: 'https://huggingface.co/Comfy-Org/vae-text-encorder-for-flux-klein-4b',
       files: [
         {
@@ -644,21 +670,21 @@ export function getImageBundles(): ModelBundle[] {
       ],
     },
     {
-      name: 'Pony Diffusion V6 XL (Anime/Stylized)',
-      description: 'Top anime and stylized checkpoint. Uncensored, no content filter. Great for creative work.',
-      tags: ['SDXL', 'Anime', 'Stylized', '1024px'],
+      name: 'DreamShaper XL Turbo V2 (Anime/Stylized)',
+      description: 'Fast anime and stylized art. Turbo mode for 4-step generation. Great for creative work.',
+      tags: ['SDXL', 'Anime', 'Stylized', 'Turbo', '1024px'],
       uncensored: true,
       totalSizeGB: 6.5,
       vramRequired: '6-8 GB',
-      workflow: 'wan',
-      url: 'https://civitai.com/models/257749/pony-diffusion-v6-xl',
+      workflow: 'sdxl',
+      url: 'https://huggingface.co/Lykon/dreamshaper-xl-v2-turbo',
       files: [
         {
-          name: 'Pony Diffusion V6 XL',
-          description: 'SDXL checkpoint — anime and stylized art.',
+          name: 'DreamShaper XL Turbo V2',
+          description: 'SDXL checkpoint — anime and stylized art, turbo mode.',
           pulls: '', tags: ['Checkpoint', '6.5 GB'], updated: '',
-          downloadUrl: 'https://huggingface.co/AstraliteHeart/pony-diffusion-v6-xl/resolve/main/v6.safetensors',
-          filename: 'ponyDiffusionV6XL.safetensors', subfolder: 'checkpoints', sizeGB: 6.5,
+          downloadUrl: 'https://huggingface.co/Lykon/dreamshaper-xl-v2-turbo/resolve/main/DreamShaperXL_Turbo_V2-SFW.safetensors',
+          filename: 'DreamShaperXL_Turbo_V2.safetensors', subfolder: 'checkpoints', sizeGB: 6.5,
         },
       ],
     },
@@ -920,35 +946,36 @@ export function getVideoBundles(): ModelBundle[] {
       ],
     },
     {
-      name: 'CogVideoX 2B',
-      description: 'Lightweight video model by Tsinghua. 480x480 output, 8-12 GB VRAM. Good text-to-video quality for its size.',
-      tags: ['CogVideoX', '480x480', 'Lightweight'],
+      name: 'CogVideoX 5B I2V',
+      description: 'CogVideoX 5B Image-to-Video by Tsinghua. Upload an image, get video. Needs 12+ GB VRAM.',
+      tags: ['CogVideoX', 'I2V', 'Quality'],
       uncensored: true,
-      totalSizeGB: 15.3,
-      vramRequired: '8-12 GB',
+      i2v: true,
+      totalSizeGB: 21.2,
+      vramRequired: '12+ GB',
       workflow: 'cogvideo',
       customNodes: ['cogvideox-wrapper'],
-      url: 'https://huggingface.co/THUDM/CogVideoX-2b',
+      url: 'https://huggingface.co/Kijai/CogVideoX-comfy',
       files: [
         {
-          name: 'CogVideoX 2B Model',
-          description: 'Main video generation model.',
-          pulls: '', tags: ['Model', '5.5 GB'], updated: '',
-          downloadUrl: 'https://huggingface.co/Kijai/CogVideoX_comfy/resolve/main/CogVideoX_2b_bf16.safetensors',
-          filename: 'CogVideoX_2b_bf16.safetensors', subfolder: 'diffusion_models', sizeGB: 5.5,
+          name: 'CogVideoX 5B I2V Model',
+          description: 'Main image-to-video generation model.',
+          pulls: '', tags: ['Model', '11.3 GB'], updated: '',
+          downloadUrl: 'https://huggingface.co/Kijai/CogVideoX-comfy/resolve/main/CogVideoX_1_0_5b_I2V_bf16.safetensors',
+          filename: 'CogVideoX_1_0_5b_I2V_bf16.safetensors', subfolder: 'diffusion_models', sizeGB: 11.3,
         },
         {
           name: 'CogVideoX VAE',
           description: 'Required video encoder/decoder.',
-          pulls: '', tags: ['VAE', '300 MB'], updated: '',
-          downloadUrl: 'https://huggingface.co/Kijai/CogVideoX_comfy/resolve/main/cogvideox_vae.safetensors',
-          filename: 'cogvideox_vae.safetensors', subfolder: 'vae', sizeGB: 0.3,
+          pulls: '', tags: ['VAE', '430 MB'], updated: '',
+          downloadUrl: 'https://huggingface.co/Kijai/CogVideoX-comfy/resolve/main/cogvideox_vae_bf16.safetensors',
+          filename: 'cogvideox_vae_bf16.safetensors', subfolder: 'vae', sizeGB: 0.4,
         },
         {
           name: 'T5-XXL Text Encoder (FP16)',
           description: 'Required text encoder (shared with other models).',
           pulls: '', tags: ['Text Encoder', '9.5 GB'], updated: '',
-          downloadUrl: 'https://huggingface.co/Kijai/CogVideoX_comfy/resolve/main/t5xxl_fp16.safetensors',
+          downloadUrl: 'https://huggingface.co/Comfy-Org/mochi_preview_repackaged/resolve/main/split_files/text_encoders/t5xxl_fp16.safetensors',
           filename: 't5xxl_fp16.safetensors', subfolder: 'text_encoders', sizeGB: 9.5,
         },
       ],
@@ -958,31 +985,31 @@ export function getVideoBundles(): ModelBundle[] {
       description: 'Larger CogVideoX with 1360x768 output. Better quality, needs 16 GB VRAM.',
       tags: ['CogVideoX 1.5', '1360x768', 'Quality'],
       uncensored: true,
-      totalSizeGB: 19.8,
+      totalSizeGB: 20.9,
       vramRequired: '16+ GB',
       workflow: 'cogvideo',
       customNodes: ['cogvideox-wrapper'],
-      url: 'https://huggingface.co/THUDM/CogVideoX1.5-5B',
+      url: 'https://huggingface.co/Kijai/CogVideoX-comfy',
       files: [
         {
           name: 'CogVideoX 1.5 5B Model',
           description: 'Higher quality video model with wider resolution.',
-          pulls: '', tags: ['Model', '10 GB'], updated: '',
-          downloadUrl: 'https://huggingface.co/Kijai/CogVideoX_comfy/resolve/main/CogVideoX1.5_5b_bf16.safetensors',
-          filename: 'CogVideoX1.5_5b_bf16.safetensors', subfolder: 'diffusion_models', sizeGB: 10,
+          pulls: '', tags: ['Model', '11.1 GB'], updated: '',
+          downloadUrl: 'https://huggingface.co/Kijai/CogVideoX-comfy/resolve/main/CogVideoX_1_5_5b_T2V_bf16.safetensors',
+          filename: 'CogVideoX_1_5_5b_T2V_bf16.safetensors', subfolder: 'diffusion_models', sizeGB: 11.1,
         },
         {
           name: 'CogVideoX VAE',
           description: 'Required video encoder/decoder.',
-          pulls: '', tags: ['VAE', '300 MB'], updated: '',
-          downloadUrl: 'https://huggingface.co/Kijai/CogVideoX_comfy/resolve/main/cogvideox_vae.safetensors',
-          filename: 'cogvideox_vae.safetensors', subfolder: 'vae', sizeGB: 0.3,
+          pulls: '', tags: ['VAE', '430 MB'], updated: '',
+          downloadUrl: 'https://huggingface.co/Kijai/CogVideoX-comfy/resolve/main/cogvideox_vae_bf16.safetensors',
+          filename: 'cogvideox_vae_bf16.safetensors', subfolder: 'vae', sizeGB: 0.4,
         },
         {
           name: 'T5-XXL Text Encoder (FP16)',
           description: 'Required text encoder (shared with other models).',
           pulls: '', tags: ['Text Encoder', '9.5 GB'], updated: '',
-          downloadUrl: 'https://huggingface.co/Kijai/CogVideoX_comfy/resolve/main/t5xxl_fp16.safetensors',
+          downloadUrl: 'https://huggingface.co/Comfy-Org/mochi_preview_repackaged/resolve/main/split_files/text_encoders/t5xxl_fp16.safetensors',
           filename: 't5xxl_fp16.safetensors', subfolder: 'text_encoders', sizeGB: 9.5,
         },
       ],
@@ -1011,8 +1038,8 @@ export function getVideoBundles(): ModelBundle[] {
           name: 'SigCLIP Vision Encoder',
           description: 'Required vision encoder for image understanding.',
           pulls: '', tags: ['CLIP Vision', '900 MB'], updated: '',
-          downloadUrl: 'https://huggingface.co/Comfy-Org/sigclip_vision_384/resolve/main/sigclip_vision_384.safetensors',
-          filename: 'sigclip_vision_384.safetensors', subfolder: 'clip_vision', sizeGB: 0.9,
+          downloadUrl: 'https://huggingface.co/Comfy-Org/sigclip_vision_384/resolve/main/sigclip_vision_patch14_384.safetensors',
+          filename: 'sigclip_vision_patch14_384.safetensors', subfolder: 'clip_vision', sizeGB: 0.9,
         },
         {
           name: 'HunyuanVideo VAE',
@@ -1041,7 +1068,7 @@ export function getVideoBundles(): ModelBundle[] {
       name: 'SVD-XT 1.1 (Image-to-Video)',
       description: 'Stable Video Diffusion by Stability AI. Upload an image, get 25 frames of smooth video. Native ComfyUI support.',
       tags: ['SVD', 'I2V', 'Native'],
-      totalSizeGB: 9.5,
+      totalSizeGB: 4.8,
       vramRequired: '12+ GB',
       workflow: 'svd',
       i2v: true,
@@ -1050,9 +1077,9 @@ export function getVideoBundles(): ModelBundle[] {
         {
           name: 'SVD-XT 1.1 Checkpoint',
           description: 'Complete I2V model — no additional downloads needed.',
-          pulls: '', tags: ['Checkpoint', '9.5 GB'], updated: '',
-          downloadUrl: 'https://huggingface.co/stabilityai/stable-video-diffusion-img2vid-xt-1-1/resolve/main/svd_xt_1_1.safetensors',
-          filename: 'svd_xt_1_1.safetensors', subfolder: 'checkpoints', sizeGB: 9.5,
+          pulls: '', tags: ['Checkpoint', '4.8 GB'], updated: '',
+          downloadUrl: 'https://huggingface.co/vdo/stable-video-diffusion-img2vid-xt-1-1/resolve/main/svd_xt_1_1.safetensors',
+          filename: 'svd_xt_1_1.safetensors', subfolder: 'checkpoints', sizeGB: 4.8,
         },
       ],
     },
@@ -1082,50 +1109,32 @@ export function getVideoBundles(): ModelBundle[] {
       ],
     },
     {
-      name: 'Pyramid Flow SD3',
+      name: 'Pyramid Flow MiniFlux v2',
       description: 'Pyramid-style temporal generation based on SD3. 768x1280 output. Experimental but interesting results.',
       tags: ['Pyramid Flow', '768x1280', 'Experimental'],
-      totalSizeGB: 8.8,
+      totalSizeGB: 4.6,
       vramRequired: '16+ GB',
       workflow: 'pyramidflow',
       customNodes: ['pyramidflow-wrapper'],
-      url: 'https://huggingface.co/rain1011/pyramid-flow-sd3',
+      url: 'https://huggingface.co/Kijai/pyramid-flow-comfy',
       files: [
         {
-          name: 'Pyramid Flow Model',
+          name: 'Pyramid Flow MiniFlux v2',
           description: 'Main video generation model.',
-          pulls: '', tags: ['Model', '8.5 GB'], updated: '',
-          downloadUrl: 'https://huggingface.co/Kijai/pyramid-flow-comfy/resolve/main/pyramid_flow_model.safetensors',
-          filename: 'pyramid_flow_model.safetensors', subfolder: 'diffusion_models', sizeGB: 8.5,
+          pulls: '', tags: ['Model', '3.9 GB'], updated: '',
+          downloadUrl: 'https://huggingface.co/Kijai/pyramid-flow-comfy/resolve/main/pyramid_flow_miniflux_bf16_v2.safetensors',
+          filename: 'pyramid_flow_miniflux_bf16_v2.safetensors', subfolder: 'diffusion_models', sizeGB: 3.9,
         },
         {
           name: 'Pyramid Flow VAE',
           description: 'Required video encoder/decoder.',
-          pulls: '', tags: ['VAE', '300 MB'], updated: '',
-          downloadUrl: 'https://huggingface.co/Kijai/pyramid-flow-comfy/resolve/main/pyramid_flow_vae.safetensors',
-          filename: 'pyramid_flow_vae.safetensors', subfolder: 'vae', sizeGB: 0.3,
+          pulls: '', tags: ['VAE', '670 MB'], updated: '',
+          downloadUrl: 'https://huggingface.co/Kijai/pyramid-flow-comfy/resolve/main/pyramid_flow_vae_bf16.safetensors',
+          filename: 'pyramid_flow_vae_bf16.safetensors', subfolder: 'vae', sizeGB: 0.7,
         },
       ],
     },
-    {
-      name: 'Allegro',
-      description: 'Rhymes AI Allegro — 720x1280 video at 15 FPS. Diffusers format, auto-downloaded on first use. High VRAM needed.',
-      tags: ['Allegro', '720x1280', 'High-End'],
-      totalSizeGB: 15.5,
-      vramRequired: '24+ GB',
-      workflow: 'allegro',
-      customNodes: ['allegro'],
-      url: 'https://huggingface.co/rhymes-ai/Allegro',
-      files: [
-        {
-          name: 'Allegro Model (Diffusers)',
-          description: 'Full model — auto-downloads additional components on first ComfyUI use.',
-          pulls: '', tags: ['Model', '~15.5 GB'], updated: '',
-          downloadUrl: 'https://huggingface.co/rhymes-ai/Allegro/resolve/main/model_index.json',
-          filename: 'allegro_model_index.json', subfolder: 'diffusion_models', sizeGB: 15.5,
-        },
-      ],
-    },
+    // Allegro removed — diffusers format only, no single-file safetensors available for one-click install
     {
       name: 'NVIDIA Cosmos 7B',
       description: 'NVIDIA Cosmos Diffusion 7B Text-to-World. 1024x1024 output at 24 FPS. Native ComfyUI support. Uses oldt5 text encoder (NOT t5xxl).',
@@ -1133,27 +1142,27 @@ export function getVideoBundles(): ModelBundle[] {
       totalSizeGB: 19.2,
       vramRequired: '24+ GB',
       workflow: 'cosmos',
-      url: 'https://huggingface.co/comfyanonymous/cosmos_1.0_text2world_safetensors',
+      url: 'https://huggingface.co/mcmonkey/cosmos-1.0',
       files: [
         {
           name: 'Cosmos 7B Text2World',
           description: 'Main video generation model by NVIDIA.',
           pulls: '', tags: ['Model', '14 GB'], updated: '',
-          downloadUrl: 'https://huggingface.co/comfyanonymous/cosmos_1.0_text2world_safetensors/resolve/main/Cosmos-1_0-Diffusion-7B-Text2World.safetensors',
+          downloadUrl: 'https://huggingface.co/mcmonkey/cosmos-1.0/resolve/main/Cosmos-1_0-Diffusion-7B-Text2World.safetensors',
           filename: 'Cosmos-1_0-Diffusion-7B-Text2World.safetensors', subfolder: 'diffusion_models', sizeGB: 14,
         },
         {
           name: 'OldT5-XXL Text Encoder (FP8)',
           description: 'Required text encoder — NOT the same as regular T5-XXL!',
           pulls: '', tags: ['Text Encoder', '4.9 GB'], updated: '',
-          downloadUrl: 'https://huggingface.co/comfyanonymous/cosmos_1.0_text2world_safetensors/resolve/main/oldt5_xxl_fp8_e4m3fn_scaled.safetensors',
+          downloadUrl: 'https://huggingface.co/comfyanonymous/cosmos_1.0_text_encoder_and_VAE_ComfyUI/resolve/main/text_encoders/oldt5_xxl_fp8_e4m3fn_scaled.safetensors',
           filename: 'oldt5_xxl_fp8_e4m3fn_scaled.safetensors', subfolder: 'text_encoders', sizeGB: 4.9,
         },
         {
           name: 'Cosmos VAE',
           description: 'Required video encoder/decoder.',
           pulls: '', tags: ['VAE', '300 MB'], updated: '',
-          downloadUrl: 'https://huggingface.co/comfyanonymous/cosmos_1.0_text2world_safetensors/resolve/main/cosmos_cv8x8x8_1.0.safetensors',
+          downloadUrl: 'https://huggingface.co/comfyanonymous/cosmos_1.0_text_encoder_and_VAE_ComfyUI/resolve/main/vae/cosmos_cv8x8x8_1.0.safetensors',
           filename: 'cosmos_cv8x8x8_1.0.safetensors', subfolder: 'vae', sizeGB: 0.3,
         },
       ],
