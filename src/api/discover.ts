@@ -34,8 +34,8 @@ export interface DownloadProgress {
 
 // ─── Download API ───
 
-export async function startModelDownload(url: string, subfolder: string, filename: string): Promise<{ status: string; id: string; error?: string }> {
-  return backendCall("download_model", { url, subfolder, filename })
+export async function startModelDownload(url: string, subfolder: string, filename: string, expectedBytes?: number): Promise<{ status: string; id: string; error?: string }> {
+  return backendCall("download_model", { url, subfolder, filename, expectedBytes: expectedBytes ?? null })
 }
 
 export async function getDownloadProgress(): Promise<Record<string, DownloadProgress>> {
@@ -100,7 +100,8 @@ export async function installBundleComplete(bundle: ModelBundle): Promise<void> 
   for (const file of bundle.files) {
     if (!file.downloadUrl || !file.filename || !file.subfolder) continue
     try {
-      const result = await startModelDownload(file.downloadUrl, file.subfolder, file.filename)
+      const expectedBytes = file.sizeGB ? Math.round(file.sizeGB * 1_073_741_824) : undefined
+      const result = await startModelDownload(file.downloadUrl, file.subfolder, file.filename, expectedBytes)
       if (result.status === 'exists') {
         // File already on disk — emit synthetic 'complete' so UI reflects it
         window.dispatchEvent(new CustomEvent('comfyui-download-exists', { detail: { filename: file.filename } }))
@@ -511,8 +512,8 @@ export async function detectProviderModelPath(providerName: string): Promise<str
 }
 
 /** Download a GGUF model to a specific directory (for non-Ollama providers) */
-export async function startModelDownloadToPath(url: string, destDir: string, filename: string): Promise<{ status: string; id: string; error?: string }> {
-  return backendCall('download_model_to_path', { url, destDir, filename })
+export async function startModelDownloadToPath(url: string, destDir: string, filename: string, expectedBytes?: number): Promise<{ status: string; id: string; error?: string }> {
+  return backendCall('download_model_to_path', { url, destDir, filename, expectedBytes: expectedBytes ?? null })
 }
 
 // ─── Image Model Bundles ───

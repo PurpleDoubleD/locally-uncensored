@@ -337,6 +337,7 @@ export function DiscoverModels({ category }: Props) {
   const [installError, setInstallError] = useState<string | null>(null)
 
   const handleBundleInstall = async (bundle: ModelBundle) => {
+    if (installingBundle === bundle.name) return // Prevent duplicate installs
     setInstallingBundle(bundle.name)
     const filenames: string[] = []
     for (const file of bundle.files) {
@@ -452,8 +453,7 @@ export function DiscoverModels({ category }: Props) {
       // HF curated lists are static — just re-detect model path and clear search results
       setHfSearchResults([])
       const providerName = providers.openai?.name || 'LM Studio'
-      detectProviderModelPath(providerName).then(path => setHfModelPath(path))
-      setLoading(false)
+      detectProviderModelPath(providerName).then(path => { setHfModelPath(path); setLoading(false) })
     }
   }
 
@@ -467,7 +467,8 @@ export function DiscoverModels({ category }: Props) {
     setHfModelPath(destDir)
     try {
       dlStore.getState().setMeta(model.filename, model.downloadUrl, 'gguf')
-      await startModelDownloadToPath(model.downloadUrl, destDir, model.filename)
+      const expectedBytes = model.sizeGB ? Math.round(model.sizeGB * 1_073_741_824) : undefined
+      await startModelDownloadToPath(model.downloadUrl, destDir, model.filename, expectedBytes)
       dlStore.getState().startPolling()
     } catch (e) {
       console.error('HF download failed:', e)

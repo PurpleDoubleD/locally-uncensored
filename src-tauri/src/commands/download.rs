@@ -27,6 +27,7 @@ pub async fn download_model(
     url: String,
     subfolder: String,
     filename: String,
+    expected_bytes: Option<u64>,
     state: State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
     let comfy_path = {
@@ -44,7 +45,26 @@ pub async fn download_model(
     let dest_file = dest_dir.join(&filename);
 
     if dest_file.exists() {
-        return Ok(serde_json::json!({"status": "exists", "path": dest_file.to_string_lossy()}));
+        // If expected_bytes is provided, verify the file is at least 90% of expected size
+        // to catch partially downloaded files
+        let file_complete = match expected_bytes {
+            Some(expected) if expected > 0 => {
+                let actual = dest_file.metadata().map(|m| m.len()).unwrap_or(0);
+                let threshold = (expected as f64 * 0.9) as u64;
+                let is_complete = actual >= threshold;
+                if !is_complete {
+                    println!("[Download] File {} exists but is incomplete: {} bytes vs {} expected ({}%)",
+                        filename, actual, expected, (actual as f64 / expected as f64 * 100.0) as u32);
+                }
+                is_complete
+            }
+            _ => true, // No expected size — trust existence (backward compat)
+        };
+
+        if file_complete {
+            return Ok(serde_json::json!({"status": "exists", "path": dest_file.to_string_lossy()}));
+        }
+        // File is incomplete — fall through to re-download (resume from partial)
     }
 
     // Use filename as ID (matches frontend lookup)
@@ -472,6 +492,7 @@ pub async fn download_model_to_path(
     url: String,
     dest_dir: String,
     filename: String,
+    expected_bytes: Option<u64>,
     state: State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
     let dir = PathBuf::from(&dest_dir);
@@ -479,7 +500,17 @@ pub async fn download_model_to_path(
     let dest_file = dir.join(&filename);
 
     if dest_file.exists() {
-        return Ok(serde_json::json!({"status": "exists", "path": dest_file.to_string_lossy()}));
+        let file_complete = match expected_bytes {
+            Some(expected) if expected > 0 => {
+                let actual = dest_file.metadata().map(|m| m.len()).unwrap_or(0);
+                let threshold = (expected as f64 * 0.9) as u64;
+                actual >= threshold
+            }
+            _ => true,
+        };
+        if file_complete {
+            return Ok(serde_json::json!({"status": "exists", "path": dest_file.to_string_lossy()}));
+        }
     }
 
     let id = filename.clone();

@@ -108,7 +108,7 @@ export function useModels() {
           updatePullProgress(name, chunk)
         }
         completePull(name)
-        await fetchModels()
+        try { await fetchModels() } catch { /* non-critical */ }
         setTimeout(() => dismissPull(name), 5000)
       } catch (err) {
         if ((err as Error).name !== 'AbortError') {

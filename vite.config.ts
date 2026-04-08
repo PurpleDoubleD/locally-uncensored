@@ -2,7 +2,7 @@ import { defineConfig, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import { spawn, execSync, type ChildProcess } from 'child_process'
-import { existsSync, readdirSync, createWriteStream, mkdirSync } from 'fs'
+import { existsSync, readdirSync, createWriteStream, mkdirSync, statSync } from 'fs'
 import { resolve, join, basename } from 'path'
 import https from 'https'
 import http from 'http'
@@ -384,7 +384,7 @@ function comfyLauncher(): Plugin {
         req.on('data', (c: any) => { body += c })
         req.on('end', () => {
           try {
-            const { url, subfolder, filename } = JSON.parse(body)
+            const { url, subfolder, filename, expectedBytes } = JSON.parse(body)
             if (!url || !subfolder || !filename) {
               res.writeHead(400, { 'Content-Type': 'application/json' })
               res.end(JSON.stringify({ error: 'Missing url, subfolder, or filename' }))
@@ -402,9 +402,24 @@ function comfyLauncher(): Plugin {
             const destPath = join(destDir, filename)
 
             if (existsSync(destPath)) {
-              res.writeHead(200, { 'Content-Type': 'application/json' })
-              res.end(JSON.stringify({ status: 'exists', id: filename }))
-              return
+              // Validate file size if expectedBytes provided (catch partial downloads)
+              let fileComplete = true
+              if (expectedBytes && expectedBytes > 0) {
+                try {
+                  const actual = statSync(destPath).size
+                  const threshold = expectedBytes * 0.9
+                  fileComplete = actual >= threshold
+                  if (!fileComplete) {
+                    console.log(`[Download] File ${filename} is incomplete: ${actual} bytes vs ${expectedBytes} expected (${Math.round(actual / expectedBytes * 100)}%)`)
+                  }
+                } catch { fileComplete = true }
+              }
+              if (fileComplete) {
+                res.writeHead(200, { 'Content-Type': 'application/json' })
+                res.end(JSON.stringify({ status: 'exists', id: filename }))
+                return
+              }
+              // Fall through to re-download incomplete file
             }
 
             const id = filename
@@ -485,14 +500,25 @@ function comfyLauncher(): Plugin {
               res.end(JSON.stringify({ error: 'Missing url, destDir, or filename' }))
               return
             }
-            const { existsSync, mkdirSync } = require('fs')
+            const { existsSync, mkdirSync, statSync: statSyncFs } = require('fs')
             const { join } = require('path')
+            const expectedBytes = parsed.expectedBytes
             if (!existsSync(destDir)) mkdirSync(destDir, { recursive: true })
             const destPath = join(destDir, filename)
             if (existsSync(destPath)) {
-              res.writeHead(200, { 'Content-Type': 'application/json' })
-              res.end(JSON.stringify({ status: 'exists', id: filename }))
-              return
+              let fileComplete = true
+              if (expectedBytes && expectedBytes > 0) {
+                try {
+                  const actual = statSyncFs(destPath).size
+                  fileComplete = actual >= expectedBytes * 0.9
+                  if (!fileComplete) console.log(`[Download] ${filename} incomplete: ${actual} vs ${expectedBytes} expected`)
+                } catch { fileComplete = true }
+              }
+              if (fileComplete) {
+                res.writeHead(200, { 'Content-Type': 'application/json' })
+                res.end(JSON.stringify({ status: 'exists', id: filename }))
+                return
+              }
             }
             const id = filename
             console.log(`[Download] Starting to path: ${filename} → ${destDir}`)
