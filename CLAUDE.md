@@ -76,6 +76,7 @@ src-tauri/src/commands/      — Rust commands: install, process, download, prox
 42. **FramePack workflow node names fix** — Kijai wrapper updated node names: FramePackModelLoader→LoadFramePackModel, removed FramePackEncode (image goes directly to FramePackSampler as start_latent). Updated dynamic-workflow.ts builder, comfyui-nodes.ts categorization, discover.ts CUSTOM_NODE_REGISTRY, and test fixtures.
 43. **FramePack workflow validation fix** — base_precision fp8→bf16, sampler unipc→unipc_bh2, added VAEEncode between LoadImage and FramePackSampler (LATENT type required, not IMAGE).
 44. **FramePack preflight custom node check** — Added framepack to customNodeModels in preflight.ts. Now checks for LoadFramePackModel + FramePackSampler before generation.
+45. **FramePack DualCLIPLoader fix** — CLIPLoader type "wan" creates Llama2 with 128256 vocab but llava_llama3 has 128320 tokens. Fixed: use DualCLIPLoader (clip_l + llava_llama3) with type "hunyuan_video". Added CLIPVisionLoader + CLIPVisionEncode for image_embeds. Full I2V pipeline verified in .exe (OOM on 12GB VRAM = hardware limit, not software bug).
 
 ### What's LEFT to finish v2.3.0:
 1. **Tauri proxy_localhost investigation** — reqwest in Tauri subprocess can't reach localhost. Direct fetch workaround in place but root cause unknown. Low priority since workaround works. Deferred to next release.
