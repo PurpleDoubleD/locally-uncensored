@@ -50,6 +50,33 @@ export function isAgentCompatible(modelName: string): boolean {
 export const isToolCallingModel = isAgentCompatible
 export const hasNativeToolCalling = isAgentCompatible
 
+/**
+ * Models that support Ollama's native `think` parameter.
+ * When think=true is sent to a non-thinking model, Ollama returns HTTP 400.
+ */
+const THINKING_COMPATIBLE = [
+  'qwq',
+  'deepseek-r1',
+  'qwen3',       // Qwen 3.x has native thinking
+  'qwen3.5',
+  'qwen3-coder',
+  'gemma3',      // Gemma 3+ supports thinking via Ollama
+  'gemma4',
+]
+
+/**
+ * Check if a model supports thinking/chain-of-thought mode.
+ * Cloud providers handle it gracefully. Ollama needs explicit support.
+ */
+export function isThinkingCompatible(modelName: string): boolean {
+  const providerId = getProviderIdFromModel(modelName)
+  if (providerId === 'openai' || providerId === 'anthropic') return true
+
+  const name = modelName.toLowerCase()
+  const baseName = name.replace(/^[^/]+\//, '').replace(/:.*$/, '').replace(/-abliterated/g, '').replace(/-uncensored/g, '')
+  return THINKING_COMPATIBLE.some(f => baseName.startsWith(f))
+}
+
 export type ToolCallingStrategy = 'native' | 'template_fix' | 'hermes_xml'
 
 /**

@@ -13,6 +13,7 @@ import { useAgentChat } from "./useAgentChat"
 import { useMemory } from "./useMemory"
 import { useAgentModeStore } from "../stores/agentModeStore"
 import { getProviderForModel, getProviderIdFromModel } from "../api/providers"
+import { isThinkingCompatible } from "../lib/model-compatibility"
 import type { ChatStreamChunk } from "../api/providers/types"
 import type { ImageAttachment } from "../types/chat"
 
@@ -150,7 +151,7 @@ export function useChat() {
           topP: settings.topP,
           topK: settings.topK,
           maxTokens: settings.maxTokens || undefined,
-          thinking: settings.thinkingEnabled === true ? true : false,
+          thinking: settings.thinkingEnabled === true && isThinkingCompatible(activeModel),
           signal: abort.signal,
         },
       )

@@ -12,7 +12,7 @@ import { AgentModeToggle } from './AgentModeToggle'
 import { ErrorBoundary } from '../ui/ErrorBoundary'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { FEATURE_FLAGS } from '../../lib/constants'
-import { isAgentCompatible } from '../../lib/model-compatibility'
+import { isAgentCompatible, isThinkingCompatible } from '../../lib/model-compatibility'
 import { FileText, Bot, User, ChevronDown, Download, Brain, Wrench } from 'lucide-react'
 import { TokenCounter } from './TokenCounter'
 import { MemoryDebugToggle } from './MemoryDebugPanel'
@@ -34,10 +34,12 @@ export function ChatView() {
   const [personaOpen, setPersonaOpen] = useState(false)
   const [exportOpen, setExportOpen] = useState(false)
   const [toolsDropdownOpen, setToolsDropdownOpen] = useState(false)
+  const [thinkHint, setThinkHint] = useState('')
   const { getActivePersona, setActivePersona } = useSettingsStore()
   const activePersona = getActivePersona()
   const allPersonas = useSettingsStore((s) => s.personas)
   const thinkingEnabled = useSettingsStore((s) => s.settings.thinkingEnabled)
+  const canThink = isThinkingCompatible(activeModel)
   const updateSettings = useSettingsStore((s) => s.updateSettings)
   const chatMode = useCodexStore((s) => s.chatMode)
 
@@ -121,18 +123,34 @@ export function ChatView() {
                 )}
 
                 {/* Thinking toggle */}
-                <button
-                  onClick={() => updateSettings({ thinkingEnabled: !thinkingEnabled })}
-                  className={`flex items-center gap-1 px-2 py-0.5 rounded border transition-colors text-[0.55rem] ${
-                    thinkingEnabled
-                      ? 'border-blue-500/30 text-blue-400'
-                      : 'border-gray-200 dark:border-white/[0.06] text-gray-600'
-                  }`}
-                  title="Toggle thinking mode — model reasons before answering"
-                >
-                  <Brain size={9} />
-                  <span>Think</span>
-                </button>
+                <div className="relative">
+                  <button
+                    onClick={() => {
+                      if (!canThink) {
+                        setThinkHint(`${activeModel} doesn't support Think mode. Try QwQ, DeepSeek-R1, or Qwen3.`)
+                        setTimeout(() => setThinkHint(''), 4000)
+                        return
+                      }
+                      updateSettings({ thinkingEnabled: !thinkingEnabled })
+                    }}
+                    className={`flex items-center gap-1 px-2 py-0.5 rounded border transition-colors text-[0.55rem] ${
+                      thinkingEnabled && canThink
+                        ? 'border-blue-500/30 text-blue-400'
+                        : !canThink
+                          ? 'border-gray-200 dark:border-white/[0.06] text-gray-500 opacity-60'
+                          : 'border-gray-200 dark:border-white/[0.06] text-gray-600'
+                    }`}
+                    title={canThink ? 'Toggle thinking mode — model reasons before answering' : `${activeModel} does not support thinking mode`}
+                  >
+                    <Brain size={9} />
+                    <span>Think</span>
+                  </button>
+                  {thinkHint && (
+                    <div className="absolute left-0 top-full mt-1 z-50 w-56 px-2 py-1.5 rounded-md bg-amber-900/90 text-amber-200 text-[0.6rem] leading-tight shadow-lg border border-amber-700/50">
+                      {thinkHint}
+                    </div>
+                  )}
+                </div>
 
                 {/* Spacer */}
                 <div className="flex-1" />

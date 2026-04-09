@@ -67,8 +67,10 @@ src-tauri/src/commands/      — Rust commands: install, process, download, prox
 35. **E2E Image+Video Gen fixes (6 bugs)** — Error handling shows real ComfyUI errors (not generic HTTP 500). Direct fetch fallback when Tauri proxy fails. Legacy builder uses correct FLUX 2 nodes (EmptyFlux2LatentImage + separate negative prompt). Stale localStorage model names auto-reset against current ComfyUI list. Polling heartbeat catches missed WebSocket completion events. ComfyUI critical functions (submit/history/cancel/free) use direct fetch bypassing broken Tauri proxy.
 36. **tqdm crash fix confirmed** — TQDM_DISABLE=1 env var in start_comfyui/auto_start_comfyui prevents KSampler [Errno 22] crash. Both image and video KSampler confirmed working in .exe.
 
+37. **Think-Mode guard for non-thinking models** — isThinkingCompatible() in model-compatibility.ts checks if model supports Ollama's `think` parameter. ChatView shows amber hint toast instead of crashing with HTTP 400. useChat.ts double-guards by not sending `think=true` to incompatible models. Supports: QwQ, DeepSeek-R1, Qwen3/3.5, Qwen3-Coder, Gemma3/4. Cloud providers always pass through.
+
 ### What's LEFT to finish v2.3.0:
-1. **Tauri proxy_localhost investigation** — reqwest in Tauri subprocess can't reach localhost. Direct fetch workaround in place but root cause unknown. Low priority since workaround works.
+1. **Tauri proxy_localhost investigation** — reqwest in Tauri subprocess can't reach localhost. Direct fetch workaround in place but root cause unknown. Low priority since workaround works. Deferred to next release.
 2. **LTX VAEDecode reference** — dynamic-workflow.ts line 263: vaeSourceId incorrectly points to UNETLoader output for LTX strategy. Fix when LTX model is installed for testing.
 
 ### Files modified in this branch (30+ files):
@@ -98,6 +100,9 @@ src-tauri/src/commands/      — Rust commands: install, process, download, prox
 - `src/stores/createStore.ts` — i2vImage state
 - `src/stores/downloadStore.ts` — NEW: unified ComfyUI download tracking (polling, bundle grouping)
 - `src/stores/uiStore.ts` — default view changed to 'chat'
+- `src/lib/model-compatibility.ts` — added isThinkingCompatible() + THINKING_COMPATIBLE list
+- `src/components/chat/ChatView.tsx` — Think button: amber hint for non-thinking models, opacity dim
+- `src/hooks/useChat.ts` — double-guard: don't send think=true to incompatible models
 
 ### Test files (4 new):
 - `src/api/__tests__/comfyui-models.test.ts` — classifyModel, MODEL_TYPE_DEFAULTS, COMPONENT_REGISTRY, determineStrategy (79 tests)
