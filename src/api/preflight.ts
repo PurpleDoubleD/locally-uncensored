@@ -64,6 +64,10 @@ export async function preflightCheck(
 
   // Models with custom wrapper nodes (Kijai/community custom_nodes)
   const customNodeModels: Record<string, { nodes: string[]; installHint: string }> = {
+    framepack: {
+      nodes: ['LoadFramePackModel', 'FramePackSampler'],
+      installHint: 'ComfyUI-FramePackWrapper custom nodes. Install via Discover > Video > FramePack bundle.',
+    },
     cogvideo: {
       nodes: ['CogVideoXModelLoader', 'CogVideoXSampler'],
       installHint: 'ComfyUI-CogVideoXWrapper custom nodes. Install from Model Manager.',
