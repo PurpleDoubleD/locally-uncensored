@@ -72,6 +72,7 @@ src-tauri/src/commands/      — Rust commands: install, process, download, prox
 38. **Chat homepage null crash fix** — getProviderIdFromModel(), isThinkingCompatible(), isAgentCompatible() all crashed with "Cannot read properties of null (reading 'split')" when activeModel was null after fresh install. Added null guards to all three functions.
 39. **Light Theme contrast fix** — ModelCard model names were invisible in light mode (text-gray-200 on white). Fixed: dark:text-gray-200 text-gray-800. Also fixed ModelManager buttons and ModelCard hover/active states for light theme.
 40. **Gemma 4 31B Heretic download URL fix** — llmfan46/gemma-4-31B-it-uncensored-heretic-GGUF repo was deleted (404). Replaced with Stabhappy/gemma-4-31B-it-heretic-Gguf. All 105 download URLs verified HTTP 200/302.
+41. **I2V image upload fix** — uploadImage() used localFetch() which only accepts string body, not FormData. FormData was silently corrupted (sent as "[object FormData]") and Content-Type was forced to application/json instead of multipart/form-data. Fixed: use direct fetch() which handles FormData natively.
 
 ### What's LEFT to finish v2.3.0:
 1. **Tauri proxy_localhost investigation** — reqwest in Tauri subprocess can't reach localhost. Direct fetch workaround in place but root cause unknown. Low priority since workaround works. Deferred to next release.

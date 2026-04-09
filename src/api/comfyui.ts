@@ -675,7 +675,9 @@ export async function uploadImage(file: File): Promise<string> {
   formData.append('image', file)
   formData.append('overwrite', 'true')
 
-  const res = await localFetch(comfyuiUrl('/upload/image'), {
+  // Direct fetch — localFetch only supports string body, not FormData.
+  // FormData needs multipart/form-data which fetch() sets automatically.
+  const res = await fetch(comfyuiUrl('/upload/image'), {
     method: 'POST',
     body: formData,
   })
