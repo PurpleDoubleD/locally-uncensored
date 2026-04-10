@@ -15,7 +15,7 @@
 <!-- Privacy: No external fonts loaded. Using system fonts. -->
 <script defer data-domain="YOUR-DOMAIN.com" src="https://plausible.YOUR-DOMAIN.com/js/script.js"></script>
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"Article","headline":"Locally Uncensored vs GPT4All — Which Local AI App Is Better?","author":{"@type":"Person","name":"PurpleDoubleD"},"datePublished":"2026-03-30","publisher":{"@type":"Organization","name":"Locally Uncensored"}}
+{"@context":"https://schema.org","@type":"Article","headline":"Locally Uncensored vs GPT4All — Which Local AI App Is Better?","author":{"@type":"Person","name":"PurpleDoubleD"},"datePublished":"2026-03-30","dateModified":"2026-04-05","publisher":{"@type":"Organization","name":"Locally Uncensored"}}
 </script>
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"FAQPage","mainEntity":[{"@type":"Question","name":"Is Locally Uncensored better than GPT4All?","acceptedAnswer":{"@type":"Answer","text":"It depends on your needs. Locally Uncensored is better if you want text chat, image generation, and video generation in one app. GPT4All is better if you need document-based RAG chat via its LocalDocs feature."}},{"@type":"Question","name":"Does GPT4All support image generation?","acceptedAnswer":{"@type":"Answer","text":"No. GPT4All focuses exclusively on text-based LLM interactions and document chat. For local image and video generation, you need a tool like Locally Uncensored which integrates ComfyUI."}},{"@type":"Question","name":"Can I use uncensored models with GPT4All?","acceptedAnswer":{"@type":"Answer","text":"GPT4All supports GGUF models and you can load uncensored ones manually, but it does not ship with uncensored model recommendations. Locally Uncensored is built around uncensored models by default."}},{"@type":"Question","name":"Which app uses less RAM — Locally Uncensored or GPT4All?","acceptedAnswer":{"@type":"Answer","text":"Locally Uncensored uses Tauri (Rust + system webview) which typically consumes less memory than GPT4All's Qt/C++ framework. Actual model inference memory depends on the model size, not the app."}}]}
@@ -57,19 +57,26 @@ ul{margin:12px 0 16px 24px;color:#ccc}li{margin-bottom:8px;font-size:15px}
 <div class="meta">Published March 30, 2026 &middot; 6 min read</div>
 
 <p>GPT4All by Nomic AI is one of the most popular local AI chatbots with over 70K GitHub stars. It is a solid choice for running LLMs locally with its LocalDocs feature for chatting with your own documents. But how does it compare to <a href="https://purpledoubled.github.io/locally-uncensored/">Locally Uncensored</a> — the open-source desktop app that combines text chat, image generation, and video generation in a single interface?</p>
-<p>Both apps let you run AI models on your own hardware with no data leaving your machine. The key difference: Locally Uncensored goes beyond text chat by integrating ComfyUI for local image and video generation, while GPT4All focuses purely on text-based AI interactions. If you are exploring the <a href="best-local-ai-apps-2026.html">best local AI apps in 2026</a>, these two represent very different philosophies.</p>
+<p>Both apps let you run AI models on your own hardware with no data leaving your machine. The key difference: Locally Uncensored v2.2.2 goes beyond text chat by integrating ComfyUI for local image and video generation, a built-in coding agent, 13 MCP tools, and multi-provider support, while GPT4All focuses purely on text-based AI interactions. If you are exploring the <a href="best-local-ai-apps-2026.html">best local AI apps in 2026</a>, these two represent very different philosophies.</p>
 
 <h2>Feature Comparison</h2>
 <table>
 <thead><tr><th>Feature</th><th class="hl">Locally Uncensored</th><th>GPT4All</th></tr></thead>
 <tbody>
 <tr><td>LLM Chat</td><td><span class="check">Yes (Ollama)</span></td><td><span class="check">Yes (built-in)</span></td></tr>
+<tr><td>Coding Agent</td><td><span class="check hl">Yes (Codex)</span></td><td><span class="cross">No</span></td></tr>
+<tr><td>MCP Tools</td><td><span class="check hl">13 built-in</span></td><td><span class="cross">No</span></td></tr>
+<tr><td>File Upload + Vision</td><td><span class="check hl">Yes</span></td><td><span class="cross">No</span></td></tr>
+<tr><td>Thinking Mode</td><td><span class="check hl">Yes</span></td><td><span class="cross">No</span></td></tr>
+<tr><td>Granular Permissions</td><td><span class="check hl">7 categories, 3 levels</span></td><td><span class="cross">No</span></td></tr>
+<tr><td>Multi-Provider</td><td><span class="check hl">Ollama + OpenAI + Anthropic</span></td><td><span class="cross">Local only</span></td></tr>
+<tr><td>Model Load/Unload</td><td><span class="check hl">Yes (VRAM mgmt)</span></td><td><span class="cross">No</span></td></tr>
 <tr><td>Image Generation</td><td><span class="check hl">Yes (ComfyUI)</span></td><td><span class="cross">No</span></td></tr>
 <tr><td>Video Generation</td><td><span class="check hl">Yes (ComfyUI)</span></td><td><span class="cross">No</span></td></tr>
 <tr><td>Document RAG</td><td><span class="cross">No</span></td><td><span class="check">Yes (LocalDocs)</span></td></tr>
 <tr><td>Custom Personas</td><td><span class="check hl">Yes</span></td><td><span class="cross">No</span></td></tr>
 <tr><td>Uncensored by Default</td><td><span class="check hl">Yes</span></td><td><span class="cross">No</span></td></tr>
-<tr><td>License</td><td><span class="check">MIT</span></td><td><span class="check">MIT</span></td></tr>
+<tr><td>License</td><td><span class="check">AGPL-3.0</span></td><td><span class="check">MIT</span></td></tr>
 <tr><td>UI Framework</td><td>Tauri + React</td><td>Qt / C++</td></tr>
 <tr><td>Model Management</td><td><span class="check">Built-in (Ollama)</span></td><td><span class="check">Built-in</span></td></tr>
 <tr><td>GPU Acceleration</td><td><span class="check">Yes</span></td><td><span class="check">Yes</span></td></tr>
@@ -85,6 +92,13 @@ ul{margin:12px 0 16px 24px;color:#ccc}li{margin-bottom:8px;font-size:15px}
 <li><strong>Uncensored by Default</strong> — Ships with abliterated model recommendations and no content filters. GPT4All does not specifically cater to uncensored use cases.</li>
 <li><strong>Lightweight Runtime</strong> — Tauri-based app uses significantly less memory than Qt-based GPT4All. Similar to the advantage over <a href="locally-uncensored-vs-lm-studio.html">Electron-based apps like LM Studio</a>.</li>
 <li><strong>All-in-One Creative Suite</strong> — Chat, image gen, and video gen in a single application instead of needing separate tools.</li>
+<li><strong>Codex Coding Agent</strong> — Built-in coding agent that reads your codebase, writes files, and runs commands directly in the app. GPT4All has no coding capabilities.</li>
+<li><strong>13 MCP Tools</strong> — Web search, file operations, shell access, screenshots, and more — integrated as tool-use capabilities. GPT4All offers no tool use.</li>
+<li><strong>File Upload with Vision</strong> — Drag and drop images and vision models describe them. GPT4All is text-only.</li>
+<li><strong>Thinking Mode</strong> — Collapsible reasoning blocks that work with all providers for transparent AI reasoning.</li>
+<li><strong>Multi-Provider Support</strong> — Use Ollama, OpenAI, and Anthropic simultaneously. GPT4All only supports its own local inference engine.</li>
+<li><strong>Model Load/Unload</strong> — Manage VRAM directly from the UI by loading and unloading models on demand.</li>
+<li><strong>Granular Permissions</strong> — Control tool access with 7 categories and 3 permission levels for safe agentic workflows.</li>
 </ul>
 
 <h2>Where GPT4All Wins</h2>
@@ -98,7 +112,7 @@ ul{margin:12px 0 16px 24px;color:#ccc}li{margin-bottom:8px;font-size:15px}
 <div class="verdict">
 <h3>The Verdict</h3>
 <p><strong>Choose GPT4All</strong> if you only need text-based AI chat and want to chat with your own documents using LocalDocs. It has a larger community and mature RAG features.</p>
-<p><strong>Choose Locally Uncensored</strong> if you want a complete local AI creative suite with text, image, and video generation in one privacy-first desktop app. Especially if uncensored models matter to you.</p>
+<p><strong>Choose Locally Uncensored</strong> if you want a complete local AI creative suite with text, image, and video generation plus a coding agent, 13 MCP tools, vision support, and multi-provider flexibility — all in one privacy-first desktop app. Especially if uncensored models matter to you.</p>
 </div>
 
 <div class="faq">
@@ -131,7 +145,7 @@ ul{margin:12px 0 16px 24px;color:#ccc}li{margin-bottom:8px;font-size:15px}
 
 <div class="cta">
 <h2>Try Locally Uncensored</h2>
-<p>Free, open source, MIT licensed. One command to get started.</p>
+<p>Free, open source, AGPL-3.0 licensed. One command to get started.</p>
 <a href="https://github.com/PurpleDoubleD/locally-uncensored" class="btn">View on GitHub</a>
 </div>
 </article>

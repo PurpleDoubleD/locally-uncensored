@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Your Local AI Agent Shouldn't Care Which Model You Run — Locally Uncensored</title>
+<meta name="description" content="How Locally Uncensored's Codex CLI works with any model — native tool calling for compatible models, Hermes XML fallback for everything else. Universal coding agent support for local LLMs.">
+<meta name="keywords" content="local AI agent, tool calling, Hermes XML, coding agent, MCP tools, Ollama tool calling, universal model support, locally uncensored codex, local LLM agent, uncensored AI coding">
+<meta property="og:title" content="Your Local AI Agent Shouldn't Care Which Model You Run">
+<meta property="og:description" content="How Locally Uncensored's Codex CLI works with any model — native tool calling for compatible models, Hermes XML fallback for everything else.">
+<meta property="og:image" content="https://raw.githubusercontent.com/PurpleDoubleD/locally-uncensored/master/docs/social-preview.png">
+<meta property="og:url" content="https://locallyuncensored.com/blog/codex-cli-universal-model-support.html">
+<meta property="og:type" content="article">
+<meta property="article:published_time" content="2026-04-09">
+<meta property="article:author" content="PurpleDoubleD">
+<meta property="article:tag" content="Tool Calling">
+<meta property="article:tag" content="Local AI">
+<meta property="article:tag" content="Coding Agent">
+<meta property="article:tag" content="MCP Tools">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Your Local AI Agent Shouldn't Care Which Model You Run">
+<meta name="twitter:description" content="How Locally Uncensored's Codex CLI works with any model — native tool calling for compatible models, Hermes XML fallback for everything else.">
+<meta name="twitter:image" content="https://raw.githubusercontent.com/PurpleDoubleD/locally-uncensored/master/docs/social-preview.png">
+<link rel="canonical" href="https://locallyuncensored.com/blog/codex-cli-universal-model-support.html">
+<meta name="robots" content="index, follow">
+<meta name="theme-color" content="#0a0a0a">
+<link rel="icon" href="../favicon.png">
+<!-- Privacy: No external fonts loaded. Using system fonts. -->
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"BlogPosting","headline":"Your Local AI Agent Shouldn't Care Which Model You Run","description":"How Locally Uncensored's Codex CLI works with any model — native tool calling for compatible models, Hermes XML fallback for everything else. Universal coding agent support for local LLMs.","image":"https://raw.githubusercontent.com/PurpleDoubleD/locally-uncensored/master/docs/social-preview.png","datePublished":"2026-04-09","dateModified":"2026-04-09","author":{"@type":"Person","name":"PurpleDoubleD","url":"https://github.com/PurpleDoubleD"},"publisher":{"@type":"Organization","name":"Locally Uncensored","url":"https://locallyuncensored.com/"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://locallyuncensored.com/blog/codex-cli-universal-model-support.html"},"keywords":"local AI agent, tool calling, Hermes XML, coding agent, MCP tools, Ollama tool calling, universal model support, locally uncensored codex"}
+</script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{--bg:#0a0a0a;--bg-subtle:#111;--bg-card:#161616;--border:#222;--border-hover:#333;--text:#ededed;--text-secondary:#888;--text-tertiary:#555;--accent:#8b5cf6;--accent-dim:rgba(139,92,246,0.08);--radius:12px;--font:'Inter',system-ui,-apple-system,sans-serif}
+body{font-family:var(--font);background:var(--bg);color:var(--text);-webkit-font-smoothing:antialiased;line-height:1.6}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+::selection{background:var(--accent);color:#fff}
+
+nav{position:fixed;top:0;width:100%;padding:0 24px;height:56px;display:flex;align-items:center;justify-content:space-between;background:rgba(10,10,10,0.8);backdrop-filter:blur(12px);border-bottom:1px solid var(--border);z-index:100}
+.nav-left{display:flex;align-items:center;gap:32px}
+.nav-logo{font-weight:700;font-size:15px;letter-spacing:-0.3px;display:flex;align-items:center;gap:8px;color:var(--text)}
+.nav-logo:hover{text-decoration:none}
+.nav-logo svg{width:18px;height:18px;opacity:0.7}
+.nav-links{display:flex;gap:24px}
+.nav-links a{font-size:14px;color:var(--text-secondary);transition:color 0.15s}
+.nav-links a:hover{color:var(--text);text-decoration:none}
+.nav-links a.active{color:var(--text)}
+.nav-right{display:flex;align-items:center;gap:12px}
+.btn-nav{font-size:13px;font-weight:500;padding:6px 14px;border-radius:8px;border:1px solid var(--border);color:var(--text-secondary);transition:all 0.15s;background:transparent;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center;gap:6px}
+.btn-nav:hover{border-color:var(--border-hover);color:var(--text);text-decoration:none}
+.btn-nav-primary{background:#fff;color:#000;border-color:#fff}
+.btn-nav-primary:hover{opacity:0.9}
+
+.container{max-width:720px;margin:0 auto;padding:120px 24px 80px}
+
+.breadcrumb{font-size:13px;color:var(--text-tertiary);margin-bottom:32px}
+.breadcrumb a{color:var(--text-secondary);border-bottom:1px solid var(--border)}
+.breadcrumb a:hover{color:var(--text);text-decoration:none}
+
+.post-meta{display:flex;align-items:center;gap:12px;margin-bottom:24px;font-size:13px;color:var(--text-tertiary)}
+.post-tag{display:inline-block;padding:2px 8px;border-radius:6px;background:var(--accent-dim);color:var(--accent);font-size:12px;font-weight:500}
+
+article h1{font-size:clamp(28px,4vw,40px);font-weight:700;letter-spacing:-1px;line-height:1.2;margin-bottom:24px}
+article h2{font-size:24px;font-weight:600;letter-spacing:-0.5px;margin-top:48px;margin-bottom:16px;padding-top:16px;border-top:1px solid var(--border)}
+article h3{font-size:18px;font-weight:600;margin-top:32px;margin-bottom:12px}
+article p{font-size:16px;color:var(--text-secondary);line-height:1.8;margin-bottom:16px}
+article p strong{color:var(--text)}
+article ul,article ol{margin:0 0 16px 24px;color:var(--text-secondary);line-height:1.8}
+article li{margin-bottom:6px;font-size:16px}
+article li strong{color:var(--text)}
+article code{font-family:'SF Mono',SFMono-Regular,Consolas,'Liberation Mono',Menlo,monospace;background:var(--bg-card);border:1px solid var(--border);padding:2px 6px;border-radius:4px;font-size:14px;color:var(--accent)}
+article pre{background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);padding:20px;margin:16px 0 24px;overflow-x:auto}
+article pre code{background:none;border:none;padding:0;font-size:14px;color:var(--text-secondary);line-height:1.7}
+
+article table{width:100%;border-collapse:collapse;margin:16px 0 24px;font-size:14px}
+article th{text-align:left;padding:10px 16px;background:var(--bg-card);border:1px solid var(--border);font-weight:600;color:var(--text);font-size:13px;text-transform:uppercase;letter-spacing:0.5px}
+article td{padding:10px 16px;border:1px solid var(--border);color:var(--text-secondary)}
+article tr:hover td{background:var(--bg-card)}
+
+article hr{border:none;border-top:1px solid var(--border);margin:48px 0 24px}
+
+.post-footer{margin-top:48px;padding:24px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);text-align:center}
+.post-footer p{font-size:14px;color:var(--text-secondary);margin-bottom:12px}
+.post-footer a.cta-btn{display:inline-flex;align-items:center;gap:8px;font-size:14px;font-weight:500;padding:10px 20px;border-radius:10px;background:#fff;color:#000;transition:opacity 0.15s}
+.post-footer a.cta-btn:hover{opacity:0.9;text-decoration:none}
+
+footer{max-width:720px;margin:0 auto;padding:40px 24px;border-top:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;font-size:13px;color:var(--text-tertiary)}
+footer a{color:var(--text-secondary);transition:color 0.15s}
+footer a:hover{color:var(--text);text-decoration:none}
+.footer-links{display:flex;gap:16px}
+
+@media(max-width:640px){
+  .nav-links{display:none}
+  .container{padding:100px 16px 60px}
+  article table{font-size:13px}
+  article th,article td{padding:8px 10px}
+}
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="nav-left">
+    <a href="../" class="nav-logo">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+      Locally Uncensored
+    </a>
+    <div class="nav-links">
+      <a href="../#features">Features</a>
+      <a href="../#models">Models</a>
+      <a href="../#compare">Compare</a>
+      <a href="../#faq">FAQ</a>
+      <a href="./" class="active">Blog</a>
+    </div>
+  </div>
+  <div class="nav-right">
+    <a href="https://github.com/PurpleDoubleD/locally-uncensored" class="btn-nav" target="_blank">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z"/></svg>
+      GitHub
+    </a>
+    <a href="https://github.com/PurpleDoubleD/locally-uncensored/releases" class="btn-nav btn-nav-primary" target="_blank">Download</a>
+  </div>
+</nav>
+
+<div class="container">
+  <div class="breadcrumb"><a href="../">Locally Uncensored</a> / <a href="./">Blog</a> / This Post</div>
+
+  <div class="post-meta">
+    <span class="post-tag">Tool Calling</span>
+    <span>April 9, 2026</span>
+    <span>&middot;</span>
+    <span>8 min read</span>
+  </div>
+
+  <article>
+    <h1>Your Local AI Agent Shouldn&rsquo;t Care Which Model You Run</h1>
+
+    <p>Most local AI apps that offer agent or coding features lock you into a handful of models. OpenAI function calling? Supported. Anthropic tool use? Supported. That random abliterated Llama finetune you pulled from HuggingFace last Tuesday? Good luck.</p>
+
+    <p>The core problem is <strong>tool calling</strong>. It&rsquo;s the mechanism that turns a chatbot into an agent &mdash; the model doesn&rsquo;t just generate text, it emits structured calls to functions like &ldquo;read this file&rdquo; or &ldquo;run this shell command.&rdquo; But there&rsquo;s no universal standard for how models express tool calls. OpenAI uses a JSON schema format. Anthropic has its own protocol. Ollama exposes native tool calling for some models but not others. And many local models &mdash; especially uncensored, abliterated, or community-finetuned variants &mdash; don&rsquo;t support structured tool calling at all.</p>
+
+    <p>So we built a system in <a href="https://github.com/PurpleDoubleD/locally-uncensored">Locally Uncensored</a> (v2.2.3) that makes our Codex coding agent work with <strong>any model</strong>. Not &ldquo;any model from our approved list.&rdquo; Any model, period.</p>
+
+    <h2>The Dual-Strategy Approach</h2>
+
+    <p>The solution is two strategies that the app picks between automatically based on the model you&rsquo;re running.</p>
+
+    <p><strong>Strategy 1: Native tool calling.</strong> If the model supports structured tool calling through its API, we use it directly. This is the cleanest path &mdash; the model receives tool definitions in its native format and returns well-formed tool calls that we parse and execute. Cloud providers (OpenAI, Anthropic) always go through this path. For Ollama, we maintain a compatibility list of models known to handle native tool calling reliably.</p>
+
+    <p><strong>Strategy 2: Hermes XML fallback.</strong> If the model isn&rsquo;t on the compatibility list, we switch to an XML-based prompting strategy inspired by the Hermes function-calling format. Instead of relying on the model&rsquo;s native tool calling infrastructure, we inject tool definitions directly into the system prompt as XML schemas and instruct the model to emit tool calls as XML blocks in its response text. Then we parse those blocks out of the raw text output.</p>
+
+    <p>The decision happens automatically. You pick a model, start a Codex session, and the app figures out the right strategy. You never see a &ldquo;this model doesn&rsquo;t support tools&rdquo; error.</p>
+
+    <h2>Which Models Get Native Tool Calling</h2>
+
+    <p>We tested and verified native tool calling with these model families through Ollama:</p>
+
+    <ul>
+      <li><strong>Hermes 3</strong></li>
+      <li><strong>Qwen 3</strong> and <strong>Qwen 3.5</strong></li>
+      <li><strong>Llama 3.x</strong> and <strong>Llama 4</strong></li>
+      <li><strong>Mistral</strong></li>
+      <li><strong>Phi-4</strong></li>
+      <li><strong>DeepSeek</strong></li>
+      <li><strong>Gemma 3</strong> and <strong>Gemma 4</strong></li>
+      <li><strong>Nemotron</strong></li>
+      <li><strong>Command-R</strong></li>
+    </ul>
+
+    <p>Cloud providers &mdash; OpenAI, Anthropic &mdash; always use native tool calling regardless of the specific model.</p>
+
+    <p>For any Ollama model not on this list, the Hermes XML strategy kicks in automatically.</p>
+
+    <h2>How the XML Fallback Actually Works</h2>
+
+    <p>When we detect that a model needs the XML strategy, three things happen at prompt construction time.</p>
+
+    <p>First, we build an <strong>XML tool prompt</strong>. Each of the available MCP tools gets described in a structured XML block &mdash; its name, description, and parameters with types. This goes into the system prompt along with instructions telling the model to use <code>&lt;tool_call&gt;</code> XML blocks when it needs to invoke a tool.</p>
+
+    <p>The conceptual structure looks something like this:</p>
+
+    <pre><code>&lt;tools&gt;
+  &lt;tool name="file_read"&gt;
+    &lt;description&gt;Read the contents of a file&lt;/description&gt;
+    &lt;parameters&gt;
+      &lt;param name="path" type="string" required="true"&gt;File path to read&lt;/param&gt;
+    &lt;/parameters&gt;
+  &lt;/tool&gt;
+  &lt;!-- ... more tools ... --&gt;
+&lt;/tools&gt;
+
+When you want to call a tool, emit:
+&lt;tool_call&gt;
+  &lt;name&gt;file_read&lt;/name&gt;
+  &lt;arguments&gt;{"path": "/src/main.rs"}&lt;/arguments&gt;
+&lt;/tool_call&gt;</code></pre>
+
+    <p>Second, when the model responds, we scan the raw text for <code>&lt;tool_call&gt;</code> blocks and parse them. The model doesn&rsquo;t need to support any special API &mdash; it just needs to be good enough at following instructions to emit the right XML structure in its text output.</p>
+
+    <p>Third, we run a <strong>JSON repair layer</strong> on the arguments. Even when a model gets the XML wrapper right, the JSON inside the arguments field is often messy &mdash; missing quotes, trailing commas, single quotes instead of doubles. The repair layer handles the most common malformations before passing arguments to the tool executor.</p>
+
+    <h2>Smart Tool Filtering Saves Your Context Window</h2>
+
+    <p>Here&rsquo;s a practical problem: we have <strong>13 MCP tools</strong> available &mdash; <code>web_search</code>, <code>web_fetch</code>, <code>file_read</code>, <code>file_write</code>, <code>file_list</code>, <code>file_search</code>, <code>shell_execute</code>, <code>code_execute</code>, <code>system_info</code>, <code>process_list</code>, <code>screenshot</code>, <code>image_generate</code>, and <code>run_workflow</code>. Injecting all 13 tool definitions into every prompt eats a significant chunk of context window, which is a real problem for local models running 4K&ndash;8K contexts.</p>
+
+    <p>The <strong>keyword-based filtering system</strong> analyzes each user message and injects only the tools that are relevant. Ask about files? You get file tools. Ask about your system? System info tools. Ask a general question? No tools at all. This saves roughly <strong>80% of tool-definition tokens</strong> compared to injecting everything blindly.</p>
+
+    <p>This matters more for the XML strategy than native tool calling, because the XML tool definitions live in the prompt text and directly consume context tokens.</p>
+
+    <h2>The 13 MCP Tools</h2>
+
+    <p>Every tool runs through Tauri&rsquo;s Rust backend with native OS access, gated by a granular permissions system. The full set:</p>
+
+    <ul>
+      <li><strong>file_read, file_write, file_list, file_search</strong> &mdash; full filesystem access within the selected project directory</li>
+      <li><strong>shell_execute</strong> &mdash; run any shell command asynchronously with streaming output</li>
+      <li><strong>code_execute</strong> &mdash; run code snippets in an isolated context</li>
+      <li><strong>web_search, web_fetch</strong> &mdash; search the web and fetch page content</li>
+      <li><strong>system_info, process_list</strong> &mdash; query hardware and running processes</li>
+      <li><strong>screenshot</strong> &mdash; capture the screen (combined with vision for visual debugging)</li>
+      <li><strong>image_generate</strong> &mdash; generate images through configured backends</li>
+      <li><strong>run_workflow</strong> &mdash; execute predefined multi-step workflows</li>
+    </ul>
+
+    <p>The agent can chain up to <strong>20 tool calls per task</strong>. In practice, a typical coding task &mdash; &ldquo;add input validation to this form and write tests&rdquo; &mdash; runs 5&ndash;10 iterations: read the existing code, write the validation, read the test file, write new tests, run them, fix failures, run again.</p>
+
+    <h2>Honest Assessment: Where This Works and Where It Doesn&rsquo;t</h2>
+
+    <p>Let me be direct about the limitations.</p>
+
+    <h3>Native tool calling with strong models is great</h3>
+
+    <p>Qwen 3 32B, Llama 4 Scout, and the cloud models handle multi-step tool-use workflows reliably. They pick the right tools, format arguments correctly, and iterate on errors intelligently. If you&rsquo;re running one of these, the experience is genuinely useful for real development work.</p>
+
+    <h3>The XML fallback is functional but rougher</h3>
+
+    <p>It works surprisingly well with models that are good at instruction following &mdash; even models that were never specifically trained for tool use. But smaller models (7B&ndash;13B) will sometimes botch the XML structure, emit partial tool calls, or hallucinate tool names that don&rsquo;t exist. The repair layers catch many of these failures, but you&rsquo;ll see more &ldquo;tool call failed, retrying&rdquo; iterations compared to native tool calling.</p>
+
+    <h3>Abliterated and uncensored models vary wildly</h3>
+
+    <p>The whole point of universal model support is that you can run whatever model you want, including ones that won&rsquo;t refuse tasks. Some abliterated models are excellent at instruction following and work well as coding agents. Others were abliterated crudely and lost some of their structured-output capabilities in the process. There&rsquo;s no way to predict this without trying &mdash; but at least the fallback strategy means they&rsquo;ll get a chance to work instead of being rejected outright.</p>
+
+    <h3>Cloud models are still better at agentic tasks</h3>
+
+    <p>This isn&rsquo;t a controversial take. GPT-4o and Claude 3.5 Sonnet are more reliable tool-callers than any local model. The value proposition of local model support isn&rsquo;t that it&rsquo;s better &mdash; it&rsquo;s that it&rsquo;s private, free, uncensored, and runs on your hardware. For many use cases, that matters more than peak reliability.</p>
+
+    <h2>Getting Started</h2>
+
+    <p>Locally Uncensored is AGPL-3.0 licensed and free. Clone and run:</p>
+
+    <pre><code>git clone https://github.com/PurpleDoubleD/locally-uncensored.git
+cd locally-uncensored
+# Windows: setup.bat | macOS/Linux: ./setup.sh</code></pre>
+
+    <p>Open the Codex tab, pick any model, select a project folder, and start giving it tasks. The app handles the native-vs-XML strategy decision automatically. Check permissions settings if you want to control what the agent can access.</p>
+
+    <p>If you&rsquo;re running Ollama, any model works. If yours isn&rsquo;t on the native tool calling list, you&rsquo;ll be on the XML fallback &mdash; and honestly, for most tasks, you won&rsquo;t notice the difference until you&rsquo;re doing complex multi-step workflows.</p>
+
+    <p>The <a href="https://github.com/PurpleDoubleD/locally-uncensored">GitHub repo</a> has full source, releases for Windows/macOS/Linux, and discussions if you want to report which models work well (or don&rsquo;t) as coding agents. Model compatibility reports from the community are genuinely useful &mdash; they help us expand the native tool calling list and improve the XML fallback parsing.</p>
+
+    <hr>
+
+    <p><em>Locally Uncensored v2.2.3 is available now. AGPL-3.0 licensed and free to use. Built by <a href="https://github.com/PurpleDoubleD">PurpleDoubleD</a>.</em></p>
+  </article>
+
+  <div class="post-footer">
+    <p>Try universal model agent support in Locally Uncensored</p>
+    <a href="https://github.com/PurpleDoubleD/locally-uncensored/releases" class="cta-btn" target="_blank">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z"/></svg>
+      Download v2.2.3
+    </a>
+  </div>
+</div>
+
+<footer>
+  <span>AGPL-3.0 License. Built by <a href="https://github.com/PurpleDoubleD" target="_blank">PurpleDoubleD</a>.</span>
+  <div class="footer-links">
+    <a href="https://github.com/PurpleDoubleD/locally-uncensored" target="_blank">GitHub</a>
+    <a href="https://github.com/PurpleDoubleD/locally-uncensored/discussions" target="_blank">Discussions</a>
+    <a href="../">Home</a>
+  </div>
+</footer>
+
+</body>
+</html>

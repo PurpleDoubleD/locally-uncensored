@@ -15,7 +15,7 @@
 <!-- Privacy: No external fonts loaded. Using system fonts. -->
 <script defer data-domain="YOUR-DOMAIN.com" src="https://plausible.YOUR-DOMAIN.com/js/script.js"></script>
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"Article","headline":"Locally Uncensored vs Jan.ai — Which Local AI App Is Better?","author":{"@type":"Person","name":"PurpleDoubleD"},"datePublished":"2026-03-30","publisher":{"@type":"Organization","name":"Locally Uncensored"}}
+{"@context":"https://schema.org","@type":"Article","headline":"Locally Uncensored vs Jan.ai — Which Local AI App Is Better?","author":{"@type":"Person","name":"PurpleDoubleD"},"datePublished":"2026-03-30","dateModified":"2026-04-05","publisher":{"@type":"Organization","name":"Locally Uncensored"}}
 </script>
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"FAQPage","mainEntity":[{"@type":"Question","name":"Is Locally Uncensored better than Jan.ai?","acceptedAnswer":{"@type":"Answer","text":"It depends on your priorities. Locally Uncensored is better if you want text chat, image generation, and video generation in one app with a permissive MIT license. Jan.ai is better if you need cloud API support alongside local models and prefer a polished ChatGPT-like interface."}},{"@type":"Question","name":"Does Jan.ai support image generation?","acceptedAnswer":{"@type":"Answer","text":"No. Jan.ai focuses on text-based LLM chat and cloud API integration. For local image and video generation, you need a tool like Locally Uncensored which integrates ComfyUI for Stable Diffusion, FLUX, and Wan 2.1 support."}},{"@type":"Question","name":"Is Jan.ai open source?","acceptedAnswer":{"@type":"Answer","text":"Jan.ai is released under the AGPL v3 license, which is open source but has copyleft requirements. Locally Uncensored uses the more permissive MIT license, which allows unrestricted use, modification, and distribution."}},{"@type":"Question","name":"Which uses less memory, Locally Uncensored or Jan?","acceptedAnswer":{"@type":"Answer","text":"Locally Uncensored uses Tauri (Rust + system webview) which typically consumes 50-100MB of RAM for the app shell. Jan uses Electron which bundles a full Chromium instance and often consumes 300-500MB or more. Actual model inference memory depends on the model size, not the app."}}]}
@@ -69,16 +69,22 @@ ul{margin:12px 0 16px 24px;color:#ccc}li{margin-bottom:8px;font-size:15px}
 <tr><td>LLM Chat</td><td><span class="check">Yes (Ollama)</span></td><td><span class="check">Yes (Cortex/llama.cpp)</span></td></tr>
 <tr><td>Image Generation</td><td><span class="check hl">Yes (ComfyUI)</span></td><td><span class="cross">No</span></td></tr>
 <tr><td>Video Generation</td><td><span class="check hl">Yes (ComfyUI)</span></td><td><span class="cross">No</span></td></tr>
-<tr><td>Cloud API Support</td><td><span class="cross">No (local only)</span></td><td><span class="check">Yes (OpenAI, Anthropic, etc.)</span></td></tr>
+<tr><td>Cloud API Support</td><td><span class="check hl">Yes (Ollama + OpenAI + Anthropic)</span></td><td><span class="check">Yes (OpenAI, Anthropic, etc.)</span></td></tr>
 <tr><td>Custom Personas</td><td><span class="check hl">25+ built-in</span></td><td><span class="cross">No</span></td></tr>
 <tr><td>Extension System</td><td><span class="cross">No</span></td><td><span class="check">Yes</span></td></tr>
 <tr><td>Uncensored by Default</td><td><span class="check hl">Yes</span></td><td><span class="cross">No</span></td></tr>
-<tr><td>License</td><td><span class="check">MIT</span></td><td>AGPL v3</td></tr>
+<tr><td>License</td><td><span class="check">AGPL-3.0</span></td><td>AGPL v3</td></tr>
 <tr><td>UI Framework</td><td>Tauri (Rust)</td><td>Electron (Chromium)</td></tr>
 <tr><td>App Memory Usage</td><td><span class="check hl">Low (50-100 MB)</span></td><td>High (300-500 MB)</td></tr>
 <tr><td>HuggingFace Browser</td><td><span class="cross">No</span></td><td><span class="check">Yes</span></td></tr>
 <tr><td>Model Management</td><td><span class="check">Built-in (Ollama)</span></td><td><span class="check">Built-in + HF</span></td></tr>
 <tr><td>Docker Required</td><td><span class="check">No</span></td><td><span class="check">No</span></td></tr>
+<tr><td>Coding Agent</td><td><span class="check hl">Yes (Codex)</span></td><td><span class="cross">No</span></td></tr>
+<tr><td>MCP Tools</td><td><span class="check hl">13 built-in</span></td><td><span class="cross">No</span></td></tr>
+<tr><td>File Upload + Vision</td><td><span class="check hl">Yes</span></td><td><span class="cross">No</span></td></tr>
+<tr><td>Thinking Mode</td><td><span class="check hl">Yes</span></td><td><span class="cross">No</span></td></tr>
+<tr><td>Granular Permissions</td><td><span class="check hl">7 categories</span></td><td><span class="cross">No</span></td></tr>
+<tr><td>Model Load/Unload</td><td><span class="check hl">Yes (VRAM mgmt)</span></td><td><span class="cross">No</span></td></tr>
 </tbody>
 </table>
 
@@ -86,14 +92,21 @@ ul{margin:12px 0 16px 24px;color:#ccc}li{margin-bottom:8px;font-size:15px}
 <ul>
 <li><strong>Image and Video Generation</strong> -- This is the single biggest differentiator. Locally Uncensored integrates ComfyUI for full image generation (Stable Diffusion XL, FLUX.1 Schnell, Pony Diffusion, Juggernaut XL) and video generation (Wan 2.1, AnimateDiff). Jan has no visual generation capabilities whatsoever. If you need anything beyond text chat, this alone justifies the switch.</li>
 <li><strong>Lightweight Runtime</strong> -- Locally Uncensored is built with Tauri, which uses Rust and your system's native webview. This typically means 50-100 MB of RAM for the app shell. Jan uses Electron, which bundles an entire Chromium browser and routinely consumes 300-500 MB before you even load a model. On machines with limited RAM, that difference matters for model inference headroom. This is similar to the advantage over <a href="locally-uncensored-vs-lm-studio.html">other Electron-based apps like LM Studio</a>.</li>
-<li><strong>MIT License</strong> -- Locally Uncensored uses the permissive MIT license. Jan uses AGPL v3, which requires you to share source code of any modifications and has stricter redistribution terms. For developers building on top of these tools, the MIT license offers significantly more freedom.</li>
+<li><strong>AGPL-3.0 License</strong> -- Both Locally Uncensored and Jan use the AGPL license family, keeping code open. Jan uses AGPL v3, which requires you to share source code of any modifications and has stricter redistribution terms. For developers building on top of these tools, the MIT license offers significantly more freedom.</li>
 <li><strong>Custom Personas</strong> -- 25+ built-in AI personas let you switch between different personalities instantly without writing system prompts. Jan provides a blank chat window with no persona system.</li>
 <li><strong>Uncensored by Default</strong> -- Ships with abliterated model recommendations and no content filters on text, images, or video. Jan does not specifically cater to uncensored use cases.</li>
+<li><strong>Codex Coding Agent</strong> -- Built-in coding agent that reads your codebase, writes files, and runs commands. Jan has no coding agent.</li>
+<li><strong>13 MCP Tools</strong> -- Web search, file operations, shell access, screenshots, and more, all built in without extensions.</li>
+<li><strong>File Upload with Vision</strong> -- Drag and drop images into chat; vision models describe them automatically.</li>
+<li><strong>Thinking Mode</strong> -- Collapsible reasoning blocks that work with all providers, showing the model's chain of thought.</li>
+<li><strong>Granular Permissions</strong> -- 7 permission categories with 3 access levels for fine-grained tool access control.</li>
+<li><strong>Multi-Provider Support</strong> -- Use Ollama, OpenAI, and Anthropic simultaneously in v2.2.2. This closes the gap with Jan's cloud API advantage.</li>
+<li><strong>Model Load/Unload</strong> -- Manage VRAM directly from the UI by loading and unloading models on demand.</li>
 </ul>
 
 <h2>Where Jan.ai Wins</h2>
 <ul>
-<li><strong>Cloud API Support</strong> -- Jan connects to OpenAI, Anthropic, Google, Mistral, and other cloud providers alongside local models. If you want a single interface for both local and cloud AI, Jan is one of the few apps that does this well. Locally Uncensored is purely local by design.</li>
+<li><strong>Cloud API Support</strong> -- Jan connects to OpenAI, Anthropic, Google, Mistral, and other cloud providers alongside local models. Locally Uncensored v2.2.2 now supports Ollama + OpenAI + Anthropic simultaneously, but Jan still supports more cloud providers out of the box.</li>
 <li><strong>Polished Chat Interface</strong> -- Jan has one of the cleanest, most intuitive chat UIs among local AI apps. It genuinely feels like a local version of ChatGPT. The conversation management, threading, and overall design are excellent.</li>
 <li><strong>Extension System</strong> -- Jan supports a plugin architecture that lets the community build and install extensions for additional functionality. Locally Uncensored does not currently have an extension system.</li>
 <li><strong>HuggingFace Integration</strong> -- Browse, search, and download models directly from HuggingFace within Jan. You can filter by quantization level and see model sizes before downloading. Locally Uncensored handles model management through Ollama's built-in model library.</li>
@@ -108,14 +121,14 @@ ul{margin:12px 0 16px 24px;color:#ccc}li{margin-bottom:8px;font-size:15px}
 <div class="verdict">
 <h3>The Verdict</h3>
 <p><strong>Choose Jan.ai</strong> if you want a polished ChatGPT-like interface that supports both local models and cloud APIs like OpenAI and Anthropic. Jan is the right choice if text chat is all you need and you value a clean UI with HuggingFace model browsing.</p>
-<p><strong>Choose Locally Uncensored</strong> if you want a lightweight, fully local AI app with text, image, and video generation capabilities. The MIT license, Tauri runtime, uncensored defaults, and ComfyUI integration make it the better choice for users who want a complete creative AI suite on their own hardware.</p>
+<p><strong>Choose Locally Uncensored</strong> if you want a lightweight AI app with text, image, and video generation capabilities. v2.2.2 adds a Codex coding agent, 13 MCP tools, vision support, multi-provider connectivity (Ollama + OpenAI + Anthropic), thinking mode, and VRAM management. The MIT license, Tauri runtime, uncensored defaults, and ComfyUI integration make it the better choice for users who want a complete creative AI suite.</p>
 </div>
 
 <div class="faq">
 <h2>Frequently Asked Questions</h2>
 
 <h3>Is Locally Uncensored better than Jan.ai?</h3>
-<p>It depends on your priorities. Locally Uncensored is better if you want text chat, image generation, and video generation in one app with a permissive MIT license. Jan.ai is better if you need cloud API support alongside local models and prefer a polished ChatGPT-like interface.</p>
+<p>It depends on your priorities. Locally Uncensored is better if you want text chat, image generation, video generation, a coding agent, and 13 MCP tools in one app with a permissive MIT license. As of v2.2.2, it also supports multi-provider (Ollama + OpenAI + Anthropic). Jan.ai is better if you need broader cloud API support and prefer a polished ChatGPT-like interface.</p>
 
 <h3>Does Jan.ai support image generation?</h3>
 <p>No. Jan.ai focuses on text-based LLM chat and cloud API integration. For local image and video generation, you need a tool like Locally Uncensored which integrates ComfyUI for Stable Diffusion, FLUX, and Wan 2.1 support.</p>
@@ -141,7 +154,7 @@ ul{margin:12px 0 16px 24px;color:#ccc}li{margin-bottom:8px;font-size:15px}
 
 <div class="cta">
 <h2>Try Locally Uncensored</h2>
-<p>Free, open source, MIT licensed. One command to get started.</p>
+<p>Free, open source, AGPL-3.0 licensed. One command to get started.</p>
 <a href="https://github.com/PurpleDoubleD/locally-uncensored" class="btn">View on GitHub</a>
 </div>
 </article>

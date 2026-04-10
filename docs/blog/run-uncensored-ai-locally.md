@@ -172,7 +172,7 @@ Yes. The app auto-detects any model installed in Ollama and any checkpoint place
 
 ### Does it phone home or collect telemetry?
 
-No. Zero telemetry, zero analytics, zero network requests beyond what Ollama and ComfyUI need for their initial installation. Once set up, the entire stack runs on localhost. The code is MIT licensed and fully auditable on [GitHub](https://github.com/PurpleDoubleD/locally-uncensored).
+No. Zero telemetry, zero analytics, zero network requests beyond what Ollama and ComfyUI need for their initial installation. Once set up, the entire stack runs on localhost. The code is AGPL-3.0 licensed and fully auditable on [GitHub](https://github.com/PurpleDoubleD/locally-uncensored).
 
 ### How is this different from just running Ollama + ComfyUI separately?
 
@@ -196,4 +196,4 @@ If you run into issues or have feature requests, the [GitHub Discussions](https:
 
 ---
 
-*Locally Uncensored is MIT licensed and free to use. Built by [PurpleDoubleD](https://github.com/PurpleDoubleD).*
+*Locally Uncensored is AGPL-3.0 licensed and free to use. Built by [PurpleDoubleD](https://github.com/PurpleDoubleD).*

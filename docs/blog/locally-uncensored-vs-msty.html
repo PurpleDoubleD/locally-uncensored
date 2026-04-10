@@ -15,7 +15,7 @@
 <!-- Privacy: No external fonts loaded. Using system fonts. -->
 <script defer data-domain="YOUR-DOMAIN.com" src="https://plausible.YOUR-DOMAIN.com/js/script.js"></script>
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"Article","headline":"Locally Uncensored vs Msty","author":{"@type":"Person","name":"PurpleDoubleD"},"datePublished":"2026-03-30","publisher":{"@type":"Organization","name":"Locally Uncensored"}}
+{"@context":"https://schema.org","@type":"Article","headline":"Locally Uncensored vs Msty","author":{"@type":"Person","name":"PurpleDoubleD"},"datePublished":"2026-03-30","dateModified":"2026-04-05","publisher":{"@type":"Organization","name":"Locally Uncensored"}}
 </script>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
@@ -52,19 +52,25 @@ ul{margin:12px 0 16px 24px;color:#ccc}li{margin-bottom:8px;font-size:15px}
 <div class="meta">Published March 30, 2026 &middot; 6 min read</div>
 
 <p>Msty positions itself as a unified interface for both local and cloud AI providers. It offers features like Knowledge Stacks for document RAG and side-by-side model comparison. However, Msty is proprietary software with a freemium model.</p>
-<p>Locally Uncensored takes the fully open-source approach with an MIT license. While Msty focuses on being a multi-provider chat hub, Locally Uncensored adds creative capabilities with integrated ComfyUI for image and video generation.</p>
+<p>Locally Uncensored v2.2.2 takes the fully open-source approach with an AGPL-3.0 license. While Msty focuses on being a multi-provider chat hub, Locally Uncensored adds creative capabilities with integrated ComfyUI for image and video generation, a built-in Codex Coding Agent, 13 MCP tools, and multi-provider support for Ollama, OpenAI, and Anthropic.</p>
 
 <h2>Feature Comparison</h2>
 <table>
 <thead><tr><th>Feature</th><th class="hl">Locally Uncensored</th><th>Msty</th></tr></thead>
 <tbody>
-<tr><td>LLM Chat</td><td><span class="check">Yes (Ollama)</span></td><td><span class="check">Yes (Ollama, LM Studio, Cloud)</span></td></tr>
+<tr><td>LLM Chat</td><td><span class="check">Yes (Ollama + OpenAI + Anthropic)</span></td><td><span class="check">Yes (Ollama, LM Studio, Cloud)</span></td></tr>
 <tr><td>Image Generation</td><td><span class="check hl">Yes (ComfyUI)</span></td><td><span class="cross">No</span></td></tr>
 <tr><td>Video Generation</td><td><span class="check hl">Yes (ComfyUI)</span></td><td><span class="cross">No</span></td></tr>
+<tr><td>Coding Agent</td><td><span class="check hl">Yes (Codex)</span></td><td><span class="cross">No</span></td></tr>
+<tr><td>MCP Tools</td><td><span class="check hl">13 (web search, file ops, shell, screenshots)</span></td><td><span class="cross">No</span></td></tr>
+<tr><td>File Upload + Vision</td><td><span class="check hl">Yes</span></td><td><span class="cross">No</span></td></tr>
+<tr><td>Thinking Mode</td><td><span class="check hl">Yes</span></td><td><span class="cross">No</span></td></tr>
+<tr><td>Granular Permissions</td><td><span class="check hl">Yes</span></td><td><span class="cross">No</span></td></tr>
+<tr><td>Model Load/Unload</td><td><span class="check hl">Yes</span></td><td><span class="cross">No</span></td></tr>
 <tr><td>Document RAG</td><td><span class="cross">No</span></td><td><span class="check">Yes (Knowledge Stacks)</span></td></tr>
-<tr><td>Multi-Provider Support</td><td>Ollama only</td><td><span class="check">Many (local + cloud)</span></td></tr>
+<tr><td>Multi-Provider Support</td><td><span class="check hl">Ollama + OpenAI + Anthropic</span></td><td><span class="check">Many (local + cloud)</span></td></tr>
 <tr><td>Custom Personas</td><td><span class="check hl">Yes</span></td><td><span class="cross">No</span></td></tr>
-<tr><td>Open Source</td><td><span class="check hl">Yes (MIT)</span></td><td><span class="cross">No (Proprietary)</span></td></tr>
+<tr><td>Open Source</td><td><span class="check hl">Yes (AGPL-3.0)</span></td><td><span class="cross">No (Proprietary)</span></td></tr>
 <tr><td>Price</td><td><span class="check hl">Free forever</span></td><td>Freemium (paid features)</td></tr>
 <tr><td>UI Framework</td><td>Tauri + React</td><td>Electron</td></tr>
 <tr><td>Side-by-side Comparison</td><td><span class="cross">No</span></td><td><span class="check">Yes</span></td></tr>
@@ -74,7 +80,13 @@ ul{margin:12px 0 16px 24px;color:#ccc}li{margin-bottom:8px;font-size:15px}
 
 <h2>Where Locally Uncensored Wins</h2>
 <ul>
-<li><strong>Fully Open Source</strong> — MIT licensed, fully auditable, forkable, and free forever. Msty is closed-source with premium features behind a paywall.</li>
+<li><strong>Fully Open Source</strong> — AGPL-3.0 licensed, fully auditable, forkable, and free forever. Msty is closed-source with premium features behind a paywall.</li>
+<li><strong>Codex Coding Agent</strong> — Built-in coding agent that can write, edit, and explain code. Msty has no coding agent.</li>
+<li><strong>13 MCP Tools</strong> — Web search, file operations, shell commands, screenshots, and more built right in. Msty offers no tool integrations.</li>
+<li><strong>File Upload with Vision</strong> — Upload images and documents for multimodal analysis. Not available in Msty.</li>
+<li><strong>Thinking Mode</strong> — See the model's chain-of-thought reasoning for transparency and better results.</li>
+<li><strong>Granular Permissions</strong> — Fine-grained control over what the AI can access and do on your system.</li>
+<li><strong>Model Load/Unload</strong> — Manually manage VRAM by loading and unloading models on demand.</li>
 <li><strong>Image + Video Generation</strong> — Full ComfyUI integration for sophisticated local image and video workflows. Msty offers no visual generation.</li>
 <li><strong>Lightweight Runtime</strong> — Tauri-based app uses significantly less memory than Msty's Electron foundation.</li>
 <li><strong>No Paywall</strong> — Every feature is free. No premium tiers, no feature gating, no subscriptions.</li>
@@ -83,7 +95,7 @@ ul{margin:12px 0 16px 24px;color:#ccc}li{margin-bottom:8px;font-size:15px}
 
 <h2>Where Msty Wins</h2>
 <ul>
-<li><strong>Multi-Provider Hub</strong> — Connect to Ollama, LM Studio, OpenAI, Anthropic, Google, Mistral, and many more from one interface.</li>
+<li><strong>Wider Provider Hub</strong> — While Locally Uncensored now supports Ollama, OpenAI, and Anthropic, Msty connects to even more providers including LM Studio, Google, Mistral, and others.</li>
 <li><strong>Knowledge Stacks</strong> — Chat with your documents using local RAG. A useful feature for research and analysis.</li>
 <li><strong>Side-by-Side Comparison</strong> — Compare responses from different models side by side to evaluate quality.</li>
 <li><strong>Prompt Engineering Tools</strong> — Built-in prompt library and management tools for power users.</li>
@@ -92,12 +104,12 @@ ul{margin:12px 0 16px 24px;color:#ccc}li{margin-bottom:8px;font-size:15px}
 <div class="verdict">
 <h3>The Verdict</h3>
 <p><strong>Choose Msty</strong> if you need a multi-provider AI hub that connects to many cloud APIs and local backends with document RAG support.</p>
-<p><strong>Choose Locally Uncensored</strong> if you want a fully open-source, free AI app with text, image, and video generation and care about software freedom.</p>
+<p><strong>Choose Locally Uncensored</strong> if you want a fully open-source, free AI app with text, image, and video generation, a built-in coding agent, MCP tools, vision support, and care about software freedom.</p>
 </div>
 
 <div class="cta">
 <h2>Try Locally Uncensored</h2>
-<p>Free, open source, MIT licensed. One command to get started.</p>
+<p>Free, open source, AGPL-3.0 licensed. One command to get started.</p>
 <a href="https://github.com/PurpleDoubleD/locally-uncensored" class="btn">View on GitHub</a>
 </div>
 </article>

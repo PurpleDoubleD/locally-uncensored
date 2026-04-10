@@ -8,7 +8,7 @@
 
 No cloud. No censorship. No data collection. Auto-detects 12 local backends. Your AI, your rules.
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
 [![GitHub stars](https://img.shields.io/github/stars/PurpleDoubleD/locally-uncensored?style=social)](https://github.com/PurpleDoubleD/locally-uncensored/stargazers)
 [![GitHub last commit](https://img.shields.io/github/last-commit/PurpleDoubleD/locally-uncensored)](https://github.com/PurpleDoubleD/locally-uncensored/commits)
 [![GitHub Discussions](https://img.shields.io/github/discussions/PurpleDoubleD/locally-uncensored)](https://github.com/PurpleDoubleD/locally-uncensored/discussions)
@@ -77,7 +77,7 @@ No cloud. No censorship. No data collection. Auto-detects 12 local backends. You
 | Agent Workflows | **Yes** | No | No | No |
 | Document Chat (RAG) | **Yes** | Yes | No | No |
 | Voice (STT + TTS) | **Yes** | Partial | No | No |
-| Open Source | **MIT** | MIT | No | AGPL |
+| Open Source | **AGPL-3.0** | MIT | No | AGPL |
 | No Docker | **Yes** | No | Yes | Yes |
 
 ---
@@ -254,7 +254,7 @@ Check out the [Contributing Guide](CONTRIBUTING.md). See [open issues](https://g
 
 ## License
 
-MIT License — see [LICENSE](LICENSE).
+AGPL-3.0 License — see [LICENSE](LICENSE).
 
 ---
 

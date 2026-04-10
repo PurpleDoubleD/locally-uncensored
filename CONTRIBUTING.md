@@ -107,4 +107,4 @@ Open a thread in [Discussions](https://github.com/PurpleDoubleD/locally-uncensor
 
 ## License
 
-By contributing, you agree that your contributions will be licensed under the MIT License.
+By contributing, you agree that your contributions will be licensed under the AGPL-3.0 License.

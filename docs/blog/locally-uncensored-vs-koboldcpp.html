@@ -15,7 +15,7 @@
 <!-- Privacy: No external fonts loaded. Using system fonts. -->
 <script defer data-domain="YOUR-DOMAIN.com" src="https://plausible.YOUR-DOMAIN.com/js/script.js"></script>
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"Article","headline":"Locally Uncensored vs Kobold.cpp — Which Local AI App Is Better?","author":{"@type":"Person","name":"PurpleDoubleD"},"datePublished":"2026-03-30","publisher":{"@type":"Organization","name":"Locally Uncensored"}}
+{"@context":"https://schema.org","@type":"Article","headline":"Locally Uncensored vs Kobold.cpp — Which Local AI App Is Better?","author":{"@type":"Person","name":"PurpleDoubleD"},"datePublished":"2026-03-30","dateModified":"2026-04-05","publisher":{"@type":"Organization","name":"Locally Uncensored"}}
 </script>
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"FAQPage","mainEntity":[{"@type":"Question","name":"Is Locally Uncensored better than Kobold.cpp for creative writing?","acceptedAnswer":{"@type":"Answer","text":"No. Kobold.cpp is purpose-built for creative writing with story mode, adventure mode, and advanced generation parameters. Locally Uncensored is better if you want text chat combined with image and video generation in one app."}},{"@type":"Question","name":"Does Kobold.cpp support image generation?","acceptedAnswer":{"@type":"Answer","text":"Kobold.cpp has basic image generation via SD.cpp, but it is limited compared to Locally Uncensored's full ComfyUI integration which supports Stable Diffusion XL, FLUX, and video generation workflows."}},{"@type":"Question","name":"Can I use Kobold.cpp with SillyTavern?","acceptedAnswer":{"@type":"Answer","text":"Yes. Kobold.cpp is one of the most popular backends for SillyTavern. Locally Uncensored is a standalone app and does not serve as a backend for third-party frontends."}},{"@type":"Question","name":"Which is easier to set up — Locally Uncensored or Kobold.cpp?","acceptedAnswer":{"@type":"Answer","text":"Kobold.cpp ships as a single executable with zero dependencies. Locally Uncensored requires installing the app plus Ollama. Both are straightforward, but Kobold.cpp has fewer moving parts."}}]}
@@ -56,7 +56,7 @@ ul{margin:12px 0 16px 24px;color:#ccc}li{margin-bottom:8px;font-size:15px}
 <h1>Locally Uncensored vs Kobold.cpp</h1>
 <div class="meta">Published March 30, 2026 &middot; 6 min read</div>
 
-<p>Kobold.cpp is a powerhouse for creative writing and roleplay. Built on llama.cpp, it ships as a single executable with zero dependencies and offers advanced text generation controls that writers love. But the local AI landscape has evolved beyond text — and <a href="https://purpledoubled.github.io/locally-uncensored/">Locally Uncensored</a> represents that evolution by combining LLM chat with full ComfyUI integration for image and video generation.</p>
+<p>Kobold.cpp is a powerhouse for creative writing and roleplay. Built on llama.cpp, it ships as a single executable with zero dependencies and offers advanced text generation controls that writers love. But the local AI landscape has evolved beyond text — and <a href="https://purpledoubled.github.io/locally-uncensored/">Locally Uncensored v2.2.2</a> represents that evolution by combining LLM chat with full ComfyUI integration for image and video generation, a built-in coding agent, 13 MCP tools, and multi-provider support.</p>
 <p>If your creative workflow involves visuals alongside text, this comparison gets interesting. Both apps run entirely on your hardware with complete privacy, but they target very different use cases. Here is how Locally Uncensored and Kobold.cpp stack up in 2026.</p>
 
 <h2>Feature Comparison</h2>
@@ -64,12 +64,19 @@ ul{margin:12px 0 16px 24px;color:#ccc}li{margin-bottom:8px;font-size:15px}
 <thead><tr><th>Feature</th><th class="hl">Locally Uncensored</th><th>Kobold.cpp</th></tr></thead>
 <tbody>
 <tr><td>LLM Chat</td><td><span class="check">Yes (Ollama)</span></td><td><span class="check">Yes (built-in llama.cpp)</span></td></tr>
+<tr><td>Coding Agent</td><td><span class="check hl">Yes (Codex)</span></td><td><span class="cross">No</span></td></tr>
+<tr><td>MCP Tools</td><td><span class="check hl">13 built-in</span></td><td><span class="cross">No</span></td></tr>
+<tr><td>File Upload + Vision</td><td><span class="check hl">Yes</span></td><td><span class="cross">No</span></td></tr>
+<tr><td>Thinking Mode</td><td><span class="check hl">Yes</span></td><td><span class="cross">No</span></td></tr>
+<tr><td>Granular Permissions</td><td><span class="check hl">7 categories, 3 levels</span></td><td><span class="cross">No</span></td></tr>
+<tr><td>Multi-Provider</td><td><span class="check hl">Ollama + OpenAI + Anthropic</span></td><td><span class="cross">Local only</span></td></tr>
+<tr><td>Model Load/Unload</td><td><span class="check hl">Yes (VRAM mgmt)</span></td><td><span class="cross">No</span></td></tr>
 <tr><td>Image Generation</td><td><span class="check hl">Yes (ComfyUI)</span></td><td><span class="check">Basic (SD.cpp)</span></td></tr>
 <tr><td>Video Generation</td><td><span class="check hl">Yes (ComfyUI)</span></td><td><span class="cross">No</span></td></tr>
 <tr><td>Story/Adventure Mode</td><td><span class="cross">No</span></td><td><span class="check">Yes</span></td></tr>
 <tr><td>Custom Personas</td><td><span class="check hl">Yes</span></td><td><span class="cross">No</span></td></tr>
 <tr><td>Uncensored by Default</td><td><span class="check hl">Yes</span></td><td><span class="check">Yes</span></td></tr>
-<tr><td>License</td><td><span class="check">MIT</span></td><td>AGPL v3</td></tr>
+<tr><td>License</td><td><span class="check">AGPL-3.0</span></td><td>AGPL v3</td></tr>
 <tr><td>Setup</td><td>Installer + Ollama</td><td>Single executable</td></tr>
 <tr><td>UI Type</td><td>Native Desktop (Tauri)</td><td>Web-based (browser)</td></tr>
 <tr><td>Advanced Gen Controls</td><td>Standard</td><td><span class="check">Extensive</span></td></tr>
@@ -81,10 +88,17 @@ ul{margin:12px 0 16px 24px;color:#ccc}li{margin-bottom:8px;font-size:15px}
 <h2>Where Locally Uncensored Wins</h2>
 <ul>
 <li><strong>Full ComfyUI Image/Video Generation</strong> — Professional-grade image and video generation workflows with support for Stable Diffusion XL, FLUX, and Wan 2.1. Kobold.cpp's SD.cpp integration is basic by comparison.</li>
-<li><strong>MIT License</strong> — MIT is far more permissive than AGPL v3 for developers who want to build on top of it.</li>
+<li><strong>AGPL-3.0 License</strong> — Same copyleft license family as KoboldCpp, keeping the open source ecosystem strong.</li>
 <li><strong>Native Desktop App</strong> — Tauri-based desktop app vs opening a browser tab. Better OS integration and lighter resource usage, similar to its advantage over <a href="locally-uncensored-vs-open-webui.html">web-based tools like Open WebUI</a>.</li>
 <li><strong>Built-in Model Management</strong> — Browse and download models directly in the app via Ollama. Kobold.cpp requires you to source GGUF files yourself.</li>
 <li><strong>Custom Personas</strong> — Switch between AI personalities instantly. Kobold.cpp focuses on generation parameters rather than persona-based interaction.</li>
+<li><strong>Codex Coding Agent</strong> — Built-in coding agent that reads your codebase, writes files, and runs commands. Kobold.cpp has no coding capabilities.</li>
+<li><strong>13 MCP Tools</strong> — Web search, file operations, shell access, screenshots, and more — all integrated as tool-use capabilities.</li>
+<li><strong>File Upload with Vision</strong> — Drag and drop images and vision models describe them. Kobold.cpp is text-focused.</li>
+<li><strong>Thinking Mode</strong> — Collapsible reasoning blocks that work with all providers for transparent AI reasoning.</li>
+<li><strong>Multi-Provider Support</strong> — Use Ollama, OpenAI, and Anthropic simultaneously instead of being limited to local GGUF models.</li>
+<li><strong>Model Load/Unload</strong> — Manage VRAM directly from the UI by loading and unloading models on demand.</li>
+<li><strong>Granular Permissions</strong> — Control tool access with 7 categories and 3 permission levels for safe agentic workflows.</li>
 </ul>
 
 <h2>Where Kobold.cpp Wins</h2>
@@ -99,7 +113,7 @@ ul{margin:12px 0 16px 24px;color:#ccc}li{margin-bottom:8px;font-size:15px}
 <div class="verdict">
 <h3>The Verdict</h3>
 <p><strong>Choose Kobold.cpp</strong> if you are focused on creative writing, roleplay, or interactive fiction and want the most advanced text generation controls available.</p>
-<p><strong>Choose Locally Uncensored</strong> if you want an all-in-one local AI app with text chat, image generation, and video generation under one roof. Especially useful if your creative workflow combines text and visuals.</p>
+<p><strong>Choose Locally Uncensored</strong> if you want an all-in-one local AI app with text chat, image generation, video generation, a coding agent, 13 MCP tools, vision support, and multi-provider flexibility under one roof. Especially useful if your creative workflow combines text and visuals.</p>
 </div>
 
 <div class="faq">
@@ -132,7 +146,7 @@ ul{margin:12px 0 16px 24px;color:#ccc}li{margin-bottom:8px;font-size:15px}
 
 <div class="cta">
 <h2>Try Locally Uncensored</h2>
-<p>Free, open source, MIT licensed. One command to get started.</p>
+<p>Free, open source, AGPL-3.0 licensed. One command to get started.</p>
 <a href="https://github.com/PurpleDoubleD/locally-uncensored" class="btn">View on GitHub</a>
 </div>
 </article>

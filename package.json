@@ -3,7 +3,7 @@
   "version": "2.3.0",
   "private": false,
   "description": "Private, local AI chat & image/video generation. No cloud, no censorship, no data collection. Powered by Ollama & ComfyUI.",
-  "license": "MIT",
+  "license": "AGPL-3.0",
   "author": "purpledoubled",
   "repository": {
     "type": "git",

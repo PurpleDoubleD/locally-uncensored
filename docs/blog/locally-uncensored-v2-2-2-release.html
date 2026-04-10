@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Locally Uncensored v2.2.2 — Codex Agent, MCP Tools, Vision &amp; Thinking Mode — Locally Uncensored</title>
+<meta name="description" content="Locally Uncensored v2.2.2 adds a built-in coding agent, 13 MCP tools, file upload with vision, thinking mode, granular permissions, and a complete UI overhaul.">
+<meta name="keywords" content="locally uncensored v2.2.2 release, codex coding agent, MCP tools, vision file upload, thinking mode, local AI app, granular permissions, UI overhaul, model load unload VRAM">
+<meta property="og:title" content="Locally Uncensored v2.2.2 — Codex Agent, MCP Tools, Vision & Thinking Mode">
+<meta property="og:description" content="Locally Uncensored v2.2.2 adds a built-in coding agent, 13 MCP tools, file upload with vision, thinking mode, granular permissions, and a complete UI overhaul.">
+<meta property="og:image" content="https://raw.githubusercontent.com/PurpleDoubleD/locally-uncensored/master/docs/social-preview.png">
+<meta property="og:url" content="https://locallyuncensored.com/blog/locally-uncensored-v2-2-2-release.html">
+<meta property="og:type" content="article">
+<meta property="article:published_time" content="2026-04-05">
+<meta property="article:author" content="PurpleDoubleD">
+<meta property="article:tag" content="Release">
+<meta property="article:tag" content="Local AI">
+<meta property="article:tag" content="Coding Agent">
+<meta property="article:tag" content="MCP Tools">
+<meta property="article:tag" content="Vision">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Locally Uncensored v2.2.2 — Codex Agent, MCP Tools, Vision & Thinking Mode">
+<meta name="twitter:description" content="Locally Uncensored v2.2.2 adds a built-in coding agent, 13 MCP tools, file upload with vision, thinking mode, granular permissions, and a complete UI overhaul.">
+<meta name="twitter:image" content="https://raw.githubusercontent.com/PurpleDoubleD/locally-uncensored/master/docs/social-preview.png">
+<link rel="canonical" href="https://locallyuncensored.com/blog/locally-uncensored-v2-2-2-release.html">
+<meta name="robots" content="index, follow">
+<meta name="theme-color" content="#0a0a0a">
+<link rel="icon" href="../favicon.png">
+<!-- Privacy: No external fonts loaded. Using system fonts. -->
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"BlogPosting","headline":"Locally Uncensored v2.2.2 — Codex Agent, MCP Tools, Vision & Thinking Mode","description":"Locally Uncensored v2.2.2 adds a built-in coding agent, 13 MCP tools, file upload with vision, thinking mode, granular permissions, and a complete UI overhaul.","image":"https://raw.githubusercontent.com/PurpleDoubleD/locally-uncensored/master/docs/social-preview.png","datePublished":"2026-04-05","dateModified":"2026-04-05","author":{"@type":"Person","name":"PurpleDoubleD","url":"https://github.com/PurpleDoubleD"},"publisher":{"@type":"Organization","name":"Locally Uncensored","url":"https://locallyuncensored.com/"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://locallyuncensored.com/blog/locally-uncensored-v2-2-2-release.html"},"keywords":"locally uncensored v2.2.2 release, codex coding agent, MCP tools, vision file upload, thinking mode, local AI app, granular permissions"}
+</script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{--bg:#0a0a0a;--bg-subtle:#111;--bg-card:#161616;--border:#222;--border-hover:#333;--text:#ededed;--text-secondary:#888;--text-tertiary:#555;--accent:#8b5cf6;--accent-dim:rgba(139,92,246,0.08);--radius:12px;--font:'Inter',system-ui,-apple-system,sans-serif}
+body{font-family:var(--font);background:var(--bg);color:var(--text);-webkit-font-smoothing:antialiased;line-height:1.6}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+::selection{background:var(--accent);color:#fff}
+
+nav{position:fixed;top:0;width:100%;padding:0 24px;height:56px;display:flex;align-items:center;justify-content:space-between;background:rgba(10,10,10,0.8);backdrop-filter:blur(12px);border-bottom:1px solid var(--border);z-index:100}
+.nav-left{display:flex;align-items:center;gap:32px}
+.nav-logo{font-weight:700;font-size:15px;letter-spacing:-0.3px;display:flex;align-items:center;gap:8px;color:var(--text)}
+.nav-logo:hover{text-decoration:none}
+.nav-logo svg{width:18px;height:18px;opacity:0.7}
+.nav-links{display:flex;gap:24px}
+.nav-links a{font-size:14px;color:var(--text-secondary);transition:color 0.15s}
+.nav-links a:hover{color:var(--text);text-decoration:none}
+.nav-links a.active{color:var(--text)}
+.nav-right{display:flex;align-items:center;gap:12px}
+.btn-nav{font-size:13px;font-weight:500;padding:6px 14px;border-radius:8px;border:1px solid var(--border);color:var(--text-secondary);transition:all 0.15s;background:transparent;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center;gap:6px}
+.btn-nav:hover{border-color:var(--border-hover);color:var(--text);text-decoration:none}
+.btn-nav-primary{background:#fff;color:#000;border-color:#fff}
+.btn-nav-primary:hover{opacity:0.9}
+
+.container{max-width:720px;margin:0 auto;padding:120px 24px 80px}
+
+.breadcrumb{font-size:13px;color:var(--text-tertiary);margin-bottom:32px}
+.breadcrumb a{color:var(--text-secondary);border-bottom:1px solid var(--border)}
+.breadcrumb a:hover{color:var(--text);text-decoration:none}
+
+.post-meta{display:flex;align-items:center;gap:12px;margin-bottom:24px;font-size:13px;color:var(--text-tertiary)}
+.post-tag{display:inline-block;padding:2px 8px;border-radius:6px;background:var(--accent-dim);color:var(--accent);font-size:12px;font-weight:500}
+
+article h1{font-size:clamp(28px,4vw,40px);font-weight:700;letter-spacing:-1px;line-height:1.2;margin-bottom:24px}
+article h2{font-size:24px;font-weight:600;letter-spacing:-0.5px;margin-top:48px;margin-bottom:16px;padding-top:16px;border-top:1px solid var(--border)}
+article h3{font-size:18px;font-weight:600;margin-top:32px;margin-bottom:12px}
+article p{font-size:16px;color:var(--text-secondary);line-height:1.8;margin-bottom:16px}
+article p strong{color:var(--text)}
+article ul,article ol{margin:0 0 16px 24px;color:var(--text-secondary);line-height:1.8}
+article li{margin-bottom:6px;font-size:16px}
+article li strong{color:var(--text)}
+article code{font-family:'SF Mono',SFMono-Regular,Consolas,'Liberation Mono',Menlo,monospace;background:var(--bg-card);border:1px solid var(--border);padding:2px 6px;border-radius:4px;font-size:14px;color:var(--accent)}
+article pre{background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);padding:20px;margin:16px 0 24px;overflow-x:auto}
+article pre code{background:none;border:none;padding:0;font-size:14px;color:var(--text-secondary);line-height:1.7}
+
+article table{width:100%;border-collapse:collapse;margin:16px 0 24px;font-size:14px}
+article th{text-align:left;padding:10px 16px;background:var(--bg-card);border:1px solid var(--border);font-weight:600;color:var(--text);font-size:13px;text-transform:uppercase;letter-spacing:0.5px}
+article td{padding:10px 16px;border:1px solid var(--border);color:var(--text-secondary)}
+article tr:hover td{background:var(--bg-card)}
+
+article hr{border:none;border-top:1px solid var(--border);margin:48px 0 24px}
+
+.post-footer{margin-top:48px;padding:24px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);text-align:center}
+.post-footer p{font-size:14px;color:var(--text-secondary);margin-bottom:12px}
+.post-footer a.cta-btn{display:inline-flex;align-items:center;gap:8px;font-size:14px;font-weight:500;padding:10px 20px;border-radius:10px;background:#fff;color:#000;transition:opacity 0.15s}
+.post-footer a.cta-btn:hover{opacity:0.9;text-decoration:none}
+
+footer{max-width:720px;margin:0 auto;padding:40px 24px;border-top:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;font-size:13px;color:var(--text-tertiary)}
+footer a{color:var(--text-secondary);transition:color 0.15s}
+footer a:hover{color:var(--text);text-decoration:none}
+.footer-links{display:flex;gap:16px}
+
+@media(max-width:640px){
+  .nav-links{display:none}
+  .container{padding:100px 16px 60px}
+  article table{font-size:13px}
+  article th,article td{padding:8px 10px}
+}
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="nav-left">
+    <a href="../" class="nav-logo">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+      Locally Uncensored
+    </a>
+    <div class="nav-links">
+      <a href="../#features">Features</a>
+      <a href="../#models">Models</a>
+      <a href="../#compare">Compare</a>
+      <a href="../#faq">FAQ</a>
+      <a href="./" class="active">Blog</a>
+    </div>
+  </div>
+  <div class="nav-right">
+    <a href="https://github.com/PurpleDoubleD/locally-uncensored" class="btn-nav" target="_blank">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z"/></svg>
+      GitHub
+    </a>
+    <a href="https://github.com/PurpleDoubleD/locally-uncensored/releases" class="btn-nav btn-nav-primary" target="_blank">Download</a>
+  </div>
+</nav>
+
+<div class="container">
+  <div class="breadcrumb"><a href="../">Locally Uncensored</a> / <a href="./">Blog</a> / This Post</div>
+
+  <div class="post-meta">
+    <span class="post-tag">Release</span>
+    <span>April 5, 2026</span>
+    <span>&middot;</span>
+    <span>14 min read</span>
+  </div>
+
+  <article>
+    <h1>Locally Uncensored v2.2.2 &mdash; Codex Agent, MCP Tools, Vision &amp; Thinking Mode</h1>
+
+    <p>Version 2.2.2 of <a href="https://github.com/PurpleDoubleD/locally-uncensored">Locally Uncensored</a> is the release where a chat app becomes an engineering tool. This update adds a built-in <strong>coding agent</strong> that reads, writes, and executes code directly on your machine, a <strong>13-tool MCP system</strong> that gives any LLM real-world capabilities, <strong>file upload with vision</strong> across every provider, <strong>thinking mode</strong> that works with any model, <strong>granular permissions</strong> to control exactly what the AI can touch, and a <strong>complete UI overhaul</strong> that makes everything 15% larger and easier to use.</p>
+
+    <p>This isn't an incremental polish release. It's the foundation for using local LLMs as agents &mdash; not just conversational assistants, but tools that can navigate your filesystem, run shell commands, analyze images, and build software. All locally, all private, all under your control.</p>
+
+    <p>Let's walk through every major feature.</p>
+
+    <h2>Codex Coding Agent</h2>
+
+    <p>The headline feature of v2.2.2 is the <strong>Codex coding agent</strong> &mdash; a fully integrated coding environment that turns any LLM into a software development assistant. This isn't a prompt wrapper. It's an autonomous agent loop that can read your codebase, write new files, modify existing ones, and run shell commands to test its work.</p>
+
+    <p>The interface introduces a <strong>3-tab system</strong>: <strong>LU</strong> (standard chat), <strong>Codex</strong> (the coding agent), and <strong>OpenClaw</strong> (an open-ended task runner). Each tab maintains its own conversation history and context, so you can chat in LU while Codex works through a multi-step refactor in the background.</p>
+
+    <h3>How It Works</h3>
+
+    <p>When you open the Codex tab, you select a project folder using a <strong>native folder picker</strong> powered by Tauri's Rust backend (no browser file dialogs &mdash; the real OS picker). Codex scans the directory structure and builds a context map of your project. From there, you describe what you want done in plain language.</p>
+
+    <p>The agent then enters an autonomous tool loop, calling up to <strong>20 tool iterations</strong> per task. In a single session, it might:</p>
+
+    <ul>
+      <li><strong>Read files</strong> to understand existing code structure and conventions</li>
+      <li><strong>Write or modify files</strong> with precise, targeted edits</li>
+      <li><strong>Run shell commands</strong> to install dependencies, run tests, or check build output</li>
+      <li><strong>Iterate on errors</strong> &mdash; if a test fails, it reads the error, fixes the code, and retries</li>
+    </ul>
+
+    <p>The 20-iteration cap exists for safety. Each iteration consumes tokens and potentially modifies your filesystem, so there's a hard stop to prevent runaway loops. In practice, most coding tasks complete in 5&ndash;10 iterations. The permissions system (covered below) gives you additional control over what the agent can actually do.</p>
+
+    <p>This works with <strong>any LLM</strong> &mdash; local Ollama models, OpenAI, Anthropic, Google Gemini. Smaller models will produce less reliable code, but the agent loop itself is model-agnostic. Pair it with a strong coder like Qwen 2.5 Coder 32B or Claude 3.5 Sonnet and the results are genuinely useful for real development work.</p>
+
+    <h2>13 MCP Tools</h2>
+
+    <p>The Codex agent is powered by <strong>MCP (Model Context Protocol) tools</strong> &mdash; a standardized way for LLMs to call functions in the real world. Version 2.2.2 ships with 13 built-in tools, and the architecture is designed for extensibility.</p>
+
+    <h3>Dynamic Tool Registry</h3>
+
+    <p>Tools aren't hardcoded into the prompt. Instead, Locally Uncensored maintains a <strong>dynamic registry</strong> that injects only the relevant tools into each conversation based on context. If you're chatting in the standard LU tab, you might get web search and file read tools. In Codex mode, the full suite &mdash; file write, shell execute, directory listing &mdash; becomes available.</p>
+
+    <h3>Smart Keyword Filtering</h3>
+
+    <p>Here's the problem with tool-use and local LLMs: tool definitions are verbose. Injecting 13 tool schemas into every prompt eats context window and wastes tokens on tools the model will never call for a given query. The <strong>smart keyword filtering</strong> system analyzes the user's message and injects only the tools that match relevant keywords. Asking about code? You get file tools. Asking about your system? You get system info tools. Asking a general knowledge question? No tools injected at all.</p>
+
+    <p>This saves approximately <strong>80% of tool-description tokens</strong> compared to naive injection. For local models running on limited context windows (4K&ndash;8K), this is the difference between tools working and tools not fitting in the prompt at all.</p>
+
+    <h3>JSON Repair for Local LLMs</h3>
+
+    <p>Cloud APIs like OpenAI and Anthropic return well-formed JSON tool calls reliably. Local models? Not so much. A 7B parameter model running through Ollama will frequently produce malformed JSON &mdash; missing closing braces, unescaped quotes in strings, trailing commas. The <strong>JSON repair</strong> layer catches these errors and fixes them before the tool executor sees them. It handles the most common failure modes: incomplete JSON, single quotes instead of double quotes, missing commas, and unquoted keys.</p>
+
+    <h3>XML Fallback</h3>
+
+    <p>Some local models are better at generating XML than JSON (particularly models fine-tuned on Anthropic-style tool use). If JSON parsing fails even after repair, the tool system falls back to <strong>XML parsing</strong>. The model can emit tool calls as <code>&lt;tool_call&gt;</code> blocks and they'll be interpreted correctly. This dual-format approach means tool use works reliably across a much wider range of local models than any single-format system.</p>
+
+    <h2>Granular Permissions</h2>
+
+    <p>Giving an AI agent access to your shell and filesystem is powerful. It's also dangerous if unchecked. Version 2.2.2 introduces a <strong>granular permissions system</strong> that lets you control exactly what the AI can and cannot do.</p>
+
+    <h3>7 Permission Categories</h3>
+
+    <p>Permissions are organized into seven categories:</p>
+
+    <ul>
+      <li><strong>File Read</strong> &mdash; can the agent read files on your filesystem?</li>
+      <li><strong>File Write</strong> &mdash; can the agent create or modify files?</li>
+      <li><strong>Shell Execute</strong> &mdash; can the agent run shell commands?</li>
+      <li><strong>System Info</strong> &mdash; can the agent query CPU, RAM, GPU, and OS details?</li>
+      <li><strong>Screenshot</strong> &mdash; can the agent capture your screen?</li>
+      <li><strong>Network</strong> &mdash; can the agent make HTTP requests?</li>
+      <li><strong>Process Control</strong> &mdash; can the agent start or stop processes?</li>
+    </ul>
+
+    <h3>3 Permission Levels</h3>
+
+    <p>Each category supports three levels: <strong>Deny</strong> (never allowed), <strong>Ask</strong> (prompt the user each time), and <strong>Allow</strong> (always permitted). The default for destructive operations like shell execute and file write is <strong>Ask</strong> &mdash; you see a confirmation dialog before anything runs. You can upgrade trusted workflows to <strong>Allow</strong> or lock down categories to <strong>Deny</strong> if you want a read-only agent.</p>
+
+    <h3>Per-Conversation Overrides</h3>
+
+    <p>Global defaults apply across all conversations, but you can override them <strong>per conversation</strong>. This means you can have a Codex session with full write + execute permissions for a trusted project, while another conversation is locked to read-only. Overrides are stored with the conversation and persist across app restarts.</p>
+
+    <h2>File Upload &amp; Vision</h2>
+
+    <p>Version 2.2.2 adds full <strong>image upload and vision analysis</strong> to the chat interface. This works across every provider that supports vision &mdash; Ollama (with multimodal models like LLaVA, Llama 3.2 Vision), OpenAI (GPT-4o, GPT-4 Vision), Anthropic (Claude 3.5 Sonnet, Claude 3 Haiku), and Google Gemini.</p>
+
+    <h3>Multiple Input Methods</h3>
+
+    <p>Getting images into the chat is flexible:</p>
+
+    <ul>
+      <li><strong>Drag and drop</strong> &mdash; drag image files from your file manager directly onto the chat input</li>
+      <li><strong>Paste from clipboard</strong> &mdash; Ctrl+V to paste a screenshot or copied image</li>
+      <li><strong>Clip button</strong> &mdash; click the attachment icon to open a file picker</li>
+    </ul>
+
+    <p>You can attach <strong>up to 5 images</strong> per message. Each image is resized and encoded appropriately for the target provider &mdash; base64 for Ollama, URL upload for cloud APIs. The app handles the format conversion transparently so you don't need to think about which provider expects what encoding.</p>
+
+    <p>Vision is particularly powerful when combined with the Codex agent. Screenshot your terminal error, paste it into Codex, and ask it to fix the bug. It reads the error from the image, finds the relevant file, and writes the fix.</p>
+
+    <h2>Thinking Mode</h2>
+
+    <p>Chain-of-thought reasoning makes LLMs significantly better at complex tasks. But every provider implements it differently (or doesn't implement it at all). Version 2.2.2 adds a <strong>provider-agnostic thinking mode</strong> that works consistently regardless of which backend you're using.</p>
+
+    <h3>How It Adapts Per Provider</h3>
+
+    <ul>
+      <li><strong>Ollama</strong> &mdash; uses the native <code>think</code> parameter when the model supports it (Qwen 3, DeepSeek R1). The thinking output is captured and displayed separately from the response.</li>
+      <li><strong>OpenAI &amp; Anthropic</strong> &mdash; injects a system prompt that instructs the model to think step-by-step inside designated blocks before answering. The app parses these blocks out of the response and displays them separately.</li>
+      <li><strong>Gemma 3 &amp; Gemma 4</strong> &mdash; these models emit thinking content wrapped in special tags. The app <strong>strips the thinking tags</strong> from the displayed response and renders the thinking content in a separate collapsible section, so you get a clean answer with the reasoning available on demand.</li>
+    </ul>
+
+    <h3>Collapsible Thinking Blocks</h3>
+
+    <p>Thinking output can be verbose &mdash; sometimes longer than the actual answer. The UI renders all thinking content in <strong>collapsible blocks</strong> that are collapsed by default. You see a compact "Thinking..." indicator with the token count. Click to expand and read the full chain of thought. This keeps the conversation view clean while preserving full transparency into the model's reasoning process.</p>
+
+    <h2>Model Load &amp; Unload</h2>
+
+    <p>Local models consume VRAM even when you're not using them. If you loaded a 13B model for a coding task and now want to generate images, that model is sitting in GPU memory doing nothing while ComfyUI fights for VRAM. Version 2.2.2 adds explicit <strong>model load and unload controls</strong>.</p>
+
+    <h3>Power Icons</h3>
+
+    <p>Each model in the model selector now has a <strong>power icon</strong> &mdash; a visual indicator showing whether the model is currently loaded in VRAM. Green means loaded and ready, gray means unloaded. Click the icon to toggle: load a model before you need it (pre-loading for faster first response), or unload it when you're done to free VRAM for other tasks.</p>
+
+    <h3>VRAM Status</h3>
+
+    <p>The model panel shows <strong>real-time VRAM usage</strong> &mdash; how much is consumed, how much is free, and which models are currently occupying memory. This is pulled from the Ollama API and updated in real time. No more guessing whether you have enough VRAM to load the next model or wondering why image generation is running out of memory.</p>
+
+    <p>Pre-loading is especially useful for Codex workflows. Before starting a coding session, load your preferred model so the first tool iteration doesn't incur the cold-start delay (which can be 10&ndash;30 seconds for large models). The model stays warm in VRAM across all 20 iterations.</p>
+
+    <h2>Native PC Control via Rust</h2>
+
+    <p>The MCP tools need to actually <em>do things</em> on your computer &mdash; read files, run commands, take screenshots. In a browser, all of that is sandboxed. The Tauri v2 backend solves this with a set of <strong>Rust-powered native commands</strong> that bypass the browser sandbox and interact with your OS directly.</p>
+
+    <h3>What the Rust Backend Provides</h3>
+
+    <ul>
+      <li><strong>Async shell execution</strong> &mdash; run any command asynchronously. Output streams back to the UI in real time, so you see build logs and test results as they happen, not as a single dump when the command finishes.</li>
+      <li><strong>Filesystem operations</strong> &mdash; read, write, create, delete, and list files and directories. All operations go through the permissions system before executing.</li>
+      <li><strong>System info</strong> &mdash; query CPU model, core count, RAM total/available, GPU name, VRAM, OS version, and disk space. Useful for the AI to understand the hardware it's working with.</li>
+      <li><strong>Screenshot capture</strong> &mdash; capture the current screen and return it as a base64 image. Combined with vision, this lets the AI "see" what's on your screen.</li>
+      <li><strong>Native folder picker</strong> &mdash; the OS-native folder selection dialog, used by the Codex agent to select project directories. No fake browser dialogs.</li>
+    </ul>
+
+    <p>All of these run through Tauri's IPC bridge, which means they execute in the Rust process with full OS permissions while the frontend remains sandboxed. The <strong>sandbox bypass</strong> is intentional and controlled &mdash; every native operation is gated by the permissions system described above. The AI can't run a shell command unless you've explicitly allowed (or approved) it.</p>
+
+    <h2>UI Overhaul</h2>
+
+    <p>The entire interface has been redesigned in v2.2.2. This isn't a theme change &mdash; it's a structural overhaul that affects how you read, write, and interact with every element in the app.</p>
+
+    <h3>15% Larger Interface</h3>
+
+    <p>Every text element, button, and input field is <strong>15% larger</strong> than the previous version. Font sizes are up, padding is more generous, click targets are bigger. The previous UI was optimized for information density; this version is optimized for readability and comfort during long sessions. If you're spending hours in Codex mode working through a refactor, you'll appreciate the reduced eye strain.</p>
+
+    <h3>Collapsible Code Blocks</h3>
+
+    <p>LLM responses frequently contain large code blocks &mdash; sometimes hundreds of lines. In previous versions, these expanded inline and pushed the rest of the conversation off screen. Now, code blocks above a certain length are <strong>automatically collapsed</strong> with a click-to-expand control. You see the first few lines and the language label. Expand when you need to read the code, collapse it when you're done.</p>
+
+    <h3>Monochrome Tool Blocks</h3>
+
+    <p>When the AI uses MCP tools (file read, shell execute, etc.), the tool call and result are displayed in <strong>monochrome blocks</strong> &mdash; visually distinct from the conversation but not attention-grabbing. Previous versions used colored badges for each tool type, which became visually noisy in a Codex session with 15+ tool calls. The monochrome design keeps the focus on the AI's reasoning and the final output, not the mechanics of tool execution.</p>
+
+    <h3>Elapsed Counter</h3>
+
+    <p>Every AI response now shows a <strong>real-time elapsed counter</strong> while generating. You can see exactly how long the model has been thinking. On completion, it shows total generation time and tokens per second. This is essential for benchmarking local models and knowing when a response is genuinely slow versus when the model is working through a complex chain of thought.</p>
+
+    <h3>Working Stop Button</h3>
+
+    <p>The stop button actually works now. In previous versions, hitting stop during generation would sometimes leave the model in a hung state, requiring a page refresh or app restart. The new implementation properly cancels the in-flight request at the HTTP level, cleans up partial responses, and leaves the UI in a consistent state. This is especially important for Codex sessions &mdash; if the agent is heading in the wrong direction on iteration 12 of 20, you need to be able to stop it immediately and redirect.</p>
+
+    <h3>DWM Border Removed</h3>
+
+    <p>On Windows, the Tauri window previously displayed the default <strong>Desktop Window Manager border</strong> &mdash; a thin colored line around the window that looked out of place against the dark UI. This has been removed in v2.2.2 for a cleaner, borderless look that blends seamlessly with the app's dark theme. A small detail, but it eliminates one of the most common visual complaints from Windows users.</p>
+
+    <h2>Upgrade Guide</h2>
+
+    <p>If you're already running Locally Uncensored, upgrading is straightforward:</p>
+
+    <pre><code>cd locally-uncensored
+git pull
+npm install
+npm run dev</code></pre>
+
+    <p>For the standalone desktop app, download the latest <code>.exe</code> (or <code>.dmg</code> / <code>.AppImage</code>) from the <a href="https://github.com/PurpleDoubleD/locally-uncensored/releases">releases page</a>. Your existing conversations, settings, and permissions carry over automatically &mdash; they're stored in your OS's app data directory, not inside the app bundle.</p>
+
+    <p>New users can clone and run:</p>
+
+    <pre><code>git clone https://github.com/PurpleDoubleD/locally-uncensored.git
+cd locally-uncensored
+# Windows: setup.bat | macOS/Linux: ./setup.sh</code></pre>
+
+    <h2>What's Next</h2>
+
+    <p>Version 2.2.2 lays the foundation for agent-based workflows. The next milestones on the roadmap:</p>
+
+    <ul>
+      <li><strong>Custom MCP tool authoring</strong> &mdash; write your own tools in JavaScript or Rust and register them with the tool system</li>
+      <li><strong>Multi-agent orchestration</strong> &mdash; let multiple specialized agents collaborate on complex tasks</li>
+      <li><strong>RAG integration</strong> &mdash; ground conversations in your local documents and codebases</li>
+      <li><strong>Voice-to-agent pipeline</strong> &mdash; speak commands, have the agent execute them, hear the results</li>
+    </ul>
+
+    <p>Follow the <a href="https://github.com/PurpleDoubleD/locally-uncensored">GitHub repo</a> for updates, or join the <a href="https://github.com/PurpleDoubleD/locally-uncensored/discussions">Discussions</a> to share feedback and feature requests.</p>
+
+    <h2>FAQ</h2>
+
+    <h3>Does the Codex agent work with small local models?</h3>
+    <p>It works with any model, but results scale with model quality. A 7B model can handle simple file reads and basic code edits. For multi-step refactoring, writing tests, and debugging, you'll want at least a 14B+ coding model like Qwen 2.5 Coder 14B/32B, DeepSeek Coder V2, or a cloud model like Claude 3.5 Sonnet. The tool system itself is model-agnostic &mdash; the quality of the agent depends entirely on the model's coding ability.</p>
+
+    <h3>Is the Codex agent safe to use on production code?</h3>
+    <p>Use it with version control. The permissions system adds a safety net (set file write and shell execute to <strong>Ask</strong> mode so you approve every change), but the best safety net is a <code>git commit</code> before you start. If the agent makes a mess, <code>git checkout .</code> undoes everything. We recommend treating it like a junior developer with full repo access: powerful, but supervise it.</p>
+
+    <h3>How does smart keyword filtering decide which tools to inject?</h3>
+    <p>Each tool has a set of associated keywords. The user's message is analyzed for keyword matches, and only tools with at least one match are included in the prompt. For example, "read the config file" matches <code>file_read</code>, while "what's the weather" matches nothing and skips tool injection entirely. The keyword sets are tuned to minimize false negatives &mdash; it's better to inject an unnecessary tool than to miss one the model needs.</p>
+
+    <h3>Can I use vision with local models?</h3>
+    <p>Yes, if the model supports multimodal input. LLaVA 1.6, Llama 3.2 Vision, and BakLLaVA work through Ollama. The app detects whether the selected model supports vision and enables/disables the upload UI accordingly. Cloud providers (OpenAI, Anthropic, Gemini) all support vision with their latest models.</p>
+
+    <h3>Does thinking mode use more tokens?</h3>
+    <p>Yes. The thinking output is generated in addition to the answer, so you'll use roughly 2&ndash;5x more output tokens per response. On local models, this means longer generation times. The benefit is significantly better reasoning on complex tasks &mdash; math, logic, multi-step planning, and code architecture decisions. For simple questions, leave thinking mode off.</p>
+
+    <h3>Why 20 tool iterations? Can I increase the limit?</h3>
+    <p>The 20-iteration cap balances capability with safety. Each iteration can modify files or run commands, so an unbounded loop risks unintended consequences. In practice, most tasks complete in 5&ndash;10 iterations. The limit is configurable in settings if you need more for complex workflows, but we recommend keeping the default until you're comfortable with the agent's behavior.</p>
+
+    <h3>Is this update free?</h3>
+    <p>Yes. Locally Uncensored is AGPL-3.0 licensed and completely free. No paid tiers, no pro features behind a paywall, no subscriptions. The full source code is on <a href="https://github.com/PurpleDoubleD/locally-uncensored">GitHub</a>.</p>
+
+    <hr>
+
+    <p><em>Locally Uncensored v2.2.2 is available now. AGPL-3.0 licensed and free to use. Built by <a href="https://github.com/PurpleDoubleD">PurpleDoubleD</a>.</em></p>
+  </article>
+
+  <div class="post-footer">
+    <p>Ready to turn your local LLM into a coding agent?</p>
+    <a href="https://github.com/PurpleDoubleD/locally-uncensored/releases" class="cta-btn" target="_blank">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z"/></svg>
+      Download v2.2.2
+    </a>
+  </div>
+</div>
+
+<footer>
+  <span>AGPL-3.0 License. Built by <a href="https://github.com/PurpleDoubleD" target="_blank">PurpleDoubleD</a>.</span>
+  <div class="footer-links">
+    <a href="https://github.com/PurpleDoubleD/locally-uncensored" target="_blank">GitHub</a>
+    <a href="https://github.com/PurpleDoubleD/locally-uncensored/discussions" target="_blank">Discussions</a>
+    <a href="../">Home</a>
+  </div>
+</footer>
+
+</body>
+</html>
