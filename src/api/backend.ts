@@ -175,9 +175,9 @@ export async function backendCall<T = any>(
     if (options.headers) {
       Object.assign(headers, options.headers);
     }
-  } else if (args && method !== "GET") {
+  } else if (method !== "GET") {
     headers["Content-Type"] = "application/json";
-    fetchOptions.body = JSON.stringify(args);
+    fetchOptions.body = JSON.stringify(args || {});
   }
   fetchOptions.headers = headers;
 

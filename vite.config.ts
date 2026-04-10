@@ -729,12 +729,15 @@ function comfyLauncher(): Plugin {
             let envContent = ''
             try { envContent = readFileSync(envPath, 'utf8') } catch { /* no .env yet */ }
 
-            if (envContent.includes('COMFYUI_PATH=')) {
-              envContent = envContent.replace(/COMFYUI_PATH=.*/g, `COMFYUI_PATH=${newPath}`)
-            } else {
-              envContent += `${envContent.endsWith('\n') ? '' : '\n'}COMFYUI_PATH=${newPath}\n`
+            const currentMatch = envContent.match(/^COMFYUI_PATH=(.*)$/m)
+            if (!currentMatch || currentMatch[1].trim() !== newPath) {
+              if (envContent.includes('COMFYUI_PATH=')) {
+                envContent = envContent.replace(/COMFYUI_PATH=.*/g, `COMFYUI_PATH=${newPath}`)
+              } else {
+                envContent += `${envContent.endsWith('\n') || envContent === '' ? '' : '\n'}COMFYUI_PATH=${newPath}\n`
+              }
+              writeFileSync(envPath, envContent, 'utf8')
             }
-            writeFileSync(envPath, envContent, 'utf8')
 
             // Update process.env
             process.env.COMFYUI_PATH = newPath
@@ -859,12 +862,15 @@ function comfyLauncher(): Plugin {
             const { writeFileSync, readFileSync } = require('fs')
             let envContent = ''
             try { envContent = readFileSync(envPath, 'utf8') } catch { /* no .env */ }
-            if (envContent.includes('COMFYUI_PATH=')) {
-              envContent = envContent.replace(/COMFYUI_PATH=.*/g, `COMFYUI_PATH=${installDir}`)
-            } else {
-              envContent += `${envContent.endsWith('\n') ? '' : '\n'}COMFYUI_PATH=${installDir}\n`
+            const currentMatch = envContent.match(/^COMFYUI_PATH=(.*)$/m)
+            if (!currentMatch || currentMatch[1].trim() !== installDir) {
+              if (envContent.includes('COMFYUI_PATH=')) {
+                envContent = envContent.replace(/COMFYUI_PATH=.*/g, `COMFYUI_PATH=${installDir}`)
+              } else {
+                envContent += `${envContent.endsWith('\n') || envContent === '' ? '' : '\n'}COMFYUI_PATH=${installDir}\n`
+              }
+              writeFileSync(envPath, envContent, 'utf8')
             }
-            writeFileSync(envPath, envContent, 'utf8')
             process.env.COMFYUI_PATH = installDir
             log(`Path saved to .env: ${installDir}`)
 
