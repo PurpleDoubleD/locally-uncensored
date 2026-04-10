@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { useCreateStore } from '../../stores/createStore'
 import { SliderControl } from '../settings/SliderControl'
 import { WorkflowFinder } from './WorkflowFinder'
-import { Dice5, Info, AlertTriangle, Film, ImageIcon } from 'lucide-react'
+import { Dice5, Info, AlertTriangle, Film, ImageIcon, ImagePlus } from 'lucide-react'
 import type { ClassifiedModel, ModelType } from '../../api/comfyui'
 import { snapToVideoGrid, isI2VModel } from '../../api/comfyui'
 
@@ -43,6 +43,7 @@ const VID_SIZE_PRESETS = [
 const TYPE_BADGE: Record<ModelType, { label: string; color: string }> = {
   flux: { label: 'FLUX', color: 'bg-purple-500/15 text-purple-300' },
   flux2: { label: 'FLUX 2', color: 'bg-purple-500/15 text-purple-300' },
+  zimage: { label: 'Z-Image', color: 'bg-rose-500/15 text-rose-300' },
   sdxl: { label: 'SDXL', color: 'bg-blue-500/15 text-blue-300' },
   sd15: { label: 'SD 1.5', color: 'bg-green-500/15 text-green-300' },
   wan: { label: 'Wan', color: 'bg-orange-500/15 text-orange-300' },
@@ -61,6 +62,7 @@ const TYPE_BADGE: Record<ModelType, { label: string; color: string }> = {
 export function ParamPanel({ imageModels, videoModels, samplerList, schedulerList, modelsLoaded }: Props) {
   const store = useCreateStore()
   const isVideo = store.mode === 'video'
+  const isI2I = store.mode === 'image' && store.imageSubMode === 'img2img'
   const [videoSubTab, setVideoSubTab] = useState<'t2v' | 'i2v'>('t2v')
   const sizePresets = isVideo ? VID_SIZE_PRESETS : getImageSizePresets(store.imageModelType)
 
@@ -68,7 +70,7 @@ export function ParamPanel({ imageModels, videoModels, samplerList, schedulerLis
   const filteredVideoModels = isVideo
     ? videoModels.filter(m => videoSubTab === 'i2v' ? isI2VModel(m.name) : !isI2VModel(m.name))
     : videoModels
-  const models = isVideo ? filteredVideoModels : imageModels
+  const models = isVideo ? filteredVideoModels : imageModels  // i2i also uses imageModels
 
   // Auto-select first model in filtered list when switching video sub-tabs
   useEffect(() => {
@@ -121,6 +123,34 @@ export function ParamPanel({ imageModels, videoModels, samplerList, schedulerLis
           >
             <ImageIcon size={11} />
             Image to Video
+          </button>
+        </div>
+      )}
+
+      {/* Image Sub-Tabs: Text to Image / Image to Image */}
+      {!isVideo && (
+        <div className="flex rounded-lg bg-gray-100 dark:bg-white/5 p-0.5 gap-0.5">
+          <button
+            onClick={() => store.setImageSubMode('text2img')}
+            className={`flex-1 flex items-center justify-center gap-1.5 px-2 py-1.5 rounded-md text-[10px] font-medium transition-all ${
+              store.imageSubMode === 'text2img'
+                ? 'bg-white dark:bg-white/15 text-gray-900 dark:text-white shadow-sm'
+                : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
+            }`}
+          >
+            <ImageIcon size={11} />
+            Text to Image
+          </button>
+          <button
+            onClick={() => store.setImageSubMode('img2img')}
+            className={`flex-1 flex items-center justify-center gap-1.5 px-2 py-1.5 rounded-md text-[10px] font-medium transition-all ${
+              store.imageSubMode === 'img2img'
+                ? 'bg-white dark:bg-white/15 text-gray-900 dark:text-white shadow-sm'
+                : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
+            }`}
+          >
+            <ImagePlus size={11} />
+            Image to Image
           </button>
         </div>
       )}
@@ -181,9 +211,14 @@ export function ParamPanel({ imageModels, videoModels, samplerList, schedulerLis
         <SliderControl label="CFG" value={store.cfgScale} min={0} max={30} step={0.5} onChange={store.setCfgScale} />
       </div>
 
-      {/* Batch Size */}
-      {!isVideo && (
+      {/* Batch Size (not for I2I) */}
+      {!isVideo && !isI2I && (
         <SliderControl label="Batch" value={store.batchSize} min={1} max={4} step={1} onChange={store.setBatchSize} />
+      )}
+
+      {/* Denoise Strength (I2I only) */}
+      {isI2I && (
+        <SliderControl label="Denoise" value={store.denoise} min={0.05} max={1.0} step={0.05} onChange={store.setDenoise} />
       )}
 
       {/* Size */}

@@ -274,6 +274,12 @@ export const COMPONENT_REGISTRY: Record<string, ComponentRequirements> = {
     clip: { patterns: ['qwen', 'mistral'], downloadName: 'qwen_3_4b_fp4_flux2.safetensors', downloadUrl: 'https://huggingface.co/Comfy-Org/vae-text-encorder-for-flux-klein-4b/resolve/main/split_files/text_encoders/qwen_3_4b_fp4_flux2.safetensors', subfolder: 'text_encoders' },
     needsSeparateVAE: true, needsSeparateCLIP: true,
   },
+  zimage: {
+    loader: 'UNETLoader',
+    vae: { patterns: ['ae', 'flux'], downloadName: 'ae.safetensors', downloadUrl: 'https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/split_files/vae/ae.safetensors', subfolder: 'vae' },
+    clip: { patterns: ['qwen_3_4b', 'qwen3'], downloadName: 'qwen_3_4b.safetensors', downloadUrl: 'https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/split_files/text_encoders/qwen_3_4b.safetensors', subfolder: 'text_encoders' },
+    needsSeparateVAE: true, needsSeparateCLIP: true,
+  },
   wan: {
     loader: 'UNETLoader',
     vae: { patterns: ['wan'], downloadName: 'wan_2.1_vae.safetensors', downloadUrl: 'https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/vae/wan_2.1_vae.safetensors', subfolder: 'vae' },
@@ -725,7 +731,7 @@ export function getImageBundles(): ModelBundle[] {
       uncensored: true,
       totalSizeGB: 19.3,
       vramRequired: '10-16 GB',
-      workflow: 'flux2',
+      workflow: 'zimage',
       url: 'https://huggingface.co/Comfy-Org/z_image_turbo',
       files: [
         {
@@ -758,7 +764,7 @@ export function getImageBundles(): ModelBundle[] {
       uncensored: true,
       totalSizeGB: 19.3,
       vramRequired: '10-16 GB',
-      workflow: 'flux2',
+      workflow: 'zimage',
       url: 'https://huggingface.co/Comfy-Org/z_image',
       files: [
         {

@@ -14,6 +14,7 @@ import {
 export type WorkflowStrategy =
   | 'unet_flux'       // FLUX 1: UNETLoader + CLIPLoader + VAELoader + EmptySD3LatentImage
   | 'unet_flux2'      // FLUX 2: UNETLoader + CLIPLoader + VAELoader + EmptyFlux2LatentImage
+  | 'unet_zimage'     // Z-Image: UNETLoader + CLIPLoader(qwen_image) + VAELoader + EmptySD3LatentImage
   | 'unet_video'      // Wan/Hunyuan: UNETLoader + CLIPLoader + VAELoader + EmptyHunyuanLatentVideo
   | 'unet_ltx'        // LTX Video: UNETLoader + CLIPLoader + EmptyLTXVLatentVideo
   | 'unet_mochi'      // Mochi: UNETLoader + CLIPLoader + VAELoader + EmptyMochiLatentVideo
@@ -43,6 +44,14 @@ export function determineStrategy(
   const hasCLIPLoader = nodes.loaders.includes('CLIPLoader')
   const hasVAELoader = nodes.loaders.includes('VAELoader')
   const hasAnimateDiff = nodes.motion.includes('ADE_LoadAnimateDiffModel')
+
+  // Z-Image → UNET + CLIPLoader(qwen_image) + VAE + SD3LatentImage
+  if (modelType === 'zimage') {
+    if (hasUNET && hasCLIPLoader && hasVAELoader) {
+      return { strategy: 'unet_zimage', reason: 'Z-Image model → UNETLoader + CLIPLoader(qwen_image)' }
+    }
+    return { strategy: 'unavailable', reason: 'Z-Image requires UNETLoader + CLIPLoader + VAELoader nodes' }
+  }
 
   // FLUX 2 → UNET + Flux2LatentImage
   if (modelType === 'flux2') {
@@ -223,13 +232,14 @@ export async function buildDynamicWorkflow(
     vaeOutputSlot = 2
     samplerModelId = modelNodeId
 
-  } else if (strategy === 'unet_flux' || strategy === 'unet_flux2' || strategy === 'unet_video' || strategy === 'unet_ltx'
+  } else if (strategy === 'unet_flux' || strategy === 'unet_flux2' || strategy === 'unet_zimage' || strategy === 'unet_video' || strategy === 'unet_ltx'
     || strategy === 'unet_mochi' || strategy === 'unet_cosmos') {
     // Separate loaders
     const unetId = String(n++)
     const clipId = String(n++)
 
-    const clipType = type === 'flux2' ? 'flux2'
+    const clipType = type === 'zimage' ? 'qwen_image'
+      : type === 'flux2' ? 'flux2'
       : type === 'flux' ? 'flux'
       : type === 'ltx' ? 'ltxv'
       : (type === 'wan' || type === 'hunyuan') ? 'wan'
@@ -324,6 +334,8 @@ export async function buildDynamicWorkflow(
   }
 
   // ─── Phase 3: Latent Initialization ───
+  // I2I mode: LoadImage → VAEEncode instead of empty latent
+  const isI2I = !isVideo && params.inputImage && (params.denoise ?? 1.0) < 1.0
 
   const latentId = String(n++)
 
@@ -378,6 +390,15 @@ export async function buildDynamicWorkflow(
       class_type: latentNode,
       inputs: { width: params.width, height: params.height, batch_size: params.batchSize },
     }
+  } else if (strategy === 'unet_zimage') {
+    // Z-Image uses SD3 latent (same architecture family)
+    const latentNode = nodes.latentInit.includes('EmptySD3LatentImage')
+      ? 'EmptySD3LatentImage'
+      : 'EmptyLatentImage'
+    workflow[latentId] = {
+      class_type: latentNode,
+      inputs: { width: params.width, height: params.height, batch_size: params.batchSize },
+    }
   } else if (strategy === 'unet_flux') {
     // FLUX 1 uses SD3 latent
     const latentNode = nodes.latentInit.includes('EmptySD3LatentImage')
@@ -395,6 +416,24 @@ export async function buildDynamicWorkflow(
     }
   }
 
+  // I2I override: replace empty latent with LoadImage → VAEEncode
+  let latentSourceId = latentId
+  if (isI2I) {
+    const loadImageId = String(n++)
+    const vaeEncodeId = String(n++)
+    workflow[loadImageId] = {
+      class_type: 'LoadImage',
+      inputs: { image: params.inputImage },
+    }
+    workflow[vaeEncodeId] = {
+      class_type: 'VAEEncode',
+      inputs: { pixels: [loadImageId, 0], vae: [vaeSourceId, vaeOutputSlot] },
+    }
+    latentSourceId = vaeEncodeId
+    // Remove the empty latent node since we're using the encoded image
+    delete workflow[latentId]
+  }
+
   // ─── Phase 4: Sampling ───
 
   const samplerId = String(n++)
@@ -405,13 +444,13 @@ export async function buildDynamicWorkflow(
       model: [samplerModelId, 0],
       positive: [posId, 0],
       negative: [negId, 0],
-      latent_image: [latentId, 0],
+      latent_image: [latentSourceId, 0],
       seed,
       steps: params.steps,
       cfg: params.cfgScale,
       sampler_name: params.sampler,
       scheduler: params.scheduler,
-      denoise: 1.0,
+      denoise: isI2I ? (params.denoise ?? 0.7) : 1.0,
     },
   }
 

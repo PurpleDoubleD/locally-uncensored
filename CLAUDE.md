@@ -27,7 +27,7 @@ src-tauri/src/commands/      — Rust commands: install, process, download, prox
 
 ## Current Work: v2.3.0 (branch: full-comfyui-fix)
 
-### What's DONE (601 tests passing):
+### What's DONE (607 tests passing):
 1. **7 new ModelTypes:** mochi, cosmos, cogvideo, svd, framepack, pyramidflow, allegro
 2. **7 new WorkflowStrategies** with complete node chains for each model
 3. **14 video bundles + 6 image bundles** in discover.ts with HuggingFace URLs
@@ -78,14 +78,17 @@ src-tauri/src/commands/      — Rust commands: install, process, download, prox
 44. **FramePack preflight custom node check** — Added framepack to customNodeModels in preflight.ts. Now checks for LoadFramePackModel + FramePackSampler before generation.
 45. **FramePack DualCLIPLoader fix** — CLIPLoader type "wan" creates Llama2 with 128256 vocab but llava_llama3 has 128320 tokens. Fixed: use DualCLIPLoader (clip_l + llava_llama3) with type "hunyuan_video". Added CLIPVisionLoader + CLIPVisionEncode for image_embeds. Full I2V pipeline verified in .exe (OOM on 12GB VRAM = hardware limit, not software bug).
 
+46. **Z-Image own ModelType + strategy** — Z-Image was classified as `flux2` but uses `qwen_3_4b` CLIP (not `qwen_3_4b_fp4_flux2`), causing KSampler shape mismatch [2560] vs [1, 77, 768]. Fixed: new ModelType `zimage`, new strategy `unet_zimage`, CLIPLoader type `qwen_image` (queried from ComfyUI /object_info). Added findMatchingVAE/CLIP for zimage (exact match `qwen_3_4b.safetensors`, excludes fp4_flux2 variant). COMPONENT_REGISTRY in both comfyui.ts and discover.ts. Defaults: 12 steps, CFG 3.5, euler/simple. Z-Image Turbo E2E verified in .exe — 5 steps generates correct 1024x1024 image.
+47. **Image-to-Image (I2I) feature** — Complete I2I pipeline: LoadImage → VAEEncode → KSampler (denoise < 1.0) → VAEDecode → SaveImage. Sub-tabs in Parameters panel (Text to Image / Image to Image) matching Video's T2V/I2V pattern. Upload zone with drag & drop, denoise slider (0.0-1.0) in both main area and sidebar. Works with all image models (SDXL, FLUX, Z-Image). Store migration from old `mode: 'i2i'` to `imageSubMode`. E2E verified in .exe — Z-Image I2I with denoise 0.7 generates correct output.
+48. **ComfyUI process cleanup on app kill** — Windows Job Object with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`. When Tauri app is killed (even via Task Manager), OS kernel automatically terminates ComfyUI Python process. Applied to both `start_comfyui()` and `auto_start_comfyui()`. Added `windows-sys` crate dependency.
+
 ### What's LEFT to finish v2.3.0:
-1. **Z-Image Turbo/Base strategy** — Z-Image is classified as `flux2` but uses `qwen_3_4b` CLIP (not `t5xxl`). KSampler shape mismatch: [2560] vs [512, 7680]. Needs its own ModelType + strategy with correct CLIPLoader config. Z-Image Base likely has the same issue.
-2. **Tauri proxy_localhost investigation** — reqwest in Tauri subprocess can't reach localhost. Direct fetch workaround in place but root cause unknown. Low priority since workaround works. Deferred to next release.
-3. **LTX VAEDecode reference** — dynamic-workflow.ts line 263: vaeSourceId incorrectly points to UNETLoader output for LTX strategy. Fix when LTX model is installed for testing.
+1. **Tauri proxy_localhost investigation** — reqwest in Tauri subprocess can't reach localhost. Direct fetch workaround in place but root cause unknown. Low priority since workaround works. Deferred to next release.
+2. **LTX VAEDecode reference** — dynamic-workflow.ts line 263: vaeSourceId incorrectly points to UNETLoader output for LTX strategy. Fix when LTX model is installed for testing.
 
 ### Files modified in this branch (30+ files):
-- `src/api/comfyui.ts` — 7 new ModelTypes, COMPONENT_REGISTRY, uploadImage(), inputImage in VideoParams
-- `src/api/dynamic-workflow.ts` — 7 new strategies, 5 wrapper builders, inputImage support in SVD/FramePack
+- `src/api/comfyui.ts` — 8 new ModelTypes (incl. zimage), COMPONENT_REGISTRY, uploadImage(), inputImage/denoise in GenerateParams, findMatchingVAE/CLIP for zimage
+- `src/api/dynamic-workflow.ts` — 8 new strategies (incl. unet_zimage), 5 wrapper builders, inputImage support in SVD/FramePack, I2I pipeline (LoadImage→VAEEncode→KSampler denoise)
 - `src/api/comfyui-nodes.ts` — 30+ new nodes in categorization mapping
 - `src/api/discover.ts` — 14 video + 6 image bundles, CUSTOM_NODE_REGISTRY, installBundleComplete(), uncensored flags, ALL sizeGB verified, HF GGUF unified text model lists (34 uncensored + 30 mainstream), removed Ollama search/fetch functions
 - `src/api/backend.ts` — install_custom_node endpoint mapping, openExternal() for system browser
@@ -94,7 +97,7 @@ src-tauri/src/commands/      — Rust commands: install, process, download, prox
 - `src-tauri/src/commands/download.rs` — download_model with resume, progress, speed tracking (camelCase params), 50% threshold for check_model_sizes
 - `src-tauri/src/main.rs` — registered install_custom_node
 - `src-tauri/capabilities/default.json` — added shell:allow-open for external links
-- `src/components/create/CreateView.tsx` — I2V upload UI (drag & drop, preview, replace/remove)
+- `src/components/create/CreateView.tsx` — I2V upload UI, I2I upload zone + denoise slider, Image/Video top-tabs only
 - `src/components/create/WorkflowSearchModal.tsx` — openExternal for CivitAI link
 - `src/components/create/WorkflowCard.tsx` — openExternal for source links
 - `src/components/chat/MarkdownRenderer.tsx` — openExternal for all chat links
@@ -105,9 +108,12 @@ src-tauri/src/commands/      — Rust commands: install, process, download, prox
 - `src/stores/providerStore.ts` — LM Studio default disabled (auto-detect only)
 - `src/stores/updateStore.ts` — openExternal for release page
 - `src/lib/constants.ts` — OnboardingModel: vramGB, uncensored, agent fields, qwen2.5-abliterate typo fix, HF GGUF downloadUrl/filename/sizeGB for all 17 onboarding models
-- `src/hooks/useCreate.ts` — i2vImage pass-through to workflow builder
+- `src/hooks/useCreate.ts` — i2vImage + i2iImage pass-through, I2I validation, imageSubMode-based generate logic
 - `src/lib/constants.ts` — OnboardingModel: vramGB, uncensored, agent fields + mainstream models
-- `src/stores/createStore.ts` — i2vImage state
+- `src/stores/createStore.ts` — i2vImage/i2iImage/denoise/imageSubMode state, persist migration for old 'i2i' mode
+- `src/components/create/ParamPanel.tsx` — Z-Image badge, Text to Image / Image to Image sub-tabs, denoise slider
+- `src-tauri/src/commands/process.rs` — Windows Job Object for ComfyUI process cleanup on app kill
+- `src-tauri/Cargo.toml` — windows-sys dependency for Job Object API
 - `src/stores/downloadStore.ts` — NEW: unified ComfyUI download tracking (polling, bundle grouping)
 - `src/stores/uiStore.ts` — default view changed to 'chat'
 - `src/lib/model-compatibility.ts` — added isThinkingCompatible() + THINKING_COMPATIBLE list

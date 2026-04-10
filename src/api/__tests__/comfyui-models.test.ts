@@ -75,6 +75,13 @@ describe('classifyModel', () => {
     expect(classifyModel('allegro_model.safetensors')).toBe('allegro')
   })
 
+  it('classifies Z-Image models', () => {
+    expect(classifyModel('z_image_turbo_bf16.safetensors')).toBe('zimage')
+    expect(classifyModel('z_image_bf16.safetensors')).toBe('zimage')
+    expect(classifyModel('z-image-turbo.safetensors')).toBe('zimage')
+    expect(classifyModel('zimage_base.safetensors')).toBe('zimage')
+  })
+
   it('returns unknown for unrecognized models', () => {
     expect(classifyModel('totally_custom_model.safetensors')).toBe('unknown')
   })
@@ -84,7 +91,7 @@ describe('classifyModel', () => {
 
 describe('isVideoModelType', () => {
   const videoTypes = ['wan', 'hunyuan', 'ltx', 'mochi', 'cosmos', 'cogvideo', 'svd', 'framepack', 'pyramidflow', 'allegro'] as const
-  const imageTypes = ['flux', 'flux2', 'sdxl', 'sd15', 'unknown'] as const
+  const imageTypes = ['flux', 'flux2', 'zimage', 'sdxl', 'sd15', 'unknown'] as const
 
   for (const t of videoTypes) {
     it(`${t} is a video model type`, () => {
@@ -132,7 +139,7 @@ describe('MODEL_TYPE_DEFAULTS', () => {
 // ─── COMPONENT_REGISTRY ───
 
 describe('COMPONENT_REGISTRY', () => {
-  const allTypes = ['sd15', 'sdxl', 'flux', 'flux2', 'wan', 'hunyuan', 'ltx', 'mochi', 'cosmos', 'cogvideo', 'svd', 'framepack', 'pyramidflow', 'allegro', 'unknown']
+  const allTypes = ['sd15', 'sdxl', 'flux', 'flux2', 'zimage', 'wan', 'hunyuan', 'ltx', 'mochi', 'cosmos', 'cogvideo', 'svd', 'framepack', 'pyramidflow', 'allegro', 'unknown']
 
   for (const t of allTypes) {
     it(`${t} has a registry entry`, () => {
@@ -288,6 +295,17 @@ describe('determineStrategy', () => {
   it('flux2 → unet_flux2', () => {
     const r = determineStrategy('flux2', false, makeNodes(), emptyModels)
     expect(r.strategy).toBe('unet_flux2')
+  })
+
+  it('zimage → unet_zimage', () => {
+    const r = determineStrategy('zimage', false, makeNodes(), emptyModels)
+    expect(r.strategy).toBe('unet_zimage')
+  })
+
+  it('zimage → unavailable without loaders', () => {
+    const nodes = makeNodes({ loaders: [] })
+    const r = determineStrategy('zimage', false, nodes, emptyModels)
+    expect(r.strategy).toBe('unavailable')
   })
 
   it('sdxl → checkpoint', () => {

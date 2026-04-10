@@ -12,6 +12,46 @@ use crate::state::AppState;
 #[cfg(target_os = "windows")]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 
+/// Assign a child process to a Windows Job Object with KILL_ON_JOB_CLOSE.
+/// When the Tauri parent process dies (even via Task Manager), the OS kernel
+/// automatically terminates all processes in the job — no Drop needed.
+#[cfg(target_os = "windows")]
+fn assign_to_kill_on_close_job(child: &std::process::Child) {
+    use windows_sys::Win32::System::JobObjects::*;
+    use windows_sys::Win32::Foundation::*;
+
+    unsafe {
+        let job = CreateJobObjectW(std::ptr::null(), std::ptr::null());
+        if job.is_null() { return; }
+
+        let mut info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = std::mem::zeroed();
+        info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+
+        SetInformationJobObject(
+            job,
+            JobObjectExtendedLimitInformation,
+            &info as *const _ as *const _,
+            std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+        );
+
+        // Open process handle from PID
+        let pid = child.id();
+        let handle = windows_sys::Win32::System::Threading::OpenProcess(
+            windows_sys::Win32::System::Threading::PROCESS_SET_QUOTA
+            | windows_sys::Win32::System::Threading::PROCESS_TERMINATE,
+            0, // FALSE
+            pid,
+        );
+        if !handle.is_null() {
+            AssignProcessToJobObject(job, handle);
+            CloseHandle(handle);
+        }
+        // Intentionally leak the job handle — it must stay alive for the duration
+        // of the parent process. When the parent dies, the handle is closed by the
+        // OS and KILL_ON_JOB_CLOSE triggers.
+    }
+}
+
 /// Show the main window (called from frontend after React renders)
 #[tauri::command]
 pub fn show_window(app: tauri::AppHandle) {
@@ -232,6 +272,10 @@ pub fn start_comfyui(state: State<'_, AppState>) -> Result<serde_json::Value, St
     let mut child = cmd.spawn()
         .map_err(|e| format!("Failed to start ComfyUI (python={}): {}", python, e))?;
 
+    // Assign to Job Object so child dies when parent dies (even via Task Manager)
+    #[cfg(target_os = "windows")]
+    assign_to_kill_on_close_job(&child);
+
     // Drain stdout/stderr in background threads to prevent buffer deadlock
     if let Some(stdout) = child.stdout.take() {
         std::thread::spawn(move || {
@@ -423,6 +467,10 @@ pub fn auto_start_comfyui(state: &AppState) {
             cmd.creation_flags(CREATE_NO_WINDOW);
             match cmd.spawn() {
                 Ok(mut child) => {
+                    // Assign to Job Object so child dies when parent dies (even via Task Manager)
+                    #[cfg(target_os = "windows")]
+                    assign_to_kill_on_close_job(&child);
+
                     // Drain stdout/stderr in background threads to prevent buffer deadlock
                     if let Some(stdout) = child.stdout.take() {
                         std::thread::spawn(move || {

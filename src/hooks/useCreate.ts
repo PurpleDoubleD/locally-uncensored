@@ -135,9 +135,11 @@ export function useCreate() {
     const state = useCreateStore.getState()
     const {
       mode, prompt, negativePrompt, imageModel, videoModel,
-      sampler, scheduler, steps, cfgScale, width, height, seed, batchSize, frames, fps, i2vImage,
+      sampler, scheduler, steps, cfgScale, width, height, seed, batchSize, frames, fps, denoise, i2iImage, i2vImage,
       setIsGenerating, setProgress, setCurrentPromptId, setError, addToGallery, addToPromptHistory,
     } = state
+
+    const isI2I = mode === 'image' && state.imageSubMode === 'img2img'
 
     setError(null)
     const activeModel = mode === 'image' ? imageModel : videoModel
@@ -146,6 +148,10 @@ export function useCreate() {
 
     if (!prompt.trim()) {
       setError('Please enter a prompt.')
+      return
+    }
+    if (isI2I && !i2iImage) {
+      setError('Please upload a source image for Image-to-Image.')
       return
     }
     if (!activeModel) {
@@ -166,7 +172,10 @@ export function useCreate() {
     abortRef.current = new AbortController()
 
     try {
-      const baseParams = { prompt, negativePrompt, model: activeModel, sampler, scheduler, steps, cfgScale, width, height, seed, batchSize }
+      const baseParams = {
+        prompt, negativePrompt, model: activeModel, sampler, scheduler, steps, cfgScale, width, height, seed, batchSize,
+        ...(isI2I && i2iImage ? { inputImage: i2iImage, denoise } : {}),
+      }
 
       let workflow: Record<string, any>
       let builderUsed: 'dynamic' | 'legacy' | 'custom' = 'dynamic'
@@ -175,7 +184,7 @@ export function useCreate() {
       let customWf = useWorkflowStore.getState().getWorkflowForModel(activeModel, imageModelType)
       if (customWf) {
         const wfNodes = Object.values(customWf.workflow).map((n: any) => n.class_type)
-        const needsUnet = imageModelType === 'flux' || imageModelType === 'flux2' || imageModelType === 'wan' || imageModelType === 'hunyuan'
+        const needsUnet = imageModelType === 'flux' || imageModelType === 'flux2' || imageModelType === 'zimage' || imageModelType === 'wan' || imageModelType === 'hunyuan'
         const hasUnet = wfNodes.includes('UNETLoader')
         const hasCheckpoint = wfNodes.includes('CheckpointLoaderSimple')
         if (needsUnet && !hasUnet && hasCheckpoint) {

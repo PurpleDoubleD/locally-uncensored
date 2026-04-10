@@ -43,7 +43,7 @@ const defaultModels: AvailableModels = {
 
 // ─── Strategy mapping tests ───
 
-describe('determineStrategy — all 14 model types', () => {
+describe('determineStrategy — all 15 model types', () => {
   const strategyMap: [ModelType, WorkflowStrategy][] = [
     ['wan', 'unet_video'],
     ['hunyuan', 'unet_video'],
@@ -57,6 +57,7 @@ describe('determineStrategy — all 14 model types', () => {
     ['allegro', 'allegro'],
     ['flux', 'unet_flux'],
     ['flux2', 'unet_flux2'],
+    ['zimage', 'unet_zimage'],
   ]
 
   for (const [modelType, expectedStrategy] of strategyMap) {

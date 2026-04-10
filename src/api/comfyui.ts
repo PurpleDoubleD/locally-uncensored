@@ -14,6 +14,8 @@ export interface GenerateParams {
   height: number
   seed: number
   batchSize: number
+  inputImage?: string   // I2I source image filename (uploaded to ComfyUI)
+  denoise?: number      // I2I denoise strength (0.0–1.0, default 1.0 = full txt2img)
 }
 
 export interface VideoParams extends GenerateParams {
@@ -28,7 +30,7 @@ export interface ComfyUIOutput {
   type: string
 }
 
-export type ModelType = 'flux' | 'flux2' | 'sdxl' | 'sd15' | 'wan' | 'hunyuan' | 'ltx' | 'mochi' | 'cosmos' | 'cogvideo' | 'svd' | 'framepack' | 'pyramidflow' | 'allegro' | 'unknown'
+export type ModelType = 'flux' | 'flux2' | 'zimage' | 'sdxl' | 'sd15' | 'wan' | 'hunyuan' | 'ltx' | 'mochi' | 'cosmos' | 'cogvideo' | 'svd' | 'framepack' | 'pyramidflow' | 'allegro' | 'unknown'
 export type VideoBackend = 'wan' | 'animatediff' | 'none'
 
 export interface ClassifiedModel {
@@ -73,8 +75,8 @@ export function classifyModel(name: string): ModelType {
   if (lower.includes('hunyuan')) return 'hunyuan'
   if (lower.includes('ltx')) return 'ltx'
 
-  // FLUX variants + Z-Image (same architecture as FLUX 2: UNETLoader + separate VAE/CLIP)
-  if (lower.includes('z_image') || lower.includes('z-image') || lower.includes('zimage')) return 'flux2'
+  // Z-Image (uses qwen_image CLIP type, NOT flux2 — different embedding dimensions)
+  if (lower.includes('z_image') || lower.includes('z-image') || lower.includes('zimage')) return 'zimage'
   if (lower.includes('flux-2') || lower.includes('flux2')) return 'flux2'
   if (lower.includes('flux')) return 'flux'
 
@@ -97,7 +99,7 @@ export function classifyModel(name: string): ModelType {
 }
 
 export function isImageModelType(type: ModelType): boolean {
-  return type === 'flux' || type === 'flux2' || type === 'sdxl' || type === 'sd15' || type === 'unknown'
+  return type === 'flux' || type === 'flux2' || type === 'zimage' || type === 'sdxl' || type === 'sd15' || type === 'unknown'
 }
 
 export function isVideoModelType(type: ModelType): boolean {
@@ -169,6 +171,11 @@ export const COMPONENT_REGISTRY: Record<string, ComponentRequirements> = {
     loader: 'UNETLoader', needsSeparateVAE: true, needsSeparateCLIP: true, clipType: 'flux2',
     vae: { matchPatterns: ['flux2', 'flux'], downloadFilename: 'flux2-vae.safetensors' },
     clip: { matchPatterns: ['qwen', 'mistral'], downloadFilename: 'qwen_3_4b_fp4_flux2.safetensors' },
+  },
+  zimage: {
+    loader: 'UNETLoader', needsSeparateVAE: true, needsSeparateCLIP: true, clipType: 'qwen_image',
+    vae: { matchPatterns: ['ae', 'flux'], downloadFilename: 'ae.safetensors' },
+    clip: { matchPatterns: ['qwen_3_4b', 'qwen3'], downloadFilename: 'qwen_3_4b.safetensors' },
   },
   wan: {
     loader: 'UNETLoader', needsSeparateVAE: true, needsSeparateCLIP: true, clipType: 'wan',
@@ -479,6 +486,14 @@ export async function findMatchingVAE(modelType: ModelType): Promise<string> {
   if (vaes.length === 0) throw new Error('No VAE models found. Download a VAE for your model type from the Model Manager.')
   const lower = (s: string) => s.toLowerCase()
 
+  if (modelType === 'zimage') {
+    // Z-Image uses ae.safetensors (same as FLUX but prefer exact match)
+    const match = vaes.find(v => lower(v) === 'ae.safetensors')
+      || vaes.find(v => lower(v).includes('ae'))
+      || vaes.find(v => lower(v).includes('flux'))
+    if (match) return match
+    throw new Error(`No Z-Image VAE found. Download "ae.safetensors" from the Model Manager.`)
+  }
   if (modelType === 'flux' || modelType === 'flux2') {
     const match = vaes.find(v => lower(v).includes('flux2') || lower(v).includes('flux'))
       || vaes.find(v => lower(v).includes('ae'))
@@ -538,6 +553,14 @@ export async function findMatchingCLIP(modelType: ModelType): Promise<string> {
   if (clips.length === 0) throw new Error('No text encoder models found. Download a CLIP/T5 model for your model type from the Model Manager.')
   const lower = (s: string) => s.toLowerCase()
 
+  if (modelType === 'zimage') {
+    // Z-Image uses qwen_3_4b.safetensors (NOT the fp4_flux2 variant — different embedding dimensions!)
+    const match = clips.find(c => lower(c) === 'qwen_3_4b.safetensors')
+      || clips.find(c => lower(c).includes('qwen_3_4b') && !lower(c).includes('fp4') && !lower(c).includes('flux2'))
+      || clips.find(c => lower(c).includes('qwen3') && !lower(c).includes('fp4'))
+    if (match) return match
+    throw new Error(`No Z-Image text encoder found. Download "qwen_3_4b.safetensors" from the Model Manager.`)
+  }
   if (modelType === 'flux2') {
     // FLUX 2 uses Qwen or Mistral text encoders, NOT T5
     const match = clips.find(c => lower(c).includes('qwen') && !lower(c).includes('qwen_2.5_vl'))

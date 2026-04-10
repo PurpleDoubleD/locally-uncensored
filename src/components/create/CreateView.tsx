@@ -113,7 +113,7 @@ export function CreateView() {
     connected, imageModels, videoModels, samplerList, schedulerList,
     videoBackend, modelsLoaded, checkConnection, fetchModels, runPreflight, generate, cancel,
   } = useCreate()
-  const { mode, setMode, error, preflightReady, preflightErrors, preflightWarnings, videoModel, i2vImage, setI2vImage } = useCreateStore()
+  const { mode, setMode, imageSubMode, error, preflightReady, preflightErrors, preflightWarnings, videoModel, i2vImage, setI2vImage, i2iImage, setI2iImage, denoise, setDenoise } = useCreateStore()
 
   const [status, setStatus] = useState<ComfyStatus | null>(null)
   const [startupLogs, setStartupLogs] = useState<string[]>([])
@@ -128,6 +128,8 @@ export function CreateView() {
   const [showConnected, setShowConnected] = useState(true)
   const [i2vUploading, setI2vUploading] = useState(false)
   const [i2vDragOver, setI2vDragOver] = useState(false)
+  const [i2iUploading, setI2iUploading] = useState(false)
+  const [i2iDragOver, setI2iDragOver] = useState(false)
   const installPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const pollIdRef = useRef(0)
@@ -224,6 +226,25 @@ export function CreateView() {
     setI2vDragOver(false)
     const file = e.dataTransfer.files[0]
     if (file) handleI2vUpload(file)
+  }
+
+  const handleI2iUpload = async (file: File) => {
+    if (!file.type.startsWith('image/')) return
+    setI2iUploading(true)
+    try {
+      const filename = await uploadImage(file)
+      setI2iImage(filename)
+    } catch (err) {
+      console.error('[CreateView] I2I image upload failed:', err)
+    }
+    setI2iUploading(false)
+  }
+
+  const handleI2iDrop = (e: React.DragEvent) => {
+    e.preventDefault()
+    setI2iDragOver(false)
+    const file = e.dataTransfer.files[0]
+    if (file) handleI2iUpload(file)
   }
 
   const isStarting = status?.starting || status?.processAlive
@@ -506,6 +527,74 @@ export function CreateView() {
                   <input type="file" accept="image/*" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) handleI2vUpload(f) }} />
                 </label>
               )}
+            </div>
+          )}
+
+          {/* I2I Image Upload + Denoise Slider — shown when Image sub-tab is "Image to Image" */}
+          {mode === 'image' && imageSubMode === 'img2img' && connected === true && (
+            <div className="space-y-2">
+              <div
+                onDragOver={(e) => { e.preventDefault(); setI2iDragOver(true) }}
+                onDragLeave={() => setI2iDragOver(false)}
+                onDrop={handleI2iDrop}
+                className={`relative rounded-lg border-2 border-dashed transition-colors ${
+                  i2iDragOver
+                    ? 'border-blue-400 bg-blue-500/10'
+                    : i2iImage
+                      ? 'border-emerald-500/30 bg-emerald-500/5'
+                      : 'border-white/10 bg-white/[0.02] hover:border-white/20'
+                }`}
+              >
+                {i2iImage ? (
+                  <div className="flex items-center justify-between px-3 py-2">
+                    <div className="flex items-center gap-2 text-emerald-400 text-[11px]">
+                      <CheckCircle2 size={12} />
+                      <span className="truncate max-w-[200px]">{i2iImage}</span>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <label className="cursor-pointer px-2 py-0.5 rounded text-[10px] text-gray-400 hover:text-white hover:bg-white/10 transition-colors">
+                        Replace
+                        <input type="file" accept="image/*" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) handleI2iUpload(f) }} />
+                      </label>
+                      <button
+                        onClick={() => setI2iImage(null)}
+                        className="p-0.5 rounded text-gray-500 hover:text-red-400 hover:bg-white/10 transition-colors"
+                        title="Remove image"
+                      >
+                        <XIcon size={10} />
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <label className="flex flex-col items-center gap-1 px-3 py-3 cursor-pointer">
+                    {i2iUploading ? (
+                      <Loader2 size={16} className="animate-spin text-gray-400" />
+                    ) : (
+                      <Upload size={16} className="text-gray-500" />
+                    )}
+                    <span className="text-[11px] text-gray-400">
+                      {i2iUploading ? 'Uploading...' : 'Drop or click to upload source image'}
+                    </span>
+                    <span className="text-[9px] text-gray-600">
+                      Image-to-Image: transforms your image guided by the prompt
+                    </span>
+                    <input type="file" accept="image/*" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) handleI2iUpload(f) }} />
+                  </label>
+                )}
+              </div>
+
+              {/* Denoise Strength Slider */}
+              <div className="flex items-center gap-3 px-1">
+                <span className="text-[10px] text-gray-500 whitespace-nowrap">Denoise</span>
+                <input
+                  type="range"
+                  min={0} max={1} step={0.05}
+                  value={denoise}
+                  onChange={(e) => setDenoise(parseFloat(e.target.value))}
+                  className="flex-1 h-1 accent-blue-500"
+                />
+                <span className="text-[10px] text-gray-400 font-mono w-8 text-right">{denoise.toFixed(2)}</span>
+              </div>
             </div>
           )}
 

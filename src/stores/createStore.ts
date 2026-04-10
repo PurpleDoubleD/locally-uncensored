@@ -3,7 +3,7 @@ import { persist } from 'zustand/middleware'
 import type { ModelType } from '../api/comfyui'
 import { classifyModel } from '../api/comfyui'
 import type { PreflightError } from '../api/preflight'
-// ModelType includes: flux, flux2, sdxl, sd15, wan, hunyuan, unknown
+// ModelType includes: flux, flux2, zimage, sdxl, sd15, wan, hunyuan, unknown
 
 export type ProgressPhase = 'idle' | 'queued' | 'loading-model' | 'loading-clip' | 'loading-vae' | 'sampling' | 'decoding' | 'complete'
 
@@ -17,6 +17,7 @@ export const MODEL_TYPE_DEFAULTS: Record<ModelType, {
   sdxl:    { steps: 25, cfgScale: 7.0, sampler: 'dpmpp_2m',       scheduler: 'karras', width: 1024, height: 1024 },
   flux:    { steps: 20, cfgScale: 1.0, sampler: 'euler',           scheduler: 'simple', width: 1024, height: 1024 },
   flux2:   { steps: 20, cfgScale: 1.0, sampler: 'euler',           scheduler: 'simple', width: 1024, height: 1024 },
+  zimage:  { steps: 12, cfgScale: 3.5, sampler: 'euler',           scheduler: 'simple', width: 1024, height: 1024 },
   wan:     { steps: 25, cfgScale: 5.0, sampler: 'euler',           scheduler: 'normal', width: 848,  height: 480, frames: 49, fps: 16 },
   hunyuan: { steps: 30, cfgScale: 6.0, sampler: 'euler',           scheduler: 'normal', width: 848,  height: 480, frames: 45, fps: 15 },
   ltx:     { steps: 20, cfgScale: 1.0, sampler: 'euler',           scheduler: 'simple', width: 768,  height: 512, frames: 97, fps: 24 },
@@ -48,6 +49,7 @@ export interface GalleryItem {
 
 interface CreateState {
   mode: 'image' | 'video'
+  imageSubMode: 'text2img' | 'img2img'
   prompt: string
   negativePrompt: string
   imageModel: string
@@ -63,6 +65,8 @@ interface CreateState {
   batchSize: number
   frames: number
   fps: number
+  denoise: number  // Denoise strength for I2I (0.0–1.0)
+  i2iImage: string | null  // Uploaded image filename for I2I
   i2vImage: string | null  // Uploaded image filename for I2V models (SVD, FramePack)
   isGenerating: boolean
   progress: number
@@ -79,6 +83,7 @@ interface CreateState {
 
   setPreflightStatus: (ready: boolean | null, errors: PreflightError[], warnings: string[]) => void
   setMode: (mode: 'image' | 'video') => void
+  setImageSubMode: (subMode: 'text2img' | 'img2img') => void
   setPrompt: (prompt: string) => void
   setNegativePrompt: (negativePrompt: string) => void
   setImageModel: (model: string, type: ModelType) => void
@@ -92,6 +97,8 @@ interface CreateState {
   setBatchSize: (batchSize: number) => void
   setFrames: (frames: number) => void
   setFps: (fps: number) => void
+  setDenoise: (denoise: number) => void
+  setI2iImage: (image: string | null) => void
   setI2vImage: (image: string | null) => void
   setIsGenerating: (generating: boolean) => void
   setProgress: (progress: number, text?: string) => void
@@ -109,6 +116,7 @@ export const useCreateStore = create<CreateState>()(
   persist(
     (set) => ({
       mode: 'image',
+      imageSubMode: 'text2img' as 'text2img' | 'img2img',
       prompt: '',
       negativePrompt: '',
       imageModel: '',
@@ -124,6 +132,8 @@ export const useCreateStore = create<CreateState>()(
       batchSize: 1,
       frames: 24,
       fps: 8,
+      denoise: 0.7,
+      i2iImage: null,
       i2vImage: null,
       isGenerating: false,
       progress: 0,
@@ -165,6 +175,7 @@ export const useCreateStore = create<CreateState>()(
         }
         return { mode }
       }),
+      setImageSubMode: (subMode) => set({ imageSubMode: subMode }),
       setPrompt: (prompt) => set({ prompt }),
       setNegativePrompt: (negativePrompt) => set({ negativePrompt }),
       setImageModel: (model, type) => {
@@ -200,6 +211,8 @@ export const useCreateStore = create<CreateState>()(
       setBatchSize: (batchSize) => set({ batchSize: Math.max(1, Math.min(8, Math.floor(batchSize))) }),
       setFrames: (frames) => set({ frames: Math.max(1, Math.min(120, Math.floor(frames))) }),
       setFps: (fps) => set({ fps: Math.max(1, Math.min(60, Math.floor(fps))) }),
+      setDenoise: (denoise) => set({ denoise: Math.max(0, Math.min(1, denoise)) }),
+      setI2iImage: (image) => set({ i2iImage: image }),
       setI2vImage: (image) => set({ i2vImage: image }),
       setIsGenerating: (generating) => set({ isGenerating: generating, ...(generating ? {} : { progressPhase: 'idle' as ProgressPhase }) }),
       setProgress: (progress, text) => set({ progress, progressText: text ?? '' }),
@@ -231,9 +244,19 @@ export const useCreateStore = create<CreateState>()(
         batchSize: state.batchSize,
         frames: state.frames,
         fps: state.fps,
+        denoise: state.denoise,
         gallery: state.gallery,
         promptHistory: state.promptHistory,
       }),
+      // Migrate old 'i2i' mode to imageSubMode (v2.3.0 refactor)
+      merge: (persisted: any, current: any) => {
+        const merged = { ...current, ...persisted }
+        if (merged.mode === 'i2i') {
+          merged.mode = 'image'
+          merged.imageSubMode = 'img2img'
+        }
+        return merged
+      },
     }
   )
 )

@@ -34,6 +34,22 @@ No cloud. No censorship. No data collection. Auto-detects 12 local backends. You
 
 ---
 
+## v2.3.0 — Coming Soon
+
+**ComfyUI Plug & Play, 20 Video/Image Models, Image-to-Image, Z-Image Support**
+
+- **ComfyUI Plug & Play** — Auto-detect, one-click install, auto-start. Zero config image and video generation.
+- **20 Model Bundles** — 14 video + 6 image bundles with one-click download (Wan 2.1, HunyuanVideo, FLUX 2, Z-Image, CogVideoX, FramePack, and more).
+- **Z-Image Turbo/Base** — Uncensored image model with own strategy and qwen_image CLIP type. 8-15 seconds per image.
+- **Image-to-Image (I2I)** — Upload a source image, adjust denoise strength (0.0-1.0), transform with any prompt. Works with all image models.
+- **Image-to-Video (I2V)** — SVD and FramePack support with drag & drop image upload.
+- **Dynamic Workflow Builder** — Auto-detects installed nodes and builds the correct pipeline for any model type.
+- **VRAM-Aware Model Filtering** — Lightweight / Mid-Range / High-End tabs based on GPU VRAM.
+- **Unified Download Manager** — Track all downloads (text models, image models, video models) with progress, speed, pause/resume.
+- **Process Cleanup** — ComfyUI Python process automatically terminates when app is closed or killed.
+
+---
+
 ## v2.2.3 — Latest Release
 
 **Plug & Play Setup, Multi-Provider Overhaul, Codex Agent, MCP Tools**
@@ -67,6 +83,7 @@ See [Release Notes](https://github.com/PurpleDoubleD/locally-uncensored/releases
 | **A/B Model Compare** | **Yes** | No | No | No |
 | **Local Benchmark** | **Yes** | No | No | No |
 | Image Generation | **Yes** | No | No | No |
+| **Image-to-Image** | **Yes** | No | No | No |
 | Video Generation | **Yes** | No | No | No |
 | **File Upload + Vision** | **Yes** | Yes | Yes | No |
 | **Thinking Mode** | **Yes** | No | No | No |
