@@ -168,16 +168,18 @@ export async function backendCall<T = any>(
 
   const method = options?.method || endpoint.method || "GET";
   const fetchOptions: RequestInit = { method };
+  const headers: Record<string, string> = { "x-locally-uncensored": "true" };
 
   if (options?.body) {
     fetchOptions.body = options.body;
     if (options.headers) {
-      fetchOptions.headers = options.headers;
+      Object.assign(headers, options.headers);
     }
   } else if (args && method !== "GET") {
-    fetchOptions.headers = { "Content-Type": "application/json" };
+    headers["Content-Type"] = "application/json";
     fetchOptions.body = JSON.stringify(args);
   }
+  fetchOptions.headers = headers;
 
   // For GET with args, append as query params
   let url = endpoint.path;

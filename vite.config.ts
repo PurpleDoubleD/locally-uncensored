@@ -141,6 +141,44 @@ function comfyLauncher(): Plugin {
   return {
     name: 'comfy-launcher',
     configureServer(server) {
+      // --- Security Middleware ---
+      server.middlewares.use('/local-api', (req, res, next) => {
+        // Exclude GET proxy-image/download from strict header checks (used in <img> tags and simple fetches)
+        if (req.method === 'GET' && (req.url?.startsWith('/proxy-image') || req.url?.startsWith('/proxy-download'))) {
+          return next();
+        }
+
+        // 1. Strict Content-Type enforcement for POST requests
+        if (req.method === 'POST') {
+           const contentType = req.headers['content-type'] || '';
+           if (!contentType.includes('application/json')) {
+               res.writeHead(415, { 'Content-Type': 'text/plain' });
+               res.end('Unsupported Media Type: Must be application/json');
+               return;
+           }
+        }
+        
+        // 2. Custom Header Requirement (CSRF Protection)
+        if (req.headers['x-locally-uncensored'] !== 'true') {
+           res.writeHead(403, { 'Content-Type': 'text/plain' });
+           res.end('Forbidden: Missing x-locally-uncensored header (CSRF Protection)');
+           return;
+        }
+
+        // 3. Strict Origin Validation (Defense in Depth)
+        const origin = req.headers.origin;
+        if (origin) {
+            const allowedOrigins = ['http://localhost:5173', 'http://127.0.0.1:5173', 'tauri://localhost', 'http://tauri.localhost'];
+            if (!allowedOrigins.includes(origin)) {
+                res.writeHead(403, { 'Content-Type': 'text/plain' });
+                res.end('Forbidden: Invalid Origin (CSRF Protection)');
+                return;
+            }
+        }
+
+        next();
+      });
+
       // Auto-start Ollama when dev server starts
       try {
         execSync('tasklist /FI "IMAGENAME eq ollama.exe" | find /I "ollama.exe"', { stdio: 'ignore' })
