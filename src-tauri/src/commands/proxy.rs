@@ -99,10 +99,30 @@ pub async fn fetch_external_bytes(url: String) -> Result<Vec<u8>, String> {
     resp.bytes().await.map(|b| b.to_vec()).map_err(|e| e.to_string())
 }
 
+/// Validate that a URL targets localhost only (anti-SSRF for local proxy).
+fn validate_localhost_url(raw: &str) -> Result<(), String> {
+    let parsed = url::Url::parse(raw)
+        .map_err(|e| format!("Invalid URL: {}", e))?;
+
+    match parsed.scheme() {
+        "http" | "https" => {}
+        other => return Err(format!("Blocked scheme: {}", other)),
+    }
+
+    let host = parsed.host_str().unwrap_or("");
+    if host == "localhost" || host == "127.0.0.1" || host == "::1" || host == "[::1]" {
+        Ok(())
+    } else {
+        Err(format!("proxy_localhost: blocked non-localhost URL (host={})", host))
+    }
+}
+
 /// Generic localhost proxy — fetch any localhost URL bypassing CORS.
 /// Used for Ollama and ComfyUI API calls in production mode.
 #[tauri::command]
 pub async fn proxy_localhost(url: String, method: Option<String>, body: Option<String>) -> Result<String, String> {
+    validate_localhost_url(&url)?;
+
     let client = reqwest::Client::builder()
         .user_agent("LocallyUncensored/2.0")
         .timeout(std::time::Duration::from_secs(300))
@@ -139,6 +159,8 @@ pub async fn proxy_localhost(url: String, method: Option<String>, body: Option<S
 /// Streaming localhost proxy — returns raw bytes for streaming responses (Ollama pull/chat).
 #[tauri::command]
 pub async fn proxy_localhost_stream(url: String, method: Option<String>, body: Option<String>) -> Result<Vec<u8>, String> {
+    validate_localhost_url(&url)?;
+
     let client = reqwest::Client::builder()
         .user_agent("LocallyUncensored/2.0")
         .timeout(std::time::Duration::from_secs(7200))

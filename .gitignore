@@ -51,5 +51,9 @@ replace_shield.py
 scripts/analyze_banner.py
 scripts/replace_logo.py
 
+# Test artifacts
+codex-api/
+test-codex.txt
+
 # OS
 Thumbs.db
