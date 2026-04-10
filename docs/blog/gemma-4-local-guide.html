@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Google Gemma 4 — Run It Locally, Uncensored Variants, Full Guide</title>
-<meta name="description" content="Complete guide to Google Gemma 4 running locally. E4B for 4 GB VRAM, 27B dense, 26B MoE. Native tool calling, vision, 256K context. Uncensored heretic and abliterated variants.">
+<meta name="description" content="Complete guide to Google Gemma 4 running locally. E4B for 4 GB VRAM, 31B dense, 26B MoE. Native tool calling, vision, 256K context. Uncensored heretic and abliterated variants.">
 <meta name="keywords" content="gemma 4 local, run gemma 4 locally, gemma 4 uncensored, gemma 4 heretic, gemma 4 abliterated, gemma 4 e4b, gemma 4 27b, gemma 4 moe, google gemma 4 guide, gemma 4 ollama, gemma 4 gguf">
 <meta property="og:title" content="Google Gemma 4 — Run It Locally, Uncensored Variants, Full Guide">
 <meta property="og:description" content="Gemma 4 from lightweight E4B to frontier 27B. Vision, tools, 256K context. Uncensored variants available.">
@@ -42,7 +42,7 @@
 <h1>Google Gemma 4 — Run It Locally</h1>
 <div class="meta">Published April 10, 2026 &middot; PurpleDoubleD &middot; 6 min read</div>
 
-<p>Google released Gemma 4 in April 2026 and it immediately became one of the most important open-weight model families for local AI. From the tiny E2B that runs on anything to the frontier 27B dense model, Gemma 4 covers every use case. Native tool calling, vision support, 256K context, and an Apache 2.0 license make it the go-to recommendation for new users.</p>
+<p>Google released Gemma 4 in April 2026 and it immediately became one of the most important open-weight model families for local AI. From the tiny E2B that runs on anything to the frontier 31B dense model, Gemma 4 covers every use case. Native tool calling, vision support, 256K context, and an Apache 2.0 license make it the go-to recommendation for new users.</p>
 
 <p>This guide covers every Gemma 4 variant, how to run them locally, and which uncensored versions exist.</p>
 
@@ -53,8 +53,7 @@
 <tbody>
 <tr><td>Gemma 4 E2B</td><td>2.3B</td><td>2-3 GB</td><td>32K</td><td>Ultra-lightweight. Runs on any machine.</td></tr>
 <tr><td>Gemma 4 E4B</td><td>4.5B</td><td>4 GB</td><td>128K</td><td>Best small model. Fast, capable, low VRAM.</td></tr>
-<tr><td>Gemma 4 12B</td><td>12B</td><td>10 GB</td><td>128K</td><td>Solid mid-range. Vision support.</td></tr>
-<tr><td>Gemma 4 27B</td><td>27B dense</td><td>16 GB</td><td>256K</td><td>Frontier quality. Native tools + vision.</td></tr>
+<tr><td>Gemma 4 31B</td><td>31B dense</td><td>17-20 GB</td><td>256K</td><td>Frontier quality. Native tools + vision.</td></tr>
 <tr><td>Gemma 4 26B MoE</td><td>26B (4B active)</td><td>16 GB</td><td>128K</td><td>26B brain at 4B speed. Tools + vision.</td></tr>
 </tbody>
 </table>
@@ -78,7 +77,7 @@
 <p>The official Gemma 4 models have content filters. Google trained them to refuse certain prompts. The community has created uncensored versions:</p>
 
 <h3>Heretic Variants</h3>
-<p>The "heretic" uncensored method produces some of the cleanest unrestricted outputs. Available for 27B dense and 26B MoE. These keep full model quality while removing refusals.</p>
+<p>The "heretic" uncensored method produces some of the cleanest unrestricted outputs. Available for 31B dense and 26B MoE. These keep full model quality while removing refusals.</p>
 
 <h3>Abliterated Variants</h3>
 <p>Abliteration removes the refusal direction from the model weights. Available for 27B. Slightly more aggressive uncensoring than heretic.</p>
@@ -86,10 +85,10 @@
 <table>
 <thead><tr><th>Variant</th><th>Size</th><th>Download</th><th>Method</th></tr></thead>
 <tbody>
-<tr><td>Gemma 4 27B Heretic</td><td>17 GB</td><td>Q4_K_M GGUF</td><td>Heretic uncensor</td></tr>
+<tr><td>Gemma 4 31B Heretic</td><td>17 GB</td><td>Q4_K_M GGUF</td><td>Heretic uncensor</td></tr>
 <tr><td>Gemma 4 26B MoE Heretic</td><td>16 GB</td><td>Q4_K_M GGUF</td><td>Heretic uncensor</td></tr>
 <tr><td>Gemma 4 31B Uncensored</td><td>17 GB</td><td>Q4_K_M GGUF</td><td>Direct training</td></tr>
-<tr><td>Gemma 4 27B Abliterated</td><td>17 GB</td><td>Q4_K_M GGUF</td><td>Abliteration</td></tr>
+<tr><td>Gemma 4 31B Abliterated</td><td>17 GB</td><td>Q4_K_M GGUF</td><td>Abliteration</td></tr>
 </tbody>
 </table>
 
@@ -103,13 +102,13 @@
 </div>
 
 <div class="verdict">
-<h3>16 GB VRAM: Gemma 4 27B</h3>
-<p>The full 27B dense model is the recommendation. Frontier-level quality with native vision and tool calling. For uncensored use, get the heretic variant.</p>
+<h3>16 GB VRAM: Gemma 4 31B</h3>
+<p>The full 31B dense model is the recommendation. Frontier-level quality with native vision and tool calling. For uncensored use, get the heretic variant.</p>
 </div>
 
 <div class="verdict">
 <h3>Speed over quality: Gemma 4 26B MoE</h3>
-<p>The MoE variant has 26B total parameters but only activates 4B per token. It runs noticeably faster than the 27B dense model while keeping most of the quality. Good for interactive agent sessions where response time matters.</p>
+<p>The MoE variant has 26B total parameters but only activates 4B per token. It runs noticeably faster than the 31B dense model while keeping most of the quality. Good for interactive agent sessions where response time matters.</p>
 </div>
 
 <h2>Gemma 4 vs the Competition</h2>
@@ -117,14 +116,14 @@
 <table>
 <thead><tr><th>Model</th><th>License</th><th>Tools</th><th>Vision</th><th>Context</th></tr></thead>
 <tbody>
-<tr><td>Gemma 4 27B</td><td>Apache 2.0</td><td>Native</td><td>Yes</td><td>256K</td></tr>
+<tr><td>Gemma 4 31B</td><td>Apache 2.0</td><td>Native</td><td>Yes</td><td>256K</td></tr>
 <tr><td>Qwen 3.5 27B</td><td>Apache 2.0</td><td>Native</td><td>No</td><td>256K</td></tr>
 <tr><td>Llama 4 Scout</td><td>Llama 4</td><td>Native</td><td>Yes</td><td>10M</td></tr>
 <tr><td>GPT-OSS 20B</td><td>MIT</td><td>Limited</td><td>No</td><td>128K</td></tr>
 </tbody>
 </table>
 
-<p>Gemma 4 27B has the best overall package: permissive license, native tools and vision, large context window, and strong uncensored variants. Qwen 3.5 edges it out on raw reasoning benchmarks but lacks vision. Llama 4 Scout has a massive context window but requires significantly more VRAM.</p>
+<p>Gemma 4 31B has the best overall package: permissive license, native tools and vision, large context window, and strong uncensored variants. Qwen 3.5 edges it out on raw reasoning benchmarks but lacks vision. Llama 4 Scout has a massive context window but requires significantly more VRAM.</p>
 
 <h2>Running Gemma 4 in Locally Uncensored</h2>
 
