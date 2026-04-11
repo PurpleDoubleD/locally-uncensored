@@ -23,6 +23,9 @@ pub struct DownloadProgress {
 pub struct InstallState {
     pub status: String,
     pub logs: Vec<String>,
+    pub download_progress: u64,
+    pub download_total: u64,
+    pub download_speed: f64,
 }
 
 impl Default for InstallState {
@@ -30,6 +33,9 @@ impl Default for InstallState {
         Self {
             status: "idle".to_string(),
             logs: Vec::new(),
+            download_progress: 0,
+            download_total: 0,
+            download_speed: 0.0,
         }
     }
 }
@@ -37,11 +43,13 @@ impl Default for InstallState {
 pub struct AppState {
     pub comfy_process: Mutex<Option<Child>>,
     pub comfy_path: Mutex<Option<String>>,
+    pub comfy_port: Mutex<u16>,
     pub whisper: Arc<Mutex<WhisperServer>>,
     pub downloads: Arc<Mutex<HashMap<String, DownloadProgress>>>,
     pub download_tokens: Arc<Mutex<HashMap<String, CancellationToken>>>,
     pub pull_tokens: Arc<Mutex<HashMap<String, CancellationToken>>>,
-    pub install_status: Mutex<InstallState>,
+    pub install_status: Arc<Mutex<InstallState>>,
+    pub ollama_install: Arc<Mutex<InstallState>>,
     pub searxng_install: Mutex<InstallState>,
     pub searxng_available: AtomicBool,
     pub python_bin: String,
@@ -55,11 +63,13 @@ impl AppState {
         Self {
             comfy_process: Mutex::new(None),
             comfy_path: Mutex::new(None),
+            comfy_port: Mutex::new(8188),
             whisper: Arc::new(Mutex::new(WhisperServer::new())),
             downloads: Arc::new(Mutex::new(HashMap::new())),
             download_tokens: Arc::new(Mutex::new(HashMap::new())),
             pull_tokens: Arc::new(Mutex::new(HashMap::new())),
-            install_status: Mutex::new(InstallState::default()),
+            install_status: Arc::new(Mutex::new(InstallState::default())),
+            ollama_install: Arc::new(Mutex::new(InstallState::default())),
             searxng_install: Mutex::new(InstallState::default()),
             searxng_available: AtomicBool::new(false),
             python_bin,

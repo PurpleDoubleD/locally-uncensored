@@ -188,8 +188,8 @@ pub fn find_comfyui_path() -> Option<String> {
     None
 }
 
-fn is_comfyui_running() -> bool {
-    reqwest::blocking::get("http://localhost:8188/system_stats")
+fn is_comfyui_running_on_port(port: u16) -> bool {
+    reqwest::blocking::get(format!("http://localhost:{}/system_stats", port))
         .map(|r| r.status().is_success())
         .unwrap_or(false)
 }
@@ -235,7 +235,9 @@ pub fn start_ollama(_state: State<'_, AppState>) -> Result<serde_json::Value, St
 
 #[tauri::command]
 pub fn start_comfyui(state: State<'_, AppState>) -> Result<serde_json::Value, String> {
-    if is_comfyui_running() {
+    let port = *state.comfy_port.lock().unwrap();
+
+    if is_comfyui_running_on_port(port) {
         return Ok(serde_json::json!({"status": "already_running"}));
     }
 
@@ -256,11 +258,12 @@ pub fn start_comfyui(state: State<'_, AppState>) -> Result<serde_json::Value, St
 
     // Validate python binary exists
     let python = &state.python_bin;
+    let port_str = port.to_string();
     println!("[ComfyUI] Using Python: {}", python);
-    println!("[ComfyUI] Starting from: {}", comfy_path);
+    println!("[ComfyUI] Starting from: {} on port {}", comfy_path, port);
 
     let mut cmd = Command::new(python);
-    cmd.args(["main.py", "--listen", "127.0.0.1", "--port", "8188", "--enable-cors-header", "*"])
+    cmd.args(["main.py", "--listen", "127.0.0.1", "--port", &port_str, "--enable-cors-header", "*"])
         .current_dir(&comfy_path)
         .env("TQDM_DISABLE", "1")
         .env("PYTHONUNBUFFERED", "1")
@@ -335,7 +338,9 @@ pub fn stop_comfyui(state: State<'_, AppState>) -> Result<serde_json::Value, Str
 
 #[tauri::command]
 pub async fn comfyui_status(state: State<'_, AppState>) -> Result<serde_json::Value, String> {
-    let running = reqwest::get("http://localhost:8188/system_stats")
+    let port = *state.comfy_port.lock().unwrap();
+
+    let running = reqwest::get(format!("http://localhost:{}/system_stats", port))
         .await
         .map(|r| r.status().is_success())
         .unwrap_or(false);
@@ -357,6 +362,7 @@ pub async fn comfyui_status(state: State<'_, AppState>) -> Result<serde_json::Va
         "starting": process_alive && !running,
         "found": found,
         "path": path,
+        "port": port,
         "processAlive": process_alive,
     }))
 }
@@ -404,6 +410,40 @@ pub fn set_comfyui_path(path: String, state: State<'_, AppState>) -> Result<serd
     Ok(serde_json::json!({"status": "saved", "path": path}))
 }
 
+#[tauri::command]
+pub fn set_comfyui_port(port: u16, state: State<'_, AppState>) -> Result<serde_json::Value, String> {
+    if port == 0 {
+        return Err("Port must be greater than 0".to_string());
+    }
+
+    {
+        let mut p = state.comfy_port.lock().unwrap();
+        *p = port;
+    }
+
+    // Persist to config file
+    if let Some(config_dir) = dirs::config_dir() {
+        let app_config = config_dir.join("locally-uncensored");
+        let _ = fs::create_dir_all(&app_config);
+        let config_file = app_config.join("config.json");
+
+        let mut config: serde_json::Value = if config_file.exists() {
+            fs::read_to_string(&config_file)
+                .ok()
+                .and_then(|s| serde_json::from_str(&s).ok())
+                .unwrap_or_else(|| serde_json::json!({}))
+        } else {
+            serde_json::json!({})
+        };
+
+        config["comfyui_port"] = serde_json::json!(port);
+        let _ = fs::write(&config_file, serde_json::to_string_pretty(&config).unwrap());
+    }
+
+    println!("[ComfyUI] Port set to {}", port);
+    Ok(serde_json::json!({"status": "saved", "port": port}))
+}
+
 /// Auto-start Ollama on app launch (called from setup)
 pub fn auto_start_ollama(_state: &AppState) {
     // Check if already running
@@ -445,18 +485,21 @@ pub fn auto_start_comfyui(state: &AppState) {
         }
     }
 
-    if is_comfyui_running() {
-        println!("[ComfyUI] Already running on port 8188");
+    let port = *state.comfy_port.lock().unwrap();
+
+    if is_comfyui_running_on_port(port) {
+        println!("[ComfyUI] Already running on port {}", port);
         return;
     }
 
     match find_comfyui_path() {
         Some(path) => {
-            println!("[ComfyUI] Auto-starting from: {}", path);
+            let port_str = port.to_string();
+            println!("[ComfyUI] Auto-starting from: {} on port {}", path, port);
             *state.comfy_path.lock().unwrap() = Some(path.clone());
 
             let mut cmd = Command::new(&state.python_bin);
-            cmd.args(["main.py", "--listen", "127.0.0.1", "--port", "8188", "--enable-cors-header", "*"])
+            cmd.args(["main.py", "--listen", "127.0.0.1", "--port", &port_str, "--enable-cors-header", "*"])
                 .current_dir(&path)
                 .env("TQDM_DISABLE", "1")
                 .env("PYTHONUNBUFFERED", "1")

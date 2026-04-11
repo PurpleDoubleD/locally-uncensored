@@ -8,6 +8,7 @@
  */
 
 import { v4 as uuid } from 'uuid'
+import { comfyuiWsUrl } from './backend'
 
 export type ComfyWSEvent =
   | { type: 'status'; data: { queue_remaining: number } }
@@ -66,7 +67,7 @@ class ComfyWSClient {
       }, timeoutMs)
 
       try {
-        this.ws = new WebSocket(`ws://localhost:8188/ws?clientId=${CLIENT_ID}`)
+        this.ws = new WebSocket(`${comfyuiWsUrl()}?clientId=${CLIENT_ID}`)
 
         this.ws.onopen = () => {
           clearTimeout(timer)

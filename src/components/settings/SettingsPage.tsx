@@ -102,8 +102,13 @@ function WorkflowSection() {
 // ── ComfyUI Settings ────────────────────────────────────────────
 
 function ComfyUISettings() {
-  const [status, setStatus] = useState<{ running: boolean; found: boolean; path?: string; starting?: boolean } | null>(null)
+  const [status, setStatus] = useState<{ running: boolean; found: boolean; path?: string; port?: number; starting?: boolean } | null>(null)
   const [loading, setLoading] = useState(true)
+  const [customPath, setCustomPath] = useState('')
+  const [pathError, setPathError] = useState('')
+  const [pathSuccess, setPathSuccess] = useState(false)
+  const [customPort, setCustomPort] = useState('')
+  const [portSuccess, setPortSuccess] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -136,6 +141,21 @@ function ComfyUISettings() {
     } catch {}
   }
 
+  const handleSetPath = async () => {
+    if (!customPath.trim()) return
+    setPathError('')
+    setPathSuccess(false)
+    try {
+      const { backendCall } = await import('../../api/backend')
+      await backendCall('set_comfyui_path', { path: customPath.trim() })
+      setPathSuccess(true)
+      setStatus(prev => prev ? { ...prev, found: true, path: customPath.trim() } : { running: false, found: true, path: customPath.trim() })
+      setTimeout(() => setPathSuccess(false), 3000)
+    } catch (err) {
+      setPathError(err instanceof Error ? err.message : 'Invalid path — main.py not found')
+    }
+  }
+
   if (loading) {
     return <div className="flex items-center gap-2 text-[0.65rem] text-gray-500"><Loader2 size={12} className="animate-spin" /> Checking...</div>
   }
@@ -153,13 +173,60 @@ function ComfyUISettings() {
         </div>
       </div>
 
-      {/* Path */}
-      {status?.path && (
-        <div className="flex items-center justify-between">
-          <span className="text-[0.7rem] text-gray-700 dark:text-gray-400">Path</span>
-          <span className="text-[0.55rem] font-mono text-gray-500 truncate max-w-48" title={status.path}>{status.path}</span>
+      {/* Path - editable */}
+      <div className="space-y-1">
+        <span className="text-[0.7rem] text-gray-700 dark:text-gray-400">Path</span>
+        <div className="flex gap-1.5">
+          <input
+            type="text"
+            value={customPath || status?.path || ''}
+            onChange={e => { setCustomPath(e.target.value); setPathError(''); setPathSuccess(false) }}
+            placeholder="C:\ComfyUI"
+            className="flex-1 px-2 py-1 rounded-lg border text-[0.6rem] font-mono bg-transparent border-white/10 text-gray-300 focus:outline-none focus:border-white/25"
+          />
+          <button
+            onClick={handleSetPath}
+            disabled={!customPath.trim() || customPath.trim() === status?.path}
+            className="px-2 py-1 rounded text-[0.6rem] bg-purple-500/10 text-purple-400 hover:bg-purple-500/20 transition-colors disabled:opacity-30"
+          >
+            Connect
+          </button>
         </div>
-      )}
+        {pathError && <p className="text-[0.55rem] text-red-400">{pathError}</p>}
+        {pathSuccess && <p className="text-[0.55rem] text-green-400">Path set successfully</p>}
+      </div>
+
+      {/* Port - editable */}
+      <div className="space-y-1">
+        <span className="text-[0.7rem] text-gray-700 dark:text-gray-400">Port</span>
+        <div className="flex gap-1.5">
+          <input
+            type="number"
+            value={customPort || status?.port || 8188}
+            onChange={e => { setCustomPort(e.target.value); setPortSuccess(false) }}
+            placeholder="8188"
+            className="w-24 px-2 py-1 rounded-lg border text-[0.6rem] font-mono bg-transparent border-white/10 text-gray-300 focus:outline-none focus:border-white/25"
+          />
+          <button
+            onClick={async () => {
+              const port = parseInt(customPort)
+              if (!port || port < 1 || port > 65535) return
+              try {
+                const { backendCall, setComfyPort } = await import('../../api/backend')
+                await backendCall('set_comfyui_port', { port })
+                setComfyPort(port)
+                setPortSuccess(true)
+                setTimeout(() => setPortSuccess(false), 3000)
+              } catch {}
+            }}
+            disabled={!customPort || parseInt(customPort) === (status?.port || 8188)}
+            className="px-2 py-1 rounded text-[0.6rem] bg-purple-500/10 text-purple-400 hover:bg-purple-500/20 transition-colors disabled:opacity-30"
+          >
+            Set
+          </button>
+        </div>
+        {portSuccess && <p className="text-[0.55rem] text-green-400">Port saved. Restart ComfyUI to apply.</p>}
+      </div>
 
       {/* Controls */}
       <div className="flex items-center gap-1.5">

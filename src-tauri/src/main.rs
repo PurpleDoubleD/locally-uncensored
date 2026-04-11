@@ -27,9 +27,12 @@ fn main() {
             commands::process::comfyui_status,
             commands::process::find_comfyui,
             commands::process::set_comfyui_path,
+            commands::process::set_comfyui_port,
             // Installation
             commands::install::install_comfyui,
             commands::install::install_comfyui_status,
+            commands::install::install_ollama,
+            commands::install::install_ollama_status,
             commands::install::install_custom_node,
             // Whisper STT
             commands::whisper::whisper_status,

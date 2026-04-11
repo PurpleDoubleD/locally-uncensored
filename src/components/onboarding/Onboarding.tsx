@@ -65,8 +65,25 @@ export function Onboarding() {
   const [comfyInstallError, setComfyInstallError] = useState('')
   const [comfyPathInput, setComfyPathInput] = useState('')
   const [comfyReady, setComfyReady] = useState(false)
+  const [comfyDownloadProgress, setComfyDownloadProgress] = useState(0)
+  const [comfyDownloadTotal, setComfyDownloadTotal] = useState(0)
+  const [comfyDownloadSpeed, setComfyDownloadSpeed] = useState(0)
   const [systemVRAM, setSystemVRAM] = useState<number | null>(null)
   const [modelSubTab, setModelSubTab] = useState<'uncensored' | 'mainstream'>('uncensored')
+  const [installStartTime, setInstallStartTime] = useState<number | null>(null)
+  const [elapsed, setElapsed] = useState(0)
+
+  // Ollama install state
+  const [ollamaInstalling, setOllamaInstalling] = useState(false)
+  const [ollamaStatus, setOllamaStatus] = useState('')
+  const [ollamaProgress, setOllamaProgress] = useState(0)
+  const [ollamaTotal, setOllamaTotal] = useState(0)
+  const [ollamaSpeed, setOllamaSpeed] = useState(0)
+  const [ollamaLogs, setOllamaLogs] = useState<string[]>([])
+  const [ollamaError, setOllamaError] = useState('')
+  const [ollamaReady, setOllamaReady] = useState(false)
+  const [ollamaStartTime, setOllamaStartTime] = useState<number | null>(null)
+  const [ollamaElapsed, setOllamaElapsed] = useState(0)
 
   const isDark = settings.theme === 'dark'
   const bgClass = isDark ? 'bg-[#0a0a0a] text-white' : 'bg-white text-gray-900'
@@ -126,6 +143,20 @@ export function Onboarding() {
 
   // Detect system VRAM for model filtering
   useEffect(() => { getSystemVRAM().then(v => setSystemVRAM(v)).catch(() => {}) }, [])
+
+  // Elapsed timer for ComfyUI installation
+  useEffect(() => {
+    if (!installStartTime) return
+    const timer = setInterval(() => setElapsed(Math.floor((Date.now() - installStartTime) / 1000)), 1000)
+    return () => clearInterval(timer)
+  }, [installStartTime])
+
+  // Elapsed timer for Ollama installation
+  useEffect(() => {
+    if (!ollamaStartTime) return
+    const timer = setInterval(() => setOllamaElapsed(Math.floor((Date.now() - ollamaStartTime) / 1000)), 1000)
+    return () => clearInterval(timer)
+  }, [ollamaStartTime])
 
   // Auto-detect ComfyUI when entering the comfyui step
   useEffect(() => {
@@ -325,44 +356,156 @@ export function Onboarding() {
                 </div>
               </>
             ) : (
-              /* ── No backends found — show all options ─────── */
+              /* ── No backends found — install Ollama in-app ─────── */
               <>
                 <h2 className="text-base font-semibold">No local backend detected</h2>
                 <p className={`text-[0.7rem] ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
-                  Install any of these local AI backends, then hit Re-Scan. Pick whichever you prefer — they all work.
+                  You need a local AI backend to chat. We'll install Ollama for you — it's the easiest to set up.
                 </p>
 
-                <div className="space-y-1 text-left max-h-[45vh] overflow-y-auto scrollbar-thin pr-1">
-                  {LOCAL_BACKENDS.map(b => (
-                    <button
-                      key={b.id}
-                      onClick={() => openExternal(b.url)}
-                      className={`flex items-center gap-2.5 px-2.5 py-2 rounded-lg border transition-all group text-left ${
-                        isDark
-                          ? 'border-white/[0.06] hover:border-white/15 hover:bg-white/[0.03]'
-                          : 'border-gray-200 hover:border-gray-400 hover:bg-gray-50'
-                      }`}
-                    >
-                      <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${isDark ? 'bg-gray-600' : 'bg-gray-300'}`} />
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-1.5">
-                          <p className="text-[0.7rem] font-medium">{b.name}</p>
-                          <ExternalLink size={10} className={`opacity-0 group-hover:opacity-100 transition-opacity ${isDark ? 'text-gray-500' : 'text-gray-400'}`} />
-                        </div>
-                        <p className={`text-[0.55rem] ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>{b.description}</p>
+                {/* Ollama ready state */}
+                {ollamaReady && (
+                  <div className={`p-3 rounded-lg border ${isDark ? 'bg-green-500/10 border-green-500/20' : 'bg-green-50 border-green-200'}`}>
+                    <div className="flex items-center gap-2 justify-center">
+                      <Check size={14} className="text-green-400" />
+                      <span className="text-[0.7rem] font-medium">Ollama is ready!</span>
+                    </div>
+                  </div>
+                )}
+
+                {/* Install button — only show when not installing and not ready */}
+                {!ollamaInstalling && !ollamaReady && (
+                  <button
+                    onClick={async () => {
+                      setOllamaInstalling(true)
+                      setOllamaError('')
+                      setOllamaStartTime(Date.now())
+                      setOllamaElapsed(0)
+                      try {
+                        await backendCall('install_ollama')
+                        const poll = setInterval(async () => {
+                          try {
+                            const s: any = await backendCall('install_ollama_status')
+                            setOllamaStatus(s.status || '')
+                            setOllamaLogs(s.logs || [])
+                            setOllamaProgress(s.download_progress || 0)
+                            setOllamaTotal(s.download_total || 0)
+                            setOllamaSpeed(s.download_speed || 0)
+                            if (s.status === 'complete') {
+                              clearInterval(poll)
+                              setOllamaInstalling(false)
+                              setOllamaReady(true)
+                              setOllamaStartTime(null)
+                            } else if (s.status === 'error') {
+                              clearInterval(poll)
+                              setOllamaInstalling(false)
+                              setOllamaStartTime(null)
+                              const lastLog = s.logs?.[s.logs.length - 1] || 'Installation failed'
+                              setOllamaError(lastLog)
+                            }
+                          } catch { /* keep polling */ }
+                        }, 1000)
+                      } catch (err) {
+                        setOllamaInstalling(false)
+                        setOllamaStartTime(null)
+                        setOllamaError(err instanceof Error ? err.message : 'Installation failed')
+                      }
+                    }}
+                    className={`w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg text-[0.7rem] font-medium transition-all ${
+                      isDark ? 'bg-white text-black hover:bg-gray-200' : 'bg-gray-900 text-white hover:bg-gray-800'
+                    }`}
+                  >
+                    <Download size={14} /> Install Ollama
+                  </button>
+                )}
+
+                {/* Install progress */}
+                {ollamaInstalling && (
+                  <div className={`p-3 rounded-lg border ${cardClass} text-left`}>
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="flex items-center gap-2">
+                        <Loader2 size={14} className="animate-spin text-blue-400" />
+                        <span className="text-[0.7rem] font-medium">
+                          {ollamaStatus === 'downloading' ? 'Downloading Ollama...' :
+                           ollamaStatus === 'installing' ? 'Installing Ollama...' :
+                           ollamaStatus === 'starting' ? 'Starting Ollama...' :
+                           'Setting up Ollama...'}
+                        </span>
                       </div>
-                      <span className={`text-[0.5rem] font-mono shrink-0 ${isDark ? 'text-gray-600' : 'text-gray-300'}`}>:{b.port}</span>
-                    </button>
-                  ))}
-                </div>
+                      <span className={`text-[0.55rem] font-mono ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>
+                        {Math.floor(ollamaElapsed / 60)}:{String(ollamaElapsed % 60).padStart(2, '0')}
+                      </span>
+                    </div>
+                    {/* Download progress bar */}
+                    {ollamaStatus === 'downloading' && ollamaTotal > 0 && (
+                      <div className="space-y-1">
+                        <ProgressBar progress={(ollamaProgress / ollamaTotal) * 100} />
+                        <div className="flex justify-between">
+                          <span className={`text-[0.55rem] ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>
+                            {formatBytes(ollamaProgress)} / {formatBytes(ollamaTotal)}
+                          </span>
+                          <span className={`text-[0.55rem] ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>
+                            {ollamaSpeed > 0 ? `${formatBytes(ollamaSpeed)}/s` : ''}
+                          </span>
+                        </div>
+                      </div>
+                    )}
+                    {/* Log lines */}
+                    <div className={`text-[0.55rem] font-mono mt-1 max-h-16 overflow-y-auto space-y-0.5 ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>
+                      {ollamaLogs.slice(-4).map((log, i) => (
+                        <p key={i}>{log}</p>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Error */}
+                {ollamaError && (
+                  <p className="text-[0.65rem] text-red-400">{ollamaError}</p>
+                )}
+
+                {/* Other alternatives collapsed */}
+                {!ollamaInstalling && !ollamaReady && (
+                  <details className={`text-left ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
+                    <summary className={`text-[0.6rem] cursor-pointer hover:underline ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>
+                      Other backends
+                    </summary>
+                    <div className="space-y-1 mt-2 max-h-[30vh] overflow-y-auto scrollbar-thin pr-1">
+                      {LOCAL_BACKENDS.filter(b => b.id !== 'ollama').map(b => (
+                        <button
+                          key={b.id}
+                          onClick={() => openExternal(b.url)}
+                          className={`w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg border transition-all group text-left ${
+                            isDark
+                              ? 'border-white/[0.06] hover:border-white/15 hover:bg-white/[0.03]'
+                              : 'border-gray-200 hover:border-gray-400 hover:bg-gray-50'
+                          }`}
+                        >
+                          <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${isDark ? 'bg-gray-600' : 'bg-gray-300'}`} />
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-1.5">
+                              <p className="text-[0.65rem] font-medium">{b.name}</p>
+                              <ExternalLink size={10} className={`opacity-0 group-hover:opacity-100 transition-opacity ${isDark ? 'text-gray-500' : 'text-gray-400'}`} />
+                            </div>
+                            <p className={`text-[0.5rem] ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>{b.description}</p>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  </details>
+                )}
 
                 <div className="flex items-center justify-center gap-2 pt-1">
-                  <button onClick={runDetection} className={secondaryBtn}>
-                    <RefreshCw size={12} /> Re-Scan
-                  </button>
-                  <button onClick={() => setStep('comfyui')} className={`${secondaryBtn} opacity-60`}>
-                    Skip for now <ChevronRight size={12} />
-                  </button>
+                  {!ollamaInstalling && !ollamaReady && (
+                    <button onClick={runDetection} className={secondaryBtn}>
+                      <RefreshCw size={12} /> Re-Scan
+                    </button>
+                  )}
+                  {(ollamaReady || !ollamaInstalling) && (
+                    <button onClick={() => setStep('comfyui')} className={ollamaReady ? primaryBtn : `${secondaryBtn} opacity-60`}>
+                      {ollamaReady ? <>Continue <ArrowRight size={14} /></> : <>Skip for now <ChevronRight size={12} /></>}
+                    </button>
+                  )}
                 </div>
               </>
             )}
@@ -411,6 +554,8 @@ export function Onboarding() {
                     setComfyInstalling(true)
                     setComfyInstallError('')
                     setComfyInstallLogs(['Starting ComfyUI installation...'])
+                    setInstallStartTime(Date.now())
+                    setElapsed(0)
                     try {
                       await backendCall('install_comfyui')
                       // Poll installation status
@@ -418,16 +563,22 @@ export function Onboarding() {
                         try {
                           const status: any = await backendCall('install_comfyui_status')
                           setComfyInstallLogs(status.logs || [])
+                          setComfyDownloadProgress(status.download_progress || 0)
+                          setComfyDownloadTotal(status.download_total || 0)
+                          setComfyDownloadSpeed(status.download_speed || 0)
                           if (status.status === 'complete' || status.status === 'done') {
                             clearInterval(poll)
                             setComfyInstalling(false)
                             setComfyReady(true)
+                            setInstallStartTime(null)
                             // Auto-start ComfyUI
                             try { await backendCall('start_comfyui') } catch {}
                           } else if (status.status === 'error') {
                             clearInterval(poll)
                             setComfyInstalling(false)
-                            setComfyInstallError('Installation failed. Check logs below.')
+                            setInstallStartTime(null)
+                            const lastLog = status.logs?.[status.logs.length - 1] || 'Installation failed'
+                            setComfyInstallError(lastLog)
                           }
                         } catch { /* keep polling */ }
                       }, 2000)
@@ -491,10 +642,29 @@ export function Onboarding() {
             {/* Installing progress */}
             {comfyInstalling && (
               <div className={`p-3 rounded-lg border ${cardClass} text-left`}>
-                <div className="flex items-center gap-2 mb-2">
-                  <Loader2 size={14} className="animate-spin text-purple-400" />
-                  <span className="text-[0.7rem] font-medium">Installing ComfyUI...</span>
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-2">
+                    <Loader2 size={14} className="animate-spin text-purple-400" />
+                    <span className="text-[0.7rem] font-medium">Installing ComfyUI...</span>
+                  </div>
+                  <span className={`text-[0.55rem] font-mono ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>
+                    {Math.floor(elapsed / 60)}:{String(elapsed % 60).padStart(2, '0')}
+                  </span>
                 </div>
+                {/* Download progress bar (shown during download phase) */}
+                {comfyInstallLogs.some(l => l.includes('Downloading')) && comfyDownloadTotal > 0 && (
+                  <div className="space-y-1 mb-2">
+                    <ProgressBar progress={comfyDownloadTotal > 0 ? (comfyDownloadProgress / comfyDownloadTotal) * 100 : 0} />
+                    <div className="flex justify-between">
+                      <span className={`text-[0.55rem] ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>
+                        {formatBytes(comfyDownloadProgress)} / {formatBytes(comfyDownloadTotal)}
+                      </span>
+                      <span className={`text-[0.55rem] ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>
+                        {comfyDownloadSpeed > 0 ? `${formatBytes(comfyDownloadSpeed)}/s` : ''}
+                      </span>
+                    </div>
+                  </div>
+                )}
                 <div className={`text-[0.55rem] font-mono max-h-24 overflow-y-auto space-y-0.5 ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>
                   {comfyInstallLogs.slice(-8).map((log, i) => (
                     <p key={i}>{log}</p>

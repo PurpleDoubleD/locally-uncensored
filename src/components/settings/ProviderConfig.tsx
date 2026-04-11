@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Wifi, WifiOff, Loader2, Eye, EyeOff, ChevronDown, Plus, Power } from 'lucide-react'
 import { useProviderStore } from '../../stores/providerStore'
 import { useMemoryStore } from '../../stores/memoryStore'
@@ -18,6 +18,23 @@ export function ProviderSettings() {
   const [expandedProvider, setExpandedProvider] = useState<ProviderId | null>(null)
 
   const autoExtractEnabled = useMemoryStore((s) => s.settings.autoExtractEnabled)
+
+  // Auto-check connection status for all enabled providers on mount
+  useEffect(() => {
+    const checkAll = async () => {
+      const ids = (Object.keys(providers) as ProviderId[]).filter(id => providers[id].enabled)
+      for (const id of ids) {
+        try {
+          const client = getProvider(id)
+          const ok = await client.checkConnection()
+          setStatuses(prev => ({ ...prev, [id]: ok ? 'connected' : 'failed' }))
+        } catch {
+          setStatuses(prev => ({ ...prev, [id]: 'failed' }))
+        }
+      }
+    }
+    checkAll()
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Get all enabled providers
   const enabledProviderIds = (Object.keys(providers) as ProviderId[]).filter(id => providers[id].enabled)
@@ -111,7 +128,11 @@ export function ProviderSettings() {
                 className="flex-1 flex items-center justify-between min-w-0"
               >
                 <div className="flex items-center gap-2 min-w-0">
-                  <span className="w-1.5 h-1.5 rounded-full bg-green-500 shrink-0" />
+                  <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                    status === 'connected' ? 'bg-green-500' :
+                    status === 'failed' ? 'bg-red-500' :
+                    'bg-gray-500'
+                  }`} />
                   <span className="text-[0.65rem] text-gray-300 font-medium truncate">{preset?.name || config.name}</span>
                   {config.isLocal && <span className="text-[0.5rem] px-1 py-0.5 rounded bg-green-500/10 text-green-400 shrink-0">LOCAL</span>}
                   {!config.isLocal && <span className="text-[0.5rem] px-1 py-0.5 rounded bg-blue-500/10 text-blue-400 shrink-0">CLOUD</span>}

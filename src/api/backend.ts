@@ -128,6 +128,9 @@ export async function backendCall<T = any>(
     set_comfyui_path: { path: "/local-api/set-comfyui-path", method: "POST" },
     install_comfyui: { path: "/local-api/install-comfyui", method: "POST" },
     install_comfyui_status: { path: "/local-api/install-comfyui" },
+    install_ollama: { path: "/local-api/install-ollama", method: "POST" },
+    install_ollama_status: { path: "/local-api/install-ollama-status" },
+    set_comfyui_port: { path: "/local-api/set-comfyui-port", method: "POST" },
     install_custom_node: { path: "/local-api/install-custom-node", method: "POST" },
     whisper_status: { path: "/local-api/transcribe-status" },
     transcribe: { path: "/local-api/transcribe", method: "POST" },
@@ -207,17 +210,22 @@ export function ollamaUrl(path: string): string {
   return `/api${path}`;
 }
 
+/** Configurable ComfyUI port — default 8188, can be changed at runtime */
+let _comfyPort = 8188;
+export function setComfyPort(port: number) { _comfyPort = port; }
+export function getComfyPort(): number { return _comfyPort; }
+
 /** Get the base URL for ComfyUI API calls */
 export function comfyuiUrl(path: string): string {
   if (isTauri()) {
-    return `http://localhost:8188${path}`;
+    return `http://localhost:${_comfyPort}${path}`;
   }
   return `/comfyui${path}`;
 }
 
 /** Get the WebSocket URL for ComfyUI */
 export function comfyuiWsUrl(): string {
-  return "ws://localhost:8188/ws";
+  return `ws://localhost:${_comfyPort}/ws`;
 }
 
 /** Download a ComfyUI output file — works in both dev and Tauri mode */

@@ -631,7 +631,7 @@ export async function submitWorkflow(workflow: Record<string, any>, clientId?: s
   const payload: Record<string, any> = { prompt: workflow }
   if (clientId) payload.client_id = clientId
   // Use direct fetch to ComfyUI (bypasses Tauri proxy issues, CORS OK with --enable-cors-header *)
-  const url = 'http://localhost:8188/prompt'
+  const url = comfyuiUrl('/prompt')
   const res = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -665,13 +665,13 @@ export async function submitWorkflow(workflow: Record<string, any>, clientId?: s
 
 export async function cancelGeneration(): Promise<void> {
   try {
-    await fetch('http://localhost:8188/interrupt', { method: 'POST' })
+    await fetch(comfyuiUrl('/interrupt'), { method: 'POST' })
   } catch { /* best effort */ }
 }
 
 export async function freeMemory(): Promise<void> {
   try {
-    await fetch('http://localhost:8188/free', {
+    await fetch(comfyuiUrl('/free'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ unload_models: true, free_memory: true }),
@@ -682,7 +682,7 @@ export async function freeMemory(): Promise<void> {
 export async function getHistory(promptId: string): Promise<any> {
   try {
     // Use direct fetch (CORS OK with --enable-cors-header *)
-    const res = await fetch(`http://localhost:8188/history/${promptId}`)
+    const res = await fetch(comfyuiUrl(`/history/${promptId}`))
     if (!res.ok) return null
     const data = await res.json()
     return data[promptId] ?? null
