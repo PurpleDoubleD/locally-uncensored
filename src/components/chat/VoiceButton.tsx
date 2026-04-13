@@ -31,10 +31,10 @@ export function VoiceButton({ onTranscript, onRecordingChange, disabled }: Props
       <div className="relative group/mic">
         <button
           disabled
-          className="p-2 rounded-lg text-gray-300 dark:text-gray-600 cursor-not-allowed shrink-0"
+          className="p-1.5 rounded-lg text-gray-300 dark:text-gray-600 cursor-not-allowed shrink-0"
           aria-label="Microphone unavailable"
         >
-          <MicOff size={15} />
+          <MicOff size={14} />
         </button>
         <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2 py-1 bg-gray-800 dark:bg-gray-700 text-white text-[0.6rem] rounded whitespace-nowrap opacity-0 group-hover/mic:opacity-100 transition-opacity pointer-events-none">
           Speech recognition not available
@@ -48,10 +48,10 @@ export function VoiceButton({ onTranscript, onRecordingChange, disabled }: Props
     return (
       <motion.button
         disabled
-        className="p-2 rounded-lg bg-blue-100 dark:bg-blue-500/20 border border-blue-300 dark:border-blue-500/40 text-blue-600 dark:text-blue-400 shrink-0 relative"
+        className="p-1.5 rounded-lg bg-blue-100 dark:bg-blue-500/20 border border-blue-300 dark:border-blue-500/40 text-blue-600 dark:text-blue-400 shrink-0 relative"
         aria-label="Transcribing audio"
       >
-        <Loader2 size={15} className="animate-spin" />
+        <Loader2 size={14} className="animate-spin" />
       </motion.button>
     )
   }
@@ -60,7 +60,7 @@ export function VoiceButton({ onTranscript, onRecordingChange, disabled }: Props
     <motion.button
       onClick={handleClick}
       disabled={disabled}
-      className={`p-2 rounded-lg transition-all shrink-0 relative ${
+      className={`p-1.5 rounded-lg transition-all shrink-0 relative ${
         isRecording
           ? "bg-red-100 dark:bg-red-500/20 border border-red-300 dark:border-red-500/40 text-red-600 dark:text-red-400"
           : "hover:bg-gray-100 dark:hover:bg-white/10 text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white"
@@ -76,7 +76,7 @@ export function VoiceButton({ onTranscript, onRecordingChange, disabled }: Props
           transition={{ duration: 1.2, repeat: Infinity, ease: "easeInOut" }}
         />
       )}
-      <Mic size={15} />
+      <Mic size={14} />
     </motion.button>
   )
 }

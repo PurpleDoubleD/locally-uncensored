@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::collections::HashMap;
 use std::net::SocketAddr;
 use axum::{
     Router,
@@ -13,6 +14,12 @@ use axum::{
 use tower_http::cors::CorsLayer;
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex as TokioMutex;
+
+// ─── Constants ───
+
+const PASSCODE_TTL_SECS: u64 = 300; // 5 minutes
+const MAX_FAILED_ATTEMPTS: u32 = 3;
+const COOLDOWN_SECS: u64 = 60;
 
 // ─── Shared server state ───
 
@@ -34,14 +41,22 @@ impl Default for RemotePermissions {
 }
 
 #[derive(Clone)]
+pub struct PasscodeState {
+    pub code: String,
+    pub expires_at: u64,
+    pub failed_attempts: HashMap<String, (u32, u64)>, // ip -> (count, cooldown_until)
+}
+
+#[derive(Clone)]
 struct RemoteState {
-    jwt_secret: String,
-    passphrase: String,
+    jwt_secret: Arc<TokioMutex<String>>,
+    passcode: Arc<TokioMutex<PasscodeState>>,
     ollama_port: u16,
     comfy_port: u16,
     permissions: Arc<TokioMutex<RemotePermissions>>,
     connected_devices: Arc<TokioMutex<Vec<ConnectedDevice>>>,
     static_dir: Option<String>,
+    tunnel_url: Arc<TokioMutex<Option<String>>>,
 }
 
 #[derive(Clone, Serialize, Debug)]
@@ -61,19 +76,10 @@ struct Claims {
     exp: usize,
 }
 
-fn generate_passphrase() -> String {
-    use rand::seq::SliceRandom;
-    const WORDS: &[&str] = &[
-        "tiger", "ocean", "lamp", "frost", "peak", "vine", "storm", "coral",
-        "ember", "wolf", "stone", "river", "hawk", "dune", "blaze", "fern",
-        "atlas", "cedar", "flint", "jade", "birch", "crest", "drift", "forge",
-        "glen", "haze", "iron", "knot", "lark", "moss", "nova", "opal",
-        "pike", "quartz", "ridge", "sage", "thorn", "vale", "wren", "zenith",
-        "arrow", "bay", "cliff", "dew", "elm", "flame", "gale", "hill",
-    ];
+fn generate_passcode() -> String {
+    use rand::Rng;
     let mut rng = rand::thread_rng();
-    let selected: Vec<&&str> = WORDS.choose_multiple(&mut rng, 6).collect();
-    selected.iter().map(|w| **w).collect::<Vec<&str>>().join("-")
+    format!("{:06}", rng.gen_range(0..1000000))
 }
 
 fn generate_jwt(secret: &str, ip: &str) -> Result<String, String> {
@@ -115,9 +121,10 @@ async fn auth_middleware(
     let path = req.uri().path().to_string();
 
     // Public routes: auth, mobile landing, static assets (HTML/CSS/JS/images)
-    // API routes (/api/*, /comfyui/*, /remote-api/*) require auth — static files don't.
+    // API routes (/api/*, /comfyui/*, /remote-api/*, /ws) require auth
     let is_api = path.starts_with("/api/")
         || path.starts_with("/comfyui/")
+        || path == "/ws"
         || (path.starts_with("/remote-api/") && path != "/remote-api/auth" && path != "/remote-api/status");
     if !is_api {
         return next.run(req).await;
@@ -160,8 +167,10 @@ async fn auth_middleware(
         return (StatusCode::UNAUTHORIZED, "Missing authorization").into_response();
     };
 
-    match validate_jwt(&state.jwt_secret, token) {
+    let jwt_secret = state.jwt_secret.lock().await;
+    match validate_jwt(&jwt_secret, token) {
         Ok(claims) => {
+            drop(jwt_secret);
             // Update last_seen for this device
             let mut devices = state.connected_devices.lock().await;
             if let Some(dev) = devices.iter_mut().find(|d| d.id == claims.sub) {
@@ -177,7 +186,7 @@ async fn auth_middleware(
 
 #[derive(Deserialize)]
 struct AuthRequest {
-    passphrase: String,
+    passcode: String,
 }
 
 #[derive(Serialize)]
@@ -190,23 +199,62 @@ async fn handle_auth(
     headers: HeaderMap,
     Json(body): Json<AuthRequest>,
 ) -> Response {
-    if body.passphrase != state.passphrase {
-        return (StatusCode::FORBIDDEN, "Invalid passphrase").into_response();
-    }
-
     let ip = headers.get("x-forwarded-for")
         .or_else(|| headers.get("x-real-ip"))
         .and_then(|v| v.to_str().ok())
         .unwrap_or("unknown")
         .to_string();
 
+    let now = chrono_now_secs();
+
+    // Rate limiting + passcode verification
+    {
+        let mut pc = state.passcode.lock().await;
+
+        // Rate limit check
+        if let Some(&(count, cooldown_until)) = pc.failed_attempts.get(&ip) {
+            if count >= MAX_FAILED_ATTEMPTS && now < cooldown_until {
+                let remaining = cooldown_until - now;
+                return (StatusCode::TOO_MANY_REQUESTS,
+                    format!("Too many attempts. Try again in {}s", remaining)
+                ).into_response();
+            }
+            // Reset if cooldown expired
+            if count >= MAX_FAILED_ATTEMPTS && now >= cooldown_until {
+                pc.failed_attempts.remove(&ip);
+            }
+        }
+
+        // Auto-regenerate expired passcode
+        if now >= pc.expires_at {
+            pc.code = generate_passcode();
+            pc.expires_at = now + PASSCODE_TTL_SECS;
+            println!("[Remote] Passcode auto-regenerated (expired)");
+        }
+
+        // Verify passcode
+        if body.passcode != pc.code {
+            let entry = pc.failed_attempts.entry(ip.clone()).or_insert((0, 0));
+            entry.0 += 1;
+            if entry.0 >= MAX_FAILED_ATTEMPTS {
+                entry.1 = now + COOLDOWN_SECS;
+            }
+            return (StatusCode::FORBIDDEN, "Invalid code").into_response();
+        }
+
+        // Success: clear failed attempts
+        pc.failed_attempts.remove(&ip);
+    }
+
     let user_agent = headers.get(header::USER_AGENT)
         .and_then(|v| v.to_str().ok())
         .unwrap_or("unknown")
         .to_string();
 
-    match generate_jwt(&state.jwt_secret, &ip) {
+    let jwt_secret = state.jwt_secret.lock().await;
+    match generate_jwt(&jwt_secret, &ip) {
         Ok(token) => {
+            drop(jwt_secret);
             // Track connected device
             let device = ConnectedDevice {
                 id: format!("dev-{}", chrono_now_secs()),
@@ -216,7 +264,7 @@ async fn handle_auth(
             };
             state.connected_devices.lock().await.push(device);
 
-            // Set cookie so browser sends token automatically (no frontend changes needed)
+            // Set cookie so browser sends token automatically
             let cookie = format!("lu-remote-token={}; Path=/; Max-Age=2592000; SameSite=Strict", token);
             let mut response = Json(AuthResponse { token }).into_response();
             response.headers_mut().insert(
@@ -320,7 +368,7 @@ async fn proxy_comfyui_ws(
     ws: axum::extract::WebSocketUpgrade,
 ) -> Response {
     let comfy_port = state.comfy_port;
-    ws.on_upgrade(move |mut client_socket| async move {
+    ws.on_upgrade(move |client_socket| async move {
         use futures_util::{SinkExt, StreamExt};
 
         let ws_url = format!("ws://localhost:{}/ws", comfy_port);
@@ -425,33 +473,34 @@ if (!token) {
     <img src="/LU-monogram-bw.png" alt="" class="logo" style="width:56px;height:56px;opacity:.25;filter:invert(1);margin-bottom:12px">
     <h1 style="font-size:1.1rem;font-weight:600;color:#a3a3a3;margin-bottom:20px">Connect</h1>
     <form id="auth-form" style="width:100%;max-width:300px;display:flex;flex-direction:column;gap:12px">
-      <input id="phrase" type="text" placeholder="Enter passphrase" autocomplete="off" autocapitalize="off"
-        style="width:100%;padding:12px 16px;border-radius:10px;background:#171717;border:1px solid #333;color:#e5e5e5;font-size:.85rem;outline:none;text-align:center;letter-spacing:1px">
+      <input id="phrase" type="tel" inputmode="numeric" pattern="[0-9]*" maxlength="6" placeholder="6-digit code" autocomplete="off" autocapitalize="off"
+        style="width:100%;padding:14px 16px;border-radius:10px;background:#171717;border:1px solid #333;color:#e5e5e5;font-size:1.6rem;outline:none;text-align:center;letter-spacing:8px;font-family:monospace">
       <button type="submit" style="padding:12px;border-radius:10px;background:#3b82f6;color:white;border:none;font-size:.85rem;font-weight:500;cursor:pointer">Connect</button>
       <p id="error" style="color:#ef4444;font-size:.7rem;text-align:center;display:none"></p>
     </form>`;
   document.getElementById('auth-form').onsubmit = async (e) => {
     e.preventDefault();
-    const phrase = document.getElementById('phrase').value.trim();
+    const code = document.getElementById('phrase').value.trim();
     try {
       const res = await fetch('/remote-api/auth', {
         method: 'POST',
         headers: {'Content-Type':'application/json'},
-        body: JSON.stringify({passphrase: phrase})
+        body: JSON.stringify({passcode: code})
       });
       if (res.ok) {
         const {token} = await res.json();
         localStorage.setItem('lu-remote-token', token);
         location.reload();
       } else {
-        const err = document.getElementById('error');
-        err.textContent = 'Invalid passphrase';
-        err.style.display = 'block';
+        const errEl = document.getElementById('error');
+        const text = await res.text();
+        errEl.textContent = res.status === 429 ? text : 'Invalid code';
+        errEl.style.display = 'block';
       }
     } catch(ex) {
-      const err = document.getElementById('error');
-      err.textContent = 'Connection failed';
-      err.style.display = 'block';
+      const errEl = document.getElementById('error');
+      errEl.textContent = 'Connection failed';
+      errEl.style.display = 'block';
     }
   };
 }
@@ -466,15 +515,21 @@ if (!token) {
 struct QrResponse {
     qr_png_base64: String,
     url: String,
-    passphrase: String,
+    passcode: String,
 }
 
 async fn handle_qr(AxumState(state): AxumState<RemoteState>) -> Json<QrResponse> {
-    let lan_ip = local_ip_address::local_ip()
-        .map(|ip| ip.to_string())
-        .unwrap_or_else(|_| "127.0.0.1".to_string());
-    let port = 11435u16; // TODO: make configurable
-    let url = format!("http://{}:{}/mobile", lan_ip, port);
+    // Use tunnel URL if active, otherwise LAN
+    let tunnel_url = state.tunnel_url.lock().await.clone();
+    let url = if let Some(ref turl) = tunnel_url {
+        format!("{}/mobile", turl)
+    } else {
+        let lan_ip = local_ip_address::local_ip()
+            .map(|ip| ip.to_string())
+            .unwrap_or_else(|_| "127.0.0.1".to_string());
+        let port = 11435u16;
+        format!("http://{}:{}/mobile", lan_ip, port)
+    };
 
     // Generate QR code as PNG image
     let qr = qrcode::QrCode::new(url.as_bytes()).unwrap();
@@ -488,10 +543,11 @@ async fn handle_qr(AxumState(state): AxumState<RemoteState>) -> Json<QrResponse>
 
     let qr_base64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &png_bytes);
 
+    let pc = state.passcode.lock().await;
     Json(QrResponse {
         qr_png_base64: qr_base64,
         url,
-        passphrase: state.passphrase.clone(),
+        passcode: pc.code.clone(),
     })
 }
 
@@ -540,12 +596,12 @@ use tokio::task::JoinHandle;
 pub struct RemoteServer {
     pub handle: Option<JoinHandle<()>>,
     pub port: u16,
-    pub passphrase: String,
-    pub jwt_secret: String,
+    pub jwt_secret: Arc<TokioMutex<String>>,
+    pub passcode: Arc<TokioMutex<PasscodeState>>,
     pub permissions: Arc<TokioMutex<RemotePermissions>>,
     pub connected_devices: Arc<TokioMutex<Vec<ConnectedDevice>>>,
     pub tunnel_pid: Option<u32>,
-    pub tunnel_url: Option<String>,
+    pub tunnel_url: Arc<TokioMutex<Option<String>>>,
 }
 
 impl RemoteServer {
@@ -553,12 +609,16 @@ impl RemoteServer {
         Self {
             handle: None,
             port: 11435,
-            passphrase: String::new(),
-            jwt_secret: String::new(),
+            jwt_secret: Arc::new(TokioMutex::new(String::new())),
+            passcode: Arc::new(TokioMutex::new(PasscodeState {
+                code: String::new(),
+                expires_at: 0,
+                failed_attempts: HashMap::new(),
+            })),
             permissions: Arc::new(TokioMutex::new(RemotePermissions::default())),
             connected_devices: Arc::new(TokioMutex::new(Vec::new())),
             tunnel_pid: None,
-            tunnel_url: None,
+            tunnel_url: Arc::new(TokioMutex::new(None)),
         }
     }
 }
@@ -567,57 +627,75 @@ impl RemoteServer {
 pub async fn start_remote_server(
     state: tauri::State<'_, crate::state::AppState>,
 ) -> Result<serde_json::Value, String> {
-    let mut remote = state.remote.lock().map_err(|e| e.to_string())?;
+    // Clone Arcs from std::sync::Mutex, then drop it before any .await
+    let (jwt_secret_arc, passcode_arc, permissions_arc, devices_arc, tunnel_url_arc, port, comfy_port, static_dir) = {
+        let remote = state.remote.lock().map_err(|e| e.to_string())?;
+        if remote.handle.is_some() {
+            return Err("Remote server already running".into());
+        }
+        let comfy_port = *state.comfy_port.lock().unwrap();
 
-    if remote.handle.is_some() {
-        return Err("Remote server already running".into());
-    }
+        // Resolve the static dir (React build output)
+        let static_dir = {
+            let exe_dir = std::env::current_exe()
+                .ok()
+                .and_then(|p| p.parent().map(|p| p.to_path_buf()));
+            let candidates = [
+                exe_dir.as_ref().map(|p| p.join("../../../dist")),
+                exe_dir.as_ref().map(|p| p.join("dist")),
+                exe_dir.as_ref().map(|p| p.join("../dist")),
+                Some(std::path::PathBuf::from("dist")),
+            ];
+            candidates.into_iter()
+                .flatten()
+                .find(|p| p.join("index.html").exists())
+                .map(|p| p.to_string_lossy().to_string())
+        };
 
-    let passphrase = generate_passphrase();
-    let jwt_secret = format!("lu-{}-{}", chrono_now_secs(), rand::random::<u64>());
-    let port = remote.port;
-    let comfy_port = *state.comfy_port.lock().unwrap();
-    let permissions = remote.permissions.clone();
-    let connected_devices = remote.connected_devices.clone();
+        (
+            remote.jwt_secret.clone(),
+            remote.passcode.clone(),
+            remote.permissions.clone(),
+            remote.connected_devices.clone(),
+            remote.tunnel_url.clone(),
+            remote.port,
+            comfy_port,
+            static_dir,
+        )
+    }; // std::sync::MutexGuard dropped here
 
-    remote.passphrase = passphrase.clone();
-    remote.jwt_secret = jwt_secret.clone();
-
-    // Resolve the static dir (React build output)
-    // Try multiple paths: dev build, Tauri resource bundle, exe-relative
-    let static_dir = {
-        let exe_dir = std::env::current_exe()
-            .ok()
-            .and_then(|p| p.parent().map(|p| p.to_path_buf()));
-        let candidates = [
-            // Dev mode: project root dist/
-            exe_dir.as_ref().map(|p| p.join("../../../dist")),
-            // Tauri bundled resource (NSIS install)
-            exe_dir.as_ref().map(|p| p.join("dist")),
-            // Portable: dist/ next to exe
-            exe_dir.as_ref().map(|p| p.join("../dist")),
-            // Fallback: cwd
-            Some(std::path::PathBuf::from("dist")),
-        ];
-        candidates.into_iter()
-            .flatten()
-            .find(|p| p.join("index.html").exists())
-            .map(|p| p.to_string_lossy().to_string())
-    };
     if let Some(ref dir) = static_dir {
         println!("[Remote] Serving static files from: {}", dir);
     } else {
         println!("[Remote] Warning: No dist/ directory found, static file serving disabled");
     }
 
+    // Generate new passcode + JWT secret
+    let passcode = generate_passcode();
+    let jwt_secret_str = format!("lu-{}-{}", chrono_now_secs(), rand::random::<u64>());
+    let now = chrono_now_secs();
+
+    // Update shared state (safe to .await now, no std::sync::MutexGuard held)
+    {
+        let mut jwt = jwt_secret_arc.lock().await;
+        *jwt = jwt_secret_str;
+    }
+    {
+        let mut pc = passcode_arc.lock().await;
+        pc.code = passcode.clone();
+        pc.expires_at = now + PASSCODE_TTL_SECS;
+        pc.failed_attempts.clear();
+    }
+
     let server_state = RemoteState {
-        jwt_secret: jwt_secret.clone(),
-        passphrase: passphrase.clone(),
+        jwt_secret: jwt_secret_arc,
+        passcode: passcode_arc,
         ollama_port: 11434,
         comfy_port,
-        permissions,
-        connected_devices,
+        permissions: permissions_arc,
+        connected_devices: devices_arc,
         static_dir,
+        tunnel_url: tunnel_url_arc,
     };
 
     let handle = tokio::spawn(async move {
@@ -629,7 +707,11 @@ pub async fn start_remote_server(
         axum::serve(listener, app).await.unwrap();
     });
 
-    remote.handle = Some(handle);
+    // Store handle back
+    {
+        let mut remote = state.remote.lock().map_err(|e| e.to_string())?;
+        remote.handle = Some(handle);
+    }
 
     let lan_ip = local_ip_address::local_ip()
         .map(|ip| ip.to_string())
@@ -637,19 +719,24 @@ pub async fn start_remote_server(
 
     Ok(serde_json::json!({
         "port": port,
-        "passphrase": passphrase,
+        "passcode": passcode,
+        "passcodeExpiresAt": now + PASSCODE_TTL_SECS,
         "lanUrl": format!("http://{}:{}", lan_ip, port),
         "mobileUrl": format!("http://{}:{}/mobile", lan_ip, port),
     }))
 }
 
 #[tauri::command]
-pub fn stop_remote_server(
+pub async fn stop_remote_server(
     state: tauri::State<'_, crate::state::AppState>,
 ) -> Result<(), String> {
-    let mut remote = state.remote.lock().map_err(|e| e.to_string())?;
+    let (handle, tunnel_pid, tunnel_url_arc) = {
+        let mut remote = state.remote.lock().map_err(|e| e.to_string())?;
+        (remote.handle.take(), remote.tunnel_pid.take(), remote.tunnel_url.clone())
+    };
+
     // Stop tunnel if running
-    if let Some(pid) = remote.tunnel_pid.take() {
+    if let Some(pid) = tunnel_pid {
         if cfg!(windows) {
             let _ = std::process::Command::new("taskkill")
                 .args(["/pid", &pid.to_string(), "/T", "/F"])
@@ -659,9 +746,13 @@ pub fn stop_remote_server(
         }
         println!("[Tunnel] Stopped");
     }
-    remote.tunnel_url = None;
+    {
+        let mut turl = tunnel_url_arc.lock().await;
+        *turl = None;
+    }
+
     // Stop server
-    if let Some(handle) = remote.handle.take() {
+    if let Some(handle) = handle {
         handle.abort();
         println!("[Remote] Server stopped");
     }
@@ -669,54 +760,102 @@ pub fn stop_remote_server(
 }
 
 #[tauri::command]
-pub fn remote_server_status(
+pub async fn remote_server_status(
     state: tauri::State<'_, crate::state::AppState>,
 ) -> Result<serde_json::Value, String> {
-    let remote = state.remote.lock().map_err(|e| e.to_string())?;
-    let running = remote.handle.is_some();
+    let (running, port, passcode_arc, tunnel_url_arc, tunnel_pid) = {
+        let remote = state.remote.lock().map_err(|e| e.to_string())?;
+        (
+            remote.handle.is_some(),
+            remote.port,
+            remote.passcode.clone(),
+            remote.tunnel_url.clone(),
+            remote.tunnel_pid,
+        )
+    };
+
+    let now = chrono_now_secs();
+    let (passcode, expires_at) = {
+        let mut pc = passcode_arc.lock().await;
+        // Auto-regenerate expired passcode
+        if running && !pc.code.is_empty() && now >= pc.expires_at {
+            pc.code = generate_passcode();
+            pc.expires_at = now + PASSCODE_TTL_SECS;
+            println!("[Remote] Passcode auto-regenerated (expired)");
+        }
+        (pc.code.clone(), pc.expires_at)
+    };
+
+    let tunnel_url = tunnel_url_arc.lock().await;
     let lan_ip = local_ip_address::local_ip()
         .map(|ip| ip.to_string())
         .unwrap_or_else(|_| "127.0.0.1".to_string());
 
     Ok(serde_json::json!({
         "running": running,
-        "port": remote.port,
-        "passphrase": if running { remote.passphrase.clone() } else { String::new() },
-        "lanUrl": if running { format!("http://{}:{}", lan_ip, remote.port) } else { String::new() },
-        "mobileUrl": if running { format!("http://{}:{}/mobile", lan_ip, remote.port) } else { String::new() },
-        "tunnelActive": remote.tunnel_pid.is_some(),
-        "tunnelUrl": remote.tunnel_url.clone().unwrap_or_default(),
+        "port": port,
+        "passcode": if running { passcode } else { String::new() },
+        "passcodeExpiresAt": if running { expires_at } else { 0 },
+        "lanUrl": if running { format!("http://{}:{}", lan_ip, port) } else { String::new() },
+        "mobileUrl": if running { format!("http://{}:{}/mobile", lan_ip, port) } else { String::new() },
+        "tunnelActive": tunnel_pid.is_some(),
+        "tunnelUrl": tunnel_url.clone().unwrap_or_default(),
     }))
 }
 
 #[tauri::command]
-pub fn regenerate_remote_token(
+pub async fn regenerate_remote_token(
     state: tauri::State<'_, crate::state::AppState>,
 ) -> Result<String, String> {
-    let mut remote = state.remote.lock().map_err(|e| e.to_string())?;
-    let new_passphrase = generate_passphrase();
+    let (jwt_arc, passcode_arc, devices_arc) = {
+        let remote = state.remote.lock().map_err(|e| e.to_string())?;
+        (remote.jwt_secret.clone(), remote.passcode.clone(), remote.connected_devices.clone())
+    };
+
+    let new_passcode = generate_passcode();
     let new_secret = format!("lu-{}-{}", chrono_now_secs(), rand::random::<u64>());
-    remote.passphrase = new_passphrase.clone();
-    remote.jwt_secret = new_secret;
-    // Clear all connected devices (old tokens are now invalid)
-    let devices = remote.connected_devices.clone();
-    tokio::spawn(async move { devices.lock().await.clear() });
-    Ok(new_passphrase)
+
+    {
+        let mut jwt = jwt_arc.lock().await;
+        *jwt = new_secret;
+    }
+    {
+        let mut pc = passcode_arc.lock().await;
+        pc.code = new_passcode.clone();
+        pc.expires_at = chrono_now_secs() + PASSCODE_TTL_SECS;
+        pc.failed_attempts.clear();
+    }
+    {
+        devices_arc.lock().await.clear();
+    }
+
+    Ok(new_passcode)
 }
 
 #[tauri::command]
 pub async fn remote_qr_code(
     state: tauri::State<'_, crate::state::AppState>,
 ) -> Result<serde_json::Value, String> {
-    let remote = state.remote.lock().map_err(|e| e.to_string())?;
-    if remote.handle.is_none() {
+    let (running, port, passcode_arc, tunnel_url_arc) = {
+        let remote = state.remote.lock().map_err(|e| e.to_string())?;
+        (remote.handle.is_some(), remote.port, remote.passcode.clone(), remote.tunnel_url.clone())
+    };
+
+    if !running {
         return Err("Remote server not running".into());
     }
 
-    let lan_ip = local_ip_address::local_ip()
-        .map(|ip| ip.to_string())
-        .unwrap_or_else(|_| "127.0.0.1".to_string());
-    let url = format!("http://{}:{}/mobile", lan_ip, remote.port);
+    // Use tunnel URL if active, otherwise LAN
+    let tunnel_url = tunnel_url_arc.lock().await;
+    let url = if let Some(ref turl) = *tunnel_url {
+        format!("{}/mobile", turl)
+    } else {
+        let lan_ip = local_ip_address::local_ip()
+            .map(|ip| ip.to_string())
+            .unwrap_or_else(|_| "127.0.0.1".to_string());
+        format!("http://{}:{}/mobile", lan_ip, port)
+    };
+    drop(tunnel_url);
 
     let qr = qrcode::QrCode::new(url.as_bytes()).map_err(|e| e.to_string())?;
     let qr_image = qr.render::<image::Luma<u8>>()
@@ -731,10 +870,11 @@ pub async fn remote_qr_code(
 
     let qr_base64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &png_bytes);
 
+    let pc = passcode_arc.lock().await;
     Ok(serde_json::json!({
         "qr_png_base64": qr_base64,
         "url": url,
-        "passphrase": remote.passphrase,
+        "passcode": pc.code,
     }))
 }
 
@@ -780,12 +920,12 @@ fn get_cloudflared_path() -> std::path::PathBuf {
 pub async fn start_tunnel(
     state: tauri::State<'_, crate::state::AppState>,
 ) -> Result<String, String> {
-    let port = {
+    let (port, tunnel_url_arc) = {
         let remote = state.remote.lock().map_err(|e| e.to_string())?;
         if remote.handle.is_none() {
             return Err("Remote server not running. Start it first.".into());
         }
-        remote.port
+        (remote.port, remote.tunnel_url.clone())
     };
 
     let cf_path = get_cloudflared_path();
@@ -839,8 +979,8 @@ pub async fn start_tunnel(
 
     // Read stderr to find the tunnel URL (cloudflared prints it there)
     let stderr = child.stderr.unwrap();
-    let tunnel_url = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
-    let url_clone = tunnel_url.clone();
+    let captured_url = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
+    let url_clone = captured_url.clone();
 
     // Spawn thread to read stderr and capture the URL
     std::thread::spawn(move || {
@@ -865,19 +1005,24 @@ pub async fn start_tunnel(
         }
     });
 
-    // Wait up to 15 seconds for the tunnel URL to appear
+    // Wait up to 15 seconds for the tunnel URL to appear (non-blocking)
     let mut url = String::new();
     for _ in 0..30 {
-        std::thread::sleep(std::time::Duration::from_millis(500));
-        url = tunnel_url.lock().unwrap().clone();
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        url = captured_url.lock().unwrap().clone();
         if !url.is_empty() { break; }
     }
 
-    // Store the tunnel process
+    // Store tunnel PID
     {
         let mut remote = state.remote.lock().map_err(|e| e.to_string())?;
         remote.tunnel_pid = Some(pid);
-        remote.tunnel_url = if url.is_empty() { None } else { Some(url.clone()) };
+    }
+
+    // Store tunnel URL in shared state (so axum handlers see it)
+    {
+        let mut turl = tunnel_url_arc.lock().await;
+        *turl = if url.is_empty() { None } else { Some(url.clone()) };
     }
 
     if url.is_empty() {
@@ -888,11 +1033,15 @@ pub async fn start_tunnel(
 }
 
 #[tauri::command]
-pub fn stop_tunnel(
+pub async fn stop_tunnel(
     state: tauri::State<'_, crate::state::AppState>,
 ) -> Result<(), String> {
-    let mut remote = state.remote.lock().map_err(|e| e.to_string())?;
-    if let Some(pid) = remote.tunnel_pid.take() {
+    let (pid, tunnel_url_arc) = {
+        let mut remote = state.remote.lock().map_err(|e| e.to_string())?;
+        (remote.tunnel_pid.take(), remote.tunnel_url.clone())
+    };
+
+    if let Some(pid) = pid {
         if cfg!(windows) {
             let _ = std::process::Command::new("taskkill")
                 .args(["/pid", &pid.to_string(), "/T", "/F"])
@@ -904,18 +1053,27 @@ pub fn stop_tunnel(
         }
         println!("[Tunnel] Stopped (PID {})", pid);
     }
-    remote.tunnel_url = None;
+
+    {
+        let mut turl = tunnel_url_arc.lock().await;
+        *turl = None;
+    }
+
     Ok(())
 }
 
 #[tauri::command]
-pub fn tunnel_status(
+pub async fn tunnel_status(
     state: tauri::State<'_, crate::state::AppState>,
 ) -> Result<serde_json::Value, String> {
-    let remote = state.remote.lock().map_err(|e| e.to_string())?;
+    let (pid, tunnel_url_arc) = {
+        let remote = state.remote.lock().map_err(|e| e.to_string())?;
+        (remote.tunnel_pid, remote.tunnel_url.clone())
+    };
+    let turl = tunnel_url_arc.lock().await;
     Ok(serde_json::json!({
-        "active": remote.tunnel_pid.is_some(),
-        "url": remote.tunnel_url,
+        "active": pid.is_some(),
+        "url": turl.clone(),
     }))
 }
 

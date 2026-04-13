@@ -391,7 +391,7 @@ describe('OllamaProvider', () => {
       expect(body.options.num_predict).toBe(1024)
     })
 
-    it('does not include options key when no chat options provided', async () => {
+    it('always includes options with num_gpu even when no chat options provided', async () => {
       const provider = new OllamaProvider(makeConfig())
       mockLocalFetch.mockResolvedValueOnce(
         new Response(JSON.stringify({
@@ -407,7 +407,7 @@ describe('OllamaProvider', () => {
       )
 
       const body = JSON.parse(mockLocalFetch.mock.calls[0][1]?.body as string)
-      expect(body.options).toBeUndefined()
+      expect(body.options).toEqual({ num_gpu: 99 })
     })
 
     it('handles empty message content', async () => {

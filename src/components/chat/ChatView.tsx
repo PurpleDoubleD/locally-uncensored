@@ -13,7 +13,8 @@ import { ErrorBoundary } from '../ui/ErrorBoundary'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { FEATURE_FLAGS } from '../../lib/constants'
 import { isAgentCompatible, isThinkingCompatible } from '../../lib/model-compatibility'
-import { FileText, Bot, User, ChevronDown, Download, Brain, Wrench } from 'lucide-react'
+import { FileText, Bot, ChevronDown, Download, Brain, Wrench } from 'lucide-react'
+import { PluginsDropdown } from './PluginsDropdown'
 import { TokenCounter } from './TokenCounter'
 import { MemoryDebugToggle } from './MemoryDebugPanel'
 import { ABCompare } from './ABCompare'
@@ -32,13 +33,9 @@ export function ChatView() {
   const activeModel = useModelStore((s) => s.activeModel)
   const models = useModelStore((s) => s.models)
   const [ragPanelOpen, setRagPanelOpen] = useState(false)
-  const [personaOpen, setPersonaOpen] = useState(false)
   const [exportOpen, setExportOpen] = useState(false)
   const [toolsDropdownOpen, setToolsDropdownOpen] = useState(false)
   const [thinkHint, setThinkHint] = useState('')
-  const { getActivePersona, setActivePersona } = useSettingsStore()
-  const activePersona = getActivePersona()
-  const allPersonas = useSettingsStore((s) => s.personas)
   const thinkingEnabled = useSettingsStore((s) => s.settings.thinkingEnabled)
   const canThink = isThinkingCompatible(activeModel)
   const updateSettings = useSettingsStore((s) => s.updateSettings)
@@ -160,41 +157,8 @@ export function ChatView() {
                   )}
                 </div>
 
-                {/* Persona selector */}
-                <div className="relative">
-                  <button
-                    onClick={() => setPersonaOpen(!personaOpen)}
-                    className="flex items-center gap-1 px-2 py-0.5 rounded border border-gray-200 dark:border-white/[0.06] hover:border-gray-400 dark:hover:border-white/15 text-gray-500 transition-colors text-[0.55rem]"
-                  >
-                    <User size={10} />
-                    <span className="max-w-[60px] truncate">{activePersona?.name || 'No Filter'}</span>
-                    <ChevronDown size={8} className={`transition-transform ${personaOpen ? 'rotate-180' : ''}`} />
-                  </button>
-                  {personaOpen && (
-                    <>
-                      <div className="fixed inset-0 z-40" onClick={() => setPersonaOpen(false)} />
-                      <div className="absolute right-0 top-full mt-1 z-50 w-44 max-h-[220px] overflow-y-auto scrollbar-thin rounded-lg bg-white dark:bg-[#1a1a1a] border border-gray-200 dark:border-white/10 shadow-xl py-1">
-                        {activePersona && (
-                          <div className="px-2 pb-1 mb-1 border-b border-gray-200 dark:border-white/[0.06]">
-                            <div className="px-2 py-1 rounded-md bg-white/[0.06] border border-white/10 text-[0.55rem] text-white font-medium flex items-center gap-1.5">
-                              <div className="w-1 h-1 rounded-full bg-green-400 shrink-0" />
-                              {activePersona.name}
-                            </div>
-                          </div>
-                        )}
-                        {allPersonas.filter(p => p.id !== activePersona?.id).map(p => (
-                          <button
-                            key={p.id}
-                            onClick={() => { setActivePersona(p.id); setPersonaOpen(false) }}
-                            className="w-full text-left px-3 py-1 text-[0.55rem] text-gray-400 hover:bg-white/5 hover:text-gray-200 transition-colors"
-                          >
-                            {p.name}
-                          </button>
-                        ))}
-                      </div>
-                    </>
-                  )}
-                </div>
+                {/* Plugins dropdown (Caveman + Personas) */}
+                <PluginsDropdown />
 
                 {/* Documents (RAG) */}
                 <button

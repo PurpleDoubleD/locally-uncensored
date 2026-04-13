@@ -8,6 +8,7 @@ import { MarkdownRenderer } from './MarkdownRenderer'
 import { TokenCounter } from './TokenCounter'
 import { MemoryDebugToggle } from './MemoryDebugPanel'
 import { RealtimeCounter } from './RealtimeCounter'
+import { PluginsDropdown } from './PluginsDropdown'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { User, Code, Brain } from 'lucide-react'
 import { useEffect, useRef } from 'react'
@@ -50,6 +51,7 @@ export function CodexView() {
           <div className="flex-1" />
           <TokenCounter />
           <MemoryDebugToggle />
+          <PluginsDropdown />
         </div>
 
         {/* Messages */}

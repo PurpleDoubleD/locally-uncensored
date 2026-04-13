@@ -8,6 +8,7 @@ import { ThinkingBlock } from './ThinkingBlock'
 import { MarkdownRenderer } from './MarkdownRenderer'
 import { TokenCounter } from './TokenCounter'
 import { RealtimeCounter } from './RealtimeCounter'
+import { PluginsDropdown } from './PluginsDropdown'
 import { FileTree } from './FileTree'
 import { User, Terminal, Shield, ShieldCheck, AlertTriangle, AlertCircle } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
@@ -71,6 +72,7 @@ export function ClaudeCodeView() {
           {installed && version && (
             <span className="text-[0.55rem] text-gray-500">{version}</span>
           )}
+          <PluginsDropdown />
           <TokenCounter />
         </div>
 

@@ -13,6 +13,7 @@ import { chatNonStreaming } from '../api/agents'
 import type { CodexEvent } from '../types/codex'
 import type { AgentBlock, AgentToolCall } from '../types/agent-mode'
 import { selectRelevantTools } from '../lib/tool-selection'
+import { isThinkingCompatible } from '../lib/model-compatibility'
 import type { ChatMessage, ToolCall, ToolDefinition } from '../api/providers/types'
 
 const CODEX_SYSTEM_PROMPT = `You are Codex, an autonomous coding agent inside Locally Uncensored. You execute coding tasks by reading files, writing code, and running shell commands. You MUST use tools to interact with the filesystem — never guess file contents.
@@ -104,6 +105,20 @@ export function useCodex() {
       systemPrompt += '\n\nBefore answering, reason through your thinking inside <think></think> tags. Your thinking will be hidden from the user. After thinking, provide your answer outside the tags.'
     }
 
+    // Caveman mode: append as response style modifier after Codex instructions
+    if (settings.cavemanMode && settings.cavemanMode !== 'off') {
+      const { CAVEMAN_PROMPTS } = await import('../lib/constants')
+      const cavemanPrompt = CAVEMAN_PROMPTS[settings.cavemanMode]
+      if (cavemanPrompt) {
+        systemPrompt += `\n\nResponse style: ${cavemanPrompt}`
+      }
+    }
+
+    // Per-message Caveman reminder for non-thinking models
+    const cavemanReminder = (settings.cavemanMode && settings.cavemanMode !== 'off')
+      ? (await import('../lib/constants')).CAVEMAN_REMINDERS?.[settings.cavemanMode as 'lite' | 'full' | 'ultra'] || ''
+      : ''
+
     // Build message history
     const conv = useChatStore.getState().conversations.find(c => c.id === convId)
     if (!conv) return
@@ -112,7 +127,12 @@ export function useCodex() {
       { role: 'system', content: systemPrompt },
       ...conv.messages
         .filter(m => m.role !== 'system' && m.content.trim())
-        .map(m => ({ role: m.role as 'user' | 'assistant' | 'tool', content: m.content })),
+        .map(m => ({
+          role: m.role as 'user' | 'assistant' | 'tool',
+          content: m.role === 'user' && cavemanReminder
+            ? `${cavemanReminder}\n${m.content}`
+            : m.content,
+        })),
     ]
 
     // Setup
@@ -133,7 +153,7 @@ export function useCodex() {
         const chatOptions = {
           temperature: 0.1, // Low temp for coding precision
           maxTokens: settings.maxTokens || undefined,
-          thinking: settings.thinkingEnabled === true ? true : false,
+          thinking: settings.thinkingEnabled === true && isThinkingCompatible(activeModel),
           signal: abort.signal,
         }
 
@@ -144,7 +164,18 @@ export function useCodex() {
             type: 'function' as const,
             function: { name: t.name, description: t.description, parameters: t.inputSchema },
           }))
-          const turn = await provider.chatWithTools(modelToUse, messages, tools, chatOptions)
+
+          let turn: { content: string; toolCalls: ToolCall[] }
+          try {
+            turn = await provider.chatWithTools(modelToUse, messages, tools, chatOptions)
+          } catch (thinkErr: any) {
+            if (thinkErr?.message?.includes('does not support thinking') || thinkErr?.statusCode === 400) {
+              turn = await provider.chatWithTools(modelToUse, messages, tools, { ...chatOptions, thinking: false })
+            } else {
+              throw thinkErr
+            }
+          }
+
           toolCalls = turn.toolCalls
           turnContent = turn.content || ''
           if ((turn as any).thinking) {

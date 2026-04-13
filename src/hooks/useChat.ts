@@ -128,13 +128,20 @@ export function useChat() {
       }
     }
 
+    // Per-message Caveman reminder for non-thinking models (ensures style adherence)
+    const cavemanReminder = (settings.cavemanMode && settings.cavemanMode !== 'off')
+      ? (await import('../lib/constants')).CAVEMAN_REMINDERS?.[settings.cavemanMode as 'lite' | 'full' | 'ultra'] || ''
+      : ''
+
     const messages = [
       ...(systemPrompt ? [{ role: "system" as const, content: systemPrompt }] : []),
       ...conv.messages
         .filter((m) => m.content.trim() !== '')
         .map((m) => ({
           role: m.role as 'user' | 'assistant' | 'system' | 'tool',
-          content: m.content,
+          content: m.role === 'user' && cavemanReminder
+            ? `${cavemanReminder}\n${m.content}`
+            : m.content,
           ...(m.images?.length ? { images: m.images.map(img => ({ data: img.data, mimeType: img.mimeType })) } : {}),
         })),
     ]
@@ -152,18 +159,30 @@ export function useChat() {
       // ── Multi-Provider: resolve provider for active model ──
       const { provider, modelId } = getProviderForModel(activeModel)
 
-      const stream = provider.chatStream(
-        modelId,
-        messages,
-        {
-          temperature: settings.temperature,
-          topP: settings.topP,
-          topK: settings.topK,
-          maxTokens: settings.maxTokens || undefined,
-          thinking: settings.thinkingEnabled === true && isThinkingCompatible(activeModel),
-          signal: abort.signal,
-        },
-      )
+      const useThinking = settings.thinkingEnabled === true && isThinkingCompatible(activeModel)
+      const chatOpts = {
+        temperature: settings.temperature,
+        topP: settings.topP,
+        topK: settings.topK,
+        maxTokens: settings.maxTokens || undefined,
+        thinking: useThinking,
+        signal: abort.signal,
+      }
+
+      // Helper: create stream, retrying without thinking if model rejects it
+      async function* createStreamWithFallback() {
+        try {
+          yield* provider.chatStream(modelId, messages, chatOpts)
+        } catch (err: any) {
+          if (useThinking && (err?.message?.includes('does not support thinking') || err?.statusCode === 400)) {
+            yield* provider.chatStream(modelId, messages, { ...chatOpts, thinking: false })
+          } else {
+            throw err
+          }
+        }
+      }
+
+      const stream = createStreamWithFallback()
 
       let frameScheduled = false
       let firstChunk = true
@@ -238,11 +257,20 @@ export function useChat() {
             ? (err as Error).message
             : `Error: ${(err as Error).message || 'Connection failed'}`
 
-        useChatStore.getState().updateMessageContent(
-          convId!,
-          assistantMessage.id,
-          contentRef.current + "\n\n" + errorMsg
-        )
+        // Show user-friendly message for thinking errors
+        if (errorMsg.includes('does not support thinking')) {
+          useChatStore.getState().updateMessageContent(
+            convId!,
+            assistantMessage.id,
+            'This model does not support thinking mode. Disable the Think button or switch to a compatible model (Qwen 3, DeepSeek-R1, Gemma 4).'
+          )
+        } else {
+          useChatStore.getState().updateMessageContent(
+            convId!,
+            assistantMessage.id,
+            contentRef.current + "\n\n" + errorMsg
+          )
+        }
       }
     } finally {
       setIsGenerating(false)

@@ -17,7 +17,8 @@ interface RemotePermissions {
 interface RemoteState {
   enabled: boolean
   port: number
-  passphrase: string
+  passcode: string
+  passcodeExpiresAt: number
   lanUrl: string
   mobileUrl: string
   qrPngBase64: string
@@ -43,7 +44,8 @@ interface RemoteState {
 export const useRemoteStore = create<RemoteState>()((set, get) => ({
   enabled: false,
   port: 11435,
-  passphrase: '',
+  passcode: '',
+  passcodeExpiresAt: 0,
   lanUrl: '',
   mobileUrl: '',
   qrPngBase64: '',
@@ -60,14 +62,16 @@ export const useRemoteStore = create<RemoteState>()((set, get) => ({
     try {
       const result = await backendCall<{
         port: number
-        passphrase: string
+        passcode: string
+        passcodeExpiresAt: number
         lanUrl: string
         mobileUrl: string
       }>('start_remote_server')
       set({
         enabled: true,
         port: result.port,
-        passphrase: result.passphrase,
+        passcode: result.passcode,
+        passcodeExpiresAt: result.passcodeExpiresAt,
         lanUrl: result.lanUrl,
         mobileUrl: result.mobileUrl,
         loading: false,
@@ -84,11 +88,14 @@ export const useRemoteStore = create<RemoteState>()((set, get) => ({
       await backendCall('stop_remote_server')
       set({
         enabled: false,
-        passphrase: '',
+        passcode: '',
+        passcodeExpiresAt: 0,
         lanUrl: '',
         mobileUrl: '',
         qrPngBase64: '',
         connectedDevices: [],
+        tunnelActive: false,
+        tunnelUrl: '',
       })
     } catch (err) {
       set({ error: String(err) })
@@ -100,7 +107,8 @@ export const useRemoteStore = create<RemoteState>()((set, get) => ({
       const status = await backendCall<{
         running: boolean
         port: number
-        passphrase: string
+        passcode: string
+        passcodeExpiresAt: number
         lanUrl: string
         mobileUrl: string
         tunnelActive: boolean
@@ -109,7 +117,8 @@ export const useRemoteStore = create<RemoteState>()((set, get) => ({
       set({
         enabled: status.running,
         port: status.port,
-        passphrase: status.passphrase,
+        passcode: status.passcode,
+        passcodeExpiresAt: status.passcodeExpiresAt,
         lanUrl: status.lanUrl,
         mobileUrl: status.mobileUrl,
         tunnelActive: status.tunnelActive,
@@ -131,8 +140,12 @@ export const useRemoteStore = create<RemoteState>()((set, get) => ({
 
   regenerateToken: async () => {
     try {
-      const newPassphrase = await backendCall<string>('regenerate_remote_token')
-      set({ passphrase: newPassphrase, connectedDevices: [] })
+      const newPasscode = await backendCall<string>('regenerate_remote_token')
+      set({
+        passcode: newPasscode,
+        passcodeExpiresAt: Math.floor(Date.now() / 1000) + 300,
+        connectedDevices: [],
+      })
       get().fetchQrCode()
     } catch (err) {
       set({ error: String(err) })
@@ -141,7 +154,7 @@ export const useRemoteStore = create<RemoteState>()((set, get) => ({
 
   fetchQrCode: async () => {
     try {
-      const qr = await backendCall<{ qr_png_base64: string; url: string; passphrase: string }>('remote_qr_code')
+      const qr = await backendCall<{ qr_png_base64: string; url: string; passcode: string }>('remote_qr_code')
       set({ qrPngBase64: qr.qr_png_base64 })
     } catch {
       // Non-critical
@@ -162,6 +175,8 @@ export const useRemoteStore = create<RemoteState>()((set, get) => ({
     try {
       const url = await backendCall<string>('start_tunnel')
       set({ tunnelActive: true, tunnelUrl: url, tunnelLoading: false })
+      // Refresh QR to show tunnel URL instead of LAN IP
+      get().fetchQrCode()
     } catch (err) {
       set({ tunnelLoading: false, error: String(err) })
     }
@@ -171,6 +186,8 @@ export const useRemoteStore = create<RemoteState>()((set, get) => ({
     try {
       await backendCall('stop_tunnel')
       set({ tunnelActive: false, tunnelUrl: '' })
+      // Refresh QR to show LAN IP again
+      get().fetchQrCode()
     } catch (err) {
       set({ error: String(err) })
     }

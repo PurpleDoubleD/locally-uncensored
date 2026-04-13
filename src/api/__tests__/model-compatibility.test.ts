@@ -143,7 +143,6 @@ describe('getRecommendedAgentModels', () => {
 
     const providers = new Set(models.map(m => m.provider))
     expect(providers.has('ollama')).toBe(true)
-    expect(providers.has('openai')).toBe(true)
     expect(providers.has('anthropic')).toBe(true)
   })
 

@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { motion } from 'framer-motion'
-import { Send, Square, Paperclip, X, Brain, Bone } from 'lucide-react'
+import { Send, Square, Paperclip, X, Brain } from 'lucide-react'
 import { VoiceButton } from './VoiceButton'
 import { ApprovalDialog } from './ApprovalDialog'
 import { useVoiceStore } from '../../stores/voiceStore'
@@ -42,7 +42,6 @@ export function ChatInput({ onSend, onStop, isGenerating, pendingApproval, onApp
   const fileInputRef = useRef<HTMLInputElement>(null)
   const isTranscribing = useVoiceStore((s) => s.isTranscribing)
   const thinkingEnabled = useSettingsStore((s) => s.settings.thinkingEnabled)
-  const cavemanMode = useSettingsStore((s) => s.settings.cavemanMode)
   const updateSettings = useSettingsStore((s) => s.updateSettings)
   const activeModel = useModelStore((s) => s.activeModel)
   const canThink = isThinkingCompatible(activeModel)
@@ -194,30 +193,12 @@ export function ChatInput({ onSend, onStop, isGenerating, pendingApproval, onApp
             className="flex-1 bg-transparent resize-none text-gray-800 dark:text-gray-200 placeholder-gray-400 dark:placeholder-gray-600 focus:outline-none text-[0.75rem] leading-relaxed max-h-[200px] disabled:opacity-50"
           />
 
-          {/* Caveman mode toggle */}
-          <button
-            onClick={() => {
-              const modes = ['off', 'lite', 'full', 'ultra'] as const
-              const idx = modes.indexOf(cavemanMode || 'off')
-              updateSettings({ cavemanMode: modes[(idx + 1) % modes.length] })
-            }}
-            className={`flex items-center gap-1 px-1.5 py-1 rounded-md transition-all shrink-0 text-[0.6rem] font-medium ${
-              cavemanMode && cavemanMode !== 'off'
-                ? 'bg-amber-500/15 text-amber-400 border border-amber-500/30'
-                : 'text-gray-500 hover:text-gray-300 hover:bg-white/5'
-            }`}
-            title={`Caveman Mode: ${cavemanMode || 'off'} — click to cycle (off → lite → full → ultra)`}
-          >
-            <Bone size={11} />
-            <span>{cavemanMode && cavemanMode !== 'off' ? cavemanMode.charAt(0).toUpperCase() + cavemanMode.slice(1) : 'Cave'}</span>
-          </button>
-
           {/* Think toggle */}
           <button
             onClick={() => {
               if (canThink) updateSettings({ thinkingEnabled: !thinkingEnabled })
             }}
-            className={`flex items-center gap-1 px-1.5 py-1 rounded-md transition-all shrink-0 text-[0.6rem] font-medium ${
+            className={`flex items-center gap-1 px-1.5 py-1.5 rounded-md transition-all shrink-0 text-[0.6rem] font-medium ${
               thinkingEnabled && canThink
                 ? 'bg-blue-500/15 text-blue-400 border border-blue-500/30'
                 : !canThink

@@ -77,7 +77,7 @@ export class OllamaProvider implements ProviderClient {
     if (options?.topK !== undefined) ollamaOptions.top_k = options.topK
     if (options?.maxTokens) ollamaOptions.num_predict = options.maxTokens
     body.options = ollamaOptions
-    body.think = options?.thinking === true
+    if (options?.thinking === true) body.think = true
 
     const res = await localFetchStream(this.apiUrl('/chat'), {
       method: 'POST',
@@ -134,7 +134,7 @@ export class OllamaProvider implements ProviderClient {
     if (options?.topK !== undefined) ollamaOptions.top_k = options.topK
     if (options?.maxTokens) ollamaOptions.num_predict = options.maxTokens
     body.options = ollamaOptions
-    body.think = options?.thinking === true
+    if (options?.thinking === true) body.think = true
 
     const fetchOptions: any = {
       method: 'POST',

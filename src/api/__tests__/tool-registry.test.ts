@@ -9,8 +9,8 @@ import {
 // ── AGENT_TOOL_DEFS ─────────────────────────────────────────────
 
 describe('AGENT_TOOL_DEFS', () => {
-  it('contains exactly 7 tool definitions', () => {
-    expect(AGENT_TOOL_DEFS).toHaveLength(7)
+  it('contains exactly 13 tool definitions', () => {
+    expect(AGENT_TOOL_DEFS).toHaveLength(13)
   })
 
   const expectedTools = [
@@ -18,9 +18,15 @@ describe('AGENT_TOOL_DEFS', () => {
     'web_fetch',
     'file_read',
     'file_write',
+    'file_list',
+    'file_search',
     'code_execute',
+    'shell_execute',
     'image_generate',
     'run_workflow',
+    'screenshot',
+    'process_list',
+    'system_info',
   ]
 
   it.each(expectedTools)('includes the "%s" tool', (name) => {
@@ -40,16 +46,19 @@ describe('AGENT_TOOL_DEFS', () => {
     }
   })
 
-  it('auto-permission tools are web_search, web_fetch, file_read', () => {
+  it('auto-permission tools are process_list, system_info, web_fetch, web_search', () => {
     const autoTools = AGENT_TOOL_DEFS.filter((t) => t.permission === 'auto')
     const autoNames = autoTools.map((t) => t.name).sort()
-    expect(autoNames).toEqual(['file_read', 'web_fetch', 'web_search'])
+    expect(autoNames).toEqual(['process_list', 'system_info', 'web_fetch', 'web_search'])
   })
 
-  it('confirm-permission tools are file_write, code_execute, image_generate, run_workflow', () => {
+  it('confirm-permission tools include file ops, code, shell, image, workflow, screenshot', () => {
     const confirmTools = AGENT_TOOL_DEFS.filter((t) => t.permission === 'confirm')
     const confirmNames = confirmTools.map((t) => t.name).sort()
-    expect(confirmNames).toEqual(['code_execute', 'file_write', 'image_generate', 'run_workflow'])
+    expect(confirmNames).toEqual([
+      'code_execute', 'file_list', 'file_read', 'file_search',
+      'file_write', 'image_generate', 'run_workflow', 'screenshot', 'shell_execute',
+    ])
   })
 })
 
@@ -125,13 +134,16 @@ describe('getToolPermission', () => {
   it('returns "auto" for auto-permission tools', () => {
     expect(getToolPermission('web_search')).toBe('auto')
     expect(getToolPermission('web_fetch')).toBe('auto')
-    expect(getToolPermission('file_read')).toBe('auto')
+    expect(getToolPermission('process_list')).toBe('auto')
+    expect(getToolPermission('system_info')).toBe('auto')
   })
 
   it('returns "confirm" for confirm-permission tools', () => {
+    expect(getToolPermission('file_read')).toBe('confirm')
     expect(getToolPermission('file_write')).toBe('confirm')
     expect(getToolPermission('code_execute')).toBe('confirm')
     expect(getToolPermission('image_generate')).toBe('confirm')
+    expect(getToolPermission('shell_execute')).toBe('confirm')
   })
 
   it('defaults to "confirm" for unknown tools', () => {

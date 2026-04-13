@@ -1,15 +1,17 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { useRemoteStore } from '../../stores/remoteStore'
 import { Wifi, WifiOff, RefreshCw, Copy, Smartphone, Shield, Trash2, Globe } from 'lucide-react'
 
 export function RemoteAccessSettings() {
   const {
-    enabled, passphrase, lanUrl, mobileUrl, qrPngBase64,
+    enabled, passcode, passcodeExpiresAt, lanUrl, mobileUrl, qrPngBase64,
     connectedDevices, permissions, loading, error,
     tunnelActive, tunnelUrl, tunnelLoading,
     startServer, stopServer, refreshStatus, refreshDevices,
     regenerateToken, setPermissions, startTunnel, stopTunnel,
   } = useRemoteStore()
+
+  const [countdown, setCountdown] = useState('')
 
   useEffect(() => {
     refreshStatus()
@@ -18,6 +20,32 @@ export function RemoteAccessSettings() {
     }, 10000)
     return () => clearInterval(interval)
   }, [enabled])
+
+  // Passcode countdown timer
+  useEffect(() => {
+    if (!passcodeExpiresAt || !enabled) {
+      setCountdown('')
+      return
+    }
+    let regenerating = false
+    const tick = () => {
+      const remaining = passcodeExpiresAt - Math.floor(Date.now() / 1000)
+      if (remaining <= 0) {
+        setCountdown('Expired')
+        if (!regenerating) {
+          regenerating = true
+          regenerateToken()
+        }
+      } else {
+        const min = Math.floor(remaining / 60)
+        const sec = remaining % 60
+        setCountdown(`${min}:${sec.toString().padStart(2, '0')}`)
+      }
+    }
+    tick()
+    const timer = setInterval(tick, 1000)
+    return () => clearInterval(timer)
+  }, [passcodeExpiresAt, enabled])
 
   const copyToClipboard = (text: string) => {
     navigator.clipboard.writeText(text)
@@ -94,22 +122,29 @@ export function RemoteAccessSettings() {
                 </div>
               </div>
               <div>
-                <p className="text-[0.55rem] text-gray-500 mb-0.5">Passphrase</p>
+                <p className="text-[0.55rem] text-gray-500 mb-0.5">Pairing Code</p>
                 <div className="flex items-center gap-1.5">
-                  <code className="text-[0.6rem] text-amber-400 font-mono">{passphrase}</code>
-                  <button onClick={() => copyToClipboard(passphrase)} className="p-0.5 hover:bg-white/10 rounded" title="Copy">
+                  <code className="text-[1rem] text-amber-400 font-mono tracking-[4px] font-bold">{passcode}</code>
+                  <button onClick={() => copyToClipboard(passcode)} className="p-0.5 hover:bg-white/10 rounded" title="Copy">
                     <Copy size={10} className="text-gray-500" />
                   </button>
                   <button onClick={regenerateToken} className="p-0.5 hover:bg-white/10 rounded" title="Regenerate">
                     <RefreshCw size={10} className="text-gray-500" />
                   </button>
+                  {countdown && (
+                    <span className={`text-[0.5rem] font-mono ${
+                      countdown === 'Expired' ? 'text-red-400' : 'text-gray-600'
+                    }`}>
+                      {countdown}
+                    </span>
+                  )}
                 </div>
               </div>
             </div>
           </div>
 
           <p className="text-[0.55rem] text-gray-600">
-            Scan the QR code with your phone or open the Mobile URL in a browser on the same network.
+            Scan the QR code with your phone or open the Mobile URL. Enter the 6-digit code to connect.
           </p>
 
           {/* Cloudflare Tunnel */}

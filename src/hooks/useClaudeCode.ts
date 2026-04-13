@@ -60,7 +60,17 @@ export function useClaudeCode() {
       claudeStore.initSession(convId, workDir)
     }
 
-    // Add user message
+    // Caveman mode: prepend style directive to prompt for CLI
+    let effectivePrompt = prompt
+    if (settings.cavemanMode && settings.cavemanMode !== 'off') {
+      const { CAVEMAN_PROMPTS } = await import('../lib/constants')
+      const cavemanPrompt = CAVEMAN_PROMPTS[settings.cavemanMode as keyof typeof CAVEMAN_PROMPTS]
+      if (cavemanPrompt) {
+        effectivePrompt = `[Response style: ${cavemanPrompt}]\n\n${prompt}`
+      }
+    }
+
+    // Add user message (show original prompt, not style-prefixed)
     chatStore.addMessage(convId, {
       id: uuid(), role: 'user', content: prompt, timestamp: Date.now(),
     })
@@ -195,7 +205,7 @@ export function useClaudeCode() {
         const result = await backendCall<{ status: string; pid?: number }>('start_claude_code', {
           workingDir: workDir,
           model,
-          prompt,
+          prompt: effectivePrompt,
           ollamaBaseUrl,
           permissionMode,
         })
