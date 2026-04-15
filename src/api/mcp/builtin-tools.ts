@@ -6,6 +6,7 @@ import { backendCall, fetchExternal } from '../backend'
 import { useAgentWorkflowStore } from '../../stores/agentWorkflowStore'
 import { WorkflowEngine } from '../../lib/workflow-engine'
 import type { StepResult } from '../../types/agent-workflows'
+import { DELEGATE_TASK_TOOL_DEF, buildDelegateExecutor } from '../agents/sub-agent'
 
 // ── Tool Definitions ────────────────────────────────────────────
 
@@ -241,6 +242,9 @@ const BUILTIN_TOOLS: MCPToolDefinition[] = [
     category: 'workflow',
     source: 'builtin',
   },
+
+  // Sub-agent delegation (Phase 13 v2.4.0).
+  DELEGATE_TASK_TOOL_DEF,
 
   // Local clock — so the agent never googles "what day is it".
   {
@@ -550,6 +554,7 @@ const EXECUTOR_MAP: Record<string, (args: Record<string, any>) => Promise<string
   image_generate: executeImageGenerate,
   run_workflow: executeRunWorkflow,
   get_current_time: executeGetCurrentTime,
+  delegate_task: buildDelegateExecutor(),
 }
 
 export function registerBuiltinTools(registry: ToolRegistry) {

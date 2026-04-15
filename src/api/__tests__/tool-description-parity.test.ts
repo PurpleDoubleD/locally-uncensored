@@ -141,9 +141,11 @@ describe('tool-description-parity — extraction sanity', () => {
 })
 
 // Tools intentionally absent on mobile because their executor relies on
-// desktop-only TypeScript code paths (WorkflowEngine for run_workflow).
-// Expanding this set requires wiring the Rust /remote-api/agent-tool dispatcher.
-const MOBILE_SKIP: ReadonlySet<string> = new Set<string>(['run_workflow'])
+// desktop-only TypeScript code paths. Expanding this set requires wiring
+// the Rust /remote-api/agent-tool dispatcher.
+//   run_workflow    → needs WorkflowEngine (TS)
+//   delegate_task   → needs sub-agent runner with provider access (TS)
+const MOBILE_SKIP: ReadonlySet<string> = new Set<string>(['run_workflow', 'delegate_task'])
 
 describe('tool-description-parity — name sets', () => {
   it('desktop and mobile expose the same set of tool names (modulo documented skips)', () => {
