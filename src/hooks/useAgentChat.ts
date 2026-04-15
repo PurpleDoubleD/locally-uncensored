@@ -25,6 +25,7 @@ import { WorkflowEngine } from '../lib/workflow-engine'
 import type { AgentBlock, AgentToolCall, OllamaChatMessage } from '../types/agent-mode'
 import { selectRelevantTools, selectRelevantToolsAsync } from '../lib/tool-selection'
 import { generateEmbeddings } from '../api/rag'
+import { budgetFromSettings } from '../api/agents/budget'
 import type { ChatMessage, ToolCall, ToolDefinition } from '../api/providers/types'
 import type { StepResult, WorkflowEngineCallbacks } from '../types/agent-workflows'
 import { executeParallel, applyResultToToolCall, type ExecutionRequest } from '../api/agents/tool-executor'
@@ -371,10 +372,25 @@ export function useAgentChat() {
     // Phase 6: lock in the start-of-turn timestamp so the in-turn cache
     // only serves results from calls made during THIS user prompt.
     const turnStartMs = Date.now()
+    // Phase 10: hard caps on tool calls and loop iterations. Halts cleanly
+    // with a synthetic assistant message when the budget is exhausted —
+    // no wedged agent, no runaway token burn.
+    const budget = budgetFromSettings({
+      agentMaxToolCalls: settings.agentMaxToolCalls ?? 50,
+      agentMaxIterations: settings.agentMaxIterations ?? 25,
+    })
 
     try {
       // ── Agent Loop ──────────────────────────────────────────
       while (runningRef.current && !abort.signal.aborted) {
+        budget.addIteration()
+        const exceed = budget.exceeded()
+        if (exceed.kind !== 'none') {
+          contentRef.current =
+            (contentRef.current ? contentRef.current + '\n\n' : '') + budget.haltMessage()
+          scheduleUIUpdate()
+          break
+        }
         let toolCalls: ToolCall[] = []
         let turnContent = ''
         let turnThinking = ''
@@ -504,6 +520,7 @@ export function useAgentChat() {
 
         type BatchEntry = { tc: typeof toolCalls[number]; ac: AgentToolCall; blockId: string }
         const batch: BatchEntry[] = []
+        budget.addToolCalls(toolCalls.length)
         for (const tc of toolCalls) {
           const toolCallId = uuid()
           const blockId = uuid()

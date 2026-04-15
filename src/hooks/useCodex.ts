@@ -19,6 +19,7 @@ import { executeParallel, applyResultToToolCall, type ExecutionRequest } from '.
 import { useToolAuditStore } from '../stores/toolAuditStore'
 import { makeInTurnCacheLookup } from '../api/agents/in-turn-cache'
 import { explainError as explainToolError } from '../api/agents/error-hints'
+import { budgetFromSettings } from '../api/agents/budget'
 
 const CODEX_SYSTEM_PROMPT = `You are Codex, an autonomous coding agent inside Locally Uncensored. You execute coding tasks by reading files, writing code, and running shell commands. You MUST use tools to interact with the filesystem — never guess file contents.
 
@@ -156,10 +157,28 @@ export function useCodex() {
 
     // Phase 6: pin turn start so in-turn cache scopes to this user prompt.
     const turnStartMs = Date.now()
+    // Phase 10: Codex already capped at 20 iterations historically; the
+    // AgentBudget also tracks tool calls and the iteration cap pulled
+    // from settings. The legacy for-loop cap stays as the outer guard.
+    const budget = budgetFromSettings({
+      agentMaxToolCalls: settings.agentMaxToolCalls ?? 50,
+      agentMaxIterations: settings.agentMaxIterations ?? 25,
+    })
 
     try {
-      // Agent loop — max 20 iterations
+      // Agent loop — max 20 iterations (legacy cap) AND AgentBudget cap,
+      // whichever is tighter.
       for (let i = 0; i < 20 && runningRef.current && !abort.signal.aborted; i++) {
+        budget.addIteration()
+        const bx = budget.exceeded()
+        if (bx.kind !== 'none') {
+          useChatStore.getState().updateMessageContent(
+            convId!,
+            assistantMsg.id,
+            (fullContent ? fullContent + '\n\n' : '') + budget.haltMessage()
+          )
+          break
+        }
         let toolCalls: ToolCall[] = []
         let turnContent = ''
 
@@ -260,6 +279,7 @@ export function useCodex() {
 
         type BatchEntry = { tc: typeof toolCalls[number]; ac: AgentToolCall; blockId: string; injectedArgs: Record<string, any> }
         const batch: BatchEntry[] = []
+        budget.addToolCalls(toolCalls.length)
         for (const tc of toolCalls) {
           const toolName = tc.function.name
           const toolArgs = { ...tc.function.arguments }

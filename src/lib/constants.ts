@@ -23,6 +23,9 @@ export const DEFAULT_SETTINGS: Settings = {
   claudeCodeModel: '',
   claudeCodeAutoApprove: false,
   claudeCodePath: '',
+  // Agent budget (Phase 10 v2.4.0)
+  agentMaxToolCalls: 50,
+  agentMaxIterations: 25,
 }
 
 /** Caveman mode system prompt prefixes — credit: github.com/JuliusBrussee/caveman (MIT) */
