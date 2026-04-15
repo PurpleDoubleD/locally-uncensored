@@ -29,6 +29,7 @@ import type { StepResult, WorkflowEngineCallbacks } from '../types/agent-workflo
 import { executeParallel, applyResultToToolCall, type ExecutionRequest } from '../api/agents/tool-executor'
 import { useToolAuditStore } from '../stores/toolAuditStore'
 import { makeInTurnCacheLookup } from '../api/agents/in-turn-cache'
+import { explainError as explainToolError } from '../api/agents/error-hints'
 
 // ── Standalone memory extraction (usable outside React hooks) ──
 
@@ -533,6 +534,7 @@ export function useAgentChat() {
           },
           execute: (name: string, args: Record<string, any>) => toolRegistry.execute(name, args),
           lookupCache: convId ? makeInTurnCacheLookup({ convId, turnStartMs }) : undefined,
+          explainError: (toolName, err) => explainToolError(toolName, err),
           awaitApproval: async (req) => {
             const entry = batch.find((e) => e.ac.id === req.id)
             if (!entry) return false
