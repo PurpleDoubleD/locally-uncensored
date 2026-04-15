@@ -14,6 +14,7 @@ import { useMemory } from "./useMemory"
 import { useAgentModeStore } from "../stores/agentModeStore"
 import { getProviderForModel, getProviderIdFromModel } from "../api/providers"
 import { isThinkingCompatible } from "../lib/model-compatibility"
+import { stripNonCanonicalTags, finalStripThinkingTags } from "../lib/thinking-stripper"
 import type { ChatStreamChunk } from "../api/providers/types"
 import type { ImageAttachment } from "../types/chat"
 
@@ -253,7 +254,13 @@ export function useChat() {
             requestAnimationFrame(() => {
               const cId = convId!
               const mId = assistantMessage.id
-              useChatStore.getState().updateMessageContent(cId, mId, contentRef.current)
+              // Always strip non-canonical thinking markers (Gemma channel
+              // tags, `<thought>`, `<reasoning>`, `<reflect>`, `<deepthink>`)
+              // from the streaming bubble. The canonical `<think>…</think>`
+              // is already handled by the char-by-char state-machine above,
+              // so we leave those alone here.
+              const displayContent = stripNonCanonicalTags(contentRef.current)
+              useChatStore.getState().updateMessageContent(cId, mId, displayContent)
               if (keepThinking && thinkingRef.current) {
                 useChatStore.getState().updateMessageThinking(cId, mId, thinkingRef.current)
               }
@@ -263,12 +270,9 @@ export function useChat() {
         }
 
         if (chunk.done) {
-          // Strip Gemma 4 channel tags
-          contentRef.current = contentRef.current
-            .replace(/<\|?channel>?\s*thought\s*/gi, '')
-            .replace(/<\|?channel\|?>/gi, '')
-            .replace(/<channel\|>/gi, '')
-            .trim()
+          // Final safety pass — catches any orphan tags that leaked through
+          // mid-stream (partial chunks, provider restarts, etc.).
+          contentRef.current = finalStripThinkingTags(contentRef.current, keepThinking)
           useChatStore
             .getState()
             .updateMessageContent(convId!, assistantMessage.id, contentRef.current)

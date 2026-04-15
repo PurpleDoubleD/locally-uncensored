@@ -32,6 +32,7 @@ import { executeParallel, applyResultToToolCall, type ExecutionRequest } from '.
 import { useToolAuditStore } from '../stores/toolAuditStore'
 import { makeInTurnCacheLookup } from '../api/agents/in-turn-cache'
 import { explainError as explainToolError } from '../api/agents/error-hints'
+import { finalStripThinkingTags } from '../lib/thinking-stripper'
 
 // ── Standalone memory extraction (usable outside React hooks) ──
 
@@ -60,8 +61,15 @@ async function extractMemories(userMsg: string, assistantMsg: string, conversati
 }
 
 // ── Approval promise management ───────────────────────────────
+//
+// Phase 5 introduced parallel tool execution via executeParallel — which
+// means multiple tools can request approval in the same batch. A single
+// `approvalRef` slot would get OVERWRITTEN by the second caller,
+// deadlocking the first. We keep a FIFO queue instead: the UI shows the
+// head of the queue, and approve/reject pops it so the next one surfaces.
 
-interface ApprovalResolver {
+interface ApprovalEntry {
+  toolCall: AgentToolCall
   resolve: (approved: boolean) => void
 }
 
@@ -72,7 +80,7 @@ export function useAgentChat() {
   const [pendingApproval, setPendingApproval] = useState<AgentToolCall | null>(null)
 
   const abortRef = useRef<AbortController | null>(null)
-  const approvalRef = useRef<ApprovalResolver | null>(null)
+  const approvalQueueRef = useRef<ApprovalEntry[]>([])
   const contentRef = useRef('')
   const thinkingRef = useRef('')
   const blocksRef = useRef<AgentBlock[]>([])
@@ -80,24 +88,30 @@ export function useAgentChat() {
 
   // ── Approval callbacks ────────────────────────────────────
 
-  const approveToolCall = useCallback(() => {
-    approvalRef.current?.resolve(true)
-    approvalRef.current = null
-    setPendingApproval(null)
+  const advanceApprovalQueue = useCallback(() => {
+    const next = approvalQueueRef.current[0]
+    setPendingApproval(next ? next.toolCall : null)
   }, [])
+
+  const approveToolCall = useCallback(() => {
+    const entry = approvalQueueRef.current.shift()
+    if (entry) entry.resolve(true)
+    advanceApprovalQueue()
+  }, [advanceApprovalQueue])
 
   const rejectToolCall = useCallback(() => {
-    approvalRef.current?.resolve(false)
-    approvalRef.current = null
-    setPendingApproval(null)
-  }, [])
+    const entry = approvalQueueRef.current.shift()
+    if (entry) entry.resolve(false)
+    advanceApprovalQueue()
+  }, [advanceApprovalQueue])
 
-  // ── Wait for user approval ────────────────────────────────
+  // ── Wait for user approval (enqueues; UI shows head of queue) ──
 
   function waitForApproval(toolCall: AgentToolCall): Promise<boolean> {
     return new Promise((resolve) => {
-      approvalRef.current = { resolve }
-      setPendingApproval(toolCall)
+      const wasEmpty = approvalQueueRef.current.length === 0
+      approvalQueueRef.current.push({ toolCall, resolve })
+      if (wasEmpty) setPendingApproval(toolCall)
     })
   }
 
@@ -496,7 +510,11 @@ export function useAgentChat() {
               : inner
           }
           return ''
-        }).trim()
+        })
+        // Strip non-canonical thinking markers (Gemma channel tags,
+        // `<thought>`, `<reasoning>`, etc.) that the canonical regex above
+        // doesn't catch. These never belong in the assistant bubble.
+        turnContent = finalStripThinkingTags(turnContent, keepThinking)
         // Also drop any orphan native-thinking that leaked through when the
         // toggle is OFF (e.g. provider returned `turn.thinking` anyway).
         if (!keepThinking) turnThinking = ''
@@ -568,7 +586,11 @@ export function useAgentChat() {
           explainError: (toolName, err) => explainToolError(toolName, err),
           awaitApproval: async (req) => {
             const entry = batch.find((e) => e.ac.id === req.id)
-            if (!entry) return false
+            if (!entry) return true
+            // Phase 12 — tools whose AC was marked 'running' at batch
+            // creation (permission level 'auto') bypass the approval
+            // gate entirely. Only 'pending_approval' tools enqueue.
+            if (entry.ac.status !== 'pending_approval') return true
             const approved = await waitForApproval(entry.ac)
             if (approved) {
               entry.ac.status = 'running'
@@ -737,8 +759,10 @@ export function useAgentChat() {
       setIsAgentRunning(false)
       runningRef.current = false
       abortRef.current = null
+      // Reject any pending approvals so their promises don't hang forever
+      for (const entry of approvalQueueRef.current) entry.resolve(false)
+      approvalQueueRef.current = []
       setPendingApproval(null)
-      approvalRef.current = null
 
       // Auto-speak if TTS enabled
       const voiceState = useVoiceStore.getState()
@@ -769,8 +793,8 @@ export function useAgentChat() {
     runningRef.current = false
     abortRef.current?.abort()
     abortRef.current = null
-    approvalRef.current?.resolve(false)
-    approvalRef.current = null
+    for (const entry of approvalQueueRef.current) entry.resolve(false)
+    approvalQueueRef.current = []
     setPendingApproval(null)
     setIsAgentRunning(false)
   }, [])

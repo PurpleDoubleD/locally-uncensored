@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { FolderOpen, Folder, FileText, ArrowLeft, RefreshCw } from 'lucide-react'
 import { useCodexStore } from '../../stores/codexStore'
 import { toolRegistry } from '../../api/mcp'
@@ -8,6 +8,7 @@ import type { FileTreeNode } from '../../types/codex'
 export function FileTree() {
   const workingDirectory = useCodexStore((s) => s.workingDirectory)
   const fileTree = useCodexStore((s) => s.fileTree)
+  const fileTreeVersion = useCodexStore((s) => s.fileTreeVersion)
   const setFileTree = useCodexStore((s) => s.setFileTree)
   const setWorkingDirectory = useCodexStore((s) => s.setWorkingDirectory)
   const [loading, setLoading] = useState(false)
@@ -73,7 +74,21 @@ export function FileTree() {
     if (workingDirectory && fileTree.length === 0) {
       loadDirectory(workingDirectory)
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // Auto-refresh when Codex writes / executes in the working directory.
+  // fileTreeVersion is bumped by codexStore.addEvent for file_change /
+  // terminal_output events. Skip the first mount (already handled above).
+  const isFirstRender = useRef(true)
+  useEffect(() => {
+    if (isFirstRender.current) {
+      isFirstRender.current = false
+      return
+    }
+    if (workingDirectory) loadDirectory(workingDirectory)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fileTreeVersion])
 
   return (
     <div className="h-full flex flex-col border-l border-gray-200 dark:border-white/[0.04] bg-gray-50 dark:bg-white/[0.01]">

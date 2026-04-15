@@ -20,22 +20,31 @@ import { useToolAuditStore } from '../stores/toolAuditStore'
 import { makeInTurnCacheLookup } from '../api/agents/in-turn-cache'
 import { explainError as explainToolError } from '../api/agents/error-hints'
 import { budgetFromSettings } from '../api/agents/budget'
+import { finalStripThinkingTags } from '../lib/thinking-stripper'
 
-const CODEX_SYSTEM_PROMPT = `You are Codex, an autonomous coding agent inside Locally Uncensored. You execute coding tasks by reading files, writing code, and running shell commands. You MUST use tools to interact with the filesystem — never guess file contents.
+const CODEX_SYSTEM_PROMPT = `You are Codex, an autonomous coding agent inside Locally Uncensored. You execute coding tasks end-to-end by reading files, writing code, and running shell commands. You MUST use tools — never guess file contents.
 
-Workflow:
-1. Understand the task
-2. Explore the codebase (file_list, file_read, file_search)
-3. Plan your changes
-4. Implement changes (file_write)
-5. Verify your work (shell_execute to run tests, lint, or build)
+AUTONOMY CONTRACT (read carefully):
+- You are expected to COMPLETE multi-step tasks without the user prompting between steps.
+- NEVER say "Now I will create X" or "Next I'll write Y" as plain text and then stop. That is a FAILURE.
+- When your plan has N steps, execute ALL N steps in one session — each step as a concrete tool call.
+- The ONLY reasons to finish without calling another tool are:
+    (a) the task is 100% complete AND verified, or
+    (b) you hit an error you cannot recover from after trying.
+- Narrative "I'm about to do X" text with no tool call after it = premature stop. Don't do it.
+
+Workflow per task:
+1. Understand the task (optional brief sentence)
+2. Explore the codebase — file_list / file_read / file_search
+3. Implement ALL required changes — file_write, as many calls as needed in one go
+4. Verify — shell_execute to run tests, lint, or build
+5. Only THEN write a short summary of what you did
 
 Rules:
 - Always read a file before modifying it
-- Explain what you are doing before each action
-- After writing files, show a summary of changes made
-- If a command fails, diagnose the issue and try a different approach
-- Be concise — show results, not verbose explanations`
+- Chain tool calls: after each tool result, if there is another step left, IMMEDIATELY call the next tool
+- If a command fails, diagnose and retry with a different approach — don't hand back to the user unless truly stuck
+- Be concise in text. All the work happens in tool calls.`
 
 // Coding-relevant tool categories
 const CODEX_CATEGORIES = ['filesystem', 'terminal', 'system', 'web'] as const
@@ -243,17 +252,10 @@ export function useCodex() {
           }
         }
 
-        // Strip Gemma 4 channel tags from content
-        turnContent = turnContent
-          .replace(/<\|?channel>?\s*thought\s*/gi, '')
-          .replace(/<\|?channel\|?>/gi, '')
-          .replace(/<channel\|>/gi, '')
-
-        // Inline <think>…</think> tags — always remove from content so the
-        // assistant bubble never shows raw tags. Route the inner text into
-        // the thinking block only when the toggle is ON (QwQ / DeepSeek-R1
-        // emit these unconditionally; we must not leak them when the user
-        // asked for thinking to be OFF).
+        // Inline <think>…</think> tags — route inner text into thinking
+        // block when toggle is ON, else discard. Non-canonical markers
+        // (Gemma channel tags, <thought>, <reasoning>, etc.) are always
+        // stripped — they are never user-facing content.
         {
           const keepThinking = settings.thinkingEnabled === true && isThinkingCompatible(activeModel)
           turnContent = turnContent.replace(/<think>([\s\S]*?)<\/think>/g, (_m, inner) => {
@@ -263,8 +265,8 @@ export function useCodex() {
             }
             return ''
           })
+          turnContent = finalStripThinkingTags(turnContent, keepThinking)
         }
-        turnContent = turnContent.trim()
 
         if (turnContent) {
           fullContent += (fullContent ? '\n\n' : '') + turnContent

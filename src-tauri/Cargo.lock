@@ -2508,7 +2508,7 @@ dependencies = [
 
 [[package]]
 name = "locally-uncensored"
-version = "2.3.3"
+version = "2.4.2"
 dependencies = [
  "axum",
  "base64 0.22.1",
