@@ -146,11 +146,25 @@ src-tauri/src/commands/      — Rust commands: install, process, download, prox
 
 81. **Version policy: stay at 2.3.3** — Don't bump per regression fix during a session. Public number is the release-train label, not a dev-build counter. Overwrite `LU-<ver>-setup.exe` on Desktop in place rather than creating 2.3.4/2.4.x trail. See `feedback_versioning.md`.
 
+82. **ERNIE-Image integration (commit 2c0c224)** — Baidu ERNIE-Image fully integrated into Model Manager. New ModelType `ernie_image`, strategy `unet_ernie_image` with `ConditioningZeroOut` for negative conditioning (CLIPLoader type `flux2`, shared `flux2-vae`). Two bundles: **Turbo** (8 steps, 28.9 GB) + **Base** (50 steps, 28.9 GB), each with 4 files: DiT model + Ministral-3-3B text encoder + Prompt Enhancer + VAE. All URLs verified HTTP 200 against `Comfy-Org/ERNIE-Image`. No custom nodes needed (ComfyUI day-0 support). No uncensored variants found. Defaults: 8 steps, CFG 1, euler/simple, 1024x1024.
+
+83. **Codex streaming (commit 2c0c224)** — `streamWithTools()` in `useCodex.ts` replaces non-streaming `chatWithTools()` for Ollama. Uses `localFetchStream()` (direct fetch → Tauri proxy fallback) with `stream: true` + `tools`. Live thinking/content tokens via NDJSON parsing. User sees progress during 2+ minute generations instead of blank screen. Non-Ollama providers (OpenAI, Anthropic) keep `chatWithTools()` fallback.
+
+84. **Codex final answer fallback (commit 2c0c224)** — When model returns empty content after tool calls (file_list as last action, no summary text), Codex now generates fallback: "Task completed: N file(s) written, M file(s) read." from the `blocks` array. Desktop + mobile parity.
+
+85. **Codex continue capability (commit 2c0c224)** — Tool-call history persisted as hidden messages (`hidden: true`, `tool_calls: [...]`) in chat store between turns. Next turn's history builder includes them so the model sees what it did before (parity with original OpenAI Codex CLI). `insertMessageBefore()` added to chatStore. `MessageList` + `CodexView` filter hidden messages. Mobile equivalent in `finishToolLoop` splices hidden messages into `msgs[]`.
+
+86. **Path doubling fix (commit 2c0c224)** — `useCodex.ts` line 314 now uses `/^[a-zA-Z]:[/\\]/` regex to detect ANY drive letter as absolute (was: `!p.startsWith('C:')` which treated `D:/` paths as relative → doubled path bug). Rust `normalize_duplicate_drive_prefix()` in `agent.rs` + `filesystem.rs` as defensive dedup (strips `D:/a/D:/a/file.html` → `D:/a/file.html`).
+
+87. **Mobile native tool calling (commit 2c0c224)** — `runToolLoop` in `mobile_landing()` replaces ReAct text-JSON parser. Uses Ollama `/api/chat` with `tools` array (same as desktop). Both Codex + Agent route through it. Remote permissions default to ALL ON. Dead code removed: `buildReActPrompt`, `parseAgentResponse`, `agentChatStream`.
+
+88. **Mobile Codex AUTONOMY CONTRACT (commit 80598ea)** — Mobile `CODEX_PROMPT` now matches desktop's system prompt with explicit autonomy contract: "NEVER say 'Now I will create X' and then stop — execute ALL N steps in one session."
+
 ### What's LEFT to finish v2.3.0:
 1. **Tauri proxy_localhost investigation** — reqwest in Tauri subprocess can't reach localhost. Direct fetch workaround now also primary path for streaming via #79a. Root cause still unknown. Low priority.
 2. **LTX VAEDecode reference** — dynamic-workflow.ts line 263: vaeSourceId incorrectly points to UNETLoader output for LTX strategy. Fix when LTX model is installed for testing.
 3. **~~Codex file tree auto-refresh~~** — RESOLVED in #79e via `fileTreeVersion` counter on codexStore.
-4. **Codex incremental content streaming** — currently `chatWithTools` non-streaming by-design (agent needs full response before parsing tool calls). Tool-call blocks ARE shown live (FileTree updates, blocks render with running/completed status). Text between iterations only appears at end of each iteration. Refactor to incremental content streaming (using Phase 11 partial-args-accumulator) is possible if user asks.
+4. **~~Codex incremental content streaming~~** — RESOLVED in #83 via `streamWithTools()` with `localFetchStream` + NDJSON parsing. Live thinking/content tokens stream during generation.
 5. **Mobile/remote.rs thinking-stripper port** — Mobile still uses inline regex stripping in `pushChunkContent`. Could port `thinking-stripper.ts` patterns over but Remote works fine in current state. Low priority.
 
 ### Files modified in this branch (30+ files):
@@ -260,6 +274,6 @@ src-tauri/src/commands/      — Rust commands: install, process, download, prox
 - Downloads: Use `downloadStore` for all ComfyUI downloads (not component-local state)
 
 
-## Test Suite: 1574 tests, 0 failures (53 test files, as of 2.3.3)
+## Test Suite: 1918 tests (74 test files, as of v24 + ERNIE-Image + Codex fixes)
 All pre-existing test failures have been fixed. Run `npx vitest run` to verify.
 Also run `cargo check --manifest-path src-tauri/Cargo.toml` for Rust changes and `npx tsc --noEmit` for TS type check.
