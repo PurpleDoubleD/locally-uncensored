@@ -41,7 +41,14 @@ export class MCPExternalClient {
       const shellModule = await import(/* @vite-ignore */ '@tauri-apps/plugin-shell')
       const { Command } = shellModule
 
-      this.process = Command.create(this.config.command, this.config.args, {
+      // Windows gotcha: Node-based MCP servers are invoked as `npx`, `npm`,
+      // `node` — but on Windows the resolvable PATH entries for those are
+      // `npx.cmd`, `npm.cmd`, etc. Command.create tries to spawn the bare
+      // name which fails with "program not found". Map known command names
+      // to their .cmd shim here.
+      const resolvedCommand = resolveCommandForPlatform(this.config.command)
+
+      this.process = Command.create(resolvedCommand, this.config.args, {
         env: this.config.env,
       })
 
@@ -180,4 +187,21 @@ export class MCPExternalClient {
       this.pendingRequests.delete(id)
     }
   }
+}
+
+/**
+ * Map a bare command name to the Windows `.cmd` shim when running on
+ * Windows. Commands with an extension or an absolute path are returned
+ * unchanged.
+ */
+export function resolveCommandForPlatform(
+  command: string,
+  platform: string = typeof navigator !== 'undefined' ? navigator.platform : ''
+): string {
+  const isWindows = /Win/i.test(platform)
+  if (!isWindows) return command
+  if (/[\\/]|\.(cmd|bat|exe)$/i.test(command)) return command
+  const NEEDS_CMD = new Set(['npx', 'npm', 'pnpm', 'yarn', 'bun', 'node', 'deno'])
+  if (NEEDS_CMD.has(command)) return `${command}.cmd`
+  return command
 }

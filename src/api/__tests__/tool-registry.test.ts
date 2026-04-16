@@ -9,8 +9,9 @@ import {
 // ── AGENT_TOOL_DEFS ─────────────────────────────────────────────
 
 describe('AGENT_TOOL_DEFS', () => {
-  it('contains exactly 14 tool definitions', () => {
-    expect(AGENT_TOOL_DEFS).toHaveLength(14)
+  it('contains exactly 15 tool definitions', () => {
+    // Phase 13 v2.4.0: delegate_task added as a builtin.
+    expect(AGENT_TOOL_DEFS).toHaveLength(15)
   })
 
   const expectedTools = [
@@ -53,11 +54,12 @@ describe('AGENT_TOOL_DEFS', () => {
     expect(autoNames).toEqual(['get_current_time', 'process_list', 'system_info', 'web_fetch', 'web_search'])
   })
 
-  it('confirm-permission tools include file ops, code, shell, image, workflow, screenshot', () => {
+  it('confirm-permission tools include file ops, code, shell, image, workflow, screenshot, delegate_task', () => {
     const confirmTools = AGENT_TOOL_DEFS.filter((t) => t.permission === 'confirm')
     const confirmNames = confirmTools.map((t) => t.name).sort()
+    // Phase 13 v2.4.0: delegate_task added under workflow category (confirm default).
     expect(confirmNames).toEqual([
-      'code_execute', 'file_list', 'file_read', 'file_search',
+      'code_execute', 'delegate_task', 'file_list', 'file_read', 'file_search',
       'file_write', 'image_generate', 'run_workflow', 'screenshot', 'shell_execute',
     ])
   })

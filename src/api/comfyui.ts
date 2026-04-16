@@ -30,7 +30,7 @@ export interface ComfyUIOutput {
   type: string
 }
 
-export type ModelType = 'flux' | 'flux2' | 'zimage' | 'sdxl' | 'sd15' | 'wan' | 'hunyuan' | 'ltx' | 'mochi' | 'cosmos' | 'cogvideo' | 'svd' | 'framepack' | 'pyramidflow' | 'allegro' | 'unknown'
+export type ModelType = 'flux' | 'flux2' | 'zimage' | 'ernie_image' | 'sdxl' | 'sd15' | 'wan' | 'hunyuan' | 'ltx' | 'mochi' | 'cosmos' | 'cogvideo' | 'svd' | 'framepack' | 'pyramidflow' | 'allegro' | 'unknown'
 export type VideoBackend = 'wan' | 'animatediff' | 'none'
 
 export interface ClassifiedModel {
@@ -75,6 +75,9 @@ export function classifyModel(name: string): ModelType {
   if (lower.includes('hunyuan')) return 'hunyuan'
   if (lower.includes('ltx')) return 'ltx'
 
+  // ERNIE-Image (Baidu, uses flux2 CLIP type + ConditioningZeroOut for negative)
+  if (lower.includes('ernie-image') || lower.includes('ernie_image')) return 'ernie_image'
+
   // Z-Image (uses qwen_image CLIP type, NOT flux2 — different embedding dimensions)
   if (lower.includes('z_image') || lower.includes('z-image') || lower.includes('zimage')) return 'zimage'
   if (lower.includes('flux-2') || lower.includes('flux2')) return 'flux2'
@@ -99,7 +102,7 @@ export function classifyModel(name: string): ModelType {
 }
 
 export function isImageModelType(type: ModelType): boolean {
-  return type === 'flux' || type === 'flux2' || type === 'zimage' || type === 'sdxl' || type === 'sd15' || type === 'unknown'
+  return type === 'flux' || type === 'flux2' || type === 'zimage' || type === 'ernie_image' || type === 'sdxl' || type === 'sd15' || type === 'unknown'
 }
 
 export function isVideoModelType(type: ModelType): boolean {
@@ -140,6 +143,8 @@ export const MODEL_TYPE_DEFAULTS: Record<string, ModelTypeDefaults> = {
   animatediff: { steps: 20, cfg: 7.5, sampler: 'euler_ancestral', scheduler: 'normal', width: 512, height: 512, frames: 16, fps: 8 },
   // AnimateDiff Lightning override (4 steps only)
   animatediff_lightning: { steps: 4, cfg: 1.0, sampler: 'euler', scheduler: 'sgm_uniform', width: 512, height: 512, frames: 16, fps: 8 },
+  // ERNIE-Image Turbo (Baidu 8B DiT)
+  ernie_image: { steps: 8, cfg: 1, sampler: 'euler', scheduler: 'simple', width: 1024, height: 1024, frames: 1, fps: 1 },
 }
 
 // ─── Component Requirements per model type ───
@@ -176,6 +181,11 @@ export const COMPONENT_REGISTRY: Record<string, ComponentRequirements> = {
     loader: 'UNETLoader', needsSeparateVAE: true, needsSeparateCLIP: true, clipType: 'qwen_image',
     vae: { matchPatterns: ['ae', 'flux'], downloadFilename: 'ae.safetensors' },
     clip: { matchPatterns: ['qwen_3_4b', 'qwen3'], downloadFilename: 'qwen_3_4b.safetensors' },
+  },
+  ernie_image: {
+    loader: 'UNETLoader', needsSeparateVAE: true, needsSeparateCLIP: true, clipType: 'flux2',
+    vae: { matchPatterns: ['flux2-vae', 'flux2', 'flux'], downloadFilename: 'flux2-vae.safetensors' },
+    clip: { matchPatterns: ['ministral-3-3b', 'ministral', 'ernie-image-prompt-enhancer'], downloadFilename: 'ministral-3-3b.safetensors' },
   },
   wan: {
     loader: 'UNETLoader', needsSeparateVAE: true, needsSeparateCLIP: true, clipType: 'wan',
@@ -494,7 +504,7 @@ export async function findMatchingVAE(modelType: ModelType): Promise<string> {
     if (match) return match
     throw new Error(`No Z-Image VAE found. Download "ae.safetensors" from the Model Manager.`)
   }
-  if (modelType === 'flux' || modelType === 'flux2') {
+  if (modelType === 'flux' || modelType === 'flux2' || modelType === 'ernie_image') {
     const match = vaes.find(v => lower(v).includes('flux2') || lower(v).includes('flux'))
       || vaes.find(v => lower(v).includes('ae'))
     if (match) return match
@@ -548,10 +558,23 @@ export async function findMatchingVAE(modelType: ModelType): Promise<string> {
   return vaes[0]
 }
 
-export async function findMatchingCLIP(modelType: ModelType): Promise<string> {
+/**
+ * Pick the right text encoder for a model.
+ *
+ * @param modelType — ModelType from `classifyModel`.
+ * @param activeModelName — optional filename of the UNet/checkpoint the
+ *   user selected. Enables quantisation-aware pairing: e.g. fp4 FLUX 2
+ *   models get the fp4-matched Qwen encoder, fp8/bf16 FLUX 2 models get
+ *   the full-precision Qwen encoder. When omitted (legacy callers), we
+ *   fall back to the full-precision variant, which is what most users
+ *   want.
+ */
+export async function findMatchingCLIP(modelType: ModelType, activeModelName?: string): Promise<string> {
   const clips = await getCLIPModels()
   if (clips.length === 0) throw new Error('No text encoder models found. Download a CLIP/T5 model for your model type from the Model Manager.')
   const lower = (s: string) => s.toLowerCase()
+  const modelLc = activeModelName ? lower(activeModelName) : ''
+  const modelIsFp4 = /fp4|nf4/.test(modelLc)
 
   if (modelType === 'zimage') {
     // Z-Image uses qwen_3_4b.safetensors (NOT the fp4_flux2 variant — different embedding dimensions!)
@@ -562,11 +585,31 @@ export async function findMatchingCLIP(modelType: ModelType): Promise<string> {
     throw new Error(`No Z-Image text encoder found. Download "qwen_3_4b.safetensors" from the Model Manager.`)
   }
   if (modelType === 'flux2') {
-    // FLUX 2 uses Qwen or Mistral text encoders, NOT T5
-    const match = clips.find(c => lower(c).includes('qwen') && !lower(c).includes('qwen_2.5_vl'))
-      || clips.find(c => lower(c).includes('mistral'))
+    // FLUX 2 uses Qwen 3 4B (NOT T5). The encoder file comes in two
+    // quantisation tiers that ARE NOT interchangeable:
+    //   - `qwen_3_4b.safetensors`           → normal / bf16 / fp8 models
+    //   - `qwen_3_4b_fp4_flux2.safetensors` → fp4 / nf4 quantised models
+    // Using the wrong one can work (same embedding dim) but noticeably
+    // degrades prompt adherence, so we pair them by inspecting the
+    // filename of the active UNet (see `modelIsFp4` above). Fallback
+    // order ensures we never hard-fail when the "ideal" encoder isn't
+    // installed: we try the paired one first, then the other.
+    const qwenFp4  = clips.find(c => lower(c).includes('qwen') && (lower(c).includes('fp4') || lower(c).includes('nf4')) && !lower(c).includes('qwen_2.5_vl'))
+    const qwenFull = clips.find(c => lower(c).includes('qwen_3_4b') && !lower(c).includes('fp4') && !lower(c).includes('nf4') && !lower(c).includes('vl'))
+    const qwenAny  = clips.find(c => lower(c).includes('qwen') && !lower(c).includes('qwen_2.5_vl'))
+    const mistral  = clips.find(c => lower(c).includes('mistral'))
+    const match = modelIsFp4
+      ? (qwenFp4 || qwenFull || qwenAny || mistral)
+      : (qwenFull || qwenAny || qwenFp4 || mistral)
     if (match) return match
-    throw new Error(`No FLUX 2 text encoder found. Download "qwen_3_4b_fp4_flux2.safetensors" from the Model Manager.`)
+    const wanted = modelIsFp4 ? 'qwen_3_4b_fp4_flux2.safetensors (fp4 FLUX 2)' : 'qwen_3_4b.safetensors (fp8/bf16 FLUX 2)'
+    throw new Error(`No FLUX 2 text encoder found. Download "${wanted}" from the Model Manager.`)
+  }
+  if (modelType === 'ernie_image') {
+    // ERNIE-Image uses its own prompt enhancer text encoder
+    const match = clips.find(c => lower(c).includes('ernie-image-prompt-enhancer') || lower(c).includes('ernie'))
+    if (match) return match
+    throw new Error(`No ERNIE-Image text encoder found. Download "ernie-image-prompt-enhancer.safetensors" from the Model Manager.`)
   }
   if (modelType === 'flux') {
     const match = clips.find(c => lower(c).includes('t5') && !lower(c).includes('umt5'))

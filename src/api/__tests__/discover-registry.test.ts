@@ -275,7 +275,7 @@ describe('discover — data validation', () => {
   describe('COMPONENT_REGISTRY', () => {
     it('has entries for all expected model types', () => {
       const expectedTypes = [
-        'sd15', 'sdxl', 'flux', 'flux2', 'zimage', 'wan', 'hunyuan',
+        'sd15', 'sdxl', 'flux', 'flux2', 'zimage', 'ernie_image', 'wan', 'hunyuan',
         'ltx', 'mochi', 'cosmos', 'cogvideo', 'svd', 'framepack',
         'pyramidflow', 'allegro', 'unknown',
       ]
@@ -298,7 +298,7 @@ describe('discover — data validation', () => {
     })
 
     it('UNET-based types that need separate VAE have vae spec with downloadUrl', () => {
-      const typesWithVAE = ['flux', 'flux2', 'zimage', 'wan', 'hunyuan', 'mochi', 'cosmos', 'cogvideo', 'framepack', 'pyramidflow']
+      const typesWithVAE = ['flux', 'flux2', 'zimage', 'ernie_image', 'wan', 'hunyuan', 'mochi', 'cosmos', 'cogvideo', 'framepack', 'pyramidflow']
       for (const t of typesWithVAE) {
         const spec = COMPONENT_REGISTRY[t]
         if (spec.needsSeparateVAE && spec.vae) {
@@ -311,7 +311,7 @@ describe('discover — data validation', () => {
     })
 
     it('UNET-based types that need separate CLIP have clip spec with downloadUrl', () => {
-      const typesWithCLIP = ['flux', 'flux2', 'zimage', 'wan', 'hunyuan', 'ltx', 'mochi', 'cosmos', 'cogvideo', 'framepack']
+      const typesWithCLIP = ['flux', 'flux2', 'zimage', 'ernie_image', 'wan', 'hunyuan', 'ltx', 'mochi', 'cosmos', 'cogvideo', 'framepack']
       for (const t of typesWithCLIP) {
         const spec = COMPONENT_REGISTRY[t]
         if (spec.needsSeparateCLIP && spec.clip) {

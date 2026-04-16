@@ -60,9 +60,13 @@ export interface AgentChatChunk {
 }
 
 // Tool call lifecycle status
-export type ToolCallStatus = 'pending_approval' | 'running' | 'completed' | 'failed' | 'rejected'
+export type ToolCallStatus = 'pending_approval' | 'running' | 'completed' | 'failed' | 'rejected' | 'cached'
 
-// Internal tracking of a tool call
+// Internal tracking of a tool call.
+// Observability fields (startedAt / completedAt / cacheHit / parentToolCallId /
+// schemaValidated / sideEffectKey / errorHint) are additive — they were introduced
+// in v2.4.0 for the agent overhaul (parallel execution, caching, audit, sub-agents).
+// All are optional to preserve rehydration of pre-v2.4 persisted messages.
 export interface AgentToolCall {
   id: string
   toolName: string
@@ -70,19 +74,42 @@ export interface AgentToolCall {
   status: ToolCallStatus
   result?: string
   error?: string
+  /** User-facing, model-facing hint appended to error for recovery (Phase 7). */
+  errorHint?: string
   duration?: number
   timestamp: number
+  /** Epoch ms when dispatch started (after permission approval). */
+  startedAt?: number
+  /** Epoch ms when result became available. */
+  completedAt?: number
+  /** True when result came from in-turn cache (Phase 6). */
+  cacheHit?: boolean
+  /** Parent toolCallId when spawned by a sub-agent delegation (Phase 13). */
+  parentToolCallId?: string
+  /** True when args passed JSON-schema validation (Phase 4). */
+  schemaValidated?: boolean
+  /** Group key for serial execution within a parallel batch (Phase 5).
+   *  Writes to the same file path or the singleton "shell" share a key. */
+  sideEffectKey?: string
 }
 
 // Phases rendered as distinct UI blocks in chat
 export type AgentPhase = 'thinking' | 'planning' | 'tool_call' | 'reflection' | 'answer'
 
 // A block in the agent's response (tool call, thinking, etc.)
+//
+// v2.4 migration:
+//   `toolCall` (singular) is preserved for legacy rehydration only.
+//   New code MUST write to `toolCalls` (plural). Use `getBlockToolCalls(block)`
+//   from src/api/agents/block-helpers.ts to read both shapes uniformly.
 export interface AgentBlock {
   id: string
   phase: AgentPhase
   content: string
+  /** @deprecated since v2.4 — use `toolCalls`. Kept for legacy persist rehydration. */
   toolCall?: AgentToolCall
+  /** v2.4+ — array of tool calls attached to this block (enables parallel execution). */
+  toolCalls?: AgentToolCall[]
   timestamp: number
 }
 

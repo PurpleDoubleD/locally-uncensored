@@ -15,6 +15,7 @@ export type WorkflowStrategy =
   | 'unet_flux'       // FLUX 1: UNETLoader + CLIPLoader + VAELoader + EmptySD3LatentImage
   | 'unet_flux2'      // FLUX 2: UNETLoader + CLIPLoader + VAELoader + EmptyFlux2LatentImage
   | 'unet_zimage'     // Z-Image: UNETLoader + CLIPLoader(qwen_image) + VAELoader + EmptySD3LatentImage
+  | 'unet_ernie_image' // ERNIE-Image: UNETLoader + CLIPLoader(flux2) + VAELoader + EmptyFlux2LatentImage + ConditioningZeroOut
   | 'unet_video'      // Wan/Hunyuan: UNETLoader + CLIPLoader + VAELoader + EmptyHunyuanLatentVideo
   | 'unet_ltx'        // LTX Video: UNETLoader + CLIPLoader + EmptyLTXVLatentVideo
   | 'unet_mochi'      // Mochi: UNETLoader + CLIPLoader + VAELoader + EmptyMochiLatentVideo
@@ -44,6 +45,14 @@ export function determineStrategy(
   const hasCLIPLoader = nodes.loaders.includes('CLIPLoader')
   const hasVAELoader = nodes.loaders.includes('VAELoader')
   const hasAnimateDiff = nodes.motion.includes('ADE_LoadAnimateDiffModel')
+
+  // ERNIE-Image → UNET + CLIPLoader(flux2) + VAE + Flux2LatentImage + ConditioningZeroOut
+  if (modelType === 'ernie_image') {
+    if (hasUNET && hasCLIPLoader && hasVAELoader) {
+      return { strategy: 'unet_ernie_image', reason: 'ERNIE-Image model → UNETLoader + CLIPLoader(flux2) + ConditioningZeroOut' }
+    }
+    return { strategy: 'unavailable', reason: 'ERNIE-Image requires UNETLoader + CLIPLoader + VAELoader nodes' }
+  }
 
   // Z-Image → UNET + CLIPLoader(qwen_image) + VAE + SD3LatentImage
   if (modelType === 'zimage') {
@@ -232,13 +241,14 @@ export async function buildDynamicWorkflow(
     vaeOutputSlot = 2
     samplerModelId = modelNodeId
 
-  } else if (strategy === 'unet_flux' || strategy === 'unet_flux2' || strategy === 'unet_zimage' || strategy === 'unet_video' || strategy === 'unet_ltx'
+  } else if (strategy === 'unet_flux' || strategy === 'unet_flux2' || strategy === 'unet_zimage' || strategy === 'unet_ernie_image' || strategy === 'unet_video' || strategy === 'unet_ltx'
     || strategy === 'unet_mochi' || strategy === 'unet_cosmos') {
     // Separate loaders
     const unetId = String(n++)
     const clipId = String(n++)
 
     const clipType = type === 'zimage' ? 'qwen_image'
+      : type === 'ernie_image' ? 'flux2'
       : type === 'flux2' ? 'flux2'
       : type === 'flux' ? 'flux'
       : type === 'ltx' ? 'ltxv'
@@ -249,7 +259,10 @@ export async function buildDynamicWorkflow(
 
     let vae: string, clip: string
     try { vae = await findMatchingVAE(type) } catch { vae = models.vaes[0] || '' }
-    try { clip = await findMatchingCLIP(type) } catch { clip = models.clips[0] || '' }
+    // Pass the active UNet filename so the resolver can prefer the matching
+    // quantisation tier (fp4 model → fp4 encoder; fp8/bf16 model → full-
+    // precision encoder). See findMatchingCLIP's flux2 branch.
+    try { clip = await findMatchingCLIP(type, params.model) } catch { clip = models.clips[0] || '' }
 
     workflow[unetId] = {
       class_type: 'UNETLoader',
@@ -325,12 +338,21 @@ export async function buildDynamicWorkflow(
     class_type: 'CLIPTextEncode',
     inputs: { text: params.prompt, clip: [clipSourceId, clipOutputSlot] },
   }
-  workflow[negId] = {
-    class_type: 'CLIPTextEncode',
-    inputs: {
-      text: params.negativePrompt || '',
-      clip: [clipSourceId, clipOutputSlot],
-    },
+
+  if (strategy === 'unet_ernie_image') {
+    // ERNIE-Image uses ConditioningZeroOut for negative (NOT CLIPTextEncode)
+    workflow[negId] = {
+      class_type: 'ConditioningZeroOut',
+      inputs: { conditioning: [posId, 0] },
+    }
+  } else {
+    workflow[negId] = {
+      class_type: 'CLIPTextEncode',
+      inputs: {
+        text: params.negativePrompt || '',
+        clip: [clipSourceId, clipOutputSlot],
+      },
+    }
   }
 
   // ─── Phase 3: Latent Initialization ───
@@ -381,8 +403,8 @@ export async function buildDynamicWorkflow(
       class_type: 'EmptyLTXVLatentVideo',
       inputs: { width: params.width, height: params.height, length: videoParams.frames, batch_size: 1 },
     }
-  } else if (strategy === 'unet_flux2') {
-    // FLUX 2 uses its own latent node
+  } else if (strategy === 'unet_flux2' || strategy === 'unet_ernie_image') {
+    // FLUX 2 / ERNIE-Image use Flux2 latent node
     const latentNode = nodes.latentInit.includes('EmptyFlux2LatentImage')
       ? 'EmptyFlux2LatentImage'
       : 'EmptySD3LatentImage'

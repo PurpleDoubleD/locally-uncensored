@@ -24,7 +24,7 @@ export function MessageList({ isGenerating, isLoadingModel, onRegenerate, onEdit
   return (
     <div ref={scrollRef} className="flex-1 overflow-y-auto scrollbar-thin py-4">
       {conversation.messages
-        .filter((m) => m.role !== 'system')
+        .filter((m) => m.role !== 'system' && !m.hidden)
         .map((message) => (
           <MessageBubble
             key={message.id}

@@ -58,6 +58,7 @@ describe('determineStrategy — all 15 model types', () => {
     ['flux', 'unet_flux'],
     ['flux2', 'unet_flux2'],
     ['zimage', 'unet_zimage'],
+    ['ernie_image', 'unet_ernie_image'],
   ]
 
   for (const [modelType, expectedStrategy] of strategyMap) {

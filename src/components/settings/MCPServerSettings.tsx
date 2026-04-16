@@ -45,15 +45,15 @@ export function MCPServerSettings() {
       clients.set(server.id, client)
       setConnected(server.id, true)
       setServerTools(server.id, tools)
-      // Register tools with the global registry
+      // Register tools with the global registry. The two-arg executor
+      // contract lets the registry bind each tool's name into its own
+      // closure — previously a single-arg hack tried to smuggle the name
+      // via `args.__toolName`, which was never populated, so MCP calls
+      // silently dispatched with an empty tool name and failed.
       toolRegistry.registerExternal(
         server.id,
         tools,
-        async (args) => {
-          const toolName = args.__toolName || ''
-          delete args.__toolName
-          return client.callTool(toolName, args)
-        }
+        async (toolName, args) => client.callTool(toolName, args)
       )
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))

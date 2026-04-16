@@ -7,10 +7,18 @@ interface CodexState {
   threads: Record<string, CodexThread>
   workingDirectory: string
   fileTree: FileTreeNode[]
+  /**
+   * Bump counter — incremented every time a Codex run mutates the working
+   * directory (file_write, file_change, terminal commands that can modify
+   * files). FileTree subscribes to this and reloads when it changes, so
+   * new/deleted files appear without a manual refresh.
+   */
+  fileTreeVersion: number
 
   setChatMode: (mode: ChatMode) => void
   setWorkingDirectory: (dir: string) => void
   setFileTree: (tree: FileTreeNode[]) => void
+  bumpFileTreeVersion: () => void
 
   getThread: (conversationId: string) => CodexThread | undefined
   initThread: (conversationId: string, workingDir: string) => string
@@ -25,10 +33,12 @@ export const useCodexStore = create<CodexState>()(
       threads: {},
       workingDirectory: '',
       fileTree: [],
+      fileTreeVersion: 0,
 
       setChatMode: (mode) => set({ chatMode: mode }),
       setWorkingDirectory: (dir) => set({ workingDirectory: dir }),
       setFileTree: (tree) => set({ fileTree: tree }),
+      bumpFileTreeVersion: () => set((state) => ({ fileTreeVersion: state.fileTreeVersion + 1 })),
 
       getThread: (conversationId) => get().threads[conversationId],
 
@@ -53,6 +63,11 @@ export const useCodexStore = create<CodexState>()(
         set((state) => {
           const thread = state.threads[conversationId]
           if (!thread) return state
+          // Auto-bump fileTreeVersion for events that can mutate the working
+          // directory. FileTree watches this and re-reads the directory.
+          const mutatesFs =
+            event.type === 'file_change' ||
+            event.type === 'terminal_output' // shell/code execution can touch files
           return {
             threads: {
               ...state.threads,
@@ -61,6 +76,7 @@ export const useCodexStore = create<CodexState>()(
                 events: [...thread.events, event],
               },
             },
+            fileTreeVersion: mutatesFs ? state.fileTreeVersion + 1 : state.fileTreeVersion,
           }
         }),
 

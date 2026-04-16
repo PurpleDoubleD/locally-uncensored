@@ -1,6 +1,7 @@
 import { useRef, useState, useCallback } from 'react'
 import { v4 as uuid } from 'uuid'
 import { chatNonStreaming } from '../api/agents'
+import { setActiveChatId, clearActiveChatId } from '../api/agent-context'
 import { useChatStore } from '../stores/chatStore'
 import { agentVariantExists, createAgentVariant, getAgentModelName, canFixModel } from '../api/model-template-fix'
 import { useModelStore } from '../stores/modelStore'
@@ -11,7 +12,7 @@ import { retrieveContext } from '../api/rag'
 import { speakStreaming, isSpeechSynthesisSupported, getVoicesAsync } from '../api/voice'
 import { toolRegistry } from '../api/mcp'
 import { usePermissionStore } from '../stores/permissionStore'
-import { isThinkingCompatible } from '../lib/model-compatibility'
+import { isThinkingCompatible, isPlainTextPlanner } from '../lib/model-compatibility'
 // Legacy compat imports (still used by some callers)
 import { getToolPermission, executeAgentTool, AGENT_TOOL_DEFS } from '../api/tool-registry'
 import { getToolCallingStrategy, type ToolCallingStrategy } from '../lib/model-compatibility'
@@ -23,9 +24,16 @@ import { buildExtractionPrompt, parseExtractionResponse } from '../lib/memory-ex
 import { useAgentWorkflowStore } from '../stores/agentWorkflowStore'
 import { WorkflowEngine } from '../lib/workflow-engine'
 import type { AgentBlock, AgentToolCall, OllamaChatMessage } from '../types/agent-mode'
-import { selectRelevantTools } from '../lib/tool-selection'
+import { selectRelevantTools, selectRelevantToolsAsync } from '../lib/tool-selection'
+import { generateEmbeddings } from '../api/rag'
+import { budgetFromSettings } from '../api/agents/budget'
 import type { ChatMessage, ToolCall, ToolDefinition } from '../api/providers/types'
 import type { StepResult, WorkflowEngineCallbacks } from '../types/agent-workflows'
+import { executeParallel, applyResultToToolCall, type ExecutionRequest } from '../api/agents/tool-executor'
+import { useToolAuditStore } from '../stores/toolAuditStore'
+import { makeInTurnCacheLookup } from '../api/agents/in-turn-cache'
+import { explainError as explainToolError } from '../api/agents/error-hints'
+import { finalStripThinkingTags } from '../lib/thinking-stripper'
 
 // ── Standalone memory extraction (usable outside React hooks) ──
 
@@ -54,8 +62,15 @@ async function extractMemories(userMsg: string, assistantMsg: string, conversati
 }
 
 // ── Approval promise management ───────────────────────────────
+//
+// Phase 5 introduced parallel tool execution via executeParallel — which
+// means multiple tools can request approval in the same batch. A single
+// `approvalRef` slot would get OVERWRITTEN by the second caller,
+// deadlocking the first. We keep a FIFO queue instead: the UI shows the
+// head of the queue, and approve/reject pops it so the next one surfaces.
 
-interface ApprovalResolver {
+interface ApprovalEntry {
+  toolCall: AgentToolCall
   resolve: (approved: boolean) => void
 }
 
@@ -66,7 +81,7 @@ export function useAgentChat() {
   const [pendingApproval, setPendingApproval] = useState<AgentToolCall | null>(null)
 
   const abortRef = useRef<AbortController | null>(null)
-  const approvalRef = useRef<ApprovalResolver | null>(null)
+  const approvalQueueRef = useRef<ApprovalEntry[]>([])
   const contentRef = useRef('')
   const thinkingRef = useRef('')
   const blocksRef = useRef<AgentBlock[]>([])
@@ -74,24 +89,30 @@ export function useAgentChat() {
 
   // ── Approval callbacks ────────────────────────────────────
 
-  const approveToolCall = useCallback(() => {
-    approvalRef.current?.resolve(true)
-    approvalRef.current = null
-    setPendingApproval(null)
+  const advanceApprovalQueue = useCallback(() => {
+    const next = approvalQueueRef.current[0]
+    setPendingApproval(next ? next.toolCall : null)
   }, [])
+
+  const approveToolCall = useCallback(() => {
+    const entry = approvalQueueRef.current.shift()
+    if (entry) entry.resolve(true)
+    advanceApprovalQueue()
+  }, [advanceApprovalQueue])
 
   const rejectToolCall = useCallback(() => {
-    approvalRef.current?.resolve(false)
-    approvalRef.current = null
-    setPendingApproval(null)
-  }, [])
+    const entry = approvalQueueRef.current.shift()
+    if (entry) entry.resolve(false)
+    advanceApprovalQueue()
+  }, [advanceApprovalQueue])
 
-  // ── Wait for user approval ────────────────────────────────
+  // ── Wait for user approval (enqueues; UI shows head of queue) ──
 
   function waitForApproval(toolCall: AgentToolCall): Promise<boolean> {
     return new Promise((resolve) => {
-      approvalRef.current = { resolve }
-      setPendingApproval(toolCall)
+      const wasEmpty = approvalQueueRef.current.length === 0
+      approvalQueueRef.current.push({ toolCall, resolve })
+      if (wasEmpty) setPendingApproval(toolCall)
     })
   }
 
@@ -115,6 +136,25 @@ export function useAgentChat() {
       blocksRef.current = blocks
       useChatStore.getState().updateMessageAgentBlocks(convId, msgId, blocks)
     }
+  }
+
+  /**
+   * ID-keyed block update — used by the parallel tool executor (Phase 5) so
+   * N concurrent tool-call blocks can update independently as their results
+   * land out of order. Falls back to no-op on unknown id.
+   */
+  function updateBlockById(
+    convId: string,
+    msgId: string,
+    blockId: string,
+    updates: Partial<AgentBlock>
+  ) {
+    const idx = blocksRef.current.findIndex((b) => b.id === blockId)
+    if (idx < 0) return
+    const blocks = [...blocksRef.current]
+    blocks[idx] = { ...blocks[idx], ...updates }
+    blocksRef.current = blocks
+    useChatStore.getState().updateMessageAgentBlocks(convId, msgId, blocks)
   }
 
   // ── Main agent message handler ────────────────────────────
@@ -220,6 +260,11 @@ export function useAgentChat() {
     if (!convId) {
       convId = store.createConversation(activeModel, persona?.systemPrompt || '')
     }
+
+    // Publish the conversation id so built-in tools land in
+    // `~/agent-workspace/<convId>/` — each LU agent chat gets an isolated
+    // workspace folder. Cleared in the finally block further down.
+    setActiveChatId(convId)
 
     // Add user message
     const userMessage = {
@@ -344,25 +389,51 @@ export function useAgentChat() {
       }
     }
 
+    // Phase 6: lock in the start-of-turn timestamp so the in-turn cache
+    // only serves results from calls made during THIS user prompt.
+    const turnStartMs = Date.now()
+    // Phase 10: hard caps on tool calls and loop iterations. Halts cleanly
+    // with a synthetic assistant message when the budget is exhausted —
+    // no wedged agent, no runaway token burn.
+    const budget = budgetFromSettings({
+      agentMaxToolCalls: settings.agentMaxToolCalls ?? 50,
+      agentMaxIterations: settings.agentMaxIterations ?? 25,
+    })
+
     try {
       // ── Agent Loop ──────────────────────────────────────────
       while (runningRef.current && !abort.signal.aborted) {
+        budget.addIteration()
+        const exceed = budget.exceeded()
+        if (exceed.kind !== 'none') {
+          contentRef.current =
+            (contentRef.current ? contentRef.current + '\n\n' : '') + budget.haltMessage()
+          scheduleUIUpdate()
+          break
+        }
         let toolCalls: ToolCall[] = []
         let turnContent = ''
         let turnThinking = ''
+
+        // Plain-text-planner escape: Gemma 3/4 with think=false drops
+        // into structured plain-text planning (Plan: / Constraint
+        // Checklist: / Confidence Score:) with no tags to strip. Pass
+        // `undefined` instead so Ollama keeps the model in tagged-
+        // thinking mode; the stripper removes the tags silently.
+        const canThinkAgent = isThinkingCompatible(activeModel)
+        const plainPlanAgent = isPlainTextPlanner(activeModel)
+        const thinkOpt: boolean | undefined = canThinkAgent
+          ? (settings.thinkingEnabled === false && plainPlanAgent
+              ? undefined
+              : settings.thinkingEnabled === true)
+          : undefined
 
         const chatOptions = {
           temperature: settings.temperature,
           topP: settings.topP,
           topK: settings.topK,
           maxTokens: settings.maxTokens || undefined,
-          // Tri-state: thinking-compatible models get an explicit true|false
-          // (OFF → tell Ollama `think: false` so the model stops thinking
-          // instead of secretly thinking + hiding it). Non-thinking models
-          // get `undefined` so the field is omitted entirely.
-          thinking: isThinkingCompatible(activeModel)
-            ? settings.thinkingEnabled === true
-            : (undefined as unknown as boolean),
+          thinking: thinkOpt as unknown as boolean,
           signal: abort.signal,
         }
 
@@ -381,9 +452,17 @@ export function useAgentChat() {
             timestamp: Date.now(),
           })
 
-          // Intelligent tool selection — only include relevant tools
+          // Intelligent tool selection — keyword for small lists, embedding
+          // routing once the total tool count grows past the threshold
+          // (Phase 9). The embedding call is best-effort: if Ollama is
+          // unreachable it silently falls back to keyword-only.
           const lastUserMsg = agentMessages.filter(m => m.role === 'user').pop()?.content || ''
-          const relevantDefs = selectRelevantTools(lastUserMsg, toolRegistry.getAll(), permissions)
+          const relevantDefs = await selectRelevantToolsAsync(
+            lastUserMsg,
+            toolRegistry.getAll(),
+            permissions,
+            { embed: (texts) => generateEmbeddings(texts) }
+          )
           const tools: ToolDefinition[] = relevantDefs.map(t => ({
             type: 'function' as const,
             function: { name: t.name, description: t.description, parameters: t.inputSchema },
@@ -444,7 +523,11 @@ export function useAgentChat() {
               : inner
           }
           return ''
-        }).trim()
+        })
+        // Strip non-canonical thinking markers (Gemma channel tags,
+        // `<thought>`, `<reasoning>`, etc.) that the canonical regex above
+        // doesn't catch. These never belong in the assistant bubble.
+        turnContent = finalStripThinkingTags(turnContent, keepThinking)
         // Also drop any orphan native-thinking that leaked through when the
         // toggle is OFF (e.g. provider returned `turn.thinking` anyway).
         if (!keepThinking) turnThinking = ''
@@ -457,160 +540,197 @@ export function useAgentChat() {
         // If no tool calls, the model is done
         if (toolCalls.length === 0) break
 
-        // Process each tool call
-        for (const tc of toolCalls) {
-          if (!runningRef.current || abort.signal.aborted) break
+        // Phase 5b (v2.4.0) — parallel tool execution via tool-executor.
+        //
+        // Pre-create AgentToolCall + block per tc so the UI can render all
+        // of them concurrently before any runs. Then executeParallel runs
+        // them respecting sideEffectKey (file_write same-path serializes,
+        // shell/code share an 'exec' queue, image/workflow share 'comfyui',
+        // pure reads fully parallel).
+        if (!runningRef.current || abort.signal.aborted) break
 
+        type BatchEntry = { tc: typeof toolCalls[number]; ac: AgentToolCall; blockId: string }
+        const batch: BatchEntry[] = []
+        budget.addToolCalls(toolCalls.length)
+        const perToolOverrides = usePermissionStore.getState().perToolOverrides
+        for (const tc of toolCalls) {
           const toolCallId = uuid()
-          const agentToolCall: AgentToolCall = {
+          const blockId = uuid()
+          const permLevel = toolRegistry.getPermissionLevelWithOverrides(
+            tc.function.name,
+            permissions,
+            perToolOverrides
+          )
+          const needsApproval = permLevel !== 'auto'
+          const ac: AgentToolCall = {
             id: toolCallId,
             toolName: tc.function.name,
             args: tc.function.arguments,
-            status: 'running',
+            status: needsApproval ? 'pending_approval' : 'running',
             timestamp: Date.now(),
           }
+          addBlock(convId!, assistantMessage.id, {
+            id: blockId,
+            phase: 'tool_call',
+            content: needsApproval
+              ? `Requesting approval: ${tc.function.name}`
+              : `Running: ${tc.function.name}`,
+            toolCall: ac,
+            toolCalls: [ac],
+            timestamp: Date.now(),
+          })
+          batch.push({ tc, ac, blockId })
+        }
 
-          // Check permission via new registry
-          const permLevel = toolRegistry.getPermissionLevel(tc.function.name, permissions)
-          const permission = permLevel === 'auto' ? 'auto' : 'confirm'
+        const requests: ExecutionRequest[] = batch.map((e) => ({
+          id: e.ac.id,
+          toolName: e.ac.toolName,
+          args: e.ac.args,
+        }))
+        const auditIds = new Map<string, string>()
 
-          if (permission === 'confirm') {
-            agentToolCall.status = 'pending_approval'
-            addBlock(convId!, assistantMessage.id, {
-              id: uuid(),
-              phase: 'tool_call',
-              content: `Requesting approval: ${tc.function.name}`,
-              toolCall: agentToolCall,
-              timestamp: Date.now(),
-            })
-
-            const approved = await waitForApproval(agentToolCall)
-
-            if (!approved) {
-              agentToolCall.status = 'rejected'
-              updateLastBlock(convId!, assistantMessage.id, {
-                toolCall: { ...agentToolCall, status: 'rejected' },
-                content: `Rejected: ${tc.function.name}`,
+        const results = await executeParallel(requests, {
+          getTool: (name) => {
+            const td = toolRegistry.getToolByName(name)
+            return td ? { name: td.name, inputSchema: td.inputSchema } : undefined
+          },
+          execute: (name: string, args: Record<string, any>) => toolRegistry.execute(name, args),
+          lookupCache: convId ? makeInTurnCacheLookup({ convId, turnStartMs }) : undefined,
+          explainError: (toolName, err) => explainToolError(toolName, err),
+          awaitApproval: async (req) => {
+            const entry = batch.find((e) => e.ac.id === req.id)
+            if (!entry) return true
+            // Phase 12 — tools whose AC was marked 'running' at batch
+            // creation (permission level 'auto') bypass the approval
+            // gate entirely. Only 'pending_approval' tools enqueue.
+            if (entry.ac.status !== 'pending_approval') return true
+            const approved = await waitForApproval(entry.ac)
+            if (approved) {
+              entry.ac.status = 'running'
+              updateBlockById(convId!, assistantMessage.id, entry.blockId, {
+                toolCall: { ...entry.ac },
+                toolCalls: [{ ...entry.ac }],
+                content: `Running: ${entry.ac.toolName}`,
               })
-
-              // Feed rejection back
-              agentMessages.push({
-                role: 'assistant',
-                content: turnContent || '',
-                tool_calls: [tc],
+            }
+            return approved
+          },
+          recordAudit: (entry) => {
+            if (!convId) return
+            if (entry.kind === 'start') {
+              const aid = useToolAuditStore.getState().record({
+                convId,
+                toolCallId: entry.id,
+                toolName: entry.toolName,
+                args: entry.args,
+                startedAt: entry.startedAt,
+                parentToolCallId: entry.parentToolCallId,
               })
-
-              if (providerId === 'openai' || providerId === 'anthropic') {
-                agentMessages.push({
-                  role: 'tool',
-                  content: 'User rejected this action. Try a different approach.',
-                  tool_call_id: tc.id,
-                })
-              } else if (strategy === 'native') {
-                agentMessages.push({
-                  role: 'tool',
-                  content: 'User rejected this action. Try a different approach.',
-                })
-              } else {
-                agentMessages.push({
-                  role: 'user',
-                  content: buildHermesToolResult(tc.function.name, 'User rejected this action. Try a different approach.'),
+              auditIds.set(entry.id, aid)
+            } else {
+              const aid = auditIds.get(entry.id)
+              if (aid) {
+                useToolAuditStore.getState().complete(aid, {
+                  status: entry.status,
+                  completedAt: entry.completedAt,
+                  resultPreview: entry.resultPreview,
+                  error: entry.error,
+                  errorHint: entry.errorHint,
+                  cacheHit: entry.cacheHit,
                 })
               }
-              continue
             }
+          },
+          abortSignal: abort.signal,
+        })
 
-            agentToolCall.status = 'running'
-            updateLastBlock(convId!, assistantMessage.id, {
-              toolCall: { ...agentToolCall, status: 'running' },
-              content: `Running: ${tc.function.name}`,
-            })
-          } else {
-            addBlock(convId!, assistantMessage.id, {
-              id: uuid(),
-              phase: 'tool_call',
-              content: `Running: ${tc.function.name}`,
-              toolCall: agentToolCall,
-              timestamp: Date.now(),
-            })
-          }
-
-          // Execute the tool
-          const startTime = Date.now()
-          const result = await toolRegistry.execute(tc.function.name, tc.function.arguments)
-          const duration = Date.now() - startTime
-
-          // Update block with result
-          const isError = result.startsWith('Error:')
-          agentToolCall.status = isError ? 'failed' : 'completed'
-          agentToolCall.result = isError ? undefined : result
-          agentToolCall.error = isError ? result : undefined
-          agentToolCall.duration = duration
-
-          updateLastBlock(convId!, assistantMessage.id, {
-            toolCall: { ...agentToolCall },
-            content: isError ? `Failed: ${tc.function.name}` : `Completed: ${tc.function.name}`,
+        // Apply results back onto blocks + memory + LLM history.
+        for (const entry of batch) {
+          const result = results.find((r) => r.id === entry.ac.id)
+          if (!result) continue
+          applyResultToToolCall(entry.ac, result)
+          const contentLabel =
+            result.status === 'completed'
+              ? `Completed: ${entry.ac.toolName}`
+              : result.status === 'cached'
+                ? `Cached: ${entry.ac.toolName}`
+                : result.status === 'rejected'
+                  ? `Rejected: ${entry.ac.toolName}`
+                  : `Failed: ${entry.ac.toolName}`
+          updateBlockById(convId!, assistantMessage.id, entry.blockId, {
+            toolCall: { ...entry.ac },
+            toolCalls: [{ ...entry.ac }],
+            content: contentLabel,
           })
 
-          // Auto-save tool result to memory
-          if (!isError) {
-            const argsShort = JSON.stringify(tc.function.arguments).substring(0, 100)
-            const resultShort = result.substring(0, 200)
+          if ((result.status === 'completed' || result.status === 'cached') && entry.ac.result) {
+            const argsShort = JSON.stringify(entry.ac.args).substring(0, 100)
+            const resultShort = entry.ac.result.substring(0, 200)
             useMemoryStore.getState().addMemory({
               type: 'reference',
-              title: `${tc.function.name} result`,
-              description: `${tc.function.name}(${argsShort.substring(0, 60)}) → ${resultShort.substring(0, 60)}`,
-              content: `${tc.function.name}(${argsShort}) → ${resultShort}`,
-              tags: [`agent:${tc.function.name}`],
+              title: `${entry.ac.toolName} result`,
+              description: `${entry.ac.toolName}(${argsShort.substring(0, 60)}) → ${resultShort.substring(0, 60)}`,
+              content: `${entry.ac.toolName}(${argsShort}) → ${resultShort}`,
+              tags: [`agent:${entry.ac.toolName}`],
               source: convId || 'agent',
             })
           }
+        }
 
-          // Append tool call + result to messages for next iteration
-          if (providerId === 'openai') {
-            // OpenAI format: assistant with tool_calls, then tool role with tool_call_id
-            agentMessages.push({
-              role: 'assistant',
-              content: turnContent || '',
-              tool_calls: [tc],
-            })
+        // Feed results back into LLM history. Format differs per provider:
+        //   OpenAI / Anthropic / Ollama native: ONE assistant message with
+        //   tool_calls[] + N tool messages (one per result). This preserves
+        //   the provider's expected structure when multiple tool calls come
+        //   back in one assistant turn.
+        //   Hermes XML fallback: pairs (assistant <tool_call> → user result),
+        //   kept per-call for compatibility with how the non-native path
+        //   parses history.
+        const resultTextFor = (r: typeof results[number]): string => {
+          if (r.status === 'rejected') return 'User rejected this action. Try a different approach.'
+          if (r.status === 'completed' || r.status === 'cached') return r.result ?? ''
+          // failed
+          return r.errorHint ? `${r.error ?? 'Tool failed'} — ${r.errorHint}` : (r.error ?? 'Tool failed')
+        }
+
+        if (providerId === 'openai' || providerId === 'anthropic') {
+          agentMessages.push({
+            role: 'assistant',
+            content: turnContent || '',
+            tool_calls: toolCalls,
+          })
+          for (const { tc } of batch) {
+            const result = results.find((r) => r.id === batch.find((b) => b.tc === tc)?.ac.id)!
             agentMessages.push({
               role: 'tool',
-              content: result,
+              content: resultTextFor(result),
               tool_call_id: tc.id,
             })
-          } else if (providerId === 'anthropic') {
-            // Anthropic format: same structure, tool_call_id maps to tool_use id
-            agentMessages.push({
-              role: 'assistant',
-              content: turnContent || '',
-              tool_calls: [tc],
-            })
-            agentMessages.push({
-              role: 'tool',
-              content: result,
-              tool_call_id: tc.id,
-            })
-          } else if (strategy === 'native') {
-            // Ollama native
-            agentMessages.push({
-              role: 'assistant',
-              content: turnContent || '',
-              tool_calls: [{ function: { name: tc.function.name, arguments: tc.function.arguments } }],
-            })
+          }
+        } else if (strategy === 'native') {
+          agentMessages.push({
+            role: 'assistant',
+            content: turnContent || '',
+            tool_calls: toolCalls.map((tc) => ({
+              function: { name: tc.function.name, arguments: tc.function.arguments },
+            })),
+          })
+          for (const { tc } of batch) {
+            const result = results.find((r) => r.id === batch.find((b) => b.tc === tc)?.ac.id)!
             agentMessages.push({
               role: 'tool',
-              content: result,
+              content: resultTextFor(result),
             })
-          } else {
-            // Hermes XML
+          }
+        } else {
+          for (const { tc } of batch) {
+            const result = results.find((r) => r.id === batch.find((b) => b.tc === tc)?.ac.id)!
             agentMessages.push({
               role: 'assistant',
               content: `<tool_call>\n{"name": "${tc.function.name}", "arguments": ${JSON.stringify(tc.function.arguments)}}\n</tool_call>`,
             })
             agentMessages.push({
               role: 'user',
-              content: buildHermesToolResult(tc.function.name, result),
+              content: buildHermesToolResult(tc.function.name, resultTextFor(result)),
             })
           }
         }
@@ -652,8 +772,13 @@ export function useAgentChat() {
       setIsAgentRunning(false)
       runningRef.current = false
       abortRef.current = null
+      // Drop the per-run workspace scope so standalone tool calls from
+      // other tabs don't accidentally land in this chat's folder.
+      clearActiveChatId()
+      // Reject any pending approvals so their promises don't hang forever
+      for (const entry of approvalQueueRef.current) entry.resolve(false)
+      approvalQueueRef.current = []
       setPendingApproval(null)
-      approvalRef.current = null
 
       // Auto-speak if TTS enabled
       const voiceState = useVoiceStore.getState()
@@ -684,8 +809,8 @@ export function useAgentChat() {
     runningRef.current = false
     abortRef.current?.abort()
     abortRef.current = null
-    approvalRef.current?.resolve(false)
-    approvalRef.current = null
+    for (const entry of approvalQueueRef.current) entry.resolve(false)
+    approvalQueueRef.current = []
     setPendingApproval(null)
     setIsAgentRunning(false)
   }, [])
@@ -703,18 +828,22 @@ export function useAgentChat() {
 // ── Agent System Prompt Builder ─────────────────────────────────
 
 function buildAgentSystemPrompt(basePrompt: string): string {
-  const agentInstructions = `You are an autonomous AI agent. You MUST use tools — NEVER answer from memory.
+  const agentInstructions = `You are an autonomous AI agent inside Locally Uncensored with full access to this computer.
 
-IMPORTANT: web_search returns ONLY short snippets, NOT real data. You MUST ALWAYS call web_fetch on the best URL to read the actual page content before answering.
+Available tools:
+- Filesystem: file_read, file_write, file_list, file_search
+- Web: web_search, web_fetch
+- System: shell_execute, code_execute, system_info, screenshot, process_list, get_current_time
+- Creative: image_generate, run_workflow
 
-Workflow:
-1. web_search → get URLs
-2. web_fetch → read actual page content from the best URL
-3. Answer based on real data from web_fetch
-
-Other tools: file_read, file_write, code_execute, image_generate.
-Chain multiple tools as needed. If a tool fails, try a different approach.
-Respond in the same language the user uses.`
+Rules:
+- You MUST use tools — NEVER answer from memory or guess file contents.
+- For filesystem tasks: ALWAYS call file_list first to explore, then file_read to inspect, then act.
+- For web tasks: web_search → web_fetch on the best URL → answer based on real data.
+- web_search returns ONLY short snippets, NOT full content. ALWAYS call web_fetch to read the actual page.
+- If you need to know the OS, paths, or hardware: call system_info once at the start.
+- Chain multiple tools as needed. If a tool fails, try a different approach.
+- Respond in the same language the user uses.`
 
   if (basePrompt) {
     return `${agentInstructions}\n\n${basePrompt}`

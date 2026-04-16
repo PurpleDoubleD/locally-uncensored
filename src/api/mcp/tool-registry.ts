@@ -5,6 +5,12 @@ import type { OllamaTool } from '../../types/agent-mode'
 import type { ToolDefinition } from '../providers/types'
 
 type ToolExecutor = (args: Record<string, any>) => Promise<string>
+/**
+ * External-tool executor gets the tool name too, because one MCP server
+ * owns many tools and routes by name. The registry wraps it into a
+ * per-tool ToolExecutor closure so the Map lookup stays {name → executor}.
+ */
+type ExternalToolExecutor = (toolName: string, args: Record<string, any>) => Promise<string>
 
 interface RegisteredTool {
   definition: MCPToolDefinition
@@ -20,11 +26,31 @@ export class ToolRegistry {
     this.tools.set(tool.name, { definition: tool, executor })
   }
 
-  registerExternal(serverId: string, tools: MCPToolDefinition[], executor: ToolExecutor) {
+  /**
+   * Register all tools from an external MCP server. The executor receives
+   * both the tool name and args, letting one MCP client back many tools
+   * (which is how MCP servers actually work — one `tools/call` endpoint,
+   * dispatched by name).
+   *
+   * Also accepts the legacy single-arg executor shape for backward compat
+   * — tests and older callers can still pass `(args) => ...` and the
+   * registry will call it unchanged. Prefer the two-arg shape in new code.
+   */
+  registerExternal(
+    serverId: string,
+    tools: MCPToolDefinition[],
+    executor: ExternalToolExecutor | ToolExecutor
+  ) {
+    const isTwoArg = executor.length >= 2
     for (const tool of tools) {
-      this.tools.set(tool.name, {
+      const name = tool.name
+      const bound: ToolExecutor = isTwoArg
+        ? (args: Record<string, any>) =>
+            (executor as ExternalToolExecutor)(name, args)
+        : (executor as ToolExecutor)
+      this.tools.set(name, {
         definition: { ...tool, source: 'external', serverId },
-        executor,
+        executor: bound,
       })
     }
   }
@@ -55,6 +81,23 @@ export class ToolRegistry {
     const tool = this.tools.get(toolName)?.definition
     if (!tool) return 'confirm'
     return permissions[tool.category]
+  }
+
+  /**
+   * Phase 12 — resolve the effective permission for a tool with a per-tool
+   * override map layered on top of category defaults. The override map is
+   * typically sourced from permissionStore.perToolOverrides and takes
+   * precedence over the category permission; when no override exists we
+   * fall back to getPermissionLevel() semantics.
+   */
+  getPermissionLevelWithOverrides(
+    toolName: string,
+    permissions: PermissionMap,
+    perToolOverrides: Record<string, PermissionLevel>
+  ): PermissionLevel {
+    const override = perToolOverrides[toolName]
+    if (override) return override
+    return this.getPermissionLevel(toolName, permissions)
   }
 
   // ── Execution ─────────────────────────────────────────────────

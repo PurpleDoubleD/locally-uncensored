@@ -13,7 +13,8 @@ import { useAgentChat } from "./useAgentChat"
 import { useMemory } from "./useMemory"
 import { useAgentModeStore } from "../stores/agentModeStore"
 import { getProviderForModel, getProviderIdFromModel } from "../api/providers"
-import { isThinkingCompatible } from "../lib/model-compatibility"
+import { isThinkingCompatible, isPlainTextPlanner } from "../lib/model-compatibility"
+import { stripNonCanonicalTags, finalStripThinkingTags } from "../lib/thinking-stripper"
 import type { ChatStreamChunk } from "../api/providers/types"
 import type { ImageAttachment } from "../types/chat"
 
@@ -167,9 +168,20 @@ export function useChat() {
       // (true or false). For every other model we leave `thinking`
       // undefined so the provider omits `think` entirely and Ollama does
       // whatever it normally does.
+      //
+      // Exception: plain-text-planner models (Gemma 3/4). Their `think:
+      // false` path emits structured plain-text planning that has no
+      // tags. We pass `undefined` instead (= Ollama default) so the model
+      // stays in tagged-thinking mode; the thinking-stripper then removes
+      // the tags silently and keepThinking=false below drops the native
+      // thinking field, so the user sees a clean answer without a
+      // planning preamble.
       const canThink = isThinkingCompatible(activeModel)
+      const plainTextPlanner = isPlainTextPlanner(activeModel)
       const useThinking: boolean | undefined = canThink
-        ? settings.thinkingEnabled === true
+        ? (settings.thinkingEnabled === false && plainTextPlanner
+            ? undefined
+            : settings.thinkingEnabled === true)
         : undefined
       const chatOpts = {
         temperature: settings.temperature,
@@ -253,7 +265,13 @@ export function useChat() {
             requestAnimationFrame(() => {
               const cId = convId!
               const mId = assistantMessage.id
-              useChatStore.getState().updateMessageContent(cId, mId, contentRef.current)
+              // Always strip non-canonical thinking markers (Gemma channel
+              // tags, `<thought>`, `<reasoning>`, `<reflect>`, `<deepthink>`)
+              // from the streaming bubble. The canonical `<think>…</think>`
+              // is already handled by the char-by-char state-machine above,
+              // so we leave those alone here.
+              const displayContent = stripNonCanonicalTags(contentRef.current)
+              useChatStore.getState().updateMessageContent(cId, mId, displayContent)
               if (keepThinking && thinkingRef.current) {
                 useChatStore.getState().updateMessageThinking(cId, mId, thinkingRef.current)
               }
@@ -263,12 +281,9 @@ export function useChat() {
         }
 
         if (chunk.done) {
-          // Strip Gemma 4 channel tags
-          contentRef.current = contentRef.current
-            .replace(/<\|?channel>?\s*thought\s*/gi, '')
-            .replace(/<\|?channel\|?>/gi, '')
-            .replace(/<channel\|>/gi, '')
-            .trim()
+          // Final safety pass — catches any orphan tags that leaked through
+          // mid-stream (partial chunks, provider restarts, etc.).
+          contentRef.current = finalStripThinkingTags(contentRef.current, keepThinking)
           useChatStore
             .getState()
             .updateMessageContent(convId!, assistantMessage.id, contentRef.current)

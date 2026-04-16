@@ -41,9 +41,9 @@ pub struct RemotePermissions {
 impl Default for RemotePermissions {
     fn default() -> Self {
         Self {
-            filesystem: false,
-            downloads: false,
-            process_control: false,
+            filesystem: true,
+            downloads: true,
+            process_control: true,
         }
     }
 }
@@ -374,6 +374,11 @@ struct AgentToolPayload {
     tool: String,
     #[serde(default)]
     args: serde_json::Value,
+    /// Per-chat workspace slug. When provided, all file tools resolve
+    /// relative paths against `~/agent-workspace/<chat_id>/`. Missing /
+    /// empty falls back to `default` so legacy clients still work.
+    #[serde(default, rename = "chatId", alias = "chat_id")]
+    chat_id: Option<String>,
 }
 
 /// Run a single agent tool on behalf of an authenticated mobile client.
@@ -383,41 +388,67 @@ struct AgentToolPayload {
 ///   - code_execute             → requires `filesystem`
 ///   - image_generate           → requires `process_control`
 ///   - web_search               → no permission required
+///
+/// Bug fix (mobile agent HTTP 500): all tool failures (missing arg,
+/// permission denied, underlying tool error) are returned as HTTP 200
+/// with `{ "error": "<msg>" }`. The mobile JS treats a 200-with-error
+/// as a normal observation that the model can read and recover from,
+/// instead of bubbling a scary HTTP 500 back up to the chat. The Rust
+/// server still logs the failure to stderr so devs can diagnose.
 async fn handle_agent_tool(
     AxumState(state): AxumState<RemoteState>,
     Json(body): Json<AgentToolPayload>,
 ) -> Response {
     use tauri::Manager;
+    let tool_name = body.tool.clone();
+
     let app_state = match state.app_handle.try_state::<crate::state::AppState>() {
         Some(s) => s,
-        None => return (StatusCode::INTERNAL_SERVER_ERROR, "AppState unavailable").into_response(),
+        None => {
+            eprintln!("[Remote agent] AppState not registered — cannot dispatch tool {}", tool_name);
+            return graceful_error("AppState unavailable on the desktop side.");
+        }
     };
 
     let perms = state.permissions.lock().await.clone();
 
-    let result: Result<serde_json::Value, String> = match body.tool.as_str() {
+    // Permission gate up-front. Returns a graceful 200 + {error,permission}
+    // so the mobile UI can render a single-line hint instead of "HTTP 403".
+    let needs = match tool_name.as_str() {
+        "file_read" | "file_write" | "code_execute" | "file_list" | "file_search" | "shell_execute" | "screenshot"
+            => Some(("filesystem", perms.filesystem)),
+        "image_generate"
+            => Some(("process_control", perms.process_control)),
+        _ => None,
+    };
+    if let Some((perm, on)) = needs {
+        if !on {
+            return graceful_perm_error(&tool_name, perm);
+        }
+    }
+
+    // Per-chat workspace slug — threaded into every file tool so each
+    // mobile chat gets its own isolated `~/agent-workspace/<slug>/` and
+    // agents running in different chats can't clobber each other.
+    let chat_id = body.chat_id.clone();
+
+    let result: Result<serde_json::Value, String> = match tool_name.as_str() {
         "file_read" => {
-            if !perms.filesystem {
-                return forbidden("filesystem permission disabled for remote clients");
-            }
             let path = body.args.get("path").and_then(|v| v.as_str()).unwrap_or("").to_string();
-            crate::commands::agent::file_read(path)
+            if path.is_empty() { Err("file_read needs a non-empty `path` argument.".into()) }
+            else { crate::commands::agent::file_read(path, chat_id.clone()) }
         }
         "file_write" => {
-            if !perms.filesystem {
-                return forbidden("filesystem permission disabled for remote clients");
-            }
             let path = body.args.get("path").and_then(|v| v.as_str()).unwrap_or("").to_string();
             let content = body.args.get("content").and_then(|v| v.as_str()).unwrap_or("").to_string();
-            crate::commands::agent::file_write(path, content)
+            if path.is_empty() { Err("file_write needs a non-empty `path` argument.".into()) }
+            else { crate::commands::agent::file_write(path, content, chat_id.clone()) }
         }
         "code_execute" => {
-            if !perms.filesystem {
-                return forbidden("filesystem permission disabled for remote clients");
-            }
             let code = body.args.get("code").and_then(|v| v.as_str()).unwrap_or("").to_string();
             let timeout = body.args.get("timeout").and_then(|v| v.as_u64());
-            crate::commands::agent::execute_code(code, timeout, app_state)
+            if code.is_empty() { Err("code_execute needs a non-empty `code` argument.".into()) }
+            else { crate::commands::agent::execute_code(code, timeout, chat_id.clone(), app_state) }
         }
         "web_search" => {
             let query = body.args.get("query").and_then(|v| v.as_str()).unwrap_or("").to_string();
@@ -425,78 +456,99 @@ async fn handle_agent_tool(
                 .or_else(|| body.args.get("count"))
                 .and_then(|v| v.as_u64())
                 .map(|n| n as usize);
-            crate::commands::search::web_search(query, count, app_state).await
+            if query.is_empty() { Err("web_search needs a non-empty `query` argument.".into()) }
+            else { crate::commands::search::web_search(query, count, app_state).await }
         }
         "web_fetch" => {
             let url = body.args.get("url").and_then(|v| v.as_str()).unwrap_or("").to_string();
-            if url.is_empty() {
-                return (StatusCode::BAD_REQUEST, "web_fetch requires a `url` argument").into_response();
-            }
-            crate::commands::search::web_fetch(url).await
+            if url.is_empty() { Err("web_fetch needs a non-empty `url` argument.".into()) }
+            else { crate::commands::search::web_fetch(url).await }
         }
         "file_list" => {
-            if !perms.filesystem {
-                return forbidden("filesystem permission disabled for remote clients");
-            }
             let path = body.args.get("path").and_then(|v| v.as_str()).unwrap_or("").to_string();
             let recursive = body.args.get("recursive").and_then(|v| v.as_bool());
             let pattern = body.args.get("pattern").and_then(|v| v.as_str()).map(String::from);
-            crate::commands::filesystem::fs_list(path, recursive, pattern)
+            if path.is_empty() { Err("file_list needs a non-empty `path` argument.".into()) }
+            else { crate::commands::filesystem::fs_list(path, recursive, pattern, chat_id.clone()) }
         }
         "file_search" => {
-            if !perms.filesystem {
-                return forbidden("filesystem permission disabled for remote clients");
-            }
             let path = body.args.get("path").and_then(|v| v.as_str()).unwrap_or("").to_string();
             let pattern = body.args.get("query")
                 .or_else(|| body.args.get("pattern"))
                 .and_then(|v| v.as_str()).unwrap_or("").to_string();
-            let max = body.args.get("max_results").and_then(|v| v.as_u64()).map(|n| n as u32);
-            crate::commands::filesystem::fs_search(path, pattern, max)
+            // Bug: AGENT_TOOLS sends `maxResults` (camelCase); also accept
+            // snake-case for older clients.
+            let max = body.args.get("maxResults")
+                .or_else(|| body.args.get("max_results"))
+                .and_then(|v| v.as_u64())
+                .map(|n| n as u32);
+            if path.is_empty() || pattern.is_empty() {
+                Err("file_search needs both `path` and `pattern` arguments.".into())
+            } else {
+                crate::commands::filesystem::fs_search(path, pattern, max, chat_id.clone())
+            }
         }
         "shell_execute" => {
-            if !perms.filesystem {
-                return forbidden("filesystem permission disabled for remote clients");
-            }
             let command = body.args.get("command").and_then(|v| v.as_str()).unwrap_or("").to_string();
-            if command.is_empty() {
-                return (StatusCode::BAD_REQUEST, "shell_execute requires a `command` argument").into_response();
+            if command.is_empty() { Err("shell_execute needs a non-empty `command` argument.".into()) }
+            else {
+                let cwd = body.args.get("cwd").and_then(|v| v.as_str()).map(String::from);
+                let timeout = body.args.get("timeout").and_then(|v| v.as_u64());
+                let shell = body.args.get("shell").and_then(|v| v.as_str()).map(String::from);
+                crate::commands::shell::shell_execute(command, None, cwd, timeout, shell, chat_id.clone()).await
             }
-            let cwd = body.args.get("cwd").and_then(|v| v.as_str()).map(String::from);
-            let timeout = body.args.get("timeout").and_then(|v| v.as_u64());
-            let shell = body.args.get("shell").and_then(|v| v.as_str()).map(String::from);
-            crate::commands::shell::shell_execute(command, None, cwd, timeout, shell).await
         }
-        "system_info" => {
-            crate::commands::system::system_info()
-        }
-        "process_list" => {
-            crate::commands::system::process_list()
-        }
-        "screenshot" => {
-            if !perms.filesystem {
-                return forbidden("filesystem permission disabled (screenshot reads your desktop)");
-            }
-            crate::commands::system::screenshot()
-        }
-        "get_current_time" => {
-            crate::commands::system::get_current_time()
-        }
+        "system_info" => crate::commands::system::system_info(),
+        "process_list" => crate::commands::system::process_list(),
+        "screenshot" => crate::commands::system::screenshot(),
+        "get_current_time" => crate::commands::system::get_current_time(),
         "image_generate" => {
-            if !perms.process_control {
-                return forbidden("ComfyUI access disabled (enable Process Control)");
-            }
             // Image generation requires the desktop Agent path — too much
-            // plumbing for the remote bridge. Fall back with a clear message.
-            Err("image_generate is desktop-only for now. Use the Create tab.".into())
+            // plumbing for the remote bridge. Return a clean structured
+            // observation rather than HTTP 500 so the mobile UI shows it
+            // as a single line, not a red HTTP error.
+            Ok(serde_json::json!({
+                "error": "image_generate is only available on the desktop app for now. Open the Create tab there."
+            }))
         }
         other => Err(format!("Unknown tool: {}", other)),
     };
 
     match result {
         Ok(v) => Json(v).into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e).into_response(),
+        Err(e) => {
+            // Log so a dev tailing the desktop console sees what failed.
+            // The mobile gets a graceful 200+{error} so the agent loop
+            // observation reads cleanly ("Error: file not found …").
+            eprintln!("[Remote agent] tool `{}` failed: {}", tool_name, e);
+            graceful_error(&e)
+        }
     }
+}
+
+/// Wrap a tool failure as a 200-OK JSON payload so the mobile parser
+/// doesn't treat it as an HTTP transport error. Mobile JS reads
+/// `{error}` and surfaces it as a normal observation.
+fn graceful_error(msg: &str) -> Response {
+    let body = serde_json::json!({ "error": msg });
+    Json(body).into_response()
+}
+
+/// Permission-denied responder: still 200, but flagged so the mobile UI
+/// can render a 1-tap "Open Settings → Permissions" hint instead of a
+/// generic error.
+fn graceful_perm_error(tool: &str, permission: &str) -> Response {
+    let msg = format!(
+        "Tool `{}` is gated behind the `{}` permission. Open Settings (gear icon) and toggle it on.",
+        tool, permission
+    );
+    eprintln!("[Remote agent] tool `{}` blocked: missing permission `{}`", tool, permission);
+    let body = serde_json::json!({
+        "error": msg,
+        "permission": permission,
+        "needs_permission": true,
+    });
+    Json(body).into_response()
 }
 
 // ─── Mobile chat event (mirror messages to desktop) ───
@@ -783,7 +835,15 @@ async fn mobile_landing() -> Html<String> {
   --radius:2px;--radius-md:6px;--radius-lg:10px;
   --safe-top:env(safe-area-inset-top,0px);--safe-bottom:env(safe-area-inset-bottom,0px);
 }
-html,body{height:100%;overflow:hidden}
+/* Viewport units: `dvh` (dynamic viewport height) tracks iOS / Android
+   keyboard open/close automatically. `svh` stays at the small state
+   (keyboard open) permanently as a fallback if dvh isn't supported.
+   Without this the old `height:100%` left the keyboard pushing the
+   whole chat up past the top edge. */
+html,body{height:100dvh;overflow:hidden}
+@supports not (height: 100dvh){
+  html,body{height:100vh}
+}
 body{font-family:system-ui,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;background:var(--surface);color:var(--text-primary);display:flex;flex-direction:column}
 #app{flex:1;display:flex;flex-direction:column;min-height:0;overflow:hidden;position:relative}
 /* Bug #5: inline SVG icons in place of Material Symbols font. The span
@@ -994,6 +1054,13 @@ button{-webkit-appearance:none;appearance:none}
 .agent-step-summary{font-size:0.66rem;color:rgba(255,255,255,0.55);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:2;min-width:0}
 .agent-step-chev{font-size:15px;transition:transform 0.2s;color:var(--text-tertiary);flex-shrink:0}
 .agent-step.open .agent-step-chev{transform:rotate(180deg)}
+/* Live-running step: subtle pulsing accent stripe on the left edge so the
+   user can see that this step is still in flight (model thinking, tool
+   running, etc.). Disappears the moment the step finalises. */
+.agent-step.live{position:relative}
+.agent-step.live::before{content:'';position:absolute;left:0;top:0;bottom:0;width:2px;background:linear-gradient(180deg,var(--accent),transparent);animation:agent-live-pulse 1.2s ease-in-out infinite}
+@keyframes agent-live-pulse{0%,100%{opacity:0.35}50%{opacity:1}}
+.agent-step.live .agent-step-icon{animation:agent-live-pulse 1.2s ease-in-out infinite}
 .agent-step-content{display:none;padding:4px 12px 10px;line-height:1.5;white-space:pre-wrap;word-wrap:break-word;overflow-wrap:anywhere;font-size:0.7rem;border-top:1px solid rgba(255,255,255,0.04)}
 .agent-step.open .agent-step-content{display:block}
 .agent-step-content code{background:rgba(0,0,0,0.35);padding:1px 4px;border-radius:var(--radius);font-size:0.66rem;font-family:ui-monospace,Menlo,monospace}
@@ -1024,7 +1091,11 @@ button{-webkit-appearance:none;appearance:none}
 @keyframes cursor-blink{0%,100%{opacity:1}50%{opacity:0}}
 
 /* ── Input bar (enlarged per request) ── */
-.input-bar{flex-shrink:0;padding:10px 12px 14px;padding-bottom:max(14px,var(--safe-bottom));background:var(--surface);border-top:1px solid rgba(255,255,255,0.04)}
+/* `--kb-height` is 0 when the keyboard is closed, > 0 when open. The
+   input bar lifts above the keyboard automatically; the chat area's
+   flex:1 makes it naturally shrink to fill the remaining space, so the
+   latest message stays visible instead of hiding behind the keys. */
+.input-bar{flex-shrink:0;padding:10px 12px 14px;padding-bottom:calc(max(14px, var(--safe-bottom)) + var(--kb-height, 0px));background:var(--surface);border-top:1px solid rgba(255,255,255,0.04)}
 .img-preview-row{display:flex;flex-wrap:wrap;gap:6px;padding:0 0 8px}
 .img-preview{position:relative;width:52px;height:52px;border-radius:var(--radius-md);overflow:hidden;background:var(--container-high);flex-shrink:0}
 .img-preview img{width:100%;height:100%;object-fit:cover;display:block}
@@ -1044,6 +1115,42 @@ button{-webkit-appearance:none;appearance:none}
 .send-btn:disabled{opacity:0.3}
 .send-btn:active{opacity:0.85}
 .send-btn .material-symbols-outlined{font-size:20px}
+/* Cancel state: while a stream or agent run is active the same button
+   switches to a muted red so the user can kill the request with one tap. */
+.send-btn.cancel{background:rgba(239,68,68,0.18);color:#fca5a5;border:1px solid rgba(239,68,68,0.35)}
+.send-btn.cancel:active{background:rgba(239,68,68,0.28)}
+
+/* ── Code block (Bug #4: collapsed by default + parity with desktop CodeBlock.tsx) ── */
+.cb-wrap{margin:8px 0;border:1px solid rgba(255,255,255,0.08);border-radius:var(--radius-md);background:rgba(0,0,0,0.4);overflow:hidden;max-width:100%}
+.cb-head{display:flex;align-items:center;justify-content:space-between;gap:6px;padding:5px 10px;background:rgba(255,255,255,0.04);border-bottom:1px solid rgba(255,255,255,0.06)}
+.cb-lang{font-size:0.58rem;color:var(--text-tertiary);font-family:ui-monospace,Menlo,monospace;letter-spacing:0.04em;text-transform:uppercase}
+.cb-actions{display:flex;align-items:center;gap:4px}
+.cb-action{display:flex;align-items:center;gap:3px;background:none;border:none;color:var(--text-tertiary);cursor:pointer;padding:3px 6px;border-radius:var(--radius);font-family:inherit;font-size:0.55rem;letter-spacing:0.06em;text-transform:uppercase;font-weight:600;transition:color 0.15s,background 0.15s}
+.cb-action:active{color:var(--primary);background:rgba(255,255,255,0.06)}
+.cb-action .material-symbols-outlined{font-size:13px}
+.cb-pre{margin:0;padding:8px 10px;overflow-x:auto;font-size:0.74rem;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;color:rgba(255,255,255,0.86);line-height:1.55;background:transparent;white-space:pre;border:none;border-radius:0}
+.cb-pre code{background:none;padding:0;border:none;font-size:inherit;color:inherit}
+.cb-toggle{width:100%;display:flex;align-items:center;justify-content:center;gap:5px;padding:5px;background:rgba(255,255,255,0.04);border:none;border-top:1px solid rgba(255,255,255,0.06);color:var(--text-tertiary);cursor:pointer;font-family:inherit;font-size:0.55rem;letter-spacing:0.08em;text-transform:uppercase;font-weight:600;transition:color 0.15s,background 0.15s}
+.cb-toggle:active{color:var(--primary);background:rgba(255,255,255,0.08)}
+.cb-toggle .cb-chev{font-size:13px;transition:transform 0.2s}
+.cb-wrap.open .cb-toggle .cb-chev{transform:rotate(180deg)}
+
+/* ── HTML preview overlay (Feature #8) ── */
+.html-preview-overlay{position:fixed;inset:0;z-index:300;background:rgba(0,0,0,0.7);-webkit-backdrop-filter:blur(4px);backdrop-filter:blur(4px);display:flex;flex-direction:column;animation:fadeIn 0.15s ease-out;padding-top:var(--safe-top);padding-bottom:var(--safe-bottom)}
+.html-preview-shell{margin:auto;width:min(96vw,820px);height:min(82vh,720px);background:var(--container);border:1px solid rgba(255,255,255,0.08);border-radius:var(--radius-md);display:flex;flex-direction:column;overflow:hidden;animation:slideUp 0.22s cubic-bezier(0.16,1,0.3,1)}
+.html-preview-header{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px 14px;background:var(--container-low);border-bottom:1px solid rgba(255,255,255,0.06);flex-shrink:0}
+.html-preview-title{display:flex;align-items:center;gap:6px;font-size:0.66rem;font-weight:600;letter-spacing:0.12em;text-transform:uppercase;color:var(--text-secondary)}
+.html-preview-title .material-symbols-outlined{font-size:14px;color:var(--accent)}
+.html-preview-actions{display:flex;align-items:center;gap:4px}
+.html-preview-action{background:none;border:none;color:var(--text-secondary);cursor:pointer;width:32px;height:32px;display:flex;align-items:center;justify-content:center;border-radius:var(--radius);transition:background 0.15s}
+.html-preview-action:active{background:var(--container-high);color:var(--primary)}
+.html-preview-action .material-symbols-outlined{font-size:18px}
+.html-preview-frame{flex:1;width:100%;border:none;background:#ffffff;display:block}
+
+/* Settings button "permission needs attention" pulse — Bug #1 hint. */
+.settings-btn.perm-gap{border-color:var(--accent);color:var(--accent)}
+.settings-btn.perm-gap::before{content:'';display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--accent);margin-right:6px;animation:perm-pulse 1.4s ease-in-out infinite}
+@keyframes perm-pulse{0%,100%{opacity:0.4}50%{opacity:1}}
 </style>
 </head>
 <body>
@@ -1073,15 +1180,30 @@ button{-webkit-appearance:none;appearance:none}
     logout:'<path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>',
     extension:'<path d="M20 12V8h-4a2 2 0 10-4 0H8v4a2 2 0 110 4v4h4a2 2 0 104 0h4v-4a2 2 0 110-4z"/>',
     auto_awesome:'<path d="M12 3l1.8 4.2L18 9l-4.2 1.8L12 15l-1.8-4.2L6 9l4.2-1.8z"/><path d="M19 13l.9 2.1L22 16l-2.1.9L19 19l-.9-2.1L16 16l2.1-.9z"/>',
-    psychology:'<path d="M9 21c0-2 1-3 1-5 0-1-1-2-2-2a4 4 0 01-4-4V8a5 5 0 0110 0v1c1 0 2 1 2 2 0 1-1 2-1 3 1 0 2 1 2 2v2h-2v3"/>',
-    psychology_alt:'<path d="M9 21c0-2 1-3 1-5 0-1-1-2-2-2a4 4 0 01-4-4V8a5 5 0 0110 0v1c1 0 2 1 2 2 0 1-1 2-1 3 1 0 2 1 2 2v2h-2v3"/><circle cx="12" cy="9" r="0.8" fill="currentColor"/>',
+    // Bug #7: redesigned thinking icon — proper Lucide Brain glyph (parity
+    // with desktop ThinkingBlock.tsx which imports Brain from lucide-react).
+    // The old psychology / psychology_alt SVGs looked like a half-drawn head;
+    // the new Brain has two clear hemispheres so the meaning reads at 20px.
+    brain:'<path d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z"/><path d="M12 5a3 3 0 1 1 5.997.125 4 4 0 0 1 2.526 5.77 4 4 0 0 1-.556 6.588A4 4 0 1 1 12 18Z"/><path d="M9 13a4.5 4.5 0 0 0 3-4 4.5 4.5 0 0 0 3 4"/>',
+    // Aliases — old call sites (psychology / psychology_alt) keep working
+    // by mapping to the same Brain glyph so we don't have to rewrite every
+    // string template that uses them. The redesign comment above stays
+    // accurate: there is now exactly one mental-icon shape on mobile.
+    psychology:'<path d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z"/><path d="M12 5a3 3 0 1 1 5.997.125 4 4 0 0 1 2.526 5.77 4 4 0 0 1-.556 6.588A4 4 0 1 1 12 18Z"/><path d="M9 13a4.5 4.5 0 0 0 3-4 4.5 4.5 0 0 0 3 4"/>',
+    psychology_alt:'<path d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z"/><path d="M12 5a3 3 0 1 1 5.997.125 4 4 0 0 1 2.526 5.77 4 4 0 0 1-.556 6.588A4 4 0 1 1 12 18Z"/><path d="M9 13a4.5 4.5 0 0 0 3-4 4.5 4.5 0 0 0 3 4"/>',
+    // smart_toy = our agent icon (kept across all states — see Bug #6).
     smart_toy:'<rect x="3" y="11" width="18" height="10" rx="2"/><circle cx="12" cy="5" r="2"/><line x1="12" y1="7" x2="12" y2="11"/><circle cx="8.5" cy="16" r="1" fill="currentColor"/><circle cx="15.5" cy="16" r="1" fill="currentColor"/>',
     stop:'<rect x="6" y="6" width="12" height="12" rx="1"/>',
     pencil:'<path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/>',
     refresh:'<polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10"/><path d="M20.49 15A9 9 0 015.64 18.36L1 14"/>',
     tune:'<line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/>',
     trash:'<polyline points="3 6 5 6 21 6"/><path d="M19 6l-2 14a2 2 0 01-2 2H9a2 2 0 01-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2"/>',
-    delete_sweep:'<polyline points="3 6 5 6 21 6"/><path d="M19 6l-2 14a2 2 0 01-2 2H9a2 2 0 01-2-2L5 6"/>'
+    delete_sweep:'<polyline points="3 6 5 6 21 6"/><path d="M19 6l-2 14a2 2 0 01-2 2H9a2 2 0 01-2-2L5 6"/>',
+    // Feature #8: HTML preview chip glyphs.
+    play_arrow:'<polygon points="6 3 20 12 6 21 6 3" fill="currentColor"/>',
+    open_in_new:'<path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/>',
+    code_brackets:'<polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/>',
+    eye:'<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>'
   };
   function svgIcon(name){return ICONS[name] ? ICON_SVG_OPEN + ICONS[name] + ICON_SVG_CLOSE : '';}
   // Expose for inline handlers (rare path, but keeps symmetry with prev API)
@@ -1105,11 +1227,64 @@ button{-webkit-appearance:none;appearance:none}
   // are NOT exposed here — user explicitly asked for permissions only.
   var remotePerms = { filesystem: false, downloads: false, process_control: false };
 
-  // ── Codex prompt (mobile-adapted, no tool execution) ──
-  var CODEX_PROMPT = 'You are Codex, a coding-focused assistant. Provide clean, efficient, well-commented code and clear explanations. Prefer showing code over prose. Focus on correctness, readability, and best practices. Be concise. When the user asks about files, explain what changes you would make without claiming to have executed them — the mobile client cannot run tools.';
+  // ── Codex prompt (agentic on mobile) ──
+  // Codex on mobile now runs the same ReAct agent loop as desktop Codex:
+  // tool calls via the per-chat `~/agent-workspace/<chatId>/` folder,
+  // with live Thought/Action/Observation cards streamed into the chat.
+  // The old "you can't run tools" text was from v2.3.3 before the mobile
+  // bridge could actually execute them.
+  var CODEX_PROMPT = 'You are Codex, an autonomous coding agent inside Locally Uncensored. You execute coding tasks end-to-end by reading files, writing code, and running shell commands. You MUST use tools — never guess file contents.\n\nAUTONOMY CONTRACT (read carefully):\n- You are expected to COMPLETE multi-step tasks without the user prompting between steps.\n- NEVER say \"Now I will create X\" or \"Next I\'ll write Y\" as plain text and then stop. That is a FAILURE.\n- When your plan has N steps, execute ALL N steps in one session — each step as a concrete tool call.\n- The ONLY reasons to finish without calling another tool are: (a) the task is truly complete, or (b) you are stuck and need user input.\n\nWorkflow:\n1. Understand the task\n2. Explore (file_list, file_read, file_search)\n3. Plan changes\n4. Implement (file_write) — chain ALL writes without stopping\n5. Only THEN write a short summary of what you did\n\nRules:\n- Always read a file before modifying it\n- Chain tool calls: after each tool result, if there is another step left, IMMEDIATELY call the next tool\n- If a command fails, diagnose and retry — don\'t hand back to the user unless truly stuck\n- Be concise in text. All the work happens in tool calls.\n- Respond in the same language the user uses.';
 
   // ── Thinking-compatible prefixes (parity with desktop) ──
-  var THINKING_COMPATIBLE = ['qwq','deepseek-r1','qwen3','qwen3.5','qwen3-coder','gemma3','gemma4'];
+  var THINKING_COMPATIBLE = ['qwq','deepseek-r1','qwen3.6','qwen3','qwen3.5','qwen3-coder','gemma3','gemma4'];
+
+  // ── Plain-text planner models — Gemma 3/4 ──
+  // Bug fix parity with desktop entry #80: Gemma 3/4 with `think:false`
+  // emits PLAIN-TEXT structured planning ("Plan:" / "Constraint Checklist:"
+  // / "Confidence Score:" / "Self-Correction during drafting:") that no
+  // tag-stripper can clean. The working escape hatch is to NOT send the
+  // explicit `think:false` to Ollama for these — let Ollama's default
+  // tagged thinking kick in, then strip the tags via stripNonCanonicalTags
+  // below. Same trade-off as desktop: hidden token spend, clean answer.
+  var PLAIN_TEXT_PLANNER_PREFIXES = ['gemma3','gemma4'];
+  function isPlainTextPlanner(modelName){
+    if(!modelName) return false;
+    var n = String(modelName).toLowerCase()
+      .replace(/^[^/]+\//,'')
+      .replace(/:.*$/,'')
+      .replace(/-abliterated/g,'')
+      .replace(/-uncensored/g,'')
+      .replace(/-heretic/g,'');
+    for(var i=0;i<PLAIN_TEXT_PLANNER_PREFIXES.length;i++){
+      if(n.indexOf(PLAIN_TEXT_PLANNER_PREFIXES[i])===0) return true;
+    }
+    return false;
+  }
+
+  // ── Universal thinking-tag stripper (mobile port of
+  //    src/lib/thinking-stripper.ts). The canonical char-state-machine
+  //    in pushChunkContent only handles `<think>…</think>`. This catches
+  //    the non-canonical formats Gemma / GPT-OSS / DeepSeek-distill emit:
+  //    <|channel|>thought, <thought>, <reasoning>, <reflect>, <deepthink>.
+  //    Stripping happens AFTER content is in the bubble so the user never
+  //    sees a "Plan:" preamble. ──
+  function stripNonCanonicalTags(text){
+    if(!text) return '';
+    var out = text;
+    // Gemma channel marker: <|channel|>thought OR <|channel|>reasoning…
+    out = out.replace(/<\|channel\|>[\s\S]*?<\|message\|>/gi, '');
+    // Wrapped variants (closing tags use the same name).
+    out = out.replace(/<thought>[\s\S]*?<\/thought>/gi, '');
+    out = out.replace(/<reasoning>[\s\S]*?<\/reasoning>/gi, '');
+    out = out.replace(/<reflect>[\s\S]*?<\/reflect>/gi, '');
+    out = out.replace(/<deepthink>[\s\S]*?<\/deepthink>/gi, '');
+    out = out.replace(/<analysis>[\s\S]*?<\/analysis>/gi, '');
+    // Orphan opener (model emits opening tag but never closes — e.g. cut
+    // off mid-thought). Treat the rest of the buffer as discarded thought.
+    var openMatch = /<thought>|<reasoning>|<reflect>|<deepthink>|<analysis>|<\|channel\|>/i.exec(out);
+    if(openMatch){ out = out.slice(0, openMatch.index); }
+    return out;
+  }
 
   // ── Built-in personas (mobile parity) ──
   var PERSONAS = [
@@ -1147,6 +1322,9 @@ button{-webkit-appearance:none;appearance:none}
   var streaming = false;
   var abortCtrl = null;
   var pendingImages = []; // [{data: base64, mimeType, name}]
+  // Thinking toggle removed from mobile — see renderShell() comment.
+  // Hardcoded false so every "is thinking on?" call site sees the same
+  // answer and the stripper drops reasoning tokens silently.
   var thinking = false;
   var drawerOpen = false;
   // Agent mode is per-chat; toggled via the brain icon next to Plugins.
@@ -1154,116 +1332,206 @@ button{-webkit-appearance:none;appearance:none}
   var agentRunning = false;
   var agentAbort = false;
 
-  // ── Agent tools (parity with src/api/agents.ts AGENT_TOOLS) ──
-  // Full parity with desktop toolRegistry (src/api/mcp/builtin-tools.ts).
-  // Every tool the desktop agent has, the mobile agent has too.
+  // ── Agent tools (parity with src/api/mcp/builtin-tools.ts) ──
+  // Descriptions kept tight-matched with the desktop BUILTIN_TOOLS so the
+  // same model behaviour follows us onto mobile. Tests in
+  // src/api/__tests__/tool-description-parity.test.ts pin this parity.
   var AGENT_TOOLS = [
-    {name:'web_search', description:'Search the web. Returns a LIST of candidate results (title + URL + short snippet). The snippet is rarely enough — follow up with web_fetch on the best URL to read the page body.',
-     parameters:[{name:'query',type:'string',description:'Search query',required:true},
-                 {name:'maxResults',type:'number',description:'Max results (default 5)',required:false}]},
-    {name:'web_fetch', description:'Fetch a URL and return its readable text (up to ~24 000 chars). HTML stripped, scripts/nav/footer removed. Use AFTER web_search for real page content.',
-     parameters:[{name:'url',type:'string',description:'Full URL (http:// or https://)',required:true}]},
-    {name:'file_read', description:'Read a file from the desktop filesystem. Relative paths resolve inside the agent workspace (~/agent-workspace); absolute paths work too.',
-     parameters:[{name:'path',type:'string',description:'File path',required:true}]},
-    {name:'file_write', description:'Write content to a file on the desktop. Creates or overwrites.',
-     parameters:[{name:'path',type:'string',description:'File path',required:true},
-                 {name:'content',type:'string',description:'Content to write',required:true}]},
-    {name:'file_list', description:'List files in a directory on the desktop. Optional recursive + glob pattern.',
-     parameters:[{name:'path',type:'string',description:'Directory path',required:true},
-                 {name:'recursive',type:'boolean',description:'Recurse into subdirs',required:false},
-                 {name:'pattern',type:'string',description:'Glob pattern (e.g. "*.ts")',required:false}]},
-    {name:'file_search', description:'Grep-style content search across files matching a glob. Returns matching lines with file/line info.',
-     parameters:[{name:'path',type:'string',description:'Root directory',required:true},
-                 {name:'query',type:'string',description:'Regex pattern',required:true},
-                 {name:'pattern',type:'string',description:'Glob to filter files (e.g. "*.rs")',required:false}]},
-    {name:'shell_execute', description:'Run a shell command. Uses PowerShell on Windows, bash on Unix. Best for quick system queries like `date`, `dir`, `ls`, `git status`, `ping`, etc.',
-     parameters:[{name:'command',type:'string',description:'The command',required:true},
-                 {name:'cwd',type:'string',description:'Working directory (optional)',required:false},
-                 {name:'timeout',type:'number',description:'Timeout ms (default 120000)',required:false},
-                 {name:'shell',type:'string',description:'"powershell" | "cmd" | "bash" (auto-detect if unset)',required:false}]},
-    {name:'code_execute', description:'Execute Python code in a sandboxed process. Use for calculations / data transforms / quick scripts.',
-     parameters:[{name:'code',type:'string',description:'Python code',required:true},
-                 {name:'timeout',type:'number',description:'Timeout ms',required:false}]},
-    {name:'system_info', description:'OS, CPU, RAM, GPU, disk. Zero arguments.',
+    {name:'web_search', description:'Search the web via the configured provider (Brave, Tavily, or auto). Returns a ranked list of {title, url, snippet}. PREFER web_fetch on promising URLs for full content — snippets are teasers, not answers. DO NOT call more than 3x per turn with similar queries; refine the query instead of re-searching. For current date/time, use get_current_time — do NOT web_search for it.',
+     parameters:[{name:'query',type:'string',description:'The search query string',required:true},
+                 {name:'maxResults',type:'number',description:'Maximum results to return (default: 5, max: 20)',required:false}]},
+    {name:'web_fetch', description:'Fetch a single URL and return its readable text (up to ~24 000 chars). Strips <script>, <style>, <nav>, <header>, <footer>, <aside>, <form> — returns main content only. PREFER this over web_search when you already know the target URL. NEVER call with localhost, private IPs (10.*, 192.168.*, 172.16-31.*), or file:// — they are refused. If response is empty or 4xx, try a different URL rather than retrying the same one.',
+     parameters:[{name:'url',type:'string',description:'Full URL including protocol (http:// or https://)',required:true},
+                 {name:'maxLength',type:'number',description:'Max chars to return (default: 24000)',required:false}]},
+    {name:'file_read', description:'Read the complete contents of a file. PREFER absolute paths; relative paths resolve against the agent workspace (~/agent-workspace). The entire file is returned — there is no pagination or range parameter. DO NOT re-read a file you just wrote with file_write; the write response already confirmed the save. For directory listings use file_list; for content search across many files use file_search.',
+     parameters:[{name:'path',type:'string',description:'Path to the file (absolute preferred)',required:true}]},
+    {name:'file_write', description:'Write a file. Creates parent directories if missing. OVERWRITES existing content — there is NO append mode. To preserve existing content and append, use file_read FIRST then file_write with the combined content. PREFER absolute paths. Writes to the same path within one turn are serialized automatically via the sideEffectKey scheduler.',
+     parameters:[{name:'path',type:'string',description:'Path to the file (absolute preferred)',required:true},
+                 {name:'content',type:'string',description:'The complete new content of the file',required:true}]},
+    {name:'file_list', description:'List directory contents. Returns entries with name, isDir, size, full path. Supports recursive=true for full tree and glob pattern ("*.ts", "**/*.py"). PREFER a specific pattern over recursive listing of large trees — recursing home / C:\\ is slow. For content search (grep), use file_search instead.',
+     parameters:[{name:'path',type:'string',description:'Directory path to list',required:true},
+                 {name:'recursive',type:'boolean',description:'Recurse into subdirectories (default: false)',required:false},
+                 {name:'pattern',type:'string',description:'Glob pattern to filter results (e.g. "*.ts", "**/*.py")',required:false}]},
+    {name:'file_search', description:'Grep-style regex content search across files in a directory. Returns matching lines with file + line number. PREFER over file_read + manual scan when hunting for a symbol across many files. Use file_list first if you do not know the layout. Default max 50 results — narrow the pattern or path if you flood. Pattern uses Rust regex syntax, not PCRE.',
+     parameters:[{name:'path',type:'string',description:'Directory to search in (recursive by default)',required:true},
+                 {name:'pattern',type:'string',description:'Regex pattern to search for',required:true},
+                 {name:'maxResults',type:'number',description:'Maximum matching files (default: 50)',required:false}]},
+    {name:'shell_execute', description:'Run a shell command. PowerShell on Windows, bash on Unix. Returns stdout, stderr, exit code. PREFER dedicated tools where available: file_read over `cat`, file_list over `ls`/`dir`, file_search over `grep`, get_current_time over `date`. Use shell_execute for git, npm, cargo, docker, package managers, or platform utilities without a dedicated tool. NEVER use to permanently delete without confirmation (rm -rf, Remove-Item -Recurse, git reset --hard). Default timeout 120 s; set higher only for known long-running builds.',
+     parameters:[{name:'command',type:'string',description:'The full command to execute',required:true},
+                 {name:'cwd',type:'string',description:'Working directory (optional, absolute preferred)',required:false},
+                 {name:'timeout',type:'number',description:'Timeout in milliseconds (default: 120000)',required:false},
+                 {name:'shell',type:'string',description:'Override shell: "powershell" | "cmd" | "bash" (default: auto)',required:false}]},
+    {name:'code_execute', description:'Execute Python code in a fresh subprocess. Returns stdout, stderr, exit code. Use for math, data transforms, JSON/CSV parsing, one-off scripts. NOT a REPL — state does not persist between calls; import everything you need each time. For system commands and shell utilities, PREFER shell_execute. Default timeout 30 s.',
+     parameters:[{name:'code',type:'string',description:'The Python source to execute (UTF-8)',required:true},
+                 {name:'language',type:'string',description:'Programming language: "python" or "shell"',required:false}]},
+    {name:'system_info', description:'Return desktop system info: OS, architecture, hostname, username, total RAM, CPU count. Zero arguments. Call once when output needs to be tailored to the user\'s platform; do not call repeatedly in a loop.',
      parameters:[]},
-    {name:'process_list', description:'List running processes with PID, name, CPU%, memory. Zero arguments.',
+    {name:'process_list', description:'List the top 30 running processes sorted by memory: {name, pid, memory, cpu%}. Zero arguments. Use for task-manager-style queries ("is Chrome running?", "which process is eating RAM?"). There is NO process_kill tool — to kill a process use shell_execute with taskkill (Windows) or kill (Unix).',
      parameters:[]},
-    {name:'screenshot', description:'Take a desktop screenshot and return a base64-encoded PNG.',
+    {name:'screenshot', description:'Capture the primary display as a base64 PNG. Zero arguments. USE for visual verification when the user asks "what\'s on my screen" or "look at X". Returns a short summary string (size + filename); the actual image is forwarded to the model via message content. NEVER call in a tight loop — screenshots are expensive and privacy-sensitive.',
      parameters:[]},
-    {name:'image_generate', description:'Generate an image from a text prompt via the desktop ComfyUI backend. Blocks up to 5 minutes.',
-     parameters:[{name:'prompt',type:'string',description:'What to generate',required:true},
-                 {name:'negativePrompt',type:'string',description:'Things to avoid',required:false}]},
-    {name:'get_current_time', description:'Return the current local date, time and timezone on the desktop. Use this FIRST for any "what day / time / date is it" question — do NOT web_search for it.',
+    {name:'image_generate', description:'Generate an image from a text prompt via the local ComfyUI pipeline. Blocks up to 5 minutes. USE for "draw me", "make an image of", "generate a picture". NOT for photo editing — this is text-to-image only; no inpainting via this tool. First installed image model is auto-selected. Rate-limit yourself to 1 call per turn — ComfyUI serializes generations internally so parallel calls will queue, not speed up.',
+     parameters:[{name:'prompt',type:'string',description:'Positive text description of the desired image',required:true},
+                 {name:'negativePrompt',type:'string',description:'Things to avoid (blurry, deformed, etc.)',required:false}]},
+    {name:'get_current_time', description:'Return the user\'s current local date, time, and timezone. Zero arguments. USE FIRST for any \'what day / time / date is it\' question — do NOT web_search or shell_execute `date`. The Rust backend probes the OS timezone on every call, so this is always authoritative.',
      parameters:[]}
   ];
 
-  function buildReActPrompt(goal, history){
-    var toolDescs = AGENT_TOOLS.map(function(t){
-      var params = t.parameters.map(function(p){
-        return '    - '+p.name+' ('+p.type+(p.required?', required':', optional')+'): '+p.description;
-      }).join('\n');
-      return '  '+t.name+': '+t.description+'\n  Parameters:\n'+params;
-    }).join('\n\n');
-    var historyText = history.map(function(e){
-      switch(e.type){
-        case 'thought': return 'Thought: '+e.content;
-        case 'action': return 'Action: '+e.content;
-        case 'observation': return 'Observation: '+e.content;
-        case 'error': return 'Error: '+e.content;
-        case 'user_input': return 'User: '+e.content;
-        default: return e.content;
+  // ── Tool-set constants ──
+  var CODEX_TOOLS = ['file_read','file_write','file_list','file_search','shell_execute','code_execute','system_info','get_current_time','web_search','web_fetch'];
+  var AGENT_ALL_TOOLS = AGENT_TOOLS.map(function(t){return t.name;});
+
+  // Convert the flat AGENT_TOOLS array into Ollama's native tools schema.
+  // `toolNames` is a whitelist — only tools whose name appears in it are
+  // included. Returns [{type:'function', function:{name, description,
+  // parameters:{type:'object', properties:{...}, required:[...]}}}].
+  function buildToolDefs(toolNames){
+    var out = [];
+    for(var i=0;i<AGENT_TOOLS.length;i++){
+      var t = AGENT_TOOLS[i];
+      if(toolNames.indexOf(t.name) === -1) continue;
+      var props = {};
+      var req = [];
+      for(var j=0;j<t.parameters.length;j++){
+        var p = t.parameters[j];
+        props[p.name] = {type: p.type, description: p.description};
+        if(p.required) req.push(p.name);
       }
-    }).join('\n');
-    var open = '```' + 'json';
-    var close = '```';
-    return 'You are an autonomous AI agent. Your goal is: '+goal+'\n\n'+
-      'You have access to the following tools:\n\n'+toolDescs+'\n\n'+
-      'You must respond with a JSON object in one of these two formats:\n\n'+
-      'To use a tool:\n'+open+'\n{"thought": "your reasoning about what to do next", "action": "tool_name", "args": {"param1": "value1"}}\n'+close+'\n\n'+
-      'To finish the task:\n'+open+'\n{"thought": "your final reasoning", "action": "finish", "answer": "your final answer or summary of what was accomplished"}\n'+close+'\n\n'+
-      'Rules:\n- Always include a "thought" explaining your reasoning\n- Use exactly one action per response\n- Only use tools from the list above\n- If a tool returns an error, try a different approach\n- When the goal is accomplished, use the "finish" action\n- Be concise and efficient\n\n'+
-      (historyText ? '\nPrevious steps:\n'+historyText+'\n\nContinue from where you left off.' : 'Begin working on the goal now.');
+      out.push({
+        type: 'function',
+        function: {
+          name: t.name,
+          description: t.description,
+          parameters: {type:'object', properties: props, required: req}
+        }
+      });
+    }
+    return out;
   }
 
-  function parseAgentResponse(response){
-    var codeBlockMatch = response.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/);
-    var candidate = codeBlockMatch ? codeBlockMatch[1] : response;
-    var jsonMatch = candidate.match(/\{[\s\S]*\}/);
-    if(jsonMatch){
-      try{
-        var p = JSON.parse(jsonMatch[0]);
-        return {
-          thought: p.thought || p.thinking || p.reasoning || '',
-          action: String(p.action || p.tool || 'continue').toLowerCase().trim(),
-          args: p.args || p.arguments || p.parameters || p.input || {},
-          answer: p.answer || p.final_answer || p.response
-        };
-      }catch(_){}
+  // Strip <think>...</think> tags from content. If keepThinking is true,
+  // capture inner text into the returned `thinking` field; otherwise
+  // discard it. Also handles Ollama's native `thinking` field.
+  function stripThinkTags(content, keepThinking){
+    var think = '';
+    // Handle inline <think>...</think> tags (may be multiple)
+    var cleaned = String(content || '').replace(/<think>([\s\S]*?)<\/think>/g, function(_, inner){
+      if(keepThinking && inner) think = think ? think+'\n'+inner : inner;
+      return '';
+    });
+    // Strip non-canonical reasoning tags too
+    cleaned = stripNonCanonicalTags(cleaned).trim();
+    return {content: cleaned, thinking: think};
+  }
+
+  // Non-streaming POST to /api/chat with native `tools` array.
+  // Returns a Promise that resolves to {content, thinking, toolCalls}.
+  // `apiMessages` = [{role, content, ...}], `tools` = Ollama tool defs.
+  function nativeToolChat(apiMessages, tools){
+    var body = {
+      model: currentModel,
+      messages: apiMessages,
+      tools: tools,
+      stream: false,
+      options: {num_gpu: 99, num_predict: 16384}
+    };
+    // Tri-state think flag — same logic as _doSend.
+    if(isThinkingCompatible(currentModel)){
+      if(thinking){
+        body.think = true;
+      } else if(!isPlainTextPlanner(currentModel)){
+        body.think = false;
+      }
     }
-    return {thought: String(response).slice(0,500), action: 'continue', args: {}};
+
+    function doPost(b){
+      return fetch('/api/chat',{
+        method:'POST',
+        headers:{'Content-Type':'application/json','Authorization':'Bearer '+TOKEN},
+        body: JSON.stringify(b),
+        signal: abortCtrl ? abortCtrl.signal : undefined
+      });
+    }
+
+    return doPost(body).then(function(r){
+      if(r.status===401){ clearAuthAndReload(); throw new Error('401'); }
+      if(!r.ok){
+        if(r.status===400 && ('think' in body)){
+          var retry = {}; for(var k in body) retry[k]=body[k]; delete retry.think;
+          return doPost(retry).then(function(rr){
+            if(!rr.ok) return rr.text().then(function(t){throw new Error('HTTP '+rr.status+': '+t);});
+            return rr.json();
+          });
+        }
+        return r.text().then(function(t){
+          // Detect "model does not support tools" errors
+          if(t.indexOf('does not support tools') >= 0 || t.indexOf('does not support tool') >= 0){
+            throw new Error('TOOLS_NOT_SUPPORTED');
+          }
+          throw new Error('HTTP '+r.status+': '+t);
+        });
+      }
+      return r.json();
+    }).then(function(data){
+      var msg = data.message || {};
+      var rawContent = msg.content || '';
+      var rawThinking = msg.thinking || '';
+      var toolCalls = [];
+      if(Array.isArray(msg.tool_calls)){
+        for(var i=0;i<msg.tool_calls.length;i++){
+          var tc = msg.tool_calls[i];
+          if(tc && tc.function){
+            toolCalls.push({function:{name:tc.function.name, arguments:tc.function.arguments || {}}});
+          }
+        }
+      }
+      return {content: rawContent, thinking: rawThinking, toolCalls: toolCalls};
+    });
   }
 
   // Run a single tool against the desktop via /remote-api/agent-tool.
-  // Returns a stringified observation suitable for the next ReAct turn.
+  // Returns a stringified observation suitable for the next loop turn.
+  // The Rust bridge returns 200 OK with {error:"..."} for every failure
+  // (missing arg, permission, underlying tool error). We surface those
+  // as clean observations instead of "HTTP 500: ..." red errors.
   function runAgentTool(tool, args){
     return fetch('/remote-api/agent-tool',{
       method:'POST',
       headers:{'Content-Type':'application/json','Authorization':'Bearer '+TOKEN},
-      body: JSON.stringify({tool:tool, args:args||{}})
+      // `chatId` → per-chat workspace on the desktop side. Each mobile
+      // chat gets its own isolated `~/agent-workspace/<chatId>/` folder
+      // so agents across chats don't trample each other's files.
+      body: JSON.stringify({tool:tool, args:args||{}, chatId: currentChatId || ''})
     }).then(function(r){
       if(r.status===401){ clearAuthAndReload(); return 'Auth required'; }
-      if(r.status===403){ return r.text().then(function(t){return 'Permission denied: '+t;}); }
       return r.text().then(function(text){
-        if(!r.ok) return 'Error '+r.status+': '+text;
-        try{
-          var data = JSON.parse(text);
+        // Try to parse JSON regardless of status — the new bridge always
+        // responds with a JSON body.
+        var data = null;
+        try{ data = JSON.parse(text); }catch(_){ /* leave null */ }
+
+        // Old-style HTTP errors (e.g. 400 from a malformed payload) — fall
+        // back to plain text so the agent still sees something useful.
+        if(!r.ok && !data){ return 'Error '+r.status+': '+text; }
+
+        if(data){
+          // Surface permission-denied with an actionable hint to enable it.
+          if(data.needs_permission){
+            // Give the user a one-tap path: bump the header plugins icon
+            // pulse so they know to open Settings → Permissions.
+            try{ window._flagPermissionGap && window._flagPermissionGap(data.permission); }catch(_){}
+            return 'Permission denied: '+data.error;
+          }
+          // Generic tool error — clean observation.
+          if(typeof data.error === 'string') return 'Error: '+data.error;
           if(typeof data === 'string') return data;
           // web_search returns {results:[{title,url,snippet},...]}
-          if(data && Array.isArray(data.results)){
+          if(Array.isArray(data.results)){
+            if(!data.results.length) return 'No results.';
             return data.results.map(function(it,i){return (i+1)+'. '+(it.title||'')+'\n   '+(it.url||'')+'\n   '+(it.snippet||'');}).join('\n\n');
           }
           // web_fetch returns {url, status, contentType, title, text, truncated}
-          if(data && typeof data.text === 'string' && (data.url || data.status !== undefined)){
+          if(typeof data.text === 'string' && (data.url || data.status !== undefined)){
             var parts = [];
             if(data.title) parts.push('Title: '+data.title);
             if(data.url) parts.push('URL: '+data.url);
@@ -1274,11 +1542,11 @@ button{-webkit-appearance:none;appearance:none}
             return parts.join('\n');
           }
           // file_read returns {content:"..."}
-          if(data && typeof data.content === 'string') return data.content;
+          if(typeof data.content === 'string') return data.content;
           // file_write returns {status:"saved", path:"..."}
-          if(data && data.status==='saved') return 'File saved: '+(data.path||args.path||'');
-          // code_execute returns {stdout, stderr, exitCode, timedOut}
-          if(data && (data.exitCode!==undefined || data.stdout!==undefined)){
+          if(data.status==='saved') return 'File saved: '+(data.path||args.path||'');
+          // code_execute / shell_execute returns {stdout, stderr, exitCode, timedOut}
+          if(data.exitCode!==undefined || data.stdout!==undefined){
             var out = data.stdout || '';
             var err = data.stderr || '';
             if(data.timedOut) return 'Execution timed out.';
@@ -1286,10 +1554,19 @@ button{-webkit-appearance:none;appearance:none}
             return out || (err ? 'stderr: '+err : 'Done.');
           }
           return JSON.stringify(data);
-        }catch(_){ return text; }
+        }
+        return text || 'Done.';
       });
     }).catch(function(e){ return 'Network error: '+(e && e.message || e); });
   }
+
+  // Highlights the Settings (cog) icon in the drawer when an agent tool
+  // got blocked by a permission. Best-effort — we just toggle a class so
+  // the user notices the dot. No-op if the drawer isn't mounted yet.
+  window._flagPermissionGap = function(_perm){
+    var sb = document.querySelector('.settings-btn');
+    if(sb){ sb.classList.add('perm-gap'); }
+  };
 
   function H(t){return String(t==null?'':t).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
   function el(id){return document.getElementById(id);}
@@ -1334,7 +1611,8 @@ button{-webkit-appearance:none;appearance:none}
         }
       }
       currentChatId = localStorage.getItem('lu-mobile-current-chat') || '';
-      thinking = localStorage.getItem('lu-mobile-thinking') === '1';
+      // `thinking` is always false now (UI toggle removed).
+      thinking = false;
     }catch(_){chats=[];currentChatId='';thinking=false;}
   }
   function persistChats(){
@@ -1343,7 +1621,6 @@ button{-webkit-appearance:none;appearance:none}
   function persistState(){
     try{
       localStorage.setItem('lu-mobile-current-chat', currentChatId);
-      localStorage.setItem('lu-mobile-thinking', thinking?'1':'0');
     }catch(_){}
   }
   function getCaveman(){var c=findChat(currentChatId); return c && c.caveman ? c.caveman : 'off';}
@@ -1464,6 +1741,30 @@ button{-webkit-appearance:none;appearance:none}
   }
 
   loadPersisted();
+
+  // ── Keyboard / viewport tracking ────────────────────────────────
+  // iOS Safari + some Android browsers do NOT resize `window.innerHeight`
+  // when the software keyboard opens. The page sits at full height behind
+  // the keyboard and the top of the chat scrolls off-screen. `dvh` CSS
+  // units fix most cases; for the holdouts we sync an explicit
+  // `--kb-height` custom prop and apply it as bottom-padding on the
+  // input bar so it never hides behind the keyboard.
+  (function setupViewportTracking(){
+    if(typeof window.visualViewport === 'undefined') return;
+    var vv = window.visualViewport;
+    function sync(){
+      // Height difference = keyboard + safe-area chrome on the bottom.
+      var kb = Math.max(0, (window.innerHeight || 0) - vv.height - vv.offsetTop);
+      document.documentElement.style.setProperty('--kb-height', kb + 'px');
+      // Also pin the scroll position to the bottom of the current chat
+      // when the keyboard animates in, so the latest message stays visible.
+      var cm = document.getElementById('chat-msgs');
+      if(cm && kb > 0){ cm.scrollTop = cm.scrollHeight; }
+    }
+    vv.addEventListener('resize', sync);
+    vv.addEventListener('scroll', sync);
+    sync();
+  })();
   Promise.all([authJson('/remote-api/config'), authJson('/api/tags')]).then(function(res){
     var cfg = res[0] || {};
     var tags = res[1] || {};
@@ -1485,20 +1786,35 @@ button{-webkit-appearance:none;appearance:none}
       msgs = Array.isArray(c.msgs) ? c.msgs.slice() : [];
     }
 
-    // Turn off thinking if incompatible
-    if(thinking && !isThinkingCompatible(currentModel)){ thinking = false; persistState(); }
-
     renderShell();
   });
 
   function renderShell(){
     var mode = getCurrentMode();
-    var modeTag = mode==='codex' ? '<span class="header-mode-tag">Codex</span>' :
+    var isCodex = mode === 'codex';
+    var modeTag = isCodex ? '<span class="header-mode-tag">Codex</span>' :
                   (getAgentEnabled() ? '<span class="header-mode-tag">Agent</span>' : '');
-    var thinkCls = !isThinkingCompatible(currentModel) ? 'disabled' : (thinking ? 'active' : '');
-    var thinkIcon = thinking ? 'psychology' : 'psychology_alt';
     var pluginsActive = (getCaveman()!=='off' || getPersonaEnabled()) ? ' active' : '';
     var agentActive = getAgentEnabled() ? ' active' : '';
+    // Agent icon STAYS smart_toy regardless of state. The button class
+    // flips to `active` (purple) while running, click routes to _stopAgent.
+    var agentClickHandler = agentRunning ? 'window._stopAgent()' : 'window._toggleAgent()';
+    var agentLabel = agentRunning ? 'Stop agent' : 'Agent';
+    var agentTitle = agentRunning ? 'Stop agent' : 'Agent mode (native tool calling)';
+    var agentBtnCls = agentRunning ? 'active' : agentActive.trim();
+    // Hidden in Codex chats (Codex on mobile is a coding-focused plain
+    // chat, no phone-side tool execution).
+    var agentBtn = isCodex ? '' :
+      ('<button class="icon-btn '+agentBtnCls+'" id="agent-btn" onclick="'+agentClickHandler+'" aria-label="'+agentLabel+'" title="'+agentTitle+'">'+
+         '<span class="material-symbols-outlined">'+svgIcon('smart_toy')+'</span>'+
+       '</button>');
+
+    // Thinking-toggle button REMOVED from mobile (user request): wasn't
+    // working reliably and confused users. Thinking is now fully handled
+    // under-the-hood: stripper silently drops any reasoning tokens regardless
+    // of whether the model emitted canonical <think> or non-canonical tags.
+    // The `thinking` variable stays as a constant `false` internally for the
+    // few code paths that still reference it.
 
     el('app').innerHTML =
       '<div class="app-shell">' +
@@ -1513,18 +1829,9 @@ button{-webkit-appearance:none;appearance:none}
             '<span class="model-name">'+H(currentModel || 'Select model')+'</span>' +
             '<span class="material-symbols-outlined chev">'+svgIcon('expand_more')+'</span>' +
           '</button>' +
-          (agentRunning
-            ? '<button class="icon-btn active" id="agent-btn" onclick="window._stopAgent()" aria-label="Stop agent" title="Stop agent">'+
-                '<span class="material-symbols-outlined">'+svgIcon('stop')+'</span>'+
-              '</button>'
-            : '<button class="icon-btn'+agentActive+'" id="agent-btn" onclick="window._toggleAgent()" aria-label="Agent" title="Agent mode (ReAct + tools)">'+
-                '<span class="material-symbols-outlined">'+svgIcon('smart_toy')+'</span>'+
-              '</button>') +
+          agentBtn +
           '<button class="icon-btn'+pluginsActive+'" id="plugins-btn" onclick="window._openPluginsPicker()" aria-label="Plugins">' +
             '<span class="material-symbols-outlined">'+svgIcon('extension')+'</span>' +
-          '</button>' +
-          '<button class="icon-btn '+thinkCls+'" id="think-btn" onclick="window._toggleThinking()" aria-label="Thinking">' +
-            '<span class="material-symbols-outlined">'+svgIcon(thinkIcon)+'</span>' +
           '</button>' +
         '</div>' +
         '<div class="chat-area" id="chat-area"></div>' +
@@ -1534,7 +1841,19 @@ button{-webkit-appearance:none;appearance:none}
             '<button class="attach-btn" id="attach-btn" onclick="window._triggerAttach()" aria-label="Attach file"><span class="material-symbols-outlined">'+svgIcon('attach_file')+'</span></button>' +
             '<input type="file" id="file-input" accept="image/*" multiple style="display:none">' +
             '<textarea id="msg-input" rows="1" placeholder="'+(getAgentEnabled()?'Give the agent a goal…':'Message...')+'"></textarea>' +
-            '<button class="send-btn" id="send-btn" onclick="window._doSend()" aria-label="Send"><span class="material-symbols-outlined">'+svgIcon('arrow_upward')+'</span></button>' +
+            // Send-Button flips to a red Stop chip while a response is
+            // in flight (streaming chat OR native tool loop). Without
+            // this the only "stop" control was hidden in the header,
+            // which users kept missing. Single id so CSS + handler both
+            // route to the right action.
+            (function(){
+              var busy = streaming || agentRunning;
+              var btnCls = busy ? 'send-btn cancel' : 'send-btn';
+              var handler = busy ? 'window._cancelSend()' : 'window._doSend()';
+              var label = busy ? 'Stop' : 'Send';
+              var icon = busy ? 'stop' : 'arrow_upward';
+              return '<button class="'+btnCls+'" id="send-btn" onclick="'+handler+'" aria-label="'+label+'" title="'+label+'"><span class="material-symbols-outlined">'+svgIcon(icon)+'</span></button>';
+            })() +
           '</div>' +
         '</div>' +
       '</div>' +
@@ -1625,7 +1944,6 @@ button{-webkit-appearance:none;appearance:none}
         if(name){
           currentModel = name;
           try{localStorage.setItem('lu-mobile-model', name);}catch(_){}
-          if(thinking && !isThinkingCompatible(currentModel)){ thinking=false; persistState(); }
           renderShell();
         }
         document.body.removeChild(overlay);
@@ -1711,6 +2029,9 @@ button{-webkit-appearance:none;appearance:none}
     var html = '<div class="chat-messages" id="chat-msgs">';
     for(var i=0;i<msgs.length;i++){
       var m = msgs[i];
+      // Skip hidden tool-call history (persisted for continue capability
+      // but not user-visible). The model sees them on the next turn.
+      if(m.hidden) continue;
       var isUser = m.role==='user';
       var isLast = i===msgs.length-1;
       var typingCls = (streaming && isLast && !isUser) ? ' msg-typing' : '';
@@ -1723,18 +2044,11 @@ button{-webkit-appearance:none;appearance:none}
         }
         html += '</div>';
       }
-      // Thinking block (assistant, collapsible) — rendered ABOVE the bubble
-      if(!isUser && m.thinking){
-        var openCls = m.thinkingOpen ? ' open' : '';
-        html += '<div class="think-block'+openCls+'">' +
-                  '<button class="think-toggle" onclick="window._toggleThink(\''+m.id+'\')">' +
-                    '<span class="material-symbols-outlined think-icon">'+svgIcon('psychology')+'</span>' +
-                    '<span class="think-label">Thinking</span>' +
-                    '<span class="material-symbols-outlined think-chev">'+svgIcon('expand_more')+'</span>' +
-                  '</button>' +
-                  '<div class="think-body">'+renderMd(m.thinking)+'</div>' +
-                '</div>';
-      }
+      // Thinking block never rendered on mobile — the toggle was removed
+      // (user request: "thinking toggle im Mobile ersetzt / rausgenommen").
+      // Any accidentally captured reasoning text lives in `m.thinking` but
+      // is NOT shown; the stripper drops incoming reasoning bytes at the
+      // source so `m.thinking` usually stays empty anyway.
       // Agent steps (transient, during / after a run). These stay visible
       // but they are NOT part of msg.content — so the next user turn does
       // not see the ReAct scaffolding and cannot drift into that style.
@@ -1744,16 +2058,19 @@ button{-webkit-appearance:none;appearance:none}
         html += '<div class="agent-steps">';
         for(var si=0; si<m.agentSteps.length; si++){
           var st = m.agentSteps[si];
-          var stIcon = st.type==='thought' ? 'psychology'
+          var stIcon = st.type==='thought' ? 'brain'
                      : st.type==='action' ? 'smart_toy'
                      : st.type==='observation' ? 'check'
                      : st.type==='error' ? 'close'
                      : 'auto_awesome';
           var openCls = st.open ? ' open' : '';
+          // Live = step is still in flight (model streaming its JSON, or
+          // the tool hasn't returned yet). Triggers the pulsing stripe CSS.
+          var liveCls = st.live ? ' live' : '';
           var summary = String(st.content||'').replace(/\s+/g,' ').slice(0, 80);
           if((st.content||'').length > 80) summary += '…';
           var stepKey = m.id + ':' + si;
-          html += '<div class="agent-step agent-'+H(st.type||'info')+openCls+'">' +
+          html += '<div class="agent-step agent-'+H(st.type||'info')+openCls+liveCls+'">' +
                     '<button class="agent-step-toggle" onclick="window._toggleAgentStep(\''+H(stepKey)+'\')">' +
                       '<span class="material-symbols-outlined agent-step-icon">'+svgIcon(stIcon)+'</span>' +
                       '<span class="agent-step-label">'+H(st.type||'info')+'</span>' +
@@ -1793,15 +2110,139 @@ button{-webkit-appearance:none;appearance:none}
     if(cm) cm.scrollTop = cm.scrollHeight;
   }
 
+  // Persistent expand/collapse state for individual code blocks. Keyed by
+  // a stable hash of (language + content) so the state survives re-renders
+  // of the chat. Same hash is used for the HTML-preview blob lookup.
+  var codeBlockOpen = {};
+  // Cache of code payloads — Preview button reads from here without having
+  // to re-extract from the rendered DOM. Keyed by the same djb2 hash.
+  var codeBlockSource = {};
+
+  function djb2(str){
+    var h = 5381;
+    for(var i=0;i<str.length;i++){ h = ((h << 5) + h) ^ str.charCodeAt(i); h |= 0; }
+    // Force unsigned + base36 for short stable ID
+    return (h >>> 0).toString(36);
+  }
+  // Heuristic: this code block IS a renderable HTML document.
+  function isHtmlSnippet(lang, raw){
+    var l = (lang || '').toLowerCase();
+    if(l === 'html' || l === 'htm' || l === 'xhtml' || l === 'svg') return true;
+    var t = raw.trim().toLowerCase();
+    if(!t) return false;
+    if(t.indexOf('<!doctype html') === 0) return true;
+    if(t.indexOf('<html') === 0) return true;
+    if(t.indexOf('<svg') === 0 && t.indexOf('xmlns') > 0) return true;
+    return false;
+  }
+  // Bug #4 / Feature #8: code blocks are collapsed by default if longer
+  // than COLLAPSE_THRESHOLD lines (parity with desktop CodeBlock.tsx).
+  // Renderable HTML/SVG also gets a "Preview" chip → opens a sandboxed
+  // iframe overlay in `_openHtmlPreview`.
+  var COLLAPSE_THRESHOLD = 4;
+
   function renderMd(text){
     var s = H(text);
-    s = s.replace(/```(\w*)\n([\s\S]*?)```/g, function(_, lang, code){
-      return '<pre><button class="copy-btn" onclick="window._copyCode(this)"><span class="material-symbols-outlined">'+svgIcon('content_copy')+'</span></button><code>'+code+'</code></pre>';
+    s = s.replace(/```(\w*)\n?([\s\S]*?)```/g, function(_, lang, code){
+      var rawCode = code.replace(/\n$/, ''); // trim trailing newline
+      var rawHtmlEscaped = H(rawCode);
+      var lines = rawCode.split('\n');
+      var lineCount = lines.length;
+      var langLabel = (lang || 'code').toLowerCase();
+      var key = djb2(langLabel + '\n' + rawCode);
+      // Cache the original source so the Preview button can read it back.
+      codeBlockSource[key] = { lang: langLabel, code: rawCode };
+      var isLong = lineCount > COLLAPSE_THRESHOLD;
+      var expanded = !isLong || codeBlockOpen[key] === true;
+      var displayCode = expanded
+        ? rawHtmlEscaped
+        : H(lines.slice(0, COLLAPSE_THRESHOLD).join('\n'));
+      var htmlPreview = isHtmlSnippet(langLabel, rawCode);
+      var previewBtn = htmlPreview
+        ? '<button class="cb-action" onclick="window._openHtmlPreview(\''+key+'\')" aria-label="Preview HTML"><span class="material-symbols-outlined">'+svgIcon('eye')+'</span><span class="cb-action-label">Preview</span></button>'
+        : '';
+      var toggleBtn = isLong
+        ? '<button class="cb-toggle" onclick="window._toggleCodeBlock(\''+key+'\')"><span class="material-symbols-outlined cb-chev">'+svgIcon('expand_more')+'</span>'+(expanded?'Collapse':('Show all '+lineCount+' lines'))+'</button>'
+        : '';
+      return ''+
+        '<div class="cb-wrap'+(expanded?' open':'')+'" data-cb-id="'+key+'">'+
+          '<div class="cb-head">'+
+            '<span class="cb-lang">'+H(langLabel)+'</span>'+
+            '<div class="cb-actions">'+
+              previewBtn +
+              '<button class="cb-action" onclick="window._copyCodeKey(\''+key+'\')" aria-label="Copy"><span class="material-symbols-outlined">'+svgIcon('content_copy')+'</span><span class="cb-action-label">Copy</span></button>'+
+            '</div>'+
+          '</div>'+
+          '<pre class="cb-pre"><code>'+displayCode+'</code></pre>'+
+          toggleBtn +
+        '</div>';
     });
     s = s.replace(/`([^`]+)`/g,'<code>$1</code>');
     s = s.replace(/\*\*(.+?)\*\*/g,'<b>$1</b>');
     return s;
   }
+
+  // Toggle handler for the "Show all N lines" / "Collapse" button.
+  window._toggleCodeBlock = function(key){
+    codeBlockOpen[key] = !codeBlockOpen[key];
+    renderChat();
+  };
+  // Copy handler that reads from our cache (no DOM scraping → handles
+  // collapsed blocks correctly).
+  window._copyCodeKey = function(key){
+    var src = codeBlockSource[key];
+    if(src && src.code) navigator.clipboard.writeText(src.code).catch(function(){});
+  };
+  // Feature #8: full-screen sandboxed HTML preview. Opens an iframe with
+  // `srcdoc` + sandbox flags so user-supplied JS can't reach the parent
+  // page. "Open in new tab" button hands the data: URL to the host
+  // browser for full inspection. Tap backdrop or close icon to dismiss.
+  window._openHtmlPreview = function(key){
+    var src = codeBlockSource[key];
+    if(!src) return;
+    var raw = src.code || '';
+    var lang = (src.lang || '').toLowerCase();
+    var doc = raw;
+    // Bare SVG → wrap so the iframe centres it.
+    if(lang === 'svg' || (raw.trim().toLowerCase().indexOf('<svg') === 0 && raw.indexOf('xmlns') > 0)){
+      doc = '<!doctype html><html><head><meta charset="utf-8"><title>SVG Preview</title>' +
+            '<style>html,body{margin:0;padding:0;background:#0e0e0e;color:#ffffff;height:100%;display:flex;align-items:center;justify-content:center;font-family:system-ui,sans-serif}svg{max-width:100%;max-height:100%}</style>' +
+            '</head><body>'+raw+'</body></html>';
+    } else if(raw.trim().toLowerCase().indexOf('<!doctype') !== 0 &&
+              raw.trim().toLowerCase().indexOf('<html') !== 0){
+      // Snippet-only HTML → wrap in a minimal doc so meta-charset is set.
+      doc = '<!doctype html><html><head><meta charset="utf-8"><title>HTML Preview</title>' +
+            '<style>body{margin:0;padding:16px;font-family:system-ui,-apple-system,sans-serif}</style>' +
+            '</head><body>'+raw+'</body></html>';
+    }
+    var overlay = document.createElement('div');
+    overlay.className = 'html-preview-overlay';
+    overlay.onclick = function(e){ if(e.target === overlay) document.body.removeChild(overlay); };
+    var dataUrl = 'data:text/html;charset=utf-8;base64,' + btoa(unescape(encodeURIComponent(doc)));
+    overlay.innerHTML =
+      '<div class="html-preview-shell">' +
+        '<div class="html-preview-header">' +
+          '<span class="html-preview-title"><span class="material-symbols-outlined">'+svgIcon('eye')+'</span>HTML Preview</span>' +
+          '<div class="html-preview-actions">' +
+            '<button class="html-preview-action" id="hpv-open" aria-label="Open in new tab"><span class="material-symbols-outlined">'+svgIcon('open_in_new')+'</span></button>' +
+            '<button class="html-preview-action" id="hpv-close" aria-label="Close"><span class="material-symbols-outlined">'+svgIcon('close')+'</span></button>' +
+          '</div>' +
+        '</div>' +
+        '<iframe class="html-preview-frame" sandbox="allow-scripts" referrerpolicy="no-referrer"></iframe>' +
+      '</div>';
+    document.body.appendChild(overlay);
+    var iframe = overlay.querySelector('.html-preview-frame');
+    if(iframe){
+      // srcdoc is the most reliable cross-mobile way to push HTML in
+      // without escaping pain. Falls back to data URL if browser blocks.
+      try{ iframe.srcdoc = doc; }
+      catch(_){ iframe.src = dataUrl; }
+    }
+    var openBtn = overlay.querySelector('#hpv-open');
+    if(openBtn) openBtn.onclick = function(){ window.open(dataUrl, '_blank'); };
+    var closeBtn = overlay.querySelector('#hpv-close');
+    if(closeBtn) closeBtn.onclick = function(){ document.body.removeChild(overlay); };
+  };
 
   // ── Exposed handlers ──
   window._toggleDrawer = function(){
@@ -1829,18 +2270,30 @@ button{-webkit-appearance:none;appearance:none}
     var bd=document.querySelector('.drawer-backdrop'); if(bd) bd.classList.add('open');
     drawerOpen = true;
   };
-  window._toggleThinking = function(){
-    if(!isThinkingCompatible(currentModel)) return;
-    thinking = !thinking;
-    persistState();
-    renderShell();
-  };
+  // _toggleThinking removed — mobile has no thinking toggle anymore.
+  // Kept as a no-op stub so stale handlers (any lingering cached page)
+  // don't throw when clicked.
+  window._toggleThinking = function(){};
   window._toggleAgent = function(){
     if(streaming || agentRunning) return;
     setAgentEnabled(!getAgentEnabled());
     renderShell();
   };
   window._stopAgent = function(){ agentAbort = true; };
+
+  // Single-button cancel: stops whichever mode is currently running.
+  // Streaming chat → abort the fetch. Agent loop → flip the agentAbort
+  // flag so the next iteration bails cleanly. User can hit this from
+  // the input-bar Send (which flips to Stop while busy) OR from the
+  // header Agent icon (also flips to Stop while an agent is running).
+  window._cancelSend = function(){
+    if(streaming && abortCtrl){
+      try{ abortCtrl.abort(); }catch(_){}
+    }
+    if(agentRunning){
+      agentAbort = true;
+    }
+  };
   window._triggerAttach = function(){
     var f = el('file-input'); if(f) f.click();
   };
@@ -2157,6 +2610,9 @@ button{-webkit-appearance:none;appearance:none}
   //                 content" (user request).
   function postChatEvent(role, content){
     if(!content) return;
+    // Safety filter: never mirror bare "Continue." to the desktop.
+    // Legacy from the old ReAct loop; kept as defense in depth.
+    if(role === 'user' && /^\s*continue\.?\s*$/i.test(content)) return;
     var c = findChat(currentChatId);
     if(!c) return;
     var mode = c.mode === 'codex' ? 'codex' : 'lu';
@@ -2196,14 +2652,24 @@ button{-webkit-appearance:none;appearance:none}
     // Mirror user message to desktop (text only)
     postChatEvent('user', text);
 
-    // Agent mode? Spin up ReAct loop instead of plain chat.
-    if(getAgentEnabled()){
-      runAgentLoop(text);
+    // Agent / Codex mode? Use native Ollama tool calling instead of
+    // plain streaming chat. Codex chats ALWAYS run tools (no toggle),
+    // matching desktop Codex which is agentic by design. Plain LU chats
+    // only run tools when the user toggled Agent on in the header.
+    var isCodexChat = getCurrentMode() === 'codex';
+    if(getAgentEnabled() || isCodexChat){
+      var toolNames = isCodexChat ? CODEX_TOOLS : AGENT_ALL_TOOLS;
+      var sysPrompt = buildSystemPrompt();
+      var kindLabel = isCodexChat ? 'Codex' : 'Agent';
+      runToolLoop(sysPrompt, toolNames, kindLabel);
       return;
     }
 
     streaming=true;
-    el('send-btn').disabled=true;
+    // Re-render the input bar so the Send-Button flips to the red Stop
+    // chip. Without this the user has no visible way to cancel a chat
+    // that hangs on an over-eager thinking model.
+    renderShell();
     renderChat();
 
     // Build API messages
@@ -2227,12 +2693,32 @@ button{-webkit-appearance:none;appearance:none}
       apiMsgs.push(apiMsg);
     }
 
-    var body = {model:currentModel, messages:apiMsgs, stream:true, options:{num_gpu:99}};
-    // Tri-state: for thinking-capable models we send explicit true|false.
-    // Explicit `false` tells Ollama to SKIP thinking (saves tokens) instead
-    // of silently letting the model emit <think> tags we'd then have to
-    // hide. Non-thinking models: omit the field entirely (undefined).
-    if(isThinkingCompatible(currentModel)) body.think = !!thinking;
+    // Token budget: 16 384 is a balance between "no truncation of the
+    // assistant's visible message" (previous default of 4000 was too low)
+    // and "don't let tagged-thinking models loop forever" (true `-1`
+    // caused Gemma 3/4 to think without ever emitting an answer). 16 k is
+    // enough for the longest reasonable agent reply plus deep thinking.
+    var body = {model:currentModel, messages:apiMsgs, stream:true, options:{num_gpu:99, num_predict:16384}};
+    // Tri-state: for thinking-capable models we normally send explicit
+    // true|false. Explicit `false` tells Ollama to SKIP thinking (saves
+    // tokens) instead of silently letting the model emit <think> tags we'd
+    // then have to hide. Non-thinking models: omit the field entirely.
+    //
+    // Bug #80 parity: Gemma 3/4 with `think:false` drops into PLAIN-TEXT
+    // structured planning ("Plan:" / "Constraint Checklist:" …) that no
+    // tag-stripper can clean. For these models with the toggle OFF we
+    // instead OMIT `think`, which makes Ollama emit tagged thinking that
+    // our stripper handles cleanly. UX is the same (clean answer) — the
+    // trade-off is hidden token spend on internal reasoning.
+    if(isThinkingCompatible(currentModel)){
+      if(thinking){
+        body.think = true;
+      } else if(!isPlainTextPlanner(currentModel)){
+        body.think = false;
+      }
+      // else: leave body.think undefined → Ollama default = tagged thinking,
+      // stripped at render time.
+    }
 
     abortCtrl = new AbortController();
     fetch('/api/chat',{
@@ -2262,152 +2748,274 @@ button{-webkit-appearance:none;appearance:none}
     });
   };
 
-  // ── Agent ReAct loop ────────────────────────────────────────────────
-  // Runs a non-streaming chat → parse JSON action → execute tool →
-  // observation → next chat. Same shape as desktop useAgentChat.ts.
-  // Parity with desktop useAgentChat.ts: pass `think: true` on the
-  // `/api/chat` body when the user toggled thinking on AND the model is
-  // thinking-compatible. Falls back to non-thinking retry on HTTP 400.
-  function agentChatNonStream(messages){
-    var body = {model:currentModel, messages:messages, stream:false, options:{num_gpu:99}};
-    // Same tri-state as _doSend — explicit true|false for thinking-capable
-    // models, field omitted for the rest.
-    if(isThinkingCompatible(currentModel)) body.think = !!thinking;
-    function go(bodyToSend){
-      return fetch('/api/chat',{
-        method:'POST',
-        headers:{'Content-Type':'application/json','Authorization':'Bearer '+TOKEN},
-        body:JSON.stringify(bodyToSend)
-      }).then(function(r){
-        if(r.status===401){ clearAuthAndReload(); throw new Error('401'); }
-        if(!r.ok){
-          if(r.status===400 && ('think' in bodyToSend)){
-            var retry = {}; for(var k in bodyToSend) retry[k]=bodyToSend[k]; delete retry.think;
-            return go(retry);
-          }
-          return r.text().then(function(t){ throw new Error('HTTP '+r.status+': '+t); });
-        }
-        return r.json();
-      }).then(function(j){
-        // Non-stream returns { message: { role, content, thinking? } }
-        var content = (j && j.message && typeof j.message.content === 'string') ? j.message.content : '';
-        var think = (j && j.message && typeof j.message.thinking === 'string') ? j.message.thinking : '';
-        if(!content && j && typeof j.response === 'string') content = j.response;
-        // Inline <think>...</think> fallback. Strip from content regardless,
-        // but keep the captured text only when the toggle asked for it.
-        if(content.indexOf('<think>') >= 0 && content.indexOf('</think>') > content.indexOf('<think>')){
-          var s = content.indexOf('<think>'), e = content.indexOf('</think>');
-          var inline = content.slice(s+7, e);
-          if(inline) think = (think ? think+'\n' : '') + inline;
-          content = (content.slice(0,s) + content.slice(e+8)).trim();
-        }
-        // Thinking visibility is gated by the header toggle — drop it when off.
-        var keep = thinking && isThinkingCompatible(currentModel);
-        if(!keep) think = '';
-        return {content: content, thinking: think};
-      });
-    }
-    return go(body);
-  }
-
+  // ── Native tool-calling loop ─────────────────────────────────────
+  //
+  // Replaces the old ReAct JSON loop with Ollama's native /api/chat
+  // `tools` parameter. The model returns structured `tool_calls[]`
+  // instead of freeform JSON we had to parse. Reliability goes from
+  // ~60% to ~99% because the model uses its trained tool-call format
+  // instead of trying to emit valid JSON in its content.
   // Append a structured agent step to the current assistant message.
   // Steps render as small colored cards ABOVE the bubble; they are NOT
-  // part of msg.content, so the next user turn does NOT see ReAct
+  // part of msg.content, so the next user turn does NOT see tool-call
   // scaffolding and the model cannot drift into that style.
   function appendAgentStep(type, content, meta){
     var idx = msgs.length-1;
     if(idx < 0 || msgs[idx].role !== 'assistant') return;
     if(!Array.isArray(msgs[idx].agentSteps)) msgs[idx].agentSteps = [];
-    // All previous steps collapse as a new one arrives; new steps start
-    // collapsed too (parity with "tool calls always collapsed by default").
+    // ALL steps always start collapsed (user request). Pulsing CSS stripe
+    // on `.live` rows shows in-flight status; the content itself stays
+    // behind the chevron until the user taps to expand.
     for(var p=0; p<msgs[idx].agentSteps.length; p++){ msgs[idx].agentSteps[p].open = false; }
-    var step = {type:type, content:content, ts:Date.now(), open:false};
+    var step = {type:type, content:content, ts:Date.now(), open:false, live:false};
     if(meta && typeof meta === 'object'){ for(var k in meta) if(Object.prototype.hasOwnProperty.call(meta,k)) step[k]=meta[k]; }
     msgs[idx].agentSteps.push(step);
     renderChat();
   }
 
-  function runAgentLoop(goal){
+  // ── Native tool-calling loop ──
+  //
+  // Uses Ollama's /api/chat with `tools` parameter (non-streaming,
+  // stream:false). The model returns structured `tool_calls[]` that we
+  // execute via the existing runAgentTool() bridge, then feed results
+  // back as `role:'tool'` messages. Loop until the model responds with
+  // no tool_calls (= final answer) or we hit maxIter.
+  //
+  // Why non-streaming? Ollama's tool calling requires stream:false to
+  // return structured tool_calls[]. The trade-off vs the old streaming
+  // ReAct loop: no live token-by-token display, but near-100% tool-call
+  // reliability instead of ~60% JSON parse success.
+  function runToolLoop(systemPrompt, toolNames, kindLabel){
     agentRunning = true;
     agentAbort = false;
-    el('send-btn').disabled = true;
-    renderShell(); // show stop button via header state
+    abortCtrl = new AbortController();
+    renderShell(); // flips Send button to Stop
     renderChat();
 
-    var history = [];
-    var maxIter = 12;
-    var i = 0;
-    var target = msgs[msgs.length-1]; // the empty assistant slot we pushed
+    var maxIter = 50; // matches desktop v24 AgentBudget default
+    var iter = 0;
+    var target = msgs[msgs.length-1]; // the empty assistant slot
+    var tools = buildToolDefs(toolNames);
+
+    // Build the LLM message history from the conversation.
+    // Include system prompt + all msgs except the last empty assistant.
+    // Hidden messages (tool-call history from previous turns) are included
+    // so the model sees what it did before (continue capability, parity
+    // with original Codex CLI).
+    var apiMessages = [];
+    var apiStartLen = 0; // track where loop-generated messages begin
+    if(systemPrompt) apiMessages.push({role:'system', content:systemPrompt});
+    var cm = getCaveman();
+    for(var k=0; k<msgs.length-1; k++){
+      var m = msgs[k];
+      var content = m.content;
+      if(m.role==='user' && cm!=='off' && CAVEMAN_REMINDERS[cm]){
+        content = CAVEMAN_REMINDERS[cm] + '\n' + content;
+      }
+      var apiMsg = {role: m.role, content: content};
+      // Carry over tool_calls on assistant messages so Ollama sees the
+      // full native tool-call history (assistant→tool pairs).
+      if(m.tool_calls) apiMsg.tool_calls = m.tool_calls;
+      if(m.images && m.images.length){ apiMsg.images = m.images.map(function(im){return im.data;}); }
+      apiMessages.push(apiMsg);
+    }
+
+    apiStartLen = apiMessages.length; // everything after this was added during the loop
+
+    // Show a "thinking" step while the first call is in flight
+    appendAgentStep('thought', kindLabel+' is thinking...', {live:true});
+    var thinkingStepIdx = (target.agentSteps || []).length - 1;
 
     function step(){
       if(agentAbort){
-        appendAgentStep('error', 'Agent stopped by user.');
-        finishAgent(null);
+        appendAgentStep('error', kindLabel+' stopped by user.');
+        finishToolLoop(null);
         return;
       }
-      if(i >= maxIter){
-        appendAgentStep('error', 'Agent stopped: max iterations reached.');
-        finishAgent(null);
+      if(iter >= maxIter){
+        appendAgentStep('error', kindLabel+' stopped: max iterations reached.');
+        finishToolLoop(null);
         return;
       }
-      i++;
+      iter++;
 
-      var prompt = buildReActPrompt(goal, history);
-      var apiMsgs = [{role:'system', content:prompt}, {role:'user', content: i===1 ? goal : 'Continue.'}];
-
-      agentChatNonStream(apiMsgs).then(function(res){
-        // Native/inline thinking goes into the message's thinking field
-        if(res.thinking){
-          if(target){ target.thinking = (target.thinking ? target.thinking+'\n' : '') + res.thinking; target.thinkingOpen = true; }
+      nativeToolChat(apiMessages, tools).then(function(res){
+        // Remove the initial "thinking" placeholder on the first
+        // successful response (only matters for iter === 1).
+        if(thinkingStepIdx >= 0 && target.agentSteps && target.agentSteps[thinkingStepIdx]){
+          target.agentSteps.splice(thinkingStepIdx, 1);
+          thinkingStepIdx = -1;
           renderChat();
         }
-        var parsed = parseAgentResponse(res.content);
-        if(parsed.thought){
-          history.push({type:'thought', content:parsed.thought});
-          appendAgentStep('thought', parsed.thought);
-        }
-        if(parsed.action === 'finish'){
-          var ans = parsed.answer || parsed.thought || '(done)';
-          history.push({type:'action', content:'finish'});
-          finishAgent(ans);
-          return;
-        }
-        if(parsed.action === 'continue' || !parsed.action){
-          step();
-          return;
-        }
-        var argsPretty = '';
-        try{ argsPretty = JSON.stringify(parsed.args||{}); }catch(_){ argsPretty = '{}'; }
-        history.push({type:'action', content:parsed.action+' '+argsPretty});
-        appendAgentStep('action', '`'+parsed.action+'` '+argsPretty, {toolName:parsed.action, args:parsed.args});
 
-        runAgentTool(parsed.action, parsed.args || {}).then(function(observation){
-          var obsTrim = String(observation || '');
-          if(obsTrim.length > 4000) obsTrim = obsTrim.slice(0,4000)+'\n…(truncated)';
-          history.push({type:'observation', content:obsTrim});
-          appendAgentStep('observation', obsTrim);
-          step();
-        }).catch(function(e){
-          history.push({type:'error', content:String(e)});
-          appendAgentStep('error', String(e));
-          step();
+        // Handle thinking content (native Ollama field + inline tags)
+        var keepThinking = thinking && isThinkingCompatible(currentModel);
+        var stripped = stripThinkTags(res.content, keepThinking);
+        var turnContent = stripped.content;
+        var turnThinking = stripped.thinking;
+        // Also pick up the native thinking field from Ollama
+        if(res.thinking){
+          if(keepThinking){
+            turnThinking = turnThinking ? turnThinking+'\n'+res.thinking : res.thinking;
+          }
+        }
+        if(turnThinking && target){
+          target.thinking = (target.thinking ? target.thinking+'\n' : '') + turnThinking;
+        }
+
+        // No tool calls → model is done, set final content
+        if(!res.toolCalls || res.toolCalls.length === 0){
+          finishToolLoop(turnContent || '(done)');
+          return;
+        }
+
+        // Push the assistant message with tool_calls into the history
+        // so Ollama sees the proper assistant→tool message pairs.
+        apiMessages.push({
+          role: 'assistant',
+          content: turnContent || '',
+          tool_calls: res.toolCalls.map(function(tc){
+            return {function:{name:tc.function.name, arguments:tc.function.arguments}};
+          })
         });
+
+        // Execute each tool call sequentially, show steps in UI
+        var tcIndex = 0;
+        function execNext(){
+          if(agentAbort){
+            appendAgentStep('error', kindLabel+' stopped by user.');
+            finishToolLoop(null);
+            return;
+          }
+          if(tcIndex >= res.toolCalls.length){
+            // All tools executed — loop back for next model turn
+            renderChat();
+            step();
+            return;
+          }
+
+          var tc = res.toolCalls[tcIndex];
+          var toolName = tc.function.name;
+          var toolArgs = tc.function.arguments || {};
+          var argsPretty = '';
+          try{ argsPretty = JSON.stringify(toolArgs); }catch(_){ argsPretty = '{}'; }
+
+          // Show "running" action step
+          appendAgentStep('action', '`'+toolName+'` '+argsPretty, {toolName:toolName, args:toolArgs, live:true});
+          var actionIdx = (target.agentSteps || []).length - 1;
+
+          runAgentTool(toolName, toolArgs).then(function(observation){
+            var obs = String(observation || '');
+
+            // Mark action as completed
+            if(target.agentSteps && target.agentSteps[actionIdx]){
+              target.agentSteps[actionIdx].live = false;
+            }
+            appendAgentStep('observation', obs);
+
+            // Push tool result into the LLM history
+            apiMessages.push({role:'tool', content:obs});
+
+            tcIndex++;
+            execNext();
+          }).catch(function(e){
+            var errMsg = String(e && e.message || e);
+            if(target.agentSteps && target.agentSteps[actionIdx]){
+              target.agentSteps[actionIdx].live = false;
+            }
+            appendAgentStep('error', errMsg);
+
+            // Push error as tool result so the model can adapt
+            apiMessages.push({role:'tool', content:'Error: '+errMsg});
+
+            tcIndex++;
+            execNext();
+          });
+        }
+
+        execNext();
       }).catch(function(e){
-        appendAgentStep('error', 'Agent chat error: '+(e && e.message || e));
-        finishAgent(null);
+        // Remove the thinking placeholder if still present
+        if(thinkingStepIdx >= 0 && target.agentSteps && target.agentSteps[thinkingStepIdx]){
+          target.agentSteps.splice(thinkingStepIdx, 1);
+          thinkingStepIdx = -1;
+        }
+
+        if(e && e.name === 'AbortError'){
+          appendAgentStep('error', 'Stopped.');
+          finishToolLoop(null);
+          return;
+        }
+        var errMsg = (e && e.message) || String(e);
+        if(errMsg === 'TOOLS_NOT_SUPPORTED'){
+          appendAgentStep('error', 'This model does not support tool calling. Pick a tool-capable model (Qwen 3, Llama 3.1+, Gemma 4).');
+          finishToolLoop(null);
+          return;
+        }
+        appendAgentStep('error', kindLabel+' error: '+errMsg);
+        finishToolLoop(null);
       });
     }
 
-    function finishAgent(finalAnswer){
+    function finishToolLoop(finalAnswer){
       agentRunning = false;
       agentAbort = false;
-      el('send-btn').disabled = false;
-      // CRITICAL: only the final answer goes into msg.content. The
-      // ReAct scaffolding stays in agentSteps[] where the next user
-      // turn won't send it back to the model. This prevents the
-      // "style drift" bug where the model keeps emitting JSON
-      // thought/action blocks after Agent Mode is toggled off.
-      if(target){ target.content = finalAnswer || target.content || ''; }
+      abortCtrl = null;
+
+      // ── Continue capability (parity with original Codex CLI) ────────
+      // Persist the tool-call history from THIS turn as hidden messages
+      // in msgs[]. On the NEXT turn, the history builder (line ~2802)
+      // includes them in apiMessages so the model sees what it did before.
+      // Hidden messages are skipped by renderChat() — the user only sees
+      // the final answer, but the model sees the full tool-call chain.
+      var toolHistory = [];
+      for(var hi = apiStartLen; hi < apiMessages.length; hi++){
+        var am = apiMessages[hi];
+        toolHistory.push(mkMsg(am.role, am.content || '', {
+          hidden: true,
+          tool_calls: am.tool_calls || undefined
+        }));
+      }
+      if(toolHistory.length > 0){
+        // Splice BEFORE target (the visible final-answer message) so
+        // the conversation order is: user → hidden tool chain → answer.
+        var targetIdx = msgs.indexOf(target);
+        if(targetIdx >= 0){
+          // splice(targetIdx, 0, ...items) — Array.prototype.splice.apply
+          // for ES5 compat (mobile JS can't use spread in all engines).
+          var spliceArgs = [targetIdx, 0];
+          for(var si = 0; si < toolHistory.length; si++) spliceArgs.push(toolHistory[si]);
+          Array.prototype.splice.apply(msgs, spliceArgs);
+        }
+      }
+
+      // The visible answer — if finalAnswer is null/empty and no prior
+      // content, build a fallback summary from agent steps so the bubble
+      // is never blank (parity with desktop useCodex.ts fix).
+      var answer = finalAnswer || '';
+      if(!answer && target && !target.content){
+        var steps = target.agentSteps || [];
+        var writes = 0, reads = 0, otherOk = 0, fails = 0;
+        for(var si2 = 0; si2 < steps.length; si2++){
+          var s = steps[si2];
+          if(s.type === 'action'){
+            if(s.toolName === 'file_write') writes++;
+            else if(s.toolName === 'file_read') reads++;
+            else otherOk++;
+          } else if(s.type === 'error' && s.content && s.content.indexOf('stopped') < 0){
+            fails++;
+          }
+        }
+        var summaryParts = [];
+        if(writes) summaryParts.push(writes + ' file(s) written');
+        if(reads) summaryParts.push(reads + ' file(s) read');
+        if(otherOk) summaryParts.push(otherOk + ' other operation(s) completed');
+        if(fails) summaryParts.push(fails + ' operation(s) failed');
+        answer = summaryParts.length > 0
+          ? 'Task completed: ' + summaryParts.join(', ') + '.'
+          : 'Task completed.';
+      }
+      if(target){ target.content = answer || target.content || ''; }
       renderShell();
       renderChat();
       var finalText = target ? (target.content || '') : '';
@@ -2464,14 +3072,20 @@ button{-webkit-appearance:none;appearance:none}
     discardedThinkBuf = '';
     var target = msgs[msgs.length-1];
     // Thinking visibility is driven strictly by the toggle. If the toggle
-    // is OFF, ALL thinking tokens (native field AND inline <think> tags)
-    // are silently dropped so the UI never shows a think block the user
-    // didn't ask for. If the toggle turns ON later, subsequent tokens
-    // appear live.
+    // is OFF, ALL thinking tokens (native field AND inline <think> tags
+    // AND non-canonical tags via stripNonCanonicalTags) are silently
+    // dropped so the UI never shows a think block the user didn't ask
+    // for. If the toggle turns ON later, subsequent tokens appear live.
     function keepThinkingNow(){ return thinking && isThinkingCompatible(currentModel); }
     function pump(){
       reader.read().then(function(result){
         if(result.done){
+          // Final pass: scrub any non-canonical thinking markers that
+          // slipped past the streaming state-machine (Gemma's channel
+          // marker, orphan <thought>, etc.). Bug #3+#5.
+          if(target){
+            target.content = stripNonCanonicalTags(target.content).trim();
+          }
           var finalText = target ? target.content : '';
           postChatEvent('assistant', finalText);
           finishStream();
@@ -2502,6 +3116,12 @@ button{-webkit-appearance:none;appearance:none}
             }
           }catch(_){ }
         }
+        // Live partial scrub of non-canonical tags (Gemma <|channel|>…).
+        // We re-strip on every chunk so the user never sees a "Plan:"
+        // preamble flash up while the model is still writing the answer.
+        if(target){
+          target.content = stripNonCanonicalTags(target.content);
+        }
         renderChat();
         pump();
       }).catch(function(){finishStream();});
@@ -2511,8 +3131,11 @@ button{-webkit-appearance:none;appearance:none}
 
   function finishStream(){
     streaming=false;abortCtrl=null;
-    var sb=el('send-btn');if(sb)sb.disabled=false;
     syncCurrentChat();
+    // renderShell flips the Send-button back from Stop to Send. Must run
+    // BEFORE renderChat so the keyboard-on-iOS doesn't momentarily see a
+    // disabled button.
+    renderShell();
     renderChat();
   }
 })();
@@ -2680,7 +3303,7 @@ pub async fn start_remote_server(
     app: AppHandle,
     state: tauri::State<'_, crate::state::AppState>,
     model: Option<String>,
-    systemPrompt: Option<String>,
+    system_prompt: Option<String>,
 ) -> Result<serde_json::Value, String> {
     // Clone Arcs from std::sync::Mutex, then drop it before any .await
     let (jwt_secret_arc, passcode_arc, permissions_arc, devices_arc, tunnel_url_arc, dispatched_model_arc, dispatched_system_prompt_arc, port, comfy_port) = {
@@ -2729,14 +3352,14 @@ pub async fn start_remote_server(
         let mut devices = devices_arc.lock().await;
         devices.clear();
     }
-    // Store dispatched model/systemPrompt
+    // Store dispatched model/system_prompt
     {
         let mut dm = dispatched_model_arc.lock().await;
         *dm = model.unwrap_or_default();
     }
     {
         let mut dsp = dispatched_system_prompt_arc.lock().await;
-        *dsp = systemPrompt.unwrap_or_default();
+        *dsp = system_prompt.unwrap_or_default();
     }
 
     let server_state = RemoteState {
@@ -2807,7 +3430,7 @@ pub async fn restart_remote_server(
     app: AppHandle,
     state: tauri::State<'_, crate::state::AppState>,
     model: Option<String>,
-    systemPrompt: Option<String>,
+    system_prompt: Option<String>,
 ) -> Result<serde_json::Value, String> {
     use tauri::Manager;
     // Stop first (ignore errors if not running)
@@ -2816,7 +3439,7 @@ pub async fn restart_remote_server(
     tokio::time::sleep(std::time::Duration::from_millis(300)).await;
     // Start fresh with a re-acquired State handle from the AppHandle
     let state2 = app.state::<crate::state::AppState>();
-    start_remote_server(app.clone(), state2, model, systemPrompt).await
+    start_remote_server(app.clone(), state2, model, system_prompt).await
 }
 
 #[tauri::command]

@@ -19,6 +19,11 @@ export interface Message {
   // Agent Mode fields
   agentBlocks?: AgentBlock[]
   toolCallSummary?: string
+  // Continue capability — tool-call history persisted between turns so
+  // the model sees what it did before (parity with original Codex CLI).
+  // Hidden messages are included in the API payload but not rendered.
+  hidden?: boolean
+  tool_calls?: { function: { name: string; arguments: Record<string, unknown> } }[]
 }
 
 export interface Conversation {

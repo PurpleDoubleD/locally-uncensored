@@ -57,10 +57,10 @@ export function DownloadBadge() {
 
   return (
     <div ref={ref} className="relative">
-      {/* Icon button */}
+      {/* Icon trigger */}
       <button
         onClick={() => setOpen(!open)}
-        className={`relative p-1.5 rounded-md transition-colors ${
+        className={`relative p-1 rounded-md transition-colors ${
           hasAny
             ? 'text-blue-400 hover:bg-blue-500/10'
             : 'text-gray-500 hover:text-gray-800 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/5'
@@ -68,14 +68,11 @@ export function DownloadBadge() {
         title="Downloads"
       >
         <ArrowDownToLine size={14} />
-        {/* Badge */}
         {totalActive > 0 && (
           <span className="absolute -top-0.5 -right-0.5 min-w-[14px] h-[14px] flex items-center justify-center rounded-full bg-blue-500 text-[0.5rem] font-bold text-white leading-none px-0.5">
             {totalActive}
-            <span className="absolute inset-0 rounded-full bg-blue-500 animate-ping opacity-40" />
           </span>
         )}
-        {/* Paused indicator */}
         {totalActive === 0 && (textEntries.some(([, s]) => s.paused) || comfyEntries.some(([, d]) => d.status === 'paused')) && (
           <span className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-yellow-500" />
         )}

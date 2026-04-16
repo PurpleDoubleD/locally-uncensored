@@ -4,7 +4,7 @@
  * WITHOUT requiring any real ComfyUI instance or model downloads.
  */
 
-import { getVideoBundles, CUSTOM_NODE_REGISTRY, type ModelBundle } from '../discover'
+import { getVideoBundles, getImageBundles, CUSTOM_NODE_REGISTRY, type ModelBundle } from '../discover'
 import { classifyModel, MODEL_TYPE_DEFAULTS, COMPONENT_REGISTRY as COMFYUI_REGISTRY, isVideoModelType } from '../comfyui'
 import { determineStrategy } from '../dynamic-workflow'
 import type { CategorizedNodes, AvailableModels } from '../comfyui-nodes'
@@ -181,5 +181,42 @@ describe('COMPONENT_REGISTRY coverage', () => {
   it('FramePack shares HunyuanVideo VAE', () => {
     const fpVae = COMFYUI_REGISTRY.framepack.vae!
     expect(fpVae.matchPatterns).toContain('hunyuan')
+  })
+
+  it('ERNIE-Image uses flux2 CLIP type and separate VAE/CLIP', () => {
+    const entry = COMFYUI_REGISTRY.ernie_image
+    expect(entry).toBeDefined()
+    expect(entry.loader).toBe('UNETLoader')
+    expect(entry.needsSeparateVAE).toBe(true)
+    expect(entry.needsSeparateCLIP).toBe(true)
+    expect(entry.clipType).toBe('flux2')
+    expect(entry.vae!.matchPatterns).toContain('flux2')
+    expect(entry.clip!.matchPatterns).toContain('ernie-image-prompt-enhancer')
+  })
+})
+
+describe('Full Pipeline: Image bundle → Strategy for ERNIE-Image', () => {
+  const bundles = getImageBundles()
+  const ernieBundles = bundles.filter(b => b.workflow === 'ernie_image')
+  const ernieBundle = ernieBundles.find(b => b.name.includes('Turbo'))
+  const ernieBaseBundle = ernieBundles.find(b => b.name.includes('Base'))
+
+  it('ERNIE-Image has Turbo + Base bundles', () => {
+    expect(ernieBundles).toHaveLength(2)
+    expect(ernieBundle).toBeDefined()
+    expect(ernieBaseBundle).toBeDefined()
+  })
+
+  it('ERNIE-Image Turbo has 4 files (model + ministral + enhancer + vae)', () => {
+    expect(ernieBundle!.files.length).toBe(4)
+  })
+
+  it('ERNIE-Image Base has 4 files (model + ministral + enhancer + vae)', () => {
+    expect(ernieBaseBundle!.files.length).toBe(4)
+  })
+
+  it('ERNIE-Image Turbo has valid strategy when all nodes available', () => {
+    const result = determineStrategy('ernie_image' as any, false, allNodesAvailable(), defaultModels)
+    expect(result.strategy).toBe('unet_ernie_image')
   })
 })

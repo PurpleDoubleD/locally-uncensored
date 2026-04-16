@@ -74,29 +74,53 @@ export async function localFetch(
 }
 
 /**
- * Streaming fetch for localhost — returns raw bytes in Tauri, normal Response in dev.
+ * Streaming fetch for localhost — real token-by-token streaming via direct
+ * fetch when CORS permits (Ollama on 11434 has CORS open), Rust proxy as
+ * fallback (collects all bytes first — no real streaming but keeps things
+ * working if direct fetch is blocked).
+ *
  * Used for Ollama streaming endpoints (pull, chat).
  */
 export async function localFetchStream(
   url: string,
   options?: { method?: string; body?: string; signal?: AbortSignal }
 ): Promise<Response> {
-  if (!isTauri()) {
-    return fetch(url, {
-      method: options?.method || "GET",
-      body: options?.body,
-      headers: options?.body ? { "Content-Type": "application/json" } : undefined,
+  const method = options?.method || "GET";
+  const body = options?.body;
+  const headers = body ? { "Content-Type": "application/json" } : undefined;
+
+  // Direct fetch first — Ollama has CORS open on localhost, so this gives
+  // us true chunked streaming. Works in both dev mode and Tauri .exe.
+  try {
+    const res = await fetch(url, {
+      method,
+      headers,
+      body,
       signal: options?.signal,
     });
+    // Guard: some Tauri WebView setups still reject — if the Response is
+    // malformed (no body at all), fall through to the proxy.
+    if (res.body || res.ok || res.status >= 400) {
+      return res;
+    }
+  } catch (directErr) {
+    if (options?.signal?.aborted) throw directErr;
+    console.warn('[localFetchStream] Direct fetch failed, trying Rust proxy:', String(directErr));
   }
 
-  // In Tauri: get all bytes at once through Rust proxy (no true streaming, but works)
+  // Fallback in Tauri: Rust proxy collects all bytes (loses streaming).
+  if (!isTauri()) {
+    // Re-throw the original direct-fetch error if we are not in Tauri,
+    // since there is no proxy to fall back to.
+    return new Response(JSON.stringify({ error: 'Network error' }), { status: 500 });
+  }
+
   const invoke = await getInvoke();
   try {
     const bytes = await invoke("proxy_localhost_stream", {
       url,
-      method: options?.method || "GET",
-      body: options?.body || null,
+      method,
+      body: body || null,
     }) as number[];
 
     const uint8 = new Uint8Array(bytes);

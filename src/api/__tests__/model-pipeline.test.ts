@@ -95,9 +95,9 @@ describe('MODEL_TYPE_DEFAULTS', () => {
     }
   })
 
-  it('FLUX uses low CFG (1.0)', () => {
+  it('FLUX uses low CFG', () => {
     expect(MODEL_TYPE_DEFAULTS.flux.cfgScale).toBe(1.0)
-    expect(MODEL_TYPE_DEFAULTS.flux2.cfgScale).toBe(1.0)
+    expect(MODEL_TYPE_DEFAULTS.flux2.cfgScale).toBe(3.5) // flux2 uses 3.5
   })
 
   it('SD1.5 uses 512x512', () => {

@@ -22,6 +22,7 @@ export interface DiscoverModel {
   provider?: ProviderId   // Which provider this model belongs to
   providerName?: string   // Display name of the provider
   canPull?: boolean       // false = no download/pull capability (cloud/external)
+  ollamaModel?: string    // Ollama model tag for `ollama pull` (e.g. 'qwen3.6')
 }
 
 export interface DownloadProgress {
@@ -290,6 +291,12 @@ export const COMPONENT_REGISTRY: Record<string, ComponentRequirements> = {
     clip: { patterns: ['qwen_3_4b', 'qwen3'], downloadName: 'qwen_3_4b.safetensors', downloadUrl: 'https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/split_files/text_encoders/qwen_3_4b.safetensors', subfolder: 'text_encoders' },
     needsSeparateVAE: true, needsSeparateCLIP: true,
   },
+  ernie_image: {
+    loader: 'UNETLoader',
+    vae: { patterns: ['flux2-vae', 'flux2', 'flux'], downloadName: 'flux2-vae.safetensors', downloadUrl: 'https://huggingface.co/Comfy-Org/ERNIE-Image/resolve/main/vae/flux2-vae.safetensors', subfolder: 'vae' },
+    clip: { patterns: ['ministral-3-3b', 'ministral', 'ernie-image-prompt-enhancer'], downloadName: 'ministral-3-3b.safetensors', downloadUrl: 'https://huggingface.co/Comfy-Org/ERNIE-Image/resolve/main/text_encoders/ministral-3-3b.safetensors', subfolder: 'text_encoders' },
+    needsSeparateVAE: true, needsSeparateCLIP: true,
+  },
   wan: {
     loader: 'UNETLoader',
     vae: { patterns: ['wan'], downloadName: 'wan_2.1_vae.safetensors', downloadUrl: 'https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/vae/wan_2.1_vae.safetensors', subfolder: 'vae' },
@@ -418,6 +425,8 @@ export function getMainstreamTextModels(): DiscoverModel[] {
     { name: 'Gemma 4 26B MoE', description: 'Gemma 4 26B MoE — 26B brain, runs like 4B. Tools + vision. Apache 2.0.', pulls: '100K+', tags: ['26B', 'Q4_K_XL', '16 GB'], updated: 'Hot', agent: true, released: '2026-04', downloadUrl: HF('unsloth/gemma-4-26B-A4B-it-GGUF', 'gemma-4-26B-A4B-it-UD-Q4_K_XL.gguf'), filename: 'gemma-4-26B-A4B-it-UD-Q4_K_XL.gguf', sizeGB: 16 },
     { name: 'Gemma 4 E4B', description: 'Gemma 4 E4B — lightweight 4.5B, great for small GPUs.', pulls: '100K+', tags: ['4.5B', 'Q4_K_M', '5 GB'], updated: 'Hot', released: '2026-04', downloadUrl: HF('unsloth/gemma-4-E4B-it-GGUF', 'gemma-4-E4B-it-Q4_K_M.gguf'), filename: 'gemma-4-E4B-it-Q4_K_M.gguf', sizeGB: 5 },
     { name: 'Gemma 4 E2B', description: 'Gemma 4 E2B — ultra-light 2.3B, runs on anything.', pulls: '100K+', tags: ['2.3B', 'Q4_K_M', '3 GB'], updated: 'New', released: '2026-04', downloadUrl: HF('unsloth/gemma-4-E2B-it-GGUF', 'gemma-4-E2B-it-Q4_K_M.gguf'), filename: 'gemma-4-E2B-it-Q4_K_M.gguf', sizeGB: 3 },
+    // ── Qwen 3.6 (April 2026) ──
+    { name: 'Qwen 3.6 35B MoE', description: 'Qwen 3.6 — 35B MoE (3B active), vision + agentic coding + thinking preservation. 256K context.', pulls: 'New', tags: ['35B MoE', 'Vision', '24 GB'], updated: 'Hot', agent: true, released: '2026-04', ollamaModel: 'qwen3.6', sizeGB: 24 },
     // ── Qwen 3.5 (March 2026) ──
     { name: 'Qwen 3.5 35B MoE', description: 'Qwen 3.5 35B MoE — best agentic, 256K context. SWE-bench leader.', pulls: '100K+', tags: ['35B', 'Q4_K_M', '21 GB'], updated: 'Hot', agent: true, released: '2026-03', downloadUrl: HF('unsloth/Qwen3.5-35B-A3B-GGUF', 'Qwen3.5-35B-A3B-Q4_K_M.gguf'), filename: 'Qwen3.5-35B-A3B-Q4_K_M.gguf', sizeGB: 21 },
     { name: 'Qwen 3.5 27B', description: 'Qwen 3.5 27B dense — strongest reasoning + coding.', pulls: '100K+', tags: ['27B', 'Q4_K_M', '16 GB'], updated: 'Hot', agent: true, released: '2026-03', downloadUrl: HF('unsloth/Qwen3.5-27B-GGUF', 'Qwen3.5-27B-Q4_K_M.gguf'), filename: 'Qwen3.5-27B-Q4_K_M.gguf', sizeGB: 16 },
@@ -836,6 +845,88 @@ export function getImageBundles(): ModelBundle[] {
           pulls: '', tags: ['Checkpoint', '6.5 GB'], updated: '',
           downloadUrl: 'https://huggingface.co/Lykon/dreamshaper-xl-v2-turbo/resolve/main/DreamShaperXL_Turbo_V2-SFW.safetensors',
           filename: 'DreamShaperXL_Turbo_V2.safetensors', subfolder: 'checkpoints', sizeGB: 6.5,
+        },
+      ],
+    },
+    {
+      name: 'ERNIE-Image Turbo',
+      description: 'Baidu ERNIE-Image Turbo — 8B DiT, 8 steps, 1024x1024. Fastest ERNIE variant with Ministral-3B encoder + Prompt Enhancer.',
+      tags: ['ernie_image', 'Image', '1024x1024'],
+      uncensored: false,
+      verified: true,
+      totalSizeGB: 28.9,
+      vramRequired: '24 GB',
+      workflow: 'ernie_image',
+      url: 'https://huggingface.co/Comfy-Org/ERNIE-Image',
+      files: [
+        {
+          name: 'ERNIE-Image Turbo (DiT 8B)',
+          description: 'Baidu ERNIE-Image Turbo diffusion model. 8 steps, fast inference.',
+          pulls: '', tags: ['Diffusion Model', '15.0 GB'], updated: 'New',
+          downloadUrl: 'https://huggingface.co/Comfy-Org/ERNIE-Image/resolve/main/diffusion_models/ernie-image-turbo.safetensors',
+          filename: 'ernie-image-turbo.safetensors', subfolder: 'diffusion_models', sizeGB: 15.0,
+        },
+        {
+          name: 'Ministral-3-3B Text Encoder',
+          description: 'Main text encoder (Ministral-3B) for ERNIE-Image prompt understanding.',
+          pulls: '', tags: ['Text Encoder', '7.2 GB'], updated: 'New',
+          downloadUrl: 'https://huggingface.co/Comfy-Org/ERNIE-Image/resolve/main/text_encoders/ministral-3-3b.safetensors',
+          filename: 'ministral-3-3b.safetensors', subfolder: 'text_encoders', sizeGB: 7.2,
+        },
+        {
+          name: 'ERNIE Prompt Enhancer',
+          description: 'Optional prompt enhancer that expands short prompts into richer descriptions.',
+          pulls: '', tags: ['Text Encoder', '6.4 GB'], updated: 'New',
+          downloadUrl: 'https://huggingface.co/Comfy-Org/ERNIE-Image/resolve/main/text_encoders/ernie-image-prompt-enhancer.safetensors',
+          filename: 'ernie-image-prompt-enhancer.safetensors', subfolder: 'text_encoders', sizeGB: 6.4,
+        },
+        {
+          name: 'FLUX 2 VAE',
+          description: 'Required autoencoder — shared with FLUX 2.',
+          pulls: '', tags: ['VAE', '335 MB'], updated: '',
+          downloadUrl: 'https://huggingface.co/Comfy-Org/ERNIE-Image/resolve/main/vae/flux2-vae.safetensors',
+          filename: 'flux2-vae.safetensors', subfolder: 'vae', sizeGB: 0.3,
+        },
+      ],
+    },
+    {
+      name: 'ERNIE-Image Base',
+      description: 'Baidu ERNIE-Image Base — 8B DiT, 50 steps, 1024x1024. Highest quality ERNIE variant.',
+      tags: ['ernie_image', 'Image', '1024x1024'],
+      uncensored: false,
+      verified: true,
+      totalSizeGB: 28.9,
+      vramRequired: '24 GB',
+      workflow: 'ernie_image',
+      url: 'https://huggingface.co/Comfy-Org/ERNIE-Image',
+      files: [
+        {
+          name: 'ERNIE-Image Base (DiT 8B)',
+          description: 'Baidu ERNIE-Image Base diffusion model. 50 steps, highest quality.',
+          pulls: '', tags: ['Diffusion Model', '15.0 GB'], updated: 'New',
+          downloadUrl: 'https://huggingface.co/Comfy-Org/ERNIE-Image/resolve/main/diffusion_models/ernie-image.safetensors',
+          filename: 'ernie-image.safetensors', subfolder: 'diffusion_models', sizeGB: 15.0,
+        },
+        {
+          name: 'Ministral-3-3B Text Encoder',
+          description: 'Main text encoder (Ministral-3B) for ERNIE-Image prompt understanding.',
+          pulls: '', tags: ['Text Encoder', '7.2 GB'], updated: 'New',
+          downloadUrl: 'https://huggingface.co/Comfy-Org/ERNIE-Image/resolve/main/text_encoders/ministral-3-3b.safetensors',
+          filename: 'ministral-3-3b.safetensors', subfolder: 'text_encoders', sizeGB: 7.2,
+        },
+        {
+          name: 'ERNIE Prompt Enhancer',
+          description: 'Optional prompt enhancer that expands short prompts into richer descriptions.',
+          pulls: '', tags: ['Text Encoder', '6.4 GB'], updated: 'New',
+          downloadUrl: 'https://huggingface.co/Comfy-Org/ERNIE-Image/resolve/main/text_encoders/ernie-image-prompt-enhancer.safetensors',
+          filename: 'ernie-image-prompt-enhancer.safetensors', subfolder: 'text_encoders', sizeGB: 6.4,
+        },
+        {
+          name: 'FLUX 2 VAE',
+          description: 'Required autoencoder — shared with FLUX 2.',
+          pulls: '', tags: ['VAE', '335 MB'], updated: '',
+          downloadUrl: 'https://huggingface.co/Comfy-Org/ERNIE-Image/resolve/main/vae/flux2-vae.safetensors',
+          filename: 'flux2-vae.safetensors', subfolder: 'vae', sizeGB: 0.3,
         },
       ],
     },

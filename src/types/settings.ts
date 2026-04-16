@@ -19,6 +19,11 @@ export interface Settings {
   claudeCodeModel: string
   claudeCodeAutoApprove: boolean
   claudeCodePath: string
+  // Agent budget (Phase 10 v2.4.0) — hard caps that halt a runaway agent.
+  /** Hard cap on tool calls per user turn. 0 = unlimited (not recommended). */
+  agentMaxToolCalls: number
+  /** Hard cap on ReAct loop iterations per user turn. 0 = unlimited. */
+  agentMaxIterations: number
 }
 
 export interface Persona {

@@ -112,6 +112,8 @@ export function categorizeNodes(allNodes: Record<string, NodeMetadata>): Categor
     EmptyMochiLatentVideo: 'latentInit',
     EmptyCosmosLatentVideo: 'latentInit',
     CogVideoXEmptyLatents: 'latentInit',
+    // Conditioning
+    ConditioningZeroOut: 'textEncoders',
     // Text encoding
     CLIPTextEncode: 'textEncoders',
     CLIPTextEncodeSDXL: 'textEncoders',

@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { ChevronDown, Search, Globe, FileText, FileEdit, Terminal, Image, Loader2, Check, X, Clock, AlertCircle, FolderOpen, Cpu, Monitor, GitBranch } from 'lucide-react'
+import { ChevronDown, Search, Globe, FileText, FileEdit, Terminal, Image, Loader2, Check, X, Clock, AlertCircle, FolderOpen, Cpu, Monitor, GitBranch, Database } from 'lucide-react'
 import type { AgentToolCall } from '../../types/agent-mode'
 
 interface Props {
@@ -31,6 +31,8 @@ const STATUS_ICONS = {
   completed: Check,
   failed: AlertCircle,
   rejected: X,
+  // Phase 6 (v2.4.0): cached result from in-turn cache, no re-execution.
+  cached: Database,
 }
 
 export function ToolCallBlock({ toolCall, onApprove, onReject }: Props) {

@@ -71,7 +71,7 @@ export function CodexView() {
             </div>
           ) : (
             <div className="py-1">
-              {messages.map((msg) => {
+              {messages.filter(msg => !msg.hidden).map((msg) => {
                 const cleanContent = msg.content ? stripChannelTags(msg.content) : ''
                 return (
                   <div

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Menu, Settings, Sun, Moon, MessageSquare, Film, Layers, GitCompareArrows, Trophy, Loader2, Power, PowerOff } from 'lucide-react'
+import { Menu, Loader2, Power, Sun, Moon } from 'lucide-react'
 import { useUIStore } from '../../stores/uiStore'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { useChatStore } from '../../stores/chatStore'
@@ -8,6 +8,7 @@ import { useModelStore } from '../../stores/modelStore'
 import { ModelSelector } from '../models/ModelSelector'
 import { UpdateBadge } from './UpdateBadge'
 import { DownloadBadge } from './DownloadBadge'
+import { CreateTopControls } from '../create/CreateTopControls'
 import { loadModel, unloadModel, listRunningModels } from '../../api/ollama'
 import { getProviderIdFromModel } from '../../api/providers'
 
@@ -71,21 +72,19 @@ export function Header() {
     updateSettings({ theme: settings.theme === 'dark' ? 'light' : 'dark' })
   }
 
-  const navBtn = (view: string, icon: React.ReactNode, title: string) => (
+  const textNav = (view: string, label: string) => (
     <button
       onClick={() => {
-        // Always reset compare mode when navigating away
-        if (view !== 'chat' || view === 'chat') useCompareStore.getState().setComparing(false)
+        useCompareStore.getState().setComparing(false)
         setView(view as any)
       }}
-      className={`p-1.5 rounded-md transition-colors ${
+      className={`text-[0.6rem] font-medium transition-colors ${
         currentView === view && !isComparing
-          ? 'bg-gray-200 dark:bg-white/10 text-gray-900 dark:text-white'
-          : 'text-gray-500 hover:text-gray-800 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/5'
+          ? 'text-gray-900 dark:text-white'
+          : 'text-gray-500 dark:text-gray-500 hover:text-gray-900 dark:hover:text-white'
       }`}
-      title={title}
     >
-      {icon}
+      {label}
     </button>
   )
 
@@ -113,10 +112,16 @@ export function Header() {
         </button>
       </div>
 
-      {/* Center: Model Selector + Light-switch toggle (replaces the old
-          Power/PowerOff pair). Green = loaded, red = unloaded, spinner =
-          transitioning. Click flips the state. */}
+      {/* Center: contextual controls.
+          - Chat views → chat model picker + Ollama Lichtschalter
+          - Create view → Image/Video mode switch + ComfyUI model picker + ComfyUI Lichtschalter
+          Both layouts follow the same visual pattern so the user has a
+          single familiar control surface. */}
       <div className="flex items-center gap-1">
+        {currentView === 'create' ? (
+          <CreateTopControls />
+        ) : (
+          <>
         <ModelSelector />
         {isOllamaModel && (
           (() => {
@@ -162,34 +167,35 @@ export function Header() {
             )
           })()
         )}
+          </>
+        )}
       </div>
 
-      {/* Right: Nav icons — Order: Chat, Create, A/B Compare, Benchmark, Models, Settings */}
-      <div className="flex items-center gap-0.5">
+      {/* Right: text nav + icon utilities */}
+      <div className="flex items-center gap-2.5">
         <DownloadBadge />
         <button
           onClick={toggleTheme}
-          className="p-1.5 rounded-md text-gray-500 hover:text-gray-800 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/5 transition-colors"
+          className="p-1 rounded-md text-gray-500 hover:text-gray-800 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/5 transition-colors"
           title={settings.theme === 'dark' ? 'Light Mode' : 'Dark Mode'}
         >
           {settings.theme === 'dark' ? <Sun size={14} /> : <Moon size={14} />}
         </button>
-        {navBtn('chat', <MessageSquare size={14} />, 'Chat')}
-        {navBtn('create', <Film size={14} />, 'Create')}
+        {textNav('chat', 'Chat')}
+        {textNav('create', 'Create')}
         <button
           onClick={() => { useCompareStore.getState().setComparing(true); setView('chat') }}
-          className={`p-1.5 rounded-md transition-colors ${
+          className={`text-[0.6rem] font-medium transition-colors ${
             isComparing
-              ? 'bg-gray-200 dark:bg-white/10 text-gray-900 dark:text-white'
-              : 'text-gray-500 hover:text-gray-800 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/5'
+              ? 'text-gray-900 dark:text-white'
+              : 'text-gray-500 dark:text-gray-500 hover:text-gray-900 dark:hover:text-white'
           }`}
-          title="A/B Compare"
         >
-          <GitCompareArrows size={14} />
+          Compare
         </button>
-        {navBtn('benchmark', <Trophy size={14} />, 'Benchmark')}
-        {navBtn('models', <Layers size={14} />, 'Models')}
-        {navBtn('settings', <Settings size={14} />, 'Settings')}
+        {textNav('benchmark', 'Benchmark')}
+        {textNav('models', 'Models')}
+        {textNav('settings', 'Settings')}
         <UpdateBadge />
       </div>
     </header>

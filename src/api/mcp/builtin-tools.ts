@@ -6,6 +6,7 @@ import { backendCall, fetchExternal } from '../backend'
 import { useAgentWorkflowStore } from '../../stores/agentWorkflowStore'
 import { WorkflowEngine } from '../../lib/workflow-engine'
 import type { StepResult } from '../../types/agent-workflows'
+import { DELEGATE_TASK_TOOL_DEF, buildDelegateExecutor } from '../agents/sub-agent'
 
 // ── Tool Definitions ────────────────────────────────────────────
 
@@ -13,12 +14,16 @@ const BUILTIN_TOOLS: MCPToolDefinition[] = [
   // Web
   {
     name: 'web_search',
-    description: 'Search the web for current information. Returns titles, URLs, and short snippets. Use web_fetch on promising URLs to read full content.',
+    description:
+      'Search the web via the configured provider (Brave, Tavily, or auto). Returns a ranked list of {title, url, snippet}. '
+      + 'PREFER web_fetch on promising URLs for full content — snippets are teasers, not answers. '
+      + 'DO NOT call more than 3x per turn with similar queries; refine the query instead of re-searching. '
+      + 'For current date/time, use get_current_time — do NOT web_search for it.',
     inputSchema: {
       type: 'object',
       properties: {
         query: { type: 'string', description: 'The search query string' },
-        maxResults: { type: 'number', description: 'Maximum results to return (default: 5)' },
+        maxResults: { type: 'number', description: 'Maximum results to return (default: 5, max: 20)' },
       },
       required: ['query'],
     },
@@ -27,12 +32,17 @@ const BUILTIN_TOOLS: MCPToolDefinition[] = [
   },
   {
     name: 'web_fetch',
-    description: 'Fetch a web page URL and return its text content. Use AFTER web_search to read the full content. Returns cleaned text, not HTML.',
+    description:
+      'Fetch a single URL and return its readable text (up to ~24 000 chars). '
+      + 'Strips <script>, <style>, <nav>, <header>, <footer>, <aside>, <form> — returns main content only. '
+      + 'PREFER this over web_search when you already know the target URL. '
+      + 'NEVER call with localhost, private IPs (10.*, 192.168.*, 172.16-31.*), or file:// — they are refused. '
+      + 'If response is empty or 4xx, try a different URL rather than retrying the same one.',
     inputSchema: {
       type: 'object',
       properties: {
-        url: { type: 'string', description: 'The URL to fetch' },
-        maxLength: { type: 'number', description: 'Maximum characters to return (default: 4000)' },
+        url: { type: 'string', description: 'Full URL including protocol (http:// or https://)' },
+        maxLength: { type: 'number', description: 'Max chars to return (default: 24000)' },
       },
       required: ['url'],
     },
@@ -43,11 +53,15 @@ const BUILTIN_TOOLS: MCPToolDefinition[] = [
   // Filesystem
   {
     name: 'file_read',
-    description: 'Read the contents of any file on the system. Supports absolute paths and relative paths (relative to agent workspace).',
+    description:
+      'Read the complete contents of a file. PREFER absolute paths; relative paths resolve against the agent workspace (~/agent-workspace). '
+      + 'The entire file is returned — there is no pagination or range parameter. '
+      + 'DO NOT re-read a file you just wrote with file_write; the write response already confirmed the save. '
+      + 'For directory listings use file_list; for content search across many files use file_search.',
     inputSchema: {
       type: 'object',
       properties: {
-        path: { type: 'string', description: 'Path to the file (absolute or relative)' },
+        path: { type: 'string', description: 'Path to the file (absolute preferred)' },
       },
       required: ['path'],
     },
@@ -56,12 +70,16 @@ const BUILTIN_TOOLS: MCPToolDefinition[] = [
   },
   {
     name: 'file_write',
-    description: 'Write content to any file. Creates the file if it does not exist, overwrites if it does. Creates parent directories automatically.',
+    description:
+      'Write a file. Creates parent directories if missing. OVERWRITES existing content — there is NO append mode. '
+      + 'To preserve existing content and append, use file_read FIRST then file_write with the combined content. '
+      + 'PREFER absolute paths. '
+      + 'Writes to the same path within one turn are serialized automatically via the sideEffectKey scheduler.',
     inputSchema: {
       type: 'object',
       properties: {
-        path: { type: 'string', description: 'Path to the file (absolute or relative)' },
-        content: { type: 'string', description: 'The content to write' },
+        path: { type: 'string', description: 'Path to the file (absolute preferred)' },
+        content: { type: 'string', description: 'The complete new content of the file' },
       },
       required: ['path', 'content'],
     },
@@ -70,12 +88,16 @@ const BUILTIN_TOOLS: MCPToolDefinition[] = [
   },
   {
     name: 'file_list',
-    description: 'List files and directories at a path. Supports recursive listing and glob patterns.',
+    description:
+      'List directory contents. Returns entries with name, isDir, size, full path. '
+      + 'Supports recursive=true for full tree and glob pattern ("*.ts", "**/*.py"). '
+      + 'PREFER a specific pattern over recursive listing of large trees — recursing home / C:\\ is slow. '
+      + 'For content search (grep), use file_search instead.',
     inputSchema: {
       type: 'object',
       properties: {
         path: { type: 'string', description: 'Directory path to list' },
-        recursive: { type: 'boolean', description: 'Whether to list recursively (default: false)' },
+        recursive: { type: 'boolean', description: 'Recurse into subdirectories (default: false)' },
         pattern: { type: 'string', description: 'Glob pattern to filter results (e.g. "*.ts", "**/*.py")' },
       },
       required: ['path'],
@@ -85,13 +107,18 @@ const BUILTIN_TOOLS: MCPToolDefinition[] = [
   },
   {
     name: 'file_search',
-    description: 'Search file contents using regex patterns. Returns matching files with line numbers and context.',
+    description:
+      'Grep-style regex content search across files in a directory. Returns matching lines with file + line number. '
+      + 'PREFER over file_read + manual scan when hunting for a symbol across many files. '
+      + 'Use file_list first if you do not know the layout. '
+      + 'Default max 50 results — narrow the pattern or path if you flood. '
+      + 'Pattern uses Rust regex syntax, not PCRE.',
     inputSchema: {
       type: 'object',
       properties: {
-        path: { type: 'string', description: 'Directory to search in' },
+        path: { type: 'string', description: 'Directory to search in (recursive by default)' },
         pattern: { type: 'string', description: 'Regex pattern to search for' },
-        maxResults: { type: 'number', description: 'Maximum files to return (default: 50)' },
+        maxResults: { type: 'number', description: 'Maximum matching files (default: 50)' },
       },
       required: ['path', 'pattern'],
     },
@@ -102,14 +129,19 @@ const BUILTIN_TOOLS: MCPToolDefinition[] = [
   // Terminal
   {
     name: 'shell_execute',
-    description: 'Execute a shell command on the system. Supports PowerShell (Windows), bash (Linux/Mac). Returns stdout, stderr, and exit code.',
+    description:
+      'Run a shell command. PowerShell on Windows, bash on Unix. Returns stdout, stderr, exit code. '
+      + 'PREFER dedicated tools where available: file_read over `cat`, file_list over `ls`/`dir`, file_search over `grep`, get_current_time over `date`. '
+      + 'Use shell_execute for git, npm, cargo, docker, package managers, or platform utilities without a dedicated tool. '
+      + 'NEVER use to permanently delete without confirmation (rm -rf, Remove-Item -Recurse, git reset --hard). '
+      + 'Default timeout 120 s; set higher only for known long-running builds.',
     inputSchema: {
       type: 'object',
       properties: {
-        command: { type: 'string', description: 'The command to execute' },
-        cwd: { type: 'string', description: 'Working directory (optional)' },
+        command: { type: 'string', description: 'The full command to execute' },
+        cwd: { type: 'string', description: 'Working directory (optional, absolute preferred)' },
         timeout: { type: 'number', description: 'Timeout in milliseconds (default: 120000)' },
-        shell: { type: 'string', description: 'Shell to use: "powershell", "cmd", "bash" (default: auto)' },
+        shell: { type: 'string', description: 'Override shell: "powershell" | "cmd" | "bash" (default: auto)' },
       },
       required: ['command'],
     },
@@ -118,11 +150,16 @@ const BUILTIN_TOOLS: MCPToolDefinition[] = [
   },
   {
     name: 'code_execute',
-    description: 'Execute Python code. Returns stdout, stderr, and exit code.',
+    description:
+      'Execute Python code in a fresh subprocess. Returns stdout, stderr, exit code. '
+      + 'Use for math, data transforms, JSON/CSV parsing, one-off scripts. '
+      + 'NOT a REPL — state does not persist between calls; import everything you need each time. '
+      + 'For system commands and shell utilities, PREFER shell_execute. '
+      + 'Default timeout 30 s.',
     inputSchema: {
       type: 'object',
       properties: {
-        code: { type: 'string', description: 'The Python code to execute' },
+        code: { type: 'string', description: 'The Python source to execute (UTF-8)' },
         language: { type: 'string', description: 'Programming language: "python" or "shell"', enum: ['python', 'shell'] },
       },
       required: ['code'],
@@ -134,14 +171,19 @@ const BUILTIN_TOOLS: MCPToolDefinition[] = [
   // System
   {
     name: 'system_info',
-    description: 'Get system information: OS, architecture, hostname, username, RAM, CPU count.',
+    description:
+      'Return desktop system info: OS, architecture, hostname, username, total RAM, CPU count. Zero arguments. '
+      + 'Call once when output needs to be tailored to the user\'s platform; do not call repeatedly in a loop.',
     inputSchema: { type: 'object', properties: {}, required: [] },
     category: 'system',
     source: 'builtin',
   },
   {
     name: 'process_list',
-    description: 'List running processes sorted by memory usage. Returns top 50 processes with name, PID, memory, and CPU usage.',
+    description:
+      'List the top 30 running processes sorted by memory: {name, pid, memory, cpu%}. Zero arguments. '
+      + 'Use for task-manager-style queries ("is Chrome running?", "which process is eating RAM?"). '
+      + 'There is NO process_kill tool — to kill a process use shell_execute with taskkill (Windows) or kill (Unix).',
     inputSchema: { type: 'object', properties: {}, required: [] },
     category: 'system',
     source: 'builtin',
@@ -150,7 +192,11 @@ const BUILTIN_TOOLS: MCPToolDefinition[] = [
   // Desktop
   {
     name: 'screenshot',
-    description: 'Take a screenshot of the primary screen. Returns base64-encoded PNG image.',
+    description:
+      'Capture the primary display as a base64 PNG. Zero arguments. '
+      + 'USE for visual verification when the user asks "what\'s on my screen" or "look at X". '
+      + 'Returns a short summary string (size + filename); the actual image is forwarded to the model via message content. '
+      + 'NEVER call in a tight loop — screenshots are expensive and privacy-sensitive.',
     inputSchema: { type: 'object', properties: {}, required: [] },
     category: 'desktop',
     source: 'builtin',
@@ -159,12 +205,17 @@ const BUILTIN_TOOLS: MCPToolDefinition[] = [
   // Image
   {
     name: 'image_generate',
-    description: 'Generate an image from a text description using the local ComfyUI image generation pipeline.',
+    description:
+      'Generate an image from a text prompt via the local ComfyUI pipeline. Blocks up to 5 minutes. '
+      + 'USE for "draw me", "make an image of", "generate a picture". '
+      + 'NOT for photo editing — this is text-to-image only; no inpainting via this tool. '
+      + 'First installed image model is auto-selected. '
+      + 'Rate-limit yourself to 1 call per turn — ComfyUI serializes generations internally so parallel calls will queue, not speed up.',
     inputSchema: {
       type: 'object',
       properties: {
-        prompt: { type: 'string', description: 'Text description of the image to generate' },
-        negativePrompt: { type: 'string', description: 'Things to avoid in the generated image' },
+        prompt: { type: 'string', description: 'Positive text description of the desired image' },
+        negativePrompt: { type: 'string', description: 'Things to avoid (blurry, deformed, etc.)' },
       },
       required: ['prompt'],
     },
@@ -175,12 +226,16 @@ const BUILTIN_TOOLS: MCPToolDefinition[] = [
   // Workflow
   {
     name: 'run_workflow',
-    description: 'Run a saved agent workflow by name. Available workflows: Research Topic, Summarize URL, Code Review, and any custom workflows.',
+    description:
+      'Execute a saved agent workflow by name. Runs a nested ReAct with a pre-built step chain. '
+      + 'USE for repeatable multi-step tasks: "Research Topic", "Summarize URL", "Code Review", plus any user-created workflows. '
+      + 'DO NOT call from inside another workflow tool — depth capped at 5 to prevent recursion fork-bombs. '
+      + 'Pass optional input as the starting variable. If the name is unknown, the error lists available names.',
     inputSchema: {
       type: 'object',
       properties: {
-        name: { type: 'string', description: 'Name of the workflow to run' },
-        input: { type: 'string', description: 'Initial input to provide to the workflow' },
+        name: { type: 'string', description: 'Name of the workflow (case-insensitive match)' },
+        input: { type: 'string', description: 'Initial input passed as user_input / last_output' },
       },
       required: ['name'],
     },
@@ -188,10 +243,16 @@ const BUILTIN_TOOLS: MCPToolDefinition[] = [
     source: 'builtin',
   },
 
+  // Sub-agent delegation (Phase 13 v2.4.0).
+  DELEGATE_TASK_TOOL_DEF,
+
   // Local clock — so the agent never googles "what day is it".
   {
     name: 'get_current_time',
-    description: 'Return the user\'s current local date, time and timezone. Use this FIRST for any "what day / time / date is it" question — do NOT web_search for it. Zero arguments.',
+    description:
+      "Return the user's current local date, time, and timezone. Zero arguments. "
+      + "USE FIRST for any 'what day / time / date is it' question — do NOT web_search or shell_execute `date`. "
+      + "The Rust backend probes the OS timezone on every call, so this is always authoritative.",
     inputSchema: {
       type: 'object',
       properties: {},
@@ -493,6 +554,7 @@ const EXECUTOR_MAP: Record<string, (args: Record<string, any>) => Promise<string
   image_generate: executeImageGenerate,
   run_workflow: executeRunWorkflow,
   get_current_time: executeGetCurrentTime,
+  delegate_task: buildDelegateExecutor(),
 }
 
 export function registerBuiltinTools(registry: ToolRegistry) {

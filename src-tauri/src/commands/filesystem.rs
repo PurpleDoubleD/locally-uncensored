@@ -7,16 +7,52 @@ use glob::glob as glob_match;
 use regex::Regex;
 use walkdir::WalkDir;
 
-/// Resolve path — supports absolute and relative (relative to home/agent-workspace)
-fn resolve_path(path: &str) -> PathBuf {
-    let p = Path::new(path);
+/// Strip duplicate drive-letter prefixes, e.g.
+/// `D:/a/D:/a/file.txt` → `D:/a/file.txt`. See commands/agent.rs for
+/// the full rationale — same bug surface for fs_list / fs_search.
+fn normalize_duplicate_drive_prefix(path: &str) -> String {
+    let bytes = path.as_bytes();
+    if bytes.len() < 3 { return path.to_string(); }
+    let mut last_drive_idx: Option<usize> = None;
+    let mut i = 1;
+    while i + 1 < bytes.len() {
+        if bytes[i] == b':'
+            && bytes[i - 1].is_ascii_alphabetic()
+            && (bytes[i + 1] == b'/' || bytes[i + 1] == b'\\')
+        {
+            last_drive_idx = Some(i - 1);
+        }
+        i += 1;
+    }
+    match last_drive_idx {
+        Some(idx) if idx > 0 => path[idx..].to_string(),
+        _ => path.to_string(),
+    }
+}
+
+/// Resolve path — supports absolute and relative (relative to the
+/// per-chat workspace `~/agent-workspace/<chat_id>/`). Mirrors the
+/// pattern in agent.rs. `chat_id` is sanitised to the charset
+/// `[A-Za-z0-9_\-\.]` (anything else → `_`) and capped at 64 chars to
+/// prevent path traversal. Missing chat_id falls back to `default`.
+fn resolve_path(path: &str, chat_id: Option<&str>) -> PathBuf {
+    let cleaned = normalize_duplicate_drive_prefix(path);
+    let p = Path::new(&cleaned);
     if p.is_absolute() {
         p.to_path_buf()
     } else {
+        let id = chat_id.unwrap_or("default");
+        let safe: String = id
+            .chars()
+            .take(64)
+            .map(|c| if c.is_ascii_alphanumeric() || c == '_' || c == '-' || c == '.' { c } else { '_' })
+            .collect();
+        let slug = if safe.is_empty() { "default".to_string() } else { safe };
         dirs::home_dir()
             .unwrap_or_default()
             .join("agent-workspace")
-            .join(path)
+            .join(slug)
+            .join(&cleaned)
     }
 }
 
@@ -44,8 +80,9 @@ fn file_meta(path: &Path) -> serde_json::Value {
 }
 
 #[tauri::command]
-pub fn fs_read(path: String) -> Result<serde_json::Value, String> {
-    let full = resolve_path(&path);
+#[allow(non_snake_case)]
+pub fn fs_read(path: String, chatId: Option<String>) -> Result<serde_json::Value, String> {
+    let full = resolve_path(&path, chatId.as_deref());
     if !full.exists() {
         return Err(format!("File not found: {}", full.display()));
     }
@@ -62,8 +99,9 @@ pub fn fs_read(path: String) -> Result<serde_json::Value, String> {
 }
 
 #[tauri::command]
-pub fn fs_write(path: String, content: String) -> Result<serde_json::Value, String> {
-    let full = resolve_path(&path);
+#[allow(non_snake_case)]
+pub fn fs_write(path: String, content: String, chatId: Option<String>) -> Result<serde_json::Value, String> {
+    let full = resolve_path(&path, chatId.as_deref());
     if let Some(parent) = full.parent() {
         fs::create_dir_all(parent).map_err(|e| format!("Create dir: {}", e))?;
     }
@@ -72,12 +110,14 @@ pub fn fs_write(path: String, content: String) -> Result<serde_json::Value, Stri
 }
 
 #[tauri::command]
+#[allow(non_snake_case)]
 pub fn fs_list(
     path: String,
     recursive: Option<bool>,
     pattern: Option<String>,
+    chatId: Option<String>,
 ) -> Result<serde_json::Value, String> {
-    let dir = resolve_path(&path);
+    let dir = resolve_path(&path, chatId.as_deref());
     if !dir.is_dir() {
         return Err(format!("Not a directory: {}", dir.display()));
     }
@@ -117,12 +157,14 @@ pub fn fs_list(
 }
 
 #[tauri::command]
+#[allow(non_snake_case)]
 pub fn fs_search(
     path: String,
     pattern: String,
     max_results: Option<u32>,
+    chatId: Option<String>,
 ) -> Result<serde_json::Value, String> {
-    let dir = resolve_path(&path);
+    let dir = resolve_path(&path, chatId.as_deref());
     if !dir.is_dir() {
         return Err(format!("Not a directory: {}", dir.display()));
     }
@@ -174,8 +216,9 @@ pub fn fs_search(
 }
 
 #[tauri::command]
-pub fn fs_info(path: String) -> Result<serde_json::Value, String> {
-    let full = resolve_path(&path);
+#[allow(non_snake_case)]
+pub fn fs_info(path: String, chatId: Option<String>) -> Result<serde_json::Value, String> {
+    let full = resolve_path(&path, chatId.as_deref());
     if !full.exists() {
         return Err(format!("Path not found: {}", full.display()));
     }
@@ -231,6 +274,49 @@ pub async fn save_text_file_dialog(
         Some(handle) => {
             let path = handle.path().to_path_buf();
             std::fs::write(&path, content).map_err(|e| format!("Write failed: {}", e))?;
+            Ok(Some(path.to_string_lossy().into_owned()))
+        }
+        None => Ok(None),
+    }
+}
+
+/// Binary counterpart to `save_text_file_dialog`. Used by the Download
+/// buttons in the Create view's Gallery / OutputDisplay / MediaViewer.
+///
+/// Why a dedicated Rust command instead of the JS `<a download>` trick?
+/// In Tauri's Webview2 the blob-URL anchor-click pattern is unreliable
+/// — most of the time the webview simply navigates to the blob URL
+/// instead of saving it, so the user saw "nothing happens". Going
+/// through a native Save As dialog guarantees the bytes hit the disk.
+///
+/// `bytes` is expected as a raw number[] over the Tauri IPC (the JS
+/// side passes `Array.from(new Uint8Array(blob))`). Returns the chosen
+/// path, or null when the user cancelled.
+#[tauri::command]
+#[allow(non_snake_case)]
+pub async fn save_binary_file_dialog(
+    bytes: Vec<u8>,
+    defaultName: Option<String>,
+    extension: Option<String>,
+    ext_label: Option<String>,
+) -> Result<Option<String>, String> {
+    let default_name = defaultName.unwrap_or_else(|| "download.bin".to_string());
+    let ext = extension.unwrap_or_else(|| {
+        // Infer from defaultName if caller didn't tell us — cheap split.
+        default_name.rsplit_once('.').map(|(_, e)| e.to_string()).unwrap_or_else(|| "bin".to_string())
+    });
+    let label = ext_label.unwrap_or_else(|| format!("{} file", ext.to_uppercase()));
+
+    let file = rfd::AsyncFileDialog::new()
+        .set_file_name(&default_name)
+        .add_filter(&label, &[ext.as_str()])
+        .save_file()
+        .await;
+
+    match file {
+        Some(handle) => {
+            let path = handle.path().to_path_buf();
+            std::fs::write(&path, &bytes).map_err(|e| format!("Write failed: {}", e))?;
             Ok(Some(path.to_string_lossy().into_owned()))
         }
         None => Ok(None),

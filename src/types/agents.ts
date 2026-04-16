@@ -48,9 +48,18 @@ export interface ToolCall {
     | "completed"
     | "failed"
     | "approved"
-    | "rejected";
+    | "rejected"
+    | "cached";
   timestamp: number;
   duration?: number;
+  // v2.4 observability — all optional, additive.
+  startedAt?: number;
+  completedAt?: number;
+  cacheHit?: boolean;
+  parentToolCallId?: string;
+  schemaValidated?: boolean;
+  errorHint?: string;
+  sideEffectKey?: string;
 }
 
 export interface AgentTask {

@@ -94,7 +94,7 @@ export async function preflightCheck(
     }
   }
 
-  const needsUnet = modelType === 'flux' || modelType === 'flux2' || modelType === 'zimage' || modelType === 'wan' || modelType === 'hunyuan'
+  const needsUnet = modelType === 'flux' || modelType === 'flux2' || modelType === 'zimage' || modelType === 'ernie_image' || modelType === 'wan' || modelType === 'hunyuan'
     || modelType === 'ltx' || modelType === 'mochi' || modelType === 'cosmos'
     || modelType === 'framepack'
   if (needsUnet) {

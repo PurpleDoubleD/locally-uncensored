@@ -13,6 +13,7 @@ import {
 } from '../../api/discover'
 import { getSystemVRAM } from '../../api/comfyui'
 import { openExternal } from '../../api/backend'
+import { useModels } from '../../hooks/useModels'
 import { useDownloadStore } from '../../stores/downloadStore'
 import { useProviderStore } from '../../stores/providerStore'
 import { GlassCard } from '../ui/GlassCard'
@@ -38,7 +39,7 @@ function ModelDiscoverCard({ model, index, isText, getModelDownloadState, isMode
   const isDownloading = dlState?.status === 'downloading' || dlState?.status === 'connecting'
   const isComplete = dlState?.status === 'complete'
   const isError = dlState?.status === 'error'
-  const canDirectDownload = !!model.downloadUrl && !!model.filename
+  const canDirectDownload = (!!model.downloadUrl && !!model.filename) || !!model.ollamaModel
 
   return (
     <motion.div
@@ -143,6 +144,7 @@ export function DiscoverModels({ category }: Props) {
   // Provider state for model path detection
   const providers = useProviderStore(s => s.providers)
   const [hfModelPath, setHfModelPath] = useState<string | null>(null)
+  const { pullModel } = useModels()
 
   // Auto-detect provider model path for GGUF downloads
   useEffect(() => {
@@ -383,6 +385,16 @@ export function DiscoverModels({ category }: Props) {
   }
 
   const handleTextDownload = async (model: DiscoverModel) => {
+    // Ollama-native models: use ollama pull instead of GGUF download
+    if (model.ollamaModel) {
+      try {
+        await pullModel(model.ollamaModel)
+      } catch (e) {
+        console.error('Ollama pull failed:', e)
+        setInstallError(`Download failed: ${e instanceof Error ? e.message : String(e)}`)
+      }
+      return
+    }
     if (!model.downloadUrl || !model.filename) return
     const destDir = hfModelPath || (await detectProviderModelPath(providers.openai?.name || 'LM Studio'))
     if (!destDir) {

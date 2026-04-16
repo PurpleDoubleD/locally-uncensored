@@ -65,7 +65,13 @@ const TOOL_GROUPS: ToolGroup[] = [
 // a tool result reveals the user really wanted a file read). Keeping
 // `get_current_time` here means the agent NEVER has to fall back to web
 // for a trivial date question just because the keyword list missed.
-const ALWAYS_INCLUDE = ['file_read', 'file_write', 'get_current_time']
+export const ALWAYS_INCLUDE = ['file_read', 'file_write', 'get_current_time']
+
+/** Tool count at which embedding-based routing becomes worth the round trip. */
+export const EMBEDDING_ROUTING_THRESHOLD = 15
+
+import type { EmbeddingFn } from '../api/agents/embedding-router'
+import { selectToolsByEmbedding } from '../api/agents/embedding-router'
 
 /**
  * Select relevant tools based on user message content.
@@ -106,4 +112,38 @@ export function selectRelevantTools(
   if (selected.length === 0) return available
 
   return selected
+}
+
+/**
+ * Embedding-aware variant (Phase 9 v2.4.0). When `embed` is provided AND
+ * the permission-filtered tool count exceeds EMBEDDING_ROUTING_THRESHOLD,
+ * rank tools by semantic similarity to the user message and union the
+ * result with the keyword-based selection (belt + braces). When `embed`
+ * is absent, throws, or fails, silently falls back to the keyword-only
+ * path.
+ */
+export async function selectRelevantToolsAsync(
+  userMessage: string,
+  allTools: MCPToolDefinition[],
+  permissions: PermissionMap,
+  opts?: { embed?: EmbeddingFn; embeddingThreshold?: number; topN?: number },
+): Promise<MCPToolDefinition[]> {
+  const threshold = opts?.embeddingThreshold ?? EMBEDDING_ROUTING_THRESHOLD
+  const available = allTools.filter((t) => permissions[t.category] !== 'blocked')
+  if (!opts?.embed || available.length <= threshold) {
+    return selectRelevantTools(userMessage, allTools, permissions)
+  }
+  try {
+    const semanticNames = await selectToolsByEmbedding(
+      userMessage,
+      available.map((t) => ({ name: t.name, description: t.description })),
+      opts.embed,
+      { topN: opts.topN ?? 10, alwaysInclude: ALWAYS_INCLUDE },
+    )
+    const keyword = selectRelevantTools(userMessage, allTools, permissions)
+    const union = new Set<string>([...semanticNames, ...keyword.map((t) => t.name)])
+    return available.filter((t) => union.has(t.name))
+  } catch {
+    return selectRelevantTools(userMessage, allTools, permissions)
+  }
 }

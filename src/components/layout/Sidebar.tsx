@@ -194,8 +194,7 @@ export function Sidebar() {
                       >
                         <Icon size={9} />
                         <span className="relative">
-                          {label}
-                          {tag && <span className="absolute -top-2 left-0 right-0 text-[0.35rem] text-red-400/70 font-medium text-center">{tag}</span>}
+                          {tag ? <span className="text-[0.4rem] text-red-400/80 font-semibold tracking-wider uppercase">{tag}</span> : label}
                         </span>
                       </button>
                     ))}

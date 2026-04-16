@@ -3,8 +3,8 @@
 ## Project Overview
 Plug and Play for the Mass Desktop AI app (Tauri + React + TypeScript) for local LLM chat, image and video generation via ComfyUI.
 - **Repo:** PurpleDoubleD/locally-uncensored (35+ stars)
-- **Current public version:** v2.2.3 (released 2026-04-05)
-- **Next release:** v2.3.3 on branch `feature/caveman-remote` (DO NOT PUSH until user says so — installer built + on Desktop, uncommitted changes)
+- **Current public version:** v2.3.3 (merging to master 2026-04-16)
+- **Branch:** `feature/agent-overhaul-v24` merged into master
 - Test iterations 2.3.4–2.3.7 were intermediate, not shipped. **2.3.3 is the next public version.**
 
 ## Tech Stack
@@ -138,10 +138,48 @@ src-tauri/src/commands/      — Rust commands: install, process, download, prox
 
 77. **Codex connection-error hints (2.3.3)** — `useCodex.ts` catch block now adds kontext hints: `/Failed to fetch/i` → "Is `ollama serve` running?", `/does not support tools/i` → "Pick a tool-capable model (Qwen 3, Llama 3.1+, Gemma 4)", `/timed out/i` → "Try smaller model or more targeted prompt".
 
+78. **Agent Overhaul v24 — 13-phase architecture rewrite (branch feature/agent-overhaul-v24, stays under 2.3.3)** — Big modular rewrite of the agent runtime, all phases on top of the prior 2.3.3 work. (1) `AgentBlock.toolCall` (singular) → `toolCalls: AgentToolCall[]` schema with `migrateBlockInPlace()` rehydrate via Zustand `persist({merge})`. (2) `toolAuditStore` ring buffer of every call with `stableArgsHash` (djb2 of canonicalised JSON). (3) Tool descriptions ≥80 chars with PREFER/NEVER hints. (4) `args-validator.ts` rejects bad args with hint to LLM before dispatch. (5) `tool-executor.ts:executeParallel` — `Promise.allSettled` with `sideEffectKey` grouping (file-write same-path serial, shell/code share `'exec'`, image/workflow share `'comfyui'`). (6) `in-turn-cache.ts` dedupes `(name, argsHash)` within one user turn, served result carries `status: 'cached' + cacheHit:true`. (7) `error-hints.ts` per-tool rules append ≤160-char retry hints to error messages. (8) MCP wiring: `ToolRegistry.registerExternal(serverId, tools, executor)`, tools prefixed `mcp__<id>__<name>`. (9) Embedding-based tool routing in `selectRelevantToolsAsync` once tool count >15 (cosine-sim, keyword fallback). (10) `AgentBudget` with `agentMaxToolCalls` (default 50) + `agentMaxIterations` (default 25) caps, halts cleanly. (11) `partial-args-accumulator.ts` library only — streaming-deltas → full args (UI wiring deferred). (12) `permissionStore.perToolOverrides` + `modeScope` ('chat'|'edit'|'agent'), `getPermissionLevelWithOverrides`. (13) `delegate_task` tool spawns sub-agent with isolated budget, max nesting depth 2.
+
+79. **Regression fixes from Agent Overhaul E2E (commit 47f41ca)** — Five regressions surfaced after v2.4.0 build + install (version bumps later reverted). (a) **Streaming dead in Chat tab** — `proxy_localhost_stream` in Rust collected all bytes via `resp.bytes().await` before returning. Fix in `src/api/backend.ts:localFetchStream`: direct `fetch()` as primary path (Ollama has CORS open on localhost → real chunked streaming), Rust proxy fallback only. (b) **Universal thinking-tag stripper** — new `src/lib/thinking-stripper.ts` handles non-canonical formats the char-state-machine misses: Gemma `<|?channel|?>thought`, alt names (`<thought>`, `<reasoning>`, `<reflect>`, `<deepthink>`), orphan openers. Applied DURING streaming in useChat.ts RAF path (`stripNonCanonicalTags`) and at stream-end in useCodex/useAgentChat (`finalStripThinkingTags`). Canonical `<think>…</think>` flow unchanged. (c) **Approval modal invisible + parallel deadlock** — `ApprovalDialog.tsx` rewritten as fullscreen backdrop modal (prominent buttons, **Enter=Approve**, **Esc=Reject**, autoFocus on Approve). Race fix: `approvalQueueRef: ApprovalEntry[]` (FIFO) replaces single `approvalRef` — N parallel tools used to overwrite each other's resolver and deadlock all but the last. Auto-permission tools bypass via `entry.ac.status !== 'pending_approval'` check inside `awaitApproval`. (d) **Codex stops after 1 tool** — `CODEX_SYSTEM_PROMPT` in useCodex.ts ships explicit AUTONOMY CONTRACT: "NEVER say 'Now I will create X' as plain text and stop. Execute ALL N steps in one session." (e) **FileTree auto-refresh** — `codexStore` gets `fileTreeVersion` counter, bumped by addEvent on `file_change`/`terminal_output`. FileTree subscribes and reloads on change → new files appear live. (f) **v2.4.2 hotfix** for React Error #130: `ToolCallBlock.STATUS_ICONS` was missing `'cached'` (Phase 6 added the status, the icon map didn't get it) → `<undefined />` → crash on second-call-cached scenario. Added `cached: Database` from lucide-react.
+
+80. **Gemma 3/4 plain-text planner bypass (commit ca6632d)** — Separate from #79b. After tag-stripping fixed `<|channel|>thought` leaks, surfaced that Gemma 3/4 with Ollama `think: false` drops into PLAIN-TEXT structured planning (`Plan:` / `Constraint Checklist:` / `Confidence Score:` / `Self-Correction during drafting:`) — no tags any stripper could remove. Tried explicit anti-planning system prompts ("IMPORTANT: Answer directly. Do not output a Plan…"). Gemma ignores them. **Working fix**: new `isPlainTextPlanner(modelName)` helper in `src/lib/model-compatibility.ts` (gemma3/gemma4 base names). When User has Thinking OFF AND model is plain-text-planner, pass `thinking: undefined` (Ollama default = tagged thinking ON) instead of `false`. Gemma then emits `<|channel|>thought` markers that the thinking-stripper removes cleanly; `keepThinking === false` gate drops the native thinking field. Same UX (clean answer, no preamble), trade-off is hidden token spend on internal reasoning. Wired identically in useChat.ts / useAgentChat.ts / useCodex.ts. The dead anti-planning prompts removed.
+
+81. **Version policy: stay at 2.3.3** — Don't bump per regression fix during a session. Public number is the release-train label, not a dev-build counter. Overwrite `LU-<ver>-setup.exe` on Desktop in place rather than creating 2.3.4/2.4.x trail. See `feedback_versioning.md`.
+
+82. **ERNIE-Image integration (commit 2c0c224)** — Baidu ERNIE-Image fully integrated into Model Manager. New ModelType `ernie_image`, strategy `unet_ernie_image` with `ConditioningZeroOut` for negative conditioning (CLIPLoader type `flux2`, shared `flux2-vae`). Two bundles: **Turbo** (8 steps, 28.9 GB) + **Base** (50 steps, 28.9 GB), each with 4 files: DiT model + Ministral-3-3B text encoder + Prompt Enhancer + VAE. All URLs verified HTTP 200 against `Comfy-Org/ERNIE-Image`. No custom nodes needed (ComfyUI day-0 support). No uncensored variants found. Defaults: 8 steps, CFG 1, euler/simple, 1024x1024.
+
+83. **Codex streaming (commit 2c0c224)** — `streamWithTools()` in `useCodex.ts` replaces non-streaming `chatWithTools()` for Ollama. Uses `localFetchStream()` (direct fetch → Tauri proxy fallback) with `stream: true` + `tools`. Live thinking/content tokens via NDJSON parsing. User sees progress during 2+ minute generations instead of blank screen. Non-Ollama providers (OpenAI, Anthropic) keep `chatWithTools()` fallback.
+
+84. **Codex final answer fallback (commit 2c0c224)** — When model returns empty content after tool calls (file_list as last action, no summary text), Codex now generates fallback: "Task completed: N file(s) written, M file(s) read." from the `blocks` array. Desktop + mobile parity.
+
+85. **Codex continue capability (commit 2c0c224)** — Tool-call history persisted as hidden messages (`hidden: true`, `tool_calls: [...]`) in chat store between turns. Next turn's history builder includes them so the model sees what it did before (parity with original OpenAI Codex CLI). `insertMessageBefore()` added to chatStore. `MessageList` + `CodexView` filter hidden messages. Mobile equivalent in `finishToolLoop` splices hidden messages into `msgs[]`.
+
+86. **Path doubling fix (commit 2c0c224)** — `useCodex.ts` line 314 now uses `/^[a-zA-Z]:[/\\]/` regex to detect ANY drive letter as absolute (was: `!p.startsWith('C:')` which treated `D:/` paths as relative → doubled path bug). Rust `normalize_duplicate_drive_prefix()` in `agent.rs` + `filesystem.rs` as defensive dedup (strips `D:/a/D:/a/file.html` → `D:/a/file.html`).
+
+87. **Mobile native tool calling (commit 2c0c224)** — `runToolLoop` in `mobile_landing()` replaces ReAct text-JSON parser. Uses Ollama `/api/chat` with `tools` array (same as desktop). Both Codex + Agent route through it. Remote permissions default to ALL ON. Dead code removed: `buildReActPrompt`, `parseAgentResponse`, `agentChatStream`.
+
+88. **Mobile Codex AUTONOMY CONTRACT (commit 80598ea)** — Mobile `CODEX_PROMPT` now matches desktop's system prompt with explicit autonomy contract: "NEVER say 'Now I will create X' and then stop — execute ALL N steps in one session."
+
+89. **Tool-call overwrite bug fix (commit 9aaa7d6)** — `streamWithTools()` NDJSON parser was overwriting tool_calls instead of appending across chunks. Silent data loss when Ollama split tool calls. Fixed: spread-append `[...toolCalls, ...new]`. Also: Rust snake_case warnings fixed (`systemPrompt` → `system_prompt`), FLUX2 CFG test corrected (3.5 not 1.0), flaky timing tests relaxed (90ms→200ms).
+
+90. **Comprehensive smoke test suite (commit 11a47e4)** — 186 new tests (1919→2105 total) across 9 new test files: `useCodex-streaming` (NDJSON parsing, tool append regression), `useCodex-fallback-answer`, `useCodex-prompt-contract` (AUTONOMY CONTRACT desktop↔mobile parity), `chatStore-operations` (all CRUD + insertMessageBefore + hidden messages), `model-compatibility-smoke` (agent/thinking/planner/claude-code), `ernie-image-workflow` (classification→strategy→bundles→ConditioningZeroOut), `app-wide-smoke` (defaults, registries, bundle→strategy pipeline), `mobile-codex-parity` (tools, loop, permissions), `message-types` (hidden, tool_calls, all roles/modes).
+
+91. **Codex streaming arg repair (commit 1f6d49b)** — `repairToolCallArgs()` was missing in the NDJSON streaming path. Ollama returns tool arguments as JSON strings (not objects) during streaming → args-validator saw string → "path is missing". Non-streaming path in ollama-provider.ts had the repair, streaming path didn't. Fixed: import + apply `repairToolCallArgs()` at both extraction points.
+
+92. **Agent filesystem awareness (commit 1f6d49b)** — Agent system prompt in `useAgentChat.ts` was web-only ("web_search → web_fetch → answer"), making the agent "PC blind" for filesystem tasks. Rewrote `buildAgentSystemPrompt()` with full tool inventory (filesystem, web, system, creative), exploration-first workflow guidance, and `system_info` hint.
+
+93. **AE-style text header (commit ee3a20a)** — Header right section redesigned from icon pills to After Effects typography: Chat, Create, Compare, Benchmark, Models, Settings as clean `text-[0.6rem] font-medium` text labels matching sidebar tab size. Downloads + Light/Dark kept as icons. Improves discoverability (#23 root cause).
+
+94. **Qwen 3.6 day-0 integration (commit ca93252)** — Qwen 3.6 (35B MoE, 3B active, vision + agentic coding + thinking preservation, 256K context) released on Ollama. Added to: `AGENT_COMPATIBLE`, `THINKING_COMPATIBLE`, `CLAUDE_CODE_COMPATIBLE`, recommended models (#1 HOT pick), Discover mainstream list, mobile `THINKING_COMPATIBLE`. One-click Ollama pull via new `ollamaModel` field on `DiscoverModel`.
+
+95. **UI polish (commit 0a82260)** — Sidebar "Soon" tag now replaces label text (was floating above). Downloads + Light/Dark restored to icons. Header nav text matched to sidebar tabs (`text-[0.6rem]`). Qwen 3.6 download button works via `ollamaModel` → `pullModel()` in `handleTextDownload`.
+
 ### What's LEFT to finish v2.3.0:
-1. **Tauri proxy_localhost investigation** — reqwest in Tauri subprocess can't reach localhost. Direct fetch workaround in place but root cause unknown. Low priority since workaround works. Deferred to next release.
+1. **Tauri proxy_localhost investigation** — reqwest in Tauri subprocess can't reach localhost. Direct fetch workaround now also primary path for streaming via #79a. Root cause still unknown. Low priority.
 2. **LTX VAEDecode reference** — dynamic-workflow.ts line 263: vaeSourceId incorrectly points to UNETLoader output for LTX strategy. Fix when LTX model is installed for testing.
-3. **Codex file tree auto-refresh** — File tree in Codex tab doesn't update when files are created during a session. Needs refresh button or fs watcher to auto-detect changes.
+3. **~~Codex file tree auto-refresh~~** — RESOLVED in #79e via `fileTreeVersion` counter on codexStore.
+4. **~~Codex incremental content streaming~~** — RESOLVED in #83 via `streamWithTools()` with `localFetchStream` + NDJSON parsing. Live thinking/content tokens stream during generation.
+5. **Mobile/remote.rs thinking-stripper port** — Mobile still uses inline regex stripping in `pushChunkContent`. Could port `thinking-stripper.ts` patterns over but Remote works fine in current state. Low priority.
 
 ### Files modified in this branch (30+ files):
 - `src/api/comfyui.ts` — 8 new ModelTypes (incl. zimage), COMPONENT_REGISTRY, uploadImage(), inputImage/denoise in GenerateParams, findMatchingVAE/CLIP for zimage
@@ -250,6 +288,6 @@ src-tauri/src/commands/      — Rust commands: install, process, download, prox
 - Downloads: Use `downloadStore` for all ComfyUI downloads (not component-local state)
 
 
-## Test Suite: 1574 tests, 0 failures (53 test files, as of 2.3.3)
+## Test Suite: 2105 tests (83 test files, as of v2.3.3 final)
 All pre-existing test failures have been fixed. Run `npx vitest run` to verify.
 Also run `cargo check --manifest-path src-tauri/Cargo.toml` for Rust changes and `npx tsc --noEmit` for TS type check.

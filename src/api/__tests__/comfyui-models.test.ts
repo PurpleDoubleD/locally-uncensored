@@ -82,6 +82,11 @@ describe('classifyModel', () => {
     expect(classifyModel('zimage_base.safetensors')).toBe('zimage')
   })
 
+  it('classifies ERNIE-Image models', () => {
+    expect(classifyModel('ernie-image-turbo.safetensors')).toBe('ernie_image')
+    expect(classifyModel('ernie_image_turbo_bf16.safetensors')).toBe('ernie_image')
+  })
+
   it('returns unknown for unrecognized models', () => {
     expect(classifyModel('totally_custom_model.safetensors')).toBe('unknown')
   })
@@ -91,7 +96,7 @@ describe('classifyModel', () => {
 
 describe('isVideoModelType', () => {
   const videoTypes = ['wan', 'hunyuan', 'ltx', 'mochi', 'cosmos', 'cogvideo', 'svd', 'framepack', 'pyramidflow', 'allegro'] as const
-  const imageTypes = ['flux', 'flux2', 'zimage', 'sdxl', 'sd15', 'unknown'] as const
+  const imageTypes = ['flux', 'flux2', 'zimage', 'ernie_image', 'sdxl', 'sd15', 'unknown'] as const
 
   for (const t of videoTypes) {
     it(`${t} is a video model type`, () => {
@@ -139,7 +144,7 @@ describe('MODEL_TYPE_DEFAULTS', () => {
 // ─── COMPONENT_REGISTRY ───
 
 describe('COMPONENT_REGISTRY', () => {
-  const allTypes = ['sd15', 'sdxl', 'flux', 'flux2', 'zimage', 'wan', 'hunyuan', 'ltx', 'mochi', 'cosmos', 'cogvideo', 'svd', 'framepack', 'pyramidflow', 'allegro', 'unknown']
+  const allTypes = ['sd15', 'sdxl', 'flux', 'flux2', 'zimage', 'ernie_image', 'wan', 'hunyuan', 'ltx', 'mochi', 'cosmos', 'cogvideo', 'svd', 'framepack', 'pyramidflow', 'allegro', 'unknown']
 
   for (const t of allTypes) {
     it(`${t} has a registry entry`, () => {
