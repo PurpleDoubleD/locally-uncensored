@@ -22,6 +22,7 @@ export interface DiscoverModel {
   provider?: ProviderId   // Which provider this model belongs to
   providerName?: string   // Display name of the provider
   canPull?: boolean       // false = no download/pull capability (cloud/external)
+  ollamaModel?: string    // Ollama model tag for `ollama pull` (e.g. 'qwen3.6')
 }
 
 export interface DownloadProgress {
@@ -425,7 +426,7 @@ export function getMainstreamTextModels(): DiscoverModel[] {
     { name: 'Gemma 4 E4B', description: 'Gemma 4 E4B — lightweight 4.5B, great for small GPUs.', pulls: '100K+', tags: ['4.5B', 'Q4_K_M', '5 GB'], updated: 'Hot', released: '2026-04', downloadUrl: HF('unsloth/gemma-4-E4B-it-GGUF', 'gemma-4-E4B-it-Q4_K_M.gguf'), filename: 'gemma-4-E4B-it-Q4_K_M.gguf', sizeGB: 5 },
     { name: 'Gemma 4 E2B', description: 'Gemma 4 E2B — ultra-light 2.3B, runs on anything.', pulls: '100K+', tags: ['2.3B', 'Q4_K_M', '3 GB'], updated: 'New', released: '2026-04', downloadUrl: HF('unsloth/gemma-4-E2B-it-GGUF', 'gemma-4-E2B-it-Q4_K_M.gguf'), filename: 'gemma-4-E2B-it-Q4_K_M.gguf', sizeGB: 3 },
     // ── Qwen 3.6 (April 2026) ──
-    { name: 'Qwen 3.6 35B MoE', description: 'Qwen 3.6 — 35B MoE (3B active), vision + agentic coding + thinking preservation. 256K context. Use: ollama pull qwen3.6', pulls: 'New', tags: ['35B MoE', 'Vision', '24 GB'], updated: 'Hot', agent: true, released: '2026-04', url: 'https://ollama.com/library/qwen3.6', canPull: false, sizeGB: 24 },
+    { name: 'Qwen 3.6 35B MoE', description: 'Qwen 3.6 — 35B MoE (3B active), vision + agentic coding + thinking preservation. 256K context.', pulls: 'New', tags: ['35B MoE', 'Vision', '24 GB'], updated: 'Hot', agent: true, released: '2026-04', ollamaModel: 'qwen3.6', sizeGB: 24 },
     // ── Qwen 3.5 (March 2026) ──
     { name: 'Qwen 3.5 35B MoE', description: 'Qwen 3.5 35B MoE — best agentic, 256K context. SWE-bench leader.', pulls: '100K+', tags: ['35B', 'Q4_K_M', '21 GB'], updated: 'Hot', agent: true, released: '2026-03', downloadUrl: HF('unsloth/Qwen3.5-35B-A3B-GGUF', 'Qwen3.5-35B-A3B-Q4_K_M.gguf'), filename: 'Qwen3.5-35B-A3B-Q4_K_M.gguf', sizeGB: 21 },
     { name: 'Qwen 3.5 27B', description: 'Qwen 3.5 27B dense — strongest reasoning + coding.', pulls: '100K+', tags: ['27B', 'Q4_K_M', '16 GB'], updated: 'Hot', agent: true, released: '2026-03', downloadUrl: HF('unsloth/Qwen3.5-27B-GGUF', 'Qwen3.5-27B-Q4_K_M.gguf'), filename: 'Qwen3.5-27B-Q4_K_M.gguf', sizeGB: 16 },

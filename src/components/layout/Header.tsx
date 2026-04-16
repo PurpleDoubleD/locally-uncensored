@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Menu, Loader2, Power } from 'lucide-react'
+import { Menu, Loader2, Power, Sun, Moon } from 'lucide-react'
 import { useUIStore } from '../../stores/uiStore'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { useChatStore } from '../../stores/chatStore'
@@ -78,7 +78,7 @@ export function Header() {
         useCompareStore.getState().setComparing(false)
         setView(view as any)
       }}
-      className={`text-[0.65rem] font-medium tracking-wider uppercase transition-colors ${
+      className={`text-[0.6rem] font-medium transition-colors ${
         currentView === view && !isComparing
           ? 'text-gray-900 dark:text-white'
           : 'text-gray-500 dark:text-gray-500 hover:text-gray-900 dark:hover:text-white'
@@ -171,20 +171,21 @@ export function Header() {
         )}
       </div>
 
-      {/* Right: AE-style text navigation */}
-      <div className="flex items-center gap-3">
+      {/* Right: text nav + icon utilities */}
+      <div className="flex items-center gap-2.5">
         <DownloadBadge />
         <button
           onClick={toggleTheme}
-          className="text-[0.65rem] font-medium tracking-wider uppercase text-gray-500 dark:text-gray-500 hover:text-gray-900 dark:hover:text-white transition-colors"
+          className="p-1 rounded-md text-gray-500 hover:text-gray-800 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/5 transition-colors"
+          title={settings.theme === 'dark' ? 'Light Mode' : 'Dark Mode'}
         >
-          {settings.theme === 'dark' ? 'Light' : 'Dark'}
+          {settings.theme === 'dark' ? <Sun size={14} /> : <Moon size={14} />}
         </button>
         {textNav('chat', 'Chat')}
         {textNav('create', 'Create')}
         <button
           onClick={() => { useCompareStore.getState().setComparing(true); setView('chat') }}
-          className={`text-[0.65rem] font-medium tracking-wider uppercase transition-colors ${
+          className={`text-[0.6rem] font-medium transition-colors ${
             isComparing
               ? 'text-gray-900 dark:text-white'
               : 'text-gray-500 dark:text-gray-500 hover:text-gray-900 dark:hover:text-white'
