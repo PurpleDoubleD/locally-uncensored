@@ -23,6 +23,7 @@ import { explainError as explainToolError } from '../api/agents/error-hints'
 import { budgetFromSettings } from '../api/agents/budget'
 import { finalStripThinkingTags } from '../lib/thinking-stripper'
 import { ollamaUrl, localFetchStream } from '../api/backend'
+import { repairToolCallArgs } from '../lib/tool-call-repair'
 
 const CODEX_SYSTEM_PROMPT = `You are Codex, an autonomous coding agent inside Locally Uncensored. You execute coding tasks end-to-end by reading files, writing code, and running shell commands. You MUST use tools — never guess file contents.
 
@@ -142,7 +143,7 @@ async function streamWithTools(
           // Ollama may split tool_calls across chunks — append, don't overwrite
           if (j.message.tool_calls && Array.isArray(j.message.tool_calls)) {
             toolCalls = [...toolCalls, ...j.message.tool_calls.map((tc: any) => ({
-              function: { name: tc.function.name, arguments: tc.function.arguments },
+              function: { name: tc.function.name, arguments: repairToolCallArgs(tc.function.arguments) },
             }))]
           }
         }
@@ -156,7 +157,7 @@ async function streamWithTools(
       const j = JSON.parse(buf.trim())
       if (j.message?.tool_calls && Array.isArray(j.message.tool_calls)) {
         toolCalls = [...toolCalls, ...j.message.tool_calls.map((tc: any) => ({
-          function: { name: tc.function.name, arguments: tc.function.arguments },
+          function: { name: tc.function.name, arguments: repairToolCallArgs(tc.function.arguments) },
         }))]
       }
       if (j.message?.content) {

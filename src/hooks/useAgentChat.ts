@@ -1,6 +1,7 @@
 import { useRef, useState, useCallback } from 'react'
 import { v4 as uuid } from 'uuid'
 import { chatNonStreaming } from '../api/agents'
+import { setActiveChatId, clearActiveChatId } from '../api/agent-context'
 import { useChatStore } from '../stores/chatStore'
 import { agentVariantExists, createAgentVariant, getAgentModelName, canFixModel } from '../api/model-template-fix'
 import { useModelStore } from '../stores/modelStore'
@@ -259,6 +260,11 @@ export function useAgentChat() {
     if (!convId) {
       convId = store.createConversation(activeModel, persona?.systemPrompt || '')
     }
+
+    // Publish the conversation id so built-in tools land in
+    // `~/agent-workspace/<convId>/` — each LU agent chat gets an isolated
+    // workspace folder. Cleared in the finally block further down.
+    setActiveChatId(convId)
 
     // Add user message
     const userMessage = {
@@ -766,6 +772,9 @@ export function useAgentChat() {
       setIsAgentRunning(false)
       runningRef.current = false
       abortRef.current = null
+      // Drop the per-run workspace scope so standalone tool calls from
+      // other tabs don't accidentally land in this chat's folder.
+      clearActiveChatId()
       // Reject any pending approvals so their promises don't hang forever
       for (const entry of approvalQueueRef.current) entry.resolve(false)
       approvalQueueRef.current = []
@@ -819,18 +828,22 @@ export function useAgentChat() {
 // ── Agent System Prompt Builder ─────────────────────────────────
 
 function buildAgentSystemPrompt(basePrompt: string): string {
-  const agentInstructions = `You are an autonomous AI agent. You MUST use tools — NEVER answer from memory.
+  const agentInstructions = `You are an autonomous AI agent inside Locally Uncensored with full access to this computer.
 
-IMPORTANT: web_search returns ONLY short snippets, NOT real data. You MUST ALWAYS call web_fetch on the best URL to read the actual page content before answering.
+Available tools:
+- Filesystem: file_read, file_write, file_list, file_search
+- Web: web_search, web_fetch
+- System: shell_execute, code_execute, system_info, screenshot, process_list, get_current_time
+- Creative: image_generate, run_workflow
 
-Workflow:
-1. web_search → get URLs
-2. web_fetch → read actual page content from the best URL
-3. Answer based on real data from web_fetch
-
-Other tools: file_read, file_write, code_execute, image_generate.
-Chain multiple tools as needed. If a tool fails, try a different approach.
-Respond in the same language the user uses.`
+Rules:
+- You MUST use tools — NEVER answer from memory or guess file contents.
+- For filesystem tasks: ALWAYS call file_list first to explore, then file_read to inspect, then act.
+- For web tasks: web_search → web_fetch on the best URL → answer based on real data.
+- web_search returns ONLY short snippets, NOT full content. ALWAYS call web_fetch to read the actual page.
+- If you need to know the OS, paths, or hardware: call system_info once at the start.
+- Chain multiple tools as needed. If a tool fails, try a different approach.
+- Respond in the same language the user uses.`
 
   if (basePrompt) {
     return `${agentInstructions}\n\n${basePrompt}`
