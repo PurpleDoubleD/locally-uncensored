@@ -495,7 +495,8 @@ async fn handle_agent_tool(
                 let cwd = body.args.get("cwd").and_then(|v| v.as_str()).map(String::from);
                 let timeout = body.args.get("timeout").and_then(|v| v.as_u64());
                 let shell = body.args.get("shell").and_then(|v| v.as_str()).map(String::from);
-                crate::commands::shell::shell_execute(command, None, cwd, timeout, shell, chat_id.clone()).await
+                let _ = &chat_id; // chat-scoped shell cwd not yet implemented
+                crate::commands::shell::shell_execute(command, None, cwd, timeout, shell).await
             }
         }
         "system_info" => crate::commands::system::system_info(),
