@@ -246,8 +246,10 @@ export class OllamaProvider implements ProviderClient {
       // (pulled before Ollama 0.15). Give the user an actionable remediation
       // instead of the cryptic "X does not support chat/completion".
       // Regex is tolerant to prefixes (e.g. Rust proxy wraps as "HTTP 400: {...}")
-      // and to the model name being quoted or not.
-      const m = typeof raw === 'string' && raw.match(/['"]?([\w.:/\-]+?)['"]?\s+does not support (chat|completion)/i)
+      // with embedded \"…\" escapes, and to the model name being quoted or not.
+      // The [\\'"]* classes swallow any combination of escape backslashes and
+      // JSON-encoded quotes around the model identifier.
+      const m = typeof raw === 'string' && raw.match(/[\\'"]*([\w.:/\-]+?)[\\'"]*\s+does not support (chat|completion)/i)
       if (m) {
         const name = m[1]
         return `Ollama rejected "${name}" — its manifest is stale (pulled before Ollama 0.15). Open a terminal and run: ollama pull ${name}   Then reload the model.`
