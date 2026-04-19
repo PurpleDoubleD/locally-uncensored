@@ -98,49 +98,67 @@ export function AppShell() {
   //   3. beforeunload sync flush on Tauri window close. Fires for graceful
   //      quits and "X" button; does NOT fire for taskkill / NSIS upgrade
   //      (why we need 1+2 as well).
-  // No dependency — we want this to run ONCE on mount regardless of
-  // onboardingDone state, and not rerun on every settings flip.
+  // No dependency — we want this to run ONCE on mount and not rerun on
+  // every settings flip. Tauri v2 sets `window.__TAURI__` asynchronously
+  // via `withGlobalTauri` — on slower machines the first render fires
+  // BEFORE the global exists, so we poll for up to 5 s, then arm the triad.
   useEffect(() => {
-    if (!isTauri()) return
-    // Migration: write onboarding marker if missing (keeps NSIS-update recovery working)
-    backendCall<boolean>('is_onboarding_done').catch(() => false).then((markerExists) => {
-      if (!markerExists) {
-        backendCall('set_onboarding_done').catch(() => {})
-      }
-    })
-    const doBackup = () => {
-      const snapshot: Record<string, string> = { __ts: new Date().toISOString() }
-      for (const key of STORE_KEYS) {
-        const val = localStorage.getItem(key)
-        if (val) snapshot[key] = val
-      }
-      // Always fire — we want backup even if snapshot is mostly empty, and the
-      // sentinel tells the restore-flow this is a valid backup.
-      localStorage.setItem('lu-restore-complete', '1')
-      backendCall('backup_stores', { data: JSON.stringify(snapshot) }).catch(() => {})
-    }
-    // First immediate backup + 5 s safety-net interval. 5 s is tight enough
-    // that almost any user interaction will survive an unexpected process kill.
-    doBackup()
-    const interval = setInterval(doBackup, 5_000)
+    let cleanup: (() => void) | null = null
+    let tries = 0
 
-    // Event-driven: every chatStore mutation queues a debounced backup (1 s).
-    let debounceTimer: ReturnType<typeof setTimeout> | null = null
-    const scheduleBackup = () => {
-      if (debounceTimer) clearTimeout(debounceTimer)
-      debounceTimer = setTimeout(doBackup, 1_000)
-    }
-    const unsubChat = useChatStore.subscribe(scheduleBackup)
+    const setupTriad = () => {
+      const doBackup = () => {
+        const snapshot: Record<string, string> = { __ts: new Date().toISOString() }
+        for (const key of STORE_KEYS) {
+          const val = localStorage.getItem(key)
+          if (val) snapshot[key] = val
+        }
+        // Always fire — we want backup even if snapshot is mostly empty, and the
+        // sentinel tells the restore-flow this is a valid backup.
+        localStorage.setItem('lu-restore-complete', '1')
+        backendCall('backup_stores', { data: JSON.stringify(snapshot) }).catch(() => {})
+      }
 
-    // Final-chance sync flush on graceful window close.
-    const onBeforeUnload = () => doBackup()
-    window.addEventListener('beforeunload', onBeforeUnload)
+      // Migration: write onboarding marker if missing (keeps NSIS-update recovery working)
+      backendCall<boolean>('is_onboarding_done').catch(() => false).then((markerExists) => {
+        if (!markerExists) backendCall('set_onboarding_done').catch(() => {})
+      })
+
+      doBackup()  // first immediate backup
+      const interval = setInterval(doBackup, 5_000)
+
+      let debounceTimer: ReturnType<typeof setTimeout> | null = null
+      const scheduleBackup = () => {
+        if (debounceTimer) clearTimeout(debounceTimer)
+        debounceTimer = setTimeout(doBackup, 1_000)
+      }
+      const unsubChat = useChatStore.subscribe(scheduleBackup)
+
+      const onBeforeUnload = () => doBackup()
+      window.addEventListener('beforeunload', onBeforeUnload)
+
+      cleanup = () => {
+        clearInterval(interval)
+        if (debounceTimer) clearTimeout(debounceTimer)
+        unsubChat()
+        window.removeEventListener('beforeunload', onBeforeUnload)
+      }
+    }
+
+    const waitForTauri = setInterval(() => {
+      tries++
+      if (isTauri()) {
+        clearInterval(waitForTauri)
+        setupTriad()
+      } else if (tries >= 50) {
+        // 50 × 100 ms = 5 s. Give up silently — probably browser dev session.
+        clearInterval(waitForTauri)
+      }
+    }, 100)
 
     return () => {
-      clearInterval(interval)
-      if (debounceTimer) clearTimeout(debounceTimer)
-      unsubChat()
-      window.removeEventListener('beforeunload', onBeforeUnload)
+      clearInterval(waitForTauri)
+      if (cleanup) cleanup()
     }
   }, [])
 
