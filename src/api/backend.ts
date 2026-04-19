@@ -12,7 +12,11 @@ let _invoke: ((cmd: string, args?: Record<string, unknown>) => Promise<unknown>)
 
 /** True when running inside a Tauri WebView (.exe), false in browser dev mode */
 export function isTauri(): boolean {
-  return !!(window as any).__TAURI__;
+  // Tauri v2 renamed the global from `__TAURI__` to `__TAURI_INTERNALS__`.
+  // Check both so the app keeps working across both versions (and also
+  // during the migration window when people might be on either).
+  const w = window as any;
+  return !!(w.__TAURI_INTERNALS__ || w.__TAURI__);
 }
 
 async function getInvoke() {

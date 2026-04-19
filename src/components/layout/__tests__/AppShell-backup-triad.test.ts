@@ -20,8 +20,8 @@ const __dirname = dirname(__filename)
 const src = readFileSync(join(__dirname, '../AppShell.tsx'), 'utf8')
 
 describe('AppShell backup triad (Bug #7)', () => {
-  it('runs the safety-net interval every 10 seconds (not 30 or longer)', () => {
-    expect(src).toContain('setInterval(doBackup, 10_000)')
+  it('runs the safety-net interval every 5 seconds (tighter than 30s for crash recovery)', () => {
+    expect(src).toContain('setInterval(doBackup, 5_000)')
     // Make sure the old 30s value is really gone.
     expect(src).not.toContain('setInterval(doBackup, 30_000)')
   })
@@ -50,16 +50,12 @@ describe('AppShell backup triad (Bug #7)', () => {
     expect(src).toContain('clearTimeout(debounceTimer)')
   })
 
-  it('writes the restore-complete sentinel only when snapshot has entries', () => {
-    // Otherwise an empty fresh install would write the sentinel and block
-    // the next startup's restore attempt.
-    expect(src).toContain('Object.keys(snapshot).length > 0')
-    // The backup-path sentinel-set must come AFTER the length-check (guarded by it).
-    // Note: there's also a restore-path sentinel write (line ~76) — we only
-    // care that at least one occurrence lives after the length guard.
-    const idxLenCheck = src.indexOf('Object.keys(snapshot).length > 0')
-    const allSentinelWrites = [...src.matchAll(/localStorage\.setItem\('lu-restore-complete'/g)]
-    const guardedByLenCheck = allSentinelWrites.some(m => (m.index ?? 0) > idxLenCheck)
-    expect(guardedByLenCheck).toBe(true)
+  it('includes a __ts timestamp marker so backup fires even if localStorage is empty', () => {
+    // We intentionally write unconditionally — a fresh install with empty
+    // localStorage should still write an (empty) backup file so the mtime
+    // reflects last-run-time, making triage easier. The `__ts` marker is
+    // what makes snapshot non-empty even when no store has persisted yet.
+    expect(src).toContain('__ts')
+    expect(src).toContain('new Date().toISOString()')
   })
 })

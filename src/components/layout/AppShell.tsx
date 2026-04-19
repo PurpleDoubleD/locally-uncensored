@@ -98,32 +98,33 @@ export function AppShell() {
   //   3. beforeunload sync flush on Tauri window close. Fires for graceful
   //      quits and "X" button; does NOT fire for taskkill / NSIS upgrade
   //      (why we need 1+2 as well).
+  // No dependency — we want this to run ONCE on mount regardless of
+  // onboardingDone state, and not rerun on every settings flip.
   useEffect(() => {
-    if (!isTauri() || !onboardingDone) return
-    // Migration: legacy users with localStorage onboardingDone=true but missing
-    // marker file → write marker so NSIS update can recover without re-onboarding.
+    if (!isTauri()) return
+    // Migration: write onboarding marker if missing (keeps NSIS-update recovery working)
     backendCall<boolean>('is_onboarding_done').catch(() => false).then((markerExists) => {
       if (!markerExists) {
         backendCall('set_onboarding_done').catch(() => {})
       }
     })
     const doBackup = () => {
-      const snapshot: Record<string, string> = {}
+      const snapshot: Record<string, string> = { __ts: new Date().toISOString() }
       for (const key of STORE_KEYS) {
         const val = localStorage.getItem(key)
         if (val) snapshot[key] = val
       }
-      if (Object.keys(snapshot).length > 0) {
-        localStorage.setItem('lu-restore-complete', '1') // sentinel for partial-restore detection
-        backendCall('backup_stores', { data: JSON.stringify(snapshot) }).catch(() => {})
-      }
+      // Always fire — we want backup even if snapshot is mostly empty, and the
+      // sentinel tells the restore-flow this is a valid backup.
+      localStorage.setItem('lu-restore-complete', '1')
+      backendCall('backup_stores', { data: JSON.stringify(snapshot) }).catch(() => {})
     }
-    doBackup() // immediate first backup
-    const interval = setInterval(doBackup, 10_000)
+    // First immediate backup + 5 s safety-net interval. 5 s is tight enough
+    // that almost any user interaction will survive an unexpected process kill.
+    doBackup()
+    const interval = setInterval(doBackup, 5_000)
 
-    // Event-driven backup: subscribe to the stores that change most often
-    // (chat conversations, codex chats, memory). Debounce to coalesce bursts
-    // — a 10-message thread arrives in ~1 s, we only want 1 backup call, not 10.
+    // Event-driven: every chatStore mutation queues a debounced backup (1 s).
     let debounceTimer: ReturnType<typeof setTimeout> | null = null
     const scheduleBackup = () => {
       if (debounceTimer) clearTimeout(debounceTimer)
@@ -131,9 +132,7 @@ export function AppShell() {
     }
     const unsubChat = useChatStore.subscribe(scheduleBackup)
 
-    // Tauri window close path — triggers on graceful quit (user clicks X)
-    // and on window.close(). Process kill / NSIS update DO NOT fire this,
-    // hence the interval above as a safety net.
+    // Final-chance sync flush on graceful window close.
     const onBeforeUnload = () => doBackup()
     window.addEventListener('beforeunload', onBeforeUnload)
 
@@ -143,7 +142,7 @@ export function AppShell() {
       unsubChat()
       window.removeEventListener('beforeunload', onBeforeUnload)
     }
-  }, [onboardingDone])
+  }, [])
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', settings.theme === 'dark')

@@ -20,39 +20,54 @@ import {
 describe('backend — URL helpers', () => {
   beforeEach(() => {
     delete windowMock.__TAURI__
+    delete windowMock.__TAURI_INTERNALS__
     setComfyPort(8188)
   })
 
   afterEach(() => {
     delete windowMock.__TAURI__
+    delete windowMock.__TAURI_INTERNALS__
     setComfyPort(8188)
   })
 
   // ─── isTauri ───
 
   describe('isTauri', () => {
-    it('returns true when __TAURI__ exists on window', () => {
+    it('returns true when __TAURI__ exists on window (v1 compat)', () => {
       windowMock.__TAURI__ = { invoke: () => {} }
       expect(isTauri()).toBe(true)
     })
 
-    it('returns false when __TAURI__ is absent', () => {
+    it('returns true when __TAURI_INTERNALS__ exists on window (v2)', () => {
+      windowMock.__TAURI_INTERNALS__ = { invoke: () => {} }
+      expect(isTauri()).toBe(true)
+    })
+
+    it('returns false when neither global is present', () => {
       delete windowMock.__TAURI__
+      delete windowMock.__TAURI_INTERNALS__
       expect(isTauri()).toBe(false)
     })
 
-    it('returns true for truthy empty object', () => {
+    it('returns true for truthy empty object (v1)', () => {
       windowMock.__TAURI__ = {}
       expect(isTauri()).toBe(true)
     })
 
-    it('returns false when __TAURI__ is null', () => {
+    it('returns true for truthy empty object (v2)', () => {
+      windowMock.__TAURI_INTERNALS__ = {}
+      expect(isTauri()).toBe(true)
+    })
+
+    it('returns false when both globals are null', () => {
       windowMock.__TAURI__ = null
+      windowMock.__TAURI_INTERNALS__ = null
       expect(isTauri()).toBe(false)
     })
 
-    it('returns false when __TAURI__ is undefined', () => {
+    it('returns false when both globals are undefined', () => {
       windowMock.__TAURI__ = undefined
+      windowMock.__TAURI_INTERNALS__ = undefined
       expect(isTauri()).toBe(false)
     })
   })
