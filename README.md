@@ -34,9 +34,19 @@ No cloud. No data collection. No API keys. Auto-detects 12 local backends. Your 
 
 ---
 
-## v2.3.3 — Current Release
+## v2.3.4 — Current Release
 
-**Remote Access, Codex Streaming, Qwen 3.6 Day-0, ERNIE-Image, 2105 Tests**
+**Chat-history persistence fix, Ollama 0.21 compatibility, Codex loop guard, 2161 Tests**
+
+### Critical Fixes (why you want this update)
+- **Chat history now survives updates** — NSIS auto-update, crashes, and abrupt process kills no longer wipe your conversations. `isTauri()` detection was broken in the v1→v2 migration, causing every backup/restore call to silently no-op. Fixed with dual-global detection + async-init polling + 5 s backup interval + event-driven + graceful-quit flush. Fully live-verified: destructive wipe + restore roundtrip confirmed on the release binary.
+- **Ollama 0.21 / 0.20.7 compatibility** — the auto-upgraded Ollama now rejects pre-existing models with `HTTP 404 model not found` on `/api/show` when their on-disk manifest lacks the new `capabilities` field. New top-of-app banner + Header Lichtschalter chip detect stale models and offer a one-click re-pull that verifies the fix before clearing the warning.
+- **Codex infinite-loop guard** — small 3 B coder models could get stuck repeating the same `file_write + shell_execute` batch forever when a test failed. Codex now halts with a clear "same tool sequence repeated — try a larger model" message.
+- **Stop button now instant** — abort signal checked between chunks in the for-await and NDJSON-reader loops. Thinking tokens no longer leak for 30–60 s after you click Stop on a Gemma-4 thinking response.
+- **Stale-chip state-leak** — switching from a stale model to a fresh one now clears the red toggle and chip immediately.
+
+### What's still in v2.3.4 from v2.3.3
+This is a hotfix release — v2.3.3's feature surface is unchanged.
 
 ### Remote Access + Mobile Web App
 - **Access your AI from your phone** — Dispatch via LAN or Cloudflare Tunnel (Internet)
@@ -67,7 +77,7 @@ No cloud. No data collection. No API keys. Auto-detects 12 local backends. Your 
 - **AE-style text header** — clean typography for better discoverability
 - **Plugins dropdown** — Caveman Mode + Personas in one menu
 - **Thinking mode** — tri-state, auto-retry, universal tag stripper
-- **2105 tests** — comprehensive smoke tests covering the entire app
+- **2161 tests** — comprehensive smoke tests covering the entire app
 
 ---
 

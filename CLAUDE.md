@@ -3,9 +3,9 @@
 ## Project Overview
 Plug and Play for the Mass Desktop AI app (Tauri + React + TypeScript) for local LLM chat, image and video generation via ComfyUI.
 - **Repo:** PurpleDoubleD/locally-uncensored (35+ stars)
-- **Current public version:** v2.3.3 (merging to master 2026-04-16)
-- **Branch:** `feature/agent-overhaul-v24` merged into master
-- Test iterations 2.3.4–2.3.7 were intermediate, not shipped. **2.3.3 is the next public version.**
+- **Current public version:** v2.3.4 (released 2026-04-20 — Bug #7 persistence fix + Ollama 0.21 compat + Codex loop guard)
+- **Branch:** master (all recent work landed)
+- v2.3.3 shipped 2026-04-16 as a feature release (Remote Access + Codex streaming + Agent Overhaul + ERNIE + Qwen 3.6). v2.3.4 is a reliability hotfix on top — same feature surface, critical bugs gone.
 
 ## Tech Stack
 - **Frontend:** React 19, Zustand, Tailwind CSS 4, Framer Motion, Vite 8
