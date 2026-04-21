@@ -35,19 +35,16 @@ No cloud. No data collection. No API keys. Auto-detects 12 local backends. Your 
 
 ---
 
-## v2.3.4 — Current Release
+## v2.3.5 — Current Release
 
-**Chat-history persistence fix, Ollama 0.21 compatibility, Codex loop guard, 2161 Tests**
+**LM Studio auto-detection fix + Windows terminal-popup cleanup, 2166 Tests**
 
 ### Critical Fixes (why you want this update)
-- **Chat history now survives updates** — NSIS auto-update, crashes, and abrupt process kills no longer wipe your conversations. `isTauri()` detection was broken in the v1→v2 migration, causing every backup/restore call to silently no-op. Fixed with dual-global detection + async-init polling + 5 s backup interval + event-driven + graceful-quit flush. Fully live-verified: destructive wipe + restore roundtrip confirmed on the release binary.
-- **Ollama 0.21 / 0.20.7 compatibility** — the auto-upgraded Ollama now rejects pre-existing models with `HTTP 404 model not found` on `/api/show` when their on-disk manifest lacks the new `capabilities` field. New top-of-app banner + Header Lichtschalter chip detect stale models and offer a one-click re-pull that verifies the fix before clearing the warning.
-- **Codex infinite-loop guard** — small 3 B coder models could get stuck repeating the same `file_write + shell_execute` batch forever when a test failed. Codex now halts with a clear "same tool sequence repeated — try a larger model" message.
-- **Stop button now instant** — abort signal checked between chunks in the for-await and NDJSON-reader loops. Thinking tokens no longer leak for 30–60 s after you click Stop on a Gemma-4 thinking response.
-- **Stale-chip state-leak** — switching from a stale model to a fresh one now clears the red toggle and chip immediately.
+- **LU now recognizes your LM Studio models when Ollama is also running** — if the first-launch detection found 2+ local backends (the very common "Ollama + LM Studio" setup), the backend selector modal opened but no provider got auto-enabled. Users who dismissed the modal saw zero LM Studio models in the dropdown even though LM Studio was clearly running. Fixed: the first non-Ollama backend is always pre-enabled; the selector stays as an educational picker so you can still switch primaries. Reproduced live and verified against a real LM Studio-like endpoint.
+- **No more terminal flashes on Windows** — a couple of subprocess spawns on the Windows code path were missing `CREATE_NO_WINDOW`, so killing ComfyUI/Claude Code during LU shutdown or installing SearXNG briefly flashed a console window. 100% of Windows-branch spawns are now flagged.
 
-### What's still in v2.3.4 from v2.3.3
-This is a hotfix release — v2.3.3's feature surface is unchanged.
+### What's still in v2.3.5 from v2.3.4
+This is a hotfix release — v2.3.4's feature surface (chat-history persistence, Ollama 0.21 compat, Codex loop guard, stop-button instant, stale-chip fix, 12 backend auto-detection, Mobile Remote, Codex streaming, Agent Mode, ERNIE-Image, Qwen 3.6, 75+ downloadable models) is unchanged. Every fix from v2.3.4 and earlier still applies.
 
 ### Remote Access + Mobile Web App
 - **Access your AI from your phone** — Dispatch via LAN or Cloudflare Tunnel (Internet)
@@ -78,7 +75,7 @@ This is a hotfix release — v2.3.3's feature surface is unchanged.
 - **AE-style text header** — clean typography for better discoverability
 - **Plugins dropdown** — Caveman Mode + Personas in one menu
 - **Thinking mode** — tri-state, auto-retry, universal tag stripper
-- **2161 tests** — comprehensive smoke tests covering the entire app
+- **2166 tests** — comprehensive smoke tests covering the entire app
 
 ---
 
