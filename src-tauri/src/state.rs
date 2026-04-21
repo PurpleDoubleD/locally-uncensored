@@ -88,6 +88,12 @@ impl AppState {
     }
 }
 
+// On Windows, spawn child processes without flashing a console window.
+// Applied to every taskkill/kill call so LU's process lifecycle stays invisible
+// to the user. 0x08000000 = CREATE_NO_WINDOW.
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x08000000;
+
 impl Drop for AppState {
     fn drop(&mut self) {
         // Kill ComfyUI process tree
@@ -95,12 +101,18 @@ impl Drop for AppState {
             if let Some(ref mut child) = *proc {
                 {
                     let pid = child.id();
-                    if cfg!(target_os = "windows") {
+                    #[cfg(windows)]
+                    {
+                        use std::os::windows::process::CommandExt;
                         let _ = std::process::Command::new("taskkill")
                             .args(["/pid", &pid.to_string(), "/T", "/F"])
+                            .creation_flags(CREATE_NO_WINDOW)
                             .output();
-                    } else {
+                    }
+                    #[cfg(not(windows))]
+                    {
                         let _ = child.kill();
+                        let _ = pid; // silence unused on non-Windows
                     }
                 }
                 println!("[ComfyUI] Stopped");
@@ -111,12 +123,18 @@ impl Drop for AppState {
         if let Ok(mut proc) = self.claude_code_process.lock() {
             if let Some(ref mut child) = *proc {
                 let pid = child.id();
-                if cfg!(target_os = "windows") {
+                #[cfg(windows)]
+                {
+                    use std::os::windows::process::CommandExt;
                     let _ = std::process::Command::new("taskkill")
                         .args(["/pid", &pid.to_string(), "/T", "/F"])
+                        .creation_flags(CREATE_NO_WINDOW)
                         .output();
-                } else {
+                }
+                #[cfg(not(windows))]
+                {
                     let _ = child.kill();
+                    let _ = pid;
                 }
                 println!("[ClaudeCode] Stopped");
             }
