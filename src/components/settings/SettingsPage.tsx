@@ -105,21 +105,30 @@ function WorkflowSection() {
 // ── ComfyUI Settings ────────────────────────────────────────────
 
 function ComfyUISettings() {
-  const [status, setStatus] = useState<{ running: boolean; found: boolean; path?: string; port?: number; starting?: boolean } | null>(null)
+  const [status, setStatus] = useState<{ running: boolean; found: boolean; path?: string; port?: number; host?: string; isLocal?: boolean; starting?: boolean } | null>(null)
   const [loading, setLoading] = useState(true)
   const [customPath, setCustomPath] = useState('')
   const [pathError, setPathError] = useState('')
   const [pathSuccess, setPathSuccess] = useState(false)
   const [customPort, setCustomPort] = useState('')
   const [portSuccess, setPortSuccess] = useState(false)
+  const [customHost, setCustomHost] = useState('')
+  const [hostError, setHostError] = useState('')
+  const [hostSuccess, setHostSuccess] = useState(false)
 
   useEffect(() => {
     let cancelled = false
     const check = async () => {
       try {
-        const { backendCall } = await import('../../api/backend')
+        const { backendCall, setComfyPort, setComfyHost } = await import('../../api/backend')
         const s: any = await backendCall('comfyui_status')
-        if (!cancelled) setStatus(s)
+        if (!cancelled) {
+          setStatus(s)
+          // Mirror backend truth into the frontend URL builder so subsequent
+          // fetch() calls hit the right machine immediately — no restart needed.
+          if (typeof s?.port === 'number' && s.port > 0) setComfyPort(s.port)
+          if (typeof s?.host === 'string' && s.host.trim()) setComfyHost(s.host)
+        }
       } catch {}
       if (!cancelled) setLoading(false)
     }
@@ -176,7 +185,49 @@ function ComfyUISettings() {
         </div>
       </div>
 
-      {/* Path - editable */}
+      {/* Host - editable (supports remote ComfyUI: Docker, LAN, homelab) */}
+      <div className="space-y-1">
+        <span className="text-[0.7rem] text-gray-700 dark:text-gray-400">Host</span>
+        <div className="flex gap-1.5">
+          <input
+            type="text"
+            value={customHost || status?.host || 'localhost'}
+            onChange={e => { setCustomHost(e.target.value); setHostError(''); setHostSuccess(false) }}
+            placeholder="localhost or server-ip"
+            className="flex-1 px-2 py-1 rounded-lg border text-[0.6rem] font-mono bg-transparent border-white/10 text-gray-300 focus:outline-none focus:border-white/25"
+          />
+          <button
+            onClick={async () => {
+              const host = customHost.trim()
+              if (!host) { setHostError('Host required'); return }
+              setHostError('')
+              setHostSuccess(false)
+              try {
+                const { backendCall, setComfyHost } = await import('../../api/backend')
+                await backendCall('set_comfyui_host', { host })
+                setComfyHost(host)
+                setHostSuccess(true)
+                setStatus(prev => prev ? { ...prev, host, isLocal: ['localhost', '127.0.0.1', '::1', '0.0.0.0'].includes(host.toLowerCase()) } : null)
+                setTimeout(() => setHostSuccess(false), 3000)
+              } catch (err) {
+                setHostError(err instanceof Error ? err.message : 'Invalid host')
+              }
+            }}
+            disabled={!customHost.trim() || customHost.trim() === status?.host}
+            className="px-2 py-1 rounded text-[0.6rem] bg-purple-500/10 text-purple-400 hover:bg-purple-500/20 transition-colors disabled:opacity-30"
+          >
+            Set
+          </button>
+        </div>
+        {hostError && <p className="text-[0.55rem] text-red-400">{hostError}</p>}
+        {hostSuccess && <p className="text-[0.55rem] text-green-400">Host saved. Restart ComfyUI to apply.</p>}
+        {status?.host && !status?.isLocal && (
+          <p className="text-[0.55rem] text-amber-400">Remote ComfyUI — start/stop/install not available from LU. Manage the process on the server.</p>
+        )}
+      </div>
+
+      {/* Path - editable (LOCAL ONLY: remote ComfyUI manages its own path) */}
+      {status?.isLocal !== false && (
       <div className="space-y-1">
         <span className="text-[0.7rem] text-gray-700 dark:text-gray-400">Path</span>
         <div className="flex gap-1.5">
@@ -198,6 +249,7 @@ function ComfyUISettings() {
         {pathError && <p className="text-[0.55rem] text-red-400">{pathError}</p>}
         {pathSuccess && <p className="text-[0.55rem] text-green-400">Path set successfully</p>}
       </div>
+      )}
 
       {/* Port - editable */}
       <div className="space-y-1">
@@ -231,7 +283,8 @@ function ComfyUISettings() {
         {portSuccess && <p className="text-[0.55rem] text-green-400">Port saved. Restart ComfyUI to apply.</p>}
       </div>
 
-      {/* Controls */}
+      {/* Controls — local host only (can't manage a remote process) */}
+      {status?.isLocal !== false && (
       <div className="flex items-center gap-1.5">
         {status?.found && !status.running && (
           <button onClick={handleStart} className="px-2 py-1 rounded text-[0.6rem] bg-green-500/10 text-green-400 hover:bg-green-500/20 transition-colors">
@@ -265,6 +318,7 @@ function ComfyUISettings() {
           </button>
         )}
       </div>
+      )}
     </div>
   )
 }

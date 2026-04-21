@@ -16,6 +16,24 @@ import type {
 import { ProviderError } from './types'
 import { parseSSEStream } from '../sse'
 import { repairJson } from '../../lib/tool-call-repair'
+import { localFetch, localFetchStream } from '../backend'
+
+/**
+ * Local OpenAI-compat backends (LM Studio, vLLM, llama.cpp, KoboldCpp, etc.)
+ * are hit over plain HTTP on localhost. From the Tauri webview that triggers
+ * CORS, so use `localFetch`/`localFetchStream` which bypass via the Rust
+ * proxy (with direct-fetch fallback).
+ * Cloud endpoints (OpenAI, OpenRouter, Groq, Together, etc.) don't need the
+ * proxy and skip it via a simple host check.
+ */
+function isLocalUrl(baseUrl: string): boolean {
+  try {
+    const h = new URL(baseUrl).hostname.toLowerCase()
+    return h === 'localhost' || h === '127.0.0.1' || h === '::1' || h === '0.0.0.0'
+  } catch {
+    return false
+  }
+}
 
 // ── OpenAI API Types ───────────────────────────────────────────
 
@@ -114,22 +132,23 @@ export class OpenAIProvider implements ProviderClient {
     if (options?.thinking === true) body.reasoning_effort = 'high'
     else if (options?.thinking === false) body.reasoning_effort = 'minimal'
 
-    let res = await fetch(`${this.baseUrl}/chat/completions`, {
+    const fetcher = isLocalUrl(this.baseUrl) ? localFetchStream : fetch
+    let res = await fetcher(`${this.baseUrl}/chat/completions`, {
       method: 'POST',
       headers: this.headers,
       body: JSON.stringify(body),
       signal: options?.signal,
-    })
+    } as any)
 
     // Retry without reasoning_effort if the model/endpoint rejects it.
     if (!res.ok && res.status === 400 && 'reasoning_effort' in body) {
       delete body.reasoning_effort
-      res = await fetch(`${this.baseUrl}/chat/completions`, {
+      res = await fetcher(`${this.baseUrl}/chat/completions`, {
         method: 'POST',
         headers: this.headers,
         body: JSON.stringify(body),
         signal: options?.signal,
-      })
+      } as any)
     }
 
     if (!res.ok) {
@@ -215,21 +234,22 @@ export class OpenAIProvider implements ProviderClient {
     if (options?.thinking === true) body.reasoning_effort = 'high'
     else if (options?.thinking === false) body.reasoning_effort = 'minimal'
 
-    let res = await fetch(`${this.baseUrl}/chat/completions`, {
+    const fetcher = isLocalUrl(this.baseUrl) ? localFetch : fetch
+    let res = await fetcher(`${this.baseUrl}/chat/completions`, {
       method: 'POST',
       headers: this.headers,
       body: JSON.stringify(body),
       signal: options?.signal,
-    })
+    } as any)
 
     if (!res.ok && res.status === 400 && 'reasoning_effort' in body) {
       delete body.reasoning_effort
-      res = await fetch(`${this.baseUrl}/chat/completions`, {
+      res = await fetcher(`${this.baseUrl}/chat/completions`, {
         method: 'POST',
         headers: this.headers,
         body: JSON.stringify(body),
         signal: options?.signal,
-      })
+      } as any)
     }
 
     if (!res.ok) {
@@ -254,9 +274,10 @@ export class OpenAIProvider implements ProviderClient {
   }
 
   async listModels(): Promise<ProviderModel[]> {
-    const res = await fetch(`${this.baseUrl}/models`, {
+    const fetcher = isLocalUrl(this.baseUrl) ? localFetch : fetch
+    const res = await fetcher(`${this.baseUrl}/models`, {
       headers: this.headers,
-    })
+    } as any)
 
     if (!res.ok) {
       throw await this.parseError(res)
@@ -277,9 +298,10 @@ export class OpenAIProvider implements ProviderClient {
 
   async checkConnection(): Promise<boolean> {
     try {
-      const res = await fetch(`${this.baseUrl}/models`, {
+      const fetcher = isLocalUrl(this.baseUrl) ? localFetch : fetch
+      const res = await fetcher(`${this.baseUrl}/models`, {
         headers: this.headers,
-      })
+      } as any)
       return res.ok
     } catch {
       return false

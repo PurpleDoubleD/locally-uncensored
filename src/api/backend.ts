@@ -159,6 +159,7 @@ export async function backendCall<T = any>(
     install_ollama: { path: "/local-api/install-ollama", method: "POST" },
     install_ollama_status: { path: "/local-api/install-ollama-status" },
     set_comfyui_port: { path: "/local-api/set-comfyui-port", method: "POST" },
+    set_comfyui_host: { path: "/local-api/set-comfyui-host", method: "POST" },
     install_custom_node: { path: "/local-api/install-custom-node", method: "POST" },
     whisper_status: { path: "/local-api/transcribe-status" },
     transcribe: { path: "/local-api/transcribe", method: "POST" },
@@ -261,17 +262,35 @@ let _comfyPort = 8188;
 export function setComfyPort(port: number) { _comfyPort = port; }
 export function getComfyPort(): number { return _comfyPort; }
 
+/**
+ * Configurable ComfyUI host — default "localhost".
+ * Can be set to any hostname/IP so users can point LU at a remote ComfyUI
+ * (e.g. headless server, Docker container on another box, LAN machine).
+ * When the host is non-local, Settings hides Start/Stop/Restart controls
+ * because LU can't manage the lifecycle of a remote Python process.
+ */
+let _comfyHost = 'localhost';
+export function setComfyHost(host: string) {
+  // Never allow empty — that would produce "http://:8188" which breaks fetch.
+  _comfyHost = (host && host.trim()) ? host.trim() : 'localhost';
+}
+export function getComfyHost(): string { return _comfyHost; }
+export function isComfyLocal(): boolean {
+  const h = _comfyHost.toLowerCase();
+  return h === 'localhost' || h === '127.0.0.1' || h === '::1' || h === '0.0.0.0';
+}
+
 /** Get the base URL for ComfyUI API calls */
 export function comfyuiUrl(path: string): string {
   if (isTauri()) {
-    return `http://localhost:${_comfyPort}${path}`;
+    return `http://${_comfyHost}:${_comfyPort}${path}`;
   }
   return `/comfyui${path}`;
 }
 
 /** Get the WebSocket URL for ComfyUI */
 export function comfyuiWsUrl(): string {
-  return `ws://localhost:${_comfyPort}/ws`;
+  return `ws://${_comfyHost}:${_comfyPort}/ws`;
 }
 
 /** Download a ComfyUI output file — works in both dev and Tauri mode */

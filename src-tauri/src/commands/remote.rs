@@ -61,6 +61,10 @@ struct RemoteState {
     passcode: Arc<TokioMutex<PasscodeState>>,
     ollama_port: u16,
     comfy_port: u16,
+    /// Configurable ComfyUI host — mirrors AppState.comfy_host so the mobile
+    /// proxy forwards to the right machine when the user pointed LU at a
+    /// remote ComfyUI instance.
+    comfy_host: String,
     permissions: Arc<TokioMutex<RemotePermissions>>,
     connected_devices: Arc<TokioMutex<Vec<ConnectedDevice>>>,
     tunnel_url: Arc<TokioMutex<Option<String>>>,
@@ -688,7 +692,7 @@ async fn proxy_comfyui(
     }
 
     let query = req.uri().query().map(|q| format!("?{}", q)).unwrap_or_default();
-    let target = format!("http://127.0.0.1:{}{}{}", state.comfy_port, stripped_owned, query);
+    let target = format!("http://{}:{}{}{}", state.comfy_host, state.comfy_port, stripped_owned, query);
     proxy_to_target(&target, req).await
 }
 
@@ -758,10 +762,11 @@ async fn proxy_comfyui_ws(
         }
     }
     let comfy_port = state.comfy_port;
+    let comfy_host = state.comfy_host.clone();
     ws.on_upgrade(move |client_socket| async move {
         use futures_util::{SinkExt, StreamExt};
 
-        let ws_url = format!("ws://127.0.0.1:{}/ws", comfy_port);
+        let ws_url = format!("ws://{}:{}/ws", comfy_host, comfy_port);
         let upstream = match tokio_tungstenite::connect_async(&ws_url).await {
             Ok((stream, _)) => stream,
             Err(e) => {
@@ -3307,7 +3312,7 @@ pub async fn start_remote_server(
     system_prompt: Option<String>,
 ) -> Result<serde_json::Value, String> {
     // Clone Arcs from std::sync::Mutex, then drop it before any .await
-    let (jwt_secret_arc, passcode_arc, permissions_arc, devices_arc, tunnel_url_arc, dispatched_model_arc, dispatched_system_prompt_arc, port, comfy_port) = {
+    let (jwt_secret_arc, passcode_arc, permissions_arc, devices_arc, tunnel_url_arc, dispatched_model_arc, dispatched_system_prompt_arc, port, comfy_port, comfy_host) = {
         let remote = state.remote.lock().map_err(|e| e.to_string())?;
         if remote.handle.is_some() {
             return Err("Remote server already running".into());
@@ -3316,6 +3321,7 @@ pub async fn start_remote_server(
         // unwrap on a poisoned mutex would terminate the entire app. Treat
         // a missing comfy_port as a non-fatal "no comfy yet" (port 0).
         let comfy_port = state.comfy_port.lock().map(|g| *g).unwrap_or(0);
+        let comfy_host = state.comfy_host.lock().map(|g| g.clone()).unwrap_or_else(|_| "localhost".to_string());
 
         (
             remote.jwt_secret.clone(),
@@ -3327,6 +3333,7 @@ pub async fn start_remote_server(
             remote.dispatched_system_prompt.clone(),
             remote.port,
             comfy_port,
+            comfy_host,
         )
     }; // std::sync::MutexGuard dropped here
 
@@ -3368,6 +3375,7 @@ pub async fn start_remote_server(
         passcode: passcode_arc,
         ollama_port: 11434,
         comfy_port,
+        comfy_host,
         permissions: permissions_arc,
         connected_devices: devices_arc,
         tunnel_url: tunnel_url_arc,

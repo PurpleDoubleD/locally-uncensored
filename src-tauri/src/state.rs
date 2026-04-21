@@ -41,10 +41,43 @@ impl Default for InstallState {
     }
 }
 
+/// Read persisted ComfyUI port + host from %APPDATA%/locally-uncensored/config.json.
+/// Returns (port, host) with sensible defaults (8188, "localhost") on any error.
+/// Called at startup so user-configured values survive app restarts.
+pub(crate) fn load_comfy_config_values() -> (u16, String) {
+    let mut port = 8188u16;
+    let mut host = "localhost".to_string();
+
+    if let Some(config_dir) = dirs::config_dir() {
+        let config_file = config_dir.join("locally-uncensored").join("config.json");
+        if let Ok(raw) = std::fs::read_to_string(&config_file) {
+            if let Ok(v) = serde_json::from_str::<serde_json::Value>(&raw) {
+                if let Some(p) = v.get("comfyui_port").and_then(|x| x.as_u64()) {
+                    if p > 0 && p < 65536 {
+                        port = p as u16;
+                    }
+                }
+                if let Some(h) = v.get("comfyui_host").and_then(|x| x.as_str()) {
+                    let trimmed = h.trim();
+                    if !trimmed.is_empty() {
+                        host = trimmed.to_string();
+                    }
+                }
+            }
+        }
+    }
+
+    (port, host)
+}
+
 pub struct AppState {
     pub comfy_process: Mutex<Option<Child>>,
     pub comfy_path: Mutex<Option<String>>,
     pub comfy_port: Mutex<u16>,
+    /// Configurable ComfyUI host. Default "localhost". Setting this to a
+    /// remote hostname/IP lets users point LU at a ComfyUI running on
+    /// another machine (homelab, Docker, LAN). Persisted in config.json.
+    pub comfy_host: Mutex<String>,
     pub whisper: Arc<Mutex<WhisperServer>>,
     pub downloads: Arc<Mutex<HashMap<String, DownloadProgress>>>,
     pub download_tokens: Arc<Mutex<HashMap<String, CancellationToken>>>,
@@ -66,10 +99,22 @@ impl AppState {
         let python_bin = get_python_bin();
         println!("[Python] Resolved: {}", python_bin);
 
+        // Load persisted ComfyUI port+host from config.json if available.
+        // Fixes a pre-existing bug where `set_comfyui_port` wrote to disk but
+        // startup never read it back. Same loader now handles the new host field.
+        let (initial_port, initial_host) = load_comfy_config_values();
+        if initial_port != 8188 {
+            println!("[ComfyUI] Loaded persisted port: {}", initial_port);
+        }
+        if initial_host != "localhost" {
+            println!("[ComfyUI] Loaded persisted host: {}", initial_host);
+        }
+
         Self {
             comfy_process: Mutex::new(None),
             comfy_path: Mutex::new(None),
-            comfy_port: Mutex::new(8188),
+            comfy_port: Mutex::new(initial_port),
+            comfy_host: Mutex::new(initial_host),
             whisper: Arc::new(Mutex::new(WhisperServer::new())),
             downloads: Arc::new(Mutex::new(HashMap::new())),
             download_tokens: Arc::new(Mutex::new(HashMap::new())),

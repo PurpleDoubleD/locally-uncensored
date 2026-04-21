@@ -29,6 +29,7 @@ fn main() {
             commands::process::find_comfyui,
             commands::process::set_comfyui_path,
             commands::process::set_comfyui_port,
+            commands::process::set_comfyui_host,
             // Installation
             commands::install::install_comfyui,
             commands::install::install_comfyui_status,

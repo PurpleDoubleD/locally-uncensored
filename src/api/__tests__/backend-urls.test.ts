@@ -15,6 +15,9 @@ import {
   comfyuiWsUrl,
   setComfyPort,
   getComfyPort,
+  setComfyHost,
+  getComfyHost,
+  isComfyLocal,
 } from '../backend'
 
 describe('backend — URL helpers', () => {
@@ -22,12 +25,14 @@ describe('backend — URL helpers', () => {
     delete windowMock.__TAURI__
     delete windowMock.__TAURI_INTERNALS__
     setComfyPort(8188)
+    setComfyHost('localhost')
   })
 
   afterEach(() => {
     delete windowMock.__TAURI__
     delete windowMock.__TAURI_INTERNALS__
     setComfyPort(8188)
+    setComfyHost('localhost')
   })
 
   // ─── isTauri ───
@@ -176,6 +181,110 @@ describe('backend — URL helpers', () => {
     it('port change affects comfyuiWsUrl', () => {
       setComfyPort(4444)
       expect(comfyuiWsUrl()).toBe('ws://localhost:4444/ws')
+    })
+  })
+
+  // ─── setComfyHost / getComfyHost / comfyuiUrl with remote host ───
+
+  describe('setComfyHost / getComfyHost', () => {
+    it('default host is localhost', () => {
+      setComfyHost('localhost')
+      expect(getComfyHost()).toBe('localhost')
+    })
+
+    it('stores and retrieves custom host', () => {
+      setComfyHost('server-1.lan')
+      expect(getComfyHost()).toBe('server-1.lan')
+    })
+
+    it('stores and retrieves IPv4 host', () => {
+      setComfyHost('192.168.1.50')
+      expect(getComfyHost()).toBe('192.168.1.50')
+    })
+
+    it('empty/whitespace falls back to localhost so URLs stay valid', () => {
+      setComfyHost('')
+      expect(getComfyHost()).toBe('localhost')
+      setComfyHost('   ')
+      expect(getComfyHost()).toBe('localhost')
+    })
+
+    it('trims whitespace when setting host', () => {
+      setComfyHost('  server-1  ')
+      expect(getComfyHost()).toBe('server-1')
+    })
+
+    it('host change affects comfyuiUrl in Tauri mode', () => {
+      windowMock.__TAURI__ = {}
+      setComfyHost('server-1.lan')
+      setComfyPort(8188)
+      expect(comfyuiUrl('/prompt')).toBe('http://server-1.lan:8188/prompt')
+    })
+
+    it('host change affects comfyuiWsUrl', () => {
+      setComfyHost('192.168.1.50')
+      setComfyPort(8188)
+      expect(comfyuiWsUrl()).toBe('ws://192.168.1.50:8188/ws')
+    })
+
+    it('host + port combined', () => {
+      windowMock.__TAURI__ = {}
+      setComfyHost('server-1.lan')
+      setComfyPort(9999)
+      expect(comfyuiUrl('/prompt')).toBe('http://server-1.lan:9999/prompt')
+      expect(comfyuiWsUrl()).toBe('ws://server-1.lan:9999/ws')
+    })
+
+    it('dev mode still uses /comfyui proxy regardless of host', () => {
+      delete windowMock.__TAURI__
+      setComfyHost('remote-server')
+      expect(comfyuiUrl('/prompt')).toBe('/comfyui/prompt')
+    })
+  })
+
+  // ─── isComfyLocal ───
+
+  describe('isComfyLocal', () => {
+    it('returns true for localhost', () => {
+      setComfyHost('localhost')
+      expect(isComfyLocal()).toBe(true)
+    })
+
+    it('returns true for 127.0.0.1', () => {
+      setComfyHost('127.0.0.1')
+      expect(isComfyLocal()).toBe(true)
+    })
+
+    it('returns true for ::1 (IPv6 loopback)', () => {
+      setComfyHost('::1')
+      expect(isComfyLocal()).toBe(true)
+    })
+
+    it('returns true for 0.0.0.0 (wildcard)', () => {
+      setComfyHost('0.0.0.0')
+      expect(isComfyLocal()).toBe(true)
+    })
+
+    it('returns false for LAN IP', () => {
+      setComfyHost('192.168.1.50')
+      expect(isComfyLocal()).toBe(false)
+    })
+
+    it('returns false for hostname', () => {
+      setComfyHost('server-1.lan')
+      expect(isComfyLocal()).toBe(false)
+    })
+
+    it('returns false for Docker service name', () => {
+      setComfyHost('comfyui-service')
+      expect(isComfyLocal()).toBe(false)
+    })
+
+    it('is case-insensitive for localhost', () => {
+      setComfyHost('LOCALHOST')
+      expect(isComfyLocal()).toBe(true)
+      setComfyHost('Localhost')
+      expect(isComfyLocal()).toBe(true)
     })
   })
 })

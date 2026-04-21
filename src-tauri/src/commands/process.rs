@@ -235,6 +235,19 @@ pub fn start_ollama(_state: State<'_, AppState>) -> Result<serde_json::Value, St
 
 #[tauri::command]
 pub fn start_comfyui(state: State<'_, AppState>) -> Result<serde_json::Value, String> {
+    // If user pointed LU at a remote ComfyUI, we have no local process to spawn.
+    // Just report status — the remote side is responsible for running ComfyUI.
+    {
+        let host = state.comfy_host.lock().unwrap().clone();
+        if !is_local_host(&host) {
+            return Ok(serde_json::json!({
+                "status": "remote",
+                "host": host,
+                "message": "Remote ComfyUI — manage the Python process on the server itself"
+            }));
+        }
+    }
+
     let port = *state.comfy_port.lock().unwrap();
 
     if is_comfyui_running_on_port(port) {
@@ -339,11 +352,22 @@ pub fn stop_comfyui(state: State<'_, AppState>) -> Result<serde_json::Value, Str
 #[tauri::command]
 pub async fn comfyui_status(state: State<'_, AppState>) -> Result<serde_json::Value, String> {
     let port = *state.comfy_port.lock().unwrap();
+    let host = state.comfy_host.lock().unwrap().clone();
+    let is_local = is_local_host(&host);
 
-    let running = reqwest::get(format!("http://localhost:{}/system_stats", port))
-        .await
-        .map(|r| r.status().is_success())
-        .unwrap_or(false);
+    // Probe the configured host (not just localhost). Remote ComfyUI
+    // still reports running: true if the /system_stats endpoint responds.
+    let running = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(3))
+        .build()
+        .ok()
+        .and_then(|c| Some(c.get(format!("http://{}:{}/system_stats", host, port))))
+        .map(|req| async move { req.send().await.map(|r| r.status().is_success()).unwrap_or(false) })
+    ;
+    let running = match running {
+        Some(fut) => fut.await,
+        None => false,
+    };
 
     let process_alive = {
         let proc = state.comfy_process.lock().unwrap();
@@ -355,7 +379,12 @@ pub async fn comfyui_status(state: State<'_, AppState>) -> Result<serde_json::Va
         p.clone()
     };
 
-    let found = path.is_some() || find_comfyui_path().is_some();
+    // For remote hosts we don't care whether a local install path exists.
+    let found = if is_local {
+        path.is_some() || find_comfyui_path().is_some()
+    } else {
+        true  // the remote side handles its own install
+    };
 
     Ok(serde_json::json!({
         "running": running,
@@ -363,8 +392,17 @@ pub async fn comfyui_status(state: State<'_, AppState>) -> Result<serde_json::Va
         "found": found,
         "path": path,
         "port": port,
+        "host": host,
+        "isLocal": is_local,
         "processAlive": process_alive,
     }))
+}
+
+/// Returns true when `host` refers to the local machine.
+/// Anything else = remote and LU won't try to manage the process.
+pub fn is_local_host(host: &str) -> bool {
+    let h = host.trim().to_ascii_lowercase();
+    matches!(h.as_str(), "localhost" | "127.0.0.1" | "::1" | "0.0.0.0" | "")
 }
 
 #[tauri::command]
@@ -408,6 +446,47 @@ pub fn set_comfyui_path(path: String, state: State<'_, AppState>) -> Result<serd
     }
 
     Ok(serde_json::json!({"status": "saved", "path": path}))
+}
+
+#[tauri::command]
+pub fn set_comfyui_host(host: String, state: State<'_, AppState>) -> Result<serde_json::Value, String> {
+    let trimmed = host.trim();
+    if trimmed.is_empty() {
+        return Err("Host must not be empty".to_string());
+    }
+    // Reject obviously invalid chars — helps avoid URL-injection style typos.
+    if trimmed.contains('/') || trimmed.contains(' ') || trimmed.contains('?') {
+        return Err("Host must be a plain hostname or IP, no slashes/spaces".to_string());
+    }
+    let final_host = trimmed.to_string();
+
+    {
+        let mut h = state.comfy_host.lock().unwrap();
+        *h = final_host.clone();
+    }
+
+    // Persist to config file
+    if let Some(config_dir) = dirs::config_dir() {
+        let app_config = config_dir.join("locally-uncensored");
+        let _ = fs::create_dir_all(&app_config);
+        let config_file = app_config.join("config.json");
+
+        let mut config: serde_json::Value = if config_file.exists() {
+            fs::read_to_string(&config_file)
+                .ok()
+                .and_then(|s| serde_json::from_str(&s).ok())
+                .unwrap_or_else(|| serde_json::json!({}))
+        } else {
+            serde_json::json!({})
+        };
+
+        config["comfyui_host"] = serde_json::json!(final_host);
+        let _ = fs::write(&config_file, serde_json::to_string_pretty(&config).unwrap());
+    }
+
+    let is_local = is_local_host(&final_host);
+    println!("[ComfyUI] Host set to {} (local={})", final_host, is_local);
+    Ok(serde_json::json!({"status": "saved", "host": final_host, "isLocal": is_local}))
 }
 
 #[tauri::command]
@@ -477,6 +556,15 @@ pub fn auto_start_ollama(_state: &AppState) {
 
 /// Auto-start ComfyUI on app launch (called from setup)
 pub fn auto_start_comfyui(state: &AppState) {
+    // If user configured a remote host, don't try to auto-start anything locally.
+    {
+        let host = state.comfy_host.lock().unwrap().clone();
+        if !is_local_host(&host) {
+            println!("[ComfyUI] Remote host configured ({}), skipping local auto-start", host);
+            return;
+        }
+    }
+
     // Always try to find and store the ComfyUI path (needed for downloads)
     if state.comfy_path.lock().unwrap().is_none() {
         if let Some(path) = find_comfyui_path() {
