@@ -8,11 +8,14 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { ProviderError } from '../providers/types'
 import type { ProviderConfig } from '../providers/types'
 
-// Mock the backend module — Ollama uses localFetch / localFetchStream instead of bare fetch
+// Mock the backend module — Ollama uses localFetch / localFetchStream instead of bare fetch.
+// Issue #31: apiUrl() now delegates to ollamaUrl() from backend.ts for a single
+// source of truth. Mocked to the dev-mode `/api${path}` shape the tests expect.
 vi.mock('../backend', () => ({
   isTauri: () => false,
   localFetch: vi.fn(),
   localFetchStream: vi.fn(),
+  ollamaUrl: (path: string) => `/api${path}`,
 }))
 
 import { OllamaProvider } from '../providers/ollama-provider'

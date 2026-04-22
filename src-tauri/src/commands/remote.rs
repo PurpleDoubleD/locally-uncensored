@@ -59,7 +59,11 @@ pub struct PasscodeState {
 struct RemoteState {
     jwt_secret: Arc<TokioMutex<String>>,
     passcode: Arc<TokioMutex<PasscodeState>>,
-    ollama_port: u16,
+    /// Full Ollama base URL (e.g. `http://localhost:11434` or `http://192.168.1.50:11434`).
+    /// Mirrors AppState.ollama_base so mobile clients dispatched through the
+    /// Remote Access proxy reach the same Ollama instance the desktop is
+    /// configured for (Issue #31).
+    ollama_base: String,
     comfy_port: u16,
     /// Configurable ComfyUI host — mirrors AppState.comfy_host so the mobile
     /// proxy forwards to the right machine when the user pointed LU at a
@@ -655,9 +659,17 @@ async fn proxy_ollama(
     }
 
     let query = req.uri().query().map(|q| format!("?{}", q)).unwrap_or_default();
-    // NOTE: reqwest inside Tauri subprocess fails on "localhost" resolution
-    // (known proxy_localhost bug). Use 127.0.0.1 directly.
-    let target = format!("http://127.0.0.1:{}{}{}", state.ollama_port, path, query);
+    // Route to the configured Ollama base URL. For the common localhost case
+    // we rewrite "localhost" → "127.0.0.1" because reqwest inside the Tauri
+    // subprocess fails on localhost resolution (known proxy_localhost bug).
+    // Remote LAN/Docker hosts stay verbatim since they resolve via normal DNS.
+    let base = state.ollama_base.trim_end_matches('/');
+    let base_final = if base.contains("://localhost") {
+        base.replace("://localhost", "://127.0.0.1")
+    } else {
+        base.to_string()
+    };
+    let target = format!("{}{}{}", base_final, path, query);
     proxy_to_target(&target, req).await
 }
 
@@ -3312,7 +3324,7 @@ pub async fn start_remote_server(
     system_prompt: Option<String>,
 ) -> Result<serde_json::Value, String> {
     // Clone Arcs from std::sync::Mutex, then drop it before any .await
-    let (jwt_secret_arc, passcode_arc, permissions_arc, devices_arc, tunnel_url_arc, dispatched_model_arc, dispatched_system_prompt_arc, port, comfy_port, comfy_host) = {
+    let (jwt_secret_arc, passcode_arc, permissions_arc, devices_arc, tunnel_url_arc, dispatched_model_arc, dispatched_system_prompt_arc, port, comfy_port, comfy_host, ollama_base) = {
         let remote = state.remote.lock().map_err(|e| e.to_string())?;
         if remote.handle.is_some() {
             return Err("Remote server already running".into());
@@ -3322,6 +3334,11 @@ pub async fn start_remote_server(
         // a missing comfy_port as a non-fatal "no comfy yet" (port 0).
         let comfy_port = state.comfy_port.lock().map(|g| *g).unwrap_or(0);
         let comfy_host = state.comfy_host.lock().map(|g| g.clone()).unwrap_or_else(|_| "localhost".to_string());
+        // Issue #31: snapshot the current Ollama base URL so the mobile proxy
+        // forwards to whatever the desktop currently targets.
+        let ollama_base = state.ollama_base.lock()
+            .map(|g| g.clone())
+            .unwrap_or_else(|_| "http://localhost:11434".to_string());
 
         (
             remote.jwt_secret.clone(),
@@ -3334,6 +3351,7 @@ pub async fn start_remote_server(
             remote.port,
             comfy_port,
             comfy_host,
+            ollama_base,
         )
     }; // std::sync::MutexGuard dropped here
 
@@ -3373,7 +3391,7 @@ pub async fn start_remote_server(
     let server_state = RemoteState {
         jwt_secret: jwt_secret_arc,
         passcode: passcode_arc,
-        ollama_port: 11434,
+        ollama_base,
         comfy_port,
         comfy_host,
         permissions: permissions_arc,

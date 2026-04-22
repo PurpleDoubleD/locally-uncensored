@@ -10,7 +10,7 @@ import type {
   ChatStreamChunk, ToolCall, ToolDefinition,
 } from './types'
 import { ProviderError } from './types'
-import { isTauri, localFetch, localFetchStream } from '../backend'
+import { localFetch, localFetchStream, ollamaUrl } from '../backend'
 import { parseNDJSONStream } from '../stream'
 import { repairToolCallArgs, extractToolCallsFromContent } from '../../lib/tool-call-repair'
 
@@ -44,14 +44,20 @@ export class OllamaProvider implements ProviderClient {
 
   constructor(private config: ProviderConfig) {}
 
-  /** Build a full Ollama API URL from config.baseUrl + path */
+  /**
+   * Build a full Ollama API URL. Delegates to `ollamaUrl()` from backend.ts
+   * so Tauri-mode (direct URL honoring `_ollamaBase`) and dev-mode
+   * (`/api/*` → Vite proxy with OLLAMA_HOST target) stay in sync with the
+   * rest of the app.
+   *
+   * Issue #31 fix: previously this function used `config.baseUrl` in Tauri
+   * mode only, and in dev mode always forwarded to the Vite proxy which
+   * itself was hardcoded to localhost:11434 — so a user-configured remote
+   * Ollama never actually got called. Both modes now go through the single
+   * ollamaUrl() resolver.
+   */
   private apiUrl(path: string): string {
-    const base = this.config.baseUrl || 'http://localhost:11434'
-    if (isTauri()) {
-      return `${base}/api${path}`
-    }
-    // Dev mode: proxy through Vite — use /api path
-    return `/api${path}`
+    return ollamaUrl(path)
   }
 
   async *chatStream(

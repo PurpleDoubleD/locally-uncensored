@@ -167,6 +167,104 @@ export function AppShell() {
     document.documentElement.classList.toggle('light', settings.theme === 'light')
   }, [settings.theme])
 
+  // ── Issue #31: Ollama host sync (Rust ↔ frontend) ─────────────
+  // Two async prereqs to serialize against:
+  //   (a) Tauri v2 `__TAURI_INTERNALS__` is set async via `withGlobalTauri`.
+  //   (b) Zustand `persist` middleware hydrates `lu-providers` async — if we
+  //       push Rust's value into the store BEFORE hydration finishes,
+  //       hydration replays the stale localStorage baseUrl and clobbers us.
+  //
+  // The deliberate order:
+  //   1. Wait for the Tauri global via the same 100ms × 50-tick poll the
+  //      backup triad uses (v2.3.3 commit 835ce86).
+  //   2. Use zustand's own `onFinishHydration` callback for ordering against
+  //      hydration — more reliable than polling `hasHydrated()` because it
+  //      fires deterministically AFTER the replay, not whenever we happen
+  //      to check.
+  //   3. Fetch Rust's resolved base (config.json > OLLAMA_HOST > default)
+  //      and push it into both the providerStore and backend.ts, regardless
+  //      of what hydration just wrote — Rust wins at cold start.
+  //   4. Arm a zustand subscribe listener for future GUI edits so
+  //      `set_ollama_host` keeps Rust's config.json authoritative.
+  useEffect(() => {
+    let cancelled = false
+    let tries = 0
+    let storeUnsub: (() => void) | null = null
+    let hydrationUnsub: (() => void) | null = null
+
+    const armSubscription = () => {
+      storeUnsub = useProviderStore.subscribe(async (state, prev) => {
+        const next = state.providers.ollama?.baseUrl
+        const old = prev.providers.ollama?.baseUrl
+        if (!next || next === old || cancelled) return
+        const { setOllamaBase } = await import('../../api/backend')
+        setOllamaBase(next)
+        if (isTauri()) {
+          backendCall('set_ollama_host', { host: next }).catch(() => {})
+        }
+      })
+    }
+
+    const pullAndArm = async () => {
+      if (cancelled) return
+      const { setOllamaBase } = await import('../../api/backend')
+
+      // Arm the store subscription FIRST, so that the setProviderConfig
+      // below fires its listener (which writes back to Rust via
+      // `set_ollama_host`). If we armed after, the initial sync would not
+      // reach config.json and users with OLLAMA_HOST would see an empty
+      // `ollama_base` field there.
+      if (!cancelled) armSubscription()
+
+      try {
+        const res = await backendCall<{ base?: string }>('get_ollama_host')
+        if (!cancelled && res?.base) {
+          setOllamaBase(res.base)
+          const current = useProviderStore.getState().providers.ollama?.baseUrl
+          if (current !== res.base) {
+            useProviderStore.getState().setProviderConfig('ollama', { baseUrl: res.base })
+          }
+        }
+      } catch { /* Rust not ready — providerStore wins, subscription handles later edits */ }
+
+      const current = useProviderStore.getState().providers.ollama?.baseUrl
+      if (!cancelled && current) setOllamaBase(current)
+    }
+
+    const afterHydration = () => {
+      // Either hydration already finished (so we run now) or we register a
+      // one-shot callback for when it does.
+      const persist = (useProviderStore as any).persist
+      if (!persist || persist.hasHydrated?.()) {
+        void pullAndArm()
+      } else {
+        hydrationUnsub = persist.onFinishHydration?.(() => { void pullAndArm() }) ?? null
+      }
+    }
+
+    const waitForTauri = setInterval(() => {
+      if (cancelled) { clearInterval(waitForTauri); return }
+      tries++
+      if (isTauri()) {
+        clearInterval(waitForTauri)
+        afterHydration()
+      } else if (tries >= 50) {
+        // 5 s elapsed — probably browser dev session. Still wire the store
+        // subscription so user edits reach Rust if Tauri appears later.
+        clearInterval(waitForTauri)
+        armSubscription()
+      }
+    }, 100)
+
+    return () => {
+      cancelled = true
+      clearInterval(waitForTauri)
+      if (storeUnsub) storeUnsub()
+      if (hydrationUnsub) hydrationUnsub()
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   // ── Mirror remote mobile chat into the dispatched desktop conversation ──
   useEffect(() => {
     if (!isTauri()) return

@@ -99,8 +99,28 @@ pub async fn fetch_external_bytes(url: String) -> Result<Vec<u8>, String> {
     resp.bytes().await.map(|b| b.to_vec()).map_err(|e| e.to_string())
 }
 
-/// Validate that a URL targets localhost only (anti-SSRF for local proxy).
-fn validate_localhost_url(raw: &str) -> Result<(), String> {
+/// Extract the host from `ollama_base` + `comfy_host` so we can allow-list
+/// user-configured remote backends through the CORS proxy. Returns a
+/// lowercase host string (or empty if the configured URL is malformed).
+fn configured_host(url_or_host: &str) -> String {
+    // ollama_base is always stored as a full URL (see load_ollama_base); try
+    // that parse first.
+    if let Ok(u) = url::Url::parse(url_or_host) {
+        if let Some(h) = u.host_str() {
+            return h.to_lowercase();
+        }
+    }
+    // comfy_host is stored as a bare hostname/IP.
+    url_or_host.trim().to_lowercase()
+}
+
+/// Validate that a URL targets either localhost or one of the user-configured
+/// backend hosts (Ollama via `ollama_base`, ComfyUI via `comfy_host`).
+///
+/// SSRF policy: the proxy only forwards to hosts the user explicitly pointed
+/// LU at. A JS-level compromise still cannot reach arbitrary intranet
+/// services; it can only reach the host the user already wanted to reach.
+fn validate_proxy_url(raw: &str, state: &crate::state::AppState) -> Result<(), String> {
     let parsed = url::Url::parse(raw)
         .map_err(|e| format!("Invalid URL: {}", e))?;
 
@@ -109,19 +129,46 @@ fn validate_localhost_url(raw: &str) -> Result<(), String> {
         other => return Err(format!("Blocked scheme: {}", other)),
     }
 
-    let host = parsed.host_str().unwrap_or("");
-    if host == "localhost" || host == "127.0.0.1" || host == "::1" || host == "[::1]" {
-        Ok(())
-    } else {
-        Err(format!("proxy_localhost: blocked non-localhost URL (host={})", host))
+    let host = parsed.host_str().unwrap_or("").to_lowercase();
+
+    // Always-allowed: localhost variants. Covers the common case + any
+    // backend bound to 0.0.0.0 on the same machine.
+    let is_local = matches!(host.as_str(),
+        "localhost" | "127.0.0.1" | "::1" | "[::1]" | "0.0.0.0"
+    ) || host.ends_with(".localhost");
+    if is_local {
+        return Ok(());
     }
+
+    // Configured Ollama host (Issue #31: users with OLLAMA_HOST=192.168.x.x).
+    let ollama_host = state.ollama_base.lock()
+        .ok()
+        .map(|g| configured_host(&g))
+        .unwrap_or_default();
+    if !ollama_host.is_empty() && host == ollama_host {
+        return Ok(());
+    }
+
+    // Configured ComfyUI host (v2.3.6 feature).
+    let comfy_host = state.comfy_host.lock()
+        .ok()
+        .map(|g| configured_host(&g))
+        .unwrap_or_default();
+    if !comfy_host.is_empty() && host == comfy_host {
+        return Ok(());
+    }
+
+    Err(format!(
+        "proxy_localhost: host '{}' not allowed. Configure remote backends via Settings → Providers (Ollama) or Settings → ComfyUI (Host).",
+        host
+    ))
 }
 
-/// Generic localhost proxy — fetch any localhost URL bypassing CORS.
-/// Used for Ollama and ComfyUI API calls in production mode.
+/// Generic localhost proxy — fetch any localhost or configured-backend URL
+/// bypassing CORS. Used for Ollama and ComfyUI API calls in production mode.
 #[tauri::command]
-pub async fn proxy_localhost(url: String, method: Option<String>, body: Option<String>) -> Result<String, String> {
-    validate_localhost_url(&url)?;
+pub async fn proxy_localhost(url: String, method: Option<String>, body: Option<String>, state: tauri::State<'_, crate::state::AppState>) -> Result<String, String> {
+    validate_proxy_url(&url, &state)?;
 
     let client = reqwest::Client::builder()
         .user_agent("LocallyUncensored/2.0")
@@ -158,8 +205,8 @@ pub async fn proxy_localhost(url: String, method: Option<String>, body: Option<S
 
 /// Streaming localhost proxy — returns raw bytes for streaming responses (Ollama pull/chat).
 #[tauri::command]
-pub async fn proxy_localhost_stream(url: String, method: Option<String>, body: Option<String>) -> Result<Vec<u8>, String> {
-    validate_localhost_url(&url)?;
+pub async fn proxy_localhost_stream(url: String, method: Option<String>, body: Option<String>, state: tauri::State<'_, crate::state::AppState>) -> Result<Vec<u8>, String> {
+    validate_proxy_url(&url, &state)?;
 
     let client = reqwest::Client::builder()
         .user_agent("LocallyUncensored/2.0")
@@ -217,8 +264,15 @@ pub async fn pull_model_stream(app: tauri::AppHandle, state: tauri::State<'_, cr
         .build()
         .map_err(|e| e.to_string())?;
 
+    // Route to the configured Ollama base (Issue #31 — was hardcoded
+    // http://localhost:11434 so remote Ollama hosts never got the pull).
+    let ollama_base = state.ollama_base.lock().ok()
+        .map(|g| g.clone())
+        .unwrap_or_else(|| "http://localhost:11434".to_string());
+    let pull_url = format!("{}/api/pull", ollama_base.trim_end_matches('/'));
+
     let resp = client
-        .post("http://localhost:11434/api/pull")
+        .post(&pull_url)
         .header("Content-Type", "application/json")
         .body(format!(r#"{{"name":"{}","stream":true}}"#, name))
         .send()

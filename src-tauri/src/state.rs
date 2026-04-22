@@ -70,6 +70,54 @@ pub(crate) fn load_comfy_config_values() -> (u16, String) {
     (port, host)
 }
 
+/// Read persisted Ollama base URL with the following priority:
+///  1. `ollama_base` in config.json (GUI-configured)
+///  2. `OLLAMA_HOST` env var (Ollama's own convention)
+///  3. Default `http://localhost:11434`
+///
+/// Accepts bare `host:port`, scheme-less `host`, or full URL — returns full
+/// URL without trailing slash. Matches Ollama's own OLLAMA_HOST semantics so
+/// setting it as an env var before launching LU "just works".
+pub(crate) fn load_ollama_base() -> String {
+    let normalize = |raw: &str| -> String {
+        let trimmed = raw.trim().trim_end_matches('/');
+        if trimmed.is_empty() {
+            "http://localhost:11434".to_string()
+        } else if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
+            trimmed.to_string()
+        } else {
+            format!("http://{}", trimmed)
+        }
+    };
+
+    // Priority 1: config.json override (GUI takes precedence)
+    if let Some(config_dir) = dirs::config_dir() {
+        let config_file = config_dir.join("locally-uncensored").join("config.json");
+        if let Ok(raw) = std::fs::read_to_string(&config_file) {
+            if let Ok(v) = serde_json::from_str::<serde_json::Value>(&raw) {
+                if let Some(b) = v.get("ollama_base").and_then(|x| x.as_str()) {
+                    let normalized = normalize(b);
+                    if !normalized.is_empty() {
+                        return normalized;
+                    }
+                }
+            }
+        }
+    }
+
+    // Priority 2: OLLAMA_HOST env var — same semantics as Ollama itself.
+    // Ollama docs explicitly document e.g. `OLLAMA_HOST=0.0.0.0:11434`.
+    if let Ok(env) = std::env::var("OLLAMA_HOST") {
+        let normalized = normalize(&env);
+        if !normalized.is_empty() {
+            return normalized;
+        }
+    }
+
+    // Priority 3: default
+    "http://localhost:11434".to_string()
+}
+
 pub struct AppState {
     pub comfy_process: Mutex<Option<Child>>,
     pub comfy_path: Mutex<Option<String>>,
@@ -78,6 +126,12 @@ pub struct AppState {
     /// remote hostname/IP lets users point LU at a ComfyUI running on
     /// another machine (homelab, Docker, LAN). Persisted in config.json.
     pub comfy_host: Mutex<String>,
+    /// Configurable Ollama base URL. Default `http://localhost:11434`.
+    /// Seeded from (in priority order): config.json `ollama_base` field,
+    /// `OLLAMA_HOST` env var, or the default. Updated at runtime via the
+    /// `set_ollama_host` command. Every call that proxies Ollama reads this
+    /// value so GUI changes reflect everywhere without a restart.
+    pub ollama_base: Mutex<String>,
     pub whisper: Arc<Mutex<WhisperServer>>,
     pub downloads: Arc<Mutex<HashMap<String, DownloadProgress>>>,
     pub download_tokens: Arc<Mutex<HashMap<String, CancellationToken>>>,
@@ -110,11 +164,21 @@ impl AppState {
             println!("[ComfyUI] Loaded persisted host: {}", initial_host);
         }
 
+        // Same bootstrap for Ollama — reads config.json first, then
+        // OLLAMA_HOST env var, then defaults. Fixes Issue #31 where users
+        // with OLLAMA_HOST set globally (Docker, homelab, LAN) saw "No local
+        // backend detected" even though ollama.exe was running.
+        let initial_ollama_base = load_ollama_base();
+        if initial_ollama_base != "http://localhost:11434" {
+            println!("[Ollama] Using base URL: {}", initial_ollama_base);
+        }
+
         Self {
             comfy_process: Mutex::new(None),
             comfy_path: Mutex::new(None),
             comfy_port: Mutex::new(initial_port),
             comfy_host: Mutex::new(initial_host),
+            ollama_base: Mutex::new(initial_ollama_base),
             whisper: Arc::new(Mutex::new(WhisperServer::new())),
             downloads: Arc::new(Mutex::new(HashMap::new())),
             download_tokens: Arc::new(Mutex::new(HashMap::new())),

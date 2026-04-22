@@ -160,6 +160,8 @@ export async function backendCall<T = any>(
     install_ollama_status: { path: "/local-api/install-ollama-status" },
     set_comfyui_port: { path: "/local-api/set-comfyui-port", method: "POST" },
     set_comfyui_host: { path: "/local-api/set-comfyui-host", method: "POST" },
+    set_ollama_host: { path: "/local-api/set-ollama-host", method: "POST" },
+    get_ollama_host: { path: "/local-api/get-ollama-host" },
     install_custom_node: { path: "/local-api/install-custom-node", method: "POST" },
     whisper_status: { path: "/local-api/transcribe-status" },
     transcribe: { path: "/local-api/transcribe", method: "POST" },
@@ -249,10 +251,51 @@ export async function backendCall<T = any>(
   return res.json();
 }
 
-/** Get the base URL for Ollama API calls */
+/**
+ * Configurable Ollama base URL. Default `http://localhost:11434`.
+ * Can be set to any URL so users can point LU at a remote Ollama
+ * (e.g. LAN machine, Docker container, cluster node). Supports the
+ * OLLAMA_HOST env var on Tauri startup via the Rust side, and GUI-
+ * configured endpoint via `set_ollama_host` — whichever comes last
+ * wins, matching how other providers behave.
+ *
+ * Stored without trailing slash so `${_ollamaBase}/api${path}` never
+ * produces a double slash.
+ */
+let _ollamaBase = 'http://localhost:11434';
+
+/** Accepts bare host:port, scheme-less host, or full URL — returns full URL. */
+export function normalizeOllamaBase(input: string): string {
+  const raw = (input || '').trim()
+  if (!raw) return 'http://localhost:11434'
+  // Already has scheme?
+  if (/^https?:\/\//i.test(raw)) return raw.replace(/\/+$/, '')
+  // Bare "host:port" or "host" — add http://
+  return `http://${raw.replace(/\/+$/, '')}`
+}
+
+export function setOllamaBase(input: string) {
+  _ollamaBase = normalizeOllamaBase(input)
+}
+export function getOllamaBase(): string { return _ollamaBase }
+
+export function isOllamaLocal(): boolean {
+  try {
+    const h = new URL(_ollamaBase).hostname.toLowerCase()
+    return h === 'localhost' || h === '127.0.0.1' || h === '::1' || h === '0.0.0.0'
+  } catch {
+    return true
+  }
+}
+
+/** Get the base URL for Ollama API calls.
+ *  - Tauri: `${_ollamaBase}/api${path}` — honors GUI + env var.
+ *  - Dev: `/api${path}` — Vite proxy target is set from OLLAMA_HOST env var
+ *    at dev-server startup time.
+ */
 export function ollamaUrl(path: string): string {
   if (isTauri()) {
-    return `http://localhost:11434/api${path}`;
+    return `${_ollamaBase}/api${path}`;
   }
   return `/api${path}`;
 }

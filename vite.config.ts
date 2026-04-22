@@ -1877,7 +1877,15 @@ export default defineConfig({
     allowedHosts: true,
     proxy: {
       '/api': {
-        target: 'http://localhost:11434',
+        // Issue #31: honour OLLAMA_HOST so `OLLAMA_HOST=0.0.0.0:11434 npm run dev`
+        // and remote Ollama setups (Docker, LAN, homelab) just work in dev mode
+        // too. Accept bare `host:port`, scheme-less host, or full URL.
+        target: (() => {
+          const raw = (process.env.OLLAMA_HOST || '').trim()
+          if (!raw) return 'http://localhost:11434'
+          if (/^https?:\/\//i.test(raw)) return raw.replace(/\/+$/, '')
+          return `http://${raw.replace(/\/+$/, '')}`
+        })(),
         changeOrigin: true,
       },
       '/ollama-search': {

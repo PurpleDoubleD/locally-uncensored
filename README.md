@@ -35,17 +35,15 @@ No cloud. No data collection. No API keys. Auto-detects 12 local backends. Your 
 
 ---
 
-## v2.3.6 — Current Release
+## v2.3.7 — Current Release
 
-**Remote ComfyUI host + LM Studio/OpenAI-compat CORS fix, 2183 Tests**
+**Remote Ollama + `OLLAMA_HOST` env var support, 2202 Tests**
 
 ### Critical Fixes (why you want this update)
-- **Configurable ComfyUI host** — Settings → ComfyUI → Host. Previously only the port was configurable, the host was hardcoded `localhost`. Now you can point LU at a ComfyUI running in Docker, on a LAN machine, or on a headless homelab server. When the host is local, the Start/Stop/Restart/Install/Path controls stay visible; remote hosts hide them (LU can't manage a remote Python process). Requested in Discussion #1 by @ShoaibSajid.
-- **LM Studio (and every OpenAI-compat local backend) can actually be reached from LU** — v2.3.5 auto-detected LM Studio and pre-enabled it, but the actual `/v1/*` calls CORS-failed inside the Tauri WebView because `openai-provider.ts` used plain `fetch()`. Test button always showed "Failed" and models never appeared in the dropdown even when curl confirmed the backend was up. Fix routes localhost calls through the Rust proxy with direct-fetch fallback. Covers LM Studio, vLLM, llama.cpp server, KoboldCpp, Jan, GPT4All, oobabooga, Aphrodite, SGLang, TGI, LocalAI, TabbyAPI.
-- **ComfyUI port now actually persists across restarts** — pre-existing bug: the port setter wrote to `config.json` but startup never read it back. New `load_comfy_config_values()` helper applies persisted port + host at startup.
+- **Remote Ollama now actually works** — Issue #31 by @k-wilkinson. Pre-2.3.7 the Ollama endpoint was hardcoded to `localhost:11434` in four places (frontend URL helper, Vite dev proxy, Ollama provider dev-mode path, Rust pull-model command), so setting `OLLAMA_HOST=0.0.0.0:11434`, `192.168.1.x:11434` or any custom port was silently ignored — LU reported "No local backend detected", model dropdowns stayed empty, Settings → Providers → Ollama → Endpoint field had zero effect, and the Test button always said Failed. Fixed end-to-end: a single `ollama_base` field reads, in priority, the persisted GUI value, then the `OLLAMA_HOST` env var (same semantics as Ollama itself), then the default. Vite dev proxy target is computed from `OLLAMA_HOST` at startup, the Rust SSRF allow-list in `proxy_localhost` accepts the configured Ollama + ComfyUI hosts, `pull_model_stream` reads from state.
 
-### What's still in v2.3.6 from v2.3.5
-Drop-in upgrade. v2.3.5's auto-detection fix + Windows terminal-popup hardening + setup.bat warnings remain in place. Every fix from v2.3.5, v2.3.4, and earlier still applies.
+### What's still in v2.3.7 from v2.3.6
+Drop-in upgrade. v2.3.6's configurable ComfyUI host (Shoaib's remote ComfyUI feature), LM Studio / OpenAI-compat CORS fix, and ComfyUI port persistence all remain in place.
 
 ### Remote Access + Mobile Web App
 - **Access your AI from your phone** — Dispatch via LAN or Cloudflare Tunnel (Internet)

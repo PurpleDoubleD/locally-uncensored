@@ -523,6 +523,80 @@ pub fn set_comfyui_port(port: u16, state: State<'_, AppState>) -> Result<serde_j
     Ok(serde_json::json!({"status": "saved", "port": port}))
 }
 
+/// Normalize user input into a full Ollama base URL.
+/// Accepts bare `host:port`, scheme-less host, or full URL.
+/// Returns full URL without trailing slash, or Err for obviously bad input.
+fn normalize_ollama_base(input: &str) -> Result<String, String> {
+    let trimmed = input.trim().trim_end_matches('/');
+    if trimmed.is_empty() {
+        return Err("Endpoint must not be empty".into());
+    }
+    // Reject whitespace / newlines inside the URL.
+    if trimmed.chars().any(|c| c.is_whitespace()) {
+        return Err("Endpoint must not contain whitespace".into());
+    }
+    let with_scheme = if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
+        trimmed.to_string()
+    } else {
+        format!("http://{}", trimmed)
+    };
+    // Sanity-check with a URL parse so "http://" alone or "http://:1234" can't pass.
+    match url::Url::parse(&with_scheme) {
+        Ok(u) if u.host_str().map_or(false, |h| !h.is_empty()) => Ok(with_scheme),
+        _ => Err(format!("Not a valid URL: {}", input)),
+    }
+}
+
+#[tauri::command]
+pub fn set_ollama_host(host: String, state: State<'_, AppState>) -> Result<serde_json::Value, String> {
+    let final_base = normalize_ollama_base(&host)?;
+
+    {
+        let mut b = state.ollama_base.lock().unwrap();
+        *b = final_base.clone();
+    }
+
+    // Persist to config file under ollama_base — next startup will pick it
+    // up via load_ollama_base() before any request fires.
+    if let Some(config_dir) = dirs::config_dir() {
+        let app_config = config_dir.join("locally-uncensored");
+        let _ = fs::create_dir_all(&app_config);
+        let config_file = app_config.join("config.json");
+
+        let mut config: serde_json::Value = if config_file.exists() {
+            fs::read_to_string(&config_file)
+                .ok()
+                .and_then(|s| serde_json::from_str(&s).ok())
+                .unwrap_or_else(|| serde_json::json!({}))
+        } else {
+            serde_json::json!({})
+        };
+
+        config["ollama_base"] = serde_json::json!(final_base);
+        let _ = fs::write(&config_file, serde_json::to_string_pretty(&config).unwrap());
+    }
+
+    let is_local = url::Url::parse(&final_base)
+        .ok()
+        .and_then(|u| u.host_str().map(|h| h.to_lowercase()))
+        .map(|h| matches!(h.as_str(), "localhost" | "127.0.0.1" | "::1" | "0.0.0.0"))
+        .unwrap_or(false);
+
+    println!("[Ollama] Base URL set to {} (local={})", final_base, is_local);
+    Ok(serde_json::json!({"status": "saved", "base": final_base, "isLocal": is_local}))
+}
+
+#[tauri::command]
+pub fn get_ollama_host(state: State<'_, AppState>) -> Result<serde_json::Value, String> {
+    let base = state.ollama_base.lock().unwrap().clone();
+    let is_local = url::Url::parse(&base)
+        .ok()
+        .and_then(|u| u.host_str().map(|h| h.to_lowercase()))
+        .map(|h| matches!(h.as_str(), "localhost" | "127.0.0.1" | "::1" | "0.0.0.0"))
+        .unwrap_or(false);
+    Ok(serde_json::json!({"base": base, "isLocal": is_local}))
+}
+
 /// Auto-start Ollama on app launch (called from setup)
 pub fn auto_start_ollama(_state: &AppState) {
     // Check if already running

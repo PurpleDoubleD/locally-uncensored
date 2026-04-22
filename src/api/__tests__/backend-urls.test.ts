@@ -18,6 +18,10 @@ import {
   setComfyHost,
   getComfyHost,
   isComfyLocal,
+  setOllamaBase,
+  getOllamaBase,
+  isOllamaLocal,
+  normalizeOllamaBase,
 } from '../backend'
 
 describe('backend — URL helpers', () => {
@@ -26,6 +30,7 @@ describe('backend — URL helpers', () => {
     delete windowMock.__TAURI_INTERNALS__
     setComfyPort(8188)
     setComfyHost('localhost')
+    setOllamaBase('http://localhost:11434')
   })
 
   afterEach(() => {
@@ -33,6 +38,7 @@ describe('backend — URL helpers', () => {
     delete windowMock.__TAURI_INTERNALS__
     setComfyPort(8188)
     setComfyHost('localhost')
+    setOllamaBase('http://localhost:11434')
   })
 
   // ─── isTauri ───
@@ -85,7 +91,7 @@ describe('backend — URL helpers', () => {
       expect(ollamaUrl('/tags')).toBe('/api/tags')
     })
 
-    it('returns full localhost URL in Tauri mode', () => {
+    it('returns full localhost URL in Tauri mode by default', () => {
       windowMock.__TAURI__ = {}
       expect(ollamaUrl('/tags')).toBe('http://localhost:11434/api/tags')
     })
@@ -103,6 +109,124 @@ describe('backend — URL helpers', () => {
     it('handles empty path in Tauri mode', () => {
       windowMock.__TAURI__ = {}
       expect(ollamaUrl('')).toBe('http://localhost:11434/api')
+    })
+
+    // Issue #31 — custom OLLAMA_HOST has to actually flow through.
+    it('honours setOllamaBase when user points at a LAN Ollama (Tauri)', () => {
+      windowMock.__TAURI__ = {}
+      setOllamaBase('http://192.168.1.50:11434')
+      expect(ollamaUrl('/tags')).toBe('http://192.168.1.50:11434/api/tags')
+      expect(ollamaUrl('/chat')).toBe('http://192.168.1.50:11434/api/chat')
+    })
+
+    it('honours custom port from setOllamaBase', () => {
+      windowMock.__TAURI__ = {}
+      setOllamaBase('http://localhost:11435')
+      expect(ollamaUrl('/tags')).toBe('http://localhost:11435/api/tags')
+    })
+
+    it('honours HTTPS base for remote Ollama', () => {
+      windowMock.__TAURI__ = {}
+      setOllamaBase('https://ollama.example.com')
+      expect(ollamaUrl('/tags')).toBe('https://ollama.example.com/api/tags')
+    })
+
+    it('dev mode still routes through Vite proxy regardless of base', () => {
+      delete windowMock.__TAURI__
+      setOllamaBase('http://192.168.1.50:11434')
+      // Vite proxy target comes from OLLAMA_HOST env var at server startup,
+      // so the frontend path stays /api — proxy does the rewrite.
+      expect(ollamaUrl('/tags')).toBe('/api/tags')
+    })
+
+    it('accepts bare host:port (no scheme) and adds http://', () => {
+      windowMock.__TAURI__ = {}
+      setOllamaBase('192.168.1.50:11434')
+      expect(ollamaUrl('/tags')).toBe('http://192.168.1.50:11434/api/tags')
+    })
+
+    it('strips trailing slash from the base URL', () => {
+      windowMock.__TAURI__ = {}
+      setOllamaBase('http://localhost:11434/')
+      expect(ollamaUrl('/tags')).toBe('http://localhost:11434/api/tags')
+    })
+  })
+
+  // ─── setOllamaBase / getOllamaBase / normalizeOllamaBase ───
+
+  describe('setOllamaBase / getOllamaBase / normalizeOllamaBase', () => {
+    it('default base is http://localhost:11434', () => {
+      setOllamaBase('http://localhost:11434')
+      expect(getOllamaBase()).toBe('http://localhost:11434')
+    })
+
+    it('stores and retrieves LAN IP base', () => {
+      setOllamaBase('http://192.168.1.50:11434')
+      expect(getOllamaBase()).toBe('http://192.168.1.50:11434')
+    })
+
+    it('accepts bare host:port and adds scheme', () => {
+      setOllamaBase('192.168.1.50:11434')
+      expect(getOllamaBase()).toBe('http://192.168.1.50:11434')
+    })
+
+    it('accepts full HTTPS URL unchanged', () => {
+      setOllamaBase('https://ollama.example.com')
+      expect(getOllamaBase()).toBe('https://ollama.example.com')
+    })
+
+    it('strips trailing slash', () => {
+      setOllamaBase('http://localhost:11434/')
+      expect(getOllamaBase()).toBe('http://localhost:11434')
+    })
+
+    it('empty input falls back to default', () => {
+      setOllamaBase('')
+      expect(getOllamaBase()).toBe('http://localhost:11434')
+      setOllamaBase('   ')
+      expect(getOllamaBase()).toBe('http://localhost:11434')
+    })
+
+    it('normalizeOllamaBase is a pure function', () => {
+      expect(normalizeOllamaBase('192.168.1.50:11434')).toBe('http://192.168.1.50:11434')
+      expect(normalizeOllamaBase('http://foo:11434')).toBe('http://foo:11434')
+      expect(normalizeOllamaBase('https://foo/')).toBe('https://foo')
+      expect(normalizeOllamaBase('')).toBe('http://localhost:11434')
+      expect(normalizeOllamaBase('  ')).toBe('http://localhost:11434')
+    })
+  })
+
+  // ─── isOllamaLocal ───
+
+  describe('isOllamaLocal', () => {
+    it('returns true for localhost', () => {
+      setOllamaBase('http://localhost:11434')
+      expect(isOllamaLocal()).toBe(true)
+    })
+
+    it('returns true for 127.0.0.1', () => {
+      setOllamaBase('http://127.0.0.1:11434')
+      expect(isOllamaLocal()).toBe(true)
+    })
+
+    it('returns true for 0.0.0.0 (wildcard bind visible as bound IP)', () => {
+      setOllamaBase('http://0.0.0.0:11434')
+      expect(isOllamaLocal()).toBe(true)
+    })
+
+    it('returns false for LAN IP', () => {
+      setOllamaBase('http://192.168.1.50:11434')
+      expect(isOllamaLocal()).toBe(false)
+    })
+
+    it('returns false for remote hostname', () => {
+      setOllamaBase('http://ollama.example.com')
+      expect(isOllamaLocal()).toBe(false)
+    })
+
+    it('is case-insensitive', () => {
+      setOllamaBase('http://LOCALHOST:11434')
+      expect(isOllamaLocal()).toBe(true)
     })
   })
 

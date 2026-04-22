@@ -30,6 +30,8 @@ fn main() {
             commands::process::set_comfyui_path,
             commands::process::set_comfyui_port,
             commands::process::set_comfyui_host,
+            commands::process::set_ollama_host,
+            commands::process::get_ollama_host,
             // Installation
             commands::install::install_comfyui,
             commands::install::install_comfyui_status,
