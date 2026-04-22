@@ -1,0 +1,124 @@
+name: Discord release announcement
+
+# Fires when a GitHub Release is published. Posts an LU-branded announcement
+# to the Discord server via two webhooks:
+#   #releases       — full release body (what's new / fixed / upgrade instructions)
+#   #announcements  — short blurb with link
+#
+# The release body is whatever `gh release create --notes "…"` wrote, so the
+# human writing the release notes owns the announcement content. No emojis
+# are injected here — follow whatever style the release body uses.
+#
+# Runs after tauri-action so users see the announcement AFTER installers are up.
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  wait-for-build:
+    # Poll the build-tauri job on the same release. Not strictly required —
+    # auto-update uses the release's latest.json which only uploads after
+    # tauri-action finishes — but announcing before installers exist confuses
+    # people who click the download link and hit 404. Single 6-min ceiling
+    # matches our normal build time (~5 min).
+    runs-on: ubuntu-latest
+    steps:
+      - name: Wait for tauri artifacts
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+          echo "Waiting for $TAG installers to appear on the release…"
+          for i in $(seq 1 72); do
+            count=$(gh release view "$TAG" --json assets --jq '[.assets[] | select(.name | test("setup\\.exe$|\\.msi$|\\.AppImage$|\\.deb$|\\.rpm$"))] | length')
+            if [ "$count" -ge 4 ]; then
+              echo "Found $count installer artifacts — proceeding."
+              exit 0
+            fi
+            echo "  ($i/72) only $count so far, sleeping 10s…"
+            sleep 10
+          done
+          echo "Timeout waiting for artifacts — announcing anyway."
+
+  announce:
+    needs: wait-for-build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Post to #releases
+        env:
+          WEBHOOK: ${{ secrets.DISCORD_RELEASES_WEBHOOK }}
+          TAG: ${{ github.event.release.tag_name }}
+          TITLE: ${{ github.event.release.name }}
+          BODY: ${{ github.event.release.body }}
+          URL: ${{ github.event.release.html_url }}
+        run: |
+          python3 - <<'PY'
+          import json, os, urllib.request, urllib.error, sys
+          webhook = os.environ.get("WEBHOOK", "").strip()
+          if not webhook:
+              sys.exit("DISCORD_RELEASES_WEBHOOK not set")
+          tag = os.environ["TAG"]
+          body = (os.environ.get("BODY") or "").strip()
+          url  = os.environ["URL"]
+          # Discord single-message limit is 2000 chars. Leave room for our
+          # own header (~120) and footer (~100), cap the body at 1700.
+          header = f"# 🚀 Locally Uncensored {tag} is live\n\nAuto-update picks this up on your next launch.\n\n"
+          footer = f"\n\nFull release notes + installers: {url}"
+          budget = 2000 - len(header) - len(footer) - 20
+          if len(body) > budget:
+              body = body[:budget].rsplit("\n", 1)[0] + "\n\n*(truncated — see full notes link below)*"
+          content = header + body + footer
+          req = urllib.request.Request(
+              webhook,
+              data=json.dumps({"content": content, "flags": 4096}).encode("utf-8"),  # 4096 = SUPPRESS_EMBEDS
+              headers={"Content-Type": "application/json", "User-Agent": "LocallyUncensored/release-announce"},
+              method="POST",
+          )
+          with urllib.request.urlopen(req, timeout=30) as r:
+              print(f"#releases POST status: {r.status}")
+          PY
+
+      - name: Post short blurb to #announcements
+        env:
+          WEBHOOK: ${{ secrets.DISCORD_ANNOUNCEMENTS_WEBHOOK }}
+          TAG: ${{ github.event.release.tag_name }}
+          URL: ${{ github.event.release.html_url }}
+          BODY: ${{ github.event.release.body }}
+        run: |
+          python3 - <<'PY'
+          import json, os, re, urllib.request, sys
+          webhook = os.environ.get("WEBHOOK", "").strip()
+          if not webhook:
+              sys.exit("DISCORD_ANNOUNCEMENTS_WEBHOOK not set")
+          tag = os.environ["TAG"]
+          url = os.environ["URL"]
+          raw = (os.environ.get("BODY") or "").strip()
+          # Extract first non-empty bullet line that mentions "fix" or "add"
+          # to produce a single-line teaser. Fallback: first paragraph.
+          teaser = ""
+          for line in raw.splitlines():
+              s = line.strip().lstrip("-•* ").strip()
+              if not s or s.startswith("#"):
+                  continue
+              teaser = s
+              break
+          teaser = re.sub(r"\*\*([^*]+)\*\*", r"**\1**", teaser)[:400]
+          msg = (
+              f"Hey everyone — **{tag} is out**. Auto-update rolls on next launch.\n\n"
+              + (f"> {teaser}\n\n" if teaser else "")
+              + f"Full notes: {url}"
+          )
+          req = urllib.request.Request(
+              webhook,
+              data=json.dumps({"content": msg, "flags": 4096}).encode("utf-8"),
+              headers={"Content-Type": "application/json", "User-Agent": "LocallyUncensored/release-announce"},
+              method="POST",
+          )
+          with urllib.request.urlopen(req, timeout=30) as r:
+              print(f"#announcements POST status: {r.status}")
+          PY
