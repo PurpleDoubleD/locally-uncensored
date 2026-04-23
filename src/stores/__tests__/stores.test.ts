@@ -328,6 +328,18 @@ describe('agentModeStore', () => {
       expect(useAgentModeStore.getState().tutorialCompleted).toBe(true)
     })
   })
+
+  describe('resetTutorial', () => {
+    it('flips tutorialCompleted back to false so Settings -> "Reset tutorial" actually re-shows the tour', () => {
+      // Arrange: tutorial marked as already seen
+      useAgentModeStore.getState().setTutorialCompleted()
+      expect(useAgentModeStore.getState().tutorialCompleted).toBe(true)
+      // Act: user clicks Reset tutorial in Settings
+      useAgentModeStore.getState().resetTutorial()
+      // Assert: tutorial will render again
+      expect(useAgentModeStore.getState().tutorialCompleted).toBe(false)
+    })
+  })
 })
 
 // ═══════════════════════════════════════════════════════════════

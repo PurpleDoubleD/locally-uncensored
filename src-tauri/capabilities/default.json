@@ -12,6 +12,7 @@
     "core:window:allow-close",
     "core:window:allow-is-maximized",
     "core:window:allow-toggle-maximize",
+    "core:window:allow-start-dragging",
     "core:webview:default",
     "shell:allow-spawn",
     "shell:allow-stdin-write",

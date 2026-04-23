@@ -26,6 +26,7 @@ export const DEFAULT_SETTINGS: Settings = {
   // Agent budget (Phase 10 v2.4.0)
   agentMaxToolCalls: 50,
   agentMaxIterations: 25,
+  hfDownloadPathOverride: '',
 }
 
 /** Caveman mode system prompt prefixes — credit: github.com/JuliusBrussee/caveman (MIT) */

@@ -151,12 +151,18 @@ pub fn is_onboarding_done() -> bool {
         .unwrap_or(false)
 }
 
-/// Persist onboarding completion to %APPDATA% (outside NSIS install dir)
+/// Persist onboarding completion to %APPDATA% (outside NSIS install dir).
+/// Pass `done: false` to clear the marker so the first-launch wizard runs again.
 #[tauri::command]
-pub fn set_onboarding_done() -> Result<(), String> {
+pub fn set_onboarding_done(done: Option<bool>) -> Result<(), String> {
     let dir = persistent_dir()?;
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    std::fs::write(dir.join("onboarding_done"), "1").map_err(|e| e.to_string())?;
+    let path = dir.join("onboarding_done");
+    if done.unwrap_or(true) {
+        std::fs::write(&path, "1").map_err(|e| e.to_string())?;
+    } else if path.exists() {
+        std::fs::remove_file(&path).map_err(|e| e.to_string())?;
+    }
     Ok(())
 }
 

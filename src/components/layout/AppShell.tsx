@@ -119,9 +119,14 @@ export function AppShell() {
         backendCall('backup_stores', { data: JSON.stringify(snapshot) }).catch(() => {})
       }
 
-      // Migration: write onboarding marker if missing (keeps NSIS-update recovery working)
+      // Migration: write onboarding marker if missing AND user has already
+      // onboarded (keeps NSIS-update recovery working). Do NOT rewrite the
+      // marker for users who just hit Settings → "Re-run onboarding" — for
+      // them onboardingDone is false, and the missing marker is intentional.
       backendCall<boolean>('is_onboarding_done').catch(() => false).then((markerExists) => {
-        if (!markerExists) backendCall('set_onboarding_done').catch(() => {})
+        if (!markerExists && useSettingsStore.getState().settings.onboardingDone) {
+          backendCall('set_onboarding_done').catch(() => {})
+        }
       })
 
       doBackup()  // first immediate backup

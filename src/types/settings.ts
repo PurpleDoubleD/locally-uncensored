@@ -24,6 +24,8 @@ export interface Settings {
   agentMaxToolCalls: number
   /** Hard cap on ReAct loop iterations per user turn. 0 = unlimited. */
   agentMaxIterations: number
+  /** Override for the HuggingFace GGUF download directory. Empty = auto-detect from active openai-compat provider (e.g. LM Studio models folder). */
+  hfDownloadPathOverride: string
 }
 
 export interface Persona {

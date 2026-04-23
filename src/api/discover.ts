@@ -544,6 +544,26 @@ export async function getAnthropicModels(): Promise<DiscoverModel[]> {
 }
 
 /** Search HuggingFace for GGUF models */
+/**
+ * Derive the guessed Q4_K_M filename for a HuggingFace repo name like
+ * "TinyLlama-1.1B-Chat-v1.0-Q4_K_M-GGUF" → "TinyLlama-1.1B-Chat-v1.0-Q4_K_M.gguf".
+ *
+ * Heuristic:
+ *   - strip a trailing "-GGUF" / "-gguf"
+ *   - if the base already ends with a quant suffix (Q4_K_M, UD-IQ2_XXS, …),
+ *     keep it and just append ".gguf" — otherwise HF returns 404 because the
+ *     actual file is "basename.gguf", not "basename-Q4_K_M.gguf"
+ *   - else default to "{basename}-Q4_K_M.gguf"
+ *
+ * Exported so the E2E regression test can exercise the edge cases without
+ * hitting the live HF API.
+ */
+export function deriveQ4FilenameFromRepo(repoName: string): string {
+  const baseName = repoName.replace(/-GGUF$/i, '').replace(/-gguf$/i, '')
+  const QUANT_SUFFIX = /-(Q[0-9]+_K_[MSL]|Q[0-9]_[0-9]+|IQ[0-9]_[A-Z]+(?:_[A-Z]+)?|UD-Q[0-9A-Z_]+|UD-IQ[0-9A-Z_]+|BF16|FP16|F16|F32)$/i
+  return QUANT_SUFFIX.test(baseName) ? `${baseName}.gguf` : `${baseName}-Q4_K_M.gguf`
+}
+
 export async function searchHuggingFaceModels(query: string): Promise<DiscoverModel[]> {
   try {
     const searchQuery = query.includes('gguf') ? query : `${query} gguf`
@@ -562,10 +582,8 @@ export async function searchHuggingFaceModels(query: string): Promise<DiscoverMo
 
     const models: DiscoverModel[] = []
     for (const repo of repos) {
-      // Derive Q4_K_M filename from repo name: "user/Model-Name-GGUF" → "Model-Name-Q4_K_M.gguf"
       const repoName = repo.id.split('/').pop() || ''
-      const baseName = repoName.replace(/-GGUF$/i, '').replace(/-gguf$/i, '')
-      const q4File = `${baseName}-Q4_K_M.gguf`
+      const q4File = deriveQ4FilenameFromRepo(repoName)
       const downloadUrl = `https://huggingface.co/${repo.id}/resolve/main/${q4File}`
 
       const downloads = repo.downloads || 0

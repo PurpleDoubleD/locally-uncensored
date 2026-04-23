@@ -16,6 +16,7 @@ import { openExternal } from '../../api/backend'
 import { useModels } from '../../hooks/useModels'
 import { useDownloadStore } from '../../stores/downloadStore'
 import { useProviderStore } from '../../stores/providerStore'
+import { useSettingsStore } from '../../stores/settingsStore'
 import { GlassCard } from '../ui/GlassCard'
 import { GlowButton } from '../ui/GlowButton'
 import { ProgressBar } from '../ui/ProgressBar'
@@ -143,15 +144,18 @@ export function DiscoverModels({ category }: Props) {
 
   // Provider state for model path detection
   const providers = useProviderStore(s => s.providers)
+  const hfOverride = useSettingsStore(s => s.settings.hfDownloadPathOverride)
   const [hfModelPath, setHfModelPath] = useState<string | null>(null)
   const { pullModel } = useModels()
 
-  // Auto-detect provider model path for GGUF downloads
+  // Auto-detect provider model path for GGUF downloads (user override wins).
   useEffect(() => {
     if (category !== 'text') return
+    const override = hfOverride?.trim()
+    if (override) { setHfModelPath(override); return }
     const providerName = providers.openai?.name || 'LM Studio'
     detectProviderModelPath(providerName).then(path => setHfModelPath(path))
-  }, [category])
+  }, [category, hfOverride, providers.openai?.name])
 
   // Detect system VRAM
   useEffect(() => {
@@ -676,13 +680,6 @@ export function DiscoverModels({ category }: Props) {
 
           {civitaiSearching && <div className="text-center py-4 text-gray-500 text-sm">Searching CivitAI...</div>}
         </GlassCard>
-      )}
-
-      {/* GGUF model path info */}
-      {isText && hfModelPath && (
-        <p className="text-[0.65rem] text-gray-500 truncate">
-          Downloads save to: {hfModelPath}
-        </p>
       )}
 
       {loading ? (

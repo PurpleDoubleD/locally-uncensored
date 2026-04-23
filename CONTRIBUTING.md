@@ -37,6 +37,22 @@ npm run tauri:build
 Most pull requests only need `npm run tauri:dev`. Thanks to @k-wilkinson for
 flagging that these commands weren't spelled out here.
 
+#### ComfyUI CORS when you run your own instance
+
+If you already have a ComfyUI running **outside** LU (e.g. a long-lived homelab
+instance) and you point `npm run tauri:dev` at it, Vite on `:5173` won't match
+ComfyUI's origin check and you'll see `403` on `/prompt` + a console warning:
+`request with non matching host and origin localhost:8188 != localhost:5173`.
+
+Start your ComfyUI with:
+
+```bash
+python main.py --listen 127.0.0.1 --port 8188 --enable-cors-header "*"
+```
+
+LU's own auto-started ComfyUI already passes this flag — you only need it when
+you're bringing your own. Thanks to @diimmortalis for flagging this in Discord.
+
 ### Project Structure
 
 ```

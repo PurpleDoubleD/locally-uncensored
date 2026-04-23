@@ -1,5 +1,5 @@
 import { useState, useEffect, type ReactNode } from 'react'
-import { ArrowLeft, RotateCcw, Sun, Moon, Mic, Volume2, Check, X, Loader2, Shield, ChevronRight } from 'lucide-react'
+import { ArrowLeft, RotateCcw, Sun, Moon, Mic, Volume2, Check, X, Loader2, Shield, ChevronRight, GraduationCap, Lock } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { useUIStore } from '../../stores/uiStore'
@@ -99,6 +99,54 @@ function WorkflowSection() {
       onEdit={(id) => { setEditingId(id); setWfView('builder') }}
       onCreate={() => { setEditingId(undefined); setWfView('builder') }}
     />
+  )
+}
+
+// ── Model Storage (HF GGUF download path override) ─────────────
+
+function HfDownloadPathSetting() {
+  const override = useSettingsStore(s => s.settings.hfDownloadPathOverride)
+  const updateSettings = useSettingsStore(s => s.updateSettings)
+  const [draft, setDraft] = useState(override)
+  useEffect(() => { setDraft(override) }, [override])
+
+  async function pickFolder() {
+    try {
+      const chosen = await backendCall<string | null>('pick_folder')
+      if (chosen) { setDraft(chosen); updateSettings({ hfDownloadPathOverride: chosen }) }
+    } catch {}
+  }
+
+  return (
+    <div className="space-y-2 py-1">
+      <div className="text-[0.6rem] text-gray-500 leading-relaxed">
+        HuggingFace GGUF downloads save here. Leave empty to auto-detect from your active openai-compat provider (e.g. LM Studio's models folder).
+      </div>
+      <div className="flex items-center gap-2">
+        <input
+          type="text"
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={() => updateSettings({ hfDownloadPathOverride: draft.trim() })}
+          placeholder="(auto-detect)"
+          className="flex-1 px-2 py-1 rounded bg-transparent border border-white/8 text-[0.65rem] text-gray-700 dark:text-gray-300 font-mono focus:outline-none focus:border-white/20"
+        />
+        <button
+          onClick={pickFolder}
+          className="px-2.5 py-1 rounded-md text-[0.6rem] font-medium bg-white dark:bg-white/10 text-gray-800 dark:text-white hover:bg-gray-100 dark:hover:bg-white/15 border border-gray-200 dark:border-white/15 transition-colors"
+        >
+          Browse…
+        </button>
+        {override && (
+          <button
+            onClick={() => { setDraft(''); updateSettings({ hfDownloadPathOverride: '' }) }}
+            className="px-2.5 py-1 rounded-md text-[0.6rem] text-gray-500 hover:text-red-400 transition-colors"
+          >
+            Reset
+          </button>
+        )}
+      </div>
+    </div>
   )
 }
 
@@ -482,6 +530,10 @@ export function SettingsPage() {
           <ProviderSettings />
         </Section>
 
+        <Section title="Model Storage">
+          <HfDownloadPathSetting />
+        </Section>
+
         <Section title="ComfyUI (Image & Video)">
           <ComfyUISettings />
         </Section>
@@ -494,7 +546,7 @@ export function SettingsPage() {
           <Section title="Agent Permissions">
             <PermissionSettings />
             <button
-              onClick={() => useAgentModeStore.getState().setTutorialCompleted()}
+              onClick={() => useAgentModeStore.getState().resetTutorial()}
               className="text-[0.6rem] text-gray-500 hover:text-gray-300 transition-colors"
             >
               Reset tutorial
@@ -594,6 +646,46 @@ export function SettingsPage() {
         </Section>
 
         <UpdateSection />
+
+        <Section title="Privacy">
+          <div className="space-y-2 py-1 text-[0.65rem] text-gray-500 dark:text-gray-400 leading-relaxed">
+            <div className="flex items-start gap-2">
+              <Lock size={12} className="mt-0.5 shrink-0 text-emerald-500" />
+              <div>
+                <p className="text-gray-700 dark:text-gray-300 font-medium mb-0.5">100% local by default.</p>
+                <p>Chat, agent runs, image &amp; video generation all execute on your machine. No telemetry, no analytics, no model pings home. The only network calls LU makes unless you explicitly opt in are: update checks against GitHub Releases, and cloud provider APIs (OpenAI, Anthropic, etc.) that you configure yourself with your own API keys.</p>
+              </div>
+            </div>
+            <div className="flex items-start gap-2 pt-1.5">
+              <Shield size={12} className="mt-0.5 shrink-0 text-emerald-500" />
+              <div>
+                <p className="text-gray-700 dark:text-gray-300 font-medium mb-0.5">You own your data.</p>
+                <p>Conversations, memories, and generated media live in <code className="px-1 py-0.5 rounded bg-black/5 dark:bg-white/5 font-mono text-[0.6rem]">%APPDATA%/Locally Uncensored</code> on Windows (or the equivalent on Linux/macOS). Back up the folder, move it between machines, or delete it — LU writes nothing else.</p>
+              </div>
+            </div>
+          </div>
+        </Section>
+
+        <Section title="Onboarding">
+          <div className="flex items-center justify-between py-1">
+            <div className="flex items-start gap-2">
+              <GraduationCap size={12} className="mt-0.5 shrink-0 text-gray-500" />
+              <div className="text-[0.65rem] text-gray-600 dark:text-gray-400 leading-relaxed">
+                Run the first-launch setup wizard again (hardware scan, recommended models, tool-calling tour).
+              </div>
+            </div>
+            <button
+              onClick={async () => {
+                useSettingsStore.getState().updateSettings({ onboardingDone: false })
+                try { await backendCall('set_onboarding_done', { done: false }) } catch {}
+                window.location.reload()
+              }}
+              className="ml-3 shrink-0 px-2.5 py-1 rounded-md text-[0.6rem] font-medium bg-white dark:bg-white/10 text-gray-800 dark:text-white hover:bg-gray-100 dark:hover:bg-white/15 border border-gray-200 dark:border-white/15 transition-colors"
+            >
+              Re-run onboarding
+            </button>
+          </div>
+        </Section>
 
         {/* ── Reset ──────────────────────────────────── */}
         <div className="pt-3 pb-6">

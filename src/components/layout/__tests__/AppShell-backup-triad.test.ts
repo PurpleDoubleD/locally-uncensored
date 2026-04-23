@@ -58,4 +58,16 @@ describe('AppShell backup triad (Bug #7)', () => {
     expect(src).toContain('__ts')
     expect(src).toContain('new Date().toISOString()')
   })
+
+  it('onboarding-marker migration does NOT re-write the marker when user clicked Settings -> Re-run onboarding', () => {
+    // Regression for v2.4.0 E2E: the Re-run onboarding button deletes the
+    // marker + sets settings.onboardingDone=false + reloads. AppShell mount
+    // must NOT re-create the marker just because it is missing — otherwise
+    // the user is sent straight back into the main app instead of the wizard.
+    // The migration is gated on settings.onboardingDone === true so it only
+    // fires for legitimate NSIS-update-after-onboarding scenarios.
+    expect(src).toMatch(/useSettingsStore\.getState\(\)\.settings\.onboardingDone/)
+    // The gated form must appear somewhere inside the is_onboarding_done.then block
+    expect(src).toMatch(/if \(!markerExists && useSettingsStore\.getState\(\)\.settings\.onboardingDone\)/)
+  })
 })

@@ -16,6 +16,7 @@ interface AgentModeState {
   setAgentModeActive: (conversationId: string, active: boolean) => void
   setSandboxLevel: (level: SandboxLevel) => void
   setTutorialCompleted: () => void
+  resetTutorial: () => void
   setNewChatHintDismissed: (dismissed: boolean) => void
   isActive: (conversationId: string) => boolean
 }
@@ -47,6 +48,8 @@ export const useAgentModeStore = create<AgentModeState>()(
       setSandboxLevel: (level) => set({ sandboxLevel: level }),
 
       setTutorialCompleted: () => set({ tutorialCompleted: true }),
+
+      resetTutorial: () => set({ tutorialCompleted: false }),
 
       setNewChatHintDismissed: (dismissed) => set({ newChatHintDismissed: dismissed }),
 
