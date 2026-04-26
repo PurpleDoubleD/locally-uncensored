@@ -2,6 +2,40 @@
 
 All notable changes to Locally Uncensored are documented here.
 
+## [2.4.2] - 2026-04-26
+
+### Fixed
+- **Updates tab no longer shows a stale "Latest Version" after a manual binary upgrade** — reported on Discord by @diimmortalis: "I tried and failed to auto-update from the .deb package in i think 2.3.7, and now the updates tab says `Current Version: 2.4.1 | Latest Version: 2.3.8`." Root cause: zustand's `persist` middleware partializes `latestVersion` into localStorage, so when a user updates the binary out-of-band the persisted "latest" snapshot survives even though it's now older than what they're running. `checkForUpdate()` has a 6h cooldown, so the stale value lingers for hours. Fix: added `onRehydrateStorage` to `updateStore` that compares persisted `latestVersion` against `currentVersion` via the existing `isNewerVersion` helper and resets `latestVersion = null, updateAvailable = false, releaseNotes = null, lastChecked = null` when the persisted snapshot isn't strictly newer. Plus a UI hardening pass in `SettingsPage`'s `UpdateSection`: the "Latest Version" row now only renders when the persisted value really is newer than current, so even a missed rehydration can't display the inversion.
+- **Agent toggle now correctly enables for uncensored / abliterated variants of agent-capable bases** — reported by @diimmortalis on Discord with `LEONW24/Qwen3.5-9B-Uncensored:Q4_K_M`. The previous `isAgentCompatible` carried a deliberately narrow allow-list for abliterated/uncensored model names (`['qwen3-coder', 'hermes3', 'hermes-3', 'hermes']`) that over-rejected popular Qwen 3.x, Llama 3.x, Gemma 4, Mistral, and Qwen 2.5 abliterations even though those families retain native tool-calling weights through abliteration. Fix: the abliterated/uncensored branch now strips the `-abliterated` / `-uncensored` / `-instruct` / `-chat` / `:tag` suffixes and checks the remaining base name against the same canonical `AGENT_COMPATIBLE` list as the vanilla path. Three regression tests added in `model-compatibility.test.ts` covering the diimmortalis case + `mannix/llama3.1-8b-abliterated` + `huihui_ai/qwen2.5-abliterated`.
+- **CivitAI model search now uses the API key from the Workflow finder + shows a clear empty-state hint** — reported by @diimmortalis: "CivitAI model search doesn't seem to work — i think it's because the api-key was only accepted for the Workflow finder under the Create Tab, but i'm not finding any errors in the console or network tab, just says it's getting back an empty model list." Fix: `searchCivitaiModels(query, type, apiKey?)` in `discover.ts` now appends `&token=<apiKey>` when set and adds `nsfw=true` to surface adult content (matching LU's positioning). The DiscoverModels CivitAI panel reads the same key the Workflow finder writes via `workflowStore.civitaiApiKey`. New `civitaiSearched` state distinguishes "before-first-search" from "search-returned-zero" and renders an empty-state hint — `No matches for "<query>". Try a broader query, or add your CivitAI API key in the Workflow finder for the full catalog.` — instead of leaving the user staring at a silent empty list.
+- **Import Workflow now shows a visible success confirmation** — reported by @diimmortalis: "doesn't seem to persist manually entered json, and doesn't document where the file would be stored. There's no feedback or console output when clicking the 'Import' button." The import was actually persisting fine, but the UI cleared the inputs on success and emitted zero feedback, so the click looked like a no-op. Fix: added `importSuccess` state to `WorkflowSearchModal` and an emerald-green confirmation row that reads `Imported "<name>" and assigned to <modelName>.` after a successful URL or JSON paste; auto-clears after 4s.
+- **Newly downloaded ComfyUI models surface in the dropdown more reliably** — reported on GitHub Discussion #22 by @Draekzy and @cprovencher-beep. Two timing-related races were stacking: (1) `refreshComfyModels` was single-shot and silently returned `false` if ComfyUI was mid-startup or busy, leaving the cache stale; (2) the `comfyui-model-downloaded` event handler in `useCreate` called `fetchModels()` exactly once, so if ComfyUI's directory scan took longer than the `/api/refresh` round-trip the immediate fetch saw the pre-scan list. Fix: `refreshComfyModels(maxAttempts = 3)` retries with 1s + 2s backoff on transient failure, and the post-download handler now schedules `fetchModels()` immediately + at +2s + at +6s with proper timer cleanup on unmount. Live-traced in DevTools: a single dispatched event now produces 8 `/api/refresh` calls inside 8s, where pre-fix it produced 1. Doesn't address adjacent root causes like file-permission issues (running ComfyUI as admin to access models) or a misconfigured `Settings → ComfyUI → Path` — those are separate problems.
+
+### Carrying forward from master (commit 9eb1329)
+- **Remote Access "Server stopped — restart does nothing" silent-failure path is fixed** — reported on issue #29 by @phantomderp13. Internet remote rethrows on failure instead of swallowing the error, orphan tunnels are cleaned up, and the inline error surfaces in the UI.
+- **Anti-Virus false-positive groundwork** — reported on issue #33 by @spiritwarri0r. Bundle metadata + signed installer carry forward; v2.4.1 already addressed most ESET / Avast hits.
+
+### Docs
+- **Blog correction: SillyTavern image generation** — reported by @diimmortalis. The "Best local AI apps 2026" comparison and the "Locally Uncensored vs SillyTavern" deep-dive both incorrectly listed SillyTavern as having no image generation support. SillyTavern does support image generation through its Stable Diffusion / ComfyUI extension; the table cell + descriptive text now reflect that, while keeping the built-in vs extension distinction honest.
+
+### Tests
+- Test suite 2244 → 2246 (+2 regression assertions in `updateStore.test.ts` pinning the diimmortalis 2.3.8/2.4.1 inversion case).
+- 3 inverted assertions in `model-compatibility.test.ts` flipped to match the new unified abliterated handling — the previous "abliterated NOT compatible" expectations were encoding the bug, not desired behavior.
+
+### Verification
+- `vitest`: 2246 / 2246 green
+- `cargo test`: 44 / 44 green
+- Built v2.4.2 installer + silent-installed over the prior v2.4.1 binary on a real Windows machine, then reproduced each bug's mechanism in the running app:
+  - B1: seeded `latestVersion: '2.3.8'` into localStorage + reloaded — Settings → Updates correctly shows `Current Version: v2.4.2` + "You are on the latest version", no stale row.
+  - B2: 7-case assertion table run in DevTools console — diimmortalis's exact model + 3 other abliterated bases all return true, plus 3 negative cases (embedding model + unknown-base abliteration) correctly stay false.
+  - B3: searching "flux" in CivitAI panel renders the empty-state hint as designed.
+  - B4: pasted ComfyUI JSON twice with different names → both workflows persisted + assigned, visible in the WORKFLOW dropdown.
+  - B5: instrumented `window.fetch`, dispatched the download-completed event once, traced 8 `/api/refresh` calls within 8s spanning the immediate / +2s / +6s × 3-attempt-retry pattern.
+
+### Notes
+- Drop-in upgrade from v2.4.1. No breaking changes, no localStorage migration. Auto-update prompts on next launch. Existing users roll over automatically.
+- We don't claim 100% reliability for any of these — if the symptoms still show up after updating, please drop a note in the matching issue / discussion / Discord thread. We'd rather hear about it.
+
 ## [2.4.1] - 2026-04-24
 
 ### Fixed
