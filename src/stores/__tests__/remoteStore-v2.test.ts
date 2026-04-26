@@ -12,6 +12,10 @@ import { useMemoryStore } from '../memoryStore'
 // ─── Mocks ───
 vi.mock('../../api/backend', () => ({
   backendCall: vi.fn().mockResolvedValue({}),
+  // isTauri is consulted at the top of startServer/startTunnel/restart to
+  // short-circuit dev-mode callers (REMOTE_DEV_MODE_ERROR). Tests in this
+  // file exercise the happy path so we always return true.
+  isTauri: vi.fn(() => true),
 }))
 import { backendCall } from '../../api/backend'
 const mockBackend = backendCall as unknown as ReturnType<typeof vi.fn>

@@ -6,8 +6,8 @@ import { useUIStore } from '../../stores/uiStore'
 import { useModelStore } from '../../stores/modelStore'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { useCodexStore } from '../../stores/codexStore'
-import { useRemoteStore } from '../../stores/remoteStore'
-import { backendCall } from '../../api/backend'
+import { useRemoteStore, REMOTE_DEV_MODE_ERROR } from '../../stores/remoteStore'
+import { backendCall, isTauri } from '../../api/backend'
 import { formatDate, truncate } from '../../lib/formatters'
 import type { ChatMode } from '../../types/codex'
 
@@ -68,6 +68,19 @@ export function Sidebar() {
   const handleDispatch = async (mode: 'lan' | 'internet') => {
     setDispatchPicker(false)
     if (!activeModel) return
+
+    // Reported by @phantomderp on v2.4.2: clicking LAN/Internet from
+    // `npm run dev` produced an HTTP 404 + cryptic JSON.parse error
+    // because the dev server can't host the Rust HTTP server / JWT auth /
+    // Cloudflare tunnel that Remote needs. Bail early with a clear,
+    // actionable banner before we burn user time on the folder picker
+    // and create a doomed conversation row. The store's startServer()
+    // also throws REMOTE_DEV_MODE_ERROR for any future caller that
+    // bypasses this guard.
+    if (!isTauri()) {
+      useRemoteStore.setState({ error: REMOTE_DEV_MODE_ERROR })
+      return
+    }
 
     // #29 follow-up: ask the user where the agent should write files for
     // this remote session BEFORE starting the server. Cancel = bail, no

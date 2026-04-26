@@ -1,15 +1,19 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 const mockBackendCall = vi.fn()
+const mockIsTauri = vi.fn(() => true)
 vi.mock('../../api/backend', () => ({
   backendCall: (...args: unknown[]) => mockBackendCall(...args),
+  isTauri: () => mockIsTauri(),
 }))
 
-import { useRemoteStore } from '../remoteStore'
+import { useRemoteStore, REMOTE_DEV_MODE_ERROR } from '../remoteStore'
 
 describe('remoteStore', () => {
   beforeEach(() => {
     mockBackendCall.mockReset()
+    mockIsTauri.mockReset()
+    mockIsTauri.mockReturnValue(true) // default: assume Tauri is available
     useRemoteStore.setState({
       enabled: false,
       port: 11435,
@@ -84,6 +88,48 @@ describe('remoteStore', () => {
       expect(state.loading).toBe(false)
       expect(state.error).toContain('Connection refused')
       expect(state.enabled).toBe(false)
+    })
+
+    // Reported by @phantomderp on v2.4.2 — clicking LAN/Internet from
+    // `npm run dev` produced an HTTP 404 + JSON.parse SyntaxError because
+    // the dev server can't host the Rust backend Remote needs. The store
+    // short-circuits with REMOTE_DEV_MODE_ERROR; backendCall is never
+    // reached.
+    describe('dev-mode short-circuit', () => {
+      it('throws REMOTE_DEV_MODE_ERROR when isTauri() is false', async () => {
+        mockIsTauri.mockReturnValue(false)
+        await expect(useRemoteStore.getState().startServer()).rejects.toThrow(REMOTE_DEV_MODE_ERROR)
+      })
+
+      it('sets the dev-mode error on state without calling backendCall', async () => {
+        mockIsTauri.mockReturnValue(false)
+        try { await useRemoteStore.getState().startServer() } catch { /* expected */ }
+        expect(mockBackendCall).not.toHaveBeenCalled()
+        expect(useRemoteStore.getState().error).toBe(REMOTE_DEV_MODE_ERROR)
+        expect(useRemoteStore.getState().loading).toBe(false)
+        expect(useRemoteStore.getState().enabled).toBe(false)
+      })
+
+      it('restart() also short-circuits in dev mode', async () => {
+        mockIsTauri.mockReturnValue(false)
+        await expect(useRemoteStore.getState().restart()).rejects.toThrow(REMOTE_DEV_MODE_ERROR)
+        expect(mockBackendCall).not.toHaveBeenCalled()
+      })
+
+      it('startTunnel() also short-circuits in dev mode', async () => {
+        mockIsTauri.mockReturnValue(false)
+        await expect(useRemoteStore.getState().startTunnel()).rejects.toThrow(REMOTE_DEV_MODE_ERROR)
+        expect(mockBackendCall).not.toHaveBeenCalled()
+        expect(useRemoteStore.getState().tunnelLoading).toBe(false)
+      })
+
+      it('REMOTE_DEV_MODE_ERROR mentions the actionable path (`npm run tauri:dev`)', () => {
+        // If the message ever loses the developer-actionable hint, this
+        // catches it. The whole point of the short-circuit is to point
+        // people at the right command.
+        expect(REMOTE_DEV_MODE_ERROR).toMatch(/npm run tauri:dev/)
+        expect(REMOTE_DEV_MODE_ERROR.toLowerCase()).toContain('desktop app')
+      })
     })
   })
 

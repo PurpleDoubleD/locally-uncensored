@@ -1,6 +1,24 @@
 import { create } from 'zustand'
-import { backendCall } from '../api/backend'
+import { backendCall, isTauri } from '../api/backend'
 import { useMemoryStore } from './memoryStore'
+
+/**
+ * Reported on Discord by @phantomderp on v2.4.2 — clicking LAN/Internet
+ * while running from source via plain `npm run dev` produced an HTTP 404
+ * + cryptic `JSON.parse: unexpected character` stacktrace. Remote Access
+ * is fundamentally a Tauri-only feature: a Rust axum server, JWT auth,
+ * Cloudflare tunnel binary management, mobile-UI static serve. None of
+ * that exists in the vite dev process. Mirroring it would mean
+ * reimplementing ~3700 lines of Rust in Node middleware, plus a forever
+ * maintenance burden every time the Rust side moves.
+ *
+ * Instead: detect dev-mode at the store entry points and surface a clear
+ * actionable message — pick the .exe or `npm run tauri:dev`. The same
+ * message is also returned by the catch-all vite middleware as a 501 in
+ * case any future caller bypasses the store.
+ */
+export const REMOTE_DEV_MODE_ERROR =
+  "Remote Access requires the installed desktop app. The plain `npm run dev` server can't host the Rust backend Remote needs (built-in HTTP server, secure passcodes, Cloudflare tunnel). For full Remote in development, use `npm run tauri:dev` instead — it brings the Rust side in and Remote works there too."
 
 /**
  * Enrich a system prompt with the user's memory context so Remote chats
@@ -96,6 +114,14 @@ export const useRemoteStore = create<RemoteState>()((set, get) => ({
   qrVisible: false,
 
   startServer: async (model?: string, systemPrompt?: string) => {
+    if (!isTauri()) {
+      // Defense in depth: Sidebar.handleDispatch already short-circuits
+      // before this point, but any other caller (tests, future components,
+      // mobile bridge) lands here too. Throw so dispatch()/restart() catch
+      // it and surface the message in `error` like any other failure.
+      set({ loading: false, enabled: false, error: REMOTE_DEV_MODE_ERROR })
+      throw new Error(REMOTE_DEV_MODE_ERROR)
+    }
     set({ loading: true, error: null })
     try {
       const args: Record<string, unknown> = {}
@@ -238,6 +264,10 @@ export const useRemoteStore = create<RemoteState>()((set, get) => ({
   },
 
   startTunnel: async () => {
+    if (!isTauri()) {
+      set({ tunnelLoading: false, error: REMOTE_DEV_MODE_ERROR })
+      throw new Error(REMOTE_DEV_MODE_ERROR)
+    }
     set({ tunnelLoading: true, error: null })
     try {
       const url = await backendCall<string>('start_tunnel')
@@ -298,6 +328,10 @@ export const useRemoteStore = create<RemoteState>()((set, get) => ({
   },
 
   restart: async (model?: string, systemPrompt?: string) => {
+    if (!isTauri()) {
+      set({ loading: false, enabled: false, error: REMOTE_DEV_MODE_ERROR })
+      throw new Error(REMOTE_DEV_MODE_ERROR)
+    }
     set({ loading: true, error: null })
     try {
       const args: Record<string, unknown> = {}

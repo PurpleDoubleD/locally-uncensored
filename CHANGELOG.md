@@ -2,6 +2,14 @@
 
 All notable changes to Locally Uncensored are documented here.
 
+## [Unreleased]
+
+### Fixed
+- **Remote Access in `npm run dev` now surfaces a clear actionable message instead of a cryptic 404 + JSON.parse stacktrace** — reported on Discord in `#bug-reports` by @phantomderp on v2.4.2: clicking the LAN button printed `POST http://localhost:5173/local-api/start-remote-server [HTTP/1.1 404 Not Found]` and clicking Internet showed an `Error: HTTP 404` toast plus `Uncaught (in promise) SyntaxError: JSON.parse: unexpected character at line 1 column 1 of the JSON data`. Root cause: Remote Access is a Tauri-only feature (a Rust axum server, JWT auth, Cloudflare tunnel binary management, mobile-UI static serve — ~3700 lines in `src-tauri/src/commands/remote.rs`). When v2.4.2 added the corresponding `/local-api/*` paths to `src/api/backend.ts`'s endpoint map, no matching middleware was added to `vite.config.ts`, so dev-mode clicks fell through to vite's default 404 HTML page, which the frontend then tried to JSON.parse. End-user impact: zero — the installed `.exe` routes through Tauri's `invoke()` and works as designed. Developer impact: a confusing dead-end when iterating on the UI from `npm run dev`. Mirroring the entire feature in Node middleware would be a maintenance trap, so we keep dev lean and instead: (1) `Sidebar.handleDispatch` and the `remoteStore.startServer` / `restart` / `startTunnel` actions all check `isTauri()` first and short-circuit with `REMOTE_DEV_MODE_ERROR` — a single source-of-truth string that points at `npm run tauri:dev` (Tauri-aware dev mode where Remote works fully) or the installed app; (2) all 12 Remote-related vite middlewares are stubbed to return `HTTP 501 + { error, devModeOnly: true }` as a backstop in case any future caller bypasses the store guards.
+
+### Tests
+- 5 new regression cases in `remoteStore.test.ts` covering the dev-mode short-circuit: `startServer` / `restart` / `startTunnel` all throw `REMOTE_DEV_MODE_ERROR` when `isTauri()` is false, `backendCall` is never reached, and the error message itself contains the actionable `npm run tauri:dev` hint plus a "desktop app" reference.
+
 ## [2.4.2] - 2026-04-26
 
 ### Fixed
