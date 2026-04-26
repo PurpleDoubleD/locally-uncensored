@@ -7,6 +7,7 @@ import { useModelStore } from '../../stores/modelStore'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { useCodexStore } from '../../stores/codexStore'
 import { useRemoteStore } from '../../stores/remoteStore'
+import { backendCall } from '../../api/backend'
 import { formatDate, truncate } from '../../lib/formatters'
 import type { ChatMode } from '../../types/codex'
 
@@ -52,8 +53,13 @@ export function Sidebar() {
     : modeConversations
 
   const handleNewChat = () => {
-    const persona = getActivePersona()
     if (activeModel) {
+      // David's request: persona starts OFF on every new chat. We still
+      // store the globally-selected persona's prompt as the conv's
+      // systemPrompt (so toggling personaEnabled later "just works"
+      // without re-reading global state), but useChat / useAgentChat
+      // only apply it when personaEnabled === true.
+      const persona = getActivePersona()
       createConversation(activeModel, persona?.systemPrompt || '', chatMode)
       setView('chat')
     }
@@ -61,11 +67,69 @@ export function Sidebar() {
 
   const handleDispatch = async (mode: 'lan' | 'internet') => {
     setDispatchPicker(false)
-    const persona = getActivePersona()
     if (!activeModel) return
+
+    // #29 follow-up: ask the user where the agent should write files for
+    // this remote session BEFORE starting the server. Cancel = bail, no
+    // orphan conv. Skip = keep `~/agent-workspace/<slug>/` default. The
+    // path goes into a "__remote__" workspace override on the desktop;
+    // every agent-tool call from mobile during this session resolves
+    // relative paths against it.
+    let pickedFolder: string | null = null
+    try {
+      const result = await backendCall<string | null>('pick_folder', {
+        defaultPath: undefined,
+      })
+      // pick_folder returns null if user cancelled — abort the dispatch.
+      if (result === null) return
+      pickedFolder = result
+    } catch {
+      // pick_folder is best-effort UX; if it errors (e.g. dev/browser
+      // mode without Tauri), proceed without an override.
+      pickedFolder = null
+    }
+
+    if (pickedFolder) {
+      try {
+        await backendCall('set_chat_workspace_override', {
+          chatId: '__remote__',
+          path: pickedFolder,
+        })
+      } catch {
+        // Override is a nice-to-have — fall through and dispatch anyway.
+      }
+    } else {
+      // No folder picked → ensure no stale override from a previous
+      // dispatch sticks around.
+      try {
+        await backendCall('set_chat_workspace_override', {
+          chatId: '__remote__',
+          path: null,
+        })
+      } catch { /* no-op */ }
+    }
+
+    // Remote dispatch — same default-OFF rule. The conv stores the global
+    // persona prompt for later opt-in via the toggle, but it is NOT sent
+    // to the mobile server as the dispatched system prompt. Mobile starts
+    // clean (autonomy contract or codex prompt only). Without this, a
+    // global "Devil's Advocate" persona silently hijacked every remote
+    // session through `dispatchedSystemPrompt` on the mobile side.
+    const persona = getActivePersona()
     const convId = createConversation(activeModel, persona?.systemPrompt || '', 'remote')
     setView('chat')
-    await dispatch(convId, activeModel, persona?.systemPrompt || '')
+    try {
+      await dispatch(convId, activeModel, '')
+    } catch {
+      // #29: server failed to start (port in use, firewall, etc.). The
+      // store has the user-facing reason in `error` — drop the orphan
+      // conversation row so the user isn't stranded on a chat tied to a
+      // server that never came up. The error banner still surfaces in
+      // ChatView so the user can act on it (e.g. close another LU
+      // instance, then click Dispatch again).
+      deleteConversation(convId)
+      return
+    }
     // Auto-start tunnel for internet mode
     if (mode === 'internet') {
       useRemoteStore.getState().startTunnel()
@@ -303,6 +367,17 @@ export function Sidebar() {
                   </>
                 )}
               </div>
+              {/* DNS-propagation hint — Cloudflare *.trycloudflare.com
+                  records can take 5-10 s to resolve on the mobile after
+                  the URL is generated. Without this hint users see "DNS
+                  not available" on first scan, panic, and click
+                  Restart. The note is small + auto-disappears once a
+                  device authenticates (qrVisible flips false). */}
+              {tunnelActive && tunnelUrl && (
+                <p className="text-[0.5rem] text-gray-500/70 leading-snug">
+                  First connection may take 5–10 s while DNS propagates. If you see a DNS error, wait a moment and reload.
+                </p>
+              )}
 
               {remoteError && (
                 <p className="text-[0.5rem] text-red-400 truncate">{remoteError}</p>
@@ -408,6 +483,25 @@ export function Sidebar() {
 
           {/* Bottom Action */}
           <div className="px-2 pb-2 pt-1 border-t border-gray-200 dark:border-white/[0.04]">
+            {/* #29: dispatch failure used to be invisible — the orphan
+                conv was deleted in handleDispatch's catch block and the
+                user was left looking at the Dispatch button as if nothing
+                happened. Surface the actual reason here so the next click
+                is informed (close other LU instance, change network,
+                etc.). Only renders when no chat is dispatched, otherwise
+                ChatView's "Server stopped" banner owns this. */}
+            {isRemoteMode && remoteError && !dispatchedConversationId && (
+              <div className="mb-1.5 px-2 py-1 rounded border border-red-500/30 bg-red-500/5 text-[0.55rem] text-red-300/90 flex items-start gap-1.5">
+                <span className="break-words flex-1 leading-snug">{remoteError}</span>
+                <button
+                  onClick={() => useRemoteStore.getState().clearError()}
+                  title="Dismiss"
+                  className="shrink-0 p-0.5 rounded text-red-400/70 hover:text-red-300 hover:bg-red-500/15 transition-all"
+                >
+                  <X size={9} />
+                </button>
+              </div>
+            )}
             {isRemoteMode ? (
               <AnimatePresence mode="wait">
                 {!dispatchPicker ? (
@@ -419,7 +513,7 @@ export function Sidebar() {
                     transition={{ duration: 0.1 }}
                     onClick={() => setDispatchPicker(true)}
                     disabled={remoteLoading || !activeModel}
-                    className="w-full flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded-md text-[0.65rem] text-gray-500 hover:text-white hover:bg-green-500/10 border border-dashed border-green-500/20 hover:border-green-500/40 transition-all disabled:opacity-40"
+                    className="w-full flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded-md text-[0.65rem] text-gray-500 hover:text-white hover:bg-white/[0.04] border border-zinc-300/40 dark:border-zinc-500/40 hover:border-zinc-300/60 dark:hover:border-zinc-400/60 transition-all disabled:opacity-40"
                   >
                     <Radio size={12} />
                     <span>{remoteLoading ? '...' : 'Dispatch'}</span>
@@ -437,16 +531,16 @@ export function Sidebar() {
                     >
                       <button
                         onClick={() => handleDispatch('lan')}
-                        className="flex-1 flex items-center justify-center gap-1 py-1.5 rounded-md text-[0.55rem] font-medium text-gray-400 border border-dashed border-green-500/20 hover:bg-blue-500/15 hover:text-blue-400 hover:border-blue-500/30 transition-all cursor-pointer"
+                        className="flex-1 flex items-center justify-center gap-1 py-1.5 rounded-md text-[0.55rem] font-medium text-gray-400 border border-zinc-300/40 dark:border-zinc-500/40 hover:bg-white/[0.05] hover:text-zinc-100 hover:border-zinc-300/60 dark:hover:border-zinc-400/60 transition-all cursor-pointer"
                       >
-                        <Wifi size={10} className="text-green-500/40" />
+                        <Wifi size={10} className="text-zinc-400" />
                         LAN
                       </button>
                       <button
                         onClick={() => handleDispatch('internet')}
-                        className="flex-1 flex items-center justify-center gap-1 py-1.5 rounded-md text-[0.55rem] font-medium text-gray-400 border border-dashed border-green-500/20 hover:bg-emerald-500/15 hover:text-emerald-400 hover:border-emerald-500/30 transition-all cursor-pointer"
+                        className="flex-1 flex items-center justify-center gap-1 py-1.5 rounded-md text-[0.55rem] font-medium text-gray-400 border border-zinc-300/40 dark:border-zinc-500/40 hover:bg-white/[0.05] hover:text-zinc-100 hover:border-zinc-300/60 dark:hover:border-zinc-400/60 transition-all cursor-pointer"
                       >
-                        <Globe size={10} className="text-green-500/40" />
+                        <Globe size={10} className="text-zinc-400" />
                         Internet
                       </button>
                     </motion.div>

@@ -33,6 +33,11 @@ interface ChatState {
   deleteConversation: (id: string) => void
   renameConversation: (id: string, title: string) => void
   setActiveConversation: (id: string | null) => void
+  /** Toggle the active persona on/off for a specific chat — mirrors the
+   *  mobile chat's `personaEnabled` flag so the user can suppress the
+   *  persona's systemPrompt without changing the global Settings
+   *  selection. */
+  setConversationPersonaEnabled: (id: string, enabled: boolean) => void
   addMessage: (conversationId: string, message: Message) => void
   insertMessageBefore: (conversationId: string, beforeId: string, message: Message) => void
   updateMessageContent: (conversationId: string, messageId: string, content: string) => void
@@ -69,6 +74,13 @@ export const useChatStore = create<ChatState>()(
           mode: mode || 'lu',
           createdAt: Date.now(),
           updatedAt: Date.now(),
+          // Per David's request: persona starts OFF by default on every
+          // new conversation. The user has to flip it on explicitly via
+          // the Plugins dropdown toggle. Without this, a globally
+          // selected persona (e.g. "Devil's Advocate") would silently
+          // hijack every new chat — including agent / codex tasks where
+          // the persona conflicts with the autonomy contract.
+          personaEnabled: false,
         }
         set((state) => ({
           conversations: [conversation, ...state.conversations],
@@ -92,6 +104,13 @@ export const useChatStore = create<ChatState>()(
         })),
 
       setActiveConversation: (id) => set({ activeConversationId: id }),
+
+      setConversationPersonaEnabled: (id, enabled) =>
+        set((state) => ({
+          conversations: state.conversations.map((c) =>
+            c.id === id ? { ...c, personaEnabled: enabled } : c
+          ),
+        })),
 
       addMessage: (conversationId, message) =>
         set((state) => ({

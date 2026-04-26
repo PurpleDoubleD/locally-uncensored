@@ -74,9 +74,12 @@ describe('remoteStore', () => {
       })
     })
 
-    it('sets error on failure', async () => {
+    it('sets error and rethrows on failure', async () => {
       mockBackendCall.mockRejectedValueOnce(new Error('Connection refused'))
-      await useRemoteStore.getState().startServer()
+      // #29: startServer rethrows so dispatch()/restart() callers can clean up
+      // (delete orphan conv, surface UI banner) instead of silently
+      // marking the chat as dispatched on a server that never came up.
+      await expect(useRemoteStore.getState().startServer()).rejects.toThrow('Connection refused')
       const state = useRemoteStore.getState()
       expect(state.loading).toBe(false)
       expect(state.error).toContain('Connection refused')

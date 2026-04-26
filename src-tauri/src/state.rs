@@ -146,6 +146,12 @@ pub struct AppState {
     pub claude_code_install: Arc<Mutex<InstallState>>,
     // Remote Access
     pub remote: Mutex<RemoteServer>,
+    /// Per-chat workspace overrides — when present, agent file ops with
+    /// a relative path resolve against this folder instead of the
+    /// default `~/agent-workspace/<chat_id>/`. Set when the user picks
+    /// a folder during Remote dispatch (#29 follow-up); cleared on
+    /// undispatch / chat delete.
+    pub chat_workspace_overrides: Arc<Mutex<HashMap<String, std::path::PathBuf>>>,
 }
 
 impl AppState {
@@ -193,6 +199,7 @@ impl AppState {
             claude_code_install: Arc::new(Mutex::new(InstallState::default())),
             // Remote Access
             remote: Mutex::new(RemoteServer::new()),
+            chat_workspace_overrides: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 }

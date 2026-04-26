@@ -10,7 +10,7 @@ import { usePermissionStore } from '../stores/permissionStore'
 import { getToolCallingStrategy } from '../lib/model-compatibility'
 import { buildHermesToolPrompt, buildHermesToolResult, parseHermesToolCalls, stripToolCallTags, hasToolCallTags } from '../api/hermes-tool-calling'
 import { chatNonStreaming } from '../api/agents'
-import { setActiveChatId, clearActiveChatId } from '../api/agent-context'
+import { setActiveChatId, clearActiveChatId, chatWorkspaceSlug } from '../api/agent-context'
 import type { CodexEvent } from '../types/codex'
 import type { AgentBlock, AgentToolCall } from '../types/agent-mode'
 import { selectRelevantTools } from '../lib/tool-selection'
@@ -22,7 +22,7 @@ import { makeInTurnCacheLookup } from '../api/agents/in-turn-cache'
 import { explainError as explainToolError } from '../api/agents/error-hints'
 import { budgetFromSettings } from '../api/agents/budget'
 import { finalStripThinkingTags } from '../lib/thinking-stripper'
-import { ollamaUrl, localFetchStream } from '../api/backend'
+import { streamOllamaChatWithTools } from '../lib/ollama-stream-tools'
 import { repairToolCallArgs, extractToolCallsFromContent, extractToolCallsWithRanges, stripRanges } from '../lib/tool-call-repair'
 import { compactMessages, getModelMaxTokens } from '../lib/context-compaction'
 import { useMemoryStore } from '../stores/memoryStore'
@@ -61,141 +61,29 @@ Rules:
 - If a command fails, diagnose and retry with a different approach — don't hand back to the user unless truly stuck
 - Be concise in text. All the work happens in tool calls.`
 
-// ── Streaming tool-call helper for Ollama ──────────────────────────────
-// Replaces the non-streaming chatWithTools() so the user sees live
-// content/thinking tokens while Gemma 4 generates (2+ minutes).
-async function streamWithTools(
-  modelId: string,
-  messages: ChatMessage[],
-  tools: ToolDefinition[],
-  options: { temperature?: number; thinking?: boolean; maxTokens?: number; signal?: AbortSignal },
-  onContent: (content: string) => void,
-  onThinking: (thinking: string) => void,
-): Promise<{ content: string; toolCalls: ToolCall[]; thinking: string }> {
-  const ollamaMessages = messages.map(m => {
-    const msg: Record<string, any> = { role: m.role, content: m.content }
-    if (m.tool_calls) msg.tool_calls = m.tool_calls
-    if ((m as any).images?.length) msg.images = (m as any).images.map((img: any) => img.data)
-    return msg
-  })
-
-  const body: Record<string, any> = {
-    model: modelId,
-    messages: ollamaMessages,
-    tools,
-    stream: true,
-    options: { num_gpu: 99 },
-  }
-  if (options.temperature !== undefined) body.options.temperature = options.temperature
-  if (options.maxTokens) body.options.num_predict = options.maxTokens
-  if (options.thinking === true) body.think = true
-  else if (options.thinking === false) body.think = false
-
-  const url = ollamaUrl('/chat')
-  // Use localFetchStream which tries direct fetch first, then falls back
-  // to the Tauri Rust proxy (proxy_localhost_stream). Plain `fetch` fails
-  // in the Tauri .exe because WebView can't reach localhost:11434 directly.
-  let response: Response
-  try {
-    response = await localFetchStream(url, {
-      method: 'POST',
-      body: JSON.stringify(body),
-      signal: options.signal,
-    })
-  } catch (fetchErr) {
-    throw fetchErr
-  }
-
-  // Retry without think on 400 (old Ollama builds / non-thinking models)
-  if (!response.ok && response.status === 400 && 'think' in body) {
-    delete body.think
-    response = await localFetchStream(url, {
-      method: 'POST',
-      body: JSON.stringify(body),
-      signal: options.signal,
-    })
-  }
-
-  if (!response.ok) {
-    const text = await response.text()
-    const err = new Error(`HTTP ${response.status}: ${text}`) as any
-    err.statusCode = response.status
-    throw err
-  }
-
-  const reader = response.body!.getReader()
-  const decoder = new TextDecoder()
-  let buf = ''
-  let content = ''
-  let thinking = ''
-  let toolCalls: ToolCall[] = []
-
-  while (true) {
-    // Fast-abort: if the user hits Stop while the model is still generating
-    // (especially in a long thinking phase), cancelling the fetch alone can
-    // take ages to propagate. Check the signal each chunk + actively cancel
-    // the reader so the loop exits immediately.
-    if (options.signal?.aborted) {
-      try { await reader.cancel() } catch {}
-      break
-    }
-    const { done, value } = await reader.read()
-    if (done) break
-
-    buf += decoder.decode(value, { stream: true })
-    const lines = buf.split('\n')
-    buf = lines.pop() || ''
-
-    for (const line of lines) {
-      const trimmed = line.trim()
-      if (!trimmed) continue
-      try {
-        const j = JSON.parse(trimmed)
-        if (j.message) {
-          if (j.message.content) {
-            content += j.message.content
-            onContent(content)
-          }
-          if (j.message.thinking) {
-            thinking += j.message.thinking
-            onThinking(thinking)
-          }
-          // Ollama may split tool_calls across chunks — append, don't overwrite
-          if (j.message.tool_calls && Array.isArray(j.message.tool_calls)) {
-            toolCalls = [...toolCalls, ...j.message.tool_calls.map((tc: any) => ({
-              function: { name: tc.function.name, arguments: repairToolCallArgs(tc.function.arguments) },
-            }))]
-          }
-        }
-      } catch { /* partial JSON line — skip */ }
-    }
-  }
-
-  // Process any remaining buffer
-  if (buf.trim()) {
-    try {
-      const j = JSON.parse(buf.trim())
-      if (j.message?.tool_calls && Array.isArray(j.message.tool_calls)) {
-        toolCalls = [...toolCalls, ...j.message.tool_calls.map((tc: any) => ({
-          function: { name: tc.function.name, arguments: repairToolCallArgs(tc.function.arguments) },
-        }))]
-      }
-      if (j.message?.content) {
-        content += j.message.content
-        onContent(content)
-      }
-      if (j.message?.thinking) {
-        thinking += j.message.thinking
-        onThinking(thinking)
-      }
-    } catch { /* ignore */ }
-  }
-
-  return { content, toolCalls, thinking }
-}
+// Local alias — the helper now lives in src/lib/ollama-stream-tools.ts
+// so useAgentChat can share the same wire protocol + arg-repair layer
+// without a code duplicate. Kept under the same name to minimise diff.
+const streamWithTools = streamOllamaChatWithTools
 
 // Coding-relevant tool categories
 const CODEX_CATEGORIES = ['filesystem', 'terminal', 'system', 'web'] as const
+
+// Detect when the model emits a re-introduction of itself ("Hello, I am
+// Codex, an autonomous coding agent…") instead of the actual answer.
+// Gemma 4 + smaller models do this after a tool error — they re-spawn
+// the system-prompt echo as if the conversation just started. The user
+// asked to silence these: drop the content, do not render it, do not
+// persist it to the assistant message, and let the loop retry.
+function isSystemPromptEcho(content: string): boolean {
+  if (!content) return false
+  const head = content.trim().slice(0, 240)
+  return (
+    /^(hello[!,.]?\s+|hi[!,.]?\s+|hey[!,.]?\s+)?(i['’]?m|i am|you are)\s+codex[,.]?\s+(an?\s+)?(autonomous\s+)?coding\s+agent/i.test(head) ||
+    /^codex:?\s+(an?\s+)?autonomous\s+coding\s+agent/i.test(head) ||
+    /^you are codex,/i.test(head)
+  )
+}
 
 export function useCodex() {
   const [isRunning, setIsRunning] = useState(false)
@@ -217,10 +105,12 @@ export function useCodex() {
       convId = store.createConversation(activeModel, persona?.systemPrompt || '', 'codex')
     }
 
-    // Per-chat agent workspace → `~/agent-workspace/<convId>/`.
-    // Cleared in the finally block so standalone tool calls elsewhere
-    // don't leak into this conversation's folder.
-    setActiveChatId(convId)
+    // Per-chat agent workspace → `~/agent-workspace/<slug>/`.
+    // Slug uses the chat title so the folder is recognisable in
+    // Explorer; falls back to a stable id-derived suffix when the
+    // title is empty. Cleared in the finally block.
+    const convForSlug = store.conversations.find((c) => c.id === convId)
+    setActiveChatId(chatWorkspaceSlug(convId, convForSlug?.title))
 
     // Init codex thread if needed
     if (!codexStore.getThread(convId)) {
@@ -366,6 +256,12 @@ export function useCodex() {
       // instead of burning budget on a no-op loop.
       let prevBatchSig: string | null = null
       let sameBatchRepeats = 0
+      // Echo guard — small models occasionally re-emit the system prompt
+      // ("Hello, I am Codex, an autonomous coding agent…") after a tool
+      // error. The user asked to silence those silently rather than
+      // letting them surface as the assistant's reply. Cap silent
+      // retries so we never loop forever.
+      let echoRetriesRemaining = 3
       // Raised from 20 → 50 (v2.3.7): large refactors across 10+ files
       // legitimately need >20 tool calls. Budget still caps via
       // agentMaxToolCalls/agentMaxIterations (defaults 50/25 from settings).
@@ -447,13 +343,24 @@ export function useCodex() {
             // ── Streaming path for Ollama ──────────────────────────────
             // Shows live content/thinking tokens so the user isn't staring
             // at an empty bubble for 2+ minutes while the model generates.
+            //
+            // Echo guard: while a turn is streaming we keep updating the
+            // visible message — but if the partial content already
+            // matches the system-prompt echo pattern we stop pushing
+            // updates so the "Hello, I am Codex…" line never lands in
+            // the chat. The post-stream echoDetected branch then drops
+            // the buffer entirely and forces a silent retry.
             let turn: { content: string; toolCalls: ToolCall[]; thinking: string }
+            const liveContent = (c: string) => {
+              if (echoRetriesRemaining > 0 && isSystemPromptEcho(c)) return
+              useChatStore.getState().updateMessageContent(convId!, assistantMsg.id, fullContent ? fullContent + '\n\n' + c : c)
+            }
             try {
               void diagLog('streamWithTools-enter', { iter: i, messagesLen: messages.length, toolsCount: tools.length, thinking: chatOptions.thinking })
               turn = await streamWithTools(
                 modelToUse, messages, tools,
                 { temperature: 0.1, thinking: chatOptions.thinking, maxTokens: chatOptions.maxTokens, signal: abort.signal },
-                (c) => useChatStore.getState().updateMessageContent(convId!, assistantMsg.id, fullContent ? fullContent + '\n\n' + c : c),
+                liveContent,
                 (t) => {
                   if (keepThinking) {
                     const combined = thinkingContent ? thinkingContent + '\n\n' + t : t
@@ -473,7 +380,7 @@ export function useCodex() {
                 turn = await streamWithTools(
                   modelToUse, messages, tools,
                   { temperature: 0.1, thinking: undefined, maxTokens: chatOptions.maxTokens, signal: abort.signal },
-                  (c) => useChatStore.getState().updateMessageContent(convId!, assistantMsg.id, fullContent ? fullContent + '\n\n' + c : c),
+                  liveContent,
                   () => {},
                 )
                 void diagLog('streamWithTools-retry-ok', { iter: i, contentLen: turn.content?.length || 0, toolCallsCount: turn.toolCalls?.length || 0 })
@@ -592,6 +499,34 @@ export function useCodex() {
             return ''
           })
           turnContent = finalStripThinkingTags(turnContent, keepThinking)
+        }
+
+        // Silent-retry on system-prompt echo — Gemma 4 sometimes
+        // restarts with "Hello, I am Codex, an autonomous coding
+        // agent…" after a tool error. Drop that content entirely
+        // (don't append, don't render) and force the loop to take
+        // another swing instead of letting the echo bubble up as
+        // the assistant's reply. Cap the silent retries so a model
+        // stuck on the echo doesn't burn the whole iteration budget.
+        const echoDetected = isSystemPromptEcho(turnContent)
+        if (echoDetected && echoRetriesRemaining > 0) {
+          echoRetriesRemaining--
+          turnContent = ''
+          // Strip the echo from the live message too if it leaked in
+          // through the streaming callback above.
+          if (fullContent) {
+            useChatStore.getState().updateMessageContent(convId, assistantMsg.id, fullContent)
+          } else {
+            useChatStore.getState().updateMessageContent(convId, assistantMsg.id, '')
+          }
+          // Push a synthetic nudge so the model has a chance to
+          // recover instead of repeating the echo verbatim.
+          messages.push({
+            role: 'user',
+            content:
+              'Continue the task. Do not introduce yourself again. Resume from the last successful step using the appropriate tool call.',
+          })
+          continue
         }
 
         if (turnContent) {

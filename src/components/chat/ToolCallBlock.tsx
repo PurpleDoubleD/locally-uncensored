@@ -97,21 +97,27 @@ export function ToolCallBlock({ toolCall, onApprove, onReject }: Props) {
                 </pre>
               )}
 
-              {/* Approval buttons */}
+              {/* Approval buttons — subtle green / red as the user
+                  asked for ("approve grün, reject rot, sauber, keine
+                  Neonfarben"). Sits inline in the pending tool block
+                  instead of a popup over the input. Enter / Esc still
+                  trigger the head-of-queue approval (handled in
+                  ChatView). */}
               {isPending && onApprove && onReject && (
-                <div className="flex items-center gap-2 pt-0.5">
+                <div className="flex items-center gap-1.5 pt-1">
                   <button
                     onClick={(e) => { e.stopPropagation(); onApprove() }}
-                    className="flex items-center gap-1 px-2.5 py-1 rounded text-[0.6rem] font-medium bg-gray-100 dark:bg-white/5 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-white/10 transition-colors"
+                    className="flex items-center gap-1 px-2.5 py-1 rounded text-[0.6rem] font-medium text-emerald-700 dark:text-emerald-300 bg-emerald-500/10 dark:bg-emerald-500/10 hover:bg-emerald-500/15 dark:hover:bg-emerald-500/15 border border-emerald-500/20 dark:border-emerald-500/25 transition-colors"
                   >
                     <Check size={10} /> Approve
                   </button>
                   <button
                     onClick={(e) => { e.stopPropagation(); onReject() }}
-                    className="flex items-center gap-1 px-2.5 py-1 rounded text-[0.6rem] font-medium bg-gray-100 dark:bg-white/5 text-gray-500 dark:text-gray-500 hover:bg-gray-200 dark:hover:bg-white/10 transition-colors"
+                    className="flex items-center gap-1 px-2.5 py-1 rounded text-[0.6rem] font-medium text-red-700 dark:text-red-300 bg-red-500/10 dark:bg-red-500/10 hover:bg-red-500/15 dark:hover:bg-red-500/15 border border-red-500/20 dark:border-red-500/25 transition-colors"
                   >
                     <X size={10} /> Reject
                   </button>
+                  <span className="ml-1 text-[0.5rem] text-gray-400 dark:text-gray-600 font-mono">⏎ / Esc</span>
                 </div>
               )}
             </div>

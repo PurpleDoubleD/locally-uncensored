@@ -13,7 +13,7 @@ import { ErrorBoundary } from '../ui/ErrorBoundary'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { FEATURE_FLAGS } from '../../lib/constants'
 import { isAgentCompatible, isThinkingCompatible } from '../../lib/model-compatibility'
-import { FileText, Bot, ChevronDown, Download, Brain, Wrench, Radio, RefreshCw } from 'lucide-react'
+import { FileText, Bot, ChevronDown, Download, Brain, Wrench, Radio, RefreshCw, X } from 'lucide-react'
 import { PluginsDropdown } from './PluginsDropdown'
 import { TokenCounter } from './TokenCounter'
 import { MemoryDebugToggle } from './MemoryDebugPanel'
@@ -58,8 +58,10 @@ export function ChatView() {
   // Remote conversation whose server has been stopped.
   const remoteEnabled = useRemoteStore((s) => s.enabled)
   const remoteLoading = useRemoteStore((s) => s.loading)
+  const remoteError = useRemoteStore((s) => s.error)
   const dispatchedConversationId = useRemoteStore((s) => s.dispatchedConversationId)
   const remoteRestart = useRemoteStore((s) => s.restart)
+  const remoteClearError = useRemoteStore((s) => s.clearError)
   const connectedDevices = useRemoteStore((s) => s.connectedDevices)
   const refreshDevices = useRemoteStore((s) => s.refreshDevices)
   const activeConv = conversations.find((c) => c.id === activeConversationId)
@@ -86,10 +88,41 @@ export function ChatView() {
     return () => clearTimeout(t)
   }, [exportToast])
 
+  // Approval keyboard shortcuts — Enter approves, Esc rejects the
+  // head-of-queue tool call. The buttons themselves now live inside
+  // ToolCallBlock so they appear inline on the pending block, but the
+  // keyboard layer stays here so the shortcuts work regardless of
+  // scroll position.
+  useEffect(() => {
+    if (!pendingApproval || !approveToolCall || !rejectToolCall) return
+    const handler = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null
+      const tag = target?.tagName
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || target?.isContentEditable) return
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault()
+        approveToolCall()
+      } else if (e.key === 'Escape') {
+        e.preventDefault()
+        rejectToolCall()
+      }
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [pendingApproval, approveToolCall, rejectToolCall])
+
   const handleRemoteReactivate = async () => {
     if (!activeConv || !activeConversationId) return
-    await remoteRestart(activeConv.model, activeConv.systemPrompt)
-    useRemoteStore.setState({ dispatchedConversationId: activeConversationId })
+    try {
+      await remoteRestart(activeConv.model, activeConv.systemPrompt)
+      useRemoteStore.setState({ dispatchedConversationId: activeConversationId })
+    } catch {
+      // #29: restart now rethrows. The store's `error` already holds the
+      // reason (e.g. "Could not bind 0.0.0.0:11435: Address already in
+      // use"). The "Server stopped" banner below renders that reason
+      // inline so the user knows what to do — instead of clicking Restart
+      // forever and watching nothing change.
+    }
   }
 
   // A/B Compare mode takes over the entire view
@@ -252,6 +285,9 @@ export function ChatView() {
                 isLoadingModel={isLoadingModel}
                 onRegenerate={regenerateMessage}
                 onEdit={editAndResend}
+                pendingApprovalId={pendingApproval?.id ?? null}
+                onApprove={approveToolCall}
+                onReject={rejectToolCall}
               />
               <RealtimeCounter isRunning={isGenerating} />
 
@@ -279,21 +315,57 @@ export function ChatView() {
                 </div>
               )}
               {isThisRemoteStopped && (
-                <div className="mx-3 mb-1.5 flex items-center justify-between gap-2 px-2.5 py-1 rounded border border-gray-200 dark:border-white/10 bg-gray-50 dark:bg-white/[0.02] text-[0.6rem]">
-                  <div className="flex items-center gap-1.5 text-gray-500">
-                    <Radio size={10} />
-                    <span className="font-medium">Server stopped</span>
-                    <span className="text-gray-500/70">— restart to reconnect mobile</span>
+                <div
+                  className={
+                    'mx-3 mb-1.5 flex items-start justify-between gap-2 px-2.5 py-1 rounded border text-[0.6rem] ' +
+                    (remoteError
+                      ? 'border-red-500/30 bg-red-500/5'
+                      : 'border-gray-200 dark:border-white/10 bg-gray-50 dark:bg-white/[0.02]')
+                  }
+                >
+                  <div className={'flex flex-col gap-0.5 min-w-0 ' + (remoteError ? 'text-red-400' : 'text-gray-500')}>
+                    <div className="flex items-center gap-1.5">
+                      <Radio size={10} />
+                      <span className="font-medium">Server stopped</span>
+                      <span className={remoteError ? 'text-red-400/70' : 'text-gray-500/70'}>
+                        {remoteError ? '— last attempt failed' : '— restart to reconnect mobile'}
+                      </span>
+                    </div>
+                    {/* #29: surface the actual reason (port in use,
+                        firewall, etc.) so the user knows why Restart is
+                        not coming back, instead of staring at a button
+                        that does nothing. */}
+                    {remoteError && (
+                      <div className="text-[0.55rem] text-red-300/80 break-words pl-4 leading-snug">
+                        {remoteError}
+                      </div>
+                    )}
                   </div>
-                  <button
-                    onClick={handleRemoteReactivate}
-                    disabled={remoteLoading}
-                    title="Start a fresh server and reattach this chat"
-                    className="flex items-center gap-1 px-2 py-0.5 rounded text-green-400 hover:bg-green-500/15 border border-green-500/30 transition-all disabled:opacity-50 font-medium"
-                  >
-                    <RefreshCw size={9} className={remoteLoading ? 'animate-spin' : ''} />
-                    Restart
-                  </button>
+                  <div className="flex items-center gap-1 shrink-0">
+                    {remoteError && (
+                      <button
+                        onClick={remoteClearError}
+                        title="Dismiss error"
+                        className="p-0.5 rounded text-red-400/70 hover:text-red-300 hover:bg-red-500/15 transition-all"
+                      >
+                        <X size={9} />
+                      </button>
+                    )}
+                    <button
+                      onClick={handleRemoteReactivate}
+                      disabled={remoteLoading}
+                      title="Start a fresh server and reattach this chat"
+                      className={
+                        'flex items-center gap-1 px-2 py-0.5 rounded transition-all disabled:opacity-50 font-medium ' +
+                        (remoteError
+                          ? 'text-red-300 hover:bg-red-500/15 border border-red-500/40'
+                          : 'text-green-400 hover:bg-green-500/15 border border-green-500/30')
+                      }
+                    >
+                      <RefreshCw size={9} className={remoteLoading ? 'animate-spin' : ''} />
+                      {remoteError ? 'Retry' : 'Restart'}
+                    </button>
+                  </div>
                 </div>
               )}
 

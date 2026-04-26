@@ -53,6 +53,8 @@ fn main() {
             commands::agent::execute_code,
             commands::agent::file_read,
             commands::agent::file_write,
+            commands::agent::set_chat_workspace_override,
+            commands::agent::get_chat_workspace_override,
             // Shell
             commands::shell::shell_execute,
             // Filesystem

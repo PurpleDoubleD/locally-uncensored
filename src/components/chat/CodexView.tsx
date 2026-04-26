@@ -9,6 +9,7 @@ import { TokenCounter } from './TokenCounter'
 import { MemoryDebugToggle } from './MemoryDebugPanel'
 import { RealtimeCounter } from './RealtimeCounter'
 import { PluginsDropdown } from './PluginsDropdown'
+import { TypingIndicator } from './TypingIndicator'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { User, Code, Brain } from 'lucide-react'
 import { useEffect, useRef } from 'react'
@@ -104,13 +105,15 @@ export function CodexView() {
                         </div>
                       )}
 
-                      {/* Text content */}
+                      {/* Text content — assistant drops the bubble entirely
+                          to match the regular Chat view (per user feedback).
+                          User keeps theirs as the right-aligned anchor. */}
                       {cleanContent && (
-                        <div className={`rounded-lg px-2.5 py-1.5 ${
+                        <div className={
                           msg.role === 'user'
-                            ? 'bg-gray-100 dark:bg-white/[0.06] border border-gray-200 dark:border-white/[0.08]'
-                            : 'bg-white dark:bg-white/[0.02] border border-gray-100 dark:border-white/[0.03]'
-                        }`}>
+                            ? 'rounded-lg px-2.5 py-1.5 bg-gray-100 dark:bg-white/[0.06] border border-gray-200 dark:border-white/[0.08]'
+                            : 'px-1 py-0.5'
+                        }>
                           <div className="text-[0.75rem] leading-relaxed">
                             {msg.role === 'user' ? (
                               <p className="text-gray-800 dark:text-gray-200 whitespace-pre-wrap">{cleanContent}</p>
@@ -124,6 +127,13 @@ export function CodexView() {
                   </div>
                 )
               })}
+              {/* 3-dot indicator while Codex is mid-loop — parity with
+                  the Chat tab so users on long Gemma 4 / Codex runs
+                  see "still thinking" instead of staring at a frozen
+                  pane between iterations. */}
+              {isRunning && (
+                <TypingIndicator />
+              )}
             </div>
           )}
         </div>

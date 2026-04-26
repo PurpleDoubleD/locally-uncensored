@@ -73,7 +73,12 @@ export function useChat() {
     if (!conv) return
 
     // RAG context injection
-    let systemPrompt = conv.systemPrompt
+    // Per-chat persona toggle (mobile-parity, mirrors mobile's
+    // `personaEnabled`). Default OFF — only when the user explicitly
+    // flipped it on via the Plugins dropdown does the persona prompt
+    // apply. Undefined / unset → suppress, so a globally selected
+    // persona never silently hijacks a new chat.
+    let systemPrompt = conv.personaEnabled === true ? conv.systemPrompt : ''
     const ragState = useRAGStore.getState()
     const ragEnabled = ragState.ragEnabled[convId] ?? false
 

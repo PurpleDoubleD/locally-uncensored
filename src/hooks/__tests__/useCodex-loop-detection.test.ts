@@ -77,8 +77,16 @@ describe('useChat stop fast-path (Bug #6)', () => {
 })
 
 describe('useCodex stream reader abort fast-path (Bug #6)', () => {
+  // The streaming helper moved out of useCodex.ts into the shared
+  // ollama-stream-tools module so the regular Agent can use it too.
+  // The fast-path now lives there.
+  const streamSrc = readFileSync(
+    join(__dirname, '../../lib/ollama-stream-tools.ts'),
+    'utf8',
+  )
+
   it('cancels the reader when signal.aborted inside the NDJSON while loop', () => {
-    expect(src).toMatch(/options\.signal\?\.aborted/)
-    expect(src).toMatch(/reader\.cancel/)
+    expect(streamSrc).toMatch(/options\.signal\?\.aborted/)
+    expect(streamSrc).toMatch(/reader\.cancel/)
   })
 })

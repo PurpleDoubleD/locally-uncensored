@@ -32,3 +32,32 @@ export function getActiveChatId(): string | null {
 export function clearActiveChatId(): void {
   activeChatId = null
 }
+
+/**
+ * Build a human-readable workspace slug for a chat.
+ *
+ * Folders used to be named after the conversation UUID
+ * (`~/agent-workspace/8f7c2a1b-…/`), which is technically unique but
+ * useless to a human opening Explorer. Per user feedback, slug is now
+ * `<title-kebabbed>-<6-char-id>` so the user can find their work.
+ *
+ * The 6-char id suffix keeps two chats with the same title from
+ * colliding (e.g. two "Untitled" chats started in a row).
+ *
+ * Sanitisation: lowercase, ASCII alphanumerics + hyphen only, capped
+ * at 40 chars. Empty / unprintable titles fall back to the UUID
+ * suffix alone, which still gives a stable folder name. The Rust side
+ * has its own paranoia layer (agent.rs::agent_workspace) so this is
+ * defence in depth.
+ */
+export function chatWorkspaceSlug(id: string, title?: string | null): string {
+  const idPart = (id || '').replace(/-/g, '').slice(0, 6) || 'noid'
+  const rawTitle = (title || '').toLowerCase().trim()
+  if (!rawTitle) return idPart
+  const slug = rawTitle
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 40)
+    .replace(/-+$/g, '')
+  return slug ? `${slug}-${idPart}` : idPart
+}

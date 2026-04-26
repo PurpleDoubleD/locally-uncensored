@@ -4,6 +4,7 @@ import { useState, useRef, useEffect } from 'react'
 import { MarkdownRenderer } from './MarkdownRenderer'
 import { ThinkingBlock } from './ThinkingBlock'
 import { ToolCallBlock } from './ToolCallBlock'
+import { ReflectionBlock } from './ReflectionBlock'
 import { SpeakerButton } from './SpeakerButton'
 import type { Message } from '../../types/chat'
 
@@ -11,9 +12,15 @@ interface Props {
   message: Message
   onRegenerate?: () => void
   onEdit?: (messageId: string, newContent: string) => void
+  /** Tool-call id awaiting user approval. When the matching block in
+   *  this message has that id, ToolCallBlock renders Approve/Reject
+   *  inline instead of a popup over the chat input. */
+  pendingApprovalId?: string | null
+  onApprove?: () => void
+  onReject?: () => void
 }
 
-export function MessageBubble({ message, onRegenerate, onEdit }: Props) {
+export function MessageBubble({ message, onRegenerate, onEdit, pendingApprovalId, onApprove, onReject }: Props) {
   const [copied, setCopied] = useState(false)
   const [isEditing, setIsEditing] = useState(false)
   const [editContent, setEditContent] = useState('')
@@ -76,14 +83,33 @@ export function MessageBubble({ message, onRegenerate, onEdit }: Props) {
           <ThinkingBlock thinking={message.thinking} />
         )}
 
-        {/* Agent Mode: Tool call blocks */}
+        {/* Agent Mode: render tool_call + reflection blocks chronologically.
+            Reflection blocks were added for #29 follow-up — narration the
+            model emitted between tool calls used to be wiped on the next
+            iteration; now it persists as a collapsible block, in the
+            order the model produced it. */}
         {!isUser && message.agentBlocks && message.agentBlocks.length > 0 && (
           <>
-            {message.agentBlocks
-              .filter((b) => b.phase === 'tool_call' && b.toolCall)
-              .map((block) => (
-                <ToolCallBlock key={block.id} toolCall={block.toolCall!} />
-              ))}
+            {[...message.agentBlocks]
+              .filter((b) => b.phase === 'tool_call' || b.phase === 'reflection')
+              .sort((a, b) => a.timestamp - b.timestamp)
+              .map((block) => {
+                if (block.phase === 'tool_call' && block.toolCall) {
+                  const isPending = !!pendingApprovalId && block.toolCall.id === pendingApprovalId
+                  return (
+                    <ToolCallBlock
+                      key={block.id}
+                      toolCall={block.toolCall}
+                      onApprove={isPending ? onApprove : undefined}
+                      onReject={isPending ? onReject : undefined}
+                    />
+                  )
+                }
+                if (block.phase === 'reflection') {
+                  return <ReflectionBlock key={block.id} content={block.content} />
+                }
+                return null
+              })}
           </>
         )}
 
@@ -107,13 +133,16 @@ export function MessageBubble({ message, onRegenerate, onEdit }: Props) {
           </div>
         )}
 
-        {/* Main content */}
+        {/* Main content — assistant messages drop the bubble entirely
+            (per user feedback: "die graue Blase komplett weghaben"). User
+            messages keep theirs because they're right-aligned and need
+            the visual anchor against the chat background. */}
         <div
           className={
-            'rounded-lg px-2.5 py-1.5 relative ' +
+            'relative ' +
             (isUser
-              ? 'bg-gray-100 dark:bg-white/[0.06] border border-gray-200 dark:border-white/[0.08]'
-              : 'bg-white dark:bg-white/[0.03] border border-gray-100 dark:border-white/[0.04]')
+              ? 'rounded-lg px-2.5 py-1.5 bg-gray-100 dark:bg-white/[0.06] border border-gray-200 dark:border-white/[0.08]'
+              : 'px-1 py-0.5')
           }
         >
           {isUser && isEditing ? (

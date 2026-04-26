@@ -2,7 +2,6 @@ import { useState, useRef, useEffect, useCallback } from 'react'
 import { motion } from 'framer-motion'
 import { Send, Square, Paperclip, X, Brain } from 'lucide-react'
 import { VoiceButton } from './VoiceButton'
-import { ApprovalDialog } from './ApprovalDialog'
 import { useVoiceStore } from '../../stores/voiceStore'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { useModelStore } from '../../stores/modelStore'
@@ -116,10 +115,11 @@ export function ChatInput({ onSend, onStop, isGenerating, pendingApproval, onApp
 
   return (
     <div className="px-3 pb-2 pt-1">
-      {/* Approval dialog */}
-      {pendingApproval && onApprove && onReject && (
-        <ApprovalDialog toolCall={pendingApproval} onApprove={onApprove} onReject={onReject} />
-      )}
+      {/* Approval used to live here as a popup over the chat input.
+          Per user feedback ("eventuell in den chat einarbeiten") it now
+          renders INSIDE the pending tool-call block in MessageList, so
+          the approve/reject buttons sit visually attached to the tool
+          they belong to. ChatView owns the Enter/Esc keyboard layer. */}
 
       <div
         className={`flex flex-col rounded-lg border px-2.5 py-2 transition-colors ${

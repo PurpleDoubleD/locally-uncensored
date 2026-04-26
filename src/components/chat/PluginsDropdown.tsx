@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Plug, ChevronDown, Bone, User } from 'lucide-react'
 import { useSettingsStore } from '../../stores/settingsStore'
+import { useChatStore } from '../../stores/chatStore'
 import type { CavemanMode } from '../../types/settings'
 
 const CAVEMAN_MODES: { value: CavemanMode; label: string; desc: string }[] = [
@@ -20,8 +21,24 @@ export function PluginsDropdown() {
   const cavemanMode = useSettingsStore((s) => s.settings.cavemanMode)
   const updateSettings = useSettingsStore((s) => s.updateSettings)
 
+  // Per-chat persona enable/disable (mirrors mobile). Defaults to true
+  // for legacy chats where the flag is absent. The toggle in the
+  // dropdown flips this on the active conversation only — other chats
+  // keep their own state. Hooks (useChat, useAgentChat, useCodex) read
+  // the flag and skip the persona's systemPrompt when it's false.
+  const activeConvId = useChatStore((s) => s.activeConversationId)
+  const activeConv = useChatStore((s) =>
+    activeConvId ? s.conversations.find((c) => c.id === activeConvId) : null
+  )
+  const setConversationPersonaEnabled = useChatStore((s) => s.setConversationPersonaEnabled)
+  // Default OFF: persona only counts as "active on this chat" when the
+  // user has explicitly flipped it on via the toggle below. Undefined or
+  // missing flag → OFF. Fixes the "Devil's Advocate hijacks every new
+  // chat" bug David flagged.
+  const personaEnabledOnChat = activeConv?.personaEnabled === true
+
   const isCavemanActive = cavemanMode && cavemanMode !== 'off'
-  const isPersonaActive = activePersona && activePersona.id !== 'unrestricted'
+  const isPersonaActive = activePersona && activePersona.id !== 'unrestricted' && personaEnabledOnChat
   const currentCaveman = CAVEMAN_MODES.find((m) => m.value === (cavemanMode || 'off'))
 
   return (
@@ -96,21 +113,38 @@ export function PluginsDropdown() {
 
             {/* ── Personas Dropdown ───────────────────────── */}
             <div className="px-2.5">
-              <button
-                onClick={() => { setPersonaOpen(!personaOpen); setCavemanOpen(false) }}
-                className="w-full flex items-center justify-between py-1.5 group"
-              >
-                <div className="flex items-center gap-1.5">
+              <div className="w-full flex items-center justify-between py-1.5 gap-2">
+                <button
+                  onClick={() => { setPersonaOpen(!personaOpen); setCavemanOpen(false) }}
+                  className="flex items-center gap-1.5 flex-1 min-w-0 text-left"
+                >
                   <User size={10} className={isPersonaActive ? 'text-green-400' : 'text-gray-400'} />
                   <span className="text-[0.6rem] font-medium text-gray-600 dark:text-gray-300">Persona</span>
-                </div>
-                <div className="flex items-center gap-1">
-                  <span className={`text-[0.55rem] truncate max-w-[80px] ${isPersonaActive ? 'text-green-400' : 'text-gray-500'}`}>
+                  <span className={`text-[0.55rem] truncate ${isPersonaActive ? 'text-green-400' : 'text-gray-500'}`}>
                     {activePersona?.name || 'Unrestricted'}
                   </span>
                   <ChevronDown size={9} className={`text-gray-500 transition-transform ${personaOpen ? 'rotate-180' : ''}`} />
-                </div>
-              </button>
+                </button>
+                {/* On/off toggle for THIS chat — Remote already had this
+                    via `personaEnabled`; now Chat / Code / Agent match. */}
+                {activeConvId && activePersona && activePersona.id !== 'unrestricted' && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      setConversationPersonaEnabled(activeConvId, !personaEnabledOnChat)
+                    }}
+                    title={personaEnabledOnChat ? 'Disable persona for this chat' : 'Enable persona for this chat'}
+                    className={
+                      'shrink-0 flex items-center w-7 h-3.5 rounded-full transition-colors ' +
+                      (personaEnabledOnChat
+                        ? 'bg-green-500/40 hover:bg-green-500/55 justify-end'
+                        : 'bg-gray-300/30 dark:bg-white/10 hover:bg-gray-300/45 dark:hover:bg-white/15 justify-start')
+                    }
+                  >
+                    <span className="w-3 h-3 rounded-full bg-white shadow-sm mx-px" />
+                  </button>
+                )}
+              </div>
 
               {personaOpen && (
                 <div className="pb-1.5 space-y-0.5 max-h-[180px] overflow-y-auto scrollbar-thin">

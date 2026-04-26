@@ -66,7 +66,8 @@ describe('Mobile CODEX_PROMPT (remote.rs) parity', () => {
   })
 
   it('mobile instructs completing all steps', () => {
-    expect(mobileRs).toContain('COMPLETE multi-step tasks')
+    // Round 7: stronger wording — same intent, different verbatim string.
+    expect(mobileRs).toContain('execute ALL N steps in one session')
   })
 
   it('mobile defines the model as Codex', () => {

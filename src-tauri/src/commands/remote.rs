@@ -389,6 +389,29 @@ struct AgentToolPayload {
     chat_id: Option<String>,
 }
 
+/// Pre-resolve a relative path argument the way `agent::resolve_agent_path`
+/// does — honouring the per-chat workspace override map. Absolute paths are
+/// returned unchanged. Used by remote handlers that delegate to filesystem
+/// commands (`fs_list` / `fs_search`) which take no `&AppState` and would
+/// otherwise resolve relatives against `~/agent-workspace/<chat_id>/` and
+/// completely miss the user-picked Remote dispatch folder. This is the
+/// fix for the silent-failure: file_list landed in
+/// `~/agent-workspace/__remote__/` (the magic key sanitised as the folder
+/// name) instead of e.g. `D:\Projects\my-site\` which the user selected.
+pub(crate) fn resolve_remote_path(
+    path: &str,
+    chat_id: Option<&str>,
+    state: &crate::state::AppState,
+) -> String {
+    use std::path::Path;
+    if Path::new(path).is_absolute() {
+        path.to_string()
+    } else {
+        let workspace = crate::commands::agent::agent_workspace_for(chat_id, state);
+        workspace.join(path).to_string_lossy().to_string()
+    }
+}
+
 /// Run a single agent tool on behalf of an authenticated mobile client.
 /// Mirrors `executeTool` in `src/api/agents.ts`. Permission-gated so a
 /// remote client cannot reach into the desktop without explicit toggle:
@@ -438,19 +461,39 @@ async fn handle_agent_tool(
     // Per-chat workspace slug — threaded into every file tool so each
     // mobile chat gets its own isolated `~/agent-workspace/<slug>/` and
     // agents running in different chats can't clobber each other.
-    let chat_id = body.chat_id.clone();
+    //
+    // #29 follow-up: when the user picked a folder during Remote
+    // dispatch, the desktop set a "__remote__" workspace override. The
+    // mobile sends its own chat id here (different from the desktop's
+    // dispatched conv id), so we substitute the magic remote key when
+    // an override is present — every tool call lands in the user-
+    // chosen folder regardless of which mobile chat made the call.
+    let chat_id_raw = body.chat_id.clone();
+    let chat_id = {
+        let has_remote_override = app_state
+            .chat_workspace_overrides
+            .lock()
+            .ok()
+            .map(|m| m.contains_key("__remote__"))
+            .unwrap_or(false);
+        if has_remote_override {
+            Some("__remote__".to_string())
+        } else {
+            chat_id_raw
+        }
+    };
 
     let result: Result<serde_json::Value, String> = match tool_name.as_str() {
         "file_read" => {
             let path = body.args.get("path").and_then(|v| v.as_str()).unwrap_or("").to_string();
             if path.is_empty() { Err("file_read needs a non-empty `path` argument.".into()) }
-            else { crate::commands::agent::file_read(path, chat_id.clone()) }
+            else { crate::commands::agent::file_read(path, chat_id.clone(), app_state.clone()) }
         }
         "file_write" => {
             let path = body.args.get("path").and_then(|v| v.as_str()).unwrap_or("").to_string();
             let content = body.args.get("content").and_then(|v| v.as_str()).unwrap_or("").to_string();
             if path.is_empty() { Err("file_write needs a non-empty `path` argument.".into()) }
-            else { crate::commands::agent::file_write(path, content, chat_id.clone()) }
+            else { crate::commands::agent::file_write(path, content, chat_id.clone(), app_state.clone()) }
         }
         "code_execute" => {
             let code = body.args.get("code").and_then(|v| v.as_str()).unwrap_or("").to_string();
@@ -473,14 +516,21 @@ async fn handle_agent_tool(
             else { crate::commands::search::web_fetch(url).await }
         }
         "file_list" => {
-            let path = body.args.get("path").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let raw_path = body.args.get("path").and_then(|v| v.as_str()).unwrap_or("").to_string();
             let recursive = body.args.get("recursive").and_then(|v| v.as_bool());
             let pattern = body.args.get("pattern").and_then(|v| v.as_str()).map(String::from);
-            if path.is_empty() { Err("file_list needs a non-empty `path` argument.".into()) }
-            else { crate::commands::filesystem::fs_list(path, recursive, pattern, chat_id.clone()) }
+            if raw_path.is_empty() { Err("file_list needs a non-empty `path` argument.".into()) }
+            else {
+                // Pre-resolve so relative paths land in the user-picked
+                // Remote workspace, not in `~/agent-workspace/__remote__/`.
+                // fs_list itself doesn't see AppState — pass an absolute
+                // path so it skips its own resolver.
+                let resolved = resolve_remote_path(&raw_path, chat_id.as_deref(), &app_state);
+                crate::commands::filesystem::fs_list(resolved, recursive, pattern, None)
+            }
         }
         "file_search" => {
-            let path = body.args.get("path").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let raw_path = body.args.get("path").and_then(|v| v.as_str()).unwrap_or("").to_string();
             let pattern = body.args.get("query")
                 .or_else(|| body.args.get("pattern"))
                 .and_then(|v| v.as_str()).unwrap_or("").to_string();
@@ -490,20 +540,37 @@ async fn handle_agent_tool(
                 .or_else(|| body.args.get("max_results"))
                 .and_then(|v| v.as_u64())
                 .map(|n| n as u32);
-            if path.is_empty() || pattern.is_empty() {
+            if raw_path.is_empty() || pattern.is_empty() {
                 Err("file_search needs both `path` and `pattern` arguments.".into())
             } else {
-                crate::commands::filesystem::fs_search(path, pattern, max, chat_id.clone())
+                let resolved = resolve_remote_path(&raw_path, chat_id.as_deref(), &app_state);
+                crate::commands::filesystem::fs_search(resolved, pattern, max, None)
             }
         }
         "shell_execute" => {
             let command = body.args.get("command").and_then(|v| v.as_str()).unwrap_or("").to_string();
             if command.is_empty() { Err("shell_execute needs a non-empty `command` argument.".into()) }
             else {
-                let cwd = body.args.get("cwd").and_then(|v| v.as_str()).map(String::from);
+                // Default cwd → the per-chat workspace folder so `npm install`
+                // / `git status` / etc. land in the same directory the agent
+                // is writing files to. Without this, shells default to the
+                // app's launch directory and every relative command fails
+                // with "no such file" while the model thinks it succeeded.
+                let cwd_raw = body.args.get("cwd").and_then(|v| v.as_str()).map(String::from);
+                let cwd = match cwd_raw {
+                    Some(c) if !c.trim().is_empty() => Some(resolve_remote_path(&c, chat_id.as_deref(), &app_state)),
+                    _ => Some(crate::commands::agent::agent_workspace_for(chat_id.as_deref(), &app_state)
+                        .to_string_lossy()
+                        .to_string()),
+                };
+                // Best-effort: ensure the cwd exists before the shell command
+                // runs. Saves the model an extra "Error: directory not found"
+                // round-trip for the very first shell call in a new chat.
+                if let Some(ref dir) = cwd {
+                    let _ = std::fs::create_dir_all(dir);
+                }
                 let timeout = body.args.get("timeout").and_then(|v| v.as_u64());
                 let shell = body.args.get("shell").and_then(|v| v.as_str()).map(String::from);
-                let _ = &chat_id; // chat-scoped shell cwd not yet implemented
                 crate::commands::shell::shell_execute(command, None, cwd, timeout, shell).await
             }
         }
@@ -1106,6 +1173,11 @@ button{-webkit-appearance:none;appearance:none}
 .copy-btn:active{opacity:1}
 .copy-btn .material-symbols-outlined{font-size:14px}
 .msg-typing::after{content:'';display:inline-block;width:2px;height:14px;background:var(--primary);margin-left:2px;animation:cursor-blink 0.7s infinite}
+.typing-dots{display:flex;gap:5px;padding:8px 12px;align-items:center}
+.typing-dots span{width:6px;height:6px;border-radius:50%;background:var(--text-tertiary);opacity:0.4;animation:typing-pulse 1.2s ease-in-out infinite}
+.typing-dots span:nth-child(2){animation-delay:0.2s}
+.typing-dots span:nth-child(3){animation-delay:0.4s}
+@keyframes typing-pulse{0%,80%,100%{opacity:0.3;transform:scale(0.85)}40%{opacity:1;transform:scale(1.15)}}
 @keyframes cursor-blink{0%,100%{opacity:1}50%{opacity:0}}
 
 /* ── Input bar (enlarged per request) ── */
@@ -1251,7 +1323,7 @@ button{-webkit-appearance:none;appearance:none}
   // with live Thought/Action/Observation cards streamed into the chat.
   // The old "you can't run tools" text was from v2.3.3 before the mobile
   // bridge could actually execute them.
-  var CODEX_PROMPT = 'You are Codex, an autonomous coding agent inside Locally Uncensored. You execute coding tasks end-to-end by reading files, writing code, and running shell commands. You MUST use tools — never guess file contents.\n\nAUTONOMY CONTRACT (read carefully):\n- You are expected to COMPLETE multi-step tasks without the user prompting between steps.\n- NEVER say \"Now I will create X\" or \"Next I\'ll write Y\" as plain text and then stop. That is a FAILURE.\n- When your plan has N steps, execute ALL N steps in one session — each step as a concrete tool call.\n- The ONLY reasons to finish without calling another tool are: (a) the task is truly complete, or (b) you are stuck and need user input.\n\nWorkflow:\n1. Understand the task\n2. Explore (file_list, file_read, file_search)\n3. Plan changes\n4. Implement (file_write) — chain ALL writes without stopping\n5. Only THEN write a short summary of what you did\n\nRules:\n- Always read a file before modifying it\n- Chain tool calls: after each tool result, if there is another step left, IMMEDIATELY call the next tool\n- If a command fails, diagnose and retry — don\'t hand back to the user unless truly stuck\n- Be concise in text. All the work happens in tool calls.\n- Respond in the same language the user uses.';
+  var CODEX_PROMPT = 'You are Codex, an autonomous coding agent inside Locally Uncensored. You execute coding tasks end-to-end by reading files, writing code, and running shell commands. You MUST use tools — never guess file contents.\n\n=== HARD RULES ===\n\n1. AFTER EVERY TOOL RESULT, your very next message MUST be EITHER (a) another tool call to continue the work, OR (b) the final user-facing summary. Empty assistant messages are a FAILURE.\n\n2. DO NOT stop after the first tool. Real coding tasks take 3-15 tool calls. Stopping after one file_read or one shell_execute without producing the requested artefact = FAILURE. "I have called one tool, that is enough" is NOT a valid stop reason.\n\n3. NEVER say "Now I will create X" / "Next I\'ll write Y" as plain prose and then stop. Do the next step RIGHT NOW as a concrete tool call.\n\n4. When your plan has N steps, execute ALL N steps in one session — each step as a concrete tool call. Plan in tool-call form, not prose-then-stop.\n\n5. The ONLY reasons to stop calling tools: (a) the user task is FULLY done with concrete artefacts on disk, OR (b) you are stuck and genuinely need user input.\n\n=== WORKFLOW ===\n\n1. Understand the task.\n2. Explore (file_list, file_read, file_search) when you need to know existing layout.\n3. Plan changes (in your head, not as a stop point).\n4. Implement (file_write) — chain ALL writes without stopping.\n5. Verify (shell_execute / code_execute / file_read).\n6. Only THEN write a short summary of what you did.\n\n=== FILE & DIRECTORY RULES ===\n\n- file_write AUTOMATICALLY creates any missing parent directories. Never call shell_execute with `mkdir`, `New-Item -ItemType Directory`, `md`, or `os.makedirs` to set up a folder before writing — just file_write the target path directly.\n- All relative paths resolve to the current chat workspace folder. Always pass relative paths (e.g. `client/public/index.html`) — do not hard-code absolute drive paths.\n- shell_execute runs inside the workspace folder by default. Do not `cd` into a parent or sibling folder; prefer relative commands.\n- On Windows, the shell is PowerShell. Quote arguments with spaces. Use forward slashes in paths inside commands. Avoid `mkdir -p` (PowerShell mkdir does not accept -p) — again, just use file_write.\n\n=== GENERAL ===\n\n- Always read a file before modifying it.\n- Chain tool calls: after each tool result, if there is another step left, IMMEDIATELY call the next tool.\n- If a command fails, diagnose and retry with corrected arguments — do not introduce yourself again.\n- After 2-3 failures of the same approach, switch strategy (e.g. file_write instead of shell mkdir) instead of repeating.\n- Be concise in text. All real work happens in tool calls.\n- Respond in the same language the user used in their message.';
 
   // ── Thinking-compatible prefixes (parity with desktop) ──
   var THINKING_COMPATIBLE = ['qwq','deepseek-r1','qwen3.6','qwen3','qwen3.5','qwen3-coder','gemma3','gemma4'];
@@ -1399,6 +1471,114 @@ button{-webkit-appearance:none;appearance:none}
   var CODEX_TOOLS = ['file_read','file_write','file_list','file_search','shell_execute','code_execute','system_info','get_current_time','web_search','web_fetch'];
   var AGENT_ALL_TOOLS = AGENT_TOOLS.map(function(t){return t.name;});
 
+  // ── Mobile parity helpers (Codex audit fixes) ──────────────────────
+  // Three helpers ported from desktop's tool-call-repair lib + Codex
+  // streaming pipeline. Without these, the mobile agent loop drifts in
+  // ways the desktop never does:
+  //   (1) Ollama sometimes emits tool_call.arguments as a JSON STRING
+  //       instead of an object; mobile passed it through unchanged →
+  //       the Rust `agent-tool` endpoint saw `args = "{...}"` and the
+  //       file_write handler reported "needs argument".
+  //   (2) Some models (qwen2.5-coder, gemma after a few iterations)
+  //       emit tool calls as a fenced ```json {"name":...} ``` block
+  //       inside `content` instead of native `tool_calls`. Without an
+  //       extractor mobile saw zero tool calls and wrote the JSON to
+  //       the chat as if it were the final answer.
+  //   (3) `apiMessages` grew unbounded across iterations. Local models
+  //       with 8K-32K windows would have their oldest messages
+  //       silently truncated by Ollama, including the system prompt
+  //       and the original user request — the model then "forgot the
+  //       task" and emitted "I'm ready to receive the task" mid-loop.
+  function repairToolCallArgs(raw){
+    if(raw == null) return {};
+    if(typeof raw === 'object') return raw;
+    if(typeof raw !== 'string') return {};
+    var trimmed = raw.trim();
+    if(!trimmed) return {};
+    try{ var parsed = JSON.parse(trimmed); return (parsed && typeof parsed === 'object') ? parsed : {}; }catch(_){}
+    // Some models double-encode the args (string of a string of JSON)
+    if(trimmed.charAt(0) === '"' && trimmed.charAt(trimmed.length-1) === '"'){
+      try{ var inner = JSON.parse(trimmed); if(typeof inner === 'string'){
+        try{ var parsed2 = JSON.parse(inner); return (parsed2 && typeof parsed2 === 'object') ? parsed2 : {}; }catch(_){}
+      }}catch(_){}
+    }
+    return {};
+  }
+
+  // Pulls fenced ```json {"name":..., "arguments":...} ``` tool calls
+  // out of the assistant's content. Returns {calls, ranges} so the
+  // caller can also strip the JSON from the visible text.
+  function extractToolCallsFromContent(content, knownToolNames){
+    var calls = [], ranges = [];
+    if(!content || typeof content !== 'string') return {calls: calls, ranges: ranges};
+    var fenceRe = /```(?:json)?\s*([\s\S]*?)```/g;
+    var match;
+    while((match = fenceRe.exec(content)) !== null){
+      var inner = match[1].trim();
+      try{
+        var obj = JSON.parse(inner);
+        var name = obj && (obj.name || obj.tool || (obj.function && obj.function.name));
+        var args = obj && (obj.arguments || obj.args || (obj.function && obj.function.arguments) || {});
+        if(name && (!knownToolNames || knownToolNames.indexOf(name) !== -1)){
+          calls.push({function:{name: name, arguments: repairToolCallArgs(args)}});
+          ranges.push({start: match.index, end: match.index + match[0].length});
+        }
+      }catch(_){}
+    }
+    return {calls: calls, ranges: ranges};
+  }
+  function stripRanges(content, ranges){
+    if(!ranges || !ranges.length) return content;
+    // Apply ranges back-to-front so earlier indexes don't shift
+    var sorted = ranges.slice().sort(function(a,b){ return b.start - a.start; });
+    var out = content;
+    for(var i=0;i<sorted.length;i++){
+      out = out.slice(0, sorted[i].start) + out.slice(sorted[i].end);
+    }
+    return out.replace(/\n{3,}/g, '\n\n').trim();
+  }
+
+  // System-prompt echo detector — Gemma 4 / smaller models drop back to
+  // "Hello, I am Codex / Agent — I am ready to assist..." after a tool
+  // error. Mirrors the desktop guard in useCodex.ts so the same line
+  // never lands in the chat over-the-air. Silent retry instead of
+  // letting the echo reach the user.
+  function isSystemPromptEcho(content){
+    if(!content) return false;
+    var head = String(content).trim().slice(0, 240);
+    if(/^(hello[!,\.]?\s+|hi[!,\.]?\s+|hey[!,\.]?\s+)?(i['’]?m|i am|you are)\s+(codex|an autonomous|the agent|an? ai)/i.test(head)) return true;
+    if(/^(i am|i['’]m)\s+ready\s+to\s+(receive|assist|help)/i.test(head)) return true;
+    if(/^(hello|hi|hey)[!,\.]?\s+i['’]?m\s+ready/i.test(head)) return true;
+    return false;
+  }
+
+  // Conservative compaction — keep system prompt + the first user message
+  // (anchors the task) + the most recent N turns. Drops only the OLDEST
+  // tool-result chains, which is the cheapest data to lose. Fires when
+  // total chars exceed budget (~24 KB by default = ~6K tokens).
+  function compactApiMessages(messages, charBudget){
+    if(!Array.isArray(messages) || messages.length < 6) return messages;
+    var budget = charBudget || 24000;
+    var total = 0;
+    for(var i=0;i<messages.length;i++) total += String(messages[i].content || '').length;
+    if(total <= budget) return messages;
+    // Always keep [0] (system) and [1] (first user) if present.
+    var head = [];
+    if(messages.length > 0 && messages[0].role === 'system') head.push(messages[0]);
+    var firstUserIdx = -1;
+    for(var j=0;j<messages.length;j++) if(messages[j].role === 'user'){ firstUserIdx = j; break; }
+    if(firstUserIdx !== -1 && messages[firstUserIdx] !== head[0]) head.push(messages[firstUserIdx]);
+    // Drop oldest tail messages until we fit.
+    var tail = messages.slice(firstUserIdx + 1);
+    while(tail.length > 4){
+      var headChars = head.reduce(function(a,m){return a + String(m.content||'').length;}, 0);
+      var tailChars = tail.reduce(function(a,m){return a + String(m.content||'').length;}, 0);
+      if(headChars + tailChars <= budget) break;
+      tail.shift();
+    }
+    return head.concat(tail);
+  }
+
   // Convert the flat AGENT_TOOLS array into Ollama's native tools schema.
   // `toolNames` is a whitelist — only tools whose name appears in it are
   // included. Returns [{type:'function', function:{name, description,
@@ -1499,7 +1679,11 @@ button{-webkit-appearance:none;appearance:none}
         for(var i=0;i<msg.tool_calls.length;i++){
           var tc = msg.tool_calls[i];
           if(tc && tc.function){
-            toolCalls.push({function:{name:tc.function.name, arguments:tc.function.arguments || {}}});
+            // repairToolCallArgs handles the case where Ollama returns
+            // `arguments` as a JSON-stringified blob — without this the
+            // mobile agent saw `{}` and the Rust handler errored out
+            // with "file_write needs argument".
+            toolCalls.push({function:{name:tc.function.name, arguments:repairToolCallArgs(tc.function.arguments)}});
           }
         }
       }
@@ -1694,18 +1878,42 @@ button{-webkit-appearance:none;appearance:none}
     return c ? (c.mode||'lu') : 'lu';
   }
 
+  // Aggressive AUTONOMY CONTRACT for the regular Agent toggle on mobile.
+  // Without this, gemma4 / llama3 / qwen2.5-instruct routinely emit code
+  // blocks in chat with "save this as index.html" instead of calling
+  // file_write. Codex already had its own prompt; this matches the
+  // strictness for the LU-mode + Agent-on path.
+  var AGENT_PROMPT = 'You are an autonomous AI agent inside Locally Uncensored. You execute tasks end-to-end via tools — you do NOT just describe what to do.\n\n=== HARD RULES ===\n\n1. AFTER EVERY TOOL RESULT, your very next message MUST be EITHER (a) another tool call to continue the work, OR (b) the final user-facing summary. There is no middle ground. Empty messages are a FAILURE.\n\n2. DO NOT stop after the FIRST tool. Real tasks take 3-10 tool calls. If the user said "build X" you write the files. If the user said "use every tool" you keep going through every tool. Stopping after one shell_execute or one get_current_time without producing a useful artefact = FAILURE.\n\n3. NEVER produce a code block followed by "save this as X". That is FAILURE — call file_write yourself.\n\n4. NEVER say "Now I will create X" / "Next I will write Y" as plain prose and stop. Do the next step right now as a concrete tool call.\n\n5. The ONLY reasons to stop calling tools: (a) the user task is FULLY done with concrete artefacts on disk / web results returned / etc., OR (b) you are stuck in a way that genuinely needs user input. "I have called one tool, that should be enough" is NOT a valid stop reason.\n\n=== WORKFLOW ===\n\n- Build / create tasks: file_write each artefact directly, chain ALL writes, then write a 1-3 sentence final answer.\n- Read / explore tasks: file_list / file_read first, then proceed.\n- Web tasks: web_search → web_fetch on the best URL → summarize.\n- Multi-tool / "use every tool" tasks: plan the order, then call each tool one at a time, recording the partial result in a final summary file before the visible reply.\n\n=== FILE RULES ===\n\n- file_write AUTOMATICALLY creates missing parent directories — do NOT shell out to mkdir / New-Item / md / os.makedirs first. Just file_write the target path.\n- Relative paths resolve to the current chat workspace folder. Use relative paths (e.g. `index.html`, `src/app.py`); do not hard-code absolute drive letters.\n- After 2-3 failures of the same approach, switch strategy — do not repeat the same broken command. Do not introduce yourself again.\n\nBe concise in prose. All real work happens in tool calls. Respond in the same language the user used in their message.';
+
   // ── System prompt builder ──
   function buildSystemPrompt(){
     var parts = [];
     var cm = getCaveman();
     if(cm!=='off' && CAVEMAN_PROMPTS[cm]) parts.push(CAVEMAN_PROMPTS[cm]);
-    if(getCurrentMode()==='codex'){
+    var isCodex = getCurrentMode()==='codex';
+    var agentOn = getAgentEnabled();
+    // ── Persona / dispatched prompt come FIRST, so the autonomy
+    // contract is the LAST thing the model reads. Otherwise a persona
+    // like "Devil's Advocate" appended after AGENT_PROMPT silently
+    // overrides the tool-use rules and the model goes off-topic.
+    var pid = getPersonaId();
+    var p = PERSONAS.find(function(x){return x.id===pid;});
+    if(getPersonaEnabled() && p && p.prompt){
+      parts.push(p.prompt);
+    } else if(dispatchedSystemPrompt && !agentOn && !isCodex){
+      // Only apply the desktop-dispatched system prompt in plain chat
+      // mode. In agent / codex mode any extra prompt fights with the
+      // autonomy rules and breaks tool calling — David's "Devil's
+      // Advocate hijack" repro. The desktop side now also defaults
+      // personaEnabled to false, so dispatchedSystemPrompt should
+      // typically be empty here anyway. Defense in depth.
+      parts.push(dispatchedSystemPrompt);
+    }
+    // ── Autonomy contract LAST so HARD RULES dominate ──
+    if(isCodex){
       parts.push(CODEX_PROMPT);
-    }else{
-      var pid = getPersonaId();
-      var p = PERSONAS.find(function(x){return x.id===pid;});
-      if(getPersonaEnabled() && p && p.prompt){ parts.push(p.prompt); }
-      else if(dispatchedSystemPrompt){ parts.push(dispatchedSystemPrompt); }
+    } else if(agentOn){
+      parts.push(AGENT_PROMPT);
     }
     return parts.join('\n\n');
   }
@@ -2121,6 +2329,15 @@ button{-webkit-appearance:none;appearance:none}
         html += '</div>';
       }
       html += '</div>';
+    }
+    // 3-dot loading indicator — visible the whole time the model is
+    // working (plain streaming OR native tool loop), parity with the
+    // desktop TypingIndicator so users on mobile see the same "still
+    // thinking" cue across iterations instead of staring at a frozen
+    // chat. Hides as soon as `streaming` and `agentRunning` are both
+    // false (= final answer landed or agent stopped).
+    if(streaming || agentRunning){
+      html += '<div class="typing-dots"><span></span><span></span><span></span></div>';
     }
     html += '</div>';
     p.innerHTML = html;
@@ -2814,6 +3031,23 @@ button{-webkit-appearance:none;appearance:none}
     var iter = 0;
     var target = msgs[msgs.length-1]; // the empty assistant slot
     var tools = buildToolDefs(toolNames);
+    // Cap silent echo retries so a model fully wedged on the echo
+    // can't burn the whole iteration budget on the same drift.
+    var echoRetriesRemaining = 3;
+    // Cap consecutive tool failures. Without this a model with broken
+    // shell-syntax assumptions (e.g. `mkdir client public` on PowerShell)
+    // can burn 50 iters cycling the same error before the iter cap kicks
+    // in. Reset on every successful tool result.
+    var consecutiveErrors = 0;
+    var maxConsecutiveErrors = 5;
+    // Stop-too-early nudges. Smaller models (gemma4:e4b confirmed) often
+    // bail after 3 tool calls — their reply is non-empty ("How can I
+    // help?") so the simple empty-content guard doesn't catch it. We
+    // also push when (a) reply is empty, (b) reply asks for help, or
+    // (c) user explicitly listed many tools but few were called.
+    // Cap kept generous since a 13-tool task with gemma4 may need
+    // 4-5 nudges to walk the full list.
+    var stopRetriesRemaining = 8;
 
     // Build the LLM message history from the conversation.
     // Include system prompt + all msgs except the last empty assistant.
@@ -2857,6 +3091,13 @@ button{-webkit-appearance:none;appearance:none}
       }
       iter++;
 
+      // Compaction — keeps Ollama from silently truncating the system
+      // prompt + first user message after a few iterations of file reads
+      // (the symptom: "I'm ready to receive the task" appearing mid-loop).
+      // Conservative budget tuned to fit comfortably inside an 8K-token
+      // context with room to spare for the model's reply.
+      apiMessages = compactApiMessages(apiMessages, 24000);
+
       nativeToolChat(apiMessages, tools).then(function(res){
         // Remove the initial "thinking" placeholder on the first
         // successful response (only matters for iter === 1).
@@ -2881,9 +3122,149 @@ button{-webkit-appearance:none;appearance:none}
           target.thinking = (target.thinking ? target.thinking+'\n' : '') + turnThinking;
         }
 
-        // No tool calls → model is done, set final content
+        // Fallback content-fence extractor — qwen2.5-coder + small Gemma
+        // builds sometimes emit ```json {"name":"file_write",...} ```
+        // INSIDE content instead of native tool_calls. Pull those out so
+        // the loop continues rather than treating raw JSON as the final
+        // answer.
+        if((!res.toolCalls || res.toolCalls.length === 0) && turnContent){
+          var pulled = extractToolCallsFromContent(turnContent, toolNames);
+          if(pulled.calls.length){
+            res.toolCalls = pulled.calls;
+            turnContent = stripRanges(turnContent, pulled.ranges);
+          }
+        }
+
+        // Silent retry on system-prompt echo. Without this the user
+        // would see "Hello, I'm ready to assist…" after a tool error
+        // mid-loop. Drop the content, push a synthetic nudge and let
+        // the loop take another swing — same shape as the desktop
+        // guard in useCodex.ts. Once retries are exhausted the echo
+        // is replaced with an empty content so finishToolLoop builds
+        // a step-summary instead of leaking the literal greeting to
+        // the user (this was Bug 2 reported by David — after several
+        // failures the model ended the turn with the greeting as the
+        // final answer).
+        if(isSystemPromptEcho(turnContent)){
+          if(echoRetriesRemaining > 0){
+            echoRetriesRemaining--;
+            apiMessages.push({
+              role: 'user',
+              content: 'Continue the task. Do not introduce yourself again. Resume from the last successful step using the appropriate tool call.'
+            });
+            step();
+            return;
+          }
+          // Retries spent — drop the echo. Falls through to the
+          // "no toolCalls → finishToolLoop" path below, which builds
+          // a clean fallback summary from the agent steps.
+          turnContent = '';
+        }
+
+        // No tool calls → model is done, set final content.
+        // #29 follow-up: previously we passed `'(done)'` as the fallback
+        // when the model emitted no closing prose. That literal string
+        // bypassed finishToolLoop()'s summary builder (which only kicks
+        // in when finalAnswer is falsy), so the user saw the bubble
+        // contain just `(done)` instead of a real summary like "Task
+        // completed: 3 file(s) written.". Pass null so the summary
+        // path runs.
         if(!res.toolCalls || res.toolCalls.length === 0){
-          finishToolLoop(turnContent || '(done)');
+          // STOP-TOO-EARLY GUARD. Three trigger conditions, in order of
+          // confidence:
+          //   (a) empty content    → model gave up silently
+          //   (b) "how can I help" / "what would you like"  → model is
+          //       asking for guidance instead of executing
+          //   (c) user explicitly listed N tool names but only some
+          //       fraction were called → model bailed mid-list
+          // Push a one-shot nudge up to stopRetriesRemaining times. After
+          // retries are spent, the loop accepts the model's reply as final.
+          var anySteps = (target && target.agentSteps) ? target.agentSteps.filter(function(s){return s.type==='action';}).length : 0;
+          var trimmed = (turnContent || '').trim();
+          var asksForHelp = /^(how can i help|what (do you|would you like|task)|please (let me know|tell me|provide))/i.test(trimmed);
+          // "Promised-but-no-summary" detector: model says it WILL
+          // summarize / WILL list / WILL provide… and then stops without
+          // actually doing it. Mostly Gemma 4 — the visible chat ends
+          // with the announcement and the user sees no real reply.
+          // Triggers regardless of length when the trailing sentence
+          // matches "i will provide/write/summarize…", "let me summarize",
+          // "now i will…", etc.
+          var promisesNoDelivery = /(i will (provide|write|summarize|create|make|list|finish|complete|do|show|give|tell)|i'?ll (provide|write|summarize|create|list|now)|let me summarize|let me (provide|give|list)|here is the summary:?\s*$|now i'?ll|next i'?ll)/i
+            .test(trimmed.slice(-260));
+          // Empty-summary check: trailing colon/dash with nothing after it.
+          var emptyAfterColon = /(:\s*|—\s*|-\s*)$/.test(trimmed) && trimmed.length < 400;
+          // Probe the FIRST user msg (= the original task) for explicit
+          // tool mentions. Using the LAST user msg fails after a nudge —
+          // the nudge text doesn't repeat the tool list, so mentionedTools
+          // would drop to 0 and the coverage-gap check would never fire on
+          // subsequent iterations.
+          var firstUserContent = '';
+          for(var li2 = 0; li2 < apiMessages.length; li2++){
+            if(apiMessages[li2].role === 'user'){ firstUserContent = String(apiMessages[li2].content || ''); break; }
+          }
+          var mentionedTools = 0;
+          var allKnownToolNames = (typeof AGENT_TOOLS !== 'undefined') ? AGENT_TOOLS.map(function(t){return t.name;}) : [];
+          var distinctToolsCalled = {};
+          for(var ti=0; ti<allKnownToolNames.length; ti++){
+            if(firstUserContent.indexOf(allKnownToolNames[ti]) !== -1) mentionedTools++;
+          }
+          // Also count how many DISTINCT tools were actually called.
+          if(target && target.agentSteps){
+            for(var ts=0; ts<target.agentSteps.length; ts++){
+              var s = target.agentSteps[ts];
+              if(s.type === 'action' && s.toolName) distinctToolsCalled[s.toolName] = true;
+            }
+          }
+          var distinctCalledCount = Object.keys(distinctToolsCalled).length;
+          // If the user mentioned ≥5 tools and we've called fewer DISTINCT
+          // tools than that, push. Using distinct (not total) count means
+          // calling get_current_time twice doesn't satisfy the gap check.
+          var coverageGap = mentionedTools >= 5 && distinctCalledCount < mentionedTools;
+          var shouldNudge = stopRetriesRemaining > 0 && (
+            (!trimmed && anySteps > 0) ||                  // (a) empty content
+            (asksForHelp && anySteps < 5) ||               // (b) "how can I help"
+            coverageGap ||                                  // (c) user listed N tools, < N called
+            promisesNoDelivery ||                           // (d) "I will provide a summary" then stops
+            emptyAfterColon                                 // (e) trailing colon with nothing after
+          );
+          if(shouldNudge){
+            stopRetriesRemaining--;
+            var nudgeText;
+            if(coverageGap){
+              // List the tools that were NOT yet called by name, so the
+              // model has a concrete next-step target.
+              var missingNames = [];
+              for(var mn=0; mn<allKnownToolNames.length; mn++){
+                var name = allKnownToolNames[mn];
+                if(firstUserContent.indexOf(name) !== -1 && !distinctToolsCalled[name]){
+                  missingNames.push(name);
+                }
+              }
+              nudgeText = 'You\'ve only called ' + distinctCalledCount + ' DISTINCT tools so far but the user explicitly listed ' +
+                mentionedTools + ' tools. Still missing: ' + missingNames.slice(0, 6).join(', ') + '. ' +
+                'Call the NEXT one from that list right now as a tool call. Do NOT write a summary yet — keep going.';
+            } else if(promisesNoDelivery || emptyAfterColon){
+              // Model said "I will provide a summary" / ended on a colon
+              // and stopped. Force it to deliver the actual content NOW.
+              nudgeText = 'You announced a summary but never wrote it. The user sees nothing useful. ' +
+                'Write the actual summary RIGHT NOW in this turn — concrete bullet list of what each tool returned, ' +
+                'plus a 1-sentence conclusion. No more announcements, no more "I will".';
+            } else if(asksForHelp){
+              nudgeText = 'Do not ask the user "how can I help" — the task was already given. Resume executing it now ' +
+                'with the next tool call. The user already told you exactly what to do.';
+            } else if(anySteps < 3){
+              nudgeText = 'You stopped after only ' + anySteps + ' tool call(s) and your last message was empty. ' +
+                'The task is not finished. Call the NEXT tool to continue. Do not stop yet.';
+            } else {
+              nudgeText = 'You completed ' + anySteps + ' tool calls but your last message was empty — the user sees nothing. ' +
+                'Write the final user-facing summary right now: 1-3 sentences listing what you did and any concrete results. ' +
+                'Do not introduce yourself again.';
+            }
+            apiMessages.push({ role: 'user', content: nudgeText });
+            step();
+            return;
+          }
+          finishToolLoop(turnContent || null);
           return;
         }
 
@@ -2934,6 +3315,24 @@ button{-webkit-appearance:none;appearance:none}
             // Push tool result into the LLM history
             apiMessages.push({role:'tool', content:obs});
 
+            // runAgentTool resolves on graceful 200+{error} too — we have
+            // to inspect the observation text to know whether the tool
+            // really succeeded. If it didn't, bump the consecutive-error
+            // counter; on success, reset.
+            if(/^(Error|Permission denied|Network error)/i.test(obs)){
+              consecutiveErrors++;
+            } else {
+              consecutiveErrors = 0;
+            }
+
+            if(consecutiveErrors >= maxConsecutiveErrors){
+              appendAgentStep('error',
+                kindLabel + ' stopped: ' + consecutiveErrors +
+                ' consecutive tool errors. Try rephrasing the task or fixing the tool arguments.');
+              finishToolLoop(null);
+              return;
+            }
+
             tcIndex++;
             execNext();
           }).catch(function(e){
@@ -2945,6 +3344,15 @@ button{-webkit-appearance:none;appearance:none}
 
             // Push error as tool result so the model can adapt
             apiMessages.push({role:'tool', content:'Error: '+errMsg});
+
+            consecutiveErrors++;
+            if(consecutiveErrors >= maxConsecutiveErrors){
+              appendAgentStep('error',
+                kindLabel + ' stopped: ' + consecutiveErrors +
+                ' consecutive tool errors. Try rephrasing the task or fixing the tool arguments.');
+              finishToolLoop(null);
+              return;
+            }
 
             tcIndex++;
             execNext();
@@ -3797,7 +4205,18 @@ pub async fn start_tunnel(
     }
 
     if url.is_empty() {
-        Ok("Tunnel started but URL not yet available. Check logs.".to_string())
+        // #29: previously we returned `Ok("Tunnel started but URL not yet
+        // available...")` here, which the frontend stored as `tunnelUrl`
+        // and then happily appended `/mobile` to — pointing the QR at a
+        // sentence instead of a URL. Return Err so `startTunnel()` in the
+        // store keeps `tunnelActive=false`, the QR falls back to the LAN
+        // URL, and the user sees a real reason in the error chip.
+        Err(format!(
+            "Cloudflare tunnel started but no public URL appeared within 15 s (cloudflared PID {}). \
+             This usually means cloudflared can't reach Cloudflare's edge — check firewall / VPN, \
+             then click Restart. LAN dispatch still works in the meantime.",
+            pid
+        ))
     } else {
         Ok(url)
     }
@@ -3917,4 +4336,69 @@ async fn mobile_monogram() -> Response {
         .header(header::CACHE_CONTROL, "public, max-age=86400")
         .body(Body::from(MONOGRAM))
         .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
+}
+
+#[cfg(test)]
+mod remote_path_tests {
+    use super::resolve_remote_path;
+    use crate::state::AppState;
+
+    /// Bug 1 regression — without the override the relative path from a
+    /// mobile `file_list` falls back to ~/agent-workspace/__remote__/ and
+    /// the user's actual project folder is never touched.
+    #[test]
+    fn relative_without_override_uses_default_workspace() {
+        let state = AppState::new();
+        let resolved = resolve_remote_path("client/public", Some("__remote__"), &state);
+        let s = resolved.replace('\\', "/");
+        assert!(s.contains("agent-workspace/__remote__/client/public"), "got: {}", s);
+    }
+
+    /// Override set → relative paths land inside it.
+    /// Path separators are normalised — PathBuf::join keeps the input
+    /// separator verbatim, so on Windows `target.join("client/public")`
+    /// still contains the forward slash.
+    #[test]
+    fn relative_with_override_lands_in_override_folder() {
+        let state = AppState::new();
+        let target = std::env::temp_dir().join("lu-rrp-test-rel");
+        state
+            .chat_workspace_overrides
+            .lock()
+            .unwrap()
+            .insert("__remote__".to_string(), target.clone());
+
+        let resolved = resolve_remote_path("client/public/index.html", Some("__remote__"), &state);
+        let actual = resolved.replace('\\', "/");
+        let expected = target
+            .join("client")
+            .join("public")
+            .join("index.html")
+            .to_string_lossy()
+            .replace('\\', "/");
+        assert_eq!(actual, expected);
+    }
+
+    /// Absolute paths must pass through untouched even when an override is set.
+    #[test]
+    fn absolute_path_passes_through_with_override() {
+        let state = AppState::new();
+        let target = std::env::temp_dir().join("lu-rrp-test-abs");
+        state
+            .chat_workspace_overrides
+            .lock()
+            .unwrap()
+            .insert("__remote__".to_string(), target);
+
+        let abs = if cfg!(windows) { "C:/elsewhere/foo.txt" } else { "/etc/passwd" };
+        let resolved = resolve_remote_path(abs, Some("__remote__"), &state);
+        let s = resolved.replace('\\', "/");
+        // We ignore drive vs unix specifics — just assert we kept the
+        // input absolute form rather than nesting it under the override.
+        if cfg!(windows) {
+            assert!(s.ends_with("/elsewhere/foo.txt"), "got: {}", s);
+        } else {
+            assert!(s.ends_with("/etc/passwd"), "got: {}", s);
+        }
+    }
 }

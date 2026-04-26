@@ -33,6 +33,11 @@ export interface Conversation {
   model: string
   systemPrompt: string
   mode?: 'lu' | 'codex' | 'openclaw' | 'claude-code' | 'remote'
+  /** Per-chat persona toggle. Mirrors the mobile chat's `personaEnabled`
+   *  flag so the user can flip the persona on/off for each chat
+   *  individually without losing the selection in Settings. Undefined
+   *  on legacy chats and treated as enabled. */
+  personaEnabled?: boolean
   createdAt: number
   updatedAt: number
 }

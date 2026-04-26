@@ -1,7 +1,8 @@
 import { useRef, useState, useCallback } from 'react'
 import { v4 as uuid } from 'uuid'
 import { chatNonStreaming } from '../api/agents'
-import { setActiveChatId, clearActiveChatId } from '../api/agent-context'
+import { setActiveChatId, clearActiveChatId, chatWorkspaceSlug } from '../api/agent-context'
+import { streamOllamaChatWithTools } from '../lib/ollama-stream-tools'
 import { useChatStore } from '../stores/chatStore'
 import { agentVariantExists, createAgentVariant, getAgentModelName, canFixModel } from '../api/model-template-fix'
 import { useModelStore } from '../stores/modelStore'
@@ -261,10 +262,17 @@ export function useAgentChat() {
       convId = store.createConversation(activeModel, persona?.systemPrompt || '')
     }
 
-    // Publish the conversation id so built-in tools land in
-    // `~/agent-workspace/<convId>/` — each LU agent chat gets an isolated
-    // workspace folder. Cleared in the finally block further down.
-    setActiveChatId(convId)
+    // Publish a HUMAN-READABLE slug ("create-an-index-7f2c3d") so
+    // built-in tools land in `~/agent-workspace/<slug>/`. Previously
+    // this was the raw conversation UUID — folders were technically
+    // isolated but the user couldn't tell which chat owned which
+    // workspace by looking. The slug derives from the chat title
+    // (which auto-rename gives a meaningful one after the first user
+    // message) plus a short id suffix to keep two chats with the same
+    // title from colliding.
+    const convForSlug = useChatStore.getState().conversations.find((c) => c.id === convId)
+    const slug = chatWorkspaceSlug(convId, convForSlug?.title)
+    setActiveChatId(slug)
 
     // Add user message
     const userMessage = {
@@ -292,7 +300,10 @@ export function useAgentChat() {
     if (!conv) return
 
     // RAG context injection
-    let systemPrompt = conv.systemPrompt
+    // Per-chat persona toggle — default OFF. Only apply persona prompt
+    // when user explicitly flipped it on. See useChat.ts for the
+    // full rationale (Devil's Advocate hijack bug).
+    let systemPrompt = conv.personaEnabled === true ? conv.systemPrompt : ''
     const ragState = useRAGStore.getState()
     const ragEnabled = ragState.ragEnabled[convId] ?? false
 
@@ -468,23 +479,87 @@ export function useAgentChat() {
             function: { name: t.name, description: t.description, parameters: t.inputSchema },
           }))
 
-          let turn: { content: string; toolCalls: ToolCall[] }
-          try {
-            turn = await provider.chatWithTools(modelToUse, agentMessages, tools, chatOptions)
-          } catch (thinkErr: any) {
-            // If thinking is rejected by model, retry WITHOUT the field at
-            // all (`undefined` — old Ollama / non-thinking models reject
-            // both `think: true` AND `think: false`).
-            if (thinkErr?.message?.includes('does not support thinking') || thinkErr?.statusCode === 400) {
-              const retryOptions = { ...chatOptions, thinking: undefined as unknown as boolean }
-              turn = await provider.chatWithTools(modelToUse, agentMessages, tools, retryOptions)
-            } else {
-              throw thinkErr
+          let turn: { content: string; toolCalls: ToolCall[]; thinking?: string }
+          if (providerId === 'ollama') {
+            // Streaming path — parity with desktop Codex. Without this
+            // the user stared at a frozen chat for 30-90 s while Gemma
+            // thought (no tokens, no 3-dot, just dead air). Now content
+            // and thinking land in real time.
+            //
+            // The thinking-indicator block is removed the moment ANY
+            // token arrives, so the user sees the live answer instead
+            // of the placeholder once the model starts producing.
+            let thinkingBlockRemoved = false
+            const dropThinkingBlock = () => {
+              if (!thinkingBlockRemoved) {
+                thinkingBlockRemoved = true
+                removeBlock(convId!, assistantMessage.id, thinkingBlockId)
+              }
             }
+            try {
+              turn = await streamOllamaChatWithTools(
+                modelToUse,
+                agentMessages,
+                tools,
+                {
+                  temperature: chatOptions.temperature,
+                  thinking: chatOptions.thinking,
+                  maxTokens: chatOptions.maxTokens,
+                  signal: abort.signal,
+                },
+                (c) => {
+                  dropThinkingBlock()
+                  // Live-update the visible content. Same accumulator
+                  // pattern as Codex: each chunk is the FULL content so
+                  // far, not a delta — assign directly.
+                  contentRef.current = c
+                  scheduleUIUpdate()
+                },
+                (t) => {
+                  dropThinkingBlock()
+                  if (settings.thinkingEnabled === true) {
+                    thinkingRef.current = t
+                    scheduleUIUpdate()
+                  }
+                },
+              )
+            } catch (thinkErr: any) {
+              if (thinkErr?.message?.includes('does not support thinking') || thinkErr?.statusCode === 400) {
+                turn = await streamOllamaChatWithTools(
+                  modelToUse,
+                  agentMessages,
+                  tools,
+                  {
+                    temperature: chatOptions.temperature,
+                    thinking: undefined,
+                    maxTokens: chatOptions.maxTokens,
+                    signal: abort.signal,
+                  },
+                  (c) => {
+                    dropThinkingBlock()
+                    contentRef.current = c
+                    scheduleUIUpdate()
+                  },
+                  () => {},
+                )
+              } else {
+                throw thinkErr
+              }
+            }
+            dropThinkingBlock()
+          } else {
+            try {
+              turn = await provider.chatWithTools(modelToUse, agentMessages, tools, chatOptions)
+            } catch (thinkErr: any) {
+              if (thinkErr?.message?.includes('does not support thinking') || thinkErr?.statusCode === 400) {
+                const retryOptions = { ...chatOptions, thinking: undefined as unknown as boolean }
+                turn = await provider.chatWithTools(modelToUse, agentMessages, tools, retryOptions)
+              } else {
+                throw thinkErr
+              }
+            }
+            removeBlock(convId!, assistantMessage.id, thinkingBlockId)
           }
-
-          // Remove thinking indicator
-          removeBlock(convId!, assistantMessage.id, thinkingBlockId)
 
           toolCalls = turn.toolCalls
           turnContent = turn.content || ''
@@ -532,13 +607,37 @@ export function useAgentChat() {
         // toggle is OFF (e.g. provider returned `turn.thinking` anyway).
         if (!keepThinking) turnThinking = ''
 
-        // Update UI
-        contentRef.current = turnContent
+        // Update UI — but DON'T overwrite contentRef during intermediate
+        // turns. Previously every iteration did `contentRef.current =
+        // turnContent`, which wiped any narration the model emitted
+        // before a tool call ("I'll create an index, then write the file
+        // …") the moment the next iteration produced an empty-content
+        // tool call. The user saw the message disappear, then reappear
+        // 3× as more tool calls fired, and finally a fresh final answer
+        // — losing all the intermediate context.
+        //
+        // Now: intermediate `turnContent` (with tool_calls > 0) is
+        // preserved as a `reflection` block so it renders above the tool
+        // calls in chronological order. Only the final-turn content (no
+        // tool_calls) becomes the message body.
+        const isFinalTurn = toolCalls.length === 0
+        if (isFinalTurn) {
+          contentRef.current = turnContent
+          thinkingRef.current = turnThinking
+          scheduleUIUpdate()
+          break
+        }
+
+        if (turnContent.trim()) {
+          addBlock(convId!, assistantMessage.id, {
+            id: uuid(),
+            phase: 'reflection',
+            content: turnContent,
+            timestamp: Date.now(),
+          })
+        }
         thinkingRef.current = turnThinking
         scheduleUIUpdate()
-
-        // If no tool calls, the model is done
-        if (toolCalls.length === 0) break
 
         // Phase 5b (v2.4.0) — parallel tool execution via tool-executor.
         //
@@ -740,6 +839,35 @@ export function useAgentChat() {
         thinkingRef.current = ''
       }
 
+      // Fallback summary — parity with useCodex.ts. When the model's
+      // last turn returned empty (it claimed completion in an earlier
+      // intermediate turn, ran tools, then emitted nothing on the
+      // wrap-up), the assistant message would otherwise stay empty and
+      // leave the user looking at a chat with reflection blocks +
+      // tool-call rows but no closing line. Build a concise summary
+      // from the actually-completed blocks so there is always a final
+      // answer at the bottom of the bubble.
+      if (!contentRef.current.trim()) {
+        const blocks = blocksRef.current
+        const completedTools = blocks.filter(
+          (b) => b.phase === 'tool_call' && b.toolCall?.status === 'completed'
+        )
+        const failedTools = blocks.filter(
+          (b) => b.phase === 'tool_call' && b.toolCall?.status === 'failed'
+        )
+        const writes = completedTools.filter((b) => b.toolCall?.toolName === 'file_write').length
+        const reads = completedTools.filter((b) => b.toolCall?.toolName === 'file_read').length
+        const otherOk = completedTools.length - writes - reads
+        const parts: string[] = []
+        if (writes) parts.push(`${writes} file${writes === 1 ? '' : 's'} written`)
+        if (reads) parts.push(`${reads} file${reads === 1 ? '' : 's'} read`)
+        if (otherOk) parts.push(`${otherOk} operation${otherOk === 1 ? '' : 's'} completed`)
+        if (failedTools.length) parts.push(`${failedTools.length} failed`)
+        contentRef.current = parts.length
+          ? `Task completed: ${parts.join(', ')}.`
+          : 'Task completed.'
+      }
+
       // Final store update
       useChatStore.getState().updateMessageContent(convId!, assistantMessage.id, contentRef.current)
       if (thinkingRef.current) {
@@ -828,7 +956,7 @@ export function useAgentChat() {
 // ── Agent System Prompt Builder ─────────────────────────────────
 
 function buildAgentSystemPrompt(basePrompt: string): string {
-  const agentInstructions = `You are an autonomous AI agent inside Locally Uncensored with full access to this computer.
+  const agentInstructions = `You are an autonomous AI agent inside Locally Uncensored with full access to this computer. You execute tasks end-to-end by using tools — you do NOT just describe what to do.
 
 Available tools:
 - Filesystem: file_read, file_write, file_list, file_search
@@ -836,13 +964,25 @@ Available tools:
 - System: shell_execute, code_execute, system_info, screenshot, process_list, get_current_time
 - Creative: image_generate, run_workflow
 
-Rules:
+AUTONOMY CONTRACT (read carefully — this is the most important rule):
+- When the user asks you to BUILD, CREATE, MAKE, or WRITE something (a file, a website, a script, a folder structure), you MUST execute it via tools — typically file_write.
+- NEVER produce a code block in your reply followed by "save this as index.html". That is a FAILURE — it means you talked instead of acted.
+- NEVER say "Now I will create X" or "Next I'll write Y" as plain prose and then stop. The model is supposed to DO the next step right now, as a tool call.
+- When the task has N steps, execute ALL N as tool calls in one session. The user does not want a tutorial — they want the result on disk.
+- The ONLY reasons to finish without calling another tool are: (a) the task is genuinely complete, or (b) you are stuck and need user input.
+
+Workflow for build / create tasks:
+1. (Optional) file_list to scout the target directory.
+2. file_write the artefact(s) directly. For a website: write index.html, style.css, script.js as separate file_write calls.
+3. After the LAST file_write, write a 1–3 sentence final answer ("Done — wrote 3 files to <path>"). Nothing in between.
+
+Other rules:
 - You MUST use tools — NEVER answer from memory or guess file contents.
-- For filesystem tasks: ALWAYS call file_list first to explore, then file_read to inspect, then act.
-- For web tasks: web_search → web_fetch on the best URL → answer based on real data.
-- web_search returns ONLY short snippets, NOT full content. ALWAYS call web_fetch to read the actual page.
+- For filesystem READ tasks: file_list first if needed, then file_read.
+- For web tasks: web_search → web_fetch on the best URL → answer based on real data. web_search returns ONLY short snippets — ALWAYS call web_fetch to read the page.
 - If you need to know the OS, paths, or hardware: call system_info once at the start.
 - Chain multiple tools as needed. If a tool fails, try a different approach.
+- Be concise in text. All the work happens in tool calls.
 - Respond in the same language the user uses.`
 
   if (basePrompt) {

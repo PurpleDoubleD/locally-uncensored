@@ -133,12 +133,45 @@ describe('remoteStore › dispatch()', () => {
     expect(useRemoteStore.getState().error).toMatch(/boom/)
   })
 
-  it('records an error via set() on startServer failure (startServer swallows the throw)', async () => {
-    // startServer catches its own error internally, so dispatch sees "success"
-    // and still sets the conversationId. The error lives on the store.
+  it('records an error via set() on startServer failure', async () => {
+    // #29: startServer + dispatch now rethrow so the caller (Sidebar)
+    // can delete the orphan conv. The error still lives on the store.
     mockBackend.mockRejectedValueOnce(new Error('startup-fail'))
     await useRemoteStore.getState().dispatch('c', 'm', '').catch(() => {})
     expect(useRemoteStore.getState().error).toMatch(/startup-fail/)
+  })
+
+  it('rethrows on startServer failure so Sidebar can clean up the orphan conv', async () => {
+    // #29: phantomderp's bug — silent failure left the user staring at a
+    // "Server stopped" banner that did nothing. The store now rethrows
+    // so Sidebar.handleDispatch can delete the just-created conv row.
+    mockBackend.mockRejectedValueOnce(new Error('port-in-use'))
+    await expect(
+      useRemoteStore.getState().dispatch('orphan', 'm', '')
+    ).rejects.toThrow('port-in-use')
+    expect(useRemoteStore.getState().dispatchedConversationId).toBeNull()
+    expect(useRemoteStore.getState().error).toMatch(/port-in-use/)
+  })
+})
+
+describe('remoteStore › restart() failure semantics', () => {
+  it('rethrows on backend failure and exposes the error to the UI', async () => {
+    // #29: ChatView's "Server stopped" banner uses the rethrow + error
+    // state to render the actual reason inline, instead of the user
+    // clicking Restart forever.
+    mockBackend.mockRejectedValueOnce(new Error('bind-failed'))
+    await expect(
+      useRemoteStore.getState().restart('m', '')
+    ).rejects.toThrow('bind-failed')
+    expect(useRemoteStore.getState().enabled).toBe(false)
+    expect(useRemoteStore.getState().loading).toBe(false)
+    expect(useRemoteStore.getState().error).toMatch(/bind-failed/)
+  })
+
+  it('clearError() wipes the error so the next attempt starts clean', () => {
+    useRemoteStore.setState({ error: 'previous failure' })
+    useRemoteStore.getState().clearError()
+    expect(useRemoteStore.getState().error).toBeNull()
   })
 })
 

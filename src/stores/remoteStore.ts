@@ -74,6 +74,7 @@ interface RemoteState {
   restart: (model?: string, systemPrompt?: string) => Promise<void>
   showQr: () => void
   hideQr: () => void
+  clearError: () => void
 }
 
 export const useRemoteStore = create<RemoteState>()((set, get) => ({
@@ -124,7 +125,13 @@ export const useRemoteStore = create<RemoteState>()((set, get) => ({
       // Auto-fetch QR code
       get().fetchQrCode()
     } catch (err) {
-      set({ loading: false, error: String(err) })
+      // #29: rethrow so dispatch()/restart() callers can react. Previously
+      // we swallowed silently, which let dispatch() set
+      // dispatchedConversationId on a server that never actually started —
+      // user saw "Server stopped" with no explanation and Restart hit the
+      // same silent failure.
+      set({ loading: false, enabled: false, error: String(err) })
+      throw err
     }
   },
 
@@ -259,12 +266,17 @@ export const useRemoteStore = create<RemoteState>()((set, get) => ({
     if (enabled) {
       await stopServer()
     }
-    // Start fresh server, only set ID on success
+    // Start fresh server, only set ID on success.
+    // #29: startServer now rethrows on failure — re-throw so the caller
+    // (Sidebar.handleDispatch) can clean up the orphan conversation row
+    // it just created instead of leaving the user staring at a "Server
+    // stopped" banner with no way out.
     try {
       await startServer(model, systemPrompt)
       set({ dispatchedConversationId: conversationId })
     } catch (err) {
       set({ dispatchedConversationId: null, error: String(err) })
+      throw err
     }
   },
 
@@ -273,6 +285,15 @@ export const useRemoteStore = create<RemoteState>()((set, get) => ({
     if (enabled) {
       await stopServer()
     }
+    // #29 follow-up: clear the Remote workspace override so the next
+    // dispatch starts from a clean slate (otherwise an old folder from
+    // last session would still bind for new mobile-driven file writes).
+    try {
+      await backendCall('set_chat_workspace_override', {
+        chatId: '__remote__',
+        path: null,
+      })
+    } catch { /* best-effort cleanup */ }
     set({ dispatchedConversationId: null })
   },
 
@@ -307,10 +328,15 @@ export const useRemoteStore = create<RemoteState>()((set, get) => ({
       // Re-fetch QR for the new passcode
       get().fetchQrCode()
     } catch (err) {
-      set({ loading: false, error: String(err) })
+      // #29: rethrow so the click-handler (ChatView.handleRemoteReactivate
+      // or Sidebar restart chip) can surface the actual reason instead of
+      // looking like the button did nothing.
+      set({ loading: false, enabled: false, error: String(err) })
+      throw err
     }
   },
 
   showQr: () => set({ qrVisible: true }),
   hideQr: () => set({ qrVisible: false }),
+  clearError: () => set({ error: null }),
 }))

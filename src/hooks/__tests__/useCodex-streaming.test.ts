@@ -211,22 +211,27 @@ describe('streamWithTools NDJSON parsing', () => {
 })
 
 // ── Drift detection ─────────────────────────────────────────────────────
+// The streaming helper used to live inline in useCodex.ts. It moved to
+// `src/lib/ollama-stream-tools.ts` so the regular Agent path
+// (useAgentChat.ts) can share the same wire protocol — these checks now
+// guard the new location instead of useCodex.ts.
 describe('streamWithTools drift detection', () => {
-  it('useCodex.ts still uses append-spread for tool_calls (not overwrite)', () => {
+  it('ollama-stream-tools.ts still uses append-spread for tool_calls (not overwrite)', () => {
     const __filename = fileURLToPath(import.meta.url)
     const __dirname = dirname(__filename)
-    const src = readFileSync(join(__dirname, '../useCodex.ts'), 'utf8')
+    const src = readFileSync(join(__dirname, '../../lib/ollama-stream-tools.ts'), 'utf8')
 
     // Must contain the spread-append pattern, not the old overwrite
-    expect(src).toContain('...toolCalls, ...j.message.tool_calls.map')
+    expect(src).toContain('...toolCalls,')
+    expect(src).toContain('...j.message.tool_calls.map')
     // Must NOT contain the old overwrite pattern
     expect(src).not.toMatch(/toolCalls\s*=\s*j\.message\.tool_calls\.map/)
   })
 
-  it('useCodex.ts uses localFetchStream (not raw fetch)', () => {
+  it('ollama-stream-tools.ts uses localFetchStream (not raw fetch)', () => {
     const __filename = fileURLToPath(import.meta.url)
     const __dirname = dirname(__filename)
-    const src = readFileSync(join(__dirname, '../useCodex.ts'), 'utf8')
+    const src = readFileSync(join(__dirname, '../../lib/ollama-stream-tools.ts'), 'utf8')
 
     expect(src).toContain('localFetchStream')
     // Must NOT use raw fetch() for the streaming endpoint
