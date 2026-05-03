@@ -696,9 +696,15 @@ async function findAnimateDiffModel(): Promise<string> {
 export async function submitWorkflow(workflow: Record<string, any>, clientId?: string): Promise<string> {
   const payload: Record<string, any> = { prompt: workflow }
   if (clientId) payload.client_id = clientId
-  // Use direct fetch to ComfyUI (bypasses Tauri proxy issues, CORS OK with --enable-cors-header *)
+  // Use localFetch (Rust proxy in Tauri, direct fetch in dev). The previous
+  // direct-only fetch broke for any ComfyUI not started by LU itself —
+  // `--enable-cors-header *` is the LU spawn flag, but a user-run ComfyUI
+  // Portable / cu126 / AMD build doesn't pass it, so the browser blocks the
+  // POST during preflight and the only thing the user sees is the JS error
+  // "Failed to fetch". The proxy bypasses the SOP entirely (it's a Rust HTTP
+  // call, not a browser one). Bug: GH disc #35, Discord oogletree + reload__.
   const url = comfyuiUrl('/prompt')
-  const res = await fetch(url, {
+  const res = await localFetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
@@ -731,13 +737,13 @@ export async function submitWorkflow(workflow: Record<string, any>, clientId?: s
 
 export async function cancelGeneration(): Promise<void> {
   try {
-    await fetch(comfyuiUrl('/interrupt'), { method: 'POST' })
+    await localFetch(comfyuiUrl('/interrupt'), { method: 'POST' })
   } catch { /* best effort */ }
 }
 
 export async function freeMemory(): Promise<void> {
   try {
-    await fetch(comfyuiUrl('/free'), {
+    await localFetch(comfyuiUrl('/free'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ unload_models: true, free_memory: true }),
@@ -747,8 +753,11 @@ export async function freeMemory(): Promise<void> {
 
 export async function getHistory(promptId: string): Promise<any> {
   try {
-    // Use direct fetch (CORS OK with --enable-cors-header *)
-    const res = await fetch(comfyuiUrl(`/history/${promptId}`))
+    // localFetch routes through Rust proxy in Tauri to dodge CORS — same
+    // reason as submitWorkflow above. Without this, a user-run ComfyUI
+    // Portable would accept the /prompt POST but the polling /history GETs
+    // would silently 0-out and the UI hangs in "generating…" forever.
+    const res = await localFetch(comfyuiUrl(`/history/${promptId}`))
     if (!res.ok) return null
     const data = await res.json()
     return data[promptId] ?? null
