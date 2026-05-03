@@ -120,7 +120,7 @@ function HfDownloadPathSetting() {
   return (
     <div className="space-y-2 py-1">
       <div className="text-[0.6rem] text-gray-500 leading-relaxed">
-        HuggingFace GGUF downloads save here. Leave empty to auto-detect from your active openai-compat provider (e.g. LM Studio's models folder).
+        Custom location for downloaded GGUFs. Leave empty to auto-detect from your active provider's models folder (e.g. <code className="font-mono">~/.lmstudio/models</code> for LM Studio). Ollama is unaffected — it manages its own blob store; LU pulls Ollama models via <code className="font-mono">ollama pull</code> regardless of this setting.
       </div>
       <div className="flex items-center gap-2">
         <input
