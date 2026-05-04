@@ -1,5 +1,5 @@
 import { useState, useEffect, type ReactNode } from 'react'
-import { ArrowLeft, RotateCcw, Sun, Moon, Mic, Volume2, Check, X, Loader2, Shield, ChevronRight, GraduationCap, Lock } from 'lucide-react'
+import { ArrowLeft, RotateCcw, Sun, Moon, Mic, Volume2, Check, X, Loader2, Shield, ChevronRight, GraduationCap, Lock, Sliders, Plug, Bot, Phone } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { useUIStore } from '../../stores/uiStore'
@@ -153,7 +153,7 @@ function HfDownloadPathSetting() {
 // ── ComfyUI Settings ────────────────────────────────────────────
 
 function ComfyUISettings() {
-  const [status, setStatus] = useState<{ running: boolean; found: boolean; path?: string; port?: number; host?: string; isLocal?: boolean; starting?: boolean } | null>(null)
+  const [status, setStatus] = useState<{ running: boolean; found: boolean; complete?: boolean; path?: string; port?: number; host?: string; isLocal?: boolean; starting?: boolean } | null>(null)
   const [loading, setLoading] = useState(true)
   const [customPath, setCustomPath] = useState('')
   const [pathError, setPathError] = useState('')
@@ -163,6 +163,10 @@ function ComfyUISettings() {
   const [customHost, setCustomHost] = useState('')
   const [hostError, setHostError] = useState('')
   const [hostSuccess, setHostSuccess] = useState(false)
+  // P14 Python install state for the Settings Install-ComfyUI flow.
+  const [installPhase, setInstallPhase] = useState<'idle' | 'python' | 'comfyui' | 'error'>('idle')
+  const [installLogs, setInstallLogs] = useState<string[]>([])
+  const [installErr, setInstallErr] = useState('')
 
   useEffect(() => {
     let cancelled = false
@@ -352,18 +356,98 @@ function ComfyUISettings() {
             Restart
           </button>
         )}
-        {!status?.found && (
+        {(!status?.found || status?.complete === false) && installPhase === 'idle' && (
           <button
             onClick={async () => {
+              const { backendCall } = await import('../../api/backend')
+              setInstallErr('')
+              setInstallLogs([])
+
+              // P14 pre-flight: ensure Python is on the box before
+              // pip-installing ComfyUI. The carcass case (status.complete
+              // === false) lands here too — Python may still be missing
+              // and the previous run died on the Microsoft Store stub.
+              let pythonOk = false
               try {
-                const { backendCall } = await import('../../api/backend')
+                const probe: any = await backendCall('python_check')
+                pythonOk = !!probe?.available
+              } catch { pythonOk = false }
+
+              if (!pythonOk) {
+                setInstallPhase('python')
+                setInstallLogs(['Installing Python 3.12 via winget…'])
+                try {
+                  await backendCall('install_python')
+                } catch (err) {
+                  setInstallPhase('error')
+                  setInstallErr(err instanceof Error ? err.message : 'Could not start Python install')
+                  return
+                }
+                pythonOk = await new Promise<boolean>((resolve) => {
+                  const poll = setInterval(async () => {
+                    try {
+                      const data: any = await backendCall('install_python_status')
+                      setInstallLogs(data.logs || [])
+                      if (data.status === 'complete' || data.status === 'already_installed') {
+                        clearInterval(poll); resolve(true)
+                      } else if (data.status === 'error') {
+                        clearInterval(poll)
+                        const lastLog = (data.logs?.length ? data.logs[data.logs.length - 1] : '') as string
+                        setInstallErr(lastLog || 'Python install failed')
+                        resolve(false)
+                      }
+                    } catch { /* keep polling */ }
+                  }, 2000)
+                })
+                if (!pythonOk) { setInstallPhase('error'); return }
+              }
+
+              setInstallPhase('comfyui')
+              setInstallLogs(['Installing ComfyUI…'])
+              try {
                 await backendCall('install_comfyui')
-              } catch {}
+                const poll = setInterval(async () => {
+                  try {
+                    const data: any = await backendCall('install_comfyui_status')
+                    setInstallLogs(data.logs || [])
+                    if (data.status === 'complete') {
+                      clearInterval(poll)
+                      setInstallPhase('idle')
+                    } else if (data.status === 'error') {
+                      clearInterval(poll)
+                      const lastLog = (data.logs?.length ? data.logs[data.logs.length - 1] : '') as string
+                      setInstallErr(lastLog || 'ComfyUI install failed')
+                      setInstallPhase('error')
+                    }
+                  } catch { /* keep polling */ }
+                }, 2000)
+              } catch (err) {
+                setInstallPhase('error')
+                setInstallErr(err instanceof Error ? err.message : 'Failed to start')
+              }
             }}
             className="px-2 py-1 rounded text-[0.6rem] bg-purple-500/10 text-purple-400 hover:bg-purple-500/20 transition-colors"
           >
-            Install ComfyUI
+            {status?.complete === false ? 'Re-install ComfyUI' : 'Install ComfyUI'}
           </button>
+        )}
+        {installPhase !== 'idle' && (
+          <div className="w-full mt-2 space-y-1">
+            <div className="flex items-center gap-1.5 text-[0.6rem] text-gray-400">
+              {installPhase !== 'error' && <Loader2 size={10} className="animate-spin" />}
+              <span>
+                {installPhase === 'python' && 'Installing Python 3.12 (~30 MB)…'}
+                {installPhase === 'comfyui' && 'Installing ComfyUI…'}
+                {installPhase === 'error' && 'Install failed'}
+              </span>
+            </div>
+            {installLogs.length > 0 && (
+              <div className="bg-black/50 rounded p-1.5 max-h-24 overflow-y-auto font-mono text-[0.5rem] text-gray-500 space-y-0.5">
+                {installLogs.slice(-6).map((log, i) => <div key={i} className="truncate">{log}</div>)}
+              </div>
+            )}
+            {installErr && <p className="text-[0.55rem] text-red-400 whitespace-pre-line">{installErr}</p>}
+          </div>
         )}
       </div>
       )}
@@ -438,6 +522,28 @@ function ClaudeCodeSettings() {
 
 // ── Main Component ──────────────────────────────────────────────
 
+// P5 settings refactor: Top-level tabs replace the previous flat scroll of
+// 17 collapsibles. Each tab groups conceptually related Sections so users
+// don't have to scan the whole list to find one toggle. Mapping (kept in
+// sync with LU-Aufgaben.md / IMPLEMENTATION_NOTES.md):
+//
+//   General      → Appearance · Generation · Privacy · Onboarding · Updates
+//   AI Backends  → Providers · Model Storage · ComfyUI
+//   Agent        → Personas · Memory · Claude Code · Agent Permissions ·
+//                  Agent Workflows · MCP Servers · Search Provider
+//   Voice & Remote → Speech · Remote Access
+//
+// Tab choice is persisted in localStorage so the user's last-used view
+// survives reloads.
+type SettingsTab = 'general' | 'backends' | 'agent' | 'voice-remote'
+const SETTINGS_TAB_KEY = 'lu-settings-tab'
+const SETTINGS_TABS: { id: SettingsTab; label: string; icon: ReactNode }[] = [
+  { id: 'general',      label: 'General',      icon: <Sliders size={11} /> },
+  { id: 'backends',     label: 'AI Backends',  icon: <Plug size={11} /> },
+  { id: 'agent',        label: 'Agent',        icon: <Bot size={11} /> },
+  { id: 'voice-remote', label: 'Voice & Remote', icon: <Phone size={11} /> },
+]
+
 export function SettingsPage() {
   const { settings, updateSettings, resetSettings } = useSettingsStore()
   const { setView } = useUIStore()
@@ -445,6 +551,18 @@ export function SettingsPage() {
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([])
   const [whisperStatus, setWhisperStatus] = useState<{ available: boolean; backend: string | null; error?: string } | null>(null)
   const [whisperLoading, setWhisperLoading] = useState(true)
+  const [tab, setTab] = useState<SettingsTab>(() => {
+    if (typeof window === 'undefined') return 'general'
+    const stored = window.localStorage.getItem(SETTINGS_TAB_KEY)
+    return (stored === 'general' || stored === 'backends' || stored === 'agent' || stored === 'voice-remote')
+      ? stored
+      : 'general'
+  })
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      try { window.localStorage.setItem(SETTINGS_TAB_KEY, tab) } catch {}
+    }
+  }, [tab])
 
   const ttsSupported = typeof window !== 'undefined' && 'speechSynthesis' in window
 
@@ -477,215 +595,248 @@ export function SettingsPage() {
           <h1 className="text-[0.8rem] font-semibold text-gray-800 dark:text-gray-200">Settings</h1>
         </div>
 
-        <Section title="Appearance">
-          <div className="flex items-center justify-between">
-            <span className="text-[0.7rem] text-gray-700 dark:text-gray-400">Theme</span>
-            <div className="flex gap-1">
+        {/* P5: top-level tabs. Sticky so the user can switch tabs from
+            anywhere in a long Section without scrolling back up. */}
+        <div className="sticky top-0 z-10 -mx-4 px-4 pb-2 mb-2 bg-white/80 dark:bg-[#0a0a0a]/80 backdrop-blur supports-[backdrop-filter]:bg-white/60 dark:supports-[backdrop-filter]:bg-[#0a0a0a]/60 border-b border-gray-100 dark:border-white/[0.04]">
+          <div className="flex items-center gap-1 overflow-x-auto scrollbar-thin">
+            {SETTINGS_TABS.map(t => (
               <button
-                onClick={() => updateSettings({ theme: 'light' })}
-                className={`flex items-center gap-1 px-2 py-1 rounded text-[0.65rem] transition-colors ${
-                  settings.theme === 'light' ? 'bg-gray-200 dark:bg-white/10 text-gray-900 dark:text-white' : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
+                key={t.id}
+                onClick={() => setTab(t.id)}
+                className={`shrink-0 inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-[0.65rem] font-medium transition-colors ${
+                  tab === t.id
+                    ? 'bg-gray-200 dark:bg-white/10 text-gray-900 dark:text-white'
+                    : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-white/[0.04]'
                 }`}
               >
-                <Sun size={11} /> Light
+                {t.icon}
+                {t.label}
               </button>
-              <button
-                onClick={() => updateSettings({ theme: 'dark' })}
-                className={`flex items-center gap-1 px-2 py-1 rounded text-[0.65rem] transition-colors ${
-                  settings.theme === 'dark' ? 'bg-gray-200 dark:bg-white/10 text-gray-900 dark:text-white' : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
-                }`}
-              >
-                <Moon size={11} /> Dark
-              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* ── General tab ──────────────────────────────── */}
+        {tab === 'general' && (<>
+          <Section title="Appearance">
+            <div className="flex items-center justify-between">
+              <span className="text-[0.7rem] text-gray-700 dark:text-gray-400">Theme</span>
+              <div className="flex gap-1">
+                <button
+                  onClick={() => updateSettings({ theme: 'light' })}
+                  className={`flex items-center gap-1 px-2 py-1 rounded text-[0.65rem] transition-colors ${
+                    settings.theme === 'light' ? 'bg-gray-200 dark:bg-white/10 text-gray-900 dark:text-white' : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
+                  }`}
+                >
+                  <Sun size={11} /> Light
+                </button>
+                <button
+                  onClick={() => updateSettings({ theme: 'dark' })}
+                  className={`flex items-center gap-1 px-2 py-1 rounded text-[0.65rem] transition-colors ${
+                    settings.theme === 'dark' ? 'bg-gray-200 dark:bg-white/10 text-gray-900 dark:text-white' : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
+                  }`}
+                >
+                  <Moon size={11} /> Dark
+                </button>
+              </div>
             </div>
-          </div>
-        </Section>
-
-        <Section title="Generation">
-          <SliderControl label="Temperature" value={settings.temperature} min={0} max={2} step={0.1} onChange={(v) => updateSettings({ temperature: v })} />
-          <SliderControl label="Top P" value={settings.topP} min={0} max={1} step={0.05} onChange={(v) => updateSettings({ topP: v })} />
-          <SliderControl label="Top K" value={settings.topK} min={1} max={100} step={1} onChange={(v) => updateSettings({ topK: v })} />
-          <div className="flex items-center justify-between">
-            <span className="text-[0.7rem] text-gray-700 dark:text-gray-400">Max Tokens</span>
-            <input
-              type="number"
-              value={settings.maxTokens}
-              onChange={(e) => updateSettings({ maxTokens: parseInt(e.target.value) || 0 })}
-              min={0}
-              placeholder="0"
-              className="w-20 px-1.5 py-0.5 rounded bg-transparent border border-white/8 text-[0.65rem] text-right text-gray-300 font-mono focus:outline-none focus:border-white/20"
-            />
-          </div>
-        </Section>
-
-        <Section title="Personas">
-          <PersonaPanel />
-        </Section>
-
-        <Section title="Memory">
-          <MemorySettings />
-        </Section>
-
-        <Section title="Providers">
-          <ProviderSettings />
-        </Section>
-
-        <Section title="Model Storage">
-          <HfDownloadPathSetting />
-        </Section>
-
-        <Section title="ComfyUI (Image & Video)">
-          <ComfyUISettings />
-        </Section>
-
-        <Section title="Claude Code">
-          <ClaudeCodeSettings />
-        </Section>
-
-        {FEATURE_FLAGS.AGENT_MODE && (
-          <Section title="Agent Permissions">
-            <PermissionSettings />
-            <button
-              onClick={() => useAgentModeStore.getState().resetTutorial()}
-              className="text-[0.6rem] text-gray-500 hover:text-gray-300 transition-colors"
-            >
-              Reset tutorial
-            </button>
           </Section>
-        )}
 
-        {FEATURE_FLAGS.AGENT_WORKFLOWS && (
-          <Section title="Agent Workflows">
-            <WorkflowSection />
+          <Section title="Generation">
+            <SliderControl label="Temperature" value={settings.temperature} min={0} max={2} step={0.1} onChange={(v) => updateSettings({ temperature: v })} />
+            <SliderControl label="Top P" value={settings.topP} min={0} max={1} step={0.05} onChange={(v) => updateSettings({ topP: v })} />
+            <SliderControl label="Top K" value={settings.topK} min={1} max={100} step={1} onChange={(v) => updateSettings({ topK: v })} />
+            <div className="flex items-center justify-between">
+              <span className="text-[0.7rem] text-gray-700 dark:text-gray-400">Max Tokens</span>
+              <input
+                type="number"
+                value={settings.maxTokens}
+                onChange={(e) => updateSettings({ maxTokens: parseInt(e.target.value) || 0 })}
+                min={0}
+                placeholder="0"
+                className="w-20 px-1.5 py-0.5 rounded bg-transparent border border-white/8 text-[0.65rem] text-right text-gray-300 font-mono focus:outline-none focus:border-white/20"
+              />
+            </div>
           </Section>
-        )}
 
-        {FEATURE_FLAGS.AGENT_MODE && (
-          <Section title="MCP Servers">
-            <MCPServerSettings />
-          </Section>
-        )}
-
-        {FEATURE_FLAGS.AGENT_MODE && (
-          <Section title="Search Provider">
-            <div className="space-y-3">
-              <div>
-                <span className="text-[0.6rem] text-gray-500 block mb-1">Provider for Agent web_search</span>
-                <div className="flex gap-1.5">
-                  {(['auto', 'brave', 'tavily'] as const).map(p => (
-                    <button
-                      key={p}
-                      onClick={() => updateSettings({ searchProvider: p })}
-                      className={`px-2.5 py-1 rounded-md text-[0.6rem] font-medium transition-all ${
-                        settings.searchProvider === p
-                          ? 'bg-white dark:bg-white/10 text-gray-900 dark:text-white shadow-sm border border-gray-200 dark:border-white/15'
-                          : 'text-gray-500 hover:text-gray-700 dark:hover:text-white bg-gray-100 dark:bg-white/5'
-                      }`}
-                    >
-                      {p === 'auto' ? 'Auto (SearXNG > DDG)' : p === 'brave' ? 'Brave Search' : 'Tavily'}
-                    </button>
-                  ))}
+          <Section title="Privacy">
+            <div className="space-y-2 py-1 text-[0.65rem] text-gray-500 dark:text-gray-400 leading-relaxed">
+              <div className="flex items-start gap-2">
+                <Lock size={12} className="mt-0.5 shrink-0 text-emerald-500" />
+                <div>
+                  <p className="text-gray-700 dark:text-gray-300 font-medium mb-0.5">100% local by default.</p>
+                  <p>Chat, agent runs, image &amp; video generation all execute on your machine. No telemetry, no analytics, no model pings home. The only network calls LU makes unless you explicitly opt in are: update checks against GitHub Releases, and cloud provider APIs (OpenAI, Anthropic, etc.) that you configure yourself with your own API keys.</p>
                 </div>
               </div>
-              <div>
-                <label className="text-[0.6rem] text-gray-500 block mb-1">Brave Search API Key</label>
-                <input
-                  type="password"
-                  value={settings.braveApiKey}
-                  onChange={(e) => updateSettings({ braveApiKey: e.target.value })}
-                  placeholder="BSA-..."
-                  className="w-full px-2.5 py-1.5 rounded-lg bg-gray-100 dark:bg-white/5 border border-gray-200 dark:border-white/10 text-[0.65rem] text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:border-gray-400 dark:focus:border-white/25"
-                />
-                <span className="text-[0.5rem] text-gray-500 mt-0.5 block">Free tier: 2000 queries/month. Get key at brave.com/search/api</span>
-              </div>
-              <div>
-                <label className="text-[0.6rem] text-gray-500 block mb-1">Tavily API Key</label>
-                <input
-                  type="password"
-                  value={settings.tavilyApiKey}
-                  onChange={(e) => updateSettings({ tavilyApiKey: e.target.value })}
-                  placeholder="tvly-..."
-                  className="w-full px-2.5 py-1.5 rounded-lg bg-gray-100 dark:bg-white/5 border border-gray-200 dark:border-white/10 text-[0.65rem] text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:border-gray-400 dark:focus:border-white/25"
-                />
-                <span className="text-[0.5rem] text-gray-500 mt-0.5 block">AI-optimized search. Free tier: 1000 queries/month. Get key at tavily.com</span>
+              <div className="flex items-start gap-2 pt-1.5">
+                <Shield size={12} className="mt-0.5 shrink-0 text-emerald-500" />
+                <div>
+                  <p className="text-gray-700 dark:text-gray-300 font-medium mb-0.5">You own your data.</p>
+                  <p>Conversations, memories, and generated media live in <code className="px-1 py-0.5 rounded bg-black/5 dark:bg-white/5 font-mono text-[0.6rem]">%APPDATA%/Locally Uncensored</code> on Windows (or the equivalent on Linux/macOS). Back up the folder, move it between machines, or delete it — LU writes nothing else.</p>
+                </div>
               </div>
             </div>
           </Section>
-        )}
 
-        <Section title="Speech">
-          <div className="flex items-center gap-3 text-[0.65rem]">
-            <span className="flex items-center gap-1">
-              {whisperLoading ? <Loader2 size={10} className="animate-spin text-gray-500" /> : whisperStatus?.available ? <Check size={10} className="text-green-500" /> : <X size={10} className="text-red-500" />}
-              <span className="text-gray-500">STT</span>
-            </span>
-            <span className="flex items-center gap-1">
-              {ttsSupported ? <Check size={10} className="text-green-500" /> : <X size={10} className="text-red-500" />}
-              <span className="text-gray-500">TTS</span>
-            </span>
-          </div>
-          <InlineToggle label="TTS Enabled" enabled={voiceSettings.ttsEnabled} onChange={() => voiceSettings.updateVoiceSettings({ ttsEnabled: !voiceSettings.ttsEnabled })} icon={<Volume2 size={11} className="text-gray-500" />} />
-          <div className="flex items-center justify-between">
-            <span className="text-[0.7rem] text-gray-500">Voice</span>
-            <select
-              value={voiceSettings.ttsVoice}
-              onChange={(e) => voiceSettings.updateVoiceSettings({ ttsVoice: e.target.value })}
-              className="max-w-[180px] px-1.5 py-0.5 rounded bg-transparent border border-white/8 text-[0.65rem] text-gray-300 focus:outline-none"
-            >
-              <option value="">Default</option>
-              {voices.map((v) => <option key={v.name} value={v.name}>{v.name}</option>)}
-            </select>
-          </div>
-          <SliderControl label="Rate" value={voiceSettings.ttsRate} min={0.5} max={2} step={0.1} onChange={(v) => voiceSettings.updateVoiceSettings({ ttsRate: v })} />
-          <SliderControl label="Pitch" value={voiceSettings.ttsPitch} min={0.5} max={2} step={0.1} onChange={(v) => voiceSettings.updateVoiceSettings({ ttsPitch: v })} />
-          <InlineToggle label="Auto-send on Transcribe" enabled={voiceSettings.autoSendOnTranscribe} onChange={() => voiceSettings.updateVoiceSettings({ autoSendOnTranscribe: !voiceSettings.autoSendOnTranscribe })} icon={<Mic size={11} className="text-gray-500" />} />
-        </Section>
-
-        <Section title="Remote Access">
-          <RemoteAccessSettings />
-        </Section>
-
-        <UpdateSection />
-
-        <Section title="Privacy">
-          <div className="space-y-2 py-1 text-[0.65rem] text-gray-500 dark:text-gray-400 leading-relaxed">
-            <div className="flex items-start gap-2">
-              <Lock size={12} className="mt-0.5 shrink-0 text-emerald-500" />
-              <div>
-                <p className="text-gray-700 dark:text-gray-300 font-medium mb-0.5">100% local by default.</p>
-                <p>Chat, agent runs, image &amp; video generation all execute on your machine. No telemetry, no analytics, no model pings home. The only network calls LU makes unless you explicitly opt in are: update checks against GitHub Releases, and cloud provider APIs (OpenAI, Anthropic, etc.) that you configure yourself with your own API keys.</p>
+          <Section title="Onboarding">
+            <div className="flex items-center justify-between py-1">
+              <div className="flex items-start gap-2">
+                <GraduationCap size={12} className="mt-0.5 shrink-0 text-gray-500" />
+                <div className="text-[0.65rem] text-gray-600 dark:text-gray-400 leading-relaxed">
+                  Run the first-launch setup wizard again (hardware scan, recommended models, tool-calling tour).
+                </div>
               </div>
+              <button
+                onClick={async () => {
+                  useSettingsStore.getState().updateSettings({ onboardingDone: false })
+                  try { await backendCall('set_onboarding_done', { done: false }) } catch {}
+                  window.location.reload()
+                }}
+                className="ml-3 shrink-0 px-2.5 py-1 rounded-md text-[0.6rem] font-medium bg-white dark:bg-white/10 text-gray-800 dark:text-white hover:bg-gray-100 dark:hover:bg-white/15 border border-gray-200 dark:border-white/15 transition-colors"
+              >
+                Re-run onboarding
+              </button>
             </div>
-            <div className="flex items-start gap-2 pt-1.5">
-              <Shield size={12} className="mt-0.5 shrink-0 text-emerald-500" />
-              <div>
-                <p className="text-gray-700 dark:text-gray-300 font-medium mb-0.5">You own your data.</p>
-                <p>Conversations, memories, and generated media live in <code className="px-1 py-0.5 rounded bg-black/5 dark:bg-white/5 font-mono text-[0.6rem]">%APPDATA%/Locally Uncensored</code> on Windows (or the equivalent on Linux/macOS). Back up the folder, move it between machines, or delete it — LU writes nothing else.</p>
-              </div>
-            </div>
-          </div>
-        </Section>
+          </Section>
 
-        <Section title="Onboarding">
-          <div className="flex items-center justify-between py-1">
-            <div className="flex items-start gap-2">
-              <GraduationCap size={12} className="mt-0.5 shrink-0 text-gray-500" />
-              <div className="text-[0.65rem] text-gray-600 dark:text-gray-400 leading-relaxed">
-                Run the first-launch setup wizard again (hardware scan, recommended models, tool-calling tour).
+          <UpdateSection />
+        </>)}
+
+        {/* ── AI Backends tab ──────────────────────────── */}
+        {tab === 'backends' && (<>
+          <Section title="Providers" defaultOpen>
+            <ProviderSettings />
+          </Section>
+
+          <Section title="Model Storage">
+            <HfDownloadPathSetting />
+          </Section>
+
+          <Section title="ComfyUI (Image & Video)">
+            <ComfyUISettings />
+          </Section>
+        </>)}
+
+        {/* ── Agent tab ─────────────────────────────────── */}
+        {tab === 'agent' && (<>
+          <Section title="Personas">
+            <PersonaPanel />
+          </Section>
+
+          <Section title="Memory">
+            <MemorySettings />
+          </Section>
+
+          <Section title="Claude Code">
+            <ClaudeCodeSettings />
+          </Section>
+
+          {FEATURE_FLAGS.AGENT_MODE && (
+            <Section title="Agent Permissions">
+              <PermissionSettings />
+              <button
+                onClick={() => useAgentModeStore.getState().resetTutorial()}
+                className="text-[0.6rem] text-gray-500 hover:text-gray-300 transition-colors"
+              >
+                Reset tutorial
+              </button>
+            </Section>
+          )}
+
+          {FEATURE_FLAGS.AGENT_WORKFLOWS && (
+            <Section title="Agent Workflows">
+              <WorkflowSection />
+            </Section>
+          )}
+
+          {FEATURE_FLAGS.AGENT_MODE && (
+            <Section title="MCP Servers">
+              <MCPServerSettings />
+            </Section>
+          )}
+
+          {FEATURE_FLAGS.AGENT_MODE && (
+            <Section title="Search Provider">
+              <div className="space-y-3">
+                <div>
+                  <span className="text-[0.6rem] text-gray-500 block mb-1">Provider for Agent web_search</span>
+                  <div className="flex gap-1.5">
+                    {(['auto', 'brave', 'tavily'] as const).map(p => (
+                      <button
+                        key={p}
+                        onClick={() => updateSettings({ searchProvider: p })}
+                        className={`px-2.5 py-1 rounded-md text-[0.6rem] font-medium transition-all ${
+                          settings.searchProvider === p
+                            ? 'bg-white dark:bg-white/10 text-gray-900 dark:text-white shadow-sm border border-gray-200 dark:border-white/15'
+                            : 'text-gray-500 hover:text-gray-700 dark:hover:text-white bg-gray-100 dark:bg-white/5'
+                        }`}
+                      >
+                        {p === 'auto' ? 'Auto (SearXNG > DDG)' : p === 'brave' ? 'Brave Search' : 'Tavily'}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <label className="text-[0.6rem] text-gray-500 block mb-1">Brave Search API Key</label>
+                  <input
+                    type="password"
+                    value={settings.braveApiKey}
+                    onChange={(e) => updateSettings({ braveApiKey: e.target.value })}
+                    placeholder="BSA-..."
+                    className="w-full px-2.5 py-1.5 rounded-lg bg-gray-100 dark:bg-white/5 border border-gray-200 dark:border-white/10 text-[0.65rem] text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:border-gray-400 dark:focus:border-white/25"
+                  />
+                  <span className="text-[0.5rem] text-gray-500 mt-0.5 block">Free tier: 2000 queries/month. Get key at brave.com/search/api</span>
+                </div>
+                <div>
+                  <label className="text-[0.6rem] text-gray-500 block mb-1">Tavily API Key</label>
+                  <input
+                    type="password"
+                    value={settings.tavilyApiKey}
+                    onChange={(e) => updateSettings({ tavilyApiKey: e.target.value })}
+                    placeholder="tvly-..."
+                    className="w-full px-2.5 py-1.5 rounded-lg bg-gray-100 dark:bg-white/5 border border-gray-200 dark:border-white/10 text-[0.65rem] text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:border-gray-400 dark:focus:border-white/25"
+                  />
+                  <span className="text-[0.5rem] text-gray-500 mt-0.5 block">AI-optimized search. Free tier: 1000 queries/month. Get key at tavily.com</span>
+                </div>
               </div>
+            </Section>
+          )}
+        </>)}
+
+        {/* ── Voice & Remote tab ────────────────────────── */}
+        {tab === 'voice-remote' && (<>
+          <Section title="Speech" defaultOpen>
+            <div className="flex items-center gap-3 text-[0.65rem]">
+              <span className="flex items-center gap-1">
+                {whisperLoading ? <Loader2 size={10} className="animate-spin text-gray-500" /> : whisperStatus?.available ? <Check size={10} className="text-green-500" /> : <X size={10} className="text-red-500" />}
+                <span className="text-gray-500">STT</span>
+              </span>
+              <span className="flex items-center gap-1">
+                {ttsSupported ? <Check size={10} className="text-green-500" /> : <X size={10} className="text-red-500" />}
+                <span className="text-gray-500">TTS</span>
+              </span>
             </div>
-            <button
-              onClick={async () => {
-                useSettingsStore.getState().updateSettings({ onboardingDone: false })
-                try { await backendCall('set_onboarding_done', { done: false }) } catch {}
-                window.location.reload()
-              }}
-              className="ml-3 shrink-0 px-2.5 py-1 rounded-md text-[0.6rem] font-medium bg-white dark:bg-white/10 text-gray-800 dark:text-white hover:bg-gray-100 dark:hover:bg-white/15 border border-gray-200 dark:border-white/15 transition-colors"
-            >
-              Re-run onboarding
-            </button>
-          </div>
-        </Section>
+            <InlineToggle label="TTS Enabled" enabled={voiceSettings.ttsEnabled} onChange={() => voiceSettings.updateVoiceSettings({ ttsEnabled: !voiceSettings.ttsEnabled })} icon={<Volume2 size={11} className="text-gray-500" />} />
+            <div className="flex items-center justify-between">
+              <span className="text-[0.7rem] text-gray-500">Voice</span>
+              <select
+                value={voiceSettings.ttsVoice}
+                onChange={(e) => voiceSettings.updateVoiceSettings({ ttsVoice: e.target.value })}
+                className="max-w-[180px] px-1.5 py-0.5 rounded bg-transparent border border-white/8 text-[0.65rem] text-gray-300 focus:outline-none"
+              >
+                <option value="">Default</option>
+                {voices.map((v) => <option key={v.name} value={v.name}>{v.name}</option>)}
+              </select>
+            </div>
+            <SliderControl label="Rate" value={voiceSettings.ttsRate} min={0.5} max={2} step={0.1} onChange={(v) => voiceSettings.updateVoiceSettings({ ttsRate: v })} />
+            <SliderControl label="Pitch" value={voiceSettings.ttsPitch} min={0.5} max={2} step={0.1} onChange={(v) => voiceSettings.updateVoiceSettings({ ttsPitch: v })} />
+            <InlineToggle label="Auto-send on Transcribe" enabled={voiceSettings.autoSendOnTranscribe} onChange={() => voiceSettings.updateVoiceSettings({ autoSendOnTranscribe: !voiceSettings.autoSendOnTranscribe })} icon={<Mic size={11} className="text-gray-500" />} />
+          </Section>
+
+          <Section title="Remote Access">
+            <RemoteAccessSettings />
+          </Section>
+        </>)}
 
         {/* ── Reset ──────────────────────────────────── */}
         <div className="pt-3 pb-6">

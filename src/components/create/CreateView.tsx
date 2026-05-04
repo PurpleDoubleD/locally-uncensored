@@ -126,6 +126,15 @@ export function CreateView() {
   const [installing, setInstalling] = useState(false)
   const [installLogs, setInstallLogs] = useState<string[]>([])
   const [installError, setInstallError] = useState('')
+  // P14: same Python pre-flight as the onboarding ComfyUI step. On a fresh
+  // Windows box `python` is the Microsoft Store stub which exit-1's
+  // `pip install`, leaving a half-cloned ComfyUI dir on disk. The Install
+  // button below now runs python_check first, kicks off install_python via
+  // winget if needed, and only then triggers install_comfyui.
+  const [pyInstalling, setPyInstalling] = useState(false)
+  const [pyInstallLogs, setPyInstallLogs] = useState<string[]>([])
+  const [pyInstallError, setPyInstallError] = useState('')
+  const pyInstallPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const [showConnected, setShowConnected] = useState(true)
   const [i2vUploading, setI2vUploading] = useState(false)
   const [i2vDragOver, setI2vDragOver] = useState(false)
@@ -267,8 +276,10 @@ export function CreateView() {
 
   return (
     <div className="h-full flex flex-col">
-      {/* Setup wizard */}
-      {notFound && !installing && (
+      {/* Setup wizard. Also hidden during Python install so the user
+          doesn't see the "ComfyUI not found" panel flickering above the
+          Python progress card. */}
+      {notFound && !installing && !pyInstalling && (
         <div className="border-b border-red-500/20">
           <div className="p-4 bg-red-500/5 space-y-3">
             <div className="flex items-center gap-2 text-red-400 text-sm font-medium">
@@ -280,6 +291,48 @@ export function CreateView() {
                 <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-2">Auto-install</p>
                 <button
                   onClick={async () => {
+                    // P14 pre-flight: ensure Python is installed before
+                    // ComfyUI's pip install. Newbies on a fresh Windows
+                    // hit the Microsoft Store stub otherwise.
+                    setPyInstallError('')
+                    let pythonOk = false
+                    try {
+                      const probe: any = await backendCall('python_check')
+                      pythonOk = !!probe?.available
+                    } catch { pythonOk = false }
+
+                    if (!pythonOk) {
+                      setPyInstalling(true)
+                      setPyInstallLogs(['Installing Python 3.12 via winget…'])
+                      try {
+                        await backendCall('install_python')
+                      } catch (err) {
+                        setPyInstalling(false)
+                        setPyInstallError(err instanceof Error ? err.message : 'Could not start Python install')
+                        return
+                      }
+                      pythonOk = await new Promise<boolean>((resolve) => {
+                        pyInstallPollRef.current = setInterval(async () => {
+                          try {
+                            const data: any = await backendCall('install_python_status')
+                            setPyInstallLogs(data.logs || [])
+                            if (data.status === 'complete' || data.status === 'already_installed') {
+                              if (pyInstallPollRef.current) clearInterval(pyInstallPollRef.current)
+                              setPyInstalling(false)
+                              resolve(true)
+                            } else if (data.status === 'error') {
+                              if (pyInstallPollRef.current) clearInterval(pyInstallPollRef.current)
+                              setPyInstalling(false)
+                              const lastLog = (data.logs?.length ? data.logs[data.logs.length - 1] : '') as string
+                              setPyInstallError(lastLog || 'Python install failed')
+                              resolve(false)
+                            }
+                          } catch { /* keep polling */ }
+                        }, 2000)
+                      })
+                      if (!pythonOk) return
+                    }
+
                     setInstalling(true)
                     setInstallError('')
                     setInstallLogs([])
@@ -351,6 +404,28 @@ export function CreateView() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* P14: Installing Python — shown while winget pulls Python.Python.3.12.
+          Sits above the ComfyUI install card so the dependency chain (Python
+          → ComfyUI) is visible from a single click. */}
+      {pyInstalling && (
+        <div className="border-b border-white/5">
+          <div className="p-3 bg-white/5 space-y-2">
+            <div className="flex items-center gap-2 text-gray-300 text-xs">
+              <Loader2 size={12} className="animate-spin" />
+              Installing Python 3.12 (~30 MB)...
+            </div>
+            {pyInstallLogs.length > 0 && (
+              <div className="bg-black rounded-lg p-2 max-h-32 overflow-y-auto font-mono text-[10px] text-gray-500">
+                {pyInstallLogs.slice(-10).map((log, i) => <div key={i} className="truncate">{log}</div>)}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+      {pyInstallError && !pyInstalling && (
+        <div className="border-b border-white/5 px-3 py-2 text-[10px] text-red-400 whitespace-pre-line">{pyInstallError}</div>
       )}
 
       {/* Installing */}

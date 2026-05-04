@@ -59,9 +59,12 @@ export function Onboarding() {
   const [selectedBackend, setSelectedBackend] = useState<string>('')
   const { setProviderConfig } = useProviderStore()
 
-  // ComfyUI step state
+  // ComfyUI step state. `comfyFound.complete` distinguishes a working
+  // install from a half-cloned carcass — see is_comfyui_install_complete in
+  // process.rs. UI uses `complete:false` to surface a Re-install option
+  // instead of "ComfyUI detected, Continue".
   const [comfyDetecting, setComfyDetecting] = useState(false)
-  const [comfyFound, setComfyFound] = useState<{ found: boolean; path?: string } | null>(null)
+  const [comfyFound, setComfyFound] = useState<{ found: boolean; path?: string; complete?: boolean } | null>(null)
   const [comfyInstalling, setComfyInstalling] = useState(false)
   const [comfyInstallLogs, setComfyInstallLogs] = useState<string[]>([])
   const [comfyInstallError, setComfyInstallError] = useState('')
@@ -70,6 +73,18 @@ export function Onboarding() {
   const [comfyDownloadProgress, setComfyDownloadProgress] = useState(0)
   const [comfyDownloadTotal, setComfyDownloadTotal] = useState(0)
   const [comfyDownloadSpeed, setComfyDownloadSpeed] = useState(0)
+
+  // P14: Python install state. On a fresh Windows box `python` is the
+  // Microsoft Store stub which exit-1's `pip install`. The ComfyUI install
+  // pre-flight runs `python_check`; if Python is missing we kick off
+  // `install_python` (winget Python.Python.3.12) and poll its status here
+  // before re-firing `install_comfyui`.
+  const [pythonInstalling, setPythonInstalling] = useState(false)
+  const [pythonInstallLogs, setPythonInstallLogs] = useState<string[]>([])
+  const [pythonInstallError, setPythonInstallError] = useState('')
+  const [pythonReady, setPythonReady] = useState(false)
+  const [pythonStartTime, setPythonStartTime] = useState<number | null>(null)
+  const [pythonElapsed, setPythonElapsed] = useState(0)
   const [systemVRAM, setSystemVRAM] = useState<number | null>(null)
   const [modelSubTab, setModelSubTab] = useState<'uncensored' | 'mainstream'>('uncensored')
   const [installStartTime, setInstallStartTime] = useState<number | null>(null)
@@ -253,13 +268,10 @@ export function Onboarding() {
   useEffect(() => { getSystemVRAM().then(v => setSystemVRAM(v)).catch(() => {}) }, [])
 
   // Count models the user already has installed across all backends. Used to
-  // suppress the "Recommended" starter pick when the user is clearly an
-  // experienced reinstaller — the previous version slapped "Recommended" on
-  // half a dozen 5–16 GB models for everyone, which was both noisy and a bad
-  // suggestion if you already had your own preferences. Failing the call
-  // returns 0 (no Ollama running yet → genuinely fresh install → recommend
-  // away).
-  const [existingModelCount, setExistingModelCount] = useState<number>(0)
+  // skip the model-picker step entirely when they're not a fresh install —
+  // a reinstaller / upgrader doesn't need a starter recommendation, and
+  // showing one is just nagging.
+  const [existingModelCount, setExistingModelCount] = useState<number | null>(null)
   useEffect(() => {
     if (step !== 'models') return
     let cancelled = false
@@ -270,6 +282,17 @@ export function Onboarding() {
     )
     return () => { cancelled = true }
   }, [step])
+
+  // Auto-skip the model step when the user already has installed models
+  // (P4 LU-Aufgaben: "Nur wenn der User noch gar kein Modell installiert hat.
+  // Sonst nirgendwo mehr 'Recommended'-Empfehlungen"). null = still loading,
+  // 0 = fresh, >0 = experienced — only the first two should see the picker.
+  useEffect(() => {
+    if (step === 'models' && existingModelCount !== null && existingModelCount > 0) {
+      setStep('done')
+    }
+  }, [step, existingModelCount])
+
   const showRecommendedBadge = existingModelCount === 0
 
   // Elapsed timer for ComfyUI installation
@@ -293,19 +316,83 @@ export function Onboarding() {
     return () => clearInterval(timer)
   }, [lmstudioStartTime])
 
-  // Auto-detect ComfyUI when entering the comfyui step
+  // Elapsed timer for Python installation (P14). winget pulls the Python
+  // 3.12 installer (~30 MB) and runs it silently; on a typical home
+  // connection this is ~30–60 s, but slow links can take a few minutes.
+  useEffect(() => {
+    if (!pythonStartTime) return
+    const timer = setInterval(() => setPythonElapsed(Math.floor((Date.now() - pythonStartTime) / 1000)), 1000)
+    return () => clearInterval(timer)
+  }, [pythonStartTime])
+
+  // Auto-detect ComfyUI when entering the comfyui step. We mark the install
+  // as "ready" (=> Continue button) only when both `found` AND `complete`
+  // are true. A `found && !complete` carcass (P14) keeps the install option
+  // visible so the user can re-trigger and let LU rebuild torch/deps.
   useEffect(() => {
     if (step === 'comfyui' && !comfyFound && !comfyDetecting) {
       setComfyDetecting(true)
-      backendCall<{ found: boolean; path?: string }>('find_comfyui')
+      backendCall<{ found: boolean; path?: string; complete?: boolean }>('find_comfyui')
         .then(result => {
           setComfyFound(result)
-          if (result.found) setComfyReady(true)
+          if (result.found && result.complete !== false) setComfyReady(true)
         })
-        .catch(() => setComfyFound({ found: false }))
+        .catch(() => setComfyFound({ found: false, complete: false }))
         .finally(() => setComfyDetecting(false))
     }
   }, [step])
+
+  // P14 pre-flight: ensure Python is on the box before triggering ComfyUI's
+  // pip install. On fresh Windows, `python` is the Microsoft Store stub
+  // and pip silently exit-1's, leaving a carcass on disk and a
+  // "not responding" message in the UI. Returns true once Python is ready.
+  // If Python is already installed, this is a no-op single round trip.
+  const ensurePythonInstalled = async (): Promise<boolean> => {
+    try {
+      const probe = await backendCall<{ available: boolean; path?: string | null }>('python_check')
+      if (probe?.available) return true
+    } catch {
+      // Treat as "not available" and continue to install.
+    }
+
+    setPythonInstalling(true)
+    setPythonInstallError('')
+    setPythonInstallLogs(['Installing Python 3.12 via winget…'])
+    setPythonStartTime(Date.now())
+    setPythonElapsed(0)
+
+    try {
+      await backendCall('install_python')
+    } catch (err) {
+      setPythonInstalling(false)
+      setPythonStartTime(null)
+      setPythonInstallError(err instanceof Error ? err.message : 'Python install failed to start')
+      return false
+    }
+
+    return await new Promise<boolean>((resolve) => {
+      const poll = setInterval(async () => {
+        try {
+          const status: any = await backendCall('install_python_status')
+          setPythonInstallLogs(status.logs || [])
+          if (status.status === 'complete' || status.status === 'already_installed') {
+            clearInterval(poll)
+            setPythonInstalling(false)
+            setPythonReady(true)
+            setPythonStartTime(null)
+            resolve(true)
+          } else if (status.status === 'error') {
+            clearInterval(poll)
+            setPythonInstalling(false)
+            setPythonStartTime(null)
+            const lastLog = status.logs?.[status.logs.length - 1] || 'Python install failed'
+            setPythonInstallError(lastLog)
+            resolve(false)
+          }
+        } catch { /* keep polling */ }
+      }, 2000)
+    })
+  }
 
   // GGUF download progress from downloadStore
   const currentModel = pullingModel ? ONBOARDING_MODELS.find(m => m.name === pullingModel) : null
@@ -798,8 +885,9 @@ export function Onboarding() {
               </div>
             )}
 
-            {/* Found */}
-            {comfyFound?.found && !comfyInstalling && (
+            {/* Found AND complete (a working install). The carcass case
+                is handled in the install-options block below. */}
+            {comfyFound?.found && comfyFound.complete !== false && !comfyInstalling && (
               <div className={`p-3 rounded-lg border ${isDark ? 'bg-green-500/10 border-green-500/20' : 'bg-green-50 border-green-200'}`}>
                 <div className="flex items-center gap-2 justify-center">
                   <Check size={14} className="text-green-400" />
@@ -809,11 +897,28 @@ export function Onboarding() {
               </div>
             )}
 
-            {/* Not found — install options */}
-            {comfyFound && !comfyFound.found && !comfyInstalling && !comfyReady && (
+            {/* Not found OR found-but-incomplete — install options.
+                P14: a found-but-incomplete dir is the ComfyUI carcass case;
+                the same install button restarts the flow (Python pre-flight
+                + git pull + pip install). */}
+            {comfyFound && (!comfyFound.found || comfyFound.complete === false) && !comfyInstalling && !pythonInstalling && !comfyReady && (
               <div className="space-y-2">
+                {comfyFound.found && comfyFound.complete === false && (
+                  <div className={`p-2.5 rounded-lg border ${isDark ? 'bg-amber-500/10 border-amber-500/20' : 'bg-amber-50 border-amber-200'} text-left`}>
+                    <p className={`text-[0.6rem] ${isDark ? 'text-amber-300' : 'text-amber-800'}`}>
+                      Found a previous ComfyUI install at <code className="font-mono">{comfyFound.path}</code> but it's missing PyTorch — looks like a previous install was interrupted. Click below to finish it.
+                    </p>
+                  </div>
+                )}
                 <button
                   onClick={async () => {
+                    // P14 pre-flight — install Python first if missing,
+                    // then proceed with the original ComfyUI flow. Both
+                    // progress cards animate from this single click; the
+                    // user never has to interact mid-flight.
+                    const pythonOk = await ensurePythonInstalled()
+                    if (!pythonOk) return
+
                     setComfyInstalling(true)
                     setComfyInstallError('')
                     setComfyInstallLogs(['Starting ComfyUI installation...'])
@@ -902,6 +1007,36 @@ export function Onboarding() {
               </div>
             )}
 
+            {/* P14: Python install progress card. Animates while winget
+                pulls Python.Python.3.12 (~30 MB) and runs the silent
+                installer. Sits ABOVE the ComfyUI install card so the user
+                can see the dependency chain (Python → ComfyUI) when both
+                run back-to-back from a single click. */}
+            {pythonInstalling && (
+              <div className={`p-3 rounded-lg border ${cardClass} text-left`}>
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-2">
+                    <Loader2 size={14} className="animate-spin text-purple-400" />
+                    <span className="text-[0.7rem] font-medium">Installing Python 3.12...</span>
+                  </div>
+                  <span className={`text-[0.55rem] font-mono ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>
+                    {Math.floor(pythonElapsed / 60)}:{String(pythonElapsed % 60).padStart(2, '0')}
+                  </span>
+                </div>
+                <p className={`text-[0.55rem] mb-2 ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>
+                  ComfyUI needs Python to run pip. We're installing it via winget — about 30 MB and 30–60 s on a typical connection.
+                </p>
+                <div className={`text-[0.55rem] font-mono max-h-24 overflow-y-auto space-y-0.5 ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>
+                  {pythonInstallLogs.slice(-6).map((log, i) => (
+                    <p key={i}>{log}</p>
+                  ))}
+                </div>
+              </div>
+            )}
+            {pythonInstallError && !pythonInstalling && (
+              <p className="text-[0.65rem] text-red-400 whitespace-pre-line">{pythonInstallError}</p>
+            )}
+
             {/* Installing progress */}
             {comfyInstalling && (
               <div className={`p-3 rounded-lg border ${cardClass} text-left`}>
@@ -952,7 +1087,10 @@ export function Onboarding() {
             )}
 
             <div className="flex items-center justify-center gap-2 pt-1">
-              {(comfyFound?.found || comfyReady) && (
+              {/* Continue only when ComfyUI is actually usable. A
+                  found-but-incomplete carcass shouldn't qualify — that
+                  install will fail at first generation. */}
+              {((comfyFound?.found && comfyFound.complete !== false) || comfyReady) && (
                 <button
                   onClick={() => setStep('models')}
                   className={primaryBtn}
@@ -960,15 +1098,15 @@ export function Onboarding() {
                   Continue <ArrowRight size={14} />
                 </button>
               )}
-              {!comfyInstalling && !comfyFound?.found && !comfyReady && (
+              {!comfyInstalling && !pythonInstalling && (!comfyFound?.found || comfyFound.complete === false) && !comfyReady && (
                 <>
                   <button
                     onClick={() => {
                       setComfyDetecting(true)
                       setComfyFound(null)
-                      backendCall<{ found: boolean; path?: string }>('find_comfyui')
-                        .then(result => { setComfyFound(result); if (result.found) setComfyReady(true) })
-                        .catch(() => setComfyFound({ found: false }))
+                      backendCall<{ found: boolean; path?: string; complete?: boolean }>('find_comfyui')
+                        .then(result => { setComfyFound(result); if (result.found && result.complete !== false) setComfyReady(true) })
+                        .catch(() => setComfyFound({ found: false, complete: false }))
                         .finally(() => setComfyDetecting(false))
                     }}
                     className={secondaryBtn}
@@ -997,23 +1135,27 @@ export function Onboarding() {
             exit={{ opacity: 0, y: -20 }}
           >
             <div className="text-center mb-3">
-              <h2 className="text-base font-semibold mb-1">Choose your models</h2>
+              <h2 className="text-base font-semibold mb-1">Pick a starter model</h2>
               <p className={`text-[0.7rem] ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
-                {systemVRAM ? `Showing models for your ${systemVRAM} GB GPU.` : 'Select models to install.'} You can add more later.
+                One small model to get you running. You can browse and install more from the Discover tab in Model Manager once you're in.
               </p>
             </div>
 
-            {/* Uncensored / Mainstream tabs */}
-            <div className="flex gap-4 justify-center">
-              <button onClick={() => setModelSubTab('uncensored')} className={`flex items-center gap-2 transition-all ${modelSubTab === 'uncensored' ? 'opacity-100' : 'opacity-40 hover:opacity-70'}`}>
-                <div className={`w-1 h-4 rounded-full ${modelSubTab === 'uncensored' ? 'bg-red-500' : 'bg-red-500/50'}`} />
-                <span className="text-[0.65rem] font-semibold uppercase tracking-wider">Uncensored</span>
-              </button>
-              <button onClick={() => setModelSubTab('mainstream')} className={`flex items-center gap-2 transition-all ${modelSubTab === 'mainstream' ? 'opacity-100' : 'opacity-40 hover:opacity-70'}`}>
-                <div className={`w-1 h-4 rounded-full ${modelSubTab === 'mainstream' ? 'bg-blue-500' : 'bg-blue-500/50'}`} />
-                <span className="text-[0.65rem] font-semibold uppercase tracking-wider">Mainstream</span>
-              </button>
-            </div>
+            {/* Uncensored / Mainstream tabs — only meaningful when both
+                categories have entries. With the curated single-starter list
+                (P4) the tabs are hidden; reintroduce only if the list grows. */}
+            {ONBOARDING_MODELS.some(m => m.uncensored) && ONBOARDING_MODELS.some(m => !m.uncensored) && (
+              <div className="flex gap-4 justify-center">
+                <button onClick={() => setModelSubTab('uncensored')} className={`flex items-center gap-2 transition-all ${modelSubTab === 'uncensored' ? 'opacity-100' : 'opacity-40 hover:opacity-70'}`}>
+                  <div className={`w-1 h-4 rounded-full ${modelSubTab === 'uncensored' ? 'bg-red-500' : 'bg-red-500/50'}`} />
+                  <span className="text-[0.65rem] font-semibold uppercase tracking-wider">Uncensored</span>
+                </button>
+                <button onClick={() => setModelSubTab('mainstream')} className={`flex items-center gap-2 transition-all ${modelSubTab === 'mainstream' ? 'opacity-100' : 'opacity-40 hover:opacity-70'}`}>
+                  <div className={`w-1 h-4 rounded-full ${modelSubTab === 'mainstream' ? 'bg-blue-500' : 'bg-blue-500/50'}`} />
+                  <span className="text-[0.65rem] font-semibold uppercase tracking-wider">Mainstream</span>
+                </button>
+              </div>
+            )}
 
             {isDownloading && pullingModel && (
               <div className={`p-2.5 rounded-lg border ${cardClass}`}>
