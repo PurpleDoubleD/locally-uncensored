@@ -31,18 +31,50 @@ async function getInvoke() {
  * Fetch a localhost URL, bypassing CORS in Tauri mode.
  * In dev mode: uses normal fetch().
  * In Tauri .exe: routes through Rust proxy_localhost command.
+ *
+ * `timeoutMs` is forwarded to the Rust proxy as `timeout_ms` so probes that
+ * hit "TCP connect succeeds but server never sends HTTP response" don't
+ * freeze the caller for the 5-minute default. Probe sites pass ~2000;
+ * long-running endpoints (Ollama pull, ComfyUI generate) omit it for
+ * the 300 s default. The dev-mode direct fetch path mirrors the same
+ * timeout via AbortController.
  */
 export async function localFetch(
   url: string,
-  options?: { method?: string; body?: string; headers?: Record<string, string>; signal?: AbortSignal }
+  options?: {
+    method?: string;
+    body?: string;
+    headers?: Record<string, string>;
+    signal?: AbortSignal;
+    timeoutMs?: number;
+  }
 ): Promise<Response> {
   if (!isTauri()) {
-    return fetch(url, {
-      method: options?.method || "GET",
-      headers: options?.headers,
-      body: options?.body,
-      signal: options?.signal,
-    });
+    // Mirror the Rust-side timeout in dev mode by chaining an
+    // AbortController onto whatever signal the caller provided.
+    let signal = options?.signal;
+    let abortTimer: ReturnType<typeof setTimeout> | undefined;
+    if (typeof options?.timeoutMs === "number" && options.timeoutMs > 0) {
+      const controller = new AbortController();
+      abortTimer = setTimeout(() => controller.abort(), options.timeoutMs);
+      // Plumb the user's signal too so they can still cancel manually.
+      if (options.signal) {
+        const userSig = options.signal;
+        if (userSig.aborted) controller.abort();
+        else userSig.addEventListener("abort", () => controller.abort(), { once: true });
+      }
+      signal = controller.signal;
+    }
+    try {
+      return await fetch(url, {
+        method: options?.method || "GET",
+        headers: options?.headers,
+        body: options?.body,
+        signal,
+      });
+    } finally {
+      if (abortTimer) clearTimeout(abortTimer);
+    }
   }
 
   // In Tauri: route through Rust to bypass CORS, with direct fetch fallback
@@ -54,6 +86,10 @@ export async function localFetch(
       url,
       method,
       body: options?.body || null,
+      // Snake-case to match the Rust parameter name. Tauri's invoke layer
+      // does NOT auto-convert camelCase here — the Rust command spec uses
+      // explicit field names.
+      timeout_ms: options?.timeoutMs ?? null,
     }) as string;
 
     return new Response(text, { status: 200, headers: { "Content-Type": "application/json" } });
@@ -62,17 +98,33 @@ export async function localFetch(
     console.warn('[localFetch] Proxy failed, trying direct fetch:', proxyErrMsg)
 
     // Fallback: try direct fetch (works when ComfyUI has --enable-cors-header *)
+    // Apply the same timeout to the fallback so a hanging probe doesn't sit
+    // for minutes on this path either.
+    let signal = options?.signal;
+    let abortTimer: ReturnType<typeof setTimeout> | undefined;
+    if (typeof options?.timeoutMs === "number" && options.timeoutMs > 0) {
+      const controller = new AbortController();
+      abortTimer = setTimeout(() => controller.abort(), options.timeoutMs);
+      if (options.signal) {
+        const userSig = options.signal;
+        if (userSig.aborted) controller.abort();
+        else userSig.addEventListener("abort", () => controller.abort(), { once: true });
+      }
+      signal = controller.signal;
+    }
     try {
       return await fetch(url, {
         method,
         headers: options?.body ? { "Content-Type": "application/json" } : undefined,
         body: options?.body,
-        signal: options?.signal,
+        signal,
       });
     } catch (fetchErr) {
       // Both failed — return the proxy error with details preserved
       const detail = proxyErrMsg || String(fetchErr)
       return new Response(JSON.stringify({ error: detail }), { status: 500 });
+    } finally {
+      if (abortTimer) clearTimeout(abortTimer);
     }
   }
 }

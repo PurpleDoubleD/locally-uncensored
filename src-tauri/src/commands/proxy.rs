@@ -166,13 +166,29 @@ fn validate_proxy_url(raw: &str, state: &crate::state::AppState) -> Result<(), S
 
 /// Generic localhost proxy — fetch any localhost or configured-backend URL
 /// bypassing CORS. Used for Ollama and ComfyUI API calls in production mode.
+///
+/// `timeout_ms` (optional) overrides the default 300 s timeout. Backend
+/// detection passes 2000 — without that override the onboarding "Searching
+/// for local backends..." step would freeze for 5 minutes whenever a port
+/// happens to be answered by software that takes the TCP connect but
+/// never replies HTTP (Discord report — Docker dev container on 8000,
+/// firewall throttling, another LLM tool with a slow health endpoint, ...).
+/// Long-running calls (Ollama pull, ComfyUI generate) keep the 300 s default.
 #[tauri::command]
-pub async fn proxy_localhost(url: String, method: Option<String>, body: Option<String>, state: tauri::State<'_, crate::state::AppState>) -> Result<String, String> {
+pub async fn proxy_localhost(
+    url: String,
+    method: Option<String>,
+    body: Option<String>,
+    timeout_ms: Option<u64>,
+    state: tauri::State<'_, crate::state::AppState>,
+) -> Result<String, String> {
     validate_proxy_url(&url, &state)?;
+
+    let timeout = std::time::Duration::from_millis(timeout_ms.unwrap_or(300_000));
 
     let client = reqwest::Client::builder()
         .user_agent("LocallyUncensored/2.0")
-        .timeout(std::time::Duration::from_secs(300))
+        .timeout(timeout)
         .build()
         .map_err(|e| e.to_string())?;
 
