@@ -627,8 +627,8 @@ const LMSTUDIO_INSTALLER_URL: &str =
 const LMSTUDIO_DEFAULT_PORT: u16 = 1234;
 
 fn lmstudio_lms_path() -> Option<PathBuf> {
-    // Post-install convention: `lms bootstrap` puts a launcher on PATH, but
-    // before bootstrap the .exe lives here. Try both.
+    // Post-bootstrap: `lms bootstrap` materialises the launcher here and adds
+    // the same path to PATH. Cheapest check first.
     let direct = dirs::home_dir().map(|h| h.join(".lmstudio").join("bin").join("lms.exe"));
     if let Some(ref p) = direct {
         if p.exists() {
@@ -636,7 +636,26 @@ fn lmstudio_lms_path() -> Option<PathBuf> {
         }
     }
 
-    // After bootstrap: `where lms` returns it. We resolve via PATH.
+    // Pre-bootstrap: on a fresh install, lms.exe ships inside the GUI app's
+    // resources dir before `lms bootstrap` ever runs. Calling this binary
+    // directly is how we *do* the bootstrap on a brand-new box — without it
+    // the user has to open LM Studio once from the Start menu just to seed
+    // the CLI, which is exactly the noob-cliff this sweep is removing.
+    if let Ok(la) = std::env::var("LOCALAPPDATA") {
+        let pre_bootstrap = PathBuf::from(la)
+            .join("Programs")
+            .join("LM Studio")
+            .join("resources")
+            .join("app")
+            .join(".webpack")
+            .join("lms.exe");
+        if pre_bootstrap.exists() {
+            return Some(pre_bootstrap);
+        }
+    }
+
+    // Last resort: PATH lookup. Catches non-standard installs (Chocolatey,
+    // user-relocated install dir, etc.).
     if let Ok(out) = Command::new("where").arg("lms").output() {
         if out.status.success() {
             let s = String::from_utf8_lossy(&out.stdout);
@@ -650,6 +669,20 @@ fn lmstudio_lms_path() -> Option<PathBuf> {
     }
 
     None
+}
+
+/// Path to the LM Studio GUI executable on Windows. We only need to launch
+/// this in the rare case where `lms bootstrap` from the pre-bootstrap binary
+/// reports success but `~/.lmstudio/` is still missing — some installs
+/// require a one-time GUI launch to populate user-data dirs before
+/// `lms bootstrap` will register the CLI on PATH.
+fn lmstudio_gui_exe() -> Option<PathBuf> {
+    let la = std::env::var("LOCALAPPDATA").ok()?;
+    let p = PathBuf::from(la)
+        .join("Programs")
+        .join("LM Studio")
+        .join("LM Studio.exe");
+    if p.exists() { Some(p) } else { None }
 }
 
 fn lmstudio_server_running() -> bool {
@@ -696,52 +729,85 @@ pub fn install_lmstudio(state: State<'_, AppState>) -> Result<serde_json::Value,
             }
         };
 
-        let temp_dir = std::env::temp_dir();
-        let installer_path = temp_dir.join("LMStudioSetup.exe");
-
-        println!("[LMStudio] Downloading {}", LMSTUDIO_INSTALLER_URL);
-        if let Err(e) =
-            download_file_blocking(LMSTUDIO_INSTALLER_URL, &installer_path, &lms_state)
-        {
-            let err = format!(
-                "Download failed: {}. If the network is fine, the installer URL may have rotated — fall back to https://lmstudio.ai/download in your browser.",
-                e
+        // Pre-check: if LM Studio is already installed (an `lms.exe` is
+        // findable in any of the locations `lmstudio_lms_path()` knows about)
+        // we skip the ~570 MB download entirely. Re-installing on a box where
+        // it's already there was the previous behaviour and made the
+        // "LM Studio detected but server offline" Plug-and-Play scenario
+        // turn into a 5-minute no-op download. The bootstrap + server-start
+        // steps below are idempotent, so the same code path now serves both
+        // first-install and offline-reactivation users.
+        let already_installed = lmstudio_lms_path().is_some();
+        if already_installed && lmstudio_server_running() {
+            update(
+                "complete",
+                "LM Studio is already installed and the server is up on localhost:1234.",
             );
-            println!("[LMStudio] {}", err);
-            update("error", &err);
             return;
         }
 
-        update(
-            "installing",
-            "Download complete. Running silent installer (this can take a minute)...",
-        );
+        if already_installed {
+            update(
+                "starting",
+                "LM Studio is already installed — skipping download. Bootstrapping CLI and starting server…",
+            );
+        } else {
+            let temp_dir = std::env::temp_dir();
+            let installer_path = temp_dir.join("LMStudioSetup.exe");
 
-        // electron-builder NSIS supports /S for silent install. Ignore exit
-        // code: real failures surface via the absence of lms.exe afterwards.
-        let mut cmd = Command::new(&installer_path);
-        cmd.arg("/S");
-        #[cfg(target_os = "windows")]
-        cmd.creation_flags(CREATE_NO_WINDOW);
-        match cmd.output() {
-            Ok(_) => println!("[LMStudio] Installer finished"),
-            Err(e) => {
-                let err = format!("Could not run installer: {}", e);
+            println!("[LMStudio] Downloading {}", LMSTUDIO_INSTALLER_URL);
+            if let Err(e) =
+                download_file_blocking(LMSTUDIO_INSTALLER_URL, &installer_path, &lms_state)
+            {
+                let err = format!(
+                    "Download failed: {}. If the network is fine, the installer URL may have rotated — fall back to https://lmstudio.ai/download in your browser.",
+                    e
+                );
                 println!("[LMStudio] {}", err);
                 update("error", &err);
                 return;
             }
+
+            update(
+                "installing",
+                "Download complete. Running silent installer (this can take a minute)...",
+            );
+
+            // electron-builder NSIS supports /S for silent install. Ignore exit
+            // code: real failures surface via the absence of lms.exe afterwards.
+            let mut cmd = Command::new(&installer_path);
+            cmd.arg("/S");
+            #[cfg(target_os = "windows")]
+            cmd.creation_flags(CREATE_NO_WINDOW);
+            match cmd.output() {
+                Ok(_) => println!("[LMStudio] Installer finished"),
+                Err(e) => {
+                    let err = format!("Could not run installer: {}", e);
+                    println!("[LMStudio] {}", err);
+                    update("error", &err);
+                    return;
+                }
+            }
+
+            let _ = fs::remove_file(&installer_path);
         }
 
-        let _ = fs::remove_file(&installer_path);
-
-        // Bootstrap the lms CLI. First boot of the LM Studio app sometimes
-        // does this for us, but it requires the GUI to launch — which we don't
-        // want during an unattended install. Calling `lms bootstrap` on the
-        // raw .exe handles it without touching the GUI.
+        // Bootstrap the lms CLI. We do this in two passes:
+        //   (1) Run `lms bootstrap` from whatever path `lmstudio_lms_path()`
+        //       resolves — on a fresh install that's the pre-bootstrap binary
+        //       inside `resources/app/.webpack/lms.exe`. This alone is enough
+        //       on most boxes.
+        //   (2) Verify that ~/.lmstudio/bin/lms.exe now exists. If not, some
+        //       LM Studio builds require the GUI to run once to populate
+        //       ~/.lmstudio/ before the bootstrap registers a launcher there.
+        //       In that case we briefly launch the GUI, wait for ~/.lmstudio/
+        //       to appear, retry bootstrap, then move on. The user sees the
+        //       GUI flash up — not ideal, but strictly better than the old
+        //       "Open LM Studio once from the Start menu" error dialog and a
+        //       failed install.
         update("starting", "Bootstrapping `lms` CLI...");
-        let lms = lmstudio_lms_path();
-        match &lms {
+        let initial_lms = lmstudio_lms_path();
+        match &initial_lms {
             Some(p) => {
                 let mut bs = Command::new(p);
                 bs.arg("bootstrap");
@@ -752,9 +818,58 @@ pub fn install_lmstudio(state: State<'_, AppState>) -> Result<serde_json::Value,
             None => {
                 update(
                     "error",
-                    "LM Studio installed but `lms.exe` not found. Open LM Studio once from the Start menu, then return here and click Re-Scan.",
+                    "LM Studio installed but `lms.exe` not found in any expected location. \
+                     The installer may have failed silently. Try installing LM Studio manually \
+                     from https://lmstudio.ai/download and then click Re-Scan.",
                 );
                 return;
+            }
+        }
+
+        // Did pass 1 produce ~/.lmstudio/bin/lms.exe?  If yes, skip the GUI
+        // dance entirely. If no, fall back to launching the GUI so it seeds
+        // its user-data dir, then retry bootstrap.
+        let post_bootstrap_path = dirs::home_dir()
+            .map(|h| h.join(".lmstudio").join("bin").join("lms.exe"));
+        let needs_gui_seed = post_bootstrap_path
+            .as_ref()
+            .map(|p| !p.exists())
+            .unwrap_or(true);
+
+        if needs_gui_seed {
+            update(
+                "starting",
+                "Launching LM Studio briefly to finalise CLI setup (you may see the window flash)...",
+            );
+            if let Some(gui) = lmstudio_gui_exe() {
+                let mut g = Command::new(&gui);
+                #[cfg(target_os = "windows")]
+                g.creation_flags(CREATE_NO_WINDOW);
+                let _ = g.spawn();
+            }
+
+            // Wait up to 30 s for ~/.lmstudio/ to appear. The first GUI launch
+            // typically writes this within 3–8 s, but on a slow VM 30 s is a
+            // safer ceiling than failing the install.
+            let lmstudio_dir = dirs::home_dir().map(|h| h.join(".lmstudio"));
+            for _ in 0..30 {
+                std::thread::sleep(std::time::Duration::from_secs(1));
+                if let Some(d) = &lmstudio_dir {
+                    if d.exists() {
+                        break;
+                    }
+                }
+            }
+
+            // Retry bootstrap from the (now possibly different) lms.exe.
+            // After GUI launch the .lmstudio dir might already contain a
+            // launcher; if not, the pre-bootstrap path is still valid.
+            if let Some(p) = lmstudio_lms_path() {
+                let mut bs = Command::new(&p);
+                bs.arg("bootstrap");
+                #[cfg(target_os = "windows")]
+                bs.creation_flags(CREATE_NO_WINDOW);
+                let _ = bs.output();
             }
         }
 
@@ -762,8 +877,10 @@ pub fn install_lmstudio(state: State<'_, AppState>) -> Result<serde_json::Value,
         // detaches a background httpd. --cors so LU's web view (which is on a
         // tauri:// origin) isn't blocked by the SOP. Port matches the
         // provider-store default of 1234 so user config Just Works.
+        // Re-resolve the path because the bootstrap dance above may have
+        // promoted us from the pre-bootstrap path to ~/.lmstudio/bin/lms.exe.
         update("starting", "Starting LM Studio server on port 1234...");
-        if let Some(p) = lms {
+        if let Some(p) = lmstudio_lms_path() {
             let mut srv = Command::new(&p);
             srv.args(["server", "start", "--cors", "--port"])
                 .arg(LMSTUDIO_DEFAULT_PORT.to_string())
