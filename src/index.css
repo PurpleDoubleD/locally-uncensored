@@ -45,6 +45,7 @@ body {
 /* Custom scrollbar */
 .scrollbar-thin::-webkit-scrollbar {
   width: 6px;
+  height: 6px;
 }
 
 .scrollbar-thin::-webkit-scrollbar-track {
@@ -59,6 +60,26 @@ body {
 .light .scrollbar-thin::-webkit-scrollbar-thumb {
   background: rgba(0, 0, 0, 0.15);
   border-radius: 3px;
+}
+
+/* Kill the legacy up/down arrow buttons WebView2 paints on custom-styled
+   scrollbars by default — they read as Windows-XP-era chrome and look
+   completely wrong against an otherwise modern dark UI. Affects all
+   .scrollbar-thin containers including the chat textarea. */
+.scrollbar-thin::-webkit-scrollbar-button,
+.scrollbar-thin::-webkit-scrollbar-button:start,
+.scrollbar-thin::-webkit-scrollbar-button:end,
+.scrollbar-thin::-webkit-scrollbar-button:vertical:start,
+.scrollbar-thin::-webkit-scrollbar-button:vertical:end,
+.scrollbar-thin::-webkit-scrollbar-button:horizontal:start,
+.scrollbar-thin::-webkit-scrollbar-button:horizontal:end {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+.scrollbar-thin::-webkit-scrollbar-corner {
+  background: transparent;
 }
 
 /* Range slider */

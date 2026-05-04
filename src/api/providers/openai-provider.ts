@@ -396,6 +396,26 @@ export class OpenAIProvider implements ProviderClient {
       code = 'not_found'
     }
 
+    // LM Studio: model load fails when there's no inference runtime for the
+    // model's format installed. The raw API error reads "No LM Runtime found
+    // for model format 'gguf'" which doesn't tell a noob what to do —
+    // rewrite it into actionable steps. This commonly happens on Windows
+    // ARM64 where LM Studio doesn't auto-fetch a runtime, and on any fresh
+    // install where the user installed via LU's in-app install_lmstudio.
+    // The runtime catalogue isn't reachable from `lms` CLI (no `runtime`
+    // subcommand), so the only Plug-and-Play step we can offer is a clear
+    // pointer into LM Studio's GUI.
+    if (/no\s+lm\s+runtime\s+found/i.test(message)) {
+      code = 'lmstudio_runtime_missing'
+      message =
+        "LM Studio has no inference runtime installed for GGUF models on this machine.\n\n" +
+        "Open LM Studio → click the 🔍 Discover icon in the left sidebar → " +
+        "switch to the \"Runtimes\" tab → download \"llama.cpp (CPU)\" " +
+        "(plus a GPU runtime if you have one).\n\n" +
+        "Once the runtime is downloaded, come back here and resend your message — " +
+        "no need to restart Locally Uncensored."
+    }
+
     return new ProviderError(message, 'openai', code, res.status)
   }
 }

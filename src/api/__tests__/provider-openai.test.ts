@@ -89,6 +89,77 @@ describe('OpenAIProvider', () => {
       }
       vi.restoreAllMocks()
     })
+
+    // Sweep #4 Bug (e): LM Studio's "model load failed because no inference
+    // runtime is installed" surfaces as `data.error.message` — without a rewrite
+    // the user just sees the raw API string and has no idea what to do. The
+    // parser detects the signature and replaces it with actionable Plug-and-Play
+    // guidance that points to LM Studio's GUI Runtimes tab. This test pins the
+    // detection (substring match, case-insensitive) and verifies the error
+    // gets the dedicated `lmstudio_runtime_missing` code so callers / UI can
+    // branch on it later if needed.
+    it('rewrites LM Studio "No LM Runtime found" into actionable guidance', async () => {
+      const provider = new OpenAIProvider(makeConfig({ name: 'LM Studio', isLocal: true }))
+      vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            error: {
+              message:
+                'Failed to load model "qwen2.5-0.5b-instruct". Error: No LM Runtime found for model format \'gguf\'!',
+            },
+          }),
+          { status: 400 },
+        ),
+      )
+      try {
+        await provider.listModels()
+        expect.fail('Should have thrown')
+      } catch (e: any) {
+        expect(e).toBeInstanceOf(ProviderError)
+        expect(e.code).toBe('lmstudio_runtime_missing')
+        expect(e.message).toMatch(/runtime/i)
+        expect(e.message).toMatch(/discover|runtimes/i)
+        expect(e.message).toMatch(/llama\.cpp/i)
+        // The raw API phrasing must NOT leak through unmodified.
+        expect(e.message).not.toMatch(/No LM Runtime found/)
+      }
+      vi.restoreAllMocks()
+    })
+
+    it('matches the runtime-missing pattern case-insensitively', async () => {
+      const provider = new OpenAIProvider(makeConfig({ name: 'LM Studio' }))
+      vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({ error: { message: 'NO LM RUNTIME FOUND for gguf' } }),
+          { status: 400 },
+        ),
+      )
+      try {
+        await provider.listModels()
+        expect.fail('Should have thrown')
+      } catch (e: any) {
+        expect(e.code).toBe('lmstudio_runtime_missing')
+      }
+      vi.restoreAllMocks()
+    })
+
+    it('does not rewrite unrelated 400 errors', async () => {
+      const provider = new OpenAIProvider(makeConfig({ name: 'LM Studio' }))
+      vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({ error: { message: 'Bad request: missing model' } }),
+          { status: 400 },
+        ),
+      )
+      try {
+        await provider.listModels()
+        expect.fail('Should have thrown')
+      } catch (e: any) {
+        expect(e.code).not.toBe('lmstudio_runtime_missing')
+        expect(e.message).toBe('Bad request: missing model')
+      }
+      vi.restoreAllMocks()
+    })
   })
 
   describe('listModels', () => {
