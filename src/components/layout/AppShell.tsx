@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useLayoutEffect, useState } from 'react'
 import { Header } from './Header'
 import { StaleModelsBanner } from './StaleModelsBanner'
 import { Sidebar } from './Sidebar'
@@ -167,9 +167,17 @@ export function AppShell() {
     }
   }, [])
 
-  useEffect(() => {
-    document.documentElement.classList.toggle('dark', settings.theme === 'dark')
-    document.documentElement.classList.toggle('light', settings.theme === 'light')
+  // Bug (h): synchronously sync the theme class with the persisted setting
+  // BEFORE first paint, so the user never sees a one-frame white flash on
+  // launch. useLayoutEffect runs before the browser commits the paint;
+  // useEffect (the previous code) ran after, which produced the
+  // "build sometimes opens white" symptom. Default-`dark` is also baked
+  // into index.html so the very first paint (before any React renders)
+  // is already dark even on cold-start.
+  useLayoutEffect(() => {
+    const isDark = settings.theme !== 'light' // unset / undefined → dark
+    document.documentElement.classList.toggle('dark', isDark)
+    document.documentElement.classList.toggle('light', !isDark)
   }, [settings.theme])
 
   // ── Issue #31: Ollama host sync (Rust ↔ frontend) ─────────────

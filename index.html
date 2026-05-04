@@ -1,12 +1,22 @@
 <!doctype html>
-<html lang="en">
+<!--
+  Bug (h): paint dark from the very first frame. The previous default
+  (no class on <html>) gave Tailwind nothing to match against until
+  AppShell's useEffect ran one render later — that's the "weiß flash"
+  you'd see between window-show and the first React commit, and the
+  reason the app could even render fully white if the user happened to
+  pick Light in the (now-removed) onboarding theme step. Hard-code dark
+  here; AppShell still toggles `light` on top if the user opts into it
+  via Settings → General → Appearance.
+-->
+<html lang="en" class="dark" style="background:#0a0a0a">
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/png" href="/favicon.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Locally Uncensored</title>
   </head>
-  <body>
+  <body style="background:#0a0a0a;margin:0">
     <div id="root"><div id="splash" style="position:fixed;inset:0;background:#0a0a0a;display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:9999"><img src="/LU-monogram-bw.png" width="80" height="80" alt="" style="margin-bottom:20px;opacity:0.9" /><div style="color:#444;font-size:12px;font-family:system-ui,sans-serif;letter-spacing:0.1em;text-transform:uppercase">Loading</div></div></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

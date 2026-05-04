@@ -16,8 +16,13 @@ import { getSystemVRAM } from '../../api/comfyui'
 import { pullModelTauri, checkConnection as checkOllama } from '../../api/ollama'
 import { hfUrlToOllamaRef, hfUrlToLmStudioSubdir } from '../../lib/hf-to-provider'
 
-type Step = 'welcome' | 'theme' | 'backends' | 'comfyui' | 'models' | 'done'
-const STEP_ORDER: Step[] = ['welcome', 'theme', 'backends', 'comfyui', 'models', 'done']
+// Bug (h): the dedicated 'theme' onboarding step was removed because users
+// kept ending up on Light by accident, and the project standard is "dark
+// always". Light mode stays available in Settings → General → Appearance
+// for users who explicitly want it; we just don't push them through the
+// choice on first launch anymore.
+type Step = 'welcome' | 'backends' | 'comfyui' | 'models' | 'done'
+const STEP_ORDER: Step[] = ['welcome', 'backends', 'comfyui', 'models', 'done']
 const isTauri = typeof window !== 'undefined' && !!(window as any).__TAURI_INTERNALS__
 
 /* ── Local backend info for the "nothing found" state ──────── */
@@ -494,43 +499,6 @@ export function Onboarding() {
             <p className={`text-[0.75rem] leading-relaxed ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
               Private, local AI chat. No servers, no tracking, everything stays on your machine.
             </p>
-            <button onClick={() => setStep('theme')} className={primaryBtn}>
-              Get Started <ArrowRight size={14} />
-            </button>
-          </motion.div>
-        )}
-
-        {/* Step 2: Theme */}
-        {step === 'theme' && (
-          <motion.div
-            key="theme"
-            className="max-w-sm w-full text-center space-y-4"
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -20 }}
-          >
-            <h2 className="text-base font-semibold">Choose your theme</h2>
-            <p className={`text-[0.7rem] ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>You can change this later in settings.</p>
-            <div className="flex gap-3 justify-center">
-              <button
-                onClick={() => updateSettings({ theme: 'light' })}
-                className={`flex flex-col items-center gap-2 p-4 rounded-lg border transition-all w-28 ${
-                  !isDark ? 'border-gray-900 bg-gray-50' : 'border-white/10 hover:border-white/20'
-                }`}
-              >
-                <div className="w-4 h-4 rounded-full bg-white border border-gray-300" />
-                <span className="text-[0.7rem] font-medium">Light</span>
-              </button>
-              <button
-                onClick={() => updateSettings({ theme: 'dark' })}
-                className={`flex flex-col items-center gap-2 p-4 rounded-lg border transition-all w-28 ${
-                  isDark ? 'border-white bg-white/10' : 'border-gray-200 hover:border-gray-400'
-                }`}
-              >
-                <div className="w-4 h-4 rounded-full bg-[#050505]" />
-                <span className="text-[0.7rem] font-medium">Dark</span>
-              </button>
-            </div>
             <button
               onClick={() => {
                 setStep('backends')
@@ -538,10 +506,14 @@ export function Onboarding() {
               }}
               className={primaryBtn}
             >
-              Next <ArrowRight size={14} />
+              Get Started <ArrowRight size={14} />
             </button>
           </motion.div>
         )}
+
+        {/* Step 2 (theme picker) was removed in Bug (h). Light mode is
+            still available in Settings → General → Appearance for users
+            who want it explicitly. */}
 
         {/* Step 3: Backend Detection */}
         {step === 'backends' && (
