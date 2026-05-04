@@ -139,8 +139,12 @@ describe('constants-validation', () => {
   // ── ONBOARDING_MODELS ────────────────────────────────────────
 
   describe('ONBOARDING_MODELS', () => {
-    it('has at least 10 models', () => {
-      expect(ONBOARDING_MODELS.length).toBeGreaterThanOrEqual(10)
+    // Previously asserted ≥10 entries; P4 (Sweep #2) intentionally trimmed
+    // the curated list down to a single starter pick. The list is allowed
+    // to grow over time — keep a permissive lower bound rather than a
+    // hard count.
+    it('is non-empty', () => {
+      expect(ONBOARDING_MODELS.length).toBeGreaterThanOrEqual(1)
     })
 
     it('all models have required fields', () => {
@@ -186,21 +190,34 @@ describe('constants-validation', () => {
       expect(uniqueNames.size).toBe(names.length)
     })
 
-    it('has both uncensored and mainstream models', () => {
-      const uncensored = ONBOARDING_MODELS.filter(m => m.uncensored === true)
-      const mainstream = ONBOARDING_MODELS.filter(m => !m.uncensored)
-      expect(uncensored.length).toBeGreaterThan(0)
-      expect(mainstream.length).toBeGreaterThan(0)
+    // P4 (Sweep #2 + Sweep #4 b1) intentionally trims ONBOARDING_MODELS
+    // to a single entry — the tiny 0.5B starter pick. Previous assertions
+    // demanded both categories / agent-capable entries, which were valid
+    // before the trim and break by design now. Replaced with assertions
+    // that fit the current "one-and-only starter" contract: the list is
+    // never empty, contains exactly one recommended model, and the
+    // Onboarding tab-default logic in `Onboarding.tsx::initialSubTab`
+    // can resolve to a non-empty filter for whatever category the
+    // starter belongs to.
+    it('has at least one model', () => {
+      expect(ONBOARDING_MODELS.length).toBeGreaterThan(0)
     })
 
-    it('has at least one recommended model', () => {
+    it('has exactly one recommended starter model', () => {
       const recommended = ONBOARDING_MODELS.filter(m => m.recommended === true)
-      expect(recommended.length).toBeGreaterThan(0)
+      expect(recommended.length).toBe(1)
     })
 
-    it('has at least one agent-capable model', () => {
-      const agents = ONBOARDING_MODELS.filter(m => m.agent === true)
-      expect(agents.length).toBeGreaterThan(0)
+    it('default sub-tab can resolve to a non-empty filter', () => {
+      // Mirrors Onboarding.tsx::initialSubTab — ensures the tab default
+      // points at whichever category actually has entries, so the user
+      // never lands on an empty starter step.
+      const hasUncensored = ONBOARDING_MODELS.some(m => m.uncensored)
+      const initialTab: 'uncensored' | 'mainstream' = hasUncensored ? 'uncensored' : 'mainstream'
+      const visible = ONBOARDING_MODELS.filter(m =>
+        initialTab === 'uncensored' ? m.uncensored : !m.uncensored,
+      )
+      expect(visible.length).toBeGreaterThan(0)
     })
 
     it('downloadUrl contains the filename', () => {

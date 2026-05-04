@@ -86,7 +86,19 @@ export function Onboarding() {
   const [pythonStartTime, setPythonStartTime] = useState<number | null>(null)
   const [pythonElapsed, setPythonElapsed] = useState(0)
   const [systemVRAM, setSystemVRAM] = useState<number | null>(null)
-  const [modelSubTab, setModelSubTab] = useState<'uncensored' | 'mainstream'>('uncensored')
+  // Default the active sub-tab to whichever category actually has entries.
+  // The previous fixed 'uncensored' default broke the onboarding starter card
+  // entirely once P4 trimmed ONBOARDING_MODELS down to a single mainstream
+  // entry (Qwen 2.5 0.5B): the tab switcher hides itself when only one
+  // category is populated, but the filter at render time still rejected every
+  // mainstream model — leaving the user on an empty list with only "Skip for
+  // now". This computed initial value keeps the switcher useful when both
+  // categories grow back, while making the single-entry case actually show
+  // the entry.
+  const initialSubTab: 'uncensored' | 'mainstream' = ONBOARDING_MODELS.some(m => m.uncensored)
+    ? 'uncensored'
+    : 'mainstream'
+  const [modelSubTab, setModelSubTab] = useState<'uncensored' | 'mainstream'>(initialSubTab)
   const [installStartTime, setInstallStartTime] = useState<number | null>(null)
   const [elapsed, setElapsed] = useState(0)
 
@@ -114,6 +126,14 @@ export function Onboarding() {
   const [lmstudioReady, setLmstudioReady] = useState(false)
   const [lmstudioStartTime, setLmstudioStartTime] = useState<number | null>(null)
   const [lmstudioElapsed, setLmstudioElapsed] = useState(0)
+  // Set when LM Studio is installed on the box but its embedded server is
+  // not currently listening on :1234. Surfaces a "Start LM Studio server"
+  // primary action instead of pushing the user through a redundant 570 MB
+  // re-install. The install_lmstudio Tauri command is idempotent — it
+  // detects the existing install and skips straight to bootstrap+server
+  // start — so we route through the same code path either way; only the
+  // UI labelling differs.
+  const [lmstudioOfflineDetected, setLmstudioOfflineDetected] = useState(false)
 
   const isDark = settings.theme === 'dark'
   const bgClass = isDark ? 'bg-[#0a0a0a] text-white' : 'bg-white text-gray-900'
@@ -253,31 +273,55 @@ export function Onboarding() {
   }
 
   /* ── Scan for backends ──────────────────────────────────── */
-  const runDetection = () => {
+  const runDetection = async () => {
     setDetecting(true)
-    detectLocalBackends().then((backends) => {
-      setDetectedBackends(backends)
-      if (backends.length > 0 && !selectedBackend) {
-        setSelectedBackend(backends[0].id)
-      }
-      setDetecting(false)
-    })
+    setLmstudioOfflineDetected(false)
+    const backends = await detectLocalBackends()
+    setDetectedBackends(backends)
+    if (backends.length > 0 && !selectedBackend) {
+      setSelectedBackend(backends[0].id)
+    } else if (backends.length === 0 && isTauri) {
+      // No live backend on any well-known port. Before we push the user
+      // through a 570 MB LM-Studio re-install, ask the Rust side whether
+      // LM Studio is actually present on disk — its embedded server may
+      // just be turned off. lmstudio_server_status is cheap (a single
+      // reqwest probe + a path check) and was added in the same sweep
+      // that introduced this branch.
+      try {
+        const status: any = await backendCall('lmstudio_server_status')
+        if (status?.lms_present && !status?.running) {
+          setLmstudioOfflineDetected(true)
+        }
+      } catch { /* command unavailable — ignore */ }
+    }
+    setDetecting(false)
   }
 
   // Detect system VRAM for model filtering
   useEffect(() => { getSystemVRAM().then(v => setSystemVRAM(v)).catch(() => {}) }, [])
 
-  // Count models the user already has installed across all backends. Used to
-  // skip the model-picker step entirely when they're not a fresh install —
-  // a reinstaller / upgrader doesn't need a starter recommendation, and
-  // showing one is just nagging.
+  // Count CHAT-CAPABLE models the user already has installed. Used to skip
+  // the model-picker step when they're not a fresh install — a reinstaller /
+  // upgrader doesn't need a starter rec.
+  //
+  // Embedding-only models (LM Studio's default `nomic-embed-text-v1.5`,
+  // `bge-*`, anything with `embed` in the name) are excluded because they
+  // can't drive a chat. Without this filter, a fresh LM Studio install
+  // looked like "user already has 1 model" and auto-skipped the starter
+  // card — which is exactly the noob trap we're trying to remove.
   const [existingModelCount, setExistingModelCount] = useState<number | null>(null)
   useEffect(() => {
     if (step !== 'models') return
     let cancelled = false
     import('../../api/ollama').then(({ listModels }) =>
       listModels()
-        .then(models => { if (!cancelled) setExistingModelCount(models.length) })
+        .then(models => {
+          const chatCapable = models.filter(m => {
+            const lower = (m.name || '').toLowerCase()
+            return !lower.includes('embed') && !lower.includes('bge-') && !lower.includes('nomic')
+          })
+          if (!cancelled) setExistingModelCount(chatCapable.length)
+        })
         .catch(() => { if (!cancelled) setExistingModelCount(0) })
     )
     return () => { cancelled = true }
@@ -580,9 +624,13 @@ export function Onboarding() {
             ) : (
               /* ── No backends found — install Ollama in-app ─────── */
               <>
-                <h2 className="text-base font-semibold">No local backend detected</h2>
+                <h2 className="text-base font-semibold">
+                  {lmstudioOfflineDetected ? 'LM Studio detected' : 'No local backend detected'}
+                </h2>
                 <p className={`text-[0.7rem] ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
-                  You need a local AI backend to chat. We'll install Ollama for you — it's the easiest to set up.
+                  {lmstudioOfflineDetected
+                    ? "LM Studio is installed but its server isn't currently running. Start it to use LM Studio as your backend — no re-install needed."
+                    : "You need a local AI backend to chat. We'll install Ollama for you — it's the easiest to set up."}
                 </p>
 
                 {/* Ollama ready state */}
@@ -595,8 +643,11 @@ export function Onboarding() {
                   </div>
                 )}
 
-                {/* Install button — only show when not installing and not ready */}
-                {!ollamaInstalling && !ollamaReady && (
+                {/* Ollama install button — hidden when we already know LM
+                    Studio is on the box and just needs starting; pushing
+                    Ollama in that situation is just noise and forces a
+                    second 200 MB download. */}
+                {!ollamaInstalling && !ollamaReady && !lmstudioOfflineDetected && (
                   <button
                     onClick={async () => {
                       setOllamaInstalling(true)
@@ -702,7 +753,12 @@ export function Onboarding() {
                 )}
 
                 {/* LM Studio install — alt path. Hidden once any installer is
-                    running so two heavy downloads don't kick off at once. */}
+                    running so two heavy downloads don't kick off at once.
+                    When `lmstudioOfflineDetected` is set we re-label this
+                    button as the primary action and let the same Tauri
+                    command handle it; the Rust side detects the existing
+                    install and skips straight to bootstrap+server-start
+                    instead of re-downloading. */}
                 {!lmstudioInstalling && !lmstudioReady && !ollamaInstalling && !ollamaReady && (
                   <button
                     onClick={async () => {
@@ -752,10 +808,15 @@ export function Onboarding() {
                       }
                     }}
                     className={`w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-[0.7rem] font-medium transition-all ${
-                      isDark ? 'bg-white/10 text-white hover:bg-white/15' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                      lmstudioOfflineDetected
+                        ? (isDark ? 'bg-white text-black hover:bg-gray-200' : 'bg-gray-900 text-white hover:bg-gray-800')
+                        : (isDark ? 'bg-white/10 text-white hover:bg-white/15' : 'bg-gray-100 text-gray-700 hover:bg-gray-200')
                     }`}
                   >
-                    <Download size={14} /> Or install LM Studio (GUI app, ~570 MB)
+                    <Download size={14} />
+                    {lmstudioOfflineDetected
+                      ? 'Start LM Studio server'
+                      : 'Or install LM Studio (GUI app, ~570 MB)'}
                   </button>
                 )}
 
