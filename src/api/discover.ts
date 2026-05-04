@@ -586,12 +586,19 @@ export async function searchHuggingFaceModels(query: string): Promise<DiscoverMo
       const q4File = deriveQ4FilenameFromRepo(repoName)
       const downloadUrl = `https://huggingface.co/${repo.id}/resolve/main/${q4File}`
 
+      // Display name = repo basename without the GGUF suffix. The previous
+      // version referenced an undefined `baseName` here, throwing a
+      // ReferenceError that the catch silently turned into an empty array
+      // — the user-facing P11 search was returning "No models found" for
+      // every query, even ones that match plenty of HF results.
+      const displayName = repoName.replace(/-GGUF$/i, '').replace(/-gguf$/i, '')
+
       const downloads = repo.downloads || 0
       const pullsStr = downloads > 1000000 ? `${(downloads / 1000000).toFixed(1)}M` :
         downloads > 1000 ? `${Math.round(downloads / 1000)}K` : `${downloads}`
 
       models.push({
-        name: baseName,
+        name: displayName,
         description: repo.id,
         pulls: pullsStr,
         tags: ['Q4_K_M', 'GGUF'],
@@ -602,7 +609,8 @@ export async function searchHuggingFaceModels(query: string): Promise<DiscoverMo
       })
     }
     return models
-  } catch {
+  } catch (err) {
+    console.warn('[discover] HF search failed:', err)
     return []
   }
 }
