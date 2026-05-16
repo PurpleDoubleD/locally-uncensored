@@ -1031,6 +1031,18 @@ export const CUSTOM_NODE_REGISTRY: Record<string, { repo: string; name: string; 
     name: 'ComfyUI-Allegro',
     requiredNodes: ['AllegroModelLoader', 'AllegroTextEncode', 'AllegroSampler', 'AllegroDecoder'],
   },
+  // VHS_VideoCombine — the ONLY ComfyUI node that produces actual .mp4 video
+  // output. Without it, the workflow falls back to SaveAnimatedWEBP which
+  // makes "video generation" emit an animated .webp file. Two reporters
+  // (miguelkodoatie on Discord 2026-05-14, Turbulent_Tomato7559 on Reddit
+  // 2026-05-10) hit this on v2.4.3/2.4.4: t2i works, t2v "succeeds" but the
+  // output is a .webp that no video player will open. v2.4.4 added a
+  // warning banner; v2.4.5 makes it a one-click install instead.
+  'videohelpersuite': {
+    repo: 'https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite',
+    name: 'ComfyUI-VideoHelperSuite',
+    requiredNodes: ['VHS_VideoCombine', 'VHS_LoadVideo'],
+  },
 }
 
 export interface ModelBundle {

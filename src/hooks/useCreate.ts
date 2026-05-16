@@ -25,6 +25,8 @@ import {
 } from '../api/comfyui-ws'
 import { buildDynamicWorkflow, WorkflowUnavailableError, checkVideoOutputCapability } from '../api/dynamic-workflow'
 import { getAllNodeInfo } from '../api/comfyui-nodes'
+import { installCustomNodes } from '../api/discover'
+import { backendCall } from '../api/backend'
 import { useCreateStore, type GalleryItem } from '../stores/createStore'
 import { useWorkflowStore } from '../stores/workflowStore'
 import { injectParameters } from '../api/workflows'
@@ -335,15 +337,64 @@ export function useCreate() {
             workflow = await buildTxt2ImgWorkflow(baseParams, imageModelType)
           }
         }
-        // Bug #6 (Turbulent_Tomato7559 — Reddit, 2026-05-10): warn when
-        // we'll fall back to animated .webp because VHS_VideoCombine is
-        // missing. User gets a banner explaining the output before they
-        // hit Generate and then wonder why they got an "image".
+        // Bug A (v2.4.5 — miguelkodoatie Discord 2026-05-14, Turbulent_Tomato7559
+        // Reddit 2026-05-10): when ComfyUI lacks VHS_VideoCombine the video
+        // workflow falls back to SaveAnimatedWEBP and produces an animated
+        // .webp instead of an .mp4. v2.4.4 added a warning banner; v2.4.5
+        // turns it into a blocking modal with a one-click install, so users
+        // get actual videos instead of trying to figure out why "video gen"
+        // gave them an image.
         if (mode === 'video' && builderUsed === 'dynamic') {
           try {
             const caps = await checkVideoOutputCapability()
             if (caps.webpOnly) {
-              setProgress(8, 'Heads-up: output will be animated .webp (install VHS_VideoCombine for mp4)')
+              const choice = await new Promise<'install' | 'webp' | 'cancel'>((resolve) => {
+                useCreateStore.getState().setVhsInstallPrompt(resolve)
+              })
+              useCreateStore.getState().setVhsInstallPrompt(null)
+
+              if (choice === 'cancel') {
+                setIsGenerating(false)
+                setProgress(0, '')
+                return
+              }
+              if (choice === 'install') {
+                setProgress(8, 'Installing VHS_VideoCombine (git clone + pip)...')
+                try {
+                  await installCustomNodes(['videohelpersuite'])
+                  setProgress(9, 'Restarting ComfyUI to register the new node...')
+                  try {
+                    await backendCall('stop_comfyui')
+                  } catch { /* may already be stopped */ }
+                  await new Promise(r => setTimeout(r, 2000))
+                  await backendCall('start_comfyui')
+                  // Wait for ComfyUI to come back; poll /object_info up to 30s
+                  let backUp = false
+                  for (let i = 0; i < 15; i++) {
+                    await new Promise(r => setTimeout(r, 2000))
+                    try {
+                      const ok = await checkComfyConnection()
+                      if (ok) { backUp = true; break }
+                    } catch { /* not yet */ }
+                  }
+                  if (!backUp) {
+                    setError('VHS_VideoCombine installed but ComfyUI did not come back online within 30s. Please restart ComfyUI manually and re-generate.')
+                    setIsGenerating(false)
+                    return
+                  }
+                  // Re-build the workflow now that the new node is available
+                  const genParams = { ...baseParams, frames, fps, ...(i2vImage ? { inputImage: i2vImage } : {}) }
+                  workflow = await buildDynamicWorkflow(genParams, imageModelType)
+                  setProgress(10, 'VHS installed — generating MP4...')
+                } catch (instErr) {
+                  setError(`Failed to install VHS_VideoCombine: ${instErr instanceof Error ? instErr.message : String(instErr)}. You can install it manually in ComfyUI Manager.`)
+                  setIsGenerating(false)
+                  return
+                }
+              } else {
+                // 'webp' — user opted to continue with the animated .webp
+                setProgress(8, 'Continuing with animated .webp output (no VHS_VideoCombine)')
+              }
             }
           } catch { /* non-fatal */ }
         }

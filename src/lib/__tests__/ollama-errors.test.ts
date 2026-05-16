@@ -78,6 +78,51 @@ describe('parseOllamaError', () => {
     expect(parsed.kind).toBe('other')
     expect(parsed.raw).toBe('request failed')
   })
+
+  // Bug C (v2.4.5 — Anson192 GH #39): "unable to load model: <blob-path>"
+  // means the manifest references a blob that isn't on disk. Classified as
+  // missing-blob so the Lichtschalter offers a one-click `ollama pull` repair.
+  it('detects missing-blob error from Anson192 GH Discussion #39', async () => {
+    const body = JSON.stringify({
+      error: 'unable to load model: C:\\Users\\yipan.ollama\\models\\blobs\\sha256-4974d885253dceff1f68b81592f515796d1eb7cfb2cb7775e0df193e96251e2a',
+    })
+    const res = new Response(body, { status: 500 })
+    const parsed = await parseOllamaError(res, 'HTTP 500', 'qwen3:8b')
+    expect(parsed.kind).toBe('missing-blob')
+    expect(parsed.model).toBe('qwen3:8b')
+    expect(parsed.message).toContain('blob')
+    expect(parsed.message).toContain('qwen3:8b')
+  })
+
+  it('missing-blob with no fallbackModel still classifies but leaves model null', async () => {
+    const body = JSON.stringify({
+      error: 'unable to load model: /var/lib/ollama/blobs/sha256-abc123',
+    })
+    const res = new Response(body, { status: 500 })
+    const parsed = await parseOllamaError(res)
+    expect(parsed.kind).toBe('missing-blob')
+    expect(parsed.model).toBeNull()
+    expect(parsed.message).toContain('<model>')
+  })
+
+  it('missing-blob tolerates forward + back slashes in path', async () => {
+    const back = 'unable to load model: C:\\path\\blobs\\sha256-deadbeef'
+    const fwd  = 'unable to load model: /var/lib/ollama/blobs/sha256-deadbeef'
+    for (const body of [back, fwd]) {
+      const res = new Response(JSON.stringify({ error: body }), { status: 500 })
+      const parsed = await parseOllamaError(res)
+      expect(parsed.kind).toBe('missing-blob')
+    }
+  })
+
+  it('Rust-proxy-wrapped missing-blob still classifies', async () => {
+    const wrapped = `HTTP 500: ${JSON.stringify({ error: 'unable to load model: /home/u/.ollama/models/blobs/sha256-abc' })}`
+    const body = JSON.stringify({ error: wrapped })
+    const res = new Response(body, { status: 500 })
+    const parsed = await parseOllamaError(res, 'HTTP 500', 'llama3:8b')
+    expect(parsed.kind).toBe('missing-blob')
+    expect(parsed.model).toBe('llama3:8b')
+  })
 })
 
 describe('ModelLoadError', () => {
@@ -134,5 +179,20 @@ describe('chatStyleMessage', () => {
     const res = new Response(JSON.stringify({ error: 'CUDA out of memory' }), { status: 500 })
     const parsed = await parseOllamaError(res)
     expect(chatStyleMessage(parsed)).toBe('CUDA out of memory')
+  })
+
+  it('produces terminal-instruction wording for missing-blob (with model)', async () => {
+    const res = new Response(JSON.stringify({ error: 'unable to load model: /x/blobs/sha256-abc' }), { status: 500 })
+    const parsed = await parseOllamaError(res, 'fallback', 'qwen3:8b')
+    const msg = chatStyleMessage(parsed)
+    expect(msg).toContain('Ollama could not load')
+    expect(msg).toContain('qwen3:8b')
+    expect(msg).toContain('ollama pull qwen3:8b')
+  })
+
+  it('produces generic missing-blob wording when model is unknown', async () => {
+    const res = new Response(JSON.stringify({ error: 'unable to load model: /x/blobs/sha256-abc' }), { status: 500 })
+    const parsed = await parseOllamaError(res)
+    expect(chatStyleMessage(parsed)).toContain('<model>')
   })
 })

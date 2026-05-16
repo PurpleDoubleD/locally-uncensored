@@ -18,7 +18,7 @@
  * that can trigger it (`/api/chat`, `/api/generate` via `prompt`/`completion`).
  */
 
-export type OllamaErrorKind = 'stale-manifest' | 'connection' | 'other'
+export type OllamaErrorKind = 'stale-manifest' | 'missing-blob' | 'connection' | 'other'
 
 export interface ParsedOllamaError {
   kind: OllamaErrorKind
@@ -37,15 +37,29 @@ const STALE_MANIFEST_RE =
 // Fresh pulls of the same model name succeed. Treated as stale-manifest so
 // the scan + banner can offer a one-click refresh.
 const SHOW_NOT_FOUND_RE = /model\s+['"]?([\w.:/\-]+?)['"]?\s+not\s+found/i
+// Bug C (v2.4.5 — Anson192 GH Discussion #39, RTX 4090): Ollama reports
+// `unable to load model: <path>/blobs/sha256-<hash>` (HTTP 500) when the
+// manifest references a blob that isn't on disk. Happens when blobs are
+// manually deleted, the model dir lives on an external drive that wasn't
+// mounted at pull time, or filesystem corruption. The fix is the same
+// recovery path as stale-manifest: `ollama pull <name>` re-fetches missing
+// blobs. We don't know the model NAME from this error (only the blob
+// hash), so callers carry the active model name in through ModelLoadError.
+const MISSING_BLOB_RE = /unable to load model[:\s].*blobs[\\/]+sha256-[0-9a-f]+/i
 
 /**
  * Parse an Ollama error response into a typed structure.
  * `res` must be a non-ok Response. Safe to call on already-consumed bodies
  * (will return an `other` with the fallback message).
+ *
+ * `fallbackModel` is used by missing-blob detection (Bug C) — Ollama's
+ * error string carries only the blob hash, so callers that know which
+ * model they were trying to load pass it in for the user-facing message.
  */
 export async function parseOllamaError(
   res: Response,
-  fallback = 'Ollama request failed'
+  fallback = 'Ollama request failed',
+  fallbackModel?: string,
 ): Promise<ParsedOllamaError> {
   let raw = fallback
   try {
@@ -72,6 +86,21 @@ export async function parseOllamaError(
         kind: 'stale-manifest',
         model,
         message: `Model "${model}" has a stale manifest. Run "ollama pull ${model}" to refresh.`,
+        raw,
+      }
+    }
+    // Bug C: missing-blob — the error string contains only the on-disk
+    // blob path, not the model name. We surface kind='missing-blob' with
+    // model=null and let the calling layer (loadModel) populate the model
+    // name from its arguments when constructing ModelLoadError.
+    if (MISSING_BLOB_RE.test(raw)) {
+      const model = fallbackModel || null
+      return {
+        kind: 'missing-blob',
+        model,
+        message: model
+          ? `Ollama could not load "${model}" — one of its blobs is missing on disk. Run "ollama pull ${model}" to re-fetch.`
+          : 'Ollama could not load the model — one of its blobs is missing on disk. Run "ollama pull <model>" to re-fetch.',
         raw,
       }
     }
@@ -119,6 +148,10 @@ export class ModelLoadError extends Error {
 export function chatStyleMessage(parsed: ParsedOllamaError): string {
   if (parsed.kind === 'stale-manifest' && parsed.model) {
     return `Ollama rejected "${parsed.model}" — its manifest is stale. Open a terminal and run: ollama pull ${parsed.model}   Then reload the model.`
+  }
+  if (parsed.kind === 'missing-blob') {
+    const model = parsed.model || '<model>'
+    return `Ollama could not load "${model}" — one of its on-disk blobs is missing. Open a terminal and run: ollama pull ${model}   Then reload the model.`
   }
   return parsed.message
 }

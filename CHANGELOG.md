@@ -4,6 +4,31 @@ All notable changes to Locally Uncensored are documented here.
 
 ## [Unreleased]
 
+## [2.4.5] - 2026-05-17
+
+Drop-in hotfix on top of v2.4.4. Four user-reported bugs and two carry-forward defensive fixes, collected from Discord, Reddit, and GitHub Discussions between v2.4.4-release (2026-05-11) and 2026-05-17.
+
+### Fixed — image / video creation
+- **Video output now actually produces `.mp4` files** (Bug A — miguelkodoatie Discord 14.05., Turbulent_Tomato7559 Reddit 10.05.). v2.4.4 added a warning when ComfyUI lacked `VHS_VideoCombine`, but the fallback to `SaveAnimatedWEBP` still produced an animated `.webp` "image" instead of a video. v2.4.5 turns the warning into a blocking modal with three options: install VHS now (one-click git clone + pip + ComfyUI restart, ~30 s), continue with `.webp`, or cancel. New entry `videohelpersuite` added to `CUSTOM_NODE_REGISTRY` in `src/api/discover.ts`, new `VhsInstallModal` component in `CreateView`, and a Promise-resolver bridge in `createStore.vhsInstallPrompt` so `useCreate.generate()` can await the user's choice. The install path re-builds the workflow after ComfyUI comes back, so the user gets a proper MP4 on the same Generate click instead of having to retry.
+
+### Fixed — onboarding / startup
+- **"ComfyUI loading..." now surfaces actionable UI after 60 s** (Bug B — dethlux GH #38). The previous indefinite spinner gave no diagnosis when ComfyUI's process was alive but its web server never responded (CUDA OOM, missing wheels, custom-node import crash). After a 60 s grace period, the banner now shows the elapsed time, an inline log viewer (last 30 lines of `comfyui_status.logs`), a "Kill process" button (calls existing `stop_comfyui` Tauri command), and the existing Restart button — so the user can either fix it from the logs or recover without restarting LU.
+
+### Fixed — chat / Ollama
+- **One-click repair for "unable to load model: …blobs/sha256-…" errors** (Bug C — Anson192 GH Discussion #39, RTX 4090). Ollama returns HTTP 500 with that error string when the model's manifest references a blob that isn't on disk (manual deletion, external drive offline at pull time, filesystem corruption). v2.4.5 adds a new `OllamaErrorKind = 'missing-blob'` classification in `src/lib/ollama-errors.ts` with a regex matching `unable to load model[:\s].*blobs[\\/]+sha256-[0-9a-f]+`. The error string carries only the blob hash, so `parseOllamaError` accepts an optional `fallbackModel` argument that `loadModel`, `OllamaProvider.chatStream`, and `OllamaProvider.chatWithTools` now pass through. `Header.tsx` treats missing-blob the same way as stale-manifest — the Lichtschalter's existing one-click "Refresh" button now also repairs missing-blob via `ollama pull <name>`.
+
+### Fixed — Linux / AppImage
+- **Arch / Wayland AppImage now actually paints content** (Bug D — emilmjt Discord 11.05.). The "empty window" symptom on Arch is Tauri 2 + webkit2gtk-4.1 silently failing on DMABUF buffer-sharing and DMA-compositing paths on certain Mesa versions (tauri-apps/tauri#9304). `src-tauri/src/main.rs` now sets `WEBKIT_DISABLE_DMABUF_RENDERER=1` and `WEBKIT_DISABLE_COMPOSITING_MODE=1` at startup on Linux, falling back to software composite — same workaround the GNOME and KDE maintainers recommend. Only set when the user hasn't already exported the vars themselves. `tauri.conf.json` also now declares explicit `bundle.linux.deb.depends` and `bundle.linux.rpm.depends` for `webkit2gtk-4.1`, `gtk3`, and `libayatana-appindicator3-1`, and enables `bundleMediaFramework` on AppImage so gstreamer plugins ship inside the AppImage instead of relying on the host distribution.
+
+### Tests
+- `vitest`: +7 new tests for `parseOllamaError` missing-blob coverage in `src/lib/__tests__/ollama-errors.test.ts` (Anson192 verbatim error, generic no-fallback-model, forward+back-slash tolerance, Rust-proxy wrapping, chat-style message wording with + without model).
+- `cargo check --release`: clean (1 dead-code warning on unused `save_binary_file_dialog`, pre-existing).
+- `tsc --noEmit`: clean.
+
+### Verification
+- Live E2E on Windows 10 + RTX 3060 Ti via Computer-Use: Bug A (modal triggers correctly when `VHS_VideoCombine` is removed, install path completes + restarts ComfyUI + produces MP4), Bug B (kill-after-60s flow stops a stuck ComfyUI cleanly), Bug C (missing-blob banner appears + `ollama pull` repairs).
+- Bug D verification pending Arch VirtualBox VM (no Linux box on dev machine) — env-var workaround is the documented upstream-recommended fix for the symptom class.
+
 ## [2.4.4] - 2026-05-11
 
 Hotfix sweep covering the v2.4.3 follow-up reports collected on Discord, Reddit, and GitHub Discussions between 2026-05-04 and 2026-05-11. Eight fixes total — six tied to specific Discord/Reddit reporters, one Reddit issue, and one GitHub Discussion (vokurta — RTX 6000 Blackwell, posted the same morning this sweep landed).

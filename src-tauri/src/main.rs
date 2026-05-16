@@ -14,6 +14,26 @@ use tauri::{
 };
 
 fn main() {
+    // Bug D (v2.4.5 — emilmjt Discord 2026-05-11): on Arch Linux + Wayland
+    // and on a handful of Mesa versions, Tauri 2's webkit2gtk-4.1 webview
+    // initialises with DMABUF buffer-sharing or DMA-compositing enabled
+    // and the GPU path silently fails — the window opens but the page
+    // never paints, so the user sees an empty rectangle. Disabling those
+    // two paths forces webkit back onto the slower-but-reliable software
+    // composite, which is the same workaround the GNOME, KDE, and Tauri
+    // upstream maintainers recommend (tauri-apps/tauri#9304, GNOME
+    // GitLab #1731). Only applied when the user hasn't already set the
+    // vars themselves — power users with a working DMABUF setup keep it.
+    #[cfg(target_os = "linux")]
+    {
+        if std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none() {
+            std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+        }
+        if std::env::var_os("WEBKIT_DISABLE_COMPOSITING_MODE").is_none() {
+            std::env::set_var("WEBKIT_DISABLE_COMPOSITING_MODE", "1");
+        }
+    }
+
     let app_state = AppState::new();
 
     tauri::Builder::default()

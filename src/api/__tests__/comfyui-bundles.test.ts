@@ -104,8 +104,18 @@ describe('Custom Node Registry', () => {
     expect(new Set(repos).size).toBe(repos.length)
   })
 
-  it('has 5 custom node entries', () => {
-    expect(Object.keys(CUSTOM_NODE_REGISTRY).length).toBe(5)
+  it('has 6 custom node entries', () => {
+    // v2.4.5 added 'videohelpersuite' for Bug A (MP4 video output) — when this
+    // registry grows again, bump the number AND add a smoke test below for the
+    // new entry so future drift is loud.
+    expect(Object.keys(CUSTOM_NODE_REGISTRY).length).toBe(6)
+  })
+
+  it('videohelpersuite entry routes to Kosinkadink upstream', () => {
+    const entry = CUSTOM_NODE_REGISTRY['videohelpersuite']
+    expect(entry).toBeTruthy()
+    expect(entry.repo).toBe('https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite')
+    expect(entry.requiredNodes).toContain('VHS_VideoCombine')
   })
 })
 

@@ -56,7 +56,10 @@ export function Header() {
       // the user re-pulled externally), clear it.
       markHealthFresh(modelToUse)
     } catch (e) {
-      if (e instanceof ModelLoadError && e.kind === 'stale-manifest') {
+      // Bug C (v2.4.5 — Anson192 GH #39): missing-blob errors get the same
+      // one-click repair path as stale-manifest — `ollama pull <name>`
+      // re-fetches missing blobs just like it refreshes stale manifests.
+      if (e instanceof ModelLoadError && (e.kind === 'stale-manifest' || e.kind === 'missing-blob')) {
         setStaleError({ model: e.model, message: e.message })
         syncStaleToStore(e.model)
       }
@@ -71,7 +74,7 @@ export function Header() {
       await unloadModel(modelToUse)
       setIsModelLoaded(false)
     } catch (e) {
-      if (e instanceof ModelLoadError && e.kind === 'stale-manifest') {
+      if (e instanceof ModelLoadError && (e.kind === 'stale-manifest' || e.kind === 'missing-blob')) {
         setStaleError({ model: e.model, message: e.message })
         syncStaleToStore(e.model)
       }

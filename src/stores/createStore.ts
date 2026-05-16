@@ -86,6 +86,11 @@ interface CreateState {
   imageModelList: ClassifiedModel[]
   videoModelList: ClassifiedModel[]
   comfyRunning: boolean
+  /** Bug A (v2.4.5): when video generation is about to fall back to .webp
+   * because VHS_VideoCombine is missing, useCreate sets this resolver and
+   * CreateView pops the modal. The user picks "install", "webp", or
+   * "cancel"; resolver fires with the choice and useCreate continues. */
+  vhsInstallPrompt: ((choice: 'install' | 'webp' | 'cancel') => void) | null
 
   setPreflightStatus: (ready: boolean | null, errors: PreflightError[], warnings: string[]) => void
   setMode: (mode: 'image' | 'video') => void
@@ -119,6 +124,7 @@ interface CreateState {
   setImageModelList: (list: ClassifiedModel[]) => void
   setVideoModelList: (list: ClassifiedModel[]) => void
   setComfyRunning: (running: boolean) => void
+  setVhsInstallPrompt: (resolver: ((choice: 'install' | 'webp' | 'cancel') => void) | null) => void
 }
 
 export const useCreateStore = create<CreateState>()(
@@ -159,6 +165,7 @@ export const useCreateStore = create<CreateState>()(
       imageModelList: [],
       videoModelList: [],
       comfyRunning: false,
+      vhsInstallPrompt: null,
 
       setPreflightStatus: (ready, errors, warnings) => set({ preflightReady: ready, preflightErrors: errors, preflightWarnings: warnings }),
       setMode: (mode) => set((state) => {
@@ -242,6 +249,7 @@ export const useCreateStore = create<CreateState>()(
       setImageModelList: (list) => set({ imageModelList: list }),
       setVideoModelList: (list) => set({ videoModelList: list }),
       setComfyRunning: (running) => set({ comfyRunning: running }),
+      setVhsInstallPrompt: (resolver) => set({ vhsInstallPrompt: resolver }),
     }),
     {
       name: 'create-store',

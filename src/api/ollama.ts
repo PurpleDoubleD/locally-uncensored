@@ -275,7 +275,9 @@ export async function loadModel(name: string): Promise<void> {
   })
   if (!res.ok) {
     const { parseOllamaError, ModelLoadError } = await import("../lib/ollama-errors")
-    const parsed = await parseOllamaError(res, `HTTP ${res.status}`)
+    // Pass the active name in as fallbackModel — Bug C missing-blob errors
+    // only carry the on-disk blob hash, not the model name.
+    const parsed = await parseOllamaError(res, `HTTP ${res.status}`, name)
     console.warn(`[ollama] failed to load model "${name}":`, res.status, parsed.message)
     throw new ModelLoadError(parsed, name)
   }

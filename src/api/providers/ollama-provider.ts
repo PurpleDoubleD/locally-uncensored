@@ -109,7 +109,7 @@ export class OllamaProvider implements ProviderClient {
 
     if (!res.ok) {
       throw new ProviderError(
-        await this.extractError(res, 'Chat failed'),
+        await this.extractError(res, 'Chat failed', model),
         'ollama', 'network', res.status,
       )
     }
@@ -178,7 +178,7 @@ export class OllamaProvider implements ProviderClient {
 
     if (!res.ok) {
       throw new ProviderError(
-        await this.extractError(res, 'Tool calling failed'),
+        await this.extractError(res, 'Tool calling failed', model),
         'ollama', 'network', res.status,
       )
     }
@@ -244,13 +244,15 @@ export class OllamaProvider implements ProviderClient {
 
   // ── Helpers ────────────────────────────────────────────────
 
-  private async extractError(res: Response, fallback: string): Promise<string> {
+  private async extractError(res: Response, fallback: string, model?: string): Promise<string> {
     try {
       // Share the detection logic with loadModel / unloadModel via ollama-errors.
       // The regex there matches chat, completion, AND generate (the Lichtschalter
       // path uses /api/generate with an empty prompt for preload — same error class).
+      // Bug C: thread the request's `model` arg through so missing-blob errors,
+      // which only carry the on-disk blob hash, can name the model in the UI.
       const { parseOllamaError, chatStyleMessage } = await import('../../lib/ollama-errors')
-      const parsed = await parseOllamaError(res, fallback)
+      const parsed = await parseOllamaError(res, fallback, model)
       return chatStyleMessage(parsed)
     } catch {
       return fallback
