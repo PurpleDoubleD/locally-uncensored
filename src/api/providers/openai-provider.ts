@@ -79,10 +79,58 @@ interface OpenAIError {
 // ── Known context lengths for popular models ───────────────────
 
 const KNOWN_CONTEXT: Record<string, number> = {
+  // OpenAI
   'gpt-4o': 128000, 'gpt-4o-mini': 128000, 'gpt-4-turbo': 128000,
   'gpt-4': 8192, 'gpt-3.5-turbo': 16385,
-  'deepseek-chat': 64000, 'deepseek-reasoner': 64000,
+  'gpt-5': 200000, 'gpt-5-mini': 200000, 'gpt-5-nano': 200000,
+  'o1': 200000, 'o1-preview': 128000, 'o1-mini': 128000,
+  'o3': 200000, 'o3-mini': 200000,
+  // DeepSeek
+  'deepseek-chat': 64000, 'deepseek-reasoner': 64000, 'deepseek-v3': 64000,
+  'deepseek-r1': 64000,
+  // Mistral
   'mistral-large-latest': 128000, 'mistral-small-latest': 32000,
+  'mistral-medium-latest': 32000, 'codestral-latest': 32000,
+  // Groq cloud (popular IDs)
+  'llama-3.3-70b-versatile': 131072, 'llama-3.1-70b-versatile': 131072,
+  'llama-3.1-8b-instant': 131072, 'mixtral-8x7b-32768': 32768,
+  // Common OpenRouter aliases
+  'meta-llama/llama-3.3-70b-instruct': 131072,
+  'meta-llama/llama-3.1-405b-instruct': 131072,
+  'qwen/qwen-2.5-72b-instruct': 32768,
+}
+
+// Heuristik aus dem Modell-Namen — letzter Fallback bevor wir auf den
+// konservativen 8192er-Default zurueckfallen. Wird nur erreicht wenn weder
+// KNOWN_CONTEXT noch `probeContextFromServer()` ein Ergebnis liefert.
+function guessContextFromName(model: string): number {
+  const lower = model.toLowerCase()
+  if (lower.includes('llama-3.1') || lower.includes('llama3.1')) return 131072
+  if (lower.includes('llama-3.2') || lower.includes('llama3.2')) return 131072
+  if (lower.includes('llama-3.3') || lower.includes('llama3.3')) return 131072
+  if (lower.includes('llama-3') || lower.includes('llama3')) return 8192
+  if (lower.includes('qwen2.5') || lower.includes('qwen-2.5')) return 32768
+  if (lower.includes('qwen3') || lower.includes('qwen-3')) return 32768
+  if (lower.includes('qwen2') || lower.includes('qwen-2')) return 32768
+  if (lower.includes('qwen')) return 32768
+  if (lower.includes('gemma-3') || lower.includes('gemma3')) return 8192
+  if (lower.includes('gemma-2') || lower.includes('gemma2')) return 8192
+  if (lower.includes('phi-3.5') || lower.includes('phi3.5')) return 128000
+  if (lower.includes('phi-3') || lower.includes('phi3')) return 128000
+  if (lower.includes('phi-4') || lower.includes('phi4')) return 16384
+  if (lower.includes('mistral-large') || lower.includes('mistral-small')) return 32768
+  if (lower.includes('mistral-nemo') || lower.includes('mistral-medium')) return 128000
+  if (lower.includes('mistral')) return 32768
+  if (lower.includes('mixtral')) return 32768
+  if (lower.includes('deepseek-r1') || lower.includes('deepseek-v3')) return 64000
+  if (lower.includes('deepseek')) return 32000
+  if (lower.includes('command-r')) return 128000
+  if (lower.includes('yi-')) return 32768
+  if (lower.includes('codestral')) return 32768
+  if (lower.includes('qwen2.5-coder') || lower.includes('coder')) return 32768
+  if (lower.includes('hermes')) return 8192
+  if (lower.includes('granite-3')) return 128000
+  return 8192
 }
 
 // ── Provider Implementation ────────────────────────────────────
@@ -286,12 +334,30 @@ export class OpenAIProvider implements ProviderClient {
     const data = await res.json()
     const models: OpenAIModelEntry[] = data.data || data.models || []
 
+    // Bug K: fuer lokale Backends (LM Studio etc.) probe das wahre
+    // Context-Limit vom Server. Sonst zeigen wir 8K obwohl das Modell 32K+
+    // kann. Probes laufen parallel; bei Cloud-Providers (OpenAI/OpenRouter)
+    // wuerde N+1 zu Rate-Limits fuehren, deshalb nur KNOWN_CONTEXT/Heuristik.
+    if (isLocalUrl(this.baseUrl)) {
+      return Promise.all(models.map(async m => ({
+        id: m.id,
+        name: m.id,
+        provider: 'openai' as const,
+        providerName: this.config.name,
+        contextLength:
+          KNOWN_CONTEXT[m.id] ??
+          (await this.probeContextFromServer(m.id)) ??
+          guessContextFromName(m.id),
+        supportsTools: true,
+      })))
+    }
+
     return models.map(m => ({
       id: m.id,
       name: m.id,
       provider: 'openai' as const,
       providerName: this.config.name,
-      contextLength: KNOWN_CONTEXT[m.id],
+      contextLength: KNOWN_CONTEXT[m.id] ?? guessContextFromName(m.id),
       supportsTools: true,
     }))
   }
@@ -308,8 +374,72 @@ export class OpenAIProvider implements ProviderClient {
     }
   }
 
+  /**
+   * Bug K — dynamische Context-Window-Detection fuer lokale OpenAI-compat
+   * Backends. LM Studio 0.3+ liefert die wahren Werte via Enhanced-API:
+   *   GET /api/v0/models/<id>  ->  { max_context_length, loaded_context_length, ... }
+   * Generische OpenAI-compat Server (vLLM, llama.cpp server, Aphrodite, SGLang,
+   * TabbyAPI, ...) liefern es oft im Standard-/v1/models/<id> response unter
+   * verschiedenen Keys: context_window | max_model_len | n_ctx_train | context_length.
+   *
+   * Wir bevorzugen `max_context_length` (das echte Modell-Limit) ueber
+   * `loaded_context_length` (was der User gerade in LM Studio geladen hat).
+   * Sonst sieht der User "8K" weil er LM Studio mit 8K geladen hat — obwohl
+   * sein qwen2.5:32b in Wahrheit 32K+ kann. Genau das war der Reporter-Bug.
+   *
+   * Returnt `null` wenn nichts gefunden, damit Callers cascaden koennen.
+   */
+  private async probeContextFromServer(model: string): Promise<number | null> {
+    if (!isLocalUrl(this.baseUrl)) return null
+
+    // 1. LM Studio Enhanced API: /api/v0/models/<id>
+    //    Base-URL ist typischerweise http://localhost:1234/v1 — wir tauschen
+    //    /v1 gegen /api/v0 aus. Wenn der Server kein LM Studio ist, kommt 404
+    //    zurueck und wir cascaden weiter.
+    try {
+      const lmStudioBase = this.baseUrl.replace(/\/v1\/?$/, '/api/v0')
+      const lmsRes = await localFetch(
+        `${lmStudioBase}/models/${encodeURIComponent(model)}`,
+        { headers: this.headers } as any,
+      )
+      if (lmsRes.ok) {
+        const data = await lmsRes.json()
+        const max = data?.max_context_length ?? data?.context_length
+        if (max && Number(max) > 0) return Number(max)
+      }
+    } catch { /* fall through */ }
+
+    // 2. Generic /v1/models/<id> — vLLM, llama.cpp server, etc. expose Context
+    //    unter wechselnden Keys. Wir akzeptieren das erste was > 0 ist.
+    try {
+      const res = await localFetch(
+        `${this.baseUrl}/models/${encodeURIComponent(model)}`,
+        { headers: this.headers } as any,
+      )
+      if (res.ok) {
+        const data = await res.json()
+        const ctx =
+          data?.context_window ??
+          data?.max_model_len ??
+          data?.n_ctx_train ??
+          data?.context_length
+        if (ctx && Number(ctx) > 0) return Number(ctx)
+      }
+    } catch { /* fall through */ }
+
+    return null
+  }
+
   async getContextLength(model: string): Promise<number> {
-    return KNOWN_CONTEXT[model] || 8192
+    // Cascade:
+    //   1. KNOWN_CONTEXT lookup (kein Network, instant)
+    //   2. probeContextFromServer (LM Studio enhanced + generic /v1/models/<id>)
+    //   3. Heuristik aus dem Modell-Namen
+    //   4. Konservativer 8192er-Fallback (in guessContextFromName)
+    if (KNOWN_CONTEXT[model]) return KNOWN_CONTEXT[model]
+    const probed = await this.probeContextFromServer(model)
+    if (probed) return probed
+    return guessContextFromName(model)
   }
 
   // ── Message conversion ───────────────────────────────────────

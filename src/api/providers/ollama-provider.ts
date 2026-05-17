@@ -229,6 +229,14 @@ export class OllamaProvider implements ProviderClient {
   }
 
   async getContextLength(model: string): Promise<number> {
+    // Bug K: dieselbe Cascade-Logik wie in src/api/ollama.ts::getModelContext.
+    // Vorher hat dieser Provider NUR `general.context_length` gecheckt — aber
+    // viele Ollama-Modelle (z.B. qwen2.5:*, llama3.x:*) lassen das leer und
+    // setzen stattdessen architecture-specific keys wie `qwen2.context_length`
+    // oder `llama.context_length`. Mit dem alten Code zeigte LU 4096 obwohl
+    // Modelle real 32K-128K koennen. Live-verified auf Arch 2026-05-17 gegen
+    // pacman-ollama 0.23.2 + qwen2.5:0.5b (general.context_length=None,
+    // qwen2.context_length=32768).
     try {
       const res = await localFetch(this.apiUrl('/show'), {
         method: 'POST',
@@ -236,7 +244,31 @@ export class OllamaProvider implements ProviderClient {
       })
       if (!res.ok) return 4096
       const info = await res.json()
-      return info?.model_info?.['general.context_length'] || info?.parameters?.num_ctx || 4096
+
+      // 1. model_info: prefer `general.context_length`, then architecture-specific
+      //    `.context_length` keys (gemma2.context_length, qwen2.context_length, etc.)
+      const modelInfo = info?.model_info || {}
+      const contextFromInfo =
+        modelInfo['general.context_length'] ||
+        Object.entries(modelInfo).find(([k]) => k.endsWith('.context_length'))?.[1]
+      if (contextFromInfo && Number(contextFromInfo) > 0) {
+        return Number(contextFromInfo)
+      }
+
+      // 2. parameters: can be an object with `num_ctx`, or a Modelfile-style string
+      //    like "num_ctx 8192\nstop ..."
+      const params = info?.parameters
+      if (params) {
+        if (typeof params === 'object' && params.num_ctx) {
+          return Number(params.num_ctx)
+        }
+        if (typeof params === 'string') {
+          const match = params.match(/num_ctx\s+(\d+)/)
+          if (match) return Number(match[1])
+        }
+      }
+
+      return 4096
     } catch {
       return 4096
     }

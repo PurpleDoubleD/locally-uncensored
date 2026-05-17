@@ -225,6 +225,63 @@ describe('OllamaProvider', () => {
         })
       )
     })
+
+    // Bug K — viele Ollama-Modelle (qwen2.5, llama3.x, gemma2) lassen
+    // `general.context_length` leer und schreiben den echten Wert in
+    // architecture-specific Keys wie `qwen2.context_length` oder
+    // `llama.context_length`. Live verified auf Arch 2026-05-17 gegen
+    // pacman-ollama qwen2.5:0.5b: general.context_length=undefined,
+    // qwen2.context_length=32768.
+    it('Bug K: reads architecture-specific .context_length (qwen2.context_length)', async () => {
+      const provider = new OllamaProvider(makeConfig())
+      mockLocalFetch.mockResolvedValueOnce(
+        new Response(JSON.stringify({
+          model_info: {
+            'general.architecture': 'qwen2',
+            'qwen2.context_length': 32768,
+            // general.context_length is NOT set, as observed in real qwen2.5:0.5b
+          },
+        }), { status: 200 })
+      )
+      expect(await provider.getContextLength('qwen2.5:0.5b')).toBe(32768)
+    })
+
+    it('Bug K: reads llama.context_length for llama3.x models', async () => {
+      const provider = new OllamaProvider(makeConfig())
+      mockLocalFetch.mockResolvedValueOnce(
+        new Response(JSON.stringify({
+          model_info: {
+            'general.architecture': 'llama',
+            'llama.context_length': 131072,
+          },
+        }), { status: 200 })
+      )
+      expect(await provider.getContextLength('llama3.1:8b')).toBe(131072)
+    })
+
+    it('Bug K: prefers general.context_length over architecture-specific when both set', async () => {
+      const provider = new OllamaProvider(makeConfig())
+      mockLocalFetch.mockResolvedValueOnce(
+        new Response(JSON.stringify({
+          model_info: {
+            'general.context_length': 8192,
+            'llama.context_length': 131072, // model file says 131K but general overrides
+          },
+        }), { status: 200 })
+      )
+      expect(await provider.getContextLength('weird:model')).toBe(8192)
+    })
+
+    it('Bug K: reads num_ctx from parameters string (Modelfile-style)', async () => {
+      const provider = new OllamaProvider(makeConfig())
+      mockLocalFetch.mockResolvedValueOnce(
+        new Response(JSON.stringify({
+          model_info: {},
+          parameters: 'num_ctx 16384\nstop "<|im_end|>"\nstop "<|endoftext|>"',
+        }), { status: 200 })
+      )
+      expect(await provider.getContextLength('custom:7b')).toBe(16384)
+    })
   })
 
   describe('chatWithTools', () => {

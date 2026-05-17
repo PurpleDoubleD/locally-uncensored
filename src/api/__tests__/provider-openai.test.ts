@@ -40,9 +40,158 @@ describe('OpenAIProvider', () => {
       expect(await provider.getContextLength('gpt-4o-mini')).toBe(128000)
     })
 
-    it('returns default 8192 for unknown models', async () => {
+    it('returns default 8192 for fully unknown models (cloud, no probe)', async () => {
       const provider = new OpenAIProvider(makeConfig())
       expect(await provider.getContextLength('unknown-model')).toBe(8192)
+    })
+
+    // Bug K — Heuristik aus Modell-Namen darf 8192-Fallback ueberschreiben
+    // sobald der Name eine bekannte Familie matched. Sonst zeigt LU 8K obwohl
+    // qwen2.5:32b in Wirklichkeit 32K kann.
+    it('guesses 131072 for llama-3.1 family from name (cloud)', async () => {
+      const provider = new OpenAIProvider(makeConfig())
+      expect(await provider.getContextLength('llama-3.1-70b')).toBe(131072)
+    })
+
+    it('guesses 32768 for qwen2.5 family from name (cloud)', async () => {
+      const provider = new OpenAIProvider(makeConfig())
+      expect(await provider.getContextLength('qwen2.5-32b-instruct')).toBe(32768)
+    })
+
+    it('guesses 64000 for deepseek-r1 family from name (cloud)', async () => {
+      const provider = new OpenAIProvider(makeConfig())
+      expect(await provider.getContextLength('deepseek-r1-distill-llama-70b')).toBe(64000)
+    })
+  })
+
+  // Bug K — LM Studio Enhanced API probing. Wenn baseUrl lokal ist, soll
+  // openai-provider /api/v0/models/<id> abfragen und max_context_length
+  // bevorzugen (das echte Modell-Limit), nicht loaded_context_length (was
+  // der User in LM Studio gerade geladen hat). Sonst zeigt LU 8K obwohl
+  // das Modell 128K kann.
+  //
+  // Test-Setup: backend.ts/isTauri() pruefr `window.__TAURI_INTERNALS__`.
+  // In Node-Vitest gibt es kein `window` — wir mocken ein leeres Object,
+  // damit isTauri() false zurueckgibt und localFetch durch zu fetch
+  // durchgreifen kann (dann mockable via globalThis.fetch).
+  describe('Bug K — probeContextFromServer (LM Studio Enhanced API)', () => {
+    beforeEach(() => {
+      if (typeof (globalThis as any).window === 'undefined') {
+        (globalThis as any).window = {}
+      }
+    })
+    afterEach(() => {
+      vi.restoreAllMocks()
+      // Window leak ist OK fuer andere Tests — sie checken eh nicht window.
+    })
+
+    it('uses LM Studio max_context_length from /api/v0/models/<id> for local URL', async () => {
+      const provider = new OpenAIProvider(makeConfig({
+        baseUrl: 'http://localhost:1234/v1',
+        isLocal: true,
+      }))
+      // Modell-Name darf KEIN Match in guessContextFromName ausloesen, damit
+      // wir bewiesen kriegen dass der Probe-Pfad lief (sonst koennte 131072
+      // auch aus der Heuristik kommen).
+      vi.spyOn(globalThis, 'fetch').mockImplementation(async (url: any) => {
+        const u = url.toString()
+        if (u.includes('/api/v0/models/custom-undocumented-model')) {
+          return new Response(JSON.stringify({
+            id: 'custom-undocumented-model',
+            max_context_length: 131072,
+            loaded_context_length: 8192, // user has 8K loaded but model can do 128K
+          }), { status: 200 })
+        }
+        return new Response('', { status: 404 })
+      })
+      // Should return 131072 (max from probe), not 8192 (heuristic fallback)
+      expect(await provider.getContextLength('custom-undocumented-model')).toBe(131072)
+    })
+
+    it('falls back to generic /v1/models/<id> if LM Studio endpoint 404s', async () => {
+      const provider = new OpenAIProvider(makeConfig({
+        baseUrl: 'http://localhost:8000/v1',
+        isLocal: true,
+      }))
+      // vLLM exposes max_model_len, not max_context_length
+      vi.spyOn(globalThis, 'fetch').mockImplementation(async (url: any) => {
+        const u = url.toString()
+        if (u.includes('/api/v0/models/')) {
+          return new Response('', { status: 404 })
+        }
+        if (u.includes('/v1/models/some-custom-model')) {
+          return new Response(JSON.stringify({
+            id: 'some-custom-model',
+            max_model_len: 65536,
+          }), { status: 200 })
+        }
+        return new Response('', { status: 404 })
+      })
+      expect(await provider.getContextLength('some-custom-model')).toBe(65536)
+    })
+
+    it('accepts n_ctx_train as fallback key (llama.cpp server style)', async () => {
+      const provider = new OpenAIProvider(makeConfig({
+        baseUrl: 'http://localhost:8080/v1',
+        isLocal: true,
+      }))
+      vi.spyOn(globalThis, 'fetch').mockImplementation(async (url: any) => {
+        const u = url.toString()
+        if (u.includes('/api/v0/models/')) return new Response('', { status: 404 })
+        if (u.includes('/v1/models/llama-server-model')) {
+          return new Response(JSON.stringify({
+            n_ctx_train: 32768,
+          }), { status: 200 })
+        }
+        return new Response('', { status: 404 })
+      })
+      expect(await provider.getContextLength('llama-server-model')).toBe(32768)
+    })
+
+    it('cascades to name heuristic when probe returns nothing', async () => {
+      const provider = new OpenAIProvider(makeConfig({
+        baseUrl: 'http://localhost:1234/v1',
+        isLocal: true,
+      }))
+      vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('', { status: 404 }))
+      // 'mistral-large-stuff' is unknown to KNOWN_CONTEXT but heuristic
+      // matches 'mistral-large' → 32768
+      expect(await provider.getContextLength('mistral-large-stuff')).toBe(32768)
+    })
+
+    it('skips probe entirely for cloud providers (no N+1 risk)', async () => {
+      const provider = new OpenAIProvider(makeConfig({
+        baseUrl: 'https://api.openai.com/v1',
+        isLocal: false,
+      }))
+      const fetchSpy = vi.spyOn(globalThis, 'fetch')
+      // gpt-4o is in KNOWN_CONTEXT, returns instantly without fetching
+      expect(await provider.getContextLength('gpt-4o')).toBe(128000)
+      expect(fetchSpy).not.toHaveBeenCalled()
+    })
+
+    it('listModels enriches contextLength via probe for local backends', async () => {
+      const provider = new OpenAIProvider(makeConfig({
+        baseUrl: 'http://localhost:1234/v1',
+        isLocal: true,
+      }))
+      vi.spyOn(globalThis, 'fetch').mockImplementation(async (url: any) => {
+        const u = url.toString()
+        if (u.endsWith('/v1/models')) {
+          return new Response(JSON.stringify({
+            data: [{ id: 'custom-unknown-7b', object: 'model' }],
+          }), { status: 200 })
+        }
+        if (u.includes('/api/v0/models/custom-unknown-7b')) {
+          return new Response(JSON.stringify({
+            max_context_length: 131072,
+          }), { status: 200 })
+        }
+        return new Response('', { status: 404 })
+      })
+      const models = await provider.listModels()
+      expect(models).toHaveLength(1)
+      expect(models[0].contextLength).toBe(131072)
     })
   })
 
@@ -52,10 +201,13 @@ describe('OpenAIProvider', () => {
       vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
         new Response(JSON.stringify({ error: { message: 'Invalid key' } }), { status: 401 })
       )
-      await expect(provider.listModels()).rejects.toThrow(ProviderError)
-      await expect(
-        provider.listModels().catch(e => e.code)
-      ).resolves.toBe(undefined) // second call needs new mock
+      try {
+        await provider.listModels()
+        expect.fail('Should have thrown')
+      } catch (e: any) {
+        expect(e).toBeInstanceOf(ProviderError)
+        expect(e.code).toBe('auth')
+      }
       vi.restoreAllMocks()
     })
 
