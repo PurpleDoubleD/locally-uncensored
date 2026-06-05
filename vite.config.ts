@@ -93,14 +93,30 @@ function comfyLauncher(): Plugin {
   let comfyProcess: ChildProcess | null = null
   let comfyLogs: string[] = []
 
+  const getComfyPython = (comfyPath: string): string => {
+    const isWin = process.platform === 'win32'
+    const venvPaths = isWin
+      ? [join(comfyPath, '.venv', 'Scripts', 'python.exe'), join(comfyPath, 'venv', 'Scripts', 'python.exe')]
+      : [join(comfyPath, '.venv', 'bin', 'python'), join(comfyPath, 'venv', 'bin', 'python')]
+    
+    for (const vp of venvPaths) {
+      if (existsSync(vp)) {
+        console.log(`[ComfyUI] Found virtual environment python: ${vp}`)
+        return vp
+      }
+    }
+    return pythonBin
+  }
+
   const startComfy = (comfyPath: string): { status: string; path: string } => {
     if (comfyProcess && !comfyProcess.killed) {
       return { status: 'already_running', path: comfyPath }
     }
 
     comfyLogs = []
-    console.log(`[ComfyUI] Spawning ${pythonBin} in: ${comfyPath}`)
-    comfyProcess = spawn(pythonBin, ['main.py', '--listen', '127.0.0.1', '--port', '8188'], {
+    const executable = getComfyPython(comfyPath)
+    console.log(`[ComfyUI] Spawning ${executable} in: ${comfyPath}`)
+    comfyProcess = spawn(executable, ['main.py', '--listen', '127.0.0.1', '--port', '8188'], {
       cwd: comfyPath,
       stdio: ['ignore', 'pipe', 'pipe'],
       shell: false,
@@ -168,8 +184,14 @@ function comfyLauncher(): Plugin {
         // 3. Strict Origin Validation (Defense in Depth)
         const origin = req.headers.origin;
         if (origin) {
-            const allowedOrigins = ['http://localhost:5173', 'http://127.0.0.1:5173', 'tauri://localhost', 'http://tauri.localhost'];
-            if (!allowedOrigins.includes(origin)) {
+            const host = req.headers.host;
+            const allowedOrigins = ['tauri://localhost', 'http://tauri.localhost'];
+            if (host) {
+                allowedOrigins.push(`http://${host}`);
+                allowedOrigins.push(`https://${host}`);
+            }
+            const isLocalOrigin = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin);
+            if (!allowedOrigins.includes(origin) && !isLocalOrigin) {
                 res.writeHead(403, { 'Content-Type': 'text/plain' });
                 res.end('Forbidden: Invalid Origin (CSRF Protection)');
                 return;
@@ -400,30 +422,48 @@ function comfyLauncher(): Plugin {
           const filename = basename(destPath)
           activeDownloads.set(id, { progress: 0, total: 0, speed: 0, filename, status: 'connecting' })
 
+          const { existsSync, statSync, createWriteStream, mkdirSync } = require('fs')
+
           const doRequest = (requestUrl: string, redirectCount = 0) => {
             if (redirectCount > 5) { promiseReject(new Error('Too many redirects')); return }
+            
+            let existingSize = 0
+            const headers: Record<string, string> = { 'User-Agent': 'LocallyUncensored/1.1' }
+            
+            if (existsSync(destPath)) {
+              try {
+                existingSize = statSync(destPath).size
+                if (existingSize > 0) {
+                  headers['Range'] = `bytes=${existingSize}-`
+                }
+              } catch {}
+            }
+
             const proto = requestUrl.startsWith('https') ? https : http
-            proto.get(requestUrl, { headers: { 'User-Agent': 'LocallyUncensored/1.1' } }, (response) => {
+            proto.get(requestUrl, { headers }, (response) => {
               if (response.statusCode && response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
                 doRequest(response.headers.location, redirectCount + 1)
                 return
               }
-              if (response.statusCode !== 200) {
+              
+              const isPartial = response.statusCode === 206
+              if (response.statusCode !== 200 && !isPartial) {
                 activeDownloads.set(id, { ...activeDownloads.get(id)!, status: 'error', error: `HTTP ${response.statusCode}` })
                 promiseReject(new Error(`HTTP ${response.statusCode}`))
                 return
               }
 
-              const total = parseInt(response.headers['content-length'] || '0', 10)
-              let downloaded = 0
+              const contentLength = parseInt(response.headers['content-length'] || '0', 10)
+              const totalBytes = isPartial ? (contentLength + existingSize) : contentLength
+              let downloaded = isPartial ? existingSize : 0
               let lastTime = Date.now()
-              let lastBytes = 0
+              let lastBytes = downloaded
 
               const dir = dirname(destPath)
               if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
-              const file = createWriteStream(destPath)
+              const file = createWriteStream(destPath, { flags: isPartial ? 'a' : 'w' })
 
-              activeDownloads.set(id, { progress: 0, total, speed: 0, filename, status: 'downloading' })
+              activeDownloads.set(id, { progress: downloaded, total: totalBytes, speed: 0, filename, status: 'downloading' })
 
               response.on('data', (chunk: Buffer) => {
                 downloaded += chunk.length
@@ -433,14 +473,14 @@ function comfyLauncher(): Plugin {
                   const speed = (downloaded - lastBytes) / dt
                   lastTime = now
                   lastBytes = downloaded
-                  activeDownloads.set(id, { progress: downloaded, total, speed, filename, status: 'downloading' })
+                  activeDownloads.set(id, { progress: downloaded, total: totalBytes, speed, filename, status: 'downloading' })
                 }
               })
 
               response.pipe(file)
               file.on('finish', () => {
                 file.close()
-                activeDownloads.set(id, { progress: total || downloaded, total: total || downloaded, speed: 0, filename, status: 'complete' })
+                activeDownloads.set(id, { progress: totalBytes || downloaded, total: totalBytes || downloaded, speed: 0, filename, status: 'complete' })
                 console.log(`[Download] Complete: ${filename}`)
                 promiseResolve()
               })
@@ -575,13 +615,7 @@ function comfyLauncher(): Plugin {
             const { existsSync, statSync } = require('fs')
             const { join } = require('path')
             const home = require('os').homedir()
-            // Try to find ComfyUI path
-            const candidates = [
-              join(home, 'ComfyUI'),
-              join(home, 'Desktop', 'ComfyUI'),
-              'C:\\ComfyUI',
-            ]
-            const comfyPath = candidates.find(p => existsSync(p)) || join(home, 'ComfyUI')
+            const comfyPath = findComfyUI() || join(home, 'ComfyUI')
             const results = (files as any[]).map((f: any) => {
               const subfolder = f.subfolder || ''
               const dir = subfolder.startsWith('custom_nodes')
