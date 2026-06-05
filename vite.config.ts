@@ -252,23 +252,24 @@ function comfyLauncher(): Plugin {
       server.middlewares.use('/comfyui', (req, res, next) => {
         if (req.method !== 'POST') return next()
         const targetPath = (req.url || '').replace(/^\/comfyui/, '') || '/'
-        let body = ''
-        req.on('data', (chunk: any) => { body += chunk })
+        const chunks: Buffer[] = []
+        req.on('data', (chunk: Buffer) => { chunks.push(chunk) })
         req.on('end', () => {
+          const body = Buffer.concat(chunks)
+          const headers = { ...req.headers }
+          delete headers.host
           const proxyReq = http.request({
             hostname: '127.0.0.1',
             port: 8188,
             path: targetPath,
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers,
           }, (proxyRes) => {
-            const chunks: Buffer[] = []
-            proxyRes.on('data', (c: Buffer) => chunks.push(c))
+            const resChunks: Buffer[] = []
+            proxyRes.on('data', (c: Buffer) => resChunks.push(c))
             proxyRes.on('end', () => {
-              const responseBody = Buffer.concat(chunks).toString()
-              res.writeHead(proxyRes.statusCode || 500, {
-                'Content-Type': proxyRes.headers['content-type'] || 'application/json',
-              })
+              const responseBody = Buffer.concat(resChunks)
+              res.writeHead(proxyRes.statusCode || 500, proxyRes.headers)
               res.end(responseBody)
             })
           })
