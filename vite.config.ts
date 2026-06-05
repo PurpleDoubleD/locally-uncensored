@@ -116,7 +116,7 @@ function comfyLauncher(): Plugin {
     comfyLogs = []
     const executable = getComfyPython(comfyPath)
     console.log(`[ComfyUI] Spawning ${executable} in: ${comfyPath}`)
-    comfyProcess = spawn(executable, ['main.py', '--listen', '127.0.0.1', '--port', '8188'], {
+    comfyProcess = spawn(executable, ['main.py', '--listen', '127.0.0.1', '--port', '8188', '--enable-cors-header', '*'], {
       cwd: comfyPath,
       stdio: ['ignore', 'pipe', 'pipe'],
       shell: false,
