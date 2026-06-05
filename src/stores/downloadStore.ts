@@ -55,8 +55,9 @@ export const useDownloadStore = create<DownloadStoreState>()((set, get) => ({
           const meta = get().downloadMeta[id]
           if (meta?.importToOllama && meta.ollamaRef && meta.destDir && !importing[id]) {
             set(s => ({ importing: { ...s.importing, [id]: true } }))
-            const { join } = require('path')
-            const ggufPath = join(meta.destDir, id)
+            const isWin = meta.destDir.includes('\\')
+            const sep = isWin ? '\\' : '/'
+            const ggufPath = meta.destDir.endsWith(sep) ? `${meta.destDir}${id}` : `${meta.destDir}${sep}${id}`
             createOllamaModel(meta.ollamaRef, `FROM "${ggufPath}"`)
               .then(() => {
                 set(s => {
