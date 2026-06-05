@@ -623,11 +623,16 @@ function comfyLauncher(): Plugin {
             const home = require('os').homedir()
             const comfyPath = findComfyUI() || join(home, 'ComfyUI')
             const results = (files as any[]).map((f: any) => {
-              const subfolder = f.subfolder || ''
-              const dir = subfolder.startsWith('custom_nodes')
-                ? join(comfyPath, subfolder)
-                : join(comfyPath, 'models', subfolder)
-              const filePath = join(dir, f.filename)
+              let filePath = ''
+              if (f.destDir) {
+                filePath = join(f.destDir, f.filename)
+              } else {
+                const subfolder = f.subfolder || ''
+                const dir = subfolder.startsWith('custom_nodes')
+                  ? join(comfyPath, subfolder)
+                  : join(comfyPath, 'models', subfolder)
+                filePath = join(dir, f.filename)
+              }
               if (existsSync(filePath)) {
                 const actual = statSync(filePath).size
                 const threshold = f.expectedBytes > 0 ? f.expectedBytes * 0.9 : 0

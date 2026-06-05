@@ -12,7 +12,7 @@ import {
   type DiscoverModel, type DownloadProgress, type ModelBundle, type CivitAIModelResult,
 } from '../../api/discover'
 import { getSystemVRAM } from '../../api/comfyui'
-import { openExternal } from '../../api/backend'
+import { openExternal, backendCall } from '../../api/backend'
 import { useModels } from '../../hooks/useModels'
 import { useDownloadStore } from '../../stores/downloadStore'
 import { useProviderStore } from '../../stores/providerStore'
@@ -208,6 +208,50 @@ export function DiscoverModels({ category }: Props) {
     return () => window.removeEventListener('comfyui-model-downloaded', handler)
   }, [category])
 
+  // Check which GGUF text models are REALLY downloaded to the provider directory
+  const [ggufStatuses, setGgufStatuses] = useState<Record<string, boolean>>({})
+  const refreshGgufStatuses = () => {
+    if (category !== 'text') return
+    const textModels = [...getUncensoredTextModels(), ...getMainstreamTextModels()]
+    const baseDir = hfModelPath || hfOverride?.trim()
+    if (!baseDir) return
+
+    const checkFiles = textModels
+      .filter(m => m.filename && m.downloadUrl)
+      .map(m => {
+        const subdir = hfUrlToLmStudioSubdir(m.downloadUrl!)
+        const targetDir = subdir ? `${baseDir}/${subdir}` : baseDir
+        const expectedBytes = m.sizeGB ? Math.round(m.sizeGB * 1_073_741_824) : 0
+        return {
+          destDir: targetDir,
+          filename: m.filename!,
+          expectedBytes,
+        }
+      })
+
+    if (checkFiles.length === 0) return
+
+    backendCall('check_model_sizes', { files: checkFiles })
+      .then((results: any[]) => {
+        const statuses: Record<string, boolean> = {}
+        for (const r of results) {
+          statuses[r.filename] = r.complete
+        }
+        setGgufStatuses(statuses)
+      })
+      .catch(() => {})
+  }
+
+  useEffect(() => {
+    refreshGgufStatuses()
+  }, [category, hfModelPath, hfOverride])
+
+  useEffect(() => {
+    const handler = () => refreshGgufStatuses()
+    window.addEventListener('comfyui-model-downloaded', handler)
+    return () => window.removeEventListener('comfyui-model-downloaded', handler)
+  }, [category, hfModelPath, hfOverride])
+
   // Start polling on mount if there are active downloads
   useEffect(() => {
     dlStore.getState().refresh()
@@ -281,6 +325,8 @@ export function DiscoverModels({ category }: Props) {
   // signal as the fastest-path (no fetchModels round-trip needed).
   const isModelFullyInstalled = (model: DiscoverModel) => {
     if (model.filename && downloads[model.filename]?.status === 'complete') return true
+
+    if (model.filename && ggufStatuses[model.filename]) return true
 
     const installedOllamaTags = installedModels
       .filter(m => m.provider === 'ollama')
