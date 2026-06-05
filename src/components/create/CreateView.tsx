@@ -183,7 +183,7 @@ export function CreateView() {
     connected, imageModels, videoModels, samplerList, schedulerList,
     videoBackend, modelsLoaded, modelLoadError, checkConnection, fetchModels, runPreflight, generate, cancel,
   } = useCreate()
-  const { mode, setMode, imageSubMode, error, preflightReady, preflightErrors, preflightWarnings, videoModel, i2vImage, setI2vImage, i2iImage, setI2iImage, denoise, setDenoise } = useCreateStore()
+  const { mode, setMode, imageSubMode, error, setError, preflightReady, preflightErrors, preflightWarnings, videoModel, i2vImage, setI2vImage, i2iImage, setI2iImage, denoise, setDenoise } = useCreateStore()
 
   const [status, setStatus] = useState<ComfyStatus | null>(null)
   const [startupLogs, setStartupLogs] = useState<string[]>([])
@@ -341,11 +341,13 @@ export function CreateView() {
   const handleI2vUpload = async (file: File) => {
     if (!file.type.startsWith('image/')) return
     setI2vUploading(true)
+    setError(null)
     try {
       const filename = await uploadImage(file)
       setI2vImage(filename)
     } catch (err) {
       console.error('[CreateView] I2V image upload failed:', err)
+      setError(err instanceof Error ? err.message : String(err))
     }
     setI2vUploading(false)
   }
@@ -360,11 +362,13 @@ export function CreateView() {
   const handleI2iUpload = async (file: File) => {
     if (!file.type.startsWith('image/')) return
     setI2iUploading(true)
+    setError(null)
     try {
       const filename = await uploadImage(file)
       setI2iImage(filename)
     } catch (err) {
       console.error('[CreateView] I2I image upload failed:', err)
+      setError(err instanceof Error ? err.message : String(err))
     }
     setI2iUploading(false)
   }
