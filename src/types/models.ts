@@ -77,6 +77,7 @@ export interface PullProgress {
   digest?: string
   total?: number
   completed?: number
+  error?: string
 }
 
 
