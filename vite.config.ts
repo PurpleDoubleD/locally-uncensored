@@ -543,6 +543,12 @@ function comfyLauncher(): Plugin {
             }
 
             const id = filename
+            const active = activeDownloads.get(id)
+            if (active && (active.status === 'downloading' || active.status === 'connecting')) {
+              res.writeHead(200, { 'Content-Type': 'application/json' })
+              res.end(JSON.stringify({ status: 'started', id }))
+              return
+            }
             console.log(`[Download] Starting: ${filename} → ${destDir}`)
             downloadFile(url, destPath, id).catch(err => console.error(`[Download] Failed: ${err.message}`))
 
@@ -675,6 +681,12 @@ function comfyLauncher(): Plugin {
               }
             }
             const id = filename
+            const active = activeDownloads.get(id)
+            if (active && (active.status === 'downloading' || active.status === 'connecting')) {
+              res.writeHead(200, { 'Content-Type': 'application/json' })
+              res.end(JSON.stringify({ status: 'started', id }))
+              return
+            }
             console.log(`[Download] Starting to path: ${filename} → ${destDir}`)
             downloadFile(url, destPath, id).catch(err => console.error(`[Download] Failed: ${err.message}`))
             res.writeHead(200, { 'Content-Type': 'application/json' })
