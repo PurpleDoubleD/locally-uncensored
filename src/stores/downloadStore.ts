@@ -1,20 +1,22 @@
 import { create } from 'zustand'
 import { getDownloadProgress, pauseDownload, cancelDownload, resumeDownload, startModelDownload, startModelDownloadToPath, lookupFileMeta, type DownloadProgress } from '../api/discover'
+import { createOllamaModel } from '../api/ollama'
 
 // Maps filename → bundle name for grouped display
 type BundleMap = Record<string, string>
 
 interface DownloadStoreState {
   downloads: Record<string, DownloadProgress>
-  downloadMeta: Record<string, { url: string; subfolder: string; destDir?: string }>
+  downloadMeta: Record<string, { url: string; subfolder: string; destDir?: string; importToOllama?: boolean; ollamaRef?: string }>
   bundleMap: BundleMap  // filename → bundle name
+  importing: Record<string, boolean>
   polling: boolean
   pollInterval: ReturnType<typeof setInterval> | null
 
   refresh: () => Promise<void>
   startPolling: () => void
   stopPolling: () => void
-  setMeta: (filename: string, url: string, subfolder: string, destDir?: string) => void
+  setMeta: (filename: string, url: string, subfolder: string, destDir?: string, importToOllama?: boolean, ollamaRef?: string) => void
   setBundleGroup: (bundleName: string, filenames: string[]) => void
   markComplete: (filename: string) => void
   pause: (id: string) => Promise<void>
@@ -35,6 +37,7 @@ export const useDownloadStore = create<DownloadStoreState>()((set, get) => ({
   downloads: {},
   downloadMeta: {},
   bundleMap: {},
+  importing: {},
   polling: false,
   pollInterval: null,
 
@@ -44,20 +47,67 @@ export const useDownloadStore = create<DownloadStoreState>()((set, get) => ({
     try {
       const prog = await getDownloadProgress()
       const prev = get().downloads
+      const importing = get().importing
 
       // Detect newly completed downloads and dispatch event
       for (const [id, d] of Object.entries(prog)) {
         if (d.status === 'complete' && prev[id]?.status !== 'complete') {
-          window.dispatchEvent(new CustomEvent('comfyui-model-downloaded'))
+          const meta = get().downloadMeta[id]
+          if (meta?.importToOllama && meta.ollamaRef && meta.destDir && !importing[id]) {
+            set(s => ({ importing: { ...s.importing, [id]: true } }))
+            const { join } = require('path')
+            const ggufPath = join(meta.destDir, id)
+            createOllamaModel(meta.ollamaRef, `FROM "${ggufPath}"`)
+              .then(() => {
+                set(s => {
+                  const updatedImporting = { ...s.importing }
+                  delete updatedImporting[id]
+                  return { importing: updatedImporting }
+                })
+                get().markComplete(id)
+                window.dispatchEvent(new CustomEvent('comfyui-model-downloaded'))
+                window.dispatchEvent(new CustomEvent('lu-models-refresh'))
+              })
+              .catch((err) => {
+                set(s => {
+                  const updatedImporting = { ...s.importing }
+                  delete updatedImporting[id]
+                  return {
+                    importing: updatedImporting,
+                    downloads: {
+                      ...s.downloads,
+                      [id]: { progress: 1, total: 1, speed: 0, filename: id, status: 'error', error: `Ollama Import Failed: ${err.message}` }
+                    }
+                  }
+                })
+              })
+          } else if (!meta?.importToOllama) {
+            window.dispatchEvent(new CustomEvent('comfyui-model-downloaded'))
+          }
         }
       }
 
       const count = get().pollCount + 1
-      set({ downloads: prog, pollCount: count })
+      const mappedProg: Record<string, DownloadProgress> = {}
+      for (const [key, val] of Object.entries(prog)) {
+        if (importing[key]) {
+          mappedProg[key] = {
+            progress: 1,
+            total: 1,
+            speed: 0,
+            filename: key,
+            status: 'connecting',
+            error: undefined
+          }
+        } else {
+          mappedProg[key] = val
+        }
+      }
+      set({ downloads: mappedProg, pollCount: count })
 
       // Auto-stop polling when no active downloads
       // BUT wait at least 5 polls before stopping — gives Rust time to register new downloads
-      const hasActive = Object.values(prog).some(d =>
+      const hasActive = Object.values(mappedProg).some(d =>
         d.status === 'downloading' || d.status === 'connecting' || d.status === 'pausing'
       )
       if (!hasActive && count >= 5) {
@@ -83,8 +133,8 @@ export const useDownloadStore = create<DownloadStoreState>()((set, get) => ({
     set({ polling: false, pollInterval: null })
   },
 
-  setMeta: (filename, url, subfolder, destDir?) => {
-    set(s => ({ downloadMeta: { ...s.downloadMeta, [filename]: { url, subfolder, destDir } } }))
+  setMeta: (filename, url, subfolder, destDir?, importToOllama?, ollamaRef?) => {
+    set(s => ({ downloadMeta: { ...s.downloadMeta, [filename]: { url, subfolder, destDir, importToOllama, ollamaRef } } }))
   },
 
   setBundleGroup: (bundleName, filenames) => {

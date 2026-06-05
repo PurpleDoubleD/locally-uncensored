@@ -324,3 +324,12 @@ export async function checkConnection(): Promise<boolean> {
     return false
   }
 }
+
+export async function createOllamaModel(name: string, modelfile: string): Promise<Response> {
+  const res = await localFetchStream(isTauri() ? ollamaUrl("/create") : "/api/create", {
+    method: "POST",
+    body: JSON.stringify({ name, modelfile, stream: false }),
+  })
+  if (!res.ok) throw new Error("Failed to create model in Ollama")
+  return res
+}

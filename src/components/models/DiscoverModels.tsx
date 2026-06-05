@@ -523,32 +523,9 @@ export function DiscoverModels({ category }: Props) {
     }
     if (!model.downloadUrl || !model.filename) return
 
-    // HF GGUF: which backend will actually consume this file?
-    //   - LM Studio explicitly enabled (openai provider with LM Studio name)
-    //     → nest under <user>/<repo>/ so its scanner picks it up.
-    //   - Otherwise default to Ollama (always-on by default), pull via
-    //     /api/pull as `hf.co/<user>/<repo>:<quant>`.
-    // Why: a raw .gguf in `~/.ollama/models` or in `~/.lmstudio/models/`
-    // (top-level) is silently ignored by both runtimes. That mismatch is
-    // the bug behind the "downloaded model never appears" reports.
     const lmStudioOn = !!providers.openai?.enabled && (providers.openai?.name || '').toLowerCase().includes('lm studio')
     const ollamaOn = !!providers.ollama?.enabled
-    const useOllamaPath = !lmStudioOn && ollamaOn
-
-    if (useOllamaPath) {
-      const ref = hfUrlToOllamaRef(model.downloadUrl, model.filename)
-      if (!ref) {
-        setInstallError(`Cannot map ${model.name} to an Ollama HF reference — try LM Studio.`)
-        return
-      }
-      try {
-        await pullModel(ref)
-      } catch (e) {
-        console.error('Ollama HF pull failed:', e)
-        setInstallError(`Ollama pull failed: ${e instanceof Error ? e.message : String(e)}. Is Ollama running?`)
-      }
-      return
-    }
+    const useOllamaImport = !lmStudioOn && ollamaOn
 
     const destDir = hfModelPath || (await detectProviderModelPath(providers.openai?.name || 'LM Studio'))
     if (!destDir) {
@@ -559,8 +536,19 @@ export function DiscoverModels({ category }: Props) {
 
     const subdir = hfUrlToLmStudioSubdir(model.downloadUrl)
     const targetDir = subdir ? `${destDir}/${subdir}` : destDir
+
     try {
-      dlStore.getState().setMeta(model.filename, model.downloadUrl, 'gguf', targetDir)
+      if (useOllamaImport) {
+        const ref = hfUrlToOllamaRef(model.downloadUrl, model.filename)
+        if (!ref) {
+          setInstallError(`Cannot map ${model.name} to an Ollama HF reference.`)
+          return
+        }
+        dlStore.getState().setMeta(model.filename, model.downloadUrl, 'gguf', targetDir, true, ref)
+      } else {
+        dlStore.getState().setMeta(model.filename, model.downloadUrl, 'gguf', targetDir, false)
+      }
+
       const expectedBytes = model.sizeGB ? Math.round(model.sizeGB * 1_073_741_824) : undefined
       await startModelDownloadToPath(model.downloadUrl, targetDir, model.filename, expectedBytes)
       dlStore.getState().startPolling()
