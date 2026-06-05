@@ -1,4 +1,4 @@
-import { comfyuiUrl, localFetch } from "./backend"
+import { comfyuiUrl, localFetch, isTauri } from "./backend"
 
 // ─── Types ───
 
@@ -810,6 +810,18 @@ export async function getHistory(promptId: string): Promise<any> {
 // ─── Upload image to ComfyUI (for I2V models like SVD, FramePack) ───
 
 export async function uploadImage(file: File): Promise<string> {
+  if (isTauri()) {
+    const arrayBuffer = await file.arrayBuffer()
+    const fileBytes = Array.from(new Uint8Array(arrayBuffer))
+    const { invoke } = await import('@tauri-apps/api/core')
+    const resText = await invoke<string>('proxy_comfyui_upload', {
+      fileBytes,
+      filename: file.name,
+    })
+    const data = JSON.parse(resText)
+    return data.name
+  }
+
   const formData = new FormData()
   formData.append('image', file)
   formData.append('overwrite', 'true')

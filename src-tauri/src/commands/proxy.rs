@@ -398,3 +398,46 @@ pub async fn ollama_search(query: String) -> Result<serde_json::Value, String> {
         Err(_) => Ok(serde_json::json!({"models": []})),
     }
 }
+
+/// Upload an image to ComfyUI, bypassing CORS.
+#[tauri::command]
+pub async fn proxy_comfyui_upload(
+    file_bytes: Vec<u8>,
+    filename: String,
+    state: tauri::State<'_, crate::state::AppState>,
+) -> Result<String, String> {
+    let host = state.comfy_host.lock().unwrap().clone();
+    let port = *state.comfy_port.lock().unwrap();
+    let url = format!("http://{}:{}/upload/image", host, port);
+
+    validate_proxy_url(&url, &state)?;
+
+    let part = reqwest::multipart::Part::bytes(file_bytes)
+        .file_name(filename.clone())
+        .mime_str("application/octet-stream")
+        .map_err(|e| e.to_string())?;
+
+    let form = reqwest::multipart::Form::new()
+        .part("image", part)
+        .text("overwrite", "true");
+
+    let client = reqwest::Client::builder()
+        .user_agent("LocallyUncensored/2.0")
+        .timeout(std::time::Duration::from_secs(120))
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    let resp = client.post(&url)
+        .multipart(form)
+        .send()
+        .await
+        .map_err(|e| format!("proxy_comfyui_upload error: {}", e))?;
+
+    if !resp.status().is_success() {
+        let status = resp.status().as_u16();
+        let text = resp.text().await.unwrap_or_default();
+        return Err(format!("HTTP {}: {}", status, text));
+    }
+
+    resp.text().await.map_err(|e| e.to_string())
+}
