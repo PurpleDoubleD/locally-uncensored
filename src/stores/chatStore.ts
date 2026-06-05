@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { persist } from 'zustand/middleware'
+import { persist, createJSONStorage } from 'zustand/middleware'
 import { v4 as uuid } from 'uuid'
 import type { Conversation, Message } from '../types/chat'
 import type { AgentBlock } from '../types/agent-mode'
@@ -207,7 +207,7 @@ export const useChatStore = create<ChatState>()(
     }),
     {
       name: 'chat-conversations',
-      storage: createSafeStorage(),
+      storage: createJSONStorage(() => createSafeStorage()),
       // Phase 1 (v2.4.0) — rehydrate legacy singular `toolCall` into `toolCalls[]`.
       // Persisted shape is whatever was last written; migration runs on every load
       // and is idempotent, so version bumps are not required.

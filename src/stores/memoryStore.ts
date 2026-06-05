@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { persist } from 'zustand/middleware'
+import { persist, createJSONStorage } from 'zustand/middleware'
 import { v4 as uuid } from 'uuid'
 import type { MemoryEntry, MemoryCategory, MemoryFile, MemoryType, MemorySettings } from '../types/agent-mode'
 import { MEMORY_MIGRATION_MAP, MEMORY_BUDGET_TIERS } from '../types/agent-mode'
@@ -410,7 +410,7 @@ export const useMemoryStore = create<MemoryState>()(
     {
       name: 'locally-uncensored-memory',
       version: 2,
-      storage: createSafeStorage(),
+      storage: createJSONStorage(() => createSafeStorage()),
       migrate: (persistedState, version) => {
         if (version < 2) {
           return migrateV1toV2(persistedState)
