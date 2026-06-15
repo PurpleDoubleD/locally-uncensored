@@ -54,6 +54,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
   { id: 'deepseek', name: 'DeepSeek', providerId: 'openai', baseUrl: 'https://api.deepseek.com/v1', isLocal: false, placeholder: 'sk-...' },
   { id: 'mistral', name: 'Mistral', providerId: 'openai', baseUrl: 'https://api.mistral.ai/v1', isLocal: false, placeholder: 'sk-...' },
   { id: 'openai', name: 'OpenAI', providerId: 'openai', baseUrl: 'https://api.openai.com/v1', isLocal: false, placeholder: 'sk-...' },
+  { id: 'litellm', name: 'LiteLLM', providerId: 'openai', baseUrl: 'http://localhost:4000/v1', isLocal: true },
   { id: 'custom-openai', name: 'Custom (OpenAI-compat)', providerId: 'openai', baseUrl: '', isLocal: false },
 
   // Anthropic (own API format)
