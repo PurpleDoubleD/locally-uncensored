@@ -1,4 +1,5 @@
 import { getImageUrl } from '../../../api/comfyui'
+import { fetchLocalhostBytes, isComfyLocal, isTauri } from '../../../api/backend'
 import { refreshResultUrl } from '../../../api/cloud/jobs'
 import { useCreateStore, type GalleryItem } from '../../../stores/createStore'
 
@@ -7,6 +8,68 @@ import { useCreateStore, type GalleryItem } from '../../../stores/createStore'
  *  → ComfyUI /view path (filename/subfolder). */
 export function galleryItemUrl(item: GalleryItem): string {
   return item.remoteUrl ?? item.dataUrl ?? getImageUrl(item.filename, item.subfolder)
+}
+
+// ── Remote-ComfyUI media resolution ────────────────────────────────────────
+// The WebView CSP (tauri.conf.json) only whitelists localhost/127.0.0.1 for
+// img-src/media-src, so an <img>/<video> src pointed at a user-configured
+// REMOTE ComfyUI host (LAN IP, Tailscale, homelab) is blocked before the
+// request leaves the app — even though generation and downloads work, because
+// those go through the Rust IPC proxy (proxy_localhost_stream), which CSP does
+// not gate. The fix: pull the bytes through that same proxy (fetchLocalhostBytes)
+// and hand the WebView a blob: URL, which the CSP already allows. No CSP change.
+//
+// item.id → live object URL. Kept in-memory; revoke via revokeGalleryBlob when
+// an item leaves the gallery so a long session doesn't leak blob URLs.
+const blobCache = new Map<string, string>()
+// item.id → in-flight fetch, so concurrent renders don't refetch the same item.
+const blobInflight = new Map<string, Promise<string>>()
+
+/** True for a remote-ComfyUI item that must be proxied to display: Tauri, a
+ *  non-local host, a real /view file, and no cloud/in-memory URL already set. */
+export function needsProxyResolve(item: GalleryItem): boolean {
+  return isTauri() && !isComfyLocal() && !!item.filename && !item.remoteUrl && !item.dataUrl
+}
+
+/** Synchronously read an already-resolved blob URL (empty string if none). */
+export function getCachedGalleryBlob(id: string): string {
+  return blobCache.get(id) ?? ''
+}
+
+/** Fetch a remote-ComfyUI item's bytes through the Rust proxy and cache a
+ *  blob: URL for it. Marks the item available on success; on failure delegates
+ *  to recoverGalleryUrl (flags `unavailable` — the honest "engine unreachable"
+ *  signal here) and rethrows. */
+export function resolveGalleryBlobUrl(item: GalleryItem): Promise<string> {
+  const cached = blobCache.get(item.id)
+  if (cached) return Promise.resolve(cached)
+  const pending = blobInflight.get(item.id)
+  if (pending) return pending
+  const p = (async () => {
+    try {
+      const bytes = await fetchLocalhostBytes(getImageUrl(item.filename, item.subfolder))
+      const type = item.type === 'video' ? 'video/mp4' : 'image/png'
+      const url = URL.createObjectURL(new Blob([bytes], { type }))
+      blobCache.set(item.id, url)
+      markGalleryItemAvailable(item)
+      return url
+    } catch (err) {
+      recoverGalleryUrl(item)
+      throw err
+    } finally {
+      blobInflight.delete(item.id)
+    }
+  })()
+  blobInflight.set(item.id, p)
+  return p
+}
+
+/** Revoke and forget an item's cached blob URL (call when it leaves the gallery). */
+export function revokeGalleryBlob(id: string): void {
+  const url = blobCache.get(id)
+  if (url) URL.revokeObjectURL(url)
+  blobCache.delete(id)
+  blobInflight.delete(id)
 }
 
 // Cloud signed URLs expire ~1 h after the last read, so a persisted item's

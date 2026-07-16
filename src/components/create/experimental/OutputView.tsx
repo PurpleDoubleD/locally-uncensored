@@ -3,7 +3,8 @@ import { Cpu, Sparkles, ImageDown, Maximize2, Download, Wand2, MonitorOff } from
 import { useCreateStore, type GalleryItem, type ProgressPhase } from '../../../stores/createStore'
 import { downloadComfyFile, isTauri } from '../../../api/backend'
 import { refreshResultUrl } from '../../../api/cloud/jobs'
-import { galleryItemUrl, markGalleryItemAvailable, recoverGalleryUrl } from './galleryUrl'
+import { markGalleryItemAvailable, recoverGalleryUrl } from './galleryUrl'
+import { useResolvedMediaUrl } from './useResolvedMediaUrl'
 import { cn } from '../ui/cn'
 
 function phaseIcon(phase: ProgressPhase) {
@@ -139,7 +140,7 @@ function reconcileDims(item: GalleryItem, w: number, h: number) {
 }
 
 export function ResultView({ item, onFullscreen, onSendToEditor }: ResultProps) {
-  const url = galleryItemUrl(item)
+  const url = useResolvedMediaUrl(item)
   const download = () => void downloadGalleryItem(item)
   const isVideo = item.type === 'video'
   return (

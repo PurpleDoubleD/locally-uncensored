@@ -1,8 +1,9 @@
 import { motion, AnimatePresence } from 'framer-motion'
 import { Images, Play, PanelRightClose, PanelRightOpen, Trash2, Download, MonitorOff } from 'lucide-react'
 import { downloadMediaUrl } from '../../../lib/download-media'
-import { useCreateStore } from '../../../stores/createStore'
-import { galleryItemUrl, markGalleryItemAvailable, recoverGalleryUrl } from './galleryUrl'
+import { useCreateStore, type GalleryItem } from '../../../stores/createStore'
+import { markGalleryItemAvailable, recoverGalleryUrl, revokeGalleryBlob } from './galleryUrl'
+import { useResolvedMediaUrl } from './useResolvedMediaUrl'
 import { cn } from '../ui/cn'
 
 interface Props {
@@ -10,6 +11,61 @@ interface Props {
   onOpenChange: (open: boolean) => void
   activeId: string | null
   onSelect: (id: string) => void
+}
+
+/** One gallery thumbnail. A component (not inline JSX) so useResolvedMediaUrl —
+ *  which proxies remote-ComfyUI media into a blob: URL — can run per item; hooks
+ *  can't be called inside a .map callback. */
+function GalleryTile({ g, active, onSelect, onRemove }: {
+  g: GalleryItem
+  active: boolean
+  onSelect: (id: string) => void
+  onRemove: (id: string) => void
+}) {
+  const url = useResolvedMediaUrl(g)
+  return (
+    <div className="relative group">
+      <button
+        onClick={() => onSelect(g.id)}
+        className={cn(
+          'w-full aspect-square rounded-lg overflow-hidden border-2 transition-colors relative',
+          active ? 'border-white/60' : 'border-transparent hover:border-white/20',
+          g.intent === 'removebg' && 'lu-checker',
+        )}
+      >
+        {g.type === 'video' ? (
+          <>
+            <video src={url} muted playsInline onError={() => recoverGalleryUrl(g)} onLoadedData={() => markGalleryItemAvailable(g)} className="w-full h-full object-cover" />
+            <span className="absolute inset-0 flex items-center justify-center bg-black/20"><Play size={16} className="text-white/90" /></span>
+          </>
+        ) : (
+          <img src={url} alt="" onError={() => recoverGalleryUrl(g)} onLoad={() => markGalleryItemAvailable(g)} className="w-full h-full object-cover" />
+        )}
+        {g.unavailable && (
+          <span
+            className="absolute inset-0 flex items-center justify-center bg-black/50 text-gray-500"
+            title="Local render — the local engine isn't reachable"
+          >
+            <MonitorOff size={16} />
+          </span>
+        )}
+      </button>
+      <button
+        onClick={() => onRemove(g.id)}
+        className="absolute -top-1.5 -right-1.5 w-6 h-6 rounded-full bg-red-600/90 hover:bg-red-600 text-gray-100 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center shadow-sm"
+        title="Delete"
+      >
+        <Trash2 size={12} />
+      </button>
+      <button
+        onClick={() => { void downloadMediaUrl(url, g.filename || undefined) }}
+        className="absolute bottom-1 right-1 w-6 h-6 rounded-md bg-black/55 hover:bg-black/70 text-gray-100 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center shadow-sm"
+        title="Download"
+      >
+        <Download size={12} />
+      </button>
+    </div>
+  )
 }
 
 /**
@@ -22,6 +78,10 @@ export function CreatePanel({ open, onOpenChange, activeId, onSelect }: Props) {
   const gallery = useCreateStore((s) => s.gallery)
   const removeFromGallery = useCreateStore((s) => s.removeFromGallery)
   const count = gallery.length
+
+  // Revoke any proxied blob: URL before dropping the item, so a long session
+  // doesn't leak object URLs for deleted remote-ComfyUI renders.
+  const handleRemove = (id: string) => { revokeGalleryBlob(id); removeFromGallery(id) }
 
   const bubble =
     'my-2 mr-2 rounded-xl bg-gray-50 dark:bg-[#1e1e1e] ring-1 ring-black/[0.04] dark:ring-white/[0.05] flex flex-col overflow-hidden shrink-0'
@@ -87,47 +147,13 @@ export function CreatePanel({ open, onOpenChange, activeId, onSelect }: Props) {
             ) : (
               <div className="grid grid-cols-2 gap-2">
                 {gallery.map((g) => (
-                  <div key={g.id} className="relative group">
-                    <button
-                      onClick={() => onSelect(g.id)}
-                      className={cn(
-                        'w-full aspect-square rounded-lg overflow-hidden border-2 transition-colors relative',
-                        (activeId ?? gallery[0]?.id) === g.id ? 'border-white/60' : 'border-transparent hover:border-white/20',
-                        g.intent === 'removebg' && 'lu-checker',
-                      )}
-                    >
-                      {g.type === 'video' ? (
-                        <>
-                          <video src={galleryItemUrl(g)} muted playsInline onError={() => recoverGalleryUrl(g)} onLoadedData={() => markGalleryItemAvailable(g)} className="w-full h-full object-cover" />
-                          <span className="absolute inset-0 flex items-center justify-center bg-black/20"><Play size={16} className="text-white/90" /></span>
-                        </>
-                      ) : (
-                        <img src={galleryItemUrl(g)} alt="" onError={() => recoverGalleryUrl(g)} onLoad={() => markGalleryItemAvailable(g)} className="w-full h-full object-cover" />
-                      )}
-                      {g.unavailable && (
-                        <span
-                          className="absolute inset-0 flex items-center justify-center bg-black/50 text-gray-500"
-                          title="Local render — the local engine isn't reachable"
-                        >
-                          <MonitorOff size={16} />
-                        </span>
-                      )}
-                    </button>
-                    <button
-                      onClick={() => removeFromGallery(g.id)}
-                      className="absolute -top-1.5 -right-1.5 w-6 h-6 rounded-full bg-red-600/90 hover:bg-red-600 text-gray-100 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center shadow-sm"
-                      title="Delete"
-                    >
-                      <Trash2 size={12} />
-                    </button>
-                    <button
-                      onClick={() => { void downloadMediaUrl(galleryItemUrl(g), g.filename || undefined) }}
-                      className="absolute bottom-1 right-1 w-6 h-6 rounded-md bg-black/55 hover:bg-black/70 text-gray-100 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center shadow-sm"
-                      title="Download"
-                    >
-                      <Download size={12} />
-                    </button>
-                  </div>
+                  <GalleryTile
+                    key={g.id}
+                    g={g}
+                    active={(activeId ?? gallery[0]?.id) === g.id}
+                    onSelect={onSelect}
+                    onRemove={handleRemove}
+                  />
                 ))}
               </div>
             )}
