@@ -29,6 +29,7 @@ describe('CSP connect-src cloud provider hosts (GH #71)', () => {
     'https://api.together.xyz',
     'https://api.deepseek.com',
     'https://api.mistral.ai',
+    'https://api.atlascloud.ai',
     'https://api.anthropic.com',
   ])('connect-src whitelists %s', (host) => {
     expect(connectSrc).toContain(host)

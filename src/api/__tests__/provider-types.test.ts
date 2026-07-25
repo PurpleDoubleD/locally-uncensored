@@ -34,7 +34,7 @@ describe('PROVIDER_PRESETS', () => {
   })
 
   it('has all major cloud providers', () => {
-    const cloudNames = ['OpenRouter', 'Groq', 'Together', 'DeepSeek', 'Mistral', 'OpenAI', 'Anthropic']
+    const cloudNames = ['OpenRouter', 'Groq', 'Together', 'DeepSeek', 'Mistral', 'Atlas Cloud', 'OpenAI', 'Anthropic']
     for (const name of cloudNames) {
       const preset = PROVIDER_PRESETS.find(p => p.name === name)
       expect(preset, `Missing cloud preset: ${name}`).toBeDefined()
@@ -55,6 +55,16 @@ describe('PROVIDER_PRESETS', () => {
     for (const p of clouds) {
       expect(p.placeholder, `Cloud preset ${p.name} should have placeholder`).toBeDefined()
     }
+  })
+
+  it('routes Atlas Cloud through the OpenAI-compatible provider path', () => {
+    const preset = PROVIDER_PRESETS.find(p => p.id === 'atlascloud')
+    expect(preset).toMatchObject({
+      name: 'Atlas Cloud',
+      providerId: 'openai',
+      baseUrl: 'https://api.atlascloud.ai/v1',
+      isLocal: false,
+    })
   })
 
   it('each preset has unique id', () => {
