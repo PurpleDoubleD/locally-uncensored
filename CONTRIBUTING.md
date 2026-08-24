@@ -7,8 +7,9 @@ Thanks for your interest in contributing! This project thrives on community inpu
 ### Prerequisites
 
 - **Node.js** 18+ ([download](https://nodejs.org/))
+- **Rust stable** ([install](https://rustup.rs/)) — required by the Tauri desktop app
 - **Ollama** ([download](https://ollama.com/)) — for text model testing
-- **ComfyUI** (optional) — only needed for image/video gen features
+- **ComfyUI** (optional) — needed for image/video testing outside the Apple Silicon local lanes
 - **Git** (obviously)
 
 ### Dev Setup
@@ -18,6 +19,25 @@ git clone https://github.com/PurpleDoubleD/locally-uncensored.git
 cd locally-uncensored
 npm install
 ```
+
+#### Apple Silicon desktop builds
+
+The bundled `llama-server` binary is intentionally not committed. Build the
+native arm64 sidecar before the first Tauri run; the script enables Metal and
+embeds its shaders so the resulting app does not need a separate llama.cpp
+install:
+
+```bash
+xcode-select --install              # once, if Command Line Tools are missing
+brew install cmake python@3.12
+bash scripts/build-llama.sh
+bash scripts/build-llama.sh --check
+npm run tauri:dev
+```
+
+Ollama remains the recommended text backend on macOS. Local image and video
+dependencies are installed into LU's own Python environment from the Create
+tab; ComfyUI is not required for those Apple Silicon lanes.
 
 You have three dev workflows, depending on what you're working on:
 

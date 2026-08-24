@@ -660,7 +660,7 @@ fn start_bundled_engine_blocking(
     // just-active 14B loaded, this engine's own load crawled through paging and
     // blew the health budget (live repro 2026-07-31; an IDLE model gets evicted
     // fine). Evict via keep_alive:0 — Ollama reloads lazily on its next use.
-    if crate::commands::process::offload_ollama_loaded_models() {
+    if !crate::commands::process::offload_ollama_loaded_models().is_empty() {
         println!("[Engine] asked Ollama to evict loaded models before engine start");
     }
 

@@ -1839,10 +1839,17 @@ async function evictBody(): Promise<RenderEviction> {
   // made: offload_local_models stops Ollama residents and both managed
   // sidecars, lmstudio_unload_model clears LM Studio. Best effort, a failed
   // call must never block a render.
-  await Promise.all([
-    backendCall('offload_local_models', { includeComfyui: false }).catch(() => {}),
+  const [offloadResult] = await Promise.all([
+    backendCall<{ ollama_models?: string[] }>('offload_local_models', { includeComfyui: false }).catch(() => null),
     backendCall('lmstudio_unload_model', { model: '--all' }).catch(() => {}),
   ])
+  // The Rust offloader reads /api/ps immediately before eviction and returns
+  // the exact names it removed. Treat that as the authoritative fallback when
+  // the frontend's earlier /api/ps probe raced or failed — otherwise the model
+  // is gone but the restore haul forgets what to reload.
+  if (!result.ollamaModel && offloadResult?.ollama_models?.length) {
+    result.ollamaModel = offloadResult.ollama_models[0]
+  }
 
   // Merge an inherited haul: it describes models that are STILL evicted from
   // an earlier render whose restore never ran. Fresh captures win on
@@ -1903,7 +1910,9 @@ async function restoreBody(evicted: RenderEviction, graceMs: number, myEpoch: nu
   }
   if (todo.ollamaModel) {
     try {
-      await loadModel(todo.ollamaModel)
+      const numCtx = useSettingsStore.getState().settings.contextWindowOverride
+      if (numCtx > 0) await loadModel(todo.ollamaModel, numCtx)
+      else await loadModel(todo.ollamaModel)
     } catch (e) {
       // No ComfyUI-restart recovery here on purpose: on the Create tab the
       // user's next step is usually another render, so stopping ComfyUI to
