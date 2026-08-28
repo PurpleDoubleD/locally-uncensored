@@ -54,10 +54,16 @@ export function stripImpersonatedSpeakers(text: string, otherModels: string[]): 
 }
 
 /** The shared history as one model sees it: other speakers tagged, own turns
- *  clean, empty placeholders dropped. */
+ *  clean, empty placeholders and app notices dropped.
+ *
+ *  Bug B3: role:'system' is an app notice here, not a turn. The caller puts the
+ *  group system prompt at index 0 itself, so letting a stored one through would
+ *  hand the engine a second system message somewhere in the middle, and a strict
+ *  Jinja chat template refuses that outright with "System message must be at the
+ *  beginning". */
 export function groupHistory(messages: Message[], model: string): GroupWireMessage[] {
   return messages
-    .filter((m) => m.content.trim() !== '')
+    .filter((m) => m.role !== 'system' && m.content.trim() !== '')
     .map((m) => ({
       role: m.role as GroupWireMessage['role'],
       content:
