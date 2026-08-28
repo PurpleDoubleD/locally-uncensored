@@ -20,6 +20,7 @@ import {
   transcribeAudio,
   transcribeAudioCloud,
   getLastTtsStatus,
+  LocalSttError,
   type AudioRecorder,
 } from "../api/voice";
 import { CloudJobError } from "../api/cloud/client";
@@ -30,7 +31,13 @@ import { registerAutoSpeak } from "../lib/ttsBridge";
 // Honest, actionable copy for dictation failures. The cloud route's own error
 // strings (403 "your plan does not include cloud voice", 429 "monthly credit
 // budget exhausted") are already human-readable — pass those through.
-function sttErrorMessage(err: unknown): string {
+export function sttErrorMessage(err: unknown): string {
+  // A refused /local-api call, or the whisper handler's own report. Both
+  // already say what went wrong in English (#115): "Transcription request
+  // refused (HTTP 415): Unsupported Media Type...", "Whisper not available".
+  // These used to arrive as a bare Error and were replaced by the microphone
+  // hint, which sent people looking at their mic instead of the real cause.
+  if (err instanceof LocalSttError && err.message.trim()) return err.message.trim();
   if (err instanceof CloudJobError) {
     if (err.status === 401) return "Signed out, sign in again to use cloud dictation";
     if (err.status === 413) return "Recording too long, try a shorter take";
