@@ -59,13 +59,50 @@ fn init_tracing() {
     if json_mode {
         let _ = tracing_subscriber::registry()
             .with(filter)
-            .with(fmt::layer().json().with_current_span(false).with_span_list(false))
+            .with(
+                fmt::layer()
+                    .json()
+                    .with_current_span(false)
+                    .with_span_list(false)
+                    .fmt_fields(EnglishFields(fmt::format::JsonFields::new())),
+            )
             .try_init();
     } else {
         let _ = tracing_subscriber::registry()
             .with(filter)
-            .with(fmt::layer().compact())
+            .with(fmt::layer().compact().fmt_fields(EnglishFields(fmt::format::DefaultFields::new())))
             .try_init();
+    }
+}
+
+/// A field formatter that runs the finished text through `os_error`.
+///
+/// The house rule is that our messages are English, and `os_error` keeps every
+/// call site of ours to it. A log line written INSIDE a dependency is out of
+/// that reach: hyper-util renders a failed `set_nodelay` itself, and on the
+/// German Windows box that landed in lu-app-exit.log as
+/// `tcp set_nodelay error: Ein ungueltiges Argument wurde angegeben.
+/// (os error 10022)`. We cannot patch the crate, but every event passes
+/// through here on its way out, so this is where the wording gets repaired.
+///
+/// It wraps the real formatter rather than replacing it, so the text and the
+/// JSON mode keep their exact shapes (including the JSON escaping) and only
+/// the operating system's own words are swapped for ours.
+struct EnglishFields<F>(F);
+
+impl<'writer, F> tracing_subscriber::fmt::FormatFields<'writer> for EnglishFields<F>
+where
+    F: for<'a> tracing_subscriber::fmt::FormatFields<'a>,
+{
+    fn format_fields<R: tracing_subscriber::field::RecordFields>(
+        &self,
+        mut writer: tracing_subscriber::fmt::format::Writer<'writer>,
+        fields: R,
+    ) -> std::fmt::Result {
+        let mut buf = String::new();
+        self.0
+            .format_fields(tracing_subscriber::fmt::format::Writer::new(&mut buf), fields)?;
+        writer.write_str(&os_error::sanitize_os_wording(&buf))
     }
 }
 
@@ -518,5 +555,97 @@ mod tests {
         );
         assert_eq!(after_first, after_second, "second call should be a no-op");
         cleanup();
+    }
+}
+
+/// The log sink itself, driven end to end.
+///
+/// `os_error`'s own tests prove the rewriting; this proves it is actually
+/// wired into the subscriber, which is the part a refactor drops for free.
+#[cfg(test)]
+mod log_english_tests {
+    use std::sync::{Arc, Mutex};
+
+    /// The connection-refused code of the machine the test runs on. Its
+    /// Display is the operating system's wording, which on a German Windows is
+    /// German and here differs from ours by its capital letter. Either way it
+    /// is text we did not write, and it must not survive.
+    #[cfg(windows)]
+    const REFUSED: i32 = 10061;
+    #[cfg(target_os = "macos")]
+    const REFUSED: i32 = 61;
+    #[cfg(all(unix, not(target_os = "macos")))]
+    const REFUSED: i32 = 111;
+
+    #[derive(Clone)]
+    struct Capture(Arc<Mutex<Vec<u8>>>);
+
+    impl std::io::Write for Capture {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(buf);
+            Ok(buf.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for Capture {
+        type Writer = Capture;
+        fn make_writer(&'a self) -> Self::Writer {
+            self.clone()
+        }
+    }
+
+    fn logged(f: impl FnOnce()) -> String {
+        let buf = Arc::new(Mutex::new(Vec::new()));
+        let subscriber = tracing_subscriber::fmt()
+            .with_writer(Capture(buf.clone()))
+            .with_ansi(false)
+            .fmt_fields(super::EnglishFields(
+                tracing_subscriber::fmt::format::DefaultFields::new(),
+            ))
+            .finish();
+        tracing::subscriber::with_default(subscriber, f);
+        let out = buf.lock().unwrap().clone();
+        String::from_utf8(out).expect("the log is utf8")
+    }
+
+    #[test]
+    fn a_dependency_that_logs_an_os_error_still_reads_in_our_words() {
+        // Exactly the hyper-util line that put German text into
+        // lu-app-exit.log on the Windows box.
+        let e = std::io::Error::from_raw_os_error(REFUSED);
+        let os_worded = e.to_string();
+        let out = logged(|| tracing::warn!("tcp set_nodelay error: {}", e));
+        assert!(out.contains("tcp set_nodelay error: "), "got: {out}");
+        assert!(out.contains("connection refused"), "got: {out}");
+        assert!(out.contains(&format!("os error {REFUSED}")), "got: {out}");
+        assert!(!out.contains(&os_worded), "the system wording survived: {out}");
+    }
+
+    /// The test above builds its own subscriber, so on its own it would still
+    /// pass if `init_tracing` stopped using the wrapper. This is the other
+    /// half: BOTH log modes have to go through it, or a user on JSON logs
+    /// keeps the German line the text mode no longer has.
+    #[test]
+    fn both_log_modes_are_wired_through_the_wrapper() {
+        const SRC: &str = include_str!("main.rs");
+        let init = &SRC[SRC.find("fn init_tracing()").expect("init_tracing exists")..];
+        let init = &init[..init.find("\n}\n").expect("the function ends")];
+        assert_eq!(
+            init.matches("EnglishFields(").count(),
+            2,
+            "text mode and json mode must both sanitise:\n{init}"
+        );
+    }
+
+    // Negative control: a line the operating system had no hand in must come
+    // out byte for byte, fields and all.
+    #[test]
+    fn an_ordinary_line_is_logged_unchanged() {
+        let out = logged(|| tracing::info!(version = "2.6.7", "LU starting"));
+        assert!(out.contains("LU starting"), "got: {out}");
+        assert!(out.contains("version=\"2.6.7\""), "got: {out}");
     }
 }
