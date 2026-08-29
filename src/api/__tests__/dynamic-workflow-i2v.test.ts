@@ -105,6 +105,33 @@ describe('buildDynamicWorkflow — I2V override on the main path', () => {
     expect(nodeOf(wf, 'EmptyHunyuanLatentVideo')).toBeUndefined()
   })
 
+  it('a required combo in the newer COMBO/options shape still fills its widget with the first option', async () => {
+    // The box's custom_nodes answer in the newer schema: spec[0] is the string
+    // "COMBO" and the choices sit under options. The old grab read spec[0][0]
+    // and left the widget unset, ComfyUI then refused the graph.
+    vi.mocked(getAllNodeInfo).mockResolvedValue({
+      ...CORE,
+      UNETLoader: { input: { required: { unet_name: [['wan2.1_i2v_14B_fp8.safetensors']] } } },
+      CLIPLoader: { input: { required: { clip_name: [['umt5_xxl_fp8_e4m3fn_scaled.safetensors']] } } },
+      VAELoader: { input: { required: { vae_name: [['wan_2.1_vae.safetensors']] } } },
+      WanImageToVideo: {
+        input: {
+          required: {
+            positive: ['CONDITIONING'], negative: ['CONDITIONING'], vae: ['VAE'],
+            width: ['INT'], height: ['INT'], length: ['INT'], batch_size: ['INT'],
+            sampling_mode: ['COMBO', { options: ['flow', 'legacy'] }],
+          },
+          optional: { start_image: ['IMAGE', {}] },
+        },
+        output: ['CONDITIONING', 'CONDITIONING', 'LATENT'],
+      },
+    } as never)
+
+    const wf = await buildDynamicWorkflow(vidParams('wan2.1_i2v_14B_fp8.safetensors') as never, 'wan')
+    const [, i2v] = nodeOf(wf, 'WanImageToVideo')!
+    expect(i2v.inputs.sampling_mode).toBe('flow')
+  })
+
   it('Hunyuan i2v: single CONDITIONING output re-points positive only', async () => {
     vi.mocked(getAllNodeInfo).mockResolvedValue({
       ...CORE,

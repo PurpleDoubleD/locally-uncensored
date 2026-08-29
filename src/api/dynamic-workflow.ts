@@ -889,11 +889,14 @@ export async function buildDynamicWorkflow(
     if (decl.start_image) inputs.start_image = [loadId, 0]
     else if (decl.image) inputs.image = [loadId, 0]
     else if (decl.init_image) inputs.init_image = [loadId, 0]
-    // Remaining REQUIRED widgets we don't model: take the schema default
-    // (combo → first option) — same live-schema pattern as the RMBG builder.
+    // Remaining REQUIRED widgets we don't model: take the schema default,
+    // for a combo the first option. Same live-schema pattern as the RMBG
+    // builder, and the combo read goes through the one shared reader so the
+    // newer COMBO/options shape cannot leave a required widget unset.
     for (const [key, spec] of Object.entries(required)) {
       if (inputs[key] !== undefined) continue
-      if (Array.isArray(spec[0])) inputs[key] = spec[0][0]
+      const combo = readComboOptions(spec)
+      if (combo && combo.length) inputs[key] = combo[0]
       else if (spec[1] && typeof spec[1] === 'object' && 'default' in spec[1]) inputs[key] = spec[1].default
     }
     const i2vId = String(n++)
