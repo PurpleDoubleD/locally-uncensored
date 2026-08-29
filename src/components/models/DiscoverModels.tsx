@@ -24,7 +24,8 @@ import { useWorkflowStore } from '../../stores/workflowStore'
 import { getProviderIdFromModel } from '../../api/providers'
 import { startBundledEngine } from '../../api/engine'
 import { BUILTIN_BACKEND_ID } from '../../lib/onboarding-backend'
-import { matchesLmStudioInstalled, type InstalledModelLike } from '../../lib/lmstudio-match'
+import { matchesLocalGgufInstalled, type InstalledModelLike } from '../../lib/lmstudio-match'
+import { resolveTextDownloadTarget } from '../../lib/text-download-target'
 import { hfUrlToOllamaRef, hfUrlToLmStudioSubdir, parseHfUrl, extractGgufQuant, isShardedOrIncompatibleGguf } from '../../lib/hf-to-provider'
 import { GlassCard } from '../ui/GlassCard'
 import { GlowButton } from '../ui/GlowButton'
@@ -239,7 +240,7 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
     // The matcher (lib/lmstudio-match.ts, unit-tested) handles both the older
     // full-basename id form AND LM Studio's modern quant-less publisher/short
     // key (e.g. "qwen/qwen2.5-vl-7b" vs "Qwen2.5-VL-7B-Instruct-Q4_K_M.gguf").
-    if (model.filename && matchesLmStudioInstalled(model.filename, installedModels as unknown as InstalledModelLike[])) {
+    if (model.filename && matchesLocalGgufInstalled(model.filename, installedModels as unknown as InstalledModelLike[])) {
       return true
     }
 
@@ -446,9 +447,20 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
     // Built-in engine lives in the managed `openai` slot. A second chat model
     // downloaded here goes flat into the app-owned models dir and boots
     // llama-server, mirroring onboarding — never nested like LM Studio.
-    const isActiveBuiltin = activeProviderId === 'openai' && !!providers.openai?.managed
-    const isActiveLmStudio = activeProviderId === 'openai' && !providers.openai?.managed && (providers.openai?.name || '').toLowerCase().includes('lm studio')
-    const isActiveOllama = activeProviderId === 'ollama'
+    //
+    // GH #118: the three flags below used to be read off `activeProviderId`
+    // alone, so a fresh install (no chat model picked yet) matched none of
+    // them and the file went down the LM Studio branch into a nested folder
+    // the built-in engine never scans. resolveTextDownloadTarget keeps the
+    // active-model rule and adds the missing fallback.
+    const downloadTarget = resolveTextDownloadTarget({
+      activeChatModel,
+      openai: providers.openai,
+      ollamaEnabled: !!providers.ollama?.enabled,
+    })
+    const isActiveBuiltin = downloadTarget === 'builtin'
+    const isActiveLmStudio = downloadTarget === 'lmstudio'
+    const isActiveOllama = downloadTarget === 'ollama'
 
     // Ollama-native models: only meaningful with Ollama present. If the user
     // is chatting on LM Studio and clicks one of these (e.g. Qwen3.6 35B
@@ -516,7 +528,11 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
         setInstallError('Could not determine model directory. Please check app permissions.')
         return
       }
-      const ollamaCantLoad = isActiveOllama || (!isActiveLmStudio && !lmStudioEnabled && ollamaEnabledNow)
+      // The note is about Ollama's split-GGUF gap, so it must only appear when
+      // Ollama really is where the user would look for the model. With the
+      // built-in engine as the target the parts land in the app's own flat
+      // models dir and the Rust scan collapses the set, so the note would lie.
+      const ollamaCantLoad = isActiveOllama || (!isActiveBuiltin && !isActiveLmStudio && !lmStudioEnabled && ollamaEnabledNow)
       setConfirmDownload({
         name: model.name,
         files: resolution.files,
@@ -539,10 +555,7 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
 
     // Route by the active chat model. If neither side has an active model yet
     // (first launch), fall back to the old enabled-wins logic.
-    let useOllamaPath: boolean
-    if (isActiveOllama) useOllamaPath = true
-    else if (isActiveBuiltin || isActiveLmStudio) useOllamaPath = false
-    else useOllamaPath = !lmStudioEnabled && ollamaEnabledNow // legacy fallback
+    const useOllamaPath = isActiveOllama
 
     if (useOllamaPath) {
       const ref = hfUrlToOllamaRef(realUrl, realName)

@@ -63,6 +63,23 @@ export function modelIdentity(s: string): string {
     .replace(/[^a-z0-9]/g, '')
 }
 
+/** An LM Studio entry in the installed-model list. */
+function isLmStudioEntry(m: InstalledModelLike): boolean {
+  if (m.provider !== 'openai') return false
+  const pname = (m.providerName || '').toLowerCase()
+  return pname.includes('lm studio') || pname.includes('lmstudio')
+}
+
+/**
+ * A built-in-engine entry. `bundledToAIModels` stamps every downloaded GGUF
+ * with `provider: 'openai'` and `providerName: 'Built-in Engine'`, and its
+ * `model` is the file stem, so the same filename matcher fits it exactly.
+ */
+function isBuiltinEntry(m: InstalledModelLike): boolean {
+  if (m.provider !== 'openai') return false
+  return (m.providerName || '').toLowerCase().includes('built-in engine')
+}
+
 /**
  * True when any LM-Studio-installed model corresponds to the given GGUF
  * filename. Order: exact basename / `publisher/`-suffix (already quant-precise),
@@ -73,15 +90,33 @@ export function matchesLmStudioInstalled(
   filename: string,
   installed: InstalledModelLike[],
 ): boolean {
+  return matchesInstalled(filename, installed.filter(isLmStudioEntry))
+}
+
+/**
+ * Same question for every local GGUF store the app can write into: LM Studio
+ * AND the built-in engine.
+ *
+ * GH #118 (nayffy, 2026-08-27): the Discover badge only ever consulted the LM
+ * Studio half, so a chat model downloaded for the BUILT-IN engine lost its
+ * INSTALLED badge on the next app start (the in-session download store is the
+ * only other evidence and it does not survive a restart). The tile then
+ * offered "Get" for a file that was already on disk. `list_bundled_models`
+ * reads that disk on every model refresh, so the evidence was there the whole
+ * time, just never asked.
+ */
+export function matchesLocalGgufInstalled(
+  filename: string,
+  installed: InstalledModelLike[],
+): boolean {
+  return matchesInstalled(filename, installed.filter((m) => isLmStudioEntry(m) || isBuiltinEntry(m)))
+}
+
+function matchesInstalled(filename: string, lms: InstalledModelLike[]): boolean {
   if (!filename) return false
   const wantBase = normalBase(filename)
   const wantId = modelIdentity(filename)
   const wantQuant = extractQuant(filename)
-  const lms = installed.filter((m) => {
-    if (m.provider !== 'openai') return false
-    const pname = (m.providerName || '').toLowerCase()
-    return pname.includes('lm studio') || pname.includes('lmstudio')
-  })
   for (const m of lms) {
     const candidates = [m.model, m.name, m.lmsKey]
       .filter(Boolean)

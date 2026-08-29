@@ -9,6 +9,7 @@ import { useUIStore } from '../../stores/uiStore'
 import { unloadAllModels, loadModel, unloadModel, listRunningModels } from '../../api/ollama'
 import { displayModelName, getProviderIdFromModel } from '../../api/providers'
 import { activateBuiltinModel, isManagedBuiltinActive } from '../../api/engine'
+import { diagnoseBuiltinEngine } from '../../api/builtin-ensure'
 import { canUseTools, resolveToolSupport, type ToolSupport } from '../../lib/tool-support'
 import { backendCall } from '../../api/backend'
 import { listLoadedLmStudioModels, loadLmStudioModel, unloadLmStudioModel } from '../../api/lmstudio'
@@ -458,6 +459,9 @@ export function ModelSelector({ openUpward = false, surface = 'chat' }: ModelSel
   // local models are gone" (it cost a whole repro round on 2026-08-07).
   const appMode = useSettingsStore((s) => s.settings.appMode)
   const [open, setOpen] = useState(false)
+  // Read by the empty-state probe below, which runs before the render that
+  // computes textModels. A ref keeps it out of the effect's dependency list.
+  const textModelsEmptyRef = useRef(true)
   const [unloading, setUnloading] = useState(false)
   const [unloadDone, setUnloadDone] = useState(false)
   // B3 — per-model LM Studio load/unload state. `lmsLoaded` is the set
@@ -655,6 +659,20 @@ export function ModelSelector({ openUpward = false, surface = 'chat' }: ModelSel
 
   useEffect(() => { fetchModels() }, [fetchModels])
 
+  // GH #118: an empty picker used to say "No models available" no matter what
+  // was wrong, so a built-in engine that never started read like a machine
+  // with nothing installed. Asked only while the dropdown is open and the list
+  // is empty, and never repairs, because opening a dropdown must not boot a server.
+  const [emptyReason, setEmptyReason] = useState('')
+  useEffect(() => {
+    if (!open || textModelsEmptyRef.current === false) return
+    let cancelled = false
+    diagnoseBuiltinEngine({ repair: false })
+      .then((d) => { if (!cancelled && !d.ok && d.reason) setEmptyReason(d.reason) })
+      .catch(() => { /* nothing to add, the generic line stands */ })
+    return () => { cancelled = true }
+  }, [open])
+
   // Refetch when any provider's enabled state or baseUrl changes (e.g. user
   // enables LM Studio / adds Anthropic key in Settings, or the backend
   // picker activates an OpenAI-compatible provider). Without this the
@@ -699,6 +717,7 @@ export function ModelSelector({ openUpward = false, surface = 'chat' }: ModelSel
   const hiddenForCode = allTextModels.length - textModels.length
   const groups = groupByFamily(textModels)
   const hasOllamaModels = textModels.some(m => ('provider' in m && m.provider === 'ollama') || !('provider' in m))
+  textModelsEmptyRef.current = textModels.length === 0
 
   return (
     <div ref={ref} className="relative">
@@ -780,7 +799,12 @@ export function ModelSelector({ openUpward = false, surface = 'chat' }: ModelSel
             {/* Scrollable model list */}
             <div className="py-1 max-h-[280px] overflow-y-auto scrollbar-thin">
               {textModels.length === 0 && (
-                <p className="text-[0.65rem] text-gray-600 text-center py-3">No models available</p>
+                <div className="px-2.5 py-3 text-center">
+                  <p className="text-[0.65rem] text-gray-600">No models available</p>
+                  {emptyReason && (
+                    <p className="mt-1 text-[0.6rem] text-amber-300/90 leading-snug text-left">{emptyReason}</p>
+                  )}
+                </div>
               )}
 
               {groups.map(({ family, models: groupModels }) => (

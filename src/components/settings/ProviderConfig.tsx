@@ -6,6 +6,7 @@ import { getProvider } from '../../api/providers'
 import { PROVIDER_PRESETS } from '../../api/providers/types'
 import { Modal } from '../ui/Modal'
 import { backendCall } from '../../api/backend'
+import { diagnoseBuiltinEngine } from '../../api/builtin-ensure'
 import type { ProviderId, ProviderConfig } from '../../api/providers/types'
 
 const isTauri = typeof window !== 'undefined' && !!(window as any).__TAURI_INTERNALS__
@@ -87,6 +88,8 @@ export function ProviderSettings() {
   const [dropdownOpen, setDropdownOpen] = useState(false)
   const [testing, setTesting] = useState<ProviderId | null>(null)
   const [statuses, setStatuses] = useState<Record<string, 'idle' | 'connected' | 'failed'>>({})
+  // Per-slot English explanation for a failed Test (GH #118).
+  const [testDetail, setTestDetail] = useState<Record<string, string>>({})
   const [showKey, setShowKey] = useState<Record<string, boolean>>({})
   const [showCloudWarning, setShowCloudWarning] = useState(false)
   const [pendingPreset, setPendingPreset] = useState<typeof PROVIDER_PRESETS[0] | null>(null)
@@ -165,13 +168,34 @@ export function ProviderSettings() {
   const handleTest = async (providerId: ProviderId) => {
     setTesting(providerId)
     setStatuses(prev => ({ ...prev, [providerId]: 'idle' }))
+    setTestDetail(prev => ({ ...prev, [providerId]: '' }))
+    let ok = false
     try {
       const client = getProvider(providerId)
-      const ok = await client.checkConnection()
-      setStatuses(prev => ({ ...prev, [providerId]: ok ? 'connected' : 'failed' }))
+      ok = await client.checkConnection()
     } catch {
-      setStatuses(prev => ({ ...prev, [providerId]: 'failed' }))
+      ok = false
     }
+    // GH #118: a red dot was the whole answer the built-in engine gave, while
+    // the console carried ERR_CONNECTION_REFUSED on 127.0.0.1:8127. The app
+    // owns that process, so a failed test asks the app: start it if a model is
+    // there, and otherwise say in one English sentence what is missing.
+    // Only the openai slot can BE the built-in engine, and testing Anthropic
+    // must never boot a local server as a side effect.
+    if (!ok && providerId === 'openai') {
+      const diag = await diagnoseBuiltinEngine({ repair: true })
+      if (diag.ok) {
+        try {
+          ok = await getProvider(providerId).checkConnection()
+        } catch {
+          ok = false
+        }
+      }
+      if (!ok && diag.reason) {
+        setTestDetail(prev => ({ ...prev, [providerId]: diag.reason }))
+      }
+    }
+    setStatuses(prev => ({ ...prev, [providerId]: ok ? 'connected' : 'failed' }))
     setTesting(null)
     // Bug (g): refresh after a Test click so the Start-Server button
     // appears the moment a user discovers their LM Studio server is down.
@@ -345,6 +369,11 @@ export function ProviderSettings() {
                     </span>
                   )}
                 </div>
+
+                {/* Why it failed, when the app can tell (GH #118). */}
+                {status === 'failed' && testDetail[id] && (
+                  <p className="text-[0.6rem] text-red-300/90 leading-snug">{testDetail[id]}</p>
+                )}
 
                 {/* API key storage disclaimer */}
                 {needsKey && currentKey && (
