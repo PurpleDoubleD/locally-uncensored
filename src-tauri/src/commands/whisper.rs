@@ -99,6 +99,8 @@ impl WhisperServer {
         cmd.creation_flags(CREATE_NO_WINDOW);
         let mut child = cmd.spawn()
             .map_err(|e| format!("Failed to start whisper server: {}", os_error::english(&e)))?;
+        // Long lived Python server: it must not outlive the app on a hard kill.
+        crate::commands::process::tie_child_to_app_lifetime(child.id());
 
         let stdin = child.stdin.take().ok_or("Failed to get stdin")?;
         let stdout = child.stdout.take().ok_or("Failed to get stdout")?;
