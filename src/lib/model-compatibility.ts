@@ -249,6 +249,26 @@ export function isVisionCompatible(modelName: string | null): boolean {
 }
 
 /**
+ * The app's OWN answer to "can this model read images", or undefined when
+ * nothing declared one and the name heuristics have to decide.
+ *
+ * Two sources feed the `supportsVision` flag on a model entry, and both are
+ * facts rather than guesses: the built-in engine reports whether the vision
+ * projector sits next to the GGUF (the file it turns into `--mmproj`, see
+ * engine.rs model_can_see_images), and a server model listing reports its
+ * input modalities. A declared answer counts in BOTH directions. Before
+ * Nebenbefund N3 of the D1 counter-check (Windows build, 2026-08-29) only
+ * `true` was ever carried, so a text-only conversion of a vision family
+ * (gemma-3-4b-it-abliterated with no projector on disk) read as vision-capable
+ * and got fed the picture the run had just generated.
+ */
+export function declaredVision(meta: unknown): boolean | undefined {
+  if (!meta || typeof meta !== 'object') return undefined
+  const flag = (meta as { supportsVision?: unknown }).supportsVision
+  return typeof flag === 'boolean' ? flag : undefined
+}
+
+/**
  * STRICT, provider-agnostic vision check: true only when the model NAME matches
  * a known vision family. Unlike isVisionCompatible (lenient — returns true for
  * ANY openai/anthropic-prefixed model so the manual attach UI stays permissive),

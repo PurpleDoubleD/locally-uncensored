@@ -113,6 +113,30 @@ describe('bundledToAIModels', () => {
     })
     expect(models[1].name).toBe('openai::llama3')
   })
+
+  /**
+   * Runde 4, Nebenbefund N3 of the D1 counter-check: whether a built-in model
+   * can read images is a file on disk (the projector next to the GGUF, which
+   * Rust reports as `vision`), not a guess from the model name.
+   */
+  it('carries the projector answer through as supportsVision, both ways', () => {
+    const models = bundledToAIModels([
+      { name: 'Qwen3.8-27B-UD-Q4_K_M', path: '/m/q.gguf', size: 1, loaded: true, vision: true },
+      { name: 'gemma-3-4b-it-abliterated-Q4_K_M', path: '/m/g.gguf', size: 1, loaded: false, vision: false },
+    ])
+    expect(models[0].supportsVision).toBe(true)
+    // The N3 witness: a gemma3 by name with no projector next to it.
+    expect(models[1].supportsVision).toBe(false)
+  })
+
+  it('negative control: a backend that does not report the field leaves it absent', () => {
+    // An older sidecar. The flag must stay undefined so the name heuristic
+    // keeps deciding, instead of every built-in model losing vision.
+    const models = bundledToAIModels([
+      { name: 'llama3', path: '/m/llama3.gguf', size: 1, loaded: false },
+    ])
+    expect('supportsVision' in models[0]).toBe(false)
+  })
 })
 
 describe('activateBuiltinModel', () => {

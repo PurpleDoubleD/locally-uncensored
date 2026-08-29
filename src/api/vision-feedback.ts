@@ -55,12 +55,19 @@ export interface VisionFeedbackMessage {
  * can look at it. Returns null when this isn't an image result, the model can't
  * see images, or the fetch fails (all non-fatal — the flow still works, the
  * model just won't visually comment).
+ *
+ * `declaredVision` is the app's OWN answer where it has one, and it beats every
+ * guess below in both directions: the built-in engine reports whether the
+ * vision projector sits next to the GGUF (the file it turns into `--mmproj`),
+ * and a server model listing reports its input modalities. Undefined means
+ * nobody declared anything and the name heuristics decide, exactly as before.
  */
 export async function buildVisionFeedback(
   model: string,
   toolName: string,
   result: string,
   providerId: string,
+  declaredVision?: boolean,
 ): Promise<VisionFeedbackMessage | null> {
   if (!result) return null
   // ONLY image_generate produces a still the vision model can read. A video_generate
@@ -80,10 +87,20 @@ export async function buildVisionFeedback(
   // capability list. Other providers: a STRICT model-name family match — never
   // the lenient isVisionCompatible, which would feed an image to a text-only
   // LM Studio model and trip the image→text SSE error.
+  //
+  // Nebenbefund N3 of the D1 counter-check (Windows build, 2026-08-29): a
+  // text-only gemma-3-4b conversion on the built-in engine is a `gemma3` to
+  // the name heuristic, so the loop attached the picture it had just made and
+  // the engine answered "image input is not supported". A successful render
+  // ended on a red error line. The projector on disk is the honest answer and
+  // is asked first now.
+  if (declaredVision === false) return null
   try {
-    const canSee = providerId === 'ollama'
-      ? await modelSupportsVision(model)
-      : modelNameSuggestsVision(model)
+    const canSee = declaredVision === true
+      ? true
+      : providerId === 'ollama'
+        ? await modelSupportsVision(model)
+        : modelNameSuggestsVision(model)
     if (!canSee) return null
   } catch {
     return null

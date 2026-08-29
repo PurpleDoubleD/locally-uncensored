@@ -112,3 +112,54 @@ describe('buildVisionFeedback — provider-aware: non-Ollama uses the strict nam
     expect(await buildVisionFeedback('openai::some-unknown-text-llm', 'image_generate', result, 'openai')).toBeNull()
   })
 })
+
+/**
+ * Runde 4, Nebenbefund N3 of the D1 counter-check (Windows build 2026-08-29):
+ * every successful picture was followed by a red "This model can't read
+ * images" line, because the built-in engine ran a text-only conversion of a
+ * vision family (gemma-3-4b-it-abliterated, no projector on disk) and the
+ * name heuristic called it vision-capable.
+ *
+ * The app knows the truth: the built-in engine reports whether the projector
+ * sits next to the GGUF, the same file it passes as --mmproj. That answer is
+ * handed in as `declaredVision` and beats the heuristic in both directions.
+ */
+describe('buildVisionFeedback, a declared capability beats the name', () => {
+  const RESULT = `Image generated: cat.png (prompt: "a cat")\n${VIEW('cat.png')}`
+
+  it('N3 witness: a gemma3 by name with no projector on disk is never fed the picture', async () => {
+    expect(await buildVisionFeedback('gemma-3-4b-it-abliterated', 'image_generate', RESULT, 'openai', false)).toBeNull()
+    // The bytes are not even fetched, so a text-only model costs nothing.
+    expect(fetchComfyImageBase64).not.toHaveBeenCalled()
+  })
+
+  it('a declared false overrides Ollama capability reporting too', async () => {
+    modelSupportsVision.mockResolvedValue(true)
+    expect(await buildVisionFeedback('gemma4:e4b', 'image_generate', RESULT, 'ollama', false)).toBeNull()
+    expect(modelSupportsVision).not.toHaveBeenCalled()
+  })
+
+  it('a declared true feeds a model whose name the strict family match misses', async () => {
+    const vf = await buildVisionFeedback('my-own-import-q4', 'image_generate', RESULT, 'openai', true)
+    expect(vf).not.toBeNull()
+    expect(vf!.images).toHaveLength(1)
+    expect(vf!.visionFeedback).toBe(true)
+  })
+
+  // ── Negative controls: nothing declared, and the old heuristics decide. ──
+  it('negative control: undefined keeps the strict name match on a non-Ollama provider', async () => {
+    expect(await buildVisionFeedback('gemma-3-4b-it-abliterated', 'image_generate', RESULT, 'openai')).not.toBeNull()
+    expect(await buildVisionFeedback('qwen2.5-coder:14b', 'image_generate', RESULT, 'openai')).toBeNull()
+  })
+
+  it('negative control: undefined keeps Ollama asking the server', async () => {
+    modelSupportsVision.mockResolvedValue(false)
+    expect(await buildVisionFeedback('gemma4:e4b', 'image_generate', RESULT, 'ollama')).toBeNull()
+    expect(modelSupportsVision).toHaveBeenCalledWith('gemma4:e4b')
+  })
+
+  it('negative control: a declared true still refuses a video result', async () => {
+    const video = `Video generated: clip.mp4 (prompt: "x")\n${VIEW('clip.mp4')}`
+    expect(await buildVisionFeedback('gemma4:e4b', 'video_generate', video, 'ollama', true)).toBeNull()
+  })
+})

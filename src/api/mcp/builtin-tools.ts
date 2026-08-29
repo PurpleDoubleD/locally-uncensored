@@ -16,6 +16,7 @@ import { isMlxImageHost, generateMlxImageDataUrl, listMlxImageModels, type MlxIm
 import { getVideoStatus, listVideoModels, generateVideo as generateMlxVideo, getVideoProgress, cancelVideo, type VideoModel } from '../mlx-video'
 import { pathToFileUrl } from '../../lib/local-media-url'
 import { RETIRED_MUTATING_NAMES } from '../../lib/retired-tools'
+import { resolveMlxModel, defaultMlxImageModel } from '../../lib/mlx-model-match'
 
 /**
  * Helper: current chat id (+ folder workspace) as a fragment to spread into
@@ -1041,26 +1042,6 @@ async function executeVideoGenerate(args: Record<string, any>): Promise<string> 
 // ── macOS MLX generation (hard rule: local image/video on Mac is MLX only,
 // never ComfyUI — see api/mlx-image.ts / api/mlx-video.ts module docs) ────
 
-/** Fuzzy-resolve a chat-typed model name against an installed MLX catalog by
- *  id or display name. Same tolerant-matching shape as resolveModelName in
- *  vram-handoff.ts, kept as a separate small helper so this Mac-only path
- *  doesn't pull in the ComfyUI-flavoured module. */
-function resolveMlxModel<T extends { id: string; name: string }>(
-  requested: string | undefined,
-  installed: T[],
-): T | null {
-  if (installed.length === 0 || !requested) return null
-  const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '')
-  const r = norm(requested)
-  if (!r) return null
-  return (
-    installed.find((m) => norm(m.id) === r || norm(m.name) === r) ??
-    installed.find((m) => norm(m.id).includes(r) || norm(m.name).includes(r)) ??
-    installed.find((m) => r.includes(norm(m.id)) || r.includes(norm(m.name))) ??
-    null
-  )
-}
-
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms))
 }
@@ -1093,7 +1074,11 @@ async function executeImageGenerateMlx(prompt: string, merged: Record<string, an
     }
     model = resolved
   } else {
-    model = installed.find((m) => m.id === 'sd-turbo') ?? installed[0]
+    // Dynamic, like the ComfyUI gate's store reads in api/model-pick.ts: a
+    // static import of the create store pulls api/comfyui in at module load
+    // and closes an import cycle through the tool registry.
+    const { useCreateStore } = await import('../../stores/createStore')
+    model = defaultMlxImageModel(installed, useCreateStore.getState().imageModel)!
   }
 
   try {

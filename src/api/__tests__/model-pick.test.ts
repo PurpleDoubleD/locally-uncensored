@@ -13,10 +13,11 @@ vi.mock('../comfyui', async (importOriginal) => {
   return { ...actual, getImageModels: vi.fn(), getVideoModels: vi.fn() }
 })
 
-import { pickModelForGeneration } from '../model-pick'
+import { pickModelForGeneration, chooseFromUserSelection } from '../model-pick'
 import { getImageModels, getVideoModels } from '../comfyui'
 import { useModelPickStore } from '../../stores/modelPickStore'
 import { useSettingsStore } from '../../stores/settingsStore'
+import { useCreateStore } from '../../stores/createStore'
 import { DEFAULT_SETTINGS } from '../../lib/constants'
 
 const IMAGE_MODELS = [
@@ -46,6 +47,9 @@ beforeEach(() => {
   vi.mocked(getImageModels).mockResolvedValue(IMAGE_MODELS)
   vi.mocked(getVideoModels).mockResolvedValue(VIDEO_MODELS)
   useSettingsStore.setState({ settings: { ...DEFAULT_SETTINGS } })
+  // The Create tab selection is the first source the gate reads, so every
+  // pre-existing case has to start from "nothing chosen in Create".
+  useCreateStore.setState({ imageModel: '', imageModelType: 'unknown', videoModel: '' })
   // No pending pick leaks between tests.
   if (useModelPickStore.getState().pending) useModelPickStore.getState().cancel()
 })
@@ -149,5 +153,91 @@ describe('pickModelForGeneration — video T2V vs I2V', () => {
     })
     expect(await pickModelForGeneration('video', {})).toBe('wan2.1_t2v_1.3B_bf16.safetensors')
     expect(await pickModelForGeneration('video', { inputImage: 'a.png' })).toBe('svd_xt_1_1.safetensors')
+  })
+})
+
+/**
+ * Runde 4, Nebenbefund N1 of the D1 counter-check (Windows build 2026-08-29):
+ * `image_generate` with an empty `model` argument built a Realistic Vision
+ * graph while the Create tab was set to Z-Image. The Create tab is the model
+ * choice the user can see, so it is the first source now.
+ */
+describe('pickModelForGeneration, the Create tab selection is the default', () => {
+  beforeEach(() => {
+    useCreateStore.setState({ imageModel: '', imageModelType: 'unknown', videoModel: '' })
+  })
+
+  it('image: the Create tab model wins over the automatic pick, no picker card', async () => {
+    useCreateStore.getState().setImageModel('RealVisXL_V5.safetensors', 'sdxl')
+    const result = await pickModelForGeneration('image', {})
+    expect(result).toBe('RealVisXL_V5.safetensors')
+    expect(useModelPickStore.getState().pending).toBeNull()
+  })
+
+  it('image: the Create tab model also wins over the saved picker preference', async () => {
+    useSettingsStore.getState().updateSettings({ preferredImageModel: 'Juggernaut-XL_v9.safetensors' })
+    useCreateStore.getState().setImageModel('RealVisXL_V5.safetensors', 'sdxl')
+    expect(await pickModelForGeneration('image', {})).toBe('RealVisXL_V5.safetensors')
+  })
+
+  it('image: an explicit model argument still beats the Create tab', async () => {
+    useCreateStore.getState().setImageModel('RealVisXL_V5.safetensors', 'sdxl')
+    const result = await pickModelForGeneration('image', { model: 'Juggernaut-XL_v9.safetensors' })
+    expect(result).toBeNull()
+    expect(useModelPickStore.getState().pending).toBeNull()
+  })
+
+  it('video: the Create tab model answers a text-to-video call', async () => {
+    useCreateStore.getState().setVideoModel('wan2.1_t2v_1.3B_bf16.safetensors')
+    expect(await pickModelForGeneration('video', {})).toBe('wan2.1_t2v_1.3B_bf16.safetensors')
+  })
+
+  // ── Negative controls: nothing chosen, or a choice that cannot serve this
+  //    call, and the old automation has to run untouched. ──
+  it('negative control: no Create selection leaves the saved preference in charge', async () => {
+    useSettingsStore.getState().updateSettings({ preferredImageModel: 'Juggernaut-XL_v9.safetensors' })
+    expect(await pickModelForGeneration('image', {})).toBe('Juggernaut-XL_v9.safetensors')
+  })
+
+  it('negative control: an uninstalled Create selection re-opens the picker', async () => {
+    useCreateStore.getState().setImageModel('deleted-last-week.safetensors', 'sdxl')
+    const p = pickModelForGeneration('image', {})
+    await answerPick({ model: 'Juggernaut-XL_v9.safetensors', save: false })
+    expect(await p).toBe('Juggernaut-XL_v9.safetensors')
+  })
+
+  it('negative control: a T2V-only Create selection does not hijack image-to-video', async () => {
+    useCreateStore.getState().setVideoModel('wan2.1_t2v_1.3B_bf16.safetensors')
+    const p = pickModelForGeneration('video', { inputImage: 'a.png' })
+    await answerPick({ model: 'svd_xt_1_1.safetensors', save: false })
+    expect(await p).toBe('svd_xt_1_1.safetensors')
+  })
+
+  it('negative control: nothing chosen anywhere still ends at the picker card', async () => {
+    const p = pickModelForGeneration('image', {})
+    await answerPick({ model: 'RealVisXL_V5.safetensors', save: false })
+    expect(await p).toBe('RealVisXL_V5.safetensors')
+  })
+})
+
+describe('chooseFromUserSelection', () => {
+  const names = ['a.safetensors', 'b.safetensors']
+
+  it('prefers the Create tab choice', () => {
+    expect(chooseFromUserSelection(names, 'b.safetensors', 'a.safetensors')).toBe('b.safetensors')
+  })
+
+  it('falls back to the saved preference when Create has none', () => {
+    expect(chooseFromUserSelection(names, '', 'a.safetensors')).toBe('a.safetensors')
+  })
+
+  it('falls back to the saved preference when the Create choice is not installed', () => {
+    expect(chooseFromUserSelection(names, 'gone.safetensors', 'a.safetensors')).toBe('a.safetensors')
+  })
+
+  it('returns null when neither choice is usable', () => {
+    expect(chooseFromUserSelection(names, 'gone.safetensors', 'also-gone.safetensors')).toBeNull()
+    expect(chooseFromUserSelection(names, undefined, undefined)).toBeNull()
+    expect(chooseFromUserSelection([], 'a.safetensors', 'b.safetensors')).toBeNull()
   })
 })

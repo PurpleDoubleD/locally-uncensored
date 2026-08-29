@@ -49,3 +49,20 @@ export function stripVisionFeedbackMessages(messages: HealableMessage[]): boolea
   }
   return healed
 }
+
+/**
+ * Does the multimodal-unsupported error that ended a turn belong on screen?
+ *
+ * Nebenbefund N3 of the D1 counter-check (Windows build, 2026-08-29): every
+ * successful picture was followed by a red "This model can't read images" line
+ * as the last thing in the chat, because the run fed its own render back to a
+ * model that could not look at it. The render worked. Blaming the user for OUR
+ * attachment turns a finished job into what reads as a failure.
+ *
+ * So: the error is reported only when the picture in the request was NOT ours.
+ * A user-attached image keeps the honest error and the actionable advice,
+ * because their question depends on that picture.
+ */
+export function reportMultimodalRefusal(visionFeedbackGiven: boolean): boolean {
+  return !visionFeedbackGiven
+}

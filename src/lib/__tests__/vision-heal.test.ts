@@ -15,7 +15,7 @@ import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
-import { stripVisionFeedbackMessages, VISION_FALLBACK_TEXT, type HealableMessage } from '../vision-heal'
+import { stripVisionFeedbackMessages, reportMultimodalRefusal, VISION_FALLBACK_TEXT, type HealableMessage } from '../vision-heal'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const read = (rel: string) => readFileSync(resolve(here, rel), 'utf8')
@@ -93,5 +93,45 @@ describe('the agent loop actually wires the heal', () => {
     const vf = read('../../api/vision-feedback.ts')
     expect(vf).toContain('visionFeedback: true')
     expect(vf).toContain('fallbackText:')
+  })
+})
+
+/**
+ * Runde 4, Nebenbefund N3 of the D1 counter-check (Windows build 2026-08-29):
+ * a finished render ended with a red "This model can't read images" line, the
+ * last thing in the chat, because the run had fed its own picture back to a
+ * model that could not look at it. The guess was ours, so the blame may not
+ * land on the user, and a successful render may not read as a failure.
+ */
+describe('reportMultimodalRefusal', () => {
+  it('N3 witness: our own attachment is swallowed, the turn keeps its summary', () => {
+    expect(reportMultimodalRefusal(true)).toBe(false)
+  })
+
+  it('NEGATIVE CONTROL: a user-attached image still earns the honest error', () => {
+    expect(reportMultimodalRefusal(false)).toBe(true)
+  })
+})
+
+describe('the agent loop actually wires the N3 rules', () => {
+  const hook = read('../../hooks/useAgentChat.ts')
+
+  it('the multimodal branch asks whose picture it was before painting the error', () => {
+    expect(hook).toContain('reportMultimodalRefusal(visionFeedbackGiven)')
+    // The swallowed case closes with the normal turn summary, not an error.
+    expect(hook).toContain('(contentRef.current.trim() || closingSummary())')
+  })
+
+  it('the loop hands its own capability answer to the vision feedback', () => {
+    expect(hook).toContain('const declaredSight = declaredVision(')
+    expect(hook).toContain('result.result, providerId, declaredSight)')
+  })
+
+  it('the built-in engine reports the projector on disk as that answer', () => {
+    const rust = read('../../../src-tauri/src/commands/engine.rs')
+    expect(rust).toContain('pub(crate) fn model_can_see_images(model_path: &str) -> bool')
+    expect(rust).toContain('"vision": model_can_see_images(&m.path)')
+    // The same file the engine turns into --mmproj, not a second opinion.
+    expect(rust).toContain('existing_mmproj(model_path).is_some()')
   })
 })
