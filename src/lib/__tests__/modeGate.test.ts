@@ -13,6 +13,7 @@ import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
 
 import { modelOutOfMode } from '../modeGate'
+import { pickForMode } from '../active-model-mode'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const read = (rel: string) => readFileSync(resolve(here, rel), 'utf8')
@@ -57,7 +58,14 @@ describe('wiring: the gate sits at the choke points', () => {
   })
 
   it('the AppShell reselect clears the selection when the new mode has no model', () => {
+    // The rule moved into lib/active-model-mode.ts on 2026-08-29 so it could
+    // be tested against an empty model list, which is what used to eat the
+    // user's pick across a restart (Befund 3, abnahme counter-check). The
+    // clearing behaviour is unchanged and is asserted here on the rule
+    // itself, not on the shape of the call site.
     const src = read('../../components/layout/AppShell.tsx')
-    expect(src).toContain('setActiveModel(fallback ? fallback.name : null)')
+    expect(src).toContain('if (pick.change) setActiveModel(pick.next)')
+    const cloudOnly = [{ name: 'lu-cloud::glm-5.3', type: 'text', provider: 'lu-cloud' }]
+    expect(pickForMode('lu-cloud::glm-5.3', cloudOnly, 'local')).toEqual({ change: true, next: null })
   })
 })

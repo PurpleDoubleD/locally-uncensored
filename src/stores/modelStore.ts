@@ -67,7 +67,15 @@ export const useModelStore = create<ModelState>()(
           // list. Falls back to the first available model, mirroring the
           // first-launch behavior so a user is never stuck with no
           // selection while a model exists.
-          const stillValid = !!state.activeModel && models.some((m) => m.name === state.activeModel)
+          // An empty list validates nothing. fetchModels writes its result
+          // here even when every provider failed, and dropping the pick on
+          // that answer is how a transient failure turned into a silently
+          // different model in the picker (Befund 3, abnahme counter-check
+          // 2026-08-29). The pick has its own guard on the way in and its
+          // own moment to be re-checked: the next non-empty list.
+          const stillValid =
+            !!state.activeModel &&
+            (models.length === 0 || models.some((m) => m.name === state.activeModel))
           // Chat models only for the auto-select — ComfyUI image/video
           // checkpoints share this list and must never become the active CHAT
           // model (an unprefixed checkpoint name routes to Ollama and every
