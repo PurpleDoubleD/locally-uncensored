@@ -1166,11 +1166,59 @@ fn openai_models_to_ollama_tags(v: &serde_json::Value) -> serde_json::Value {
     serde_json::json!({ "models": out })
 }
 
+/// Is this relay target a backend on this machine or the LAN?
+///
+/// Such a backend renders the MODEL'S OWN Jinja chat template, which is where
+/// the thinking switch actually lives (`enable_thinking`, reached through
+/// `chat_template_kwargs`). A cloud endpoint implements the protocol itself
+/// and the strict ones refuse an unknown body field outright, and the relay
+/// has no walk-down ladder to recover from that, so it only ever asks a local
+/// server. Mirrors `isLanBackend` on the desktop side.
+pub(crate) fn is_lan_base(base: &str) -> bool {
+    let host = base
+        .split("://")
+        .nth(1)
+        .unwrap_or(base)
+        .split('/')
+        .next()
+        .unwrap_or("")
+        .rsplit('@')
+        .next()
+        .unwrap_or("");
+    let host = host.trim_start_matches('[');
+    let host = host.split(']').next().unwrap_or(host);
+    let host = if host.contains(':') && !host.contains("::") {
+        host.split(':').next().unwrap_or(host)
+    } else {
+        host
+    };
+    let h = host.to_ascii_lowercase();
+    h == "localhost"
+        || h == "127.0.0.1"
+        || h == "::1"
+        || h.ends_with(".local")
+        || h.starts_with("10.")
+        || h.starts_with("192.168.")
+        || h.starts_with("fd")
+        || h.starts_with("fe80:")
+        || (h.starts_with("172.")
+            && h.split('.')
+                .nth(1)
+                .and_then(|o| o.parse::<u8>().ok())
+                .map(|o| (16..=31).contains(&o))
+                .unwrap_or(false))
+}
+
 /// Ollama `/api/chat` request → OpenAI `/v1/chat/completions` request. Always
 /// asks the backend for stream:false (we reshape the reply for the mobile's
 /// requested mode afterwards). Ollama tool defs are already OpenAI-shaped, so
-/// tools pass through; the `think`/`options` knobs are Ollama-only and dropped.
-fn ollama_chat_req_to_openai(req: &serde_json::Value) -> serde_json::Value {
+/// tools pass through, and the `options` knobs are Ollama-only and dropped.
+///
+/// `think` is NOT dropped any more (2.6.7 Denk-Audit, Loch 9). It used to be,
+/// so the phone's Think button did nothing at all whenever the box relayed to
+/// an OpenAI-compatible backend, the built-in engine included. It is carried
+/// the way a template-rendering server reads it, and only to a local one.
+fn ollama_chat_req_to_openai(req: &serde_json::Value, lan: bool) -> serde_json::Value {
     let model = strip_provider_prefix(req.get("model").and_then(|v| v.as_str()).unwrap_or(""));
     let mut messages = Vec::new();
     if let Some(arr) = req.get("messages").and_then(|m| m.as_array()) {
@@ -1215,6 +1263,12 @@ fn ollama_chat_req_to_openai(req: &serde_json::Value) -> serde_json::Value {
     if let Some(tools) = req.get("tools") {
         if tools.as_array().map(|a| !a.is_empty()).unwrap_or(false) {
             out["tools"] = tools.clone();
+        }
+    }
+    if lan {
+        if let Some(think) = req.get("think").and_then(|v| v.as_bool()) {
+            out["chat_template_kwargs"] = serde_json::json!({ "enable_thinking": think });
+            out["reasoning_effort"] = serde_json::json!(if think { "high" } else { "none" });
         }
     }
     out
@@ -1334,7 +1388,7 @@ async fn proxy_openai_compat(state: &RemoteState, req: Request) -> Response {
             .get("stream")
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
-        let oai_req = ollama_chat_req_to_openai(&ollama_req);
+        let oai_req = ollama_chat_req_to_openai(&ollama_req, is_lan_base(&base_final));
         let url = format!("{}/chat/completions", base_final);
         let mut rb = client.post(&url).json(&oai_req);
         if !state.openai_key.is_empty() {
@@ -1379,8 +1433,9 @@ async fn proxy_openai_compat(state: &RemoteState, req: Request) -> Response {
 #[cfg(test)]
 mod openai_bridge_tests {
     use super::{
-        ollama_chat_req_to_openai, openai_models_to_ollama_tags, openai_resp_to_ollama_message,
-        openai_resp_to_ollama_ndjson, strip_provider_prefix, to_data_url,
+        is_lan_base, ollama_chat_req_to_openai, openai_models_to_ollama_tags,
+        openai_resp_to_ollama_message, openai_resp_to_ollama_ndjson, strip_provider_prefix,
+        to_data_url,
     };
 
     #[test]
@@ -1418,12 +1473,76 @@ mod openai_bridge_tests {
             "model": "openai::qwen", "messages": [{"role": "user", "content": "hi"}],
             "stream": true, "options": {"num_predict": 2048}, "think": false
         });
-        let out = ollama_chat_req_to_openai(&req);
+        let out = ollama_chat_req_to_openai(&req, true);
         assert_eq!(out["model"], "qwen");
         assert_eq!(out["stream"], false);
         assert_eq!(out["max_tokens"], 2048);
+        // The Ollama-only spelling never goes on an OpenAI wire.
         assert!(out.get("think").is_none());
         assert_eq!(out["messages"][0]["content"], "hi");
+    }
+
+    // 2.6.7 Denk-Audit, Loch 9: the relay dropped `think` on the floor, so the
+    // phone's Think button did nothing whenever the box relayed to an
+    // OpenAI-compatible backend, the built-in engine included.
+    #[test]
+    fn chat_req_carries_the_think_switch_to_a_local_backend() {
+        let on = ollama_chat_req_to_openai(
+            &serde_json::json!({"model": "m", "messages": [], "think": true}),
+            true,
+        );
+        assert_eq!(on["chat_template_kwargs"]["enable_thinking"], true);
+        assert_eq!(on["reasoning_effort"], "high");
+
+        let off = ollama_chat_req_to_openai(
+            &serde_json::json!({"model": "m", "messages": [], "think": false}),
+            true,
+        );
+        assert_eq!(off["chat_template_kwargs"]["enable_thinking"], false);
+        assert_eq!(off["reasoning_effort"], "none");
+    }
+
+    #[test]
+    fn chat_req_asks_a_cloud_backend_for_nothing_it_may_refuse() {
+        let out = ollama_chat_req_to_openai(
+            &serde_json::json!({"model": "m", "messages": [], "think": true}),
+            false,
+        );
+        assert!(out.get("chat_template_kwargs").is_none());
+        assert!(out.get("reasoning_effort").is_none());
+    }
+
+    #[test]
+    fn chat_req_without_a_switch_stays_silent_even_locally() {
+        let out = ollama_chat_req_to_openai(
+            &serde_json::json!({"model": "m", "messages": []}),
+            true,
+        );
+        assert!(out.get("chat_template_kwargs").is_none());
+        assert!(out.get("reasoning_effort").is_none());
+    }
+
+    #[test]
+    fn lan_base_knows_local_from_cloud() {
+        for b in [
+            "http://127.0.0.1:8127/v1",
+            "http://localhost:1234/v1",
+            "http://192.168.0.54:11434/v1",
+            "http://10.0.0.5:8080/v1",
+            "http://172.20.1.2:8080/v1",
+            "http://box.local:8127/v1",
+            "http://[::1]:8127/v1",
+        ] {
+            assert!(is_lan_base(b), "expected LAN: {}", b);
+        }
+        for b in [
+            "https://api.openai.com/v1",
+            "https://openrouter.ai/api/v1",
+            "https://api.lu-labs.ai/v1",
+            "http://172.32.0.1:8080/v1",
+        ] {
+            assert!(!is_lan_base(b), "expected cloud: {}", b);
+        }
     }
 
     #[test]
@@ -1432,7 +1551,7 @@ mod openai_bridge_tests {
             "model": "m",
             "messages": [{"role": "user", "content": "look", "images": ["/9j/abc"]}]
         });
-        let out = ollama_chat_req_to_openai(&req);
+        let out = ollama_chat_req_to_openai(&req, true);
         let parts = out["messages"][0]["content"].as_array().unwrap();
         assert_eq!(parts[0]["type"], "text");
         assert_eq!(parts[1]["type"], "image_url");
@@ -1448,7 +1567,7 @@ mod openai_bridge_tests {
             "model": "m", "messages": [],
             "tools": [{"type": "function", "function": {"name": "f"}}]
         });
-        let out = ollama_chat_req_to_openai(&req);
+        let out = ollama_chat_req_to_openai(&req, true);
         assert_eq!(out["tools"][0]["function"]["name"], "f");
     }
 
@@ -1507,8 +1626,8 @@ mod openai_bridge_tests {
 #[cfg(test)]
 mod openai_bridge_live_tests {
     use super::{
-        ollama_chat_req_to_openai, openai_models_to_ollama_tags, openai_resp_to_ollama_message,
-        openai_resp_to_ollama_ndjson,
+        is_lan_base, ollama_chat_req_to_openai, openai_models_to_ollama_tags,
+        openai_resp_to_ollama_message, openai_resp_to_ollama_ndjson,
     };
 
     #[test]
@@ -1549,7 +1668,7 @@ mod openai_bridge_live_tests {
             });
             let resp: serde_json::Value = client
                 .post(format!("{}/chat/completions", base))
-                .json(&ollama_chat_req_to_openai(&ollama_req))
+                .json(&ollama_chat_req_to_openai(&ollama_req, is_lan_base(base)))
                 .send()
                 .await
                 .unwrap()
@@ -1572,7 +1691,7 @@ mod openai_bridge_live_tests {
             });
             let resp2: serde_json::Value = client
                 .post(format!("{}/chat/completions", base))
-                .json(&ollama_chat_req_to_openai(&stream_req))
+                .json(&ollama_chat_req_to_openai(&stream_req, is_lan_base(base)))
                 .send()
                 .await
                 .unwrap()
