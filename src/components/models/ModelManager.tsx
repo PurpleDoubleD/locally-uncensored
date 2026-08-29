@@ -17,6 +17,7 @@ import { checkComfyConnection, refreshComfyModels } from '../../api/comfyui'
 import { isMlxImageHost } from '../../api/mlx-image'
 import { MlxMediaSettings } from '../settings/MlxMediaSettings'
 import { backendCall } from '../../api/backend'
+import { counterView } from '../../lib/inventory-counter'
 import type { ModelCategory, AIModel } from '../../types/models'
 
 // One category drives BOTH views (Discover + Installed) — the old split
@@ -31,8 +32,27 @@ const RAIL_ITEMS: { key: Mode; label: string; icon: typeof MessagesSquare }[] = 
   { key: 'video', label: 'Video', icon: Clapperboard },
 ]
 
+/** The mark a counter wears while it has nothing counted to show. Not a 0:
+ *  a 0 next to a card that reads Installed is a wrong answer, and this one
+ *  stood for five seconds on the real box (Befund 2, 2026-08-29). */
+function CountingDots({ label }: { label: string }) {
+  return (
+    <span
+      className="text-[0.55rem] font-normal opacity-50 animate-pulse"
+      role="status"
+      aria-label={label}
+      title={label}
+    >
+      &middot;&middot;&middot;
+    </span>
+  )
+}
+
 export function ModelManager() {
-  const { models, activeModel, setActiveModel, fetchModels, removeModel, categoryFilter, setCategoryFilter } = useModels()
+  const {
+    models, activeModel, setActiveModel, fetchModels, removeModel,
+    categoryFilter, setCategoryFilter, inventoryLoaded, inventoryRefreshing,
+  } = useModels()
   const { setView } = useUIStore()
   const ollamaEnabled = useProviderStore(s => s.providers.ollama.enabled)
   const [pullOpen, setPullOpen] = useState(false)
@@ -109,6 +129,9 @@ export function ModelManager() {
 
   const filteredModels = models.filter((m: AIModel) => m.type === mode)
   const modeMeta = RAIL_ITEMS.find(r => r.key === mode)!
+  // One rule for the rail badges and the Installed badge, so the two can
+  // never again disagree about what an uncounted lane looks like.
+  const inventoryState = { loaded: inventoryLoaded, refreshing: inventoryRefreshing }
 
   // d37d7bf5 + neejuh (2.5.5): "models show installed in Discover but the
   // Installed tab is empty and I can't select them." Image/video models are
@@ -142,7 +165,7 @@ export function ModelManager() {
       <aside className="shrink-0 w-12 lg:w-36 border-r border-gray-200 dark:border-white/[0.06] bg-gray-50/60 dark:bg-white/[0.015] flex flex-col py-3 px-1.5 lg:px-2 gap-1">
         {RAIL_ITEMS.map(({ key, label, icon: Icon }) => {
           const active = mode === key
-          const count = models.filter((m) => m.type === key).length
+          const badge = counterView(models.filter((m) => m.type === key).length, inventoryState)
           return (
             <button
               key={key}
@@ -159,9 +182,13 @@ export function ModelManager() {
               <span className={`hidden lg:block text-[0.68rem] font-medium ${active ? 'text-gray-900 dark:text-white' : 'text-gray-500 dark:text-gray-400'}`}>
                 {label}
               </span>
-              {count > 0 && (
-                <span className="hidden lg:block ml-auto text-[0.55rem] text-gray-400 dark:text-gray-500 tabular-nums">{count}</span>
-              )}
+              {badge.kind === 'loading' ? (
+                <span className="hidden lg:block ml-auto">
+                  <CountingDots label={`Counting installed ${label.toLowerCase()} models`} />
+                </span>
+              ) : badge.value > 0 ? (
+                <span className="hidden lg:block ml-auto text-[0.55rem] text-gray-400 dark:text-gray-500 tabular-nums">{badge.value}</span>
+              ) : null}
             </button>
           )
         })}
@@ -210,7 +237,14 @@ export function ModelManager() {
                 }`}
               >
                 <HardDrive size={11} /> Installed
-                <span className="text-[0.55rem] font-normal opacity-70 tabular-nums">{filteredModels.length}</span>
+                {(() => {
+                  const badge = counterView(filteredModels.length, inventoryState)
+                  return badge.kind === 'loading' ? (
+                    <CountingDots label="Counting installed models" />
+                  ) : (
+                    <span className="text-[0.55rem] font-normal opacity-70 tabular-nums">{badge.value}</span>
+                  )
+                })()}
               </button>
             </div>
 
@@ -265,7 +299,14 @@ export function ModelManager() {
 
           {!showMlxPanel && tab === 'installed' && (
             <>
-              {imageOrVideo && filteredModels.length === 0 && comfyReachable !== true ? (
+              {counterView(filteredModels.length, inventoryState).kind === 'loading' ? (
+                // The empty state is the same claim the counter makes, in
+                // words: you own none of these. It waits for the count for
+                // the same reason (Befund 2, abnahme counter-check).
+                <div className="text-center py-16 px-6">
+                  <p className="text-[0.7rem] text-gray-500">Reading your installed models…</p>
+                </div>
+              ) : imageOrVideo && filteredModels.length === 0 && comfyReachable !== true ? (
                 // comfyReachable: null = still probing, false = confirmed down.
                 // Never show the misleading "no models installed" here while the
                 // probe is pending — on desktop checkComfyConnection has to time

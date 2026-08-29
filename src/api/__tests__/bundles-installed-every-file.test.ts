@@ -33,6 +33,7 @@ const diffusionModels = vi.fn<() => Promise<string[]>>(async () => [])
 const ggufUnets = vi.fn<() => Promise<string[]>>(async () => [])
 const vaes = vi.fn<() => Promise<string[]>>(async () => [])
 const clips = vi.fn<() => Promise<string[]>>(async () => [])
+const loras = vi.fn<() => Promise<string[]>>(async () => [])
 
 vi.mock('../backend', () => ({
   backendCall: (...a: unknown[]) => backendCall(...(a as [string, unknown])),
@@ -48,6 +49,10 @@ vi.mock('../comfyui', () => ({
   getAnimateDiffModels: async () => [],
   getVAEModels: () => vaes(),
   getCLIPModels: () => clips(),
+  // Seventh loader (2026-08-29, abnahme counter-check): LoraLoader has always
+  // enumerated the loras folder and nothing here ever asked it, so a LoRA was
+  // the one installed file no surface could reason about.
+  getLoraModels: () => loras(),
   filterPartialFiles: async (names: string[]) => new Set(names),
   refreshComfyModels: vi.fn(async () => true),
 }))
@@ -71,13 +76,24 @@ const RAPID_AIO = {
   ],
 } as unknown as ModelBundle
 
-/** A LoRA bundle: nothing ComfyUI enumerates through these loaders, so the
- *  gate has no business judging it either way. */
+/** A LoRA bundle. Since 2026-08-29 the loras folder IS enumerated, so this
+ *  bundle is judged like every other one: the counter-check found Pixel Art XL
+ *  reading Installed on its card while no list and no counter knew the file. */
 const LORA_ONLY = {
   name: 'Character LoRA',
   description: '', tags: [], totalSizeGB: 0.2, vramRequired: '4 GB',
   files: [
     { name: '', description: '', pulls: '', tags: [], updated: '', filename: 'mychar.safetensors', subfolder: 'loras', sizeGB: 0.2 },
+  ],
+} as unknown as ModelBundle
+
+/** An upscale model: still nothing any of these loaders enumerates, so the
+ *  gate still has no business judging it either way. */
+const UPSCALE_ONLY = {
+  name: 'Upscaler',
+  description: '', tags: [], totalSizeGB: 0.07, vramRequired: '4 GB',
+  files: [
+    { name: '', description: '', pulls: '', tags: [], updated: '', filename: '4x-UltraSharp.pth', subfolder: 'upscale_models', sizeGB: 0.07 },
   ],
 } as unknown as ModelBundle
 
@@ -128,8 +144,23 @@ describe('a bundle counts as installed only when ComfyUI lists every file it enu
   })
 
   it('a bundle whose files ComfyUI never enumerates is left to the disk check', async () => {
+    const out = await checkBundlesInstalled([UPSCALE_ONLY])
+    expect(out[UPSCALE_ONLY.name]).toBe(true)
+  })
+
+  it('a LoRA the running ComfyUI lists counts as installed', async () => {
+    loras.mockResolvedValue(['mychar.safetensors'])
     const out = await checkBundlesInstalled([LORA_ONLY])
     expect(out[LORA_ONLY.name]).toBe(true)
+  })
+
+  it('NEGATIVE CONTROL: a LoRA on disk the running ComfyUI does not list is not installed', async () => {
+    // The counter-check case, from the other end: the card used to trust the
+    // disk alone here, which is how it read Installed over a list that had
+    // never heard of the file.
+    loras.mockResolvedValue([])
+    const out = await checkBundlesInstalled([LORA_ONLY])
+    expect(out[LORA_ONLY.name]).toBe(false)
   })
 
   it('an engine that cannot be reached leaves the disk verdict standing', async () => {

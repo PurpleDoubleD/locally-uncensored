@@ -6,6 +6,7 @@ import { unloadLmStudioModel } from '../api/lmstudio'
 import { activateBuiltinModel } from '../api/engine'
 import { isLmStudioProvider } from '../lib/hf-to-provider'
 import { isTauri, backendCall } from '../api/backend'
+import { useChatStore } from './chatStore'
 import { log } from '../lib/logger'
 
 export interface PullState {
@@ -21,6 +22,16 @@ interface ModelState {
   activePulls: Record<string, PullState>
   isModelLoading: boolean
   categoryFilter: ModelCategory
+  /** Has a model list ever landed here. A counter must show a loading mark
+   *  until it has, never a 0 (Befund 2 of the abnahme counter-check
+   *  2026-08-29: "Installed 0" next to three Installed cards). */
+  inventoryLoaded: boolean
+  /** How many inventory refreshes are in flight. A number, not a flag,
+   *  because fetchModels is called from several mounted components at once
+   *  and the first one to finish must not declare the count settled. */
+  inventoryRefreshes: number
+  beginInventoryRefresh: () => void
+  endInventoryRefresh: () => void
   setModels: (models: AIModel[]) => void
   setActiveModel: (name: string | null) => void
   startPull: (name: string, controller: AbortController) => void
@@ -40,6 +51,12 @@ export const useModelStore = create<ModelState>()(
       activePulls: {},
       isModelLoading: false,
       categoryFilter: 'all',
+      inventoryLoaded: false,
+      inventoryRefreshes: 0,
+
+      beginInventoryRefresh: () => set((state) => ({ inventoryRefreshes: state.inventoryRefreshes + 1 })),
+      endInventoryRefresh: () =>
+        set((state) => ({ inventoryRefreshes: Math.max(0, state.inventoryRefreshes - 1) })),
 
       setModels: (models) =>
         set((state) => {
@@ -51,7 +68,15 @@ export const useModelStore = create<ModelState>()(
           // list. Falls back to the first available model, mirroring the
           // first-launch behavior so a user is never stuck with no
           // selection while a model exists.
-          const stillValid = !!state.activeModel && models.some((m) => m.name === state.activeModel)
+          // An empty list validates nothing. fetchModels writes its result
+          // here even when every provider failed, and dropping the pick on
+          // that answer is how a transient failure turned into a silently
+          // different model in the picker (Befund 3, abnahme counter-check
+          // 2026-08-29). The pick has its own guard on the way in and its
+          // own moment to be re-checked: the next non-empty list.
+          const stillValid =
+            !!state.activeModel &&
+            (models.length === 0 || models.some((m) => m.name === state.activeModel))
           // Chat models only for the auto-select — ComfyUI image/video
           // checkpoints share this list and must never become the active CHAT
           // model (an unprefixed checkpoint name routes to Ollama and every
@@ -59,6 +84,7 @@ export const useModelStore = create<ModelState>()(
           const firstChat = models.find((m) => m.type !== 'image' && m.type !== 'video')
           return {
             models,
+            inventoryLoaded: true,
             activeModel: stillValid
               ? state.activeModel
               : (firstChat ? firstChat.name : null),
@@ -69,6 +95,15 @@ export const useModelStore = create<ModelState>()(
         const prev = get().activeModel
         const prevModel = prev ? get().models.find((m) => m.name === prev) : undefined
         set({ activeModel: name })
+        // Befund 4 of the abnahme counter-check (2026-08-29): the open chat
+        // kept the model it was created with while the wire of that same turn
+        // already carried the new one. Every path that changes the selection
+        // comes through here, so the record is written here, once. A cleared
+        // selection has nothing to write.
+        if (name) {
+          try { useChatStore.getState().setActiveConversationModel(name) }
+          catch (e) { log.warn('[modelStore] could not note the model on the open chat', { err: e }) }
+        }
         if (!prev || prev === name) return
         // Exactly ONE local model stays in VRAM at a time (David 2026-06-12:
         // "darf niemals 2 gleichzeitig geladen sein, außer man macht Compare").
