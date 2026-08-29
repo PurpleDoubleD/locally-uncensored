@@ -14,7 +14,7 @@
 import { describe, it, expect } from 'vitest'
 import { builtinSlotStatus } from '../builtin-slot-status'
 
-describe('builtinSlotStatus — what the row may claim without a socket', () => {
+describe('builtinSlotStatus: what the row may claim without a socket', () => {
   it('THE FIX: an engine that was never started reads "not running", not "failed"', () => {
     expect(builtinSlotStatus({ running: false, healthy: false })).toBe('stopped')
   })

@@ -42,7 +42,7 @@ beforeEach(() => {
   managed = true
 })
 
-describe('readBuiltinSlotStatus — ask the app, not the port', () => {
+describe('readBuiltinSlotStatus: ask the app, not the port', () => {
   it('THE FIX: an engine that never started reads stopped, with no request sent', async () => {
     backendCall.mockResolvedValue({ running: false, healthy: false })
     expect(await readBuiltinSlotStatus()).toBe('stopped')

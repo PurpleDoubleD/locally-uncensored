@@ -13,7 +13,7 @@ import { getImageBundles, getVideoBundles } from '../../api/discover'
 const fitOnGpu = (needGb: number, vramGb: number) =>
   needGb <= vramGb ? 'fits' : needGb <= vramGb + 2 ? 'tight' : 'big'
 
-describe('bundleVramNeedGb — what a bundle really asks of the GPU', () => {
+describe('bundleVramNeedGb: what a bundle really asks of the GPU', () => {
   it('reads the upper bound of a range', () => {
     expect(bundleVramNeedGb({ vramRequired: '6-8 GB', totalSizeGB: 2.8 })).toBe(8)
     expect(bundleVramNeedGb({ vramRequired: '10-12 GB', totalSizeGB: 14 })).toBe(12)
