@@ -175,7 +175,19 @@ export async function checkBundlesInstalled(bundles: ModelBundle[]): Promise<Rec
   // copy, moved install). "Installed" from the disk check alone then locks the
   // user out: the Create picker (fed by ComfyUI's enums) shows nothing AND
   // re-downloading is refused. When ComfyUI is reachable, a bundle only counts
-  // as installed if ComfyUI can actually see at least one of its listed files.
+  // as installed if ComfyUI can actually see the files it needs.
+  //
+  // EVERY enumerable file, not merely one of them. GH #113 came back on 2.6.6
+  // (Blahx with a screenshot, lapbo: "the model is not visible, although it is
+  // downloaded") because "at least one" is nearly free in this catalogue:
+  // seven of the thirteen video bundles ship the same umt5_xxl_fp8_e4m3fn_scaled
+  // text encoder and six the same wan_2.1_vae. One neighbour that installed
+  // cleanly leaves those two listed forever, so a bundle whose own main model
+  // ComfyUI cannot serve still passed the gate on somebody else's file. The
+  // card then said Installed while the Installed tab and every picker, which
+  // enumerate the real model, had nothing (Blahx: two cards reading Installed
+  // over a rail counter of 1). The file that makes the bundle what it is is
+  // exactly the file this gate has to be sure about.
   if (comfyLists) {
     const visible = new Set<string>()
     for (const arr of Object.values(comfyLists)) for (const n of arr) visible.add(normalizeModelBase(n))
@@ -183,9 +195,12 @@ export async function checkBundlesInstalled(bundles: ModelBundle[]): Promise<Rec
       if (!result[bundle.name]) continue
       const enumFiles = bundle.files.filter(f => f.filename && f.subfolder && ENUM_SUBFOLDERS.has(f.subfolder))
       if (enumFiles.length === 0) continue
-      if (!enumFiles.some(f => visible.has(normalizeModelBase(f.filename!)))) {
+      const unseen = enumFiles.filter(f => !visible.has(normalizeModelBase(f.filename!)))
+      if (unseen.length > 0) {
         result[bundle.name] = false
-        log.warn(`[discover] ${bundle.name}: files on disk but invisible to the running ComfyUI · not counting as installed`)
+        log.warn(`[discover] ${bundle.name}: files on disk but invisible to the running ComfyUI · not counting as installed`, {
+          files: unseen.map(f => f.filename),
+        })
       }
     }
   }
@@ -226,6 +241,24 @@ export function normalizeModelBase(name: string): string {
     .replace(/[-_](fp4|fp8|fp16|bf16|e4m3fn|scaled|fp8_e4m3fn_scaled)$/g, '')
 }
 
+/** Every model name the RUNNING ComfyUI enumerates, as one flat list.
+ *
+ *  ONE reader, because "can ComfyUI see this file" is asked from three places
+ *  and every place that asked its own way ended up asking a different question.
+ *  UNETLoader enumerates only .safetensors and .sft; every GGUF quant is listed
+ *  by ComfyUI-GGUF's own loader instead. checkBundlesInstalled was taught that
+ *  fifth loader in 2.6.6 (6abf570) and the Create probe in 2.6.5 (b8531b6),
+ *  while the Model Manager's install click kept asking four. Both Unfiltered
+ *  video bundles are GGUF, so on that path a perfectly listed model came back
+ *  "not listed" and the user was told LU and ComfyUI use different model
+ *  folders, which was never true. Nothing here may go back to a subset. */
+export async function readComfyModelNames(): Promise<string[]> {
+  const lists = await Promise.all([
+    getCheckpoints(), getDiffusionModels(), getVAEModels(), getCLIPModels(), getGgufUnetModels(),
+  ])
+  return lists.flat()
+}
+
 /** Which of `wanted` the RUNNING ComfyUI does not list yet.
  *
  *  One function, because there are two journeys that end in the same place: a
@@ -245,10 +278,7 @@ export function normalizeModelBase(name: string): string {
  *  not get is not a file we have seen. */
 export async function modelsNotVisibleInComfy(wanted: string[]): Promise<string[]> {
   try {
-    const lists = await Promise.all([
-      getCheckpoints(), getDiffusionModels(), getVAEModels(), getCLIPModels(), getGgufUnetModels(),
-    ])
-    const visible = new Set(lists.flat().map(normalizeModelBase))
+    const visible = new Set((await readComfyModelNames()).map(normalizeModelBase))
     return wanted.filter((n) => !visible.has(normalizeModelBase(n)))
   } catch {
     return wanted // engine unreachable, so it has confirmed nothing
@@ -285,14 +315,77 @@ export async function installCustomNodes(nodeKeys: string[]): Promise<void> {
   }
 }
 
-/** How long an install click may wait for ComfyUI to notice a file that is
+/** How long an install click itself waits for ComfyUI to notice a file that is
  *  already complete on disk. Three rounds of 1.5s against the 20 rounds of 3s
  *  the Create install and the download poller spend, because this one runs
  *  inside a click: the common case is an old file that answers on the very
- *  first lookup, before any waiting happens at all, and the poller keeps
- *  watching the same file with the full budget afterwards. */
+ *  first lookup, before any waiting happens at all.
+ *
+ *  This is a fast path, NOT the verdict. Anything it cannot confirm inside the
+ *  click goes to confirmVisibleOrAccuse below, on the full budget. */
 const INVISIBLE_RECHECK_ATTEMPTS = 3
 const INVISIBLE_RECHECK_DELAY_MS = 1500
+
+/** Files whose long visibility confirmation is already running, so a second
+ *  click on an overlapping bundle does not start a second one. */
+const confirmingVisibility = new Map<string, Promise<void>>()
+
+/** Resolves once every long visibility confirmation started so far has ended.
+ *  The confirmation outlives the install click by design, so a test about its
+ *  verdict needs something to wait on, and a test about the NEXT install needs
+ *  a way to be sure the previous one is not still asking the engine. */
+export async function whenVisibilityConfirmed(): Promise<void> {
+  await Promise.all([...confirmingVisibility.values()])
+}
+
+/**
+ * D2. Give a file that is on disk but not listed yet the same sixty seconds the
+ * other two paths give it, without holding the click.
+ *
+ * 05ee25ff justified the click's three rounds with "the download poller keeps
+ * watching the same file with the full budget afterwards". For a file that was
+ * DOWNLOADED in this run that is true. For a file the install skipped because
+ * it was already complete on disk it is not: nothing is started, so the Rust
+ * progress map never gains an entry, downloadStore.refresh never sees a
+ * transition to complete, and announceUntilVisible is never called. Those 4.5
+ * seconds were the only window such a file ever got, and the video bundles
+ * share exactly those files, so the case is the common one and not the rare
+ * one. Voxyl AI and Aldrich Ironhart (Discord 2026-08-13) measured scans on the
+ * big files that run far longer than that.
+ *
+ * So the click says what it knows for certain, that the file is on disk, and
+ * this keeps asking. Every round re-announces the arrival, which is what makes
+ * the Model Manager re-run its installed check, and only an engine that still
+ * does not list the file after the full budget is called a folder mismatch.
+ */
+function confirmVisibleOrAccuse(filename: string): Promise<void> {
+  const running = confirmingVisibility.get(filename)
+  if (running) return running
+  const started = runVisibilityConfirmation(filename).finally(() => confirmingVisibility.delete(filename))
+  confirmingVisibility.set(filename, started)
+  return started
+}
+
+async function runVisibilityConfirmation(filename: string): Promise<void> {
+  try {
+    const { waitForModelsVisible } = await import('../lib/bundle-install')
+    const left = await waitForModelsVisible({
+      missing: () => modelsNotVisibleInComfy([filename]),
+      refresh: async () => {
+        await refreshComfyModels().catch(() => false)
+        window.dispatchEvent(new CustomEvent('comfyui-model-downloaded', { detail: { filename } }))
+      },
+    })
+    if (left.length === 0) {
+      log.info(`[discover] ${filename} is listed by ComfyUI now`)
+      return
+    }
+    log.warn(`[discover] ${filename} exists on disk but the running ComfyUI does not list it`)
+    window.dispatchEvent(new CustomEvent('comfyui-model-invisible', { detail: { filename } }))
+  } catch (err) {
+    log.warn('[discover] visibility confirmation failed', { filename, err })
+  }
+}
 
 export async function installBundleComplete(bundle: ModelBundle): Promise<void> {
   const errors: string[] = []
@@ -320,8 +413,7 @@ export async function installBundleComplete(bundle: ModelBundle): Promise<void> 
   let visibleBases: Set<string> | null | undefined
   const readVisibleBases = async (): Promise<Set<string> | null> => {
     try {
-      const lists = await Promise.all([getCheckpoints(), getDiffusionModels(), getVAEModels(), getCLIPModels()])
-      return new Set(lists.flat().map(normalizeModelBase))
+      return new Set((await readComfyModelNames()).map(normalizeModelBase))
     } catch {
       return null // ComfyUI unreachable · cannot judge visibility
     }
@@ -360,13 +452,12 @@ export async function installBundleComplete(bundle: ModelBundle): Promise<void> 
     if (!file.downloadUrl || !file.filename || !file.subfolder) continue
     if (installedFiles.has(file.filename)) {
       const visible = ENUM_SUBFOLDERS.has(file.subfolder) ? await comfyCanSee(file.filename) : null
-      if (visible === false) {
-        log.warn(`[discover] ${file.filename} exists on disk but the running ComfyUI does not list it`)
-        window.dispatchEvent(new CustomEvent('comfyui-model-invisible', { detail: { filename: file.filename } }))
-      } else {
-        log.info(`[discover] Skipping ${file.filename} · already installed`)
-        window.dispatchEvent(new CustomEvent('comfyui-download-exists', { detail: { filename: file.filename } }))
-      }
+      // The file is on disk at its full size. That much is certain right now,
+      // so it is what the card is told, and an engine that has not caught up
+      // yet is not turned into an accusation the user cannot act on.
+      log.info(`[discover] Skipping ${file.filename} · already installed`)
+      window.dispatchEvent(new CustomEvent('comfyui-download-exists', { detail: { filename: file.filename } }))
+      if (visible === false) void confirmVisibleOrAccuse(file.filename)
       continue
     }
     try {
