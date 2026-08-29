@@ -43,6 +43,17 @@ interface ChatState {
   setConversationPersonaEnabled: (id: string, enabled: boolean) => void
   /** Group chat v1: the models that answer in turn (capped at 4). */
   setGroupModels: (id: string, models: string[]) => void
+  /** Write the model the open chat is actually running on.
+   *
+   *  Befund 4 of the abnahme counter-check (2026-08-29): switching the model
+   *  mid-chat left conversation.model on whatever was picked when the chat
+   *  was created. The saved chat said Hermes while the wire of that same turn
+   *  already went to Qwen3. The request was right, the record was not, and
+   *  the record is what an export, a reopened chat and every later reader see.
+   *
+   *  No updatedAt bump on purpose: picking a model is not activity in the
+   *  chat, and bumping it would jump the chat to the top of the sidebar. */
+  setActiveConversationModel: (model: string) => void
   addMessage: (conversationId: string, message: Message) => void
   insertMessageBefore: (conversationId: string, beforeId: string, message: Message) => void
   insertMessagesBefore: (conversationId: string, beforeId: string, messages: Message[]) => void
@@ -187,6 +198,19 @@ export const useChatStore = create<ChatState>()(
             c.id === id ? { ...c, groupModels: models.slice(0, 4), updatedAt: Date.now() } : c
           ),
         })),
+
+      setActiveConversationModel: (model) =>
+        set((state) => {
+          const id = state.activeConversationId
+          if (!id || !model) return state
+          const open = state.conversations.find((c) => c.id === id)
+          if (!open || open.model === model) return state
+          return {
+            conversations: state.conversations.map((c) =>
+              c.id === id ? { ...c, model } : c
+            ),
+          }
+        }),
 
       addMessage: (conversationId, message) =>
         set((state) => ({

@@ -6,6 +6,7 @@ import { unloadLmStudioModel } from '../api/lmstudio'
 import { activateBuiltinModel } from '../api/engine'
 import { isLmStudioProvider } from '../lib/hf-to-provider'
 import { isTauri, backendCall } from '../api/backend'
+import { useChatStore } from './chatStore'
 import { log } from '../lib/logger'
 
 export interface PullState {
@@ -94,6 +95,15 @@ export const useModelStore = create<ModelState>()(
         const prev = get().activeModel
         const prevModel = prev ? get().models.find((m) => m.name === prev) : undefined
         set({ activeModel: name })
+        // Befund 4 of the abnahme counter-check (2026-08-29): the open chat
+        // kept the model it was created with while the wire of that same turn
+        // already carried the new one. Every path that changes the selection
+        // comes through here, so the record is written here, once. A cleared
+        // selection has nothing to write.
+        if (name) {
+          try { useChatStore.getState().setActiveConversationModel(name) }
+          catch (e) { log.warn('[modelStore] could not note the model on the open chat', { err: e }) }
+        }
         if (!prev || prev === name) return
         // Exactly ONE local model stays in VRAM at a time (David 2026-06-12:
         // "darf niemals 2 gleichzeitig geladen sein, außer man macht Compare").
