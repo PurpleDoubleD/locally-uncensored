@@ -19,9 +19,15 @@ import {
   renderTimeoutNotice,
   warmupExceeded,
   swapWarmupNotice,
+  loadPhaseGraceMs,
+  finishGraceMs,
   MIN_STEPS_FOR_VERDICT,
   HOPELESS_FACTOR,
   SWAP_WARMUP_BUDGET_MS,
+  SWAP_WARMUP_ALIVE_BUDGET_MS,
+  warmupBudgetMs,
+  LOAD_PHASE_GRACE_CAP_MS,
+  FINISH_GRACE_CAP_MS,
 } from '../render-budget'
 
 const here = dirname(fileURLToPath(import.meta.url))
@@ -117,12 +123,151 @@ describe('the warm-up budget (G24, R17c witness)', () => {
   })
 })
 
+describe('the load phase does not eat the render budget (Z36 finding 4)', () => {
+  const IMAGE_BUDGET = 5 * 60_000
+  // The Z36 witness, W3 run 2026-08-16: a forced z_image_bf16 render in the
+  // chat tool. The big bf16 checkpoint loads first, sampling only starts after
+  // it, and the whole thing lands at 352.6 s against a 5 minute budget.
+  const LOAD_MS = 300_000
+  const TOTAL_MS = 352_600
+
+  const deadlineAt = (firstOwnProgressAt: number | null, now: number, wsConnected = true) =>
+    IMAGE_BUDGET + loadPhaseGraceMs(wsConnected, 0, firstOwnProgressAt, now)
+
+  it('the Z36 render survives: at 352.6 s the deadline has not been reached', () => {
+    // sampling started at 300 s, so the budget only starts counting there
+    expect(TOTAL_MS).toBeLessThan(deadlineAt(LOAD_MS, TOTAL_MS))
+  })
+
+  it('the same render dies without the grace, which is exactly what was reported', () => {
+    expect(TOTAL_MS).toBeGreaterThan(IMAGE_BUDGET)
+  })
+
+  it('the grace freezes at the measured load once sampling has started', () => {
+    expect(loadPhaseGraceMs(true, 0, LOAD_MS, TOTAL_MS)).toBe(LOAD_MS)
+    // and it does not keep growing with the clock afterwards
+    expect(loadPhaseGraceMs(true, 0, LOAD_MS, TOTAL_MS + 600_000)).toBe(LOAD_MS)
+  })
+
+  it('while the checkpoint is still loading the grace grows with the clock', () => {
+    expect(loadPhaseGraceMs(true, 0, null, 60_000)).toBe(60_000)
+    expect(loadPhaseGraceMs(true, 0, null, 120_000)).toBe(120_000)
+  })
+
+  it('the whole wait stays bounded: the grace never exceeds its cap', () => {
+    expect(loadPhaseGraceMs(true, 0, null, 60 * 60_000)).toBe(LOAD_PHASE_GRACE_CAP_MS)
+    expect(loadPhaseGraceMs(true, 0, 60 * 60_000, 60 * 60_000)).toBe(LOAD_PHASE_GRACE_CAP_MS)
+    // and the cap the poll loop really passes is the warm-up budget in force
+    expect(loadPhaseGraceMs(true, 0, null, 60 * 60_000, warmupBudgetMs(false))).toBe(SWAP_WARMUP_BUDGET_MS)
+  })
+
+  it('the cap matches the warm-up ceiling, so a wedged load trips G24 first', () => {
+    // The two guards cannot disagree about how long a load may take: the
+    // warm-up verdict lands first, with the message that names the real cause.
+    expect(LOAD_PHASE_GRACE_CAP_MS).toBe(SWAP_WARMUP_ALIVE_BUDGET_MS)
+    expect(warmupExceeded(false, true, SWAP_WARMUP_ALIVE_BUDGET_MS + 1, SWAP_WARMUP_ALIVE_BUDGET_MS)).toBe(true)
+  })
+
+  it('NEGATIVE CONTROL: without a WS there is no grace, the old flat deadline stands', () => {
+    expect(loadPhaseGraceMs(false, 0, null, 120_000)).toBe(0)
+    expect(loadPhaseGraceMs(false, 0, LOAD_MS, TOTAL_MS)).toBe(0)
+    expect(deadlineAt(LOAD_MS, TOTAL_MS, false)).toBe(IMAGE_BUDGET)
+  })
+
+  it('NEGATIVE CONTROL: a render that starts sampling at once gets no free time', () => {
+    expect(loadPhaseGraceMs(true, 0, 0, 10_000)).toBe(0)
+    expect(deadlineAt(0, 10_000)).toBe(IMAGE_BUDGET)
+  })
+
+  it('NEGATIVE CONTROL: R32 is untouched, the pace verdict still uses the raw budget', () => {
+    // 30 steps at 80 s each after a 4 minute load: the projection is hopeless
+    // against the 5 minute budget and must stay hopeless.
+    const t = new PaceTracker()
+    t.tick(1, 30, 240_000)
+    t.tick(2, 30, 320_000)
+    t.tick(3, 30, 400_000)
+    t.tick(4, 30, 480_000)
+    expect(overBudget(t.projectedTotalMs(), IMAGE_BUDGET)).toBe(true)
+  })
+})
+
+describe('a render seconds from done is adopted, not thrown away (Z36 finding 4)', () => {
+  const paceAt = (value: number, max: number, stepMs: number) => {
+    const t = new PaceTracker()
+    for (let i = 0; i <= 4; i++) t.tick(value - 4 + i, max, (value - 4 + i) * stepMs)
+    return t
+  }
+
+  it('20 steps of 25 done at 1 s each: the rest fits, the job gets the grace', () => {
+    const t = paceAt(20, 25, 1000)
+    expect(t.projectedRemainingMs()).toBeCloseTo(5000, -2)
+    expect(finishGraceMs(t.projectedRemainingMs())).toBe(FINISH_GRACE_CAP_MS)
+  })
+
+  it('the grace is bounded and granted from one measurement only', () => {
+    expect(finishGraceMs(FINISH_GRACE_CAP_MS)).toBe(FINISH_GRACE_CAP_MS)
+    expect(finishGraceMs(0)).toBe(FINISH_GRACE_CAP_MS)
+  })
+
+  it('NEGATIVE CONTROL: half an hour of work left buys nothing', () => {
+    expect(finishGraceMs(30 * 60_000)).toBe(0)
+    expect(finishGraceMs(FINISH_GRACE_CAP_MS + 1)).toBe(0)
+  })
+
+  it('NEGATIVE CONTROL: no measured pace, no grace', () => {
+    expect(finishGraceMs(null)).toBe(0)
+    expect(finishGraceMs(Number.NaN)).toBe(0)
+    expect(new PaceTracker().projectedRemainingMs()).toBe(null)
+    const barely = new PaceTracker()
+    barely.tick(1, 30, 0)
+    barely.tick(2, 30, 1000)
+    expect(barely.projectedRemainingMs()).toBe(null)
+  })
+
+  it('the timeout notice names the real elapsed time when the load stretched it', () => {
+    const n = renderTimeoutNotice('Image', 5 * 60_000, 9 * 60_000)
+    expect(n).toContain('5 minute budget')
+    expect(n).toContain('about 9 minutes')
+    expect(n).toContain('loading')
+    // NEGATIVE CONTROL: no stretch, no extra sentence
+    expect(renderTimeoutNotice('Image', 5 * 60_000, 4 * 60_000)).not.toContain('about')
+    expect(renderTimeoutNotice('Image', 5 * 60_000)).not.toContain('about')
+  })
+})
+
+describe('a confirmed-alive load is not a wedged load (Z36 finding 4)', () => {
+  it('the plain budget still ends a load nothing can vouch for', () => {
+    expect(warmupBudgetMs(false)).toBe(SWAP_WARMUP_BUDGET_MS)
+    expect(warmupExceeded(false, true, SWAP_WARMUP_BUDGET_MS + 1, warmupBudgetMs(false))).toBe(true)
+  })
+
+  it('a prompt ComfyUI still has in its queue buys the doubled budget', () => {
+    expect(warmupBudgetMs(true)).toBe(SWAP_WARMUP_ALIVE_BUDGET_MS)
+    expect(SWAP_WARMUP_ALIVE_BUDGET_MS).toBe(2 * SWAP_WARMUP_BUDGET_MS)
+    // the Z36 load, past the plain budget, survives on the life signal
+    expect(warmupExceeded(false, true, SWAP_WARMUP_BUDGET_MS + 1, warmupBudgetMs(true))).toBe(false)
+  })
+
+  it('NEGATIVE CONTROL: R17c still dies, 19 wedged minutes beat both budgets', () => {
+    const R17C = 19 * 60_000
+    expect(warmupExceeded(false, true, R17C, warmupBudgetMs(false))).toBe(true)
+    expect(warmupExceeded(false, true, R17C, warmupBudgetMs(true))).toBe(true)
+  })
+
+  it('NEGATIVE CONTROL: the life signal never overrides the WS and progress gates', () => {
+    // no WS, we are blind by design
+    expect(warmupExceeded(false, false, 60 * 60_000, warmupBudgetMs(true))).toBe(false)
+    // something on the GPU moved, so the load is not wedged and nothing dies
+    expect(warmupExceeded(true, true, 60 * 60_000, warmupBudgetMs(true))).toBe(false)
+  })
+})
+
 describe('wiring in the poll loop', () => {
   const handoff = read('../../api/vram-handoff.ts')
 
   it('the poll loop feeds progress events into the tracker and checks the budget', () => {
     expect(handoff).toContain("if (ev.type === 'progress') {")
-    expect(handoff).toContain('pace.tick(ev.data.value, ev.data.max, Date.now())')
+    expect(handoff).toContain('pace.tick(ev.data.value, ev.data.max, at)')
     expect(handoff).toContain('if (overBudget(projected, timeoutMs))')
   })
 
@@ -134,13 +279,38 @@ describe('wiring in the poll loop', () => {
 
   it('G24: the loop tracks warm-up with ANY-prompt progress and the live WS state', () => {
     expect(handoff).toContain('sawAnyProgress = true')
-    expect(handoff).toContain('warmupExceeded(sawAnyProgress, comfyWS.connected, warmupElapsed)')
+    expect(handoff).toContain('warmupExceeded(sawAnyProgress, comfyWS.connected, warmupElapsed, warmupBudgetMs(promptAlive))')
     // own-prompt ticks still feed the pace tracker underneath the any-progress flag
     expect(handoff).toContain("if (ev.data.prompt_id === promptId) {")
   })
 
   it('the WS listener is always released', () => {
     expect(handoff).toContain('offProgress()')
+  })
+
+  it('Z36 finding 4: the deadline is recomputed per tick and carries the load phase', () => {
+    // the old fixed wall clock is gone from the poll loop (other helpers keep
+    // their own plain deadlines, this pin must not reach into them)
+    const loop = handoff.slice(handoff.indexOf('async function pollAndExtract'))
+    expect(loop).not.toContain('const deadline = Date.now() + timeoutMs')
+    expect(handoff).toContain('loadPhaseGraceMs(comfyWS.connected, startedAt, firstOwnProgressAt, Date.now(),')
+    expect(handoff).toContain('if (firstOwnProgressAt === null) firstOwnProgressAt = at')
+    // the pace verdict keeps the RAW budget, so R32 dies as early as before
+    expect(handoff).toContain('if (overBudget(projected, timeoutMs))')
+  })
+
+  it('Z36 finding 4: the loop asks ComfyUI whether a long load is still alive', () => {
+    expect(handoff).toContain('promptAlive = await isPromptQueued(promptId)')
+    // the question is only asked once the plain budget is spent, and throttled
+    expect(handoff).toContain('warmupElapsed > SWAP_WARMUP_BUDGET_MS && Date.now() - aliveCheckedAt > 30_000')
+    // and the same budget bounds the flat deadline's load grace
+    expect(handoff).toContain('warmupBudgetMs(promptAlive))')
+  })
+
+  it('Z36 finding 4: a nearly finished render is adopted once, then the job ends', () => {
+    expect(handoff).toContain('finishGraceUsed === 0 ? finishGraceMs(pace.projectedRemainingMs()) : 0')
+    expect(handoff).toContain('finishGraceUsed = grace')
+    expect(handoff).toContain('renderTimeoutNotice(kindLabel, timeoutMs, elapsedMs)')
   })
 
   it('abandonPrompt kills only OUR job: pending delete first, interrupt only if ours runs', () => {
