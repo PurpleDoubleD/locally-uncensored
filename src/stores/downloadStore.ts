@@ -55,6 +55,27 @@ async function announceUntilVisible(filename: string, subfolder: string | undefi
   }
 }
 
+/**
+ * What to tell the user about a file that is on disk while the running ComfyUI
+ * does not list it.
+ *
+ * The old text named one cause, a model folder LU and ComfyUI do not share
+ * (pnwpdr4519). For a .gguf that is almost never the cause. UNETLoader does not
+ * enumerate .gguf at all: the file is read by ComfyUI-GGUF's own loader, so a
+ * pack that is missing, or that failed to import because its gguf dependency
+ * landed in a different Python environment, leaves ComfyUI with no loader that
+ * can see the file even though the folder is exactly right. Every Unfiltered
+ * video bundle we ship is a GGUF, which is what lapbo and Blahx were looking at.
+ *
+ * English on purpose, like every error text in the product.
+ */
+export function invisibleFileMessage(filename: string): string {
+  if (filename.toLowerCase().endsWith('.gguf')) {
+    return `${filename} is on disk, but the running ComfyUI does not list it. GGUF models are read by the ComfyUI-GGUF node pack, so this usually means that pack is missing or failed to load. Install this model again from the Model Manager: that installs the pack and restarts ComfyUI. If it is still missing afterwards, LU and ComfyUI are pointed at different model folders, so set the right ComfyUI install under Settings, AI Backends.`
+  }
+  return `${filename} is on disk, but the running ComfyUI does not list it, so LU and ComfyUI are pointed at different model folders. Set the right ComfyUI install under Settings, AI Backends, or restart ComfyUI from LU, then try again.`
+}
+
 // Maps filename → bundle name for grouped display
 type BundleMap = Record<string, string>
 
@@ -177,7 +198,7 @@ export const useDownloadStore = create<DownloadStoreState>()((set, get) => ({
         ...s.downloads,
         [filename]: {
           progress: 0, total: 0, speed: 0, filename, status: 'error',
-          error: 'File is already on disk, but your running ComfyUI does not list it — LU and ComfyUI are using different model folders. Point LU at the right ComfyUI install (Settings → AI Backends) or restart ComfyUI from LU, then try again.',
+          error: invisibleFileMessage(filename),
         },
       },
     }))

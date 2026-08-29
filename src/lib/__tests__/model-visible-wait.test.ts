@@ -149,12 +149,30 @@ describe('the install path uses it, and says something honest when it runs out',
     // diffusion_models, which IS in ENUM_SUBFOLDERS. Without the GGUF loader
     // the probe fails for a file ComfyUI lists perfectly well: 20 rounds of
     // waiting, an uncalled-for engine restart, then a wrong diagnosis.
+    //
+    // B1 (2.6.7): the loader list moved into one reader, readComfyModelNames,
+    // because the three paths that ask "can ComfyUI see this file" each had
+    // their own copy and they drifted. checkBundlesInstalled was taught the
+    // GGUF loader in 2.6.6 and this probe was born with it, while the Model
+    // Manager's install click kept asking four loaders and told users LU and
+    // ComfyUI use different model folders for a GGUF the engine serves fine.
+    // The guard pins the reader AND that both callers go through it.
+    const reader = discoverSrc.slice(
+      discoverSrc.indexOf('export async function readComfyModelNames'),
+      discoverSrc.indexOf('/** Which of `wanted`'),
+    )
+    expect(reader).toContain('getGgufUnetModels()')
+    expect(discoverSrc).toMatch(/import \{[^}]*getGgufUnetModels[^}]*\} from "\.\/comfyui"/)
     const probe = discoverSrc.slice(
       discoverSrc.indexOf('export async function modelsNotVisibleInComfy'),
       discoverSrc.indexOf('/** #72:'),
     )
-    expect(probe).toContain('getGgufUnetModels()')
-    expect(discoverSrc).toMatch(/import \{[^}]*getGgufUnetModels[^}]*\} from "\.\/comfyui"/)
+    expect(probe).toContain('readComfyModelNames()')
+    const installClick = discoverSrc.slice(
+      discoverSrc.indexOf('const readVisibleBases ='),
+      discoverSrc.indexOf('const comfyCanSee ='),
+    )
+    expect(installClick).toContain('readComfyModelNames()')
     // And the caller still runs it through the wait rather than once.
     expect(src).toContain('missing: stillMissing, refresh: refreshLists')
     expect(src).toContain('const stillMissing = () => modelsNotVisibleInComfy(wanted)')
