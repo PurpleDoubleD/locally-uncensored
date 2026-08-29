@@ -117,3 +117,22 @@ describe('ensureBuiltinEngineAlive', () => {
     await expect(ensureBuiltinEngineAlive('qwen2.5-0.5b')).rejects.toThrow(/CUDA out of memory/)
   })
 })
+
+// The translated bubble text may hide the raw Rust line from the user, but a
+// bug report still needs it. The old test pinned the raw text to the bubble;
+// this one pins its replacement path, the app log. Whoever removes the
+// log.warn in explainEngineTransportMessage turns this red.
+import { explainEngineTransportMessage } from '../builtin-ensure'
+import { log } from '../../lib/logger'
+
+describe('explainEngineTransportMessage keeps the raw line reachable', () => {
+  it('logs the verbatim transport error while the bubble gets plain english', () => {
+    const warn = vi.spyOn(log, 'warn').mockImplementation(() => {})
+    const raw = 'proxy_localhost_stream_chunked: error sending request for url (http://127.0.0.1:8127/v1/chat/completions)'
+    const text = explainEngineTransportMessage(raw, 'http://127.0.0.1:8127')
+    expect(text).toMatch(/built-in engine is not answering/)
+    expect(text).not.toContain('proxy_localhost')
+    expect(warn).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ raw }))
+    warn.mockRestore()
+  })
+})
