@@ -281,6 +281,40 @@ export class OpenAIProvider implements ProviderClient {
     return walked?.off === 'minimal' ? 'minimal' : 'none'
   }
 
+  /**
+   * The thinking knob a backend that renders the MODEL'S OWN template reads.
+   *
+   * `reasoning_effort` is an OpenAI-API concept. A server that runs the
+   * model's Jinja template itself does not have a reasoning mode of its own:
+   * the switch lives INSIDE the template, as the `enable_thinking` variable
+   * the Qwen, GLM, Nemotron and Hunyuan cards branch on, and it is reached
+   * through `chat_template_kwargs`.
+   *
+   * Counter-check on the bundled engine (lu-llama-server b1-049326a,
+   * 2026-08-29), asking /apply-template with a template that prints which
+   * branch it took:
+   *
+   *   reasoning_effort: 'high'                      -> MARKER_THINK_OFF
+   *   chat_template_kwargs: {enable_thinking:true}  -> MARKER_THINK_ON
+   *
+   * and the chat request carrying reasoning_effort answered 200, so nothing
+   * ever complained. That is David's report exactly: the Think button was on,
+   * the model did not think, and no thinking block appeared, because nothing
+   * on the wire ever asked it to.
+   *
+   * Only for a backend on this machine or the LAN. A cloud endpoint
+   * implements the protocol itself, does not render a template, and the
+   * strict ones (api.openai.com) refuse an unknown body field outright.
+   * The ladder in sendChat drops the field for a local server that refuses it
+   * too, and remembers, so the cost is one round trip once.
+   */
+  private templateThinkingKwargs(thinking: boolean | undefined): Record<string, unknown> | undefined {
+    if (thinking === undefined) return undefined
+    if (!this.isLanBackend) return undefined
+    if (OpenAIProvider.templateKwargsRefused.has(this.baseUrl)) return undefined
+    return { enable_thinking: thinking }
+  }
+
   /** Remember a walk, for one direction of the switch only. */
   private rememberEffort(model: string, lane: 'on' | 'off', value: 'minimal' | 'omit'): void {
     const key = this.catalogKey(model)
@@ -333,6 +367,16 @@ export class OpenAIProvider implements ProviderClient {
     if (!stopped() && refused(res) && body.reasoning_effort === 'none') {
       body.reasoning_effort = 'minimal'
       res = await post()
+    }
+
+    // Its own rung, ahead of both the knob and stream_options: a server that
+    // refuses the template kwargs must not be remembered as one that cannot
+    // think. Dropped for the whole endpoint once it succeeds without it, so
+    // the extra round trip is paid once and not on every message.
+    if (!stopped() && refused(res) && 'chat_template_kwargs' in body) {
+      delete body.chat_template_kwargs
+      res = await post()
+      if (res.ok) OpenAIProvider.templateKwargsRefused.add(this.baseUrl)
     }
 
     if (!stopped() && refused(res) && 'stream_options' in body) {
@@ -434,6 +478,11 @@ export class OpenAIProvider implements ProviderClient {
     // endpoint that rejects it is handled by the ladder in sendChat.
     const effort = this.thinkingEffort(model, options?.thinking)
     if (effort) body.reasoning_effort = effort
+    // The knob a template-rendering backend actually reads. See
+    // templateThinkingKwargs for the counter-check that reasoning_effort
+    // alone leaves the built-in engine's Think button doing nothing.
+    const tmplKwargs = this.templateThinkingKwargs(options?.thinking)
+    if (tmplKwargs) body.chat_template_kwargs = tmplKwargs
     // Ask the server for REAL token usage in a final stream chunk
     // (choices:[] + usage:{...}). OpenAI, DeepInfra (LU Cloud), Groq, vLLM and
     // LM Studio all honor stream_options; an endpoint that rejects unknown
@@ -596,6 +645,9 @@ export class OpenAIProvider implements ProviderClient {
     // Same reasoning_effort gate as chatStream.
     const effort = this.thinkingEffort(model, options?.thinking)
     if (effort) body.reasoning_effort = effort
+    // Same template-kwargs gate as chatStream.
+    const tmplKwargs = this.templateThinkingKwargs(options?.thinking)
+    if (tmplKwargs) body.chat_template_kwargs = tmplKwargs
 
     // Same self-heal as chatStream: agent/tool turns after a Create render
     // must revive the offloaded built-in engine before hitting its port.
@@ -843,6 +895,15 @@ export class OpenAIProvider implements ProviderClient {
    * user's thinking switch for the rest of the session.
    */
   private static effortMemory = new Map<string, { on?: 'omit'; off?: 'minimal' | 'omit' }>()
+
+  /**
+   * Endpoints that refused `chat_template_kwargs`. Keyed by base URL, not by
+   * model: it is the SERVER that either forwards template kwargs or does not,
+   * and llama-server does it for every model it ever loads. Remembered so a
+   * backend that dislikes the field pays one extra round trip once instead of
+   * one on every message.
+   */
+  private static templateKwargsRefused = new Set<string>()
 
   /** Live tool-capability answers per endpoint (G37b). Static for the same
    *  reason as probeCache, and TTL-bound like it: an LM Studio reload or an
