@@ -140,8 +140,10 @@ async function runGroupTurn(convId: string, model: string, allModels: string[], 
           `Loading ${toLoad} into the built-in engine for this turn...`,
         )
         await ensureBuiltinEngineAlive(model)
-        if (abort.signal.aborted) return
+        // A stop during the load must not leave the loading line standing in
+        // the bubble as if it were the model's answer.
         useChatStore.getState().updateMessageContent(convId, assistantMessage.id, '')
+        if (abort.signal.aborted) return
       }
     }
 
