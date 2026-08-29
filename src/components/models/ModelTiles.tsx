@@ -10,6 +10,7 @@ import {
 } from 'lucide-react'
 import type { DiscoverModel, DownloadProgress, ModelBundle } from '../../api/discover'
 import { formatBytes } from '../../lib/formatters'
+import { bundleVramNeedGb } from '../../lib/hardware'
 
 // ─── Hardware fit ───────────────────────────────────────────────────
 
@@ -303,10 +304,9 @@ export interface BundleTileProps {
   onRetry: () => void
   onClear: () => void
   onOpenUrl: (url: string) => void
-  parseVRAM: (s: string) => number
 }
 
-export function BundleTile({ bundle, vramGb, complete, downloading, hasErrors, onInstall, onRetry, onClear, onOpenUrl, parseVRAM }: BundleTileProps) {
+export function BundleTile({ bundle, vramGb, complete, downloading, hasErrors, onInstall, onRetry, onClear, onOpenUrl }: BundleTileProps) {
   // No COMING SOON overlay any more (2026-07-24). It was driven by
   // `!bundle.verified && !complete`, a hand-set boolean, and it dimmed the tile
   // behind a full-cover "COMING SOON" pill while that tile's own working
@@ -319,7 +319,9 @@ export function BundleTile({ bundle, vramGb, complete, downloading, hasErrors, o
   // wrapper-node-names pins every node name the builder emits against real
   // wrapper registries. A lane that cannot run gets pulled (see the CogVideoX
   // and Pyramid Flow removals) rather than shipped behind a badge.
-  const need = parseVRAM(bundle.vramRequired)
+  // bundleVramNeedGb, not a local parser: the add-on bundles say "any" and the
+  // old local one answered 99 GB to that, which painted a 0.17 GB LoRA red.
+  const need = bundleVramNeedGb(bundle)
   const fit: Fit = !vramGb ? 'unknown' : need <= vramGb ? 'fits' : need <= vramGb + 2 ? 'tight' : 'big'
 
   return (

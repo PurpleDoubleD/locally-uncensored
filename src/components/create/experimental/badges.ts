@@ -25,6 +25,9 @@ export const TYPE_BADGE: Record<ModelType, { label: string; color: string }> = {
   wans2v: { label: 'Wan S2V', color: 'bg-orange-500/15 text-orange-300' },
   wananimate: { label: 'Wan Animate', color: 'bg-orange-500/15 text-orange-300' },
   wanvace: { label: 'VACE', color: 'bg-lime-500/15 text-lime-300' },
+  // A motion module, not a main model. It shows up in the Models inventory,
+  // never in a Create picker, so this label is only ever read there.
+  animatediff: { label: 'AnimateDiff', color: 'bg-sky-500/15 text-sky-300' },
   unknown: { label: 'Model', color: 'bg-white/10 text-gray-400' },
 }
 

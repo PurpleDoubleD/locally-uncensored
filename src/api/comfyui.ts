@@ -138,13 +138,15 @@ export function galleryTypeForFile(
 // 2.5.8: ace / wans2v / wananimate / wanvace are the specialized local-lane
 // architectures (music, talking character, motion control). They are neither
 // image nor video picker material — each lane has its own model list.
-export type ModelType = 'flux' | 'flux2' | 'zimage' | 'ernie_image' | 'sdxl' | 'sd15' | 'wan' | 'wan22' | 'hunyuan' | 'ltx' | 'mochi' | 'cosmos' | 'cogvideo' | 'svd' | 'framepack' | 'pyramidflow' | 'allegro' | 'ace' | 'wans2v' | 'wananimate' | 'wanvace' | 'unknown'
+export type ModelType = 'flux' | 'flux2' | 'zimage' | 'ernie_image' | 'sdxl' | 'sd15' | 'wan' | 'wan22' | 'hunyuan' | 'ltx' | 'mochi' | 'cosmos' | 'cogvideo' | 'svd' | 'framepack' | 'pyramidflow' | 'allegro' | 'ace' | 'wans2v' | 'wananimate' | 'wanvace' | 'animatediff' | 'unknown'
 export type VideoBackend = 'wan' | 'animatediff' | 'none'
 
 export interface ClassifiedModel {
   name: string
   type: ModelType
-  source: 'checkpoint' | 'diffusion_model'
+  /** Which ComfyUI enum listed this file. `motion_module` is the AnimateDiff
+   *  one, and it lives outside ComfyUI\models entirely (see getMotionModels). */
+  source: 'checkpoint' | 'diffusion_model' | 'motion_module'
 }
 
 // ─── Model Classification ───
@@ -180,6 +182,11 @@ export function classifyModel(name: string | null | undefined): ModelType {
   if (lower.includes('vace')) return 'wanvace'
   if (lower.includes('s2v')) return 'wans2v'
   if (lower.includes('animate') && lower.includes('wan') && !lower.includes('animatediff')) return 'wananimate'
+  // A motion module is neither an image nor a standalone video model: it is the
+  // second half of the AnimateDiff lane, which also needs an SD checkpoint. Its
+  // own type keeps it out of isImageModelType (which lets 'unknown' through and
+  // would otherwise offer a motion module in the image picker).
+  if (lower.includes('animatediff')) return 'animatediff'
   if (lower.includes('ace_step') || lower.includes('ace-step') || lower.includes('acestep')) return 'ace'
   // Merged 14B "rapid AIO" builds (e.g. wan2.2-i2v-rapid-aio) are Wan 14B
   // architecture: classic WanImageToVideo graph + wan_2.1_vae — NOT the
@@ -615,9 +622,14 @@ export async function getSchedulers(): Promise<string[]> {
   }
 }
 
+/** Motion modules the AnimateDiff-Evolved pack enumerates. These files do NOT
+ *  live under ComfyUI\models: the pack keeps them in
+ *  custom_nodes/ComfyUI-AnimateDiff-Evolved/models, which is why the four
+ *  ComfyUI\models loaders cannot see them and why every surface that only read
+ *  those four reported an installed AnimateDiff bundle as nothing at all. */
 export async function getAnimateDiffModels(): Promise<string[]> {
   try {
-    const res = await localFetch(comfyuiUrl('/object_info/ADE_LoadAnimateDiffModel'))
+    const res = await localFetch(comfyuiUrl('/object_info/ADE_LoadAnimateDiffModel'), { timeoutMs: COMFY_LIST_TIMEOUT_MS })
     if (!res.ok) return []
     const data = await res.json()
     return data?.ADE_LoadAnimateDiffModel?.input?.required?.model_name?.[0] ?? []
@@ -763,6 +775,55 @@ export async function getVideoModels(): Promise<ClassifiedModel[]> {
   }
 
   return result
+}
+
+/** The AnimateDiff motion modules, as classified models. (getMotionModels,
+ *  without the prefix, is the Wan Animate/VACE lane and a different thing.)
+ *
+ *  Kept separate from getVideoModels on purpose: the Create video picker asks
+ *  that one for a MAIN model, and a motion module is never that. It is half of
+ *  a pair (SD checkpoint + motion module) that the animatediff strategy puts
+ *  together itself via findAnimateDiffModel. */
+export async function getAnimateDiffMotionModels(): Promise<ClassifiedModel[]> {
+  const names = await getAnimateDiffModels()
+  return names.map((name) => ({ name, type: 'animatediff' as ModelType, source: 'motion_module' as const }))
+}
+
+/** Everything installed in the video lane, for the INVENTORY surfaces: the
+ *  Models rail counter and the Installed tab.
+ *
+ *  Counter-check on the Windows box, 2026-08-29: two AnimateDiff bundles
+ *  installed cleanly, both cards read Installed, and the rail counter and the
+ *  Installed list knew neither of them. The cards check their own files, the
+ *  counter read the four ComfyUI\models loaders, and AnimateDiff keeps its
+ *  motion modules under custom_nodes. Same bug shape as GH #113: card, counter
+ *  and list answering from different readers.
+ *
+ *  Two additions over getVideoModels, both of them things ComfyUI really can
+ *  serve as video right now:
+ *   - the motion modules themselves, wherever the pack keeps them
+ *   - the SD checkpoints the AnimateDiff lane drives, but ONLY while motion
+ *     modules exist, which is the same condition selectStrategy uses before it
+ *     routes a video request onto the animatediff pipeline. That is the second
+ *     file of both AnimateDiff bundles (Realistic Vision), which used to be
+ *     counted under Image alone, so a video bundle showed up half in the wrong
+ *     lane and half nowhere. It stays in the Image count too, because it is
+ *     genuinely an image checkpoint as well.
+ *
+ *  Not used by detectVideoBackend, the Create picker or model-pick: those ask
+ *  for a main model and getVideoModels still answers exactly what it did. */
+export async function getInstalledVideoModels(): Promise<ClassifiedModel[]> {
+  const [videoModels, motionModels] = await Promise.all([getVideoModels(), getAnimateDiffMotionModels()])
+  const out: ClassifiedModel[] = [...videoModels, ...motionModels]
+  if (motionModels.length > 0) {
+    const imageModels = await getImageModels()
+    for (const m of imageModels) {
+      if (m.source !== 'checkpoint') continue
+      if (out.some((x) => x.name === m.name)) continue
+      out.push(m)
+    }
+  }
+  return out
 }
 
 // ── 2.5.8 specialized local-lane model lists ─────────────────────────────────

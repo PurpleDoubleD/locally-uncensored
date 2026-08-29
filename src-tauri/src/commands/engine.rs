@@ -910,7 +910,7 @@ fn spawn_engine_attempt(
     port: u16,
     ctx: u32,
 ) -> Result<(), StartFailure> {
-    println!("[Engine] Starting built-in llama-server on port {port} — {model_path}");
+    println!("[Engine] Starting built-in llama-server on port {port}, model {model_path}");
     let mut cmd = Command::new(binary);
     cmd.args(args)
         .stdin(Stdio::null())
@@ -1457,7 +1457,7 @@ fn start_bundled_embed_blocking(
         )
     })?;
 
-    println!("[Engine] Starting built-in embeddings server on port {port} — {model_path}");
+    println!("[Engine] Starting built-in embeddings server on port {port}, model {model_path}");
     let mut cmd = Command::new(&binary);
     cmd.args(build_embed_args(&model_path, port))
         .stdin(Stdio::null())

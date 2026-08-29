@@ -13,7 +13,7 @@ import {
   type DiscoverModel, type DownloadProgress, type ModelBundle, type CivitAIModelResult, type HfGgufFile,
 } from '../../api/discover'
 import { getSystemVRAM } from '../../api/comfyui'
-import { getMaxVramGb, getTotalRamGb } from '../../lib/hardware'
+import { getMaxVramGb, getTotalRamGb, bundleVramNeedGb } from '../../lib/hardware'
 import { openExternal } from '../../api/backend'
 import { useModels } from '../../hooks/useModels'
 import { useDownloadStore } from '../../stores/downloadStore'
@@ -148,21 +148,12 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
   const isVideo = category === 'video'
   const bundles = isImage ? getImageBundles() : isVideo ? getVideoBundles() : []
 
-  // Parse VRAM requirement string to minimum GB needed
-  // "6-8 GB" → 8 (need at least the upper bound)
-  // "12+ GB" → 13 (+ means MORE than that number)
-  // "8 GB" → 8
-  const parseVRAM = (s: string): number => {
-    if (s.includes('+')) {
-      const match = s.match(/(\d+)\+/)
-      return match ? parseInt(match[1]) + 2 : 99 // "12+" means realistically 14+ GB needed
-    }
-    // Range like "6-8 GB" → take the upper number
-    const range = s.match(/(\d+)\s*-\s*(\d+)/)
-    if (range) return parseInt(range[2])
-    const match = s.match(/(\d+)/)
-    return match ? parseInt(match[1]) : 99
-  }
+  // How much VRAM a bundle wants, read by the ONE shared parser in
+  // lib/hardware. The local copy that used to live here answered 99 GB to the
+  // add-on bundles, whose requirement reads "any", so the sort buried them,
+  // the tier filter hid them and the tile called a 0.17 GB LoRA too big for a
+  // 12 GB card.
+  const parseVRAM = (b: ModelBundle): number => bundleVramNeedGb(b)
 
   // Sort bundles: verified first, then HOT, then fits VRAM, then by size
   const sortedBundles = [...bundles].sort((a, b) => {
@@ -173,12 +164,12 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
     if (a.hot && !b.hot) return -1
     if (!a.hot && b.hot) return 1
     if (systemVRAM) {
-      const aFits = parseVRAM(a.vramRequired) <= systemVRAM
-      const bFits = parseVRAM(b.vramRequired) <= systemVRAM
+      const aFits = parseVRAM(a) <= systemVRAM
+      const bFits = parseVRAM(b) <= systemVRAM
       if (aFits && !bFits) return -1
       if (!aFits && bFits) return 1
     }
-    return parseVRAM(a.vramRequired) - parseVRAM(b.vramRequired)
+    return parseVRAM(a) - parseVRAM(b)
   })
 
   const tabFilteredBundles = sortedBundles.filter(b => subTab === 'uncensored' ? b.uncensored : !b.uncensored)
@@ -186,7 +177,7 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
   // VRAM tier filtering for bundles
   const vramFilteredBundles = tabFilteredBundles.filter(b => {
     if (vramTier === 'all') return true
-    const vram = parseVRAM(b.vramRequired)
+    const vram = parseVRAM(b)
     if (vramTier === 'fit') return systemVRAM ? vram <= systemVRAM + 2 : true
     if (vramTier === 'ultra') return vram <= 4
     if (vramTier === 'light') return vram > 4 && vram <= 10
@@ -767,7 +758,6 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
                 onRetry={() => retryBundle(bundle)}
                 onClear={() => clearBundle(bundle)}
                 onOpenUrl={(u) => openExternal(u)}
-                parseVRAM={parseVRAM}
               />
             </motion.div>
           ))}

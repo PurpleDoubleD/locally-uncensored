@@ -44,6 +44,9 @@ vi.mock('../comfyui', () => ({
   getVAEModels: async () => [],
   getCLIPModels: async () => [],
   getGgufUnetModels: () => getGgufUnetModels(),
+  // Sixth loader (2026-08-29): the AnimateDiff pack lists its motion modules
+  // itself. No motion module in these fixtures, so it answers empty.
+  getAnimateDiffModels: async () => [],
   filterPartialFiles: async (names: string[]) => new Set(names),
   refreshComfyModels: (...a: unknown[]) => refreshComfyModels(...(a as [number])),
 }))
