@@ -9,6 +9,8 @@
  * performance.now.
  */
 
+import { createThinkStreamSplitter } from './hermes-stream'
+import { settleThinking } from './thinking-stripper'
 import type { ChatStreamChunk } from '../api/providers/types'
 import { computeGenerationTps } from '../stores/benchmarkStore'
 
@@ -70,6 +72,11 @@ export async function measureRun(
   let contentCount = 0
   let thinkCount = 0
   let answerText = ''
+  // Splits an inline <think> span out of the content stream. Never
+  // startInThink here: a benchmark prompt is a fresh turn and a pre-opened
+  // thought closes itself on the first closer, which the settlement below
+  // catches for the answer text.
+  const inlineThink = createThinkStreamSplitter()
   let finishReason: string | undefined
   let apiEvalCount: number | undefined
   let apiEvalDurationMs: number | undefined
@@ -102,8 +109,20 @@ export async function measureRun(
     }
     if (chunk.thinking) thinkCount++
     if (chunk.content) {
-      answerText += chunk.content
-      contentCount++
+      // 2.6.7 Denk-Audit, Loch 7: a backend that does NOT own a reasoning
+      // channel sends the thought inline, as <think> inside the content
+      // (Ollama with the think flag unset, llama.cpp with reasoning-format
+      // none, LM Studio). Counting that as answer put the reasoning into
+      // `answerText`, so the correctness check could pass on a number the
+      // model only considered and rejected, and thinkShare read 0 on exactly
+      // the local backends the board is used to compare. Same splitter every
+      // other surface uses.
+      const part = inlineThink.feed(chunk.content)
+      if (part.thinking) thinkCount++
+      if (part.prose) {
+        answerText += part.prose
+        contentCount++
+      }
     }
     if (chunk.finishReason) finishReason = chunk.finishReason
     // Bug M v2.4.7 — Ollama reports authoritative gen metrics in the done:true
@@ -143,6 +162,15 @@ export async function measureRun(
   }
 
   const totalTime = clock() - startTime
+
+  // Whatever the splitter still held back, plus the pre-opened shape it could
+  // not see coming: the answer the check scores is prose only.
+  {
+    const rest = inlineThink.flush()
+    if (rest.prose) { answerText += rest.prose; contentCount++ }
+    if (rest.thinking) thinkCount++
+    answerText = settleThinking(answerText, '', false).content
+  }
 
   // totalTokens is the whole output, thinking included, so a model that reasons
   // out loud and one that does not are counted the same way (David 2026-08-05:

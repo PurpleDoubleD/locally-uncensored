@@ -11,6 +11,9 @@ import { applySendBudget, chatBudgetApplies, sharedChatSendBudget } from '../lib
 import { v4 as uuid } from 'uuid'
 import type { ChatMessage } from '../api/providers/types'
 import type { Message } from '../types/chat'
+import { createThinkStreamSplitter } from '../lib/hermes-stream'
+import { settleThinking } from '../lib/thinking-stripper'
+import { isThinkingCompatible } from '../lib/model-compatibility'
 
 export function useABCompare() {
   const store = useCompareStore()
@@ -78,6 +81,13 @@ export function useABCompare() {
       // Bug AA v2.5.0 — forward num_ctx override to both A/B sides.
       contextWindow: settings.contextWindowOverride || undefined,
     }
+    // 2.6.7 Denk-Audit, Loch 6: this hook sent no thinking signal at all and
+    // stripped nothing, so a comparison ran on whatever the backend defaulted
+    // to and the raw <think> block was part of what the user compared. Both
+    // sides get the same tri-state the plain chat sends, per model, because a
+    // line-up can mix a reasoner with an instruct model.
+    const thinkOptFor = (model: string): boolean | undefined =>
+      isThinkingCompatible(model) ? settings.thinkingEnabled === true : undefined
 
     // Stream Model A
     abortA.current = new AbortController()
@@ -85,17 +95,30 @@ export function useABCompare() {
       const startTime = Date.now()
       let fullContent = ''
       let tokenCount = 0
+      // The pane has no thinking block, so reasoning is never part of what
+      // is being compared: it is split out of the live stream and the
+      // end-of-turn settlement catches the pre-opened shape the splitter
+      // cannot see coming.
+      const splitter = createThinkStreamSplitter()
+      const show = (part: { prose: string }) => {
+        if (!part.prose) return
+        fullContent += part.prose
+        useCompareStore.getState().addContentA(part.prose)
+      }
       try {
         const { provider, modelId } = getProviderForModel(modelA)
-        const stream = provider.chatStream(modelId, sendMessages, { ...opts, signal: abortA.current!.signal })
+        const stream = provider.chatStream(modelId, sendMessages, {
+          ...opts, thinking: thinkOptFor(modelA), signal: abortA.current!.signal,
+        })
         for await (const chunk of stream) {
           if (chunk.content) {
-            fullContent += chunk.content
             tokenCount++
-            useCompareStore.getState().addContentA(chunk.content)
+            show(splitter.feed(chunk.content))
           }
         }
+        show(splitter.flush())
       } catch { /* aborted or error */ }
+      fullContent = settleThinking(fullContent, '', false).content
       const elapsed = Date.now() - startTime
       useCompareStore.getState().finishA(fullContent, {
         tokens: tokenCount,
@@ -110,17 +133,30 @@ export function useABCompare() {
       const startTime = Date.now()
       let fullContent = ''
       let tokenCount = 0
+      // The pane has no thinking block, so reasoning is never part of what
+      // is being compared: it is split out of the live stream and the
+      // end-of-turn settlement catches the pre-opened shape the splitter
+      // cannot see coming.
+      const splitter = createThinkStreamSplitter()
+      const show = (part: { prose: string }) => {
+        if (!part.prose) return
+        fullContent += part.prose
+        useCompareStore.getState().addContentB(part.prose)
+      }
       try {
         const { provider, modelId } = getProviderForModel(modelB)
-        const stream = provider.chatStream(modelId, sendMessages, { ...opts, signal: abortB.current!.signal })
+        const stream = provider.chatStream(modelId, sendMessages, {
+          ...opts, thinking: thinkOptFor(modelB), signal: abortB.current!.signal,
+        })
         for await (const chunk of stream) {
           if (chunk.content) {
-            fullContent += chunk.content
             tokenCount++
-            useCompareStore.getState().addContentB(chunk.content)
+            show(splitter.feed(chunk.content))
           }
         }
+        show(splitter.flush())
       } catch { /* aborted or error */ }
+      fullContent = settleThinking(fullContent, '', false).content
       const elapsed = Date.now() - startTime
       useCompareStore.getState().finishB(fullContent, {
         tokens: tokenCount,
