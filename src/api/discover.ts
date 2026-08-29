@@ -1,5 +1,5 @@
 import { backendCall, fetchExternal } from "./backend"
-import { getCheckpoints, getDiffusionModels, getVAEModels, getCLIPModels, getGgufUnetModels, filterPartialFiles, refreshComfyModels } from "./comfyui"
+import { getCheckpoints, getDiffusionModels, getVAEModels, getCLIPModels, getGgufUnetModels, getAnimateDiffModels, filterPartialFiles, refreshComfyModels } from "./comfyui"
 import type { ProviderId } from "./providers/types"
 import { log } from "../lib/logger"
 
@@ -150,21 +150,30 @@ export async function checkBundlesInstalled(bundles: ModelBundle[]): Promise<Rec
     // quants are listed by ComfyUI-GGUF's own loader. Both Unfiltered video
     // bundles are GGUF, so without it this cannot see the one file that makes
     // them what they are, and the fuzzy fallback below can never confirm them.
-    const [rawCheckpoints, rawDiffModels, rawGgufUnets, rawVaes, rawClips] = await Promise.all([
+    // getAnimateDiffModels for the same reason getGgufUnetModels is here: the
+    // motion modules of both AnimateDiff bundles live under custom_nodes and
+    // none of the four ComfyUI\models loaders can see them. Without it the
+    // gate below skipped those files and the card trusted the disk alone,
+    // which is how two cards read Installed over a rail counter that knew
+    // neither of them.
+    const [rawCheckpoints, rawDiffModels, rawGgufUnets, rawVaes, rawClips, rawMotion] = await Promise.all([
       getCheckpoints(), getDiffusionModels(), getGgufUnetModels(), getVAEModels(), getCLIPModels(),
+      getAnimateDiffModels(),
     ])
-    const [checkpoints, diffModels, ggufUnets, vaes, clips] = await Promise.all([
+    const [checkpoints, diffModels, ggufUnets, vaes, clips, motion] = await Promise.all([
       filterPartialFiles(rawCheckpoints).then(s => Array.from(s)),
       filterPartialFiles(rawDiffModels).then(s => Array.from(s)),
       filterPartialFiles(rawGgufUnets).then(s => Array.from(s)),
       filterPartialFiles(rawVaes).then(s => Array.from(s)),
       filterPartialFiles(rawClips).then(s => Array.from(s)),
+      filterPartialFiles(rawMotion).then(s => Array.from(s)),
     ])
     comfyLists = {
       checkpoints,
       diffusion_models: [...diffModels, ...ggufUnets],
       vae: vaes,
       text_encoders: clips,
+      [ANIMATEDIFF_SUBFOLDER]: motion,
     }
   } catch {
     comfyLists = null // ComfyUI not reachable · size-check verdicts stand
@@ -226,10 +235,19 @@ export async function checkBundlesInstalled(bundles: ModelBundle[]): Promise<Rec
   return result
 }
 
+/** Where the AnimateDiff-Evolved pack keeps its motion modules. Not under
+ *  ComfyUI\models at all, which is exactly why the counter and the Installed
+ *  list used to miss a fully installed AnimateDiff bundle while its card said
+ *  Installed (counter-check on the Windows box, 2026-08-29). */
+export const ANIMATEDIFF_SUBFOLDER = 'custom_nodes/ComfyUI-AnimateDiff-Evolved/models'
+
 /** Subfolders whose contents ComfyUI enumerates via object_info — the only
  *  ones the visibility check can reason about (loras/upscale etc. stay on the
- *  pure size check). */
-export const ENUM_SUBFOLDERS = new Set(['checkpoints', 'diffusion_models', 'vae', 'text_encoders'])
+ *  pure size check). The AnimateDiff one is enumerated by the pack's own
+ *  ADE_LoadAnimateDiffModel node, so it belongs here even though it sits under
+ *  custom_nodes: a motion module the running ComfyUI cannot list is exactly as
+ *  useless as an invisible checkpoint. */
+export const ENUM_SUBFOLDERS = new Set(['checkpoints', 'diffusion_models', 'vae', 'text_encoders', ANIMATEDIFF_SUBFOLDER])
 
 /** Base identity of a model file: basename only (ComfyUI enums can carry
  *  nested-subdir prefixes), lowercase, extension and common quant suffixes
@@ -255,6 +273,12 @@ export function normalizeModelBase(name: string): string {
 export async function readComfyModelNames(): Promise<string[]> {
   const lists = await Promise.all([
     getCheckpoints(), getDiffusionModels(), getVAEModels(), getCLIPModels(), getGgufUnetModels(),
+    // Sixth loader, added 2026-08-29 after the counter-check: the AnimateDiff
+    // pack enumerates its motion modules itself, from a folder under
+    // custom_nodes. Without it a finished AnimateDiff download could never be
+    // confirmed, so the download store spent its full budget and then told the
+    // user LU and ComfyUI use different model folders, which was not true.
+    getAnimateDiffModels(),
   ])
   return lists.flat()
 }

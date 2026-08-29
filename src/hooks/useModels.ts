@@ -3,7 +3,7 @@ import { listModels, pullModel as pullModelApi, pullModelTauri, deleteModel as d
 import { isTauri, isMacOS } from '../api/backend'
 import {
   getImageModels as getComfyImageModels,
-  getVideoModels as getComfyVideoModels,
+  getInstalledVideoModels as getComfyVideoModels,
   checkComfyConnection,
   filterPartialFiles,
 } from '../api/comfyui'
@@ -191,6 +191,13 @@ export function useModels() {
       if (comfyOk) {
         // Settled, not all: a folder ComfyUI cannot read costs that one lane,
         // never the whole list. The old code lost both to a single throw.
+        // The VIDEO side asks getInstalledVideoModels, not getVideoModels. This
+        // is the inventory, and the inventory has to agree with the bundle
+        // cards: a bundle whose card says Installed must be in this count and
+        // in the Installed list. The four ComfyUI\models loaders alone cannot
+        // do that, because the AnimateDiff pack keeps its motion modules under
+        // custom_nodes (counter-check on the Windows box, 2026-08-29: two
+        // cards Installed, rail counter 3, neither bundle in the list).
         const [imageResult, videoResult] = await Promise.allSettled([
           getComfyImageModels(),
           getComfyVideoModels(),

@@ -121,6 +121,10 @@ export const MODEL_TYPE_DEFAULTS: Record<ModelType, {
   wans2v:      { steps: 20, cfgScale: 6.0, sampler: 'euler',           scheduler: 'simple', width: 832,  height: 480, frames: 77, fps: 16 },
   wananimate:  { steps: 20, cfgScale: 5.0, sampler: 'euler',           scheduler: 'simple', width: 832,  height: 480, frames: 77, fps: 16 },
   wanvace:     { steps: 25, cfgScale: 5.0, sampler: 'euler',           scheduler: 'simple', width: 832,  height: 480, frames: 81, fps: 16 },
+  // The AnimateDiff lane runs on an SD1.5 checkpoint plus a motion module, so
+  // these are the SD1.5 numbers with a frame count (see comfyui.ts
+  // MODEL_TYPE_DEFAULTS.animatediff, which the workflow builder reads).
+  animatediff: { steps: 20, cfgScale: 7.5, sampler: 'euler_ancestral', scheduler: 'normal', width: 512,  height: 512, frames: 16, fps: 8  },
   unknown:     { steps: 20, cfgScale: 7.0, sampler: 'euler',           scheduler: 'normal', width: 1024, height: 1024 },
 }
 
