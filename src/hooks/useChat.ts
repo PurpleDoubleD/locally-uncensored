@@ -525,10 +525,18 @@ export function useChat() {
     const messages = applyChatSendBudget(
       capMessageCount([
         ...(systemPrompt ? [{ role: "system" as const, content: systemPrompt }] : []),
+        // Bug B3: a stored role:'system' message is an APP notice, never a
+        // model turn. MessageList hides it, useCodex and useAgentChat both
+        // drop it from their payloads, and staged-apply.ts writes one on the
+        // promise that "it still never reaches the model". Plain chat was the
+        // one path that did not filter, so such a message rode along at
+        // whatever index it happened to sit at, and a strict Jinja template
+        // answers a mid-conversation system message with "System message must
+        // be at the beginning" instead of a reply.
         ...conv.messages
-          .filter((m) => m.content.trim() !== '')
+          .filter((m) => m.role !== 'system' && m.content.trim() !== '')
           .map((m) => ({
-            role: m.role as 'user' | 'assistant' | 'system' | 'tool',
+            role: m.role as 'user' | 'assistant' | 'tool',
             content: m.role === 'user' && cavemanReminder
               ? `${cavemanReminder}\n${m.content}`
               : m.content,

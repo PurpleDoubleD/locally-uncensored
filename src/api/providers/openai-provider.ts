@@ -20,6 +20,7 @@ import { signalCreditsExhausted } from '../../lib/credits-exhausted'
 import { parseRetryAfter } from '../../lib/http-status'
 import { localFetch, localFetchStream, isPrivateOrLanHost, isDirectFetchAllowed, hostnameOf, ensureProxyAllowsHost, backendCall } from '../backend'
 import { ensureBuiltinEngineAlive, explainDeadEngine, isManagedBuiltinSlot } from '../builtin-ensure'
+import { normalizeSystemMessages } from './normalize-system'
 
 // Transport routing lives in the `useLocalProxy` getter (below) plus the shared
 // host helpers in backend.ts. A direct webview fetch only works for hosts the
@@ -384,7 +385,11 @@ export class OpenAIProvider implements ProviderClient {
   ): AsyncGenerator<ChatStreamChunk> {
     const body: Record<string, any> = {
       model,
-      messages: messages.map(m => this.toOpenAIMessage(m)),
+      // Bug B3: one system message, first. The built-in engine and LM Studio
+      // render the model's own Jinja template, which raises "System message
+      // must be at the beginning" on anything else and kills the whole turn
+      // before a byte streams. See providers/normalize-system.ts.
+      messages: normalizeSystemMessages(messages).map(m => this.toOpenAIMessage(m)),
       stream: true,
     }
 
@@ -548,7 +553,8 @@ export class OpenAIProvider implements ProviderClient {
   ): Promise<{ content: string; toolCalls: ToolCall[]; promptEvalCount?: number; evalCount?: number; thinking?: string }> {
     const body: Record<string, any> = {
       model,
-      messages: messages.map(m => this.toOpenAIMessage(m)),
+      // Bug B3: same invariant as chatStream, see providers/normalize-system.ts.
+      messages: normalizeSystemMessages(messages).map(m => this.toOpenAIMessage(m)),
       stream: false,
     }
 

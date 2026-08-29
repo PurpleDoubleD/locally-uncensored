@@ -13,6 +13,7 @@ import { ProviderError } from './types'
 import { localFetch, localFetchStream, ollamaUrl } from '../backend'
 import { parseNDJSONStream } from '../stream'
 import { repairToolCallArgs, extractToolCallsFromContent } from '../../lib/tool-call-repair'
+import { normalizeSystemMessages } from './normalize-system'
 
 // ── Ollama-specific types ──────────────────────────────────────
 
@@ -78,7 +79,9 @@ export class OllamaProvider implements ProviderClient {
     messages: ChatMessage[],
     options?: ChatOptions,
   ): AsyncGenerator<ChatStreamChunk> {
-    const ollamaMessages = messages.map(m => {
+    // Bug B3: one system message, first, or Ollama's own template rendering
+    // raises the same way llama.cpp's does. See providers/normalize-system.ts.
+    const ollamaMessages = normalizeSystemMessages(messages).map(m => {
       const msg: Record<string, any> = { role: m.role, content: m.content }
       if (m.images?.length) msg.images = m.images.map(img => img.data)
       return msg
@@ -185,7 +188,8 @@ export class OllamaProvider implements ProviderClient {
     tools: ToolDefinition[],
     options?: ChatOptions,
   ): Promise<{ content: string; toolCalls: ToolCall[] }> {
-    const ollamaMessages = messages.map(m => {
+    // Bug B3: same invariant as chatStream, see providers/normalize-system.ts.
+    const ollamaMessages = normalizeSystemMessages(messages).map(m => {
       const msg: Record<string, any> = { role: m.role, content: m.content }
       if (m.tool_calls) msg.tool_calls = m.tool_calls
       if (m.images?.length) msg.images = m.images.map(img => img.data)
