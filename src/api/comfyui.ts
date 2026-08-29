@@ -146,8 +146,29 @@ export interface ClassifiedModel {
   name: string
   type: ModelType
   /** Which ComfyUI enum listed this file. `motion_module` is the AnimateDiff
-   *  one, and it lives outside ComfyUI\models entirely (see getMotionModels). */
-  source: 'checkpoint' | 'diffusion_model' | 'motion_module'
+   *  one, and it lives outside ComfyUI\models entirely (see getMotionModels).
+   *  `lora`, `vae` and `text_encoder` are the addon folders: files that are
+   *  not a model on their own, take up real disk, and used to appear in no
+   *  list and no counter at all (counter-check 2026-08-29). */
+  source: 'checkpoint' | 'diffusion_model' | 'motion_module' | 'lora' | 'vae' | 'text_encoder'
+}
+
+/** Where a listed file actually sits, by the enum that listed it. The disk
+ *  probe needs the folder, and the delete command resolves the same set.
+ *
+ *  The motion-module folder is spelled out rather than imported: discover.ts
+ *  owns ANIMATEDIFF_SUBFOLDER and imports back into this module, so a static
+ *  import here would be a cycle. A unit test pins the two spellings together
+ *  so the duplicate cannot drift. */
+export function subfolderForSource(source: ClassifiedModel['source']): string {
+  switch (source) {
+    case 'checkpoint': return 'checkpoints'
+    case 'diffusion_model': return 'diffusion_models'
+    case 'motion_module': return 'custom_nodes/ComfyUI-AnimateDiff-Evolved/models'
+    case 'lora': return 'loras'
+    case 'vae': return 'vae'
+    case 'text_encoder': return 'text_encoders'
+  }
 }
 
 // ─── Model Classification ───
@@ -857,6 +878,87 @@ export async function getInstalledVideoModels(): Promise<ClassifiedModel[]> {
       if (out.some((x) => x.name === m.name)) continue
       out.push(m)
     }
+  }
+  return out
+}
+
+/** One addon folder, as classified models. These files are not a model on
+ *  their own, which is why no picker offers them and why every inventory
+ *  surface used to skip them. They still occupy the disk and the user still
+ *  has to be able to see and remove them. */
+async function addonLane(
+  read: () => Promise<string[]>,
+  source: 'lora' | 'vae' | 'text_encoder',
+): Promise<ClassifiedModel[]> {
+  const names = await read()
+  const complete = await filterPartialFiles(names)
+  return names
+    .filter((name) => complete.has(name))
+    .map((name) => ({ name, type: classifyModel(name), source }))
+}
+
+/** Everything installed in the image lane, for the INVENTORY surfaces: the
+ *  Models rail counter and the Installed tab. The image twin of
+ *  getInstalledVideoModels, and the same bug shape one folder further out.
+ *
+ *  Counter-check on the Windows box, 2026-08-29: the cards for Pixel Art XL
+ *  (163 MB in loras\) and SDXL VAE fp16-fix (319 MB in vae\) both read
+ *  Installed, and neither file was in any Installed list or any counter.
+ *  Beside them sat two more LoRAs, four text encoders and five more VAEs that
+ *  no surface in the app had ever mentioned. The counter and the list read
+ *  checkpoints\ and diffusion_models\ and nothing else, so the user could
+ *  neither see what those files cost him nor delete one from the list.
+ *
+ *  Not used by the Create picker or model-pick: those ask for a main model
+ *  and getImageModels still answers exactly what it did. A VAE is never a
+ *  main model, and this function is the only place that says otherwise. */
+export async function getInstalledImageModels(): Promise<ClassifiedModel[]> {
+  const [imageModels, loras, vaes, textEncoders] = await Promise.all([
+    inventoryLane('image', getImageModels),
+    inventoryLane('lora', () => addonLane(getLoraModels, 'lora')),
+    inventoryLane('vae', () => addonLane(getVAEModels, 'vae')),
+    inventoryLane('text_encoder', () => addonLane(getCLIPModels, 'text_encoder')),
+  ])
+  const out: ClassifiedModel[] = []
+  const seen = new Set<string>()
+  // First lane wins. A name that two loaders both list (a checkpoint ComfyUI
+  // also offers as a VAE) is one file on the disk and belongs in the list
+  // once, or the Installed count starts inventing entries.
+  for (const m of [...imageModels, ...loras, ...vaes, ...textEncoders]) {
+    if (seen.has(m.name)) continue
+    seen.add(m.name)
+    out.push(m)
+  }
+  return out
+}
+
+/** What each listed file weighs on the disk, by filename.
+ *
+ *  The inventory used to hand every ComfyUI file a size of 0, which the card
+ *  renders as no size at all. That was tolerable while the list held nothing
+ *  but big checkpoints the user had just picked himself; it is not once the
+ *  list is supposed to answer "what is all this costing me". Best effort
+ *  throughout: a probe that fails costs the sizes, never the list. */
+export async function readModelDiskSizes(models: ClassifiedModel[]): Promise<Map<string, number>> {
+  const out = new Map<string, number>()
+  if (models.length === 0) return out
+  try {
+    // expectedBytes 0 on purpose: this asks how big the file IS, and the
+    // partial-download verdict is filterPartialFiles' job, not this one's.
+    const files = models.map((m) => ({
+      subfolder: subfolderForSource(m.source),
+      filename: m.name,
+      expectedBytes: 0,
+    }))
+    const results: Array<{ filename: string; exists?: boolean; actualBytes?: number }> =
+      await backendCall('check_model_sizes', { files })
+    for (const r of results) {
+      if (r.exists && typeof r.actualBytes === 'number' && r.actualBytes > 0) {
+        out.set(r.filename, r.actualBytes)
+      }
+    }
+  } catch (err) {
+    log.warn('comfyui.disk_sizes_failed', { err })
   }
   return out
 }

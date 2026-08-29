@@ -47,6 +47,9 @@ vi.mock('../comfyui', () => ({
   // Sixth loader (2026-08-29): the AnimateDiff pack lists its motion modules
   // itself. No motion module in these fixtures, so it answers empty.
   getAnimateDiffModels: async () => [],
+  // Seventh loader (2026-08-29, abnahme counter-check): LoraLoader enumerates
+  // the loras folder, so a LoRA is judged like every other file now.
+  getLoraModels: async () => [],
   filterPartialFiles: async (names: string[]) => new Set(names),
   refreshComfyModels: (...a: unknown[]) => refreshComfyModels(...(a as [number])),
 }))
@@ -300,15 +303,27 @@ describe('a file complete on disk waits out the ComfyUI scan before it is called
   })
 
   it('a subfolder ComfyUI never enumerates is not judged at all', async () => {
-    // loras and upscale models do not appear in these lists, so waiting on one
-    // would be certain failure on a click.
+    // Upscale models do not appear in these lists, so waiting on one would be
+    // certain failure on a click. (loras left this group on 2026-08-29: the
+    // LoRA folder IS enumerated, by LoraLoader, and the abnahme counter-check
+    // showed what not asking it costs.)
+    const rec = recordVerdicts()
+
+    await installBundleComplete(bundleOf([{ filename: '4x-UltraSharp.pth', subfolder: 'upscale_models' }]))
+    rec.stop()
+
+    expect(rec.seen).toEqual([{ type: 'comfyui-download-exists', filename: '4x-UltraSharp.pth' }])
+    expect(getCheckpoints).not.toHaveBeenCalled()
+  })
+
+  it('a LoRA IS judged now, so a finished LoRA download gets the same wait as any other file', async () => {
     const rec = recordVerdicts()
 
     await installBundleComplete(bundleOf([{ filename: 'mychar.safetensors', subfolder: 'loras' }]))
     rec.stop()
 
     expect(rec.seen).toEqual([{ type: 'comfyui-download-exists', filename: 'mychar.safetensors' }])
-    expect(getCheckpoints).not.toHaveBeenCalled()
+    expect(getCheckpoints).toHaveBeenCalled()
   })
 
   it('an engine that cannot be reached is not a verdict, and costs no budget', async () => {

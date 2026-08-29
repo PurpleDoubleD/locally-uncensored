@@ -1,5 +1,5 @@
 import { backendCall, fetchExternal } from "./backend"
-import { getCheckpoints, getDiffusionModels, getVAEModels, getCLIPModels, getGgufUnetModels, getAnimateDiffModels, filterPartialFiles, refreshComfyModels } from "./comfyui"
+import { getCheckpoints, getDiffusionModels, getVAEModels, getCLIPModels, getGgufUnetModels, getAnimateDiffModels, getLoraModels, filterPartialFiles, refreshComfyModels } from "./comfyui"
 import type { ProviderId } from "./providers/types"
 import { log } from "../lib/logger"
 
@@ -156,23 +156,29 @@ export async function checkBundlesInstalled(bundles: ModelBundle[]): Promise<Rec
     // gate below skipped those files and the card trusted the disk alone,
     // which is how two cards read Installed over a rail counter that knew
     // neither of them.
-    const [rawCheckpoints, rawDiffModels, rawGgufUnets, rawVaes, rawClips, rawMotion] = await Promise.all([
+    // getLoraModels for the same reason, found one round later (abnahme
+    // counter-check 2026-08-29): the LoRA folder is enumerated by LoraLoader
+    // and nothing here asked it, so a LoRA bundle's card was decided on the
+    // disk alone while no counter and no list knew the file existed.
+    const [rawCheckpoints, rawDiffModels, rawGgufUnets, rawVaes, rawClips, rawMotion, rawLoras] = await Promise.all([
       getCheckpoints(), getDiffusionModels(), getGgufUnetModels(), getVAEModels(), getCLIPModels(),
-      getAnimateDiffModels(),
+      getAnimateDiffModels(), getLoraModels(),
     ])
-    const [checkpoints, diffModels, ggufUnets, vaes, clips, motion] = await Promise.all([
+    const [checkpoints, diffModels, ggufUnets, vaes, clips, motion, loras] = await Promise.all([
       filterPartialFiles(rawCheckpoints).then(s => Array.from(s)),
       filterPartialFiles(rawDiffModels).then(s => Array.from(s)),
       filterPartialFiles(rawGgufUnets).then(s => Array.from(s)),
       filterPartialFiles(rawVaes).then(s => Array.from(s)),
       filterPartialFiles(rawClips).then(s => Array.from(s)),
       filterPartialFiles(rawMotion).then(s => Array.from(s)),
+      filterPartialFiles(rawLoras).then(s => Array.from(s)),
     ])
     comfyLists = {
       checkpoints,
       diffusion_models: [...diffModels, ...ggufUnets],
       vae: vaes,
       text_encoders: clips,
+      loras,
       [ANIMATEDIFF_SUBFOLDER]: motion,
     }
   } catch {
@@ -242,12 +248,18 @@ export async function checkBundlesInstalled(bundles: ModelBundle[]): Promise<Rec
 export const ANIMATEDIFF_SUBFOLDER = 'custom_nodes/ComfyUI-AnimateDiff-Evolved/models'
 
 /** Subfolders whose contents ComfyUI enumerates via object_info — the only
- *  ones the visibility check can reason about (loras/upscale etc. stay on the
- *  pure size check). The AnimateDiff one is enumerated by the pack's own
- *  ADE_LoadAnimateDiffModel node, so it belongs here even though it sits under
- *  custom_nodes: a motion module the running ComfyUI cannot list is exactly as
- *  useless as an invisible checkpoint. */
-export const ENUM_SUBFOLDERS = new Set(['checkpoints', 'diffusion_models', 'vae', 'text_encoders', ANIMATEDIFF_SUBFOLDER])
+ *  ones the visibility check can reason about (upscale models and the GGUF
+ *  text downloads stay on the pure size check). The AnimateDiff one is
+ *  enumerated by the pack's own ADE_LoadAnimateDiffModel node, so it belongs
+ *  here even though it sits under custom_nodes: a motion module the running
+ *  ComfyUI cannot list is exactly as useless as an invisible checkpoint.
+ *
+ *  loras joined on 2026-08-29, with readComfyModelNames below. LoraLoader has
+ *  always enumerated that folder; nothing here ever asked it, so a LoRA was
+ *  the one installed file the app could not reason about anywhere: its card
+ *  trusted the disk alone, the counter and the list never saw it, and a
+ *  finished LoRA download was skipped by the visibility wait as unjudgeable. */
+export const ENUM_SUBFOLDERS = new Set(['checkpoints', 'diffusion_models', 'vae', 'text_encoders', 'loras', ANIMATEDIFF_SUBFOLDER])
 
 /** Base identity of a model file: basename only (ComfyUI enums can carry
  *  nested-subdir prefixes), lowercase, extension and common quant suffixes
@@ -273,6 +285,12 @@ export function normalizeModelBase(name: string): string {
 export async function readComfyModelNames(): Promise<string[]> {
   const lists = await Promise.all([
     getCheckpoints(), getDiffusionModels(), getVAEModels(), getCLIPModels(), getGgufUnetModels(),
+    // Seventh loader, added 2026-08-29 after the abnahme counter-check: the
+    // LoRA folder. Two installed addon bundles (Pixel Art XL, SDXL VAE) read
+    // Installed on their cards while no list and no counter knew them, and
+    // the LoRA half of that could not even be judged, because this reader
+    // never asked LoraLoader.
+    getLoraModels(),
     // Sixth loader, added 2026-08-29 after the counter-check: the AnimateDiff
     // pack enumerates its motion modules itself, from a folder under
     // custom_nodes. Without it a finished AnimateDiff download could never be

@@ -2,10 +2,11 @@ import { useCallback, useEffect, useMemo } from 'react'
 import { listModels, pullModel as pullModelApi, pullModelTauri, deleteModel as deleteModelApi } from '../api/ollama'
 import { isTauri, isMacOS } from '../api/backend'
 import {
-  getImageModels as getComfyImageModels,
+  getInstalledImageModels as getComfyImageModels,
   getInstalledVideoModels as getComfyVideoModels,
   checkComfyConnection,
   filterPartialFiles,
+  readModelDiskSizes,
 } from '../api/comfyui'
 import { parseNDJSONStream } from '../api/stream'
 import { log } from '../lib/logger'
@@ -191,13 +192,16 @@ export function useModels() {
       if (comfyOk) {
         // Settled, not all: a folder ComfyUI cannot read costs that one lane,
         // never the whole list. The old code lost both to a single throw.
-        // The VIDEO side asks getInstalledVideoModels, not getVideoModels. This
-        // is the inventory, and the inventory has to agree with the bundle
-        // cards: a bundle whose card says Installed must be in this count and
-        // in the Installed list. The four ComfyUI\models loaders alone cannot
-        // do that, because the AnimateDiff pack keeps its motion modules under
-        // custom_nodes (counter-check on the Windows box, 2026-08-29: two
-        // cards Installed, rail counter 3, neither bundle in the list).
+        // BOTH sides ask an inventory reader, not a picker reader. The
+        // inventory has to agree with the bundle cards: a bundle whose card
+        // says Installed must be in this count and in the Installed list.
+        // The four ComfyUI\models loaders alone cannot do that. Video needed
+        // the AnimateDiff pack, which keeps its motion modules under
+        // custom_nodes (counter-check 2026-08-29: two cards Installed, rail
+        // counter 3, neither bundle in the list). Image needed the addon
+        // folders: the abnahme counter-check the same day found Pixel Art XL
+        // in loras\ and the SDXL VAE in vae\ with Installed cards, present on
+        // the disk, and in no list and no counter anywhere.
         const [imageResult, videoResult] = await Promise.allSettled([
           getComfyImageModels(),
           getComfyVideoModels(),
@@ -218,8 +222,12 @@ export function useModels() {
         ])
         const format = (name: string) =>
           name.toLowerCase().endsWith('.gguf') ? 'gguf' : 'safetensors'
+        // What each file weighs, asked once for both lanes. Every ComfyUI
+        // entry used to carry size 0, and the card hides a zero size, so the
+        // Installed list answered "what is this costing me" with silence.
+        const sizes = await readModelDiskSizes([...imageModels, ...videoModels])
         const toModel = <T extends 'image' | 'video'>(m: { name: string; type: string }, type: T) => ({
-          name: m.name, model: m.name, size: 0, format: format(m.name),
+          name: m.name, model: m.name, size: sizes.get(m.name) ?? 0, format: format(m.name),
           architecture: m.type, type, providerName: 'ComfyUI' as const,
         })
         comfyModels = [
