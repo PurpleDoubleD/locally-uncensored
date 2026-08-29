@@ -278,7 +278,7 @@ pub struct BundledModel {
 /// Parse a llama.cpp gguf-split file stem: `<base>-NNNNN-of-MMMMM` (4 or 5
 /// digit groups, mirroring the frontend's GGUF_SHARD_RE). Returns
 /// (base, part, total) or None for ordinary single-file stems.
-fn split_shard_stem(stem: &str) -> Option<(&str, u32, u32)> {
+pub(crate) fn split_shard_stem(stem: &str) -> Option<(&str, u32, u32)> {
     let (rest, total_s) = stem.rsplit_once("-of-")?;
     let (base, part_s) = rest.rsplit_once('-')?;
     for s in [part_s, total_s] {
