@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { isVisionCompatible } from '../model-compatibility'
+import { isVisionCompatible, declaredVision } from '../model-compatibility'
 import { isMultimodalUnsupportedError, MULTIMODAL_UNSUPPORTED_MESSAGE } from '../ollama-errors'
 
 // #67 (gthvidsten, GH Discussion) — attaching an image to a text-only model.
@@ -67,5 +67,40 @@ describe('isMultimodalUnsupportedError', () => {
   })
   it('exposes actionable, vision-oriented copy', () => {
     expect(MULTIMODAL_UNSUPPORTED_MESSAGE).toMatch(/vision/i)
+  })
+})
+
+/**
+ * Runde 4, Nebenbefund N3 of the D1 counter-check: the app's own answer about
+ * a model's image capability, read off a model entry. Two sources fill it and
+ * both are facts: the built-in engine reports the vision projector on disk,
+ * and a server model listing reports its input modalities.
+ */
+describe('declaredVision', () => {
+  it('reads a declared true and a declared false', () => {
+    expect(declaredVision({ supportsVision: true })).toBe(true)
+    // The N3 witness: gemma3 by name, no projector next to the GGUF.
+    expect(declaredVision({ supportsVision: false })).toBe(false)
+  })
+
+  // ── Negative controls: nothing declared, so the name heuristics decide. ──
+  it('negative control: an entry without the field declares nothing', () => {
+    expect(declaredVision({ name: 'openai::llama3' })).toBeUndefined()
+  })
+
+  it('negative control: a missing entry or a non-boolean declares nothing', () => {
+    expect(declaredVision(undefined)).toBeUndefined()
+    expect(declaredVision(null)).toBeUndefined()
+    expect(declaredVision('gemma3')).toBeUndefined()
+    expect(declaredVision({ supportsVision: 'yes' })).toBeUndefined()
+  })
+
+  it('negative control: the composer keeps the heuristic when nothing is declared', () => {
+    // ChatInput's precedence in one line: declared wins, absent falls back.
+    const fallback = isVisionCompatible('gemma3:12b')
+    const declared = declaredVision({ name: 'openai::gemma-3-4b-it-abliterated', supportsVision: false })
+    expect(fallback).toBe(true)
+    expect(declared !== undefined ? declared : fallback).toBe(false)
+    expect(declaredVision({ name: 'gemma3:12b' }) ?? fallback).toBe(true)
   })
 })

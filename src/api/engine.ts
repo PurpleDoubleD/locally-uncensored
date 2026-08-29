@@ -40,6 +40,12 @@ export interface BundledModel {
    * (ENG-6c). null/absent when the header doesn't carry it — presets then
    * stay uncapped, exactly the pre-2.6.0 behavior. */
   ctx_train?: number | null
+  /** Can the built-in engine show this model a picture? True only when the
+   * vision projector sits next to the GGUF, which is the same file Rust turns
+   * into `--mmproj` at start (engine.rs model_can_see_images). Absent when the
+   * installed backend predates the field, and the callers then fall back to
+   * the model-name heuristic exactly as before. */
+  vision?: boolean
 }
 
 export interface EngineStatus {
@@ -245,6 +251,11 @@ export function bundledToAIModels(models: BundledModel[]): CloudModel[] {
     type: 'text' as const,
     provider: 'openai' as const,
     providerName: 'Built-in Engine',
+    // The projector answer from disk, carried as the app-wide capability flag
+    // so the composer and the agent loop stop guessing from the model name.
+    // Deliberately left absent (not false) when the backend did not report it,
+    // so an older sidecar keeps the old heuristic instead of losing vision.
+    ...(typeof m.vision === 'boolean' ? { supportsVision: m.vision } : {}),
   }))
 }
 

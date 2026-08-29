@@ -27,10 +27,10 @@ import { retrieveContext } from '../api/rag'
 import { toolRegistry } from '../api/mcp'
 import { usePermissionStore } from '../stores/permissionStore'
 import { CODEX_CONFIRM_TOOLS, codexConfirmEnabled } from './codexShellGate'
-import { isThinkingCompatible, isPlainTextPlanner } from '../lib/model-compatibility'
+import { isThinkingCompatible, isPlainTextPlanner, declaredVision } from '../lib/model-compatibility'
 import { resolveToolCallingStrategy } from '../lib/agent-strategy'
 import { isMultimodalUnsupportedError, MULTIMODAL_UNSUPPORTED_MESSAGE } from '../lib/ollama-errors'
-import { stripVisionFeedbackMessages } from '../lib/vision-heal'
+import { stripVisionFeedbackMessages, reportMultimodalRefusal } from '../lib/vision-heal'
 import { log } from '../lib/logger'
 import { buildHermesToolPrompt, buildHermesToolResult, buildHermesToolCall, parseHermesToolCalls, stripToolCallTags, hasToolCallTags } from '../api/hermes-tool-calling'
 import { parseLooseToolCalls, stripMatchedCalls, stripToolCallText, canonicalToolName } from '../lib/loose-tool-parse'
@@ -694,6 +694,23 @@ export function useAgentChat() {
     // rightly weakened. Windowed batch repeats, per-epoch identical reads and
     // repeated narration now watch this loop too.
     const loopGuard = new AgentLoopGuard()
+    // The closing line a turn gets when the model itself said nothing usable.
+    // Read from the live counters at call time, so both the normal end of the
+    // run and the swallowed multimodal refusal below produce the same text.
+    const closingSummary = () =>
+      summarizeTurn({
+        calls: blocksRef.current
+          .filter((b) => b.phase === 'tool_call' && b.toolCall)
+          .map((b) => ({
+            toolName: b.toolCall!.toolName,
+            status: b.toolCall!.status,
+            result: b.toolCall!.result,
+          })),
+        imageGenDone,
+        videoGenDone,
+        visionFeedbackGiven,
+        planGap: openPlanGap(useTodoStore.getState().getTodos(convId!)),
+      })
     // Which read produced which result message, so the request builder can
     // tell the guard that a re-read of a CAPPED result is legitimate rather
     // than a loop (plan A1, LOOP-GUARD). Keyed by the message object, which
@@ -1947,13 +1964,22 @@ export function useAgentChat() {
         // video results, or fetch failures — and on non-Ollama only feeds models
         // whose name matches a vision family (so a text LM Studio model isn't
         // sent an image and made to SSE-error).
+        //
+        // Runde 4 / Nebenbefund N3 (D1 counter-check, Windows build
+        // 2026-08-29): the app's own capability answer now goes in with the
+        // call. For the built-in engine that is the vision projector on disk,
+        // the same file the engine passes as --mmproj, so a text-only
+        // conversion of a vision family is never handed a picture again.
+        const declaredSight = declaredVision(
+          useModelStore.getState().models.find((m) => m.name === activeModel),
+        )
         for (const { tc, ac } of batch) {
           const result = results.find((r) => r.id === ac.id)
           // G22: once this run proved the model text-only, stop attaching.
           if (visionRefused) break
           if (result?.status === 'completed' && result.result) {
             try {
-              const vf = await buildVisionFeedback(modelToUse, tc.function.name, result.result, providerId)
+              const vf = await buildVisionFeedback(modelToUse, tc.function.name, result.result, providerId, declaredSight)
               if (vf) {
                 agentMessages.push(vf as unknown as ChatMessage)
                 visionFeedbackGiven = true
@@ -1981,23 +2007,11 @@ export function useAgentChat() {
         // Closing line when the model said nothing itself. Pure logic lives in
         // summarizeTurn so the D#81 rules (a failed picture is not a completed
         // task, and its reason gets shown) are locked by tests.
-        contentRef.current = summarizeTurn({
-          calls: blocksRef.current
-            .filter((b) => b.phase === 'tool_call' && b.toolCall)
-            .map((b) => ({
-              toolName: b.toolCall!.toolName,
-              status: b.toolCall!.status,
-              result: b.toolCall!.result,
-            })),
-          imageGenDone,
-          videoGenDone,
-          visionFeedbackGiven,
-          // G27: the reconcile steers above have a budget of two; when it is
-          // spent the run ends with the plan still open, and this line is the
-          // last thing the user reads. It may not say "completed" while the
-          // PlanBar next to it says otherwise.
-          planGap: openPlanGap(useTodoStore.getState().getTodos(convId!)),
-        })
+        // G27: the reconcile steers above have a budget of two; when it is
+        // spent the run ends with the plan still open, and this line is the
+        // last thing the user reads. It may not say "completed" while the
+        // PlanBar next to it says otherwise. closingSummary carries that rule.
+        contentRef.current = closingSummary()
       }
 
       // Final store update
@@ -2015,9 +2029,16 @@ export function useAgentChat() {
         const sendRefusal = explainSendRefusal(err)
 
         if (isMultimodalUnsupportedError(errorMsg)) {
+          // N3: only a picture the USER attached earns this error. When the run
+          // attached its own render and the model turned out unable to look at
+          // it, the render still succeeded and is on screen, so the turn closes
+          // with its normal summary instead of a red line under a finished
+          // image (D1 counter-check, Windows build 2026-08-29).
           useChatStore.getState().updateMessageContent(
             convId!, assistantMessage.id,
-            MULTIMODAL_UNSUPPORTED_MESSAGE
+            reportMultimodalRefusal(visionFeedbackGiven)
+              ? MULTIMODAL_UNSUPPORTED_MESSAGE
+              : (contentRef.current.trim() || closingSummary())
           )
         } else if ((err as { code?: string })?.code === 'tools_unsupported' || errorMsg.includes('does not support tools')) {
           // G26: record the refusal so the layered resolution (toolStrategyFor)

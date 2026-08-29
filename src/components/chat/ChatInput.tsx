@@ -7,7 +7,7 @@ import { ApprovalDialog } from './ApprovalDialog'
 import { useVoiceStore } from '../../stores/voiceStore'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { useModelStore } from '../../stores/modelStore'
-import { isThinkingCompatible, isVisionCompatible } from '../../lib/model-compatibility'
+import { isThinkingCompatible, isVisionCompatible, declaredVision } from '../../lib/model-compatibility'
 import type { AgentToolCall } from '../../types/agent-mode'
 import type { ImageAttachment } from '../../types/chat'
 
@@ -88,9 +88,10 @@ export function ChatInput({ onSend, onStop, isGenerating, pendingApproval, onApp
   const thinkLockedOn = thinkMode === 'always'
   const canThink = thinkMode ? thinkMode === 'toggle' : isThinkingCompatible(activeModel)
   // Same server-over-heuristic precedence for vision (input_modalities →
-  // supportsVision). The flag is `true` or undefined (never false), so
-  // models without it still fall back to the name heuristic.
-  const serverVision = activeModelMeta && 'supportsVision' in activeModelMeta ? activeModelMeta.supportsVision : undefined
+  // supportsVision, and the built-in engine's projector-on-disk answer). A
+  // declared flag counts in both directions; models without one still fall
+  // back to the name heuristic.
+  const serverVision = declaredVision(activeModelMeta)
   const canSeeImages = serverVision !== undefined ? serverVision : isVisionCompatible(activeModel)
 
   useEffect(() => {

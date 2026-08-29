@@ -159,9 +159,23 @@ pub(crate) fn is_projector_file(file_name: &str) -> bool {
 
 /// Absolute path of the projector belonging to `model_path`, if it is on disk.
 /// Absence is the normal case (text-only model) and never an error.
-fn existing_mmproj(model_path: &str) -> Option<String> {
+pub(crate) fn existing_mmproj(model_path: &str) -> Option<String> {
     let p = mmproj_sibling_path(model_path);
     p.is_file().then(|| p.to_string_lossy().to_string())
+}
+
+/// Can this GGUF read images once the built-in engine loads it?
+///
+/// Exactly the question `existing_mmproj` answers when the server is started:
+/// llama-server sees images only with `--mmproj`, and that flag rides the argv
+/// only when the projector file sits next to the model. Reported with the
+/// model list so the frontend stops guessing from the model NAME. Nebenbefund
+/// N3 of the D1 counter-check (Windows build, 2026-08-29): a text-only
+/// gemma-3-4b conversion is a gemma3 by name, the app fed it the picture it
+/// had just generated, and the run ended on a red "This model can't read
+/// images" line under a picture that came out fine.
+pub(crate) fn model_can_see_images(model_path: &str) -> bool {
+    existing_mmproj(model_path).is_some()
 }
 
 /// Build the `llama-server` argv for a chat engine. `-ngl 999` offloads every
@@ -1102,6 +1116,7 @@ fn list_bundled_models_blocking(state: &AppState) -> Result<serde_json::Value, S
                 "size": m.size,
                 "loaded": is_loaded,
                 "ctx_train": ctx_train,
+                "vision": model_can_see_images(&m.path),
             })
         })
         .collect();
@@ -1652,6 +1667,29 @@ mod tests {
         let tail: Vec<&str> = args.iter().rev().take(2).map(String::as_str).collect();
         assert_eq!(tail, vec!["/data/kv-slots", "--slot-save-path"]);
         assert!(args.iter().any(|a| a == "--mmproj"));
+    }
+
+    #[test]
+    fn vision_is_reported_from_the_projector_on_disk() {
+        // Nebenbefund N3 of the D1 counter-check: the model list has to answer
+        // "can this model read images" from the SAME file the engine passes as
+        // --mmproj, not from the model name.
+        let dir = tempfile::tempdir().unwrap();
+        let vision = dir.path().join("Qwen3.8-27B-UD-Q4_K_M.gguf");
+        std::fs::write(&vision, b"weights").unwrap();
+        std::fs::write(dir.path().join("Qwen3.8-27B-UD-Q4_K_M.mmproj.gguf"), b"projector").unwrap();
+        assert!(model_can_see_images(&vision.to_string_lossy()));
+
+        // Negative control: a gemma3 by NAME with no projector next to it. This
+        // is the exact file the counter-check ran, and the old name heuristic
+        // called it vision-capable.
+        let text_only = dir.path().join("gemma-3-4b-it-abliterated-Q4_K_M.gguf");
+        std::fs::write(&text_only, b"weights").unwrap();
+        assert!(!model_can_see_images(&text_only.to_string_lossy()));
+
+        // Negative control: a projector belonging to ANOTHER model in the same
+        // flat folder must not lend its vision to this one.
+        assert!(!model_can_see_images(&dir.path().join("nothing-here.gguf").to_string_lossy()));
     }
 
     #[test]
