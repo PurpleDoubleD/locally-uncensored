@@ -493,6 +493,35 @@ pub fn get_chat_workspace_override(
 }
 
 
+/// Sub-folder names of `~/agent-workspace`, so the app can find the folder an
+/// OLDER chat already owns.
+///
+/// The frontend used to rebuild a chat's folder name from its title on every
+/// turn, and the auto-rename after the first message therefore moved the
+/// folder out from under a running agent (counter-check round 2, 2026-08-29).
+/// The name is pinned per conversation now, but chats that predate the pin
+/// have only their folder on disk to go by. Their names all end in the stable
+/// `-<id6>` suffix, so one listing is enough to adopt the right one.
+///
+/// Names only, no paths, directories only. A missing or unreadable root is an
+/// empty list, never an error: not finding a legacy folder simply means a new
+/// one gets created.
+#[tauri::command]
+pub fn list_agent_workspaces() -> Result<Vec<String>, String> {
+    let root = agent_workspace_root();
+    let entries = match fs::read_dir(&root) {
+        Ok(e) => e,
+        Err(_) => return Ok(Vec::new()),
+    };
+    let mut names: Vec<String> = entries
+        .flatten()
+        .filter(|e| e.file_type().map(|t| t.is_dir()).unwrap_or(false))
+        .filter_map(|e| e.file_name().to_str().map(|s| s.to_string()))
+        .collect();
+    names.sort();
+    Ok(names)
+}
+
 /// Human byte size for tool messages. Mirrors formatBytes in builtin-tools.ts
 /// so the desktop and relay paths say the same thing about the same file.
 fn format_bytes(bytes: u64) -> String {
@@ -506,6 +535,46 @@ fn format_bytes(bytes: u64) -> String {
         format!("{:.1} MB", b / (KB * KB))
     } else {
         format!("{:.1} GB", b / (KB * KB * KB))
+    }
+}
+
+#[cfg(test)]
+mod workspace_listing_tests {
+    use std::fs;
+
+    /// The listing rule the frontend's fallback search depends on: folder
+    /// names, directories only, sorted, and a plain file is not a workspace.
+    #[test]
+    fn lists_only_directory_names_sorted() {
+        let root = std::env::temp_dir().join("lu-test-agent-workspace-listing");
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(root.join("zeta-5e61db")).unwrap();
+        fs::create_dir_all(root.join("alpha-aabbcc")).unwrap();
+        fs::write(root.join("loose.txt"), b"not a workspace").unwrap();
+
+        let entries = fs::read_dir(&root).unwrap();
+        let mut names: Vec<String> = entries
+            .flatten()
+            .filter(|e| e.file_type().map(|t| t.is_dir()).unwrap_or(false))
+            .filter_map(|e| e.file_name().to_str().map(|s| s.to_string()))
+            .collect();
+        names.sort();
+
+        assert_eq!(names, vec!["alpha-aabbcc".to_string(), "zeta-5e61db".to_string()]);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// Negative control: a root that does not exist is an empty list, not an
+    /// error, so a fresh install never sees a failure here.
+    #[test]
+    fn missing_root_is_empty_not_an_error() {
+        let root = std::env::temp_dir().join("lu-test-agent-workspace-absent");
+        let _ = fs::remove_dir_all(&root);
+        let listed: Vec<String> = match fs::read_dir(&root) {
+            Ok(e) => e.flatten().filter_map(|x| x.file_name().to_str().map(|s| s.to_string())).collect(),
+            Err(_) => Vec::new(),
+        };
+        assert!(listed.is_empty());
     }
 }
 

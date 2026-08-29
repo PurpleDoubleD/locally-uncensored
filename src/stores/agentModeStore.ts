@@ -13,6 +13,16 @@ interface AgentModeState {
   // it should pop up.
   workspaces: Record<string, AgentWorkspace>
 
+  // Per-conversation agent workspace FOLDER NAME, decided once and then
+  // frozen (counter-check round 2, 2026-08-29). The name used to be derived
+  // from the chat title on every turn, so the app's own auto-rename moved the
+  // folder out from under a running agent: round one wrote into
+  // `agent-workspace/new-chat-5e61db/`, round two looked in
+  // `agent-workspace/<the-new-title>-5e61db/` and found nothing. Keyed by
+  // conversation id, written by resolveChatWorkspaceSlug on first use, and
+  // persisted so a restart cannot re-derive a different name.
+  workspaceSlugs: Record<string, string>
+
   // Last folder the user picked from the "Use last folder" shortcut in
   // AgentWorkspaceDialog. Carries over across chats so the user doesn't
   // have to re-browse to the same repo every time. Updated by
@@ -28,6 +38,7 @@ interface AgentModeState {
   toggleAgentMode: (conversationId: string) => void
   setAgentModeActive: (conversationId: string, active: boolean) => void
   setWorkspace: (conversationId: string, workspace: AgentWorkspace) => void
+  pinWorkspaceSlug: (conversationId: string, slug: string) => void
   clearWorkspace: (conversationId: string) => void
   setSandboxLevel: (level: SandboxLevel) => void
   setTutorialCompleted: () => void
@@ -41,6 +52,7 @@ export const useAgentModeStore = create<AgentModeState>()(
     (set, get) => ({
       agentModeActive: {},
       workspaces: {},
+      workspaceSlugs: {},
       lastFolder: undefined,
       sandboxLevel: 'restricted',
       tutorialCompleted: false,
@@ -76,6 +88,18 @@ export const useAgentModeStore = create<AgentModeState>()(
               ? workspace.path
               : state.lastFolder,
         })),
+
+      // Write-once on purpose: a second call for a conversation that already
+      // has a folder name is ignored, so no later code path can rename the
+      // ground an agent run is standing on.
+      pinWorkspaceSlug: (conversationId, slug) =>
+        set((state) => {
+          if (!conversationId || !slug) return state
+          if (state.workspaceSlugs[conversationId]) return state
+          return {
+            workspaceSlugs: { ...state.workspaceSlugs, [conversationId]: slug },
+          }
+        }),
 
       clearWorkspace: (conversationId) =>
         set((state) => {

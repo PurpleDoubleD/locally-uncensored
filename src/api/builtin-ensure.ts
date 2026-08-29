@@ -15,10 +15,13 @@
  */
 
 import { backendCall } from './backend'
+import { trackEngineSwap, waitForEngineSwap } from './engine-swap-gate'
+import { log } from '../lib/logger'
 import { useProviderStore } from '../stores/providerStore'
 import { useSettingsStore } from '../stores/settingsStore'
 import { builtinSlotStatus, type SlotStatus } from '../lib/builtin-slot-status'
 import { AGENT_CONTEXT_CAP } from '../lib/context-window'
+import { ENGINE_DEFAULT_CTX, preservedSwapCtx } from '../lib/builtin-ctx'
 import {
   bareBuiltinModelName,
   builtinModelMatches,
@@ -62,12 +65,35 @@ let inflight: { key: string; promise: Promise<void> } | null = null
  */
 export function explainDeadEngine(err: unknown, baseUrl: string): unknown {
   const msg = err instanceof Error ? err.message : String(err ?? '')
+  const friendly = explainEngineTransportMessage(msg, baseUrl)
+  return friendly ? new Error(friendly) : err
+}
+
+/**
+ * The same translation for a message that arrived as a RESPONSE BODY rather
+ * than as a thrown error, which is the shape the counter-check actually hit.
+ *
+ * `localFetchStream` does not reject when the Rust proxy cannot reach the
+ * engine: it hands back `Response(503, {"error": "proxy_localhost_stream_chunked:
+ * error sending request for url (http://127.0.0.1:8127/v1/chat/completions)"})`.
+ * So `sendOrExplain` never saw a throw, `parseError` lifted the body verbatim,
+ * and the user read an internal Rust command name in their chat bubble.
+ *
+ * Returns the replacement text, or null when the message is not a transport
+ * failure against this engine (a real HTTP status carries the server's own
+ * words and must survive untouched). The raw text is not appended: it names a
+ * Rust function and a port, which tells the user nothing they can act on.
+ */
+export function explainEngineTransportMessage(message: string, baseUrl: string): string | null {
+  const msg = String(message ?? '')
   const host = baseUrl.replace(/^https?:\/\//, '').replace(/\/.*$/, '')
-  const isTransport = /error sending request|connection refused|failed to fetch|ECONNREFUSED|tcp connect/i.test(msg)
-  if (!isTransport || !msg.includes(host.split(':')[0])) return err
-  return new Error(
-    `The built-in engine is not answering on ${host}. It either failed to start or was shut down. Open Settings, AI Backends, Built-in Engine and start it again, or pick a different backend. Original error: ${msg}`,
-  )
+  const isTransport = /error sending request|connection refused|failed to fetch|ECONNREFUSED|tcp connect|proxy_localhost/i.test(msg)
+  if (!isTransport || !msg.includes(host.split(':')[0])) return null
+  // The raw line still exists for a bug report, it just lives in the app log
+  // now instead of in the chat bubble. House rule: no raw Rust error in front
+  // of a user.
+  log.warn('[builtin-engine] transport failure hidden behind a plain sentence', { raw: msg, host })
+  return `The built-in engine is not answering on ${host}. It is either still loading a model, failed to start, or was shut down. Wait for the model to finish loading and send again, or open Settings, AI Backends, Built-in Engine and start it there.`
 }
 
 /** True when the `openai` slot is the app-managed built-in engine. */
@@ -117,6 +143,13 @@ export async function builtinReloadNeeded(modelName: string): Promise<string | n
  */
 export async function ensureBuiltinEngineAlive(modelName: string): Promise<void> {
   if (!isManagedBuiltinSlot()) return
+  // Self-heal before an error message: a swap the app itself started is still
+  // tearing down and restarting llama-server, and a send fired into that gap
+  // is a guaranteed transport failure. Wait it out, then probe. The wait has a
+  // deadline so a wedged swap can never hold a send forever; past it the
+  // health check below decides what happens and says so in English.
+  // (Counter-check round 2, 2026-08-29: two picks in a row, then send.)
+  await waitForEngineSwap()
   const key = bareBuiltinModelName(modelName)
   if (inflight && inflight.key === key) return inflight.promise
   const earlier = inflight?.promise
@@ -149,7 +182,7 @@ async function loadBuiltinModel(modelName: string): Promise<void> {
   const rightModel = builtinModelMatches(status?.model_path, modelName)
   if (status?.healthy && rightModel) return
 
-  let models: Array<{ name: string; path: string }>
+  let models: Array<{ name: string; path: string; ctx_train?: number | null }>
   try {
     const res = await backendCall<BundledList>('list_bundled_models')
     models = res?.models ?? []
@@ -182,19 +215,39 @@ async function loadBuiltinModel(modelName: string): Promise<void> {
   // Restart with the user's expert tuning, not bare defaults — otherwise a
   // self-heal would silently drop a configured ctx/KV-quant until the next
   // manual model pick.
-  const tuning = useSettingsStore.getState().settings.builtinEngine
+  const settingsTuning = useSettingsStore.getState().settings.builtinEngine
+  // ... and do not hand back context the engine already holds. A group round
+  // restarts the engine before every speaker; with the raw 8192 default in the
+  // tuning that shrank a 32K engine to 8K on each swap while the header still
+  // promised 32K (counter-check round 2, 2026-08-29). See lib/builtin-ctx.ts.
+  const keepCtx = preservedSwapCtx({
+    tuningCtx: settingsTuning?.ctx,
+    currentCtx: status?.ctx,
+    ctxTrain: hit.ctx_train,
+  })
+  const tuning = keepCtx ? { ...(settingsTuning ?? {}), ctx: keepCtx } : settingsTuning
   // A running engine holding the WRONG model is a swap (stop, then start on
   // the same port). Everything else is a plain start, which is idempotent for
   // the same model and tuning, so an engine that is merely still warming up is
   // never torn down and restarted for nothing.
   const cmd = status?.running && !rightModel ? 'swap_bundled_model' : 'start_bundled_engine'
-  await backendCall(cmd, { modelPath: hit.path, tuning })
+  await trackEngineSwap(backendCall(cmd, { modelPath: hit.path, tuning }))
+  // The engine is a different process with a different ctx now. Tell the
+  // header and the token counter to re-read it, so the number on screen is the
+  // one llama-server actually started with even when the raise above was
+  // refused or skipped. Second half of the same finding: the display must not
+  // be able to lie, whatever the swap ended up asking for.
+  announceContextReload()
 }
 
-// The default the engine ships with. A settings ctx equal to it is treated as
-// "never touched", anything else as an explicit user choice that wins in both
-// directions (see ensureBuiltinAgentCtx below).
-const ENGINE_DEFAULT_CTX = 8192
+/** Ask every context consumer to re-read the engine. No-op outside a DOM. */
+function announceContextReload(): void {
+  try {
+    if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
+      window.dispatchEvent(new Event('lu-context-reloaded'))
+    }
+  } catch { /* a missing DOM is not a reason to fail a send */ }
+}
 
 // Models whose raise attempt failed once (path -> refused ctx). Without this
 // a card that cannot allocate the bigger KV cache would retry the failing
@@ -267,15 +320,17 @@ export async function ensureBuiltinAgentCtx(modelName: string): Promise<void> {
 
   const raised = { ...(tuning ?? {}), ctx: want }
   try {
-    await backendCall(status?.running ? 'swap_bundled_model' : 'start_bundled_engine', {
+    await trackEngineSwap(backendCall(status?.running ? 'swap_bundled_model' : 'start_bundled_engine', {
       modelPath: hit.path,
       tuning: raised,
-    })
+    }))
+    announceContextReload()
   } catch {
     refusedCtxByPath.set(hit.path, want)
     // Fall back to the previous tuning so the chat engine is not left dead.
     try {
-      await backendCall('start_bundled_engine', { modelPath: hit.path, tuning })
+      await trackEngineSwap(backendCall('start_bundled_engine', { modelPath: hit.path, tuning }))
+      announceContextReload()
     } catch { /* the lazy self-heal on the next send takes over */ }
   }
 }

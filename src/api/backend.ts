@@ -9,6 +9,16 @@
  */
 
 import { log } from "../lib/logger";
+import { shouldLogRepeat } from "../lib/probe-backoff";
+
+// Hosts whose proxy failure has already been logged, host -> timestamp. Keeps
+// a dead local backend from filling the console with the same line forever.
+const proxyWarnSeen = new Map<string, number>();
+
+/** Test-only: forget which hosts have already had their warning. */
+export function __resetProxyWarnLogForTests(): void {
+  proxyWarnSeen.clear();
+}
 
 let _invoke: ((cmd: string, args?: Record<string, unknown>) => Promise<unknown>) | null = null;
 
@@ -164,7 +174,14 @@ export async function localFetch(
       return new Response(httpErr.body, { status: httpErr.status })
     }
 
-    log.warn('[localFetch] Proxy failed, trying direct fetch', { err: proxyErrMsg })
+    // One line per host per minute, not one per attempt. A backend that is
+    // not installed used to write two console lines every 1.5 seconds, over
+    // forty inside a single chat round, and the real errors drowned in it
+    // (counter-check round 2, 2026-08-29). The poller behind it now backs off
+    // as well; this is the belt for anything else that keeps trying.
+    if (shouldLogRepeat(proxyWarnSeen, hostnameOf(url), Date.now())) {
+      log.warn('[localFetch] Proxy failed, trying direct fetch (repeats within the next minute are not logged)', { err: proxyErrMsg })
+    }
 
     // Fallback: try direct fetch (works when ComfyUI has --enable-cors-header *)
     // Apply the same timeout to the fallback so a hanging probe doesn't sit

@@ -55,9 +55,14 @@ describe('explainDeadEngine', () => {
     expect(out.message).toMatch(/Settings/i)
   })
 
-  it('keeps the original text so a bug report still carries it', () => {
+  // Changed 2026-08-29 (counter-check round 2). The raw line used to be
+  // appended for bug reports, which put "proxy_localhost_stream_chunked" in
+  // front of the user. House rule: no raw Rust error in a chat bubble. The
+  // original is written to the app log instead, see explainEngineTransportMessage.
+  it('keeps the internal Rust command name out of the bubble', () => {
     const out = explainDeadEngine(new Error(raw), MANAGED_URL) as Error
-    expect(out.message).toContain('proxy_localhost_stream_chunked')
+    expect(out.message).not.toContain('proxy_localhost_stream_chunked')
+    expect(out.message).not.toContain('Original error')
   })
 
   it('covers the other shapes a refused local connection takes', () => {
