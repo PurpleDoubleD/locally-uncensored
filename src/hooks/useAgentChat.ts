@@ -10,7 +10,7 @@ import {
 } from '../lib/approval-queue'
 import { v4 as uuid } from 'uuid'
 import { streamProviderTurn } from '../lib/provider-stream'
-import { createHermesDisplayFilter, createThinkStreamSplitter } from '../lib/hermes-stream'
+import { createHermesDisplayFilter, createThinkStreamSplitter, createTurnThinkingSink } from '../lib/hermes-stream'
 import { beginAgentRun, endAgentRun, setActiveAgentModel, renderWorkspaceSection, takeChatArtifacts, type AgentRunContext } from '../api/agent-context'
 import { resolveChatWorkspaceSlug } from '../api/workspace-slug'
 import { isOllamaLocal } from '../api/backend'
@@ -1158,9 +1158,21 @@ export function useAgentChat() {
           // end-of-turn parse on the full raw text stays authoritative.
           const splitter = createThinkStreamSplitter({ startInThink: keepThinking })
           let shown = ''
+          // Two live reasoning sources on this transport, merged by the one
+          // shared sink so neither can overwrite the other: the <think> spans
+          // the splitter pulls out of the text stream, and the native
+          // reasoning channel the backend may fill instead. Paint only; the
+          // end-of-turn parse on the full raw text stays authoritative.
+          const thinkSink = createTurnThinkingSink()
+          const paintThink = () => {
+            if (!keepThinking) return
+            thinkingRef.current = thinkSink.live()
+            scheduleUIUpdate()
+          }
           const feedUI = (chunk: { prose: string; thinking: string }) => {
             if (chunk.thinking && keepThinking) {
-              thinkingRef.current += chunk.thinking.replace(/<think>/g, '')
+              thinkSink.inline(chunk.thinking)
+              paintThink()
             }
             if (chunk.prose) shown += chunk.prose
             contentRef.current = shown
@@ -1177,9 +1189,21 @@ export function useAgentChat() {
             sendMessages,
             { ...chatOptions, thinking: undefined as unknown as boolean },
             (_full, delta) => feedUI(splitter.feed(display.feed(delta))),
+            // A prompt-transport backend can still answer on the NATIVE
+            // reasoning channel: the built-in engine extracts <think> into
+            // reasoning_content itself and the provider yields it as
+            // `thinking`. This branch passed no thinking callback and never
+            // read hermesTurn.thinking either, so that reasoning fell on the
+            // floor and the block stayed empty with the Think button on.
+            (full) => { thinkSink.native(full); paintThink() },
           )
           feedUI(splitter.feed(display.flush()))
           feedUI(splitter.flush())
+          if (hermesTurn.thinking) {
+            turnThinking = turnThinking
+              ? `${turnThinking}\n\n${hermesTurn.thinking}`
+              : hermesTurn.thinking
+          }
           const rawContent = hermesTurn.content
 
           if (hasToolCallTags(rawContent)) {

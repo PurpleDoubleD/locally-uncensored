@@ -16,7 +16,7 @@ import { useAgentLoopStore } from '../stores/agentLoopStore'
 import { CODEX_CONFIRM_TOOLS } from './codexShellGate'
 import { buildHermesToolPrompt, buildHermesToolResult, buildHermesToolCall, parseHermesToolCalls, stripToolCallTags, hasToolCallTags } from '../api/hermes-tool-calling'
 import { streamProviderTurn, type StreamedProviderTurn } from '../lib/provider-stream'
-import { createHermesDisplayFilter } from '../lib/hermes-stream'
+import { createHermesDisplayFilter, createThinkStreamSplitter, createTurnThinkingSink } from '../lib/hermes-stream'
 import { beginAgentRun, endAgentRun, setActiveAgentModel, type AgentRunContext } from '../api/agent-context'
 import { resolveChatWorkspaceSlug } from '../api/workspace-slug'
 import { codexModeKnobs, CODEX_MODE_LABELS, type CodexMode } from '../lib/codex-mode'
@@ -959,6 +959,13 @@ export function useCodex() {
           thinking: thinkOptCx as unknown as boolean,
           signal: abort.signal,
         }
+        // Hoisted to the top of the step (2.6.7 Denk-Audit): the prompt
+        // transport declared its own copy AFTER the stream, so the branch that
+        // needed it while streaming could not see it at all. One gate per step,
+        // read by every transport and by the end-of-turn routing.
+        const keepThinking =
+          codexThinkMode(activeModel) === 'always' ||
+          (settings.thinkingEnabled === true && codexCanThink(activeModel))
 
         // ── Request build (2.6.6, plan A1/A2/A3) ─────────────────────────
         // Age decay, then the send budget, then compaction, in that order.
@@ -1175,10 +1182,6 @@ export function useCodex() {
             lastUserMsg: lastUserMsg.slice(0, 120),
           })
 
-          const keepThinking =
-            codexThinkMode(activeModel) === 'always' ||
-            (settings.thinkingEnabled === true && codexCanThink(activeModel))
-
           if (providerId === 'ollama') {
             // ── Streaming path for Ollama ──────────────────────────────
             // Shows live content/thinking tokens so the user isn't staring
@@ -1386,18 +1389,61 @@ export function useCodex() {
           // which spoke Ollama's /api/chat and quietly mis-routed hermes
           // turns on every other provider.
           const display = createHermesDisplayFilter()
+          // G35 parity with the Agent path (David 2026-08-07): the thought
+          // streams inside the SAME bounded ThinkingBlock window, never
+          // full-height into the answer. Without the splitter this branch fed
+          // the raw reasoning straight into the answer bubble for the whole
+          // turn, and only the end-of-turn parse pulled it back out again.
+          // The Qwen3 templates pre-open the thought in the PROMPT, so the
+          // stream begins mid-thought and only ever sends the closer, which
+          // is what startInThink covers.
+          const splitter = createThinkStreamSplitter({ startInThink: keepThinking })
           let shown = ''
+          // Live only, through the SAME shared sink the Agent path uses, so
+          // the inline <think> spans and the native reasoning channel cannot
+          // overwrite each other. Nothing is committed into thinkingContent
+          // here: the authoritative end-of-turn parse runs on the FULL raw
+          // text and owns what counts, exactly like the tool-call extraction.
+          const thinkSink = createTurnThinkingSink()
+          const paintThink = () => {
+            if (!keepThinking) return
+            const live = thinkSink.live()
+            if (!live) return
+            useChatStore.getState().updateMessageThinking(
+              convId!, assistantMsg.id, thinkingContent ? thinkingContent + '\n\n' + live : live,
+            )
+          }
+          const feedUI = (part: { prose: string; thinking: string }) => {
+            if (part.thinking) {
+              thinkSink.inline(part.thinking)
+              paintThink()
+            }
+            if (part.prose) {
+              shown += part.prose
+              liveContent(shown)
+            }
+          }
           const hermesTurn = await streamProviderTurn(
             provider,
             modelToUse,
             sendMessages.map(m => ({ role: m.role, content: m.content })),
             { ...chatOptions, thinking: undefined as unknown as boolean, contextWindow: numCtx },
-            (_full, delta) => {
-              shown += display.feed(delta)
-              liveContent(shown)
-            },
+            (_full, delta) => feedUI(splitter.feed(display.feed(delta))),
+            // A prompt-transport backend can still answer on the NATIVE
+            // reasoning channel: llama-server extracts <think> into
+            // reasoning_content by itself and the provider yields it as
+            // `thinking`. This branch used to pass streamProviderTurn no
+            // thinking callback at all and then never read hermesTurn.thinking
+            // either, so that reasoning fell on the floor and the block stayed
+            // empty with the Think button switched on.
+            (full) => { thinkSink.native(full); paintThink() },
           )
-          shown += display.flush()
+          feedUI(splitter.feed(display.flush()))
+          feedUI(splitter.flush())
+          if (keepThinking && hermesTurn.thinking) {
+            thinkingContent += (thinkingContent ? '\n\n' : '') + hermesTurn.thinking
+            useChatStore.getState().updateMessageThinking(convId!, assistantMsg.id, thinkingContent)
+          }
           // Final paint DIRECT + settle the coalesced frame, so a queued
           // stale frame can never fire after the writes below (audit D1).
           settleLivePaint()
@@ -1418,9 +1464,6 @@ export function useCodex() {
         // (Gemma channel tags, <thought>, <reasoning>, etc.) are always
         // stripped — they are never user-facing content.
         {
-          const keepThinking =
-            codexThinkMode(activeModel) === 'always' ||
-            (settings.thinkingEnabled === true && codexCanThink(activeModel))
           turnContent = turnContent.replace(/<think>([\s\S]*?)<\/think>/g, (_m, inner) => {
             if (keepThinking) {
               thinkingContent += (thinkingContent ? '\n\n' : '') + inner

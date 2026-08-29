@@ -167,3 +167,54 @@ export function createThinkStreamSplitter(opts?: { startInThink?: boolean }): Th
     },
   }
 }
+
+/**
+ * The two live reasoning sources of ONE turn, merged in one place.
+ *
+ * A prompt-transport turn can be handed its reasoning two different ways at
+ * the same time, and 2.6.7 lost one of them on both agent paths:
+ *
+ *   - inline, as `<think>` spans inside the visible text, which is what
+ *     `createThinkStreamSplitter` pulls out; and
+ *   - natively, as the provider's `thinking` chunks, which is what
+ *     llama-server produces once it parses `<think>` into `reasoning_content`
+ *     for us, and what every cloud reasoner sends.
+ *
+ * They differ in shape: the splitter emits DELTAS, the provider callback hands
+ * over the CUMULATIVE text. Merging them by hand in each hook is how the
+ * Coding path ended up with no live thinking at all and the Agent path with a
+ * native answer that overwrote the inline one. This holds both, keeps them
+ * apart, and answers the only question the UI has: what should the thinking
+ * block show right now.
+ *
+ * Live display only. The end-of-turn parse on the full raw text stays
+ * authoritative for what is finally stored on the message.
+ */
+export interface TurnThinkingSink {
+  /** One `<think>` delta out of the visible stream. */
+  inline(delta: string): void
+  /** The provider's reasoning channel, cumulative. */
+  native(full: string): void
+  /** What the thinking block should show right now, '' when there is nothing. */
+  live(): string
+}
+
+export function createTurnThinkingSink(): TurnThinkingSink {
+  let inlineText = ''
+  let nativeText = ''
+  return {
+    inline(delta: string) {
+      if (!delta) return
+      // A pre-opened thought (Qwen3 templates put the opener in the PROMPT)
+      // can still carry a literal opener when the model repeats it. It is a
+      // marker, never reasoning the user wants to read.
+      inlineText += delta.replace(/<think>/g, '')
+    },
+    native(full: string) {
+      nativeText = full ?? ''
+    },
+    live() {
+      return [nativeText, inlineText].filter(Boolean).join('\n\n')
+    },
+  }
+}
