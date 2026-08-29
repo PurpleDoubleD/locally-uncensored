@@ -13,7 +13,7 @@ import { ProviderError } from './types'
 import { localFetch, localFetchStream, ollamaUrl } from '../backend'
 import { parseNDJSONStream } from '../stream'
 import { repairToolCallArgs, extractToolCallsFromContent } from '../../lib/tool-call-repair'
-import { normalizeSystemMessages } from './normalize-system'
+import { applyTemplateContract } from './normalize-system'
 
 // ── Ollama-specific types ──────────────────────────────────────
 
@@ -79,9 +79,15 @@ export class OllamaProvider implements ProviderClient {
     messages: ChatMessage[],
     options?: ChatOptions,
   ): AsyncGenerator<ChatStreamChunk> {
-    // Bug B3: one system message, first, or Ollama's own template rendering
-    // raises the same way llama.cpp's does. See providers/normalize-system.ts.
-    const ollamaMessages = normalizeSystemMessages(messages).map(m => {
+    // Bug B3: one system message first, and, because this call carries no
+    // `tools` payload, no `tool` role and no two turns of the same role in a
+    // row either. Ollama renders the model's own template exactly the way
+    // llama.cpp does, and a strict one raises instead of improvising. See
+    // providers/normalize-system.ts for the whole contract.
+    const ollamaMessages = applyTemplateContract(messages, {
+      toolRole: 'text',
+      alternate: true,
+    }).map(m => {
       const msg: Record<string, any> = { role: m.role, content: m.content }
       if (m.images?.length) msg.images = m.images.map(img => img.data)
       return msg
@@ -188,8 +194,14 @@ export class OllamaProvider implements ProviderClient {
     tools: ToolDefinition[],
     options?: ChatOptions,
   ): Promise<{ content: string; toolCalls: ToolCall[] }> {
-    // Bug B3: same invariant as chatStream, see providers/normalize-system.ts.
-    const ollamaMessages = normalizeSystemMessages(messages).map(m => {
+    // Bug B3: same contract as chatStream. A turn that really carries a
+    // `tools` payload keeps the native tool channel. The strategy resolution
+    // only sends one after Ollama itself reported the `tools` capability for
+    // this model (/api/show, see lib/tool-support.ts).
+    const ollamaMessages = applyTemplateContract(messages, {
+      toolRole: tools.length > 0 ? 'native' : 'text',
+      alternate: tools.length === 0,
+    }).map(m => {
       const msg: Record<string, any> = { role: m.role, content: m.content }
       if (m.tool_calls) msg.tool_calls = m.tool_calls
       if (m.images?.length) msg.images = m.images.map(img => img.data)

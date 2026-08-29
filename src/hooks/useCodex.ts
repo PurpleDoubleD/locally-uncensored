@@ -14,7 +14,7 @@ import { applyGoalCommand } from '../lib/goal-command'
 import { useAgentGoalStore, renderGoalSection } from '../stores/agentGoalStore'
 import { useAgentLoopStore } from '../stores/agentLoopStore'
 import { CODEX_CONFIRM_TOOLS } from './codexShellGate'
-import { buildHermesToolPrompt, buildHermesToolResult, parseHermesToolCalls, stripToolCallTags, hasToolCallTags } from '../api/hermes-tool-calling'
+import { buildHermesToolPrompt, buildHermesToolResult, buildHermesToolCall, parseHermesToolCalls, stripToolCallTags, hasToolCallTags } from '../api/hermes-tool-calling'
 import { streamProviderTurn, type StreamedProviderTurn } from '../lib/provider-stream'
 import { createHermesDisplayFilter } from '../lib/hermes-stream'
 import { beginAgentRun, endAgentRun, chatWorkspaceSlug, setActiveAgentModel, type AgentRunContext } from '../api/agent-context'
@@ -2143,7 +2143,26 @@ export function useCodex() {
           guardKeyOfResult.set(msg as unknown as object, guardKeyFor(tc))
           return msg
         }
-        if (providerId === 'openai' || providerId === 'anthropic' || providerId === 'lu-cloud') {
+        // Bug B3 round 2: same reorder as the Agent surface. This chain asked
+        // WHICH PROVIDER, and the built-in engine and LM Studio are providerId
+        // 'openai', so a coding run driving the model by prompt still wrote
+        // its results into the native `tool` role, with no `tools` payload in
+        // the request to justify it. A strict chat template has no branch for
+        // that role and refuses the whole conversation. The transport decides
+        // the shape; the provider only decides whether it needs ids.
+        if (strategy === 'hermes_xml') {
+          for (const entry of batch) {
+            const result = results.find((r) => r.id === entry.ac.id)!
+            messages.push({
+              role: 'assistant',
+              content: buildHermesToolCall(entry.ac.toolName, entry.injectedArgs),
+            })
+            messages.push(rememberResult(
+              { role: 'user', content: buildHermesToolResult(entry.ac.toolName, resultTextFor(result)) },
+              entry.tc,
+            ))
+          }
+        } else if (providerId === 'openai' || providerId === 'anthropic' || providerId === 'lu-cloud') {
           messages.push({ role: 'assistant', content: turnContent || '', tool_calls: toolCalls })
           for (const { tc } of batch) {
             const result = results.find((r) => r.id === batch.find((b) => b.tc === tc)?.ac.id)!
@@ -2162,11 +2181,14 @@ export function useCodex() {
             messages.push(rememberResult({ role: 'tool', content: resultTextFor(result) }, tc))
           }
         } else {
+          // Ollama on a non-native strategy that is not hermes_xml. Same
+          // dialect, written by the same builders as the branch above so the
+          // two can never drift apart again.
           for (const entry of batch) {
             const result = results.find((r) => r.id === entry.ac.id)!
             messages.push({
               role: 'assistant',
-              content: `<tool_call>\n{"name": "${entry.ac.toolName}", "arguments": ${JSON.stringify(entry.injectedArgs)}}\n</tool_call>`,
+              content: buildHermesToolCall(entry.ac.toolName, entry.injectedArgs),
             })
             messages.push(rememberResult(
               { role: 'user', content: buildHermesToolResult(entry.ac.toolName, resultTextFor(result)) },

@@ -20,7 +20,7 @@ import { signalCreditsExhausted } from '../../lib/credits-exhausted'
 import { parseRetryAfter } from '../../lib/http-status'
 import { localFetch, localFetchStream, isPrivateOrLanHost, isDirectFetchAllowed, hostnameOf, ensureProxyAllowsHost, backendCall } from '../backend'
 import { ensureBuiltinEngineAlive, explainDeadEngine, isManagedBuiltinSlot } from '../builtin-ensure'
-import { normalizeSystemMessages } from './normalize-system'
+import { applyTemplateContract } from './normalize-system'
 
 // Transport routing lives in the `useLocalProxy` getter (below) plus the shared
 // host helpers in backend.ts. A direct webview fetch only works for hosts the
@@ -216,6 +216,33 @@ export class OpenAIProvider implements ProviderClient {
   }
 
   /**
+   * Bug B3 round 2: the message sequence this endpoint can actually render.
+   *
+   * A LAN backend (the bundled engine, LM Studio, llama.cpp, vLLM, Jan, …)
+   * renders the MODEL's own Jinja chat template, and a strict one raises
+   * rather than improvises: no `tool` role, no two turns of the same role in
+   * a row, user first. A cloud endpoint implements the protocol itself and
+   * wants the plain OpenAI shape, so it is left alone.
+   *
+   * `nativeTools` is the second half of the rule and the reason this is not
+   * a blanket downgrade. When the request carries a `tools` payload, the
+   * strategy resolution already asked this very server whether its template
+   * understands tools (serverToolSupport, /props chat_template_caps or the
+   * LM Studio per-model listing) and got a yes. Then the tool channel stays
+   * native, ids and all. When it does NOT carry one, the run is on the
+   * prompt transport, and a leftover `tool` message in the history is a role
+   * this template has no branch for. That is exactly the payload the
+   * counter-check killed the built-in engine with.
+   */
+  private templateContract(messages: ChatMessage[], nativeTools: boolean): ChatMessage[] {
+    const rendersTemplate = this.isLanBackend && !nativeTools
+    return applyTemplateContract(messages, {
+      toolRole: rendersTemplate ? 'text' : 'native',
+      alternate: rendersTemplate,
+    })
+  }
+
+  /**
    * Run a send and, when this slot is the app's own engine, translate a
    * transport failure into a sentence about the engine. A refused connection
    * to 127.0.0.1:8127 used to surface as the raw proxy error, which is how a
@@ -389,7 +416,7 @@ export class OpenAIProvider implements ProviderClient {
       // render the model's own Jinja template, which raises "System message
       // must be at the beginning" on anything else and kills the whole turn
       // before a byte streams. See providers/normalize-system.ts.
-      messages: normalizeSystemMessages(messages).map(m => this.toOpenAIMessage(m)),
+      messages: this.templateContract(messages, (options?.tools?.length ?? 0) > 0).map(m => this.toOpenAIMessage(m)),
       stream: true,
     }
 
@@ -554,7 +581,7 @@ export class OpenAIProvider implements ProviderClient {
     const body: Record<string, any> = {
       model,
       // Bug B3: same invariant as chatStream, see providers/normalize-system.ts.
-      messages: normalizeSystemMessages(messages).map(m => this.toOpenAIMessage(m)),
+      messages: this.templateContract(messages, tools.length > 0).map(m => this.toOpenAIMessage(m)),
       stream: false,
     }
 

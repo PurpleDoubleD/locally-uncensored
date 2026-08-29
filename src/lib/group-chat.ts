@@ -21,7 +21,7 @@ export function groupSystemPrompt(model: string, allModels: string[], personaPro
   const others = allModels.filter((m) => m !== model).map((m) => `"${m}"`).join(', ')
   const line =
     `You are "${model}", one of several AI models answering in the same group conversation with ${others}. ` +
-    `Earlier assistant messages starting with a [model-name] tag were written by the other models; untagged assistant messages are your own. ` +
+    `What the other models said arrives as user messages that start with a [model-name] tag; the assistant messages are your own earlier turns. ` +
     `Answer as yourself in your own voice, add something new, and do not repeat what another model already said.`
   return personaPrompt ? `${personaPrompt}\n\n${line}` : line
 }
@@ -53,23 +53,35 @@ export function stripImpersonatedSpeakers(text: string, otherModels: string[]): 
   return cut === -1 ? text : lines.slice(0, cut).join('\n').trim()
 }
 
-/** The shared history as one model sees it: other speakers tagged, own turns
- *  clean, empty placeholders and app notices dropped.
+/** The shared history as one model sees it: the OTHER speakers arrive as
+ *  tagged user turns, this model's own turns stay assistant, empty
+ *  placeholders and app notices are dropped.
  *
  *  Bug B3: role:'system' is an app notice here, not a turn. The caller puts the
  *  group system prompt at index 0 itself, so letting a stored one through would
  *  hand the engine a second system message somewhere in the middle, and a strict
  *  Jinja chat template refuses that outright with "System message must be at the
- *  beginning". */
+ *  beginning".
+ *
+ *  Bug B3 round 2: the other speakers used to arrive as assistant turns, tagged
+ *  but assistant all the same. From round two on that puts two assistant
+ *  messages next to each other in every payload, one per speaker, and a
+ *  template that demands strict user/assistant alternation raises on it. The
+ *  counter-check killed both speakers of a two-model group that way on the
+ *  installed 2.6.7 build. A foreign turn is not this model's own speech, so
+ *  the honest role for it is user; the [model-name] tag and the system prompt
+ *  above say who is talking, which is how attribution worked all along. It
+ *  also fixes round one for the second speaker, whose prompt used to end on
+ *  somebody else's assistant turn and asked it to carry on mid-sentence. */
 export function groupHistory(messages: Message[], model: string): GroupWireMessage[] {
   return messages
     .filter((m) => m.role !== 'system' && m.content.trim() !== '')
-    .map((m) => ({
-      role: m.role as GroupWireMessage['role'],
-      content:
-        m.role === 'assistant' && m.modelId && m.modelId !== model
-          ? `[${m.modelId}] ${m.content}`
-          : m.content,
-      ...(m.images?.length ? { images: m.images.map((i) => ({ data: i.data, mimeType: i.mimeType })) } : {}),
-    }))
+    .map((m) => {
+      const foreign = m.role === 'assistant' && !!m.modelId && m.modelId !== model
+      return {
+        role: (foreign ? 'user' : m.role) as GroupWireMessage['role'],
+        content: foreign ? `[${m.modelId}] ${m.content}` : m.content,
+        ...(m.images?.length ? { images: m.images.map((i) => ({ data: i.data, mimeType: i.mimeType })) } : {}),
+      }
+    })
 }
