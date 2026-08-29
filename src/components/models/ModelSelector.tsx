@@ -14,6 +14,7 @@ import { canUseTools, resolveToolSupport, type ToolSupport } from '../../lib/too
 import { backendCall } from '../../api/backend'
 import { listLoadedLmStudioModels, loadLmStudioModel, unloadLmStudioModel } from '../../api/lmstudio'
 import { isLmStudioProvider } from '../../lib/hf-to-provider'
+import { nextProbeDelayMs } from '../../lib/probe-backoff'
 import type { AIModel } from '../../types/models'
 
 // ── Local-mode cloud discovery (2.5.8): an "LU Cloud" section at the list's
@@ -496,7 +497,16 @@ export function ModelSelector({ openUpward = false, surface = 'chat' }: ModelSel
     if (!open) return
     setSelectError(null) // fresh open — drop any stale auto-load error
     let cancelled = false
-    const refresh = () => {
+    let timer: ReturnType<typeof setTimeout> | undefined
+    // Consecutive failed probes. A backend that answers keeps the brisk 1.5 s
+    // beat; one that is not installed is asked about less and less often, up
+    // to a minute. Counter-check round 2 (2026-08-29) found the app knocking
+    // on localhost:11434 every 1.5 s forever on a box with no Ollama at all,
+    // over forty console lines inside a single chat round, drowning out the
+    // errors somebody was actually looking for.
+    let misses = 0
+
+    const refresh = async () => {
       // Skip the tick entirely while the window is hidden/minimized — there's
       // nothing to repaint and we re-sync the moment it's visible again. Stops a
       // backgrounded app from hitting Ollama / LM Studio every 1.5 s (#70).
@@ -515,17 +525,39 @@ export function ModelSelector({ openUpward = false, surface = 'chat' }: ModelSel
       } else if (!cancelled) {
         setLmsLoaded((prev) => (prev.size ? new Set() : prev))
       }
-      void listRunningModels().then((list) => { if (!cancelled) setOllamaLoaded((prev) => sameStringSet(prev, list) ? prev : new Set(list)) }).catch(() => {})
+      try {
+        const list = await listRunningModels()
+        misses = 0
+        if (!cancelled) setOllamaLoaded((prev) => sameStringSet(prev, list) ? prev : new Set(list))
+      } catch {
+        misses += 1
+      }
     }
-    refresh()
-    const id = setInterval(refresh, 1500)
+
+    // setTimeout chain rather than setInterval: the gap has to grow, and a
+    // fixed interval cannot.
+    const tick = () => {
+      void refresh().finally(() => {
+        if (cancelled) return
+        timer = setTimeout(tick, nextProbeDelayMs(misses))
+      })
+    }
+    tick()
+
     // Re-sync immediately when the user comes back to the window (the hidden
-    // ticks above were skipped, so the loaded-state could be stale).
-    const onVisible = () => { if (typeof document !== 'undefined' && !document.hidden) refresh() }
+    // ticks above were skipped, so the loaded-state could be stale). Coming
+    // back is also a good moment to give a backend that was down another quick
+    // chance, so the ladder resets here.
+    const onVisible = () => {
+      if (typeof document === 'undefined' || document.hidden || cancelled) return
+      misses = 0
+      if (timer) clearTimeout(timer)
+      tick()
+    }
     document.addEventListener('visibilitychange', onVisible)
     return () => {
       cancelled = true
-      clearInterval(id)
+      if (timer) clearTimeout(timer)
       document.removeEventListener('visibilitychange', onVisible)
     }
   }, [open])
