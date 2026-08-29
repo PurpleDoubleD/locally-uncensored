@@ -6,7 +6,8 @@ import { getProvider } from '../../api/providers'
 import { PROVIDER_PRESETS } from '../../api/providers/types'
 import { Modal } from '../ui/Modal'
 import { backendCall } from '../../api/backend'
-import { diagnoseBuiltinEngine } from '../../api/builtin-ensure'
+import { diagnoseBuiltinEngine, readBuiltinSlotStatus } from '../../api/builtin-ensure'
+import type { SlotStatus } from '../../lib/builtin-slot-status'
 import type { ProviderId, ProviderConfig } from '../../api/providers/types'
 
 const isTauri = typeof window !== 'undefined' && !!(window as any).__TAURI_INTERNALS__
@@ -87,7 +88,7 @@ export function ProviderSettings() {
   const { providers, setProviderConfig, setProviderApiKey, getProviderApiKey } = useProviderStore()
   const [dropdownOpen, setDropdownOpen] = useState(false)
   const [testing, setTesting] = useState<ProviderId | null>(null)
-  const [statuses, setStatuses] = useState<Record<string, 'idle' | 'connected' | 'failed'>>({})
+  const [statuses, setStatuses] = useState<Record<string, SlotStatus>>({})
   // Per-slot English explanation for a failed Test (GH #118).
   const [testDetail, setTestDetail] = useState<Record<string, string>>({})
   const [showKey, setShowKey] = useState<Record<string, boolean>>({})
@@ -109,6 +110,28 @@ export function ProviderSettings() {
     } catch { /* command unavailable on older builds — leave null */ }
   }
 
+  // One status for one slot, and never a verdict nobody earned.
+  //
+  // GH #118 leftover, counter-check 2026-08-29: right after app start, with no
+  // chat model loaded, this row read "Failed" for the app's OWN engine, and
+  // the click that disproved it printed ERR_CONNECTION_REFUSED on 127.0.0.1:8127
+  // in the console first. The app starts that process itself, so it can simply
+  // ask whether it runs. An engine that was never started is "Not running",
+  // which is a true sentence and also a different one from "Failed".
+  const probeSlot = async (id: ProviderId): Promise<SlotStatus> => {
+    if (id === 'openai') {
+      const known = await readBuiltinSlotStatus()
+      // 'connected' or 'stopped' answers it without touching a socket. Only an
+      // engine that is up but not yet answering falls through to a real probe.
+      if (known) return known
+    }
+    try {
+      return (await getProvider(id).checkConnection()) ? 'connected' : 'failed'
+    } catch {
+      return 'failed'
+    }
+  }
+
   // Auto-check connection status for all enabled providers on mount.
   // Also probe lmstudio_server_status so the inline "Start Server"
   // affordance is correct from first render, not just after a Test click.
@@ -116,13 +139,8 @@ export function ProviderSettings() {
     const checkAll = async () => {
       const ids = (Object.keys(providers) as ProviderId[]).filter(id => providers[id].enabled)
       for (const id of ids) {
-        try {
-          const client = getProvider(id)
-          const ok = await client.checkConnection()
-          setStatuses(prev => ({ ...prev, [id]: ok ? 'connected' : 'failed' }))
-        } catch {
-          setStatuses(prev => ({ ...prev, [id]: 'failed' }))
-        }
+        const status = await probeSlot(id)
+        setStatuses(prev => ({ ...prev, [id]: status }))
       }
       await refreshLmStudioInfo()
     }
@@ -170,11 +188,17 @@ export function ProviderSettings() {
     setStatuses(prev => ({ ...prev, [providerId]: 'idle' }))
     setTestDetail(prev => ({ ...prev, [providerId]: '' }))
     let ok = false
-    try {
-      const client = getProvider(providerId)
-      ok = await client.checkConnection()
-    } catch {
-      ok = false
+    // A stopped engine is a thing to start, not a thing to probe. Skipping the
+    // doomed request is what keeps ERR_CONNECTION_REFUSED out of the console
+    // on the way to a green dot (GH #118).
+    const stopped = providerId === 'openai' && (await readBuiltinSlotStatus()) === 'stopped'
+    if (!stopped) {
+      try {
+        const client = getProvider(providerId)
+        ok = await client.checkConnection()
+      } catch {
+        ok = false
+      }
     }
     // GH #118: a red dot was the whole answer the built-in engine gave, while
     // the console carried ERR_CONNECTION_REFUSED on 127.0.0.1:8127. The app
@@ -264,6 +288,7 @@ export function ProviderSettings() {
                   <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${
                     status === 'connected' ? 'bg-green-500' :
                     status === 'failed' ? 'bg-red-500' :
+                    status === 'stopped' ? 'bg-amber-500' :
                     'bg-gray-500'
                   }`} />
                   <span className="text-[0.65rem] text-gray-300 font-medium truncate">{view.label}</span>
@@ -272,6 +297,7 @@ export function ProviderSettings() {
                   {!config.isLocal && <span className="text-[0.5rem] px-1 py-0.5 rounded bg-blue-500/10 text-blue-400 shrink-0">CLOUD</span>}
                   {status === 'connected' && <Wifi size={8} className="text-green-400 shrink-0" />}
                   {status === 'failed' && <WifiOff size={8} className="text-red-400 shrink-0" />}
+                  {status === 'stopped' && <WifiOff size={8} className="text-amber-400 shrink-0" />}
                 </div>
                 <ChevronDown size={10} className={`text-gray-500 transition-transform shrink-0 ${isExpanded ? 'rotate-180' : ''}`} />
               </button>
@@ -366,6 +392,14 @@ export function ProviderSettings() {
                   {status === 'failed' && (
                     <span className="flex items-center gap-1 text-[0.6rem] text-red-400">
                       <WifiOff size={10} /> Failed
+                    </span>
+                  )}
+                  {status === 'stopped' && (
+                    <span
+                      className="flex items-center gap-1 text-[0.6rem] text-amber-400"
+                      title="The engine is installed but not started yet. It starts when you pick a chat model, or when you press Test."
+                    >
+                      <WifiOff size={10} /> Not running
                     </span>
                   )}
                 </div>

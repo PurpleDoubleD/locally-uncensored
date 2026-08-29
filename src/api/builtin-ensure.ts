@@ -17,6 +17,7 @@
 import { backendCall } from './backend'
 import { useProviderStore } from '../stores/providerStore'
 import { useSettingsStore } from '../stores/settingsStore'
+import { builtinSlotStatus, type SlotStatus } from '../lib/builtin-slot-status'
 import { AGENT_CONTEXT_CAP } from '../lib/context-window'
 
 interface EngineStatusLite {
@@ -201,6 +202,22 @@ export async function ensureBuiltinAgentCtx(modelName: string): Promise<void> {
     try {
       await backendCall('start_bundled_engine', { modelPath: hit.path, tuning })
     } catch { /* the lazy self-heal on the next send takes over */ }
+  }
+}
+
+// ── What the AI Backends row may say before anyone probed ────────────────────
+
+/** Ask the app about its own engine, without a socket.
+ *
+ *  Returns null when this slot is not the managed built-in engine, when the
+ *  backend command is unavailable (browser/dev), or when the answer does not
+ *  settle the question. The caller then probes as it always did. */
+export async function readBuiltinSlotStatus(): Promise<SlotStatus | null> {
+  if (!isManagedBuiltinSlot()) return null
+  try {
+    return builtinSlotStatus(await backendCall<EngineStatusLite>('bundled_engine_status'))
+  } catch {
+    return null
   }
 }
 
