@@ -62,12 +62,18 @@ describe('build-llama.sh', () => {
     expect(code).not.toBe(0)
   })
 
-  it('appends .exe only for windows targets', () => {
+  it('appends .exe only for windows targets, and carries the lu- prefix', () => {
+    // GitHub #120: the output name gained the app prefix because Tauri's deb
+    // bundler drops every externalBin into /usr/bin, where Debian's own
+    // llama.cpp-tools package already owns llama-server and dpkg refuses the
+    // install. The name lives in four places (this script, tauri.conf.json,
+    // engine.rs and the NSIS hooks) and they have to agree, so the expected
+    // strings below are the fourth guard against one of them drifting back.
     expect(callFn('out_name_for', 'x86_64-pc-windows-msvc').out).toBe(
-      'llama-server-x86_64-pc-windows-msvc.exe',
+      'lu-llama-server-x86_64-pc-windows-msvc.exe',
     )
     expect(callFn('out_name_for', 'aarch64-apple-darwin').out).toBe(
-      'llama-server-aarch64-apple-darwin',
+      'lu-llama-server-aarch64-apple-darwin',
     )
   })
 
