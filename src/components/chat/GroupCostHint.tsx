@@ -12,11 +12,22 @@
 
 import { Users } from 'lucide-react'
 import { useChatStore } from '../../stores/chatStore'
+import { useProviderStore } from '../../stores/providerStore'
 import { isGroupChat } from '../../lib/group-chat'
 
-/** The line itself. Kept pure so the wording is testable without a renderer. */
-export function groupCostHintText(models: number): string {
-  return `1 round = ${models} answers = ${models}x the cost`
+/** The line itself. Kept pure so the wording is testable without a renderer.
+ *
+ *  `builtinSpeakers` is how many of the line-up run on the app's own engine.
+ *  From two upwards that costs time rather than money: llama-server holds one
+ *  model, so the engine is stopped and started again between those speakers.
+ *  The counter-check found the app hiding this by not reloading at all and
+ *  answering every speaker with the same model, which is the one thing we will
+ *  not do, so the wait gets named here before the user presses send. */
+export function groupCostHintText(models: number, builtinSpeakers = 0): string {
+  const base = `1 round = ${models} answers = ${models}x the cost`
+  return builtinSpeakers >= 2
+    ? `${base}, and the built-in engine reloads between local speakers`
+    : base
 }
 
 export function GroupCostHint() {
@@ -27,7 +38,17 @@ export function GroupCostHint() {
       : undefined,
   )
 
+  // Only the app-managed engine has the one-model-at-a-time problem. A LAN
+  // OpenAI-compatible server in the same slot serves many models at once.
+  const managedBuiltin = useProviderStore(
+    (s) => !!s.providers.openai?.enabled && s.providers.openai?.managed === true,
+  )
+
   if (!isGroupChat(groupModels)) return null
+
+  const builtinSpeakers = managedBuiltin
+    ? groupModels.filter((m) => m.startsWith('openai::')).length
+    : 0
 
   return (
     <div className="w-full max-w-[70%] mx-auto px-3 pb-1 flex justify-center">
@@ -38,7 +59,7 @@ export function GroupCostHint() {
           className="flex-1 min-w-0 truncate text-[0.6rem] text-gray-700 dark:text-gray-300"
           title={groupModels.join(', ')}
         >
-          {groupCostHintText(groupModels.length)}
+          {groupCostHintText(groupModels.length, builtinSpeakers)}
         </span>
       </div>
     </div>

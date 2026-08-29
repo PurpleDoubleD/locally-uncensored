@@ -32,6 +32,7 @@ import { isMultimodalUnsupportedError, MULTIMODAL_UNSUPPORTED_MESSAGE } from "..
 import type { ImageAttachment, Message } from "../types/chat"
 import { isGroupChat, groupSystemPrompt, groupHistory, stripImpersonatedSpeakers } from "../lib/group-chat"
 import { explainSendRefusal } from "../lib/template-refusal"
+import { builtinReloadNeeded, ensureBuiltinEngineAlive } from "../api/builtin-ensure"
 import { emptyAnswerExplanation } from "../lib/answer-notes"
 import { log } from "../lib/logger"
 import { CREDITS_EXHAUSTED_MESSAGE } from '../lib/credits-exhausted'
@@ -119,6 +120,31 @@ async function runGroupTurn(convId: string, model: string, allModels: string[], 
   const others = allModels.filter((m) => m !== model)
 
   try {
+    // Local speakers share ONE engine process. llama-server holds a single
+    // model and answers with it whatever the request's `model` field says, so
+    // a group round used to send every speaker's turn to whichever model
+    // happened to be loaded: the user saw two names and got one model
+    // (counter-check on the Windows box, 2026-08-28). The engine loads this
+    // speaker's model before its turn now.
+    //
+    // Announced first, because a swap stops and restarts llama-server and a
+    // large GGUF takes long enough that a silent wait reads as a hang. The
+    // line is overwritten by the first token, or by the empty-answer note if
+    // no token ever comes.
+    if (providerId === 'openai') {
+      const toLoad = await builtinReloadNeeded(model)
+      if (toLoad) {
+        useChatStore.getState().updateMessageContent(
+          convId,
+          assistantMessage.id,
+          `Loading ${toLoad} into the built-in engine for this turn...`,
+        )
+        await ensureBuiltinEngineAlive(model)
+        if (abort.signal.aborted) return
+        useChatStore.getState().updateMessageContent(convId, assistantMessage.id, '')
+      }
+    }
+
     const { provider, modelId } = getProviderForModel(model)
     let effectiveCtx: number | undefined = settings.contextWindowOverride || undefined
     if (providerId === 'ollama') {

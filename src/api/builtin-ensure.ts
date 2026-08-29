@@ -19,12 +19,22 @@ import { useProviderStore } from '../stores/providerStore'
 import { useSettingsStore } from '../stores/settingsStore'
 import { builtinSlotStatus, type SlotStatus } from '../lib/builtin-slot-status'
 import { AGENT_CONTEXT_CAP } from '../lib/context-window'
+import {
+  bareBuiltinModelName,
+  builtinModelMatches,
+  builtinModelMismatchMessage,
+  builtinModelNameFromPath,
+} from '../lib/builtin-model-identity'
 
 interface EngineStatusLite {
   running: boolean
   healthy: boolean
   /** The `--ctx-size` the chat engine was started with (ENG-3). */
   ctx?: number | null
+  /** Absolute path of the GGUF the engine was started with, null when it is
+   *  not running. The ONLY honest answer to "which model is loaded": the
+   *  `model` field of a request is a label llama-server ignores. */
+  model_path?: string | null
 }
 
 interface BundledList {
@@ -34,7 +44,12 @@ interface BundledList {
 // Coalesce concurrent sends (chat + title generation) into ONE health-check /
 // restart. start_bundled_engine blocks until /health is green, so awaiting the
 // same promise is exactly "wait for the restart the other call kicked off".
-let inflight: Promise<void> | null = null
+//
+// Keyed by model since 2.6.7: the call can now SWAP the loaded model, and a
+// second caller asking for a different model must not be handed the first
+// caller's promise and told the engine is ready. Same model rides along, a
+// different model waits its turn and then runs its own check.
+let inflight: { key: string; promise: Promise<void> } | null = null
 
 /**
  * Rewrite a transport failure against our own engine into something a user can
@@ -62,58 +77,118 @@ export function isManagedBuiltinSlot(): boolean {
 }
 
 /**
- * Make sure the built-in engine is up before a send. No-op when the slot is
- * not managed, the engine is already healthy, or `modelName` is not a bundled
- * GGUF (nothing we own to heal). Throws only when an actual restart attempt
- * fails — that error carries llama-server's stderr tail and IS the honest
- * thing to show in the chat instead of a bare "fetch failed".
+ * Is the engine about to answer with the wrong model.
+ *
+ * Answers the question `ensureBuiltinEngineAlive` acts on, without acting:
+ * null when nothing has to happen, otherwise the bare id that has to be loaded
+ * first. The group round asks this so it can put a loading line in the bubble
+ * BEFORE it waits, because a swap stops and restarts llama-server and a large
+ * GGUF takes long enough that a silent wait reads as a hang.
+ *
+ * Never throws and never changes anything.
+ */
+export async function builtinReloadNeeded(modelName: string): Promise<string | null> {
+  if (!isManagedBuiltinSlot()) return null
+  // A model from another provider slot travels through its own provider and
+  // has nothing to do with our engine.
+  const parts = modelName.split('::')
+  if (parts.length === 2 && parts[0] !== 'openai') return null
+  const bare = bareBuiltinModelName(modelName)
+  if (!bare) return null
+  try {
+    const status = await backendCall<EngineStatusLite>('bundled_engine_status')
+    if (!status?.healthy) return bare
+    return builtinModelMatches(status.model_path, bare) ? null : bare
+  } catch {
+    return null // non-Tauri context (tests/browser), nothing to manage
+  }
+}
+
+/**
+ * Make sure the built-in engine is up AND holding `modelName` before a send.
+ * No-op when the slot is not managed or the engine already has that exact
+ * model. Throws only when an actual start/swap attempt fails, and that error
+ * carries llama-server's stderr tail and IS the honest thing to show in the
+ * chat instead of a bare "fetch failed".
+ *
+ * The model half is new in 2.6.7 and is the app-side cure for the counter-check
+ * finding: llama-server answers whatever it holds, whatever the `model` field
+ * says, so "the engine is healthy" was never enough to send.
  */
 export async function ensureBuiltinEngineAlive(modelName: string): Promise<void> {
   if (!isManagedBuiltinSlot()) return
-  if (inflight) return inflight
-  inflight = (async () => {
-    try {
-      let status: EngineStatusLite | null
-      try {
-        status = await backendCall<EngineStatusLite>('bundled_engine_status')
-      } catch {
-        return // non-Tauri context (tests/browser) — nothing to manage
-      }
-      if (status?.healthy) return
-
-      let models: Array<{ name: string; path: string }>
-      try {
-        const res = await backendCall<BundledList>('list_bundled_models')
-        models = res?.models ?? []
-      } catch {
-        return
-      }
-      const bare = modelName.includes('::') ? modelName.split('::')[1] : modelName
-      const hit = models.find((m) => m.name === bare)
-      if (!hit) {
-        // The slot IS our engine (managed), the engine is NOT healthy, and the
-        // model the picker is holding is not on disk where the engine looks.
-        // Returning quietly here sent the send straight into a dead port, and
-        // the user got "proxy_localhost_stream_chunked: error sending request
-        // for url (http://127.0.0.1:8127/v1/chat/completions)" as their first
-        // impression of the app (applejames, Discord 2026-08-01, fresh install
-        // on Windows 10 — they gave up on the built-in engine and moved to
-        // Ollama). Say what is actually wrong instead.
-        throw new Error(
-          `The built-in engine has no model file named "${bare}". It may have been deleted, moved, or the download did not finish. Open Models, install it again, then pick it in the chat.`,
-        )
-      }
-
-      // Restart with the user's expert tuning, not bare defaults — otherwise a
-      // self-heal would silently drop a configured ctx/KV-quant until the next
-      // manual model pick.
-      const tuning = useSettingsStore.getState().settings.builtinEngine
-      await backendCall('start_bundled_engine', { modelPath: hit.path, tuning })
-    } finally {
-      inflight = null
-    }
+  const key = bareBuiltinModelName(modelName)
+  if (inflight && inflight.key === key) return inflight.promise
+  const earlier = inflight?.promise
+  const run = (async () => {
+    // A swap for another model is already running: let it finish rather than
+    // fight it for the one engine process. Its failure is its own caller's to
+    // report, so it is swallowed here.
+    if (earlier) await earlier.catch(() => undefined)
+    await loadBuiltinModel(modelName)
   })()
-  return inflight
+  inflight = { key, promise: run }
+  try {
+    await run
+  } finally {
+    if (inflight?.promise === run) inflight = null
+  }
+}
+
+/** The body of `ensureBuiltinEngineAlive`, minus the coalescing. */
+async function loadBuiltinModel(modelName: string): Promise<void> {
+  let status: EngineStatusLite | null
+  try {
+    status = await backendCall<EngineStatusLite>('bundled_engine_status')
+  } catch {
+    return // non-Tauri context (tests/browser) — nothing to manage
+  }
+  // Healthy AND holding what the caller wants: the only case that may skip
+  // out. An engine whose status carries no model_path cannot be judged, so it
+  // counts as a match and the send proceeds exactly as it did before.
+  const rightModel = builtinModelMatches(status?.model_path, modelName)
+  if (status?.healthy && rightModel) return
+
+  let models: Array<{ name: string; path: string }>
+  try {
+    const res = await backendCall<BundledList>('list_bundled_models')
+    models = res?.models ?? []
+  } catch {
+    return
+  }
+  const bare = bareBuiltinModelName(modelName)
+  const hit = models.find((m) => m.name === bare)
+  if (!hit && status?.healthy) {
+    // The engine runs, it holds something else, and the model the caller named
+    // is not on disk. Loading it is impossible, and letting the send through
+    // would hand the user another model's answer under this model's name.
+    // Say which is which instead.
+    throw new Error(builtinModelMismatchMessage(builtinModelNameFromPath(status.model_path), bare))
+  }
+  if (!hit) {
+    // The slot IS our engine (managed), the engine is NOT healthy, and the
+    // model the picker is holding is not on disk where the engine looks.
+    // Returning quietly here sent the send straight into a dead port, and
+    // the user got "proxy_localhost_stream_chunked: error sending request
+    // for url (http://127.0.0.1:8127/v1/chat/completions)" as their first
+    // impression of the app (applejames, Discord 2026-08-01, fresh install
+    // on Windows 10 — they gave up on the built-in engine and moved to
+    // Ollama). Say what is actually wrong instead.
+    throw new Error(
+      `The built-in engine has no model file named "${bare}". It may have been deleted, moved, or the download did not finish. Open Models, install it again, then pick it in the chat.`,
+    )
+  }
+
+  // Restart with the user's expert tuning, not bare defaults — otherwise a
+  // self-heal would silently drop a configured ctx/KV-quant until the next
+  // manual model pick.
+  const tuning = useSettingsStore.getState().settings.builtinEngine
+  // A running engine holding the WRONG model is a swap (stop, then start on
+  // the same port). Everything else is a plain start, which is idempotent for
+  // the same model and tuning, so an engine that is merely still warming up is
+  // never torn down and restarted for nothing.
+  const cmd = status?.running && !rightModel ? 'swap_bundled_model' : 'start_bundled_engine'
+  await backendCall(cmd, { modelPath: hit.path, tuning })
 }
 
 // The default the engine ships with. A settings ctx equal to it is treated as

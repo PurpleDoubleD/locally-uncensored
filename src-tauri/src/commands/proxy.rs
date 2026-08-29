@@ -413,6 +413,142 @@ fn apply_body_and_headers(
     request
 }
 
+// ── The built-in engine may only answer AS the model it is holding ──────────
+//
+// Counter-check, Windows box 2026-08-28: with Gemma loaded, a request carrying
+// `"model": "Hermes-3-Llama-3.2-3B.Q4_K_M"` and one carrying
+// `"model": "gibt-es-nicht-42"` were both answered by Gemma, with no error and
+// no model change. That is llama-server behaving as documented: it serves the
+// single model it was started with and treats `model` as a label. Nothing
+// above it ever compared the two, so the app could show one name and deliver
+// another model's words.
+//
+// The app layer reloads before a send (`api/builtin-ensure.ts`). This is the
+// guard at the root, so the rule holds no matter who builds the request: a
+// plugin, a workflow, a future feature, or a hand-made call through the same
+// proxy. It refuses rather than reloads, because a swap here would stop and
+// restart the engine underneath a request that is already in flight, and the
+// layer that CAN reload sits above and already does.
+
+/// The picker id of a bundled GGUF, derived from the path the engine was
+/// started with. Twin of `builtinModelNameFromPath` in
+/// `src/lib/builtin-model-identity.ts`, and it has to stay one: a split GGUF
+/// is listed under its base name while the loaded path points at part 1.
+pub(crate) fn builtin_model_name_from_path(path: &str) -> String {
+    let leaf = path.rsplit(['/', '\\']).next().unwrap_or(path);
+    let stem = match leaf.len().checked_sub(5) {
+        Some(cut) if leaf[cut..].eq_ignore_ascii_case(".gguf") => &leaf[..cut],
+        _ => leaf,
+    };
+    match crate::commands::engine::split_shard_stem(stem) {
+        Some((base, _, _)) => base.to_string(),
+        None => stem.to_string(),
+    }
+}
+
+/// The bare model id behind a picker id (`openai::name` becomes `name`).
+/// Twin of `bareBuiltinModelName`, and it strips nothing else for the same
+/// reason: the id is the name the user reads back in the refusal.
+fn bare_model_name(name: &str) -> &str {
+    let trimmed = name.trim();
+    let parts: Vec<&str> = trimmed.split("::").collect();
+    if parts.len() == 2 {
+        parts[1]
+    } else {
+        trimmed
+    }
+}
+
+/// Is this URL a generation request against the built-in engine's own port.
+///
+/// Deliberately narrow. `/v1/models`, `/props`, `/health` and every other
+/// endpoint carry no model field and must keep working; and a request to any
+/// other port belongs to Ollama, LM Studio or ComfyUI, whose model handling is
+/// their own business.
+fn is_builtin_generation_url(url: &str, engine_port: u16) -> bool {
+    let parsed = match url::Url::parse(url) {
+        Ok(u) => u,
+        Err(_) => return false,
+    };
+    let host = parsed.host_str().unwrap_or("");
+    let loopback = host == "127.0.0.1"
+        || host == "localhost"
+        || host == "::1"
+        || host == "[::1]"
+        || host.parse::<std::net::Ipv4Addr>().map(|ip| ip.is_loopback()).unwrap_or(false);
+    if !loopback || parsed.port() != Some(engine_port) {
+        return false;
+    }
+    let path = parsed.path().trim_end_matches('/');
+    path.ends_with("/chat/completions") || path.ends_with("/completions") || path.ends_with("/infill")
+}
+
+/// The `model` field of a request body, when there is one worth checking.
+fn requested_model(body: Option<&str>) -> Option<String> {
+    let raw = body?;
+    let value: serde_json::Value = serde_json::from_str(raw).ok()?;
+    let name = value.get("model")?.as_str()?.trim();
+    if name.is_empty() {
+        None
+    } else {
+        Some(name.to_string())
+    }
+}
+
+/// The English refusal for a request that names a model the engine is not
+/// holding, or None when there is nothing to complain about.
+///
+/// Pure, so the whole rule is testable without a running engine.
+pub(crate) fn builtin_model_conflict(
+    url: &str,
+    body: Option<&str>,
+    loaded_path: &str,
+    engine_port: u16,
+) -> Option<String> {
+    if !is_builtin_generation_url(url, engine_port) {
+        return None;
+    }
+    let loaded = builtin_model_name_from_path(loaded_path);
+    if loaded.is_empty() {
+        return None;
+    }
+    let asked_raw = requested_model(body)?;
+    // Through the same normaliser as the loaded path, so a request naming
+    // "model.gguf" is compared against "model" and not refused for nothing.
+    let asked = builtin_model_name_from_path(bare_model_name(&asked_raw));
+    if asked.is_empty() || asked == loaded {
+        return None;
+    }
+    Some(format!(
+        "The built-in engine has \"{loaded}\" loaded, but this request asked for \"{asked}\". \
+         The engine answers with the model it was started with, whatever the model field says, \
+         so this request was refused instead of being answered by the wrong model. \
+         Load \"{asked}\" first (Models, or the chat model picker) and send again."
+    ))
+}
+
+/// The guard as the proxy commands call it: reads the running engine out of
+/// the app state and applies `builtin_model_conflict`. No engine running means
+/// no claim to check.
+fn guard_builtin_model(
+    url: &str,
+    body: Option<&str>,
+    state: &tauri::State<'_, crate::state::AppState>,
+) -> Result<(), String> {
+    let loaded = match state.bundled_engine.lock() {
+        Ok(guard) => guard.as_ref().map(|e| (e.port, e.model_path.clone())),
+        Err(_) => None,
+    };
+    let (port, path) = match loaded {
+        Some(v) => v,
+        None => return Ok(()),
+    };
+    match builtin_model_conflict(url, body, &path, port) {
+        Some(msg) => Err(msg),
+        None => Ok(()),
+    }
+}
+
 /// Generic localhost proxy — fetch any localhost or configured-backend URL
 /// bypassing CORS. Used for Ollama and ComfyUI API calls in production mode.
 ///
@@ -433,6 +569,8 @@ pub async fn proxy_localhost(
     state: tauri::State<'_, crate::state::AppState>,
 ) -> Result<String, String> {
     validate_proxy_url(&url, &state)?;
+    // A generation request may not name a model the engine is not holding.
+    guard_builtin_model(&url, body.as_deref(), &state)?;
 
     let timeout = std::time::Duration::from_millis(timeout_ms.unwrap_or(300_000));
 
@@ -473,6 +611,8 @@ pub async fn proxy_localhost(
 #[tauri::command]
 pub async fn proxy_localhost_stream(url: String, method: Option<String>, body: Option<String>, headers: Option<std::collections::HashMap<String, String>>, state: tauri::State<'_, crate::state::AppState>) -> Result<Vec<u8>, String> {
     validate_proxy_url(&url, &state)?;
+    // A generation request may not name a model the engine is not holding.
+    guard_builtin_model(&url, body.as_deref(), &state)?;
 
     let client = reqwest::Client::builder()
         .user_agent("LocallyUncensored/2.0")
@@ -530,6 +670,8 @@ pub async fn proxy_localhost_stream_chunked(
     state: tauri::State<'_, crate::state::AppState>,
 ) -> Result<(), String> {
     validate_proxy_url(&url, &state)?;
+    // A generation request may not name a model the engine is not holding.
+    guard_builtin_model(&url, body.as_deref(), &state)?;
 
     // Register a cancellation token under stream_id (mirrors pull_tokens).
     let token = tokio_util::sync::CancellationToken::new();
@@ -1134,5 +1276,134 @@ mod tests {
         assert_eq!(configured_host("192.168.1.50"), "192.168.1.50");
         assert_eq!(configured_host("HTTP://Host.LAN:8080"), "host.lan");
         assert_eq!(configured_host("  nas  "), "nas");
+    }
+}
+
+/// The root guard on model identity: a request to the built-in engine may not
+/// name a model the engine is not holding.
+///
+/// The finding these pin down was measured, not reasoned about: on the Windows
+/// box, with Gemma loaded, `"model": "Hermes-3-Llama-3.2-3B.Q4_K_M"` and
+/// `"model": "gibt-es-nicht-42"` were both answered by Gemma without an error.
+#[cfg(test)]
+mod builtin_model_guard_tests {
+    use super::*;
+
+    const PORT: u16 = 8127;
+    const GEMMA: &str = "C:\\Users\\ddrob\\AppData\\Roaming\\lu\\models\\mlabonne_gemma-3-4b-it-abliterated-Q4_K_M.gguf";
+    const CHAT: &str = "http://127.0.0.1:8127/v1/chat/completions";
+
+    fn body(model: &str) -> String {
+        format!(r#"{{"model":"{}","messages":[{{"role":"user","content":"hi"}}]}}"#, model)
+    }
+
+    #[test]
+    fn a_foreign_model_name_is_refused_in_english_naming_both_models() {
+        let b = body("Hermes-3-Llama-3.2-3B.Q4_K_M");
+        let msg = builtin_model_conflict(CHAT, Some(&b), GEMMA, PORT)
+            .expect("the wrong model must not be answered silently");
+        assert!(msg.contains("mlabonne_gemma-3-4b-it-abliterated-Q4_K_M"), "got: {msg}");
+        assert!(msg.contains("Hermes-3-Llama-3.2-3B.Q4_K_M"), "got: {msg}");
+        // English, and no localised wording can reach this string at all: it is
+        // built from two file names and our own words.
+        assert!(msg.is_ascii(), "got: {msg}");
+    }
+
+    #[test]
+    fn a_model_that_does_not_exist_is_refused_too() {
+        let b = body("gibt-es-nicht-42");
+        assert!(builtin_model_conflict(CHAT, Some(&b), GEMMA, PORT).is_some());
+    }
+
+    // ── Negative controls: everything that must still pass through ──────────
+
+    #[test]
+    fn the_loaded_model_passes_prefixed_or_not() {
+        for name in [
+            "mlabonne_gemma-3-4b-it-abliterated-Q4_K_M",
+            "openai::mlabonne_gemma-3-4b-it-abliterated-Q4_K_M",
+            "mlabonne_gemma-3-4b-it-abliterated-Q4_K_M.gguf",
+        ] {
+            let b = body(name);
+            assert!(
+                builtin_model_conflict(CHAT, Some(&b), GEMMA, PORT).is_none(),
+                "the loaded model was refused under the name {name}"
+            );
+        }
+    }
+
+    #[test]
+    fn another_port_is_none_of_our_business() {
+        // Ollama, LM Studio, ComfyUI and the embeddings server all answer on
+        // their own ports and manage their own models.
+        let b = body("llama3.1:8b");
+        for url in [
+            "http://127.0.0.1:11434/v1/chat/completions",
+            "http://127.0.0.1:1234/v1/chat/completions",
+            "http://127.0.0.1:8128/v1/completions",
+        ] {
+            assert!(builtin_model_conflict(url, Some(&b), GEMMA, PORT).is_none(), "{url}");
+        }
+    }
+
+    #[test]
+    fn endpoints_without_a_model_claim_are_untouched() {
+        let b = body("Hermes-3-Llama-3.2-3B.Q4_K_M");
+        for url in [
+            "http://127.0.0.1:8127/v1/models",
+            "http://127.0.0.1:8127/props",
+            "http://127.0.0.1:8127/health",
+            "http://127.0.0.1:8127/slots",
+        ] {
+            assert!(builtin_model_conflict(url, Some(&b), GEMMA, PORT).is_none(), "{url}");
+        }
+    }
+
+    #[test]
+    fn a_request_that_names_no_model_is_not_invented_into_a_conflict() {
+        assert!(builtin_model_conflict(CHAT, None, GEMMA, PORT).is_none());
+        assert!(builtin_model_conflict(CHAT, Some("{}"), GEMMA, PORT).is_none());
+        assert!(builtin_model_conflict(CHAT, Some(r#"{"model":""}"#), GEMMA, PORT).is_none());
+        assert!(builtin_model_conflict(CHAT, Some(r#"{"model":null}"#), GEMMA, PORT).is_none());
+        // Not JSON at all: the guard has no claim to check, and mangling the
+        // request would be worse than forwarding it.
+        assert!(builtin_model_conflict(CHAT, Some("not json"), GEMMA, PORT).is_none());
+    }
+
+    #[test]
+    fn nothing_loaded_means_nothing_to_contradict() {
+        let b = body("Hermes-3-Llama-3.2-3B.Q4_K_M");
+        assert!(builtin_model_conflict(CHAT, Some(&b), "", PORT).is_none());
+    }
+
+    #[test]
+    fn localhost_spellings_are_all_the_same_engine() {
+        let b = body("Hermes-3-Llama-3.2-3B.Q4_K_M");
+        for url in [
+            "http://localhost:8127/v1/chat/completions",
+            "http://127.0.0.1:8127/v1/chat/completions/",
+            "http://127.0.0.2:8127/v1/completions",
+        ] {
+            assert!(builtin_model_conflict(url, Some(&b), GEMMA, PORT).is_some(), "{url}");
+        }
+    }
+
+    #[test]
+    fn a_split_gguf_is_known_by_the_name_the_picker_shows() {
+        // scan_gguf_models lists a split set under its base name and points at
+        // part 1, so a raw stem compare would refuse every split model.
+        let loaded = "/m/DeepSeek-V4-Flash-Q4_K_M-00001-of-00003.gguf";
+        let b = body("DeepSeek-V4-Flash-Q4_K_M");
+        assert!(builtin_model_conflict(CHAT, Some(&b), loaded, PORT).is_none());
+        assert_eq!(builtin_model_name_from_path(loaded), "DeepSeek-V4-Flash-Q4_K_M");
+        // And a name that only looks like a shard marker keeps it.
+        assert_eq!(builtin_model_name_from_path("/m/best-of-both-worlds.gguf"), "best-of-both-worlds");
+    }
+
+    #[test]
+    fn the_name_is_read_off_both_path_shapes_and_any_extension_case() {
+        assert_eq!(builtin_model_name_from_path("/Users/x/models/qwen2.5-0.5b.gguf"), "qwen2.5-0.5b");
+        assert_eq!(builtin_model_name_from_path("C:\\m\\qwen2.5-0.5b.GGUF"), "qwen2.5-0.5b");
+        assert_eq!(builtin_model_name_from_path("qwen2.5-0.5b"), "qwen2.5-0.5b");
     }
 }
