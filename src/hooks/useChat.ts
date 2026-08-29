@@ -28,6 +28,7 @@ import { modelOutOfMode } from "../lib/modeGate"
 import { syncOllamaHealthFromError } from "../lib/sync-ollama-health"
 import { isThinkingCompatible, isPlainTextPlanner } from "../lib/model-compatibility"
 import { stripNonCanonicalTags, finalStripThinkingTags, settleThinking } from "../lib/thinking-stripper"
+import { isLocalModelByName } from "../api/agents/model-locality"
 import { isMultimodalUnsupportedError, MULTIMODAL_UNSUPPORTED_MESSAGE } from "../lib/ollama-errors"
 import type { ImageAttachment, Message } from "../types/chat"
 import { isGroupChat, groupSystemPrompt, groupHistory, stripImpersonatedSpeakers } from "../lib/group-chat"
@@ -529,7 +530,14 @@ export function useChat() {
     const activeMeta = useModelStore.getState().models.find((m) => m.name === activeModel)
     const thinkMode = activeMeta && 'thinkMode' in activeMeta ? activeMeta.thinkMode : undefined
     const canThink = thinkMode ? thinkMode === 'toggle' : isThinkingCompatible(activeModel)
-    if (settings.thinkingEnabled && providerId !== 'ollama' && canThink && thinkMode === undefined) {
+    // And not for a LOCAL OpenAI-compatible backend any more (2.6.7
+    // Denk-Audit): the built-in engine, LM Studio, llama.cpp and friends
+    // render the model's own template, which has a real thinking switch the
+    // provider now flips through chat_template_kwargs. Asking for tags on top
+    // of a template that already opened the thought is the same double
+    // instruction that trapped the cloud reasoners in a loop, one layer down.
+    if (settings.thinkingEnabled && providerId !== 'ollama' && canThink && thinkMode === undefined
+        && !isLocalModelByName(activeModel)) {
       systemPrompt = (systemPrompt || '') + '\n\nBefore answering, reason through your thinking inside <think></think> tags. Your thinking will be hidden from the user. After thinking, provide your answer outside the tags.'
     }
 

@@ -629,7 +629,13 @@ export function useCodex() {
 
     // For non-Ollama providers, inject thinking via system prompt — only for
     // models where the Think toggle actually applies (thinkMode gate).
-    if (settings.thinkingEnabled && providerId !== 'ollama' && codexCanThink(activeModel)) {
+    // Not for a LOCAL OpenAI-compatible backend any more (2.6.7 Denk-Audit):
+    // those render the model's own template, which has a real thinking switch
+    // the provider now flips through chat_template_kwargs. Asking for tags on
+    // top of a template that already opened the thought is a double
+    // instruction, and that is what loops a reasoner.
+    if (settings.thinkingEnabled && providerId !== 'ollama' && codexCanThink(activeModel)
+        && !isLocalModelByName(activeModel)) {
       systemPrompt += '\n\nBefore answering, reason through your thinking inside <think></think> tags. Your thinking will be hidden from the user. After thinking, provide your answer outside the tags.'
     }
 

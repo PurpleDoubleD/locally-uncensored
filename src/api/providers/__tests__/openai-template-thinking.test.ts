@@ -25,6 +25,9 @@
  * Run: npx vitest run src/api/providers/__tests__/openai-template-thinking.test.ts
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+import { dirname, join } from 'node:path'
 
 const streamBody = 'data: {"choices":[{"delta":{"content":"hi"}}]}\n\ndata: [DONE]\n\n'
 
@@ -149,5 +152,36 @@ describe('a local server that refuses the field is not mistaken for one that can
     expect(sent).toHaveLength(1)
     expect(sent[0].body.reasoning_effort).toBe('high')
     expect('chat_template_kwargs' in sent[0].body).toBe(false)
+  })
+})
+
+/**
+ * And the tag injection steps aside where the real switch exists.
+ *
+ * Before the template switch, plain chat and the coding loop appended "reason
+ * inside <think></think> tags" to the system prompt for every OpenAI-compatible
+ * endpoint that declared nothing. On a LOCAL backend that now arrives on top of
+ * a template that has already opened the thought — the same double instruction
+ * that trapped David's cloud Qwen3.6 in a reasoning loop on 2026-07-12, one
+ * layer down. Cloud endpoints that declare nothing keep the injection: it is
+ * still the only thing that can ask them.
+ */
+describe('the tag injection and the template switch do not stack', () => {
+  const read = (rel: string) =>
+    readFileSync(join(dirname(fileURLToPath(import.meta.url)), '../../..', rel), 'utf8')
+
+  it('plain chat skips the injection for a local backend', () => {
+    expect(read('hooks/useChat.ts')).toContain("&& !isLocalModelByName(activeModel)) {")
+  })
+
+  it('the coding loop does the same', () => {
+    expect(read('hooks/useCodex.ts')).toContain("&& !isLocalModelByName(activeModel)) {")
+  })
+
+  it('NEGATIVE CONTROL: the injection itself is still there for everyone else', () => {
+    for (const f of ['hooks/useChat.ts', 'hooks/useCodex.ts']) {
+      expect(read(f)).toContain('reason through your thinking inside <think></think> tags')
+      expect(read(f)).toContain("providerId !== 'ollama'")
+    }
   })
 })
