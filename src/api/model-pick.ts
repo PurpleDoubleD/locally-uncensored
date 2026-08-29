@@ -9,10 +9,12 @@ import type { ModelPickKind } from '../stores/modelPickStore'
  * not the LLM's:
  *
  *   - explicit `model` arg from the user/LLM   → no picker (intent wins)
+ *   - Create tab selection installed           → silent use (the user's
+ *     visible model choice in the product, see chooseFromUserSelection)
  *   - saved preference installed               → silent use (Change-Model
  *     affordance shows in the tool call instead)
- *   - nothing saved (or saved got uninstalled) → ModelPickerCard renders in
- *     the running tool call; save icon persists the choice for next prompts
+ *   - nothing chosen anywhere (or it got uninstalled) → ModelPickerCard
+ *     renders in the running tool call; save icon persists the choice
  *   - ComfyUI unreachable / no models          → null (the existing decide
  *     phase reports its own actionable error — UX identical to before)
  *
@@ -21,6 +23,34 @@ import type { ModelPickKind } from '../stores/modelPickStore'
  * (the rest). The preference keys are per-kind because the sets are
  * disjoint (SVD can't T2V, Wan 1.3B can't I2V).
  */
+/**
+ * The model the user has ALREADY chosen for this kind, in order of authority,
+ * or null when neither choice fits this call.
+ *
+ * The Create tab comes first. It is the model selection the user can see and
+ * changed last, so a Create tab set to Z-Image has to answer a chat request
+ * for a picture with Z-Image. Nebenbefund N1 of the D1 counter-check (Windows
+ * build, 2026-08-29): with an empty `model` argument the chat tool ignored
+ * that and built a Realistic Vision graph in two runs out of two, because the
+ * saved picker preference was the only choice this gate ever read.
+ *
+ * `saved` (the ModelPickerCard preference) stays as the second source, so an
+ * install that never opened Create behaves exactly as before. Both have to be
+ * in `names`, the installed and eligible set for THIS call: an uninstalled or
+ * wrong-capability choice falls through to the picker instead of building a
+ * graph around a file ComfyUI does not have.
+ */
+export function chooseFromUserSelection(
+  names: string[],
+  createChoice: string | null | undefined,
+  saved: string | null | undefined,
+): string | null {
+  for (const choice of [createChoice, saved]) {
+    if (typeof choice === 'string' && choice && names.includes(choice)) return choice
+  }
+  return null
+}
+
 export async function pickModelForGeneration(
   kind: 'image' | 'video',
   args: Record<string, any>,
@@ -54,7 +84,17 @@ export async function pickModelForGeneration(
     : pickKind === 'video-t2v' ? 'preferredVideoT2VModel'
     : 'preferredVideoI2VModel'
   const saved = useSettingsStore.getState().settings[prefKey]
-  if (saved && names.includes(saved)) return saved
+
+  // The Create tab's own model selection, read through the same store the
+  // Create page writes it to. For video the two sub-kinds share one Create
+  // selection; `names` already carries the I2V/T2V filter, so a T2V-only
+  // choice simply does not answer an image-to-video call.
+  const { useCreateStore } = await import('../stores/createStore')
+  const createState = useCreateStore.getState()
+  const createChoice = pickKind === 'image' ? createState.imageModel : createState.videoModel
+
+  const chosen = chooseFromUserSelection(names, createChoice, saved)
+  if (chosen) return chosen
 
   const { useModelPickStore } = await import('../stores/modelPickStore')
   const choice = await useModelPickStore.getState().request(pickKind, names, names[0])
