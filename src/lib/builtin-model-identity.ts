@@ -43,14 +43,18 @@ export function builtinModelNameFromPath(modelPath: string | null | undefined): 
 
 /**
  * The bare model id behind a picker id: `openai::qwen2.5-0.5b` and
- * `qwen2.5-0.5b` both answer `qwen2.5-0.5b`. A trailing `.gguf` is dropped so
- * a caller that passes the file name still lines up with the listing.
+ * `qwen2.5-0.5b` both answer `qwen2.5-0.5b`.
+ *
+ * Nothing else is touched. This id is a LOOKUP KEY: it is matched against the
+ * `name` of a `list_bundled_models` entry and it names the model in an error
+ * the user reads, so it has to stay the string the picker holds. Tolerance for
+ * a name that carries the file extension belongs in the comparison below, not
+ * here.
  */
 export function bareBuiltinModelName(nameOrPrefixed: string | null | undefined): string {
   const raw = (nameOrPrefixed ?? '').trim()
   const parts = raw.split('::')
-  const bare = parts.length === 2 ? parts[1] : raw
-  return bare.replace(/\.gguf$/i, '')
+  return parts.length === 2 ? parts[1] : raw
 }
 
 /**
@@ -67,7 +71,9 @@ export function builtinModelMatches(
   requested: string | null | undefined,
 ): boolean {
   const loaded = builtinModelNameFromPath(loadedPath)
-  const want = bareBuiltinModelName(requested)
+  // The requested name goes through the same normaliser, so a caller that
+  // passes "model.gguf" is compared against "model" and not called a mismatch.
+  const want = builtinModelNameFromPath(bareBuiltinModelName(requested))
   if (!loaded || !want) return true
   return loaded === want
 }

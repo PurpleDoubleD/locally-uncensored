@@ -49,10 +49,17 @@ describe('builtinModelNameFromPath', () => {
 })
 
 describe('bareBuiltinModelName', () => {
-  it('strips the provider prefix and a trailing extension', () => {
+  it('strips the provider prefix and nothing else', () => {
     expect(bareBuiltinModelName('openai::qwen2.5-0.5b')).toBe('qwen2.5-0.5b')
     expect(bareBuiltinModelName('qwen2.5-0.5b')).toBe('qwen2.5-0.5b')
-    expect(bareBuiltinModelName('openai::qwen2.5-0.5b.gguf')).toBe('qwen2.5-0.5b')
+  })
+
+  // Negative control: this id is a lookup key against list_bundled_models and
+  // the name in a user facing error, so it must come back verbatim. Trimming
+  // an extension here would look up the wrong entry and rename the model in
+  // the message.
+  it('leaves a name that carries the file extension intact', () => {
+    expect(bareBuiltinModelName('openai::qwen2.5-0.5b.gguf')).toBe('qwen2.5-0.5b.gguf')
   })
 
   it('leaves a name with more than one separator alone, as the registry does', () => {
@@ -66,9 +73,10 @@ describe('bareBuiltinModelName', () => {
 })
 
 describe('builtinModelMatches', () => {
-  it('is true for the same model, prefixed or not', () => {
+  it('is true for the same model, prefixed or not, extension or not', () => {
     expect(builtinModelMatches('/m/qwen2.5-0.5b.gguf', 'qwen2.5-0.5b')).toBe(true)
     expect(builtinModelMatches('/m/qwen2.5-0.5b.gguf', 'openai::qwen2.5-0.5b')).toBe(true)
+    expect(builtinModelMatches('/m/qwen2.5-0.5b.gguf', 'openai::qwen2.5-0.5b.gguf')).toBe(true)
   })
 
   it('is FALSE for the case the counter-check measured on the box', () => {

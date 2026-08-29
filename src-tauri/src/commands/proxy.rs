@@ -446,15 +446,16 @@ pub(crate) fn builtin_model_name_from_path(path: &str) -> String {
     }
 }
 
-/// The bare model id behind a picker id (`openai::name` becomes `name`), with
-/// a trailing `.gguf` dropped. Twin of `bareBuiltinModelName`.
+/// The bare model id behind a picker id (`openai::name` becomes `name`).
+/// Twin of `bareBuiltinModelName`, and it strips nothing else for the same
+/// reason: the id is the name the user reads back in the refusal.
 fn bare_model_name(name: &str) -> &str {
     let trimmed = name.trim();
     let parts: Vec<&str> = trimmed.split("::").collect();
-    let bare = if parts.len() == 2 { parts[1] } else { trimmed };
-    match bare.len().checked_sub(5) {
-        Some(cut) if bare[cut..].eq_ignore_ascii_case(".gguf") => &bare[..cut],
-        _ => bare,
+    if parts.len() == 2 {
+        parts[1]
+    } else {
+        trimmed
     }
 }
 
@@ -512,7 +513,9 @@ pub(crate) fn builtin_model_conflict(
         return None;
     }
     let asked_raw = requested_model(body)?;
-    let asked = bare_model_name(&asked_raw);
+    // Through the same normaliser as the loaded path, so a request naming
+    // "model.gguf" is compared against "model" and not refused for nothing.
+    let asked = builtin_model_name_from_path(bare_model_name(&asked_raw));
     if asked.is_empty() || asked == loaded {
         return None;
     }
