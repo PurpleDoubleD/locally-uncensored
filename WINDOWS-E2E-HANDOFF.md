@@ -46,7 +46,8 @@ npm install
 #    sidecar exe is missing; copy_binaries only checks that the file EXISTS).
 #    Pinned llama.cpp tag is b9949 (see scripts/build-llama.sh). Needs Vulkan SDK.
 bash scripts/build-llama.sh x86_64-pc-windows-msvc
-#    -> produces src-tauri/bin/llama-server-x86_64-pc-windows-msvc.exe
+#    -> produces src-tauri/bin/lu-llama-server-x86_64-pc-windows-msvc.exe
+#       (the lu- prefix is deliberate, see GitHub #120: Debian owns /usr/bin/llama-server)
 
 # 2) Build the app (NSIS installer).
 npm run tauri:build
@@ -57,7 +58,7 @@ npm run tauri:build
 dropping a stub so `copy_binaries` passes, then fix the real sidecar after:
 ```bash
 # emergency stub ONLY to get the app to build; built-in engine won't run until real build lands
-printf '' > src-tauri/bin/llama-server-x86_64-pc-windows-msvc.exe
+printf '' > src-tauri/bin/lu-llama-server-x86_64-pc-windows-msvc.exe
 ```
 (There is also a dedicated CI lane `.github/workflows/sidecar-windows.yml` that does the full
 Vulkan build + boot smoke — usable once the branch is pushed.)
@@ -116,7 +117,7 @@ expected behavior; **[Win‑new]** = Windows‑specific path that was never exer
 
 ### B. Built‑in engine — local text chat  [Win‑new: Vulkan sidecar]
 1. Chat tab, Local mode, model = **Built‑in Engine** (`127.0.0.1:8127/v1`, managed).
-2. Send "Two plus two?". **Expected:** streamed answer "4"; the `llama-server-*.exe` sidecar
+2. Send "Two plus two?". **Expected:** streamed answer "4"; the `lu-llama-server.exe` sidecar
    is running (Task Manager). This is the Windows Vulkan sidecar — first real HW test.
 
 ### C. Local text chat — Ollama & LM Studio (if installed)

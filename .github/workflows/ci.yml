@@ -115,8 +115,8 @@ jobs:
           mkdir -p src-tauri/bin
           triple="$(rustc -vV | awk '/^host:/{print $2}')"
           case "$triple" in
-            *-windows-*) touch "src-tauri/bin/llama-server-$triple.exe" ;;
-            *)           touch "src-tauri/bin/llama-server-$triple" ;;
+            *-windows-*) touch "src-tauri/bin/lu-llama-server-$triple.exe" ;;
+            *)           touch "src-tauri/bin/lu-llama-server-$triple" ;;
           esac
           ls -la src-tauri/bin/
 

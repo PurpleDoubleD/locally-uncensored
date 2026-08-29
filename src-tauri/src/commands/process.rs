@@ -277,6 +277,41 @@ pub fn decide_comfy_cpu_flag(
     }
 }
 
+/// Force GPU is a promise LU keeps, not a claim LU checks: the flag drops
+/// `--cpu` and ComfyUI then asks torch for a device. On a venv holding
+/// CUDA-only wheels and an AMD card that ends in
+/// "Torch not compiled with CUDA enabled" and nothing else, which is what
+/// numbrain, lapbo, petermanmancusso and sancora all saw. The flag still
+/// wins, the user asked for it, but the reason is in the output panel before
+/// the traceback is.
+///
+/// `torch_gpu`: Some(false) = the venv's torch reports no usable GPU,
+/// Some(true) = it does, None = the probe did not answer and we say nothing
+/// rather than guess.
+pub(crate) fn force_gpu_warning(
+    mode: ComfyGpuMode,
+    torch_gpu: Option<bool>,
+    has_amd: bool,
+    os: &str,
+) -> Option<String> {
+    if mode != ComfyGpuMode::ForceGpu || torch_gpu != Some(false) {
+        return None;
+    }
+    let head = "ComfyUI GPU is set to Force GPU, but the PyTorch in this ComfyUI                 environment reports no usable GPU. ComfyUI will stop with                 \"Torch not compiled with CUDA enabled\" instead of rendering.";
+    let fix = match (has_amd, os) {
+        (true, "linux") => {
+            "Your card is AMD and this environment holds CUDA-only wheels. Reinstall the              ComfyUI environment from Settings > ComfyUI: LU now installs the ROCm build              of PyTorch when it sees an AMD card."
+        }
+        (true, "windows") => {
+            "Your card is AMD and PyTorch ships no ROCm wheels for Windows, so no              reinstall can fix this here. Use a ComfyUI of your own on DirectML or              ZLUDA, or set ComfyUI GPU back to Auto and render on the processor."
+        }
+        _ => {
+            "Reinstall the ComfyUI environment from Settings > ComfyUI so PyTorch is              rebuilt for the card LU detects, or set ComfyUI GPU back to Auto."
+        }
+    };
+    Some(format!("[LU] {head} {fix}"))
+}
+
 /// Skip these directories during ComfyUI search
 const SKIP_DIRS: &[&str] = &[
     "node_modules", ".git", "__pycache__", "venv", ".venv", "site-packages",
@@ -1336,6 +1371,23 @@ fn start_comfyui_blocking(state: &AppState) -> Result<serde_json::Value, String>
     // shd_scorpion (RX 7900 XTX): remember what we actually launched with so
     // the Create tab can warn instead of letting a CPU gen time out silently.
     *state.comfy_started_cpu.lock().unwrap() = Some(needs_cpu_fallback);
+    // Force GPU skips the probe above on purpose, so ask separately and only
+    // in that mode: the answer costs a torch import once per python path and
+    // buys the sentence that explains the crash that is about to happen.
+    let force_gpu_note = if gpu_mode == ComfyGpuMode::ForceGpu {
+        let (_, has_amd) = crate::commands::torch_wheels::gpu_vendors_present();
+        force_gpu_warning(
+            gpu_mode,
+            comfy_gpu_available_cached(&python, Some(&state.comfy_gpu_cache)),
+            has_amd,
+            std::env::consts::OS,
+        )
+    } else {
+        None
+    };
+    if let Some(note) = &force_gpu_note {
+        println!("[ComfyUI] {note}");
+    }
     let mut comfy_args: Vec<&str> = vec![
         "main.py",
         "--listen", "127.0.0.1",
@@ -1406,6 +1458,9 @@ fn start_comfyui_blocking(state: &AppState) -> Result<serde_json::Value, String>
         let mut buf = state.comfy_output.lock().unwrap();
         buf.clear();
         buf.push_back(format!("[start] {} main.py --port {}", python, port_str));
+        if let Some(note) = &force_gpu_note {
+            buf.push_back(note.clone());
+        }
     }
     let capture = |line: String, sink: &Arc<Mutex<std::collections::VecDeque<String>>>| {
         println!("[ComfyUI] {}", line);
@@ -2384,6 +2439,33 @@ mod tests {
     #[test]
     fn probe_comfy_gpu_on_empty_python_is_definitive_false() {
         assert_eq!(probe_comfy_gpu(""), Some(false));
+    }
+
+    #[test]
+    fn force_gpu_on_a_torch_without_a_gpu_says_why_before_the_crash() {
+        let linux = force_gpu_warning(ComfyGpuMode::ForceGpu, Some(false), true, "linux")
+            .expect("an AMD Linux box with CUDA wheels must be told");
+        assert!(linux.contains("Torch not compiled with CUDA enabled"), "{linux}");
+        assert!(linux.contains("ROCm"), "the Linux way out is a reinstall: {linux}");
+        let win = force_gpu_warning(ComfyGpuMode::ForceGpu, Some(false), true, "windows")
+            .expect("an AMD Windows box must be told too");
+        assert!(win.contains("DirectML"), "{win}");
+        // Never promise a reinstall that cannot exist: there are no ROCm
+        // wheels for Windows, so the message must not send the user there.
+        assert!(!win.contains("Reinstall the ComfyUI environment"), "{win}");
+        let other = force_gpu_warning(ComfyGpuMode::ForceGpu, Some(false), false, "windows")
+            .expect("a non-AMD box with a dead torch is still worth a word");
+        assert!(!other.contains("AMD"), "{other}");
+    }
+
+    #[test]
+    fn nothing_is_said_when_there_is_nothing_to_say() {
+        // Negative controls: the note only belongs to Force GPU on a torch
+        // that answered "no GPU". Everything else stays quiet.
+        assert_eq!(force_gpu_warning(ComfyGpuMode::ForceGpu, Some(true), true, "linux"), None);
+        assert_eq!(force_gpu_warning(ComfyGpuMode::ForceGpu, None, true, "linux"), None);
+        assert_eq!(force_gpu_warning(ComfyGpuMode::Auto, Some(false), true, "linux"), None);
+        assert_eq!(force_gpu_warning(ComfyGpuMode::ForceCpu, Some(false), true, "linux"), None);
     }
 }
 

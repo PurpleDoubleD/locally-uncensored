@@ -45,18 +45,29 @@ const HEALTH_TIMEOUT: Duration = Duration::from_secs(60);
 
 // ── Pure helpers (unit-tested without a real binary) ─────────────────────────
 
-/// Sidecar file name Tauri produces from `externalBin: ["bin/llama-server"]`
-/// inside the bundled app (target-triple suffix stripped, `.exe` on Windows).
+/// Sidecar file name Tauri produces from
+/// `externalBin: ["bin/lu-llama-server"]` inside the bundled app (target
+/// triple suffix stripped, `.exe` on Windows).
+///
+/// GitHub #120 (AnnSdf1969, Ubuntu 26.04, 2026-08-28): the file used to be
+/// called `llama-server`, and Tauri's deb bundler copies every external
+/// binary straight into `/usr/bin`. Debian ships its own `llama.cpp-tools`
+/// package that owns `/usr/bin/llama-server`, so dpkg refused the whole
+/// install with "trying to overwrite '/usr/bin/llama-server', which is also
+/// in package llama.cpp-tools". The bundler offers no way to put a sidecar
+/// anywhere else, so the name carries the app prefix instead. Renaming beats
+/// a Debian Conflicts entry: a conflict would make the user uninstall their
+/// own llama.cpp to install ours.
 pub(crate) fn sidecar_binary_name() -> &'static str {
     if cfg!(target_os = "windows") {
-        "llama-server.exe"
+        "lu-llama-server.exe"
     } else {
-        "llama-server"
+        "lu-llama-server"
     }
 }
 
 /// Rust host target-triple, used to locate the dev-time sidecar produced by
-/// `scripts/build-llama.sh` (`bin/llama-server-<triple>[.exe]`). mac-first for
+/// `scripts/build-llama.sh` (`bin/lu-llama-server-<triple>[.exe]`). mac-first for
 /// 2.5.7; win/linux triples are here so P6 doesn't need to touch this.
 pub(crate) fn host_target_triple() -> String {
     let arch = std::env::consts::ARCH; // "aarch64" | "x86_64" | ...
@@ -406,11 +417,11 @@ fn resolve_engine_binary(app: &AppHandle) -> Option<PathBuf> {
         }
     }
 
-    // 3. Dev: src-tauri/bin/llama-server-<triple>[.exe]. `tauri dev` runs the
-    //    binary from target/debug, so walk up to the manifest dir.
+    // 3. Dev: src-tauri/bin/lu-llama-server-<triple>[.exe]. `tauri dev` runs
+    //    the binary from target/debug, so walk up to the manifest dir.
     let triple = host_target_triple();
     let suffix = if cfg!(target_os = "windows") { ".exe" } else { "" };
-    let dev_name = format!("llama-server-{triple}{suffix}");
+    let dev_name = format!("lu-llama-server-{triple}{suffix}");
     let mut dev_candidates: Vec<PathBuf> = Vec::new();
     if let Ok(manifest) = std::env::var("CARGO_MANIFEST_DIR") {
         dev_candidates.push(PathBuf::from(&manifest).join("bin").join(&dev_name));
@@ -1614,9 +1625,44 @@ mod tests {
     fn sidecar_name_has_exe_only_on_windows() {
         let name = sidecar_binary_name();
         if cfg!(target_os = "windows") {
-            assert_eq!(name, "llama-server.exe");
+            assert_eq!(name, "lu-llama-server.exe");
         } else {
-            assert_eq!(name, "llama-server");
+            assert_eq!(name, "lu-llama-server");
+        }
+    }
+
+    #[test]
+    fn the_bundled_sidecar_name_is_ours_and_not_one_debian_already_owns() {
+        // GitHub #120 (AnnSdf1969, Ubuntu 26.04): Tauri's deb bundler copies
+        // every externalBin straight into /usr/bin, so the file name IS the
+        // system path. Debian's own llama.cpp-tools package owns
+        // /usr/bin/llama-server, and dpkg refused the entire LU install over
+        // it. Two things have to hold, and both are checked from the shipped
+        // config rather than from a second copy of the string: the name the
+        // config bundles is the name this code looks for, and it is not a
+        // name the distro package already claims.
+        let conf: serde_json::Value = serde_json::from_str(include_str!("../../tauri.conf.json"))
+            .expect("tauri.conf.json parses");
+        let names: Vec<&str> = conf["bundle"]["externalBin"]
+            .as_array()
+            .expect("bundle.externalBin is an array")
+            .iter()
+            .filter_map(|b| b.as_str())
+            .map(|b| b.rsplit('/').next().unwrap_or(b))
+            .collect();
+        let name = sidecar_binary_name();
+        let stem = name.strip_suffix(".exe").unwrap_or(name);
+        assert!(
+            names.contains(&stem),
+            "the config bundles {names:?} but the app looks for {stem}",
+        );
+        // Negative control: the four binaries Debian's llama.cpp-tools puts
+        // in /usr/bin. None of them may be a name we bundle.
+        for owned in ["llama-server", "llama-cli", "llama-bench", "llama-quantize"] {
+            assert!(
+                !names.contains(&owned),
+                "{owned} is owned by llama.cpp-tools in /usr/bin, dpkg would refuse the install",
+            );
         }
     }
 

@@ -56,15 +56,15 @@ describe('the installer frees the bundled engine', () => {
   })
 
   it('asks the only question that matters, can the file be written', () => {
-    expect(unlock).toMatch(/FileOpen \$R3 "\$INSTDIR\\llama-server\.exe" a/)
+    expect(unlock).toMatch(/FileOpen \$R3 "\$INSTDIR\\\$\{EXE\}" a/)
     // Bounded: a locked file must not spin the installer forever.
     expect(unlock).toMatch(/\$R4 >= 4/)
   })
 
   it('frees the file the bundle actually ships and Rust actually starts', () => {
     const external = conf.bundle?.externalBin ?? []
-    expect(external).toContain('bin/llama-server')
-    expect(engineRs).toMatch(/"llama-server\.exe"/)
+    expect(external).toContain('bin/lu-llama-server')
+    expect(engineRs).toMatch(/"lu-llama-server\.exe"/)
   })
 })
 
@@ -74,7 +74,7 @@ describe('it kills our engine and nobody elses', () => {
   })
 
   it('kills only the process whose image is the file being overwritten', () => {
-    expect(unlock).toContain("-eq '$INSTDIR\\llama-server.exe'")
+    expect(unlock).toContain("-eq '$INSTDIR\\${EXE}'")
     expect(unlock).toMatch(/Stop-Process -Id \$\$_\.ProcessId -Force/)
   })
 
@@ -104,15 +104,48 @@ describe('it kills our engine and nobody elses', () => {
 describe('a lock we cannot clear must not end the update', () => {
   it('moves the old engine aside instead of failing the copy', () => {
     expect(unlock).toMatch(
-      /Rename "\$INSTDIR\\llama-server\.exe" "\$INSTDIR\\llama-server\.exe\.old"/,
+      /Rename "\$INSTDIR\\\$\{EXE\}" "\$INSTDIR\\\$\{EXE\}\.old"/,
     )
     // The rename is the last resort, it belongs after the retry budget.
     expect(unlock.indexOf('$R4 >= 4')).toBeLessThan(unlock.indexOf('Rename'))
   })
 
   it('sweeps the leftover before the next install writes a new one', () => {
-    const sweep = unlock.indexOf('Delete "$INSTDIR\\llama-server.exe.old"')
+    const sweep = unlock.indexOf('Delete "$INSTDIR\\${EXE}.old"')
     expect(sweep).toBeGreaterThan(-1)
     expect(sweep).toBeLessThan(unlock.indexOf('${Do}'))
+  })
+})
+
+/**
+ * GitHub #120 (AnnSdf1969, Ubuntu 26.04, 2026-08-28): the sidecar was called
+ * llama-server, Tauri's deb bundler copies external binaries straight into
+ * /usr/bin, and Debian's own llama.cpp-tools package owns
+ * /usr/bin/llama-server. dpkg refused the entire install over the collision.
+ * The file now carries our prefix, which means a Windows update coming from
+ * 2.6.6 or older finds the old file, and possibly a live process on it, in an
+ * install folder we no longer write that name into.
+ */
+describe('an update from before the rename does not leave the old engine behind', () => {
+  const preinstall = hooks.slice(hooks.indexOf('!macro NSIS_HOOK_PREINSTALL'))
+
+  it('frees the file this build actually ships', () => {
+    expect(preinstall).toContain('!insertmacro LU_FREE_SIDECAR "lu-llama-server.exe"')
+  })
+
+  it('also frees and removes the name 2.6.6 shipped', () => {
+    expect(preinstall).toContain('!insertmacro LU_SWEEP_OLD_SIDECAR')
+    const sweep = hooks.slice(hooks.indexOf('!macro LU_SWEEP_OLD_SIDECAR'))
+    expect(sweep).toContain('!insertmacro LU_FREE_SIDECAR "llama-server.exe"')
+    expect(sweep).toContain('Delete "$INSTDIR\\llama-server.exe"')
+  })
+
+  it('never ships a name Debian already owns in /usr/bin', () => {
+    // Negative control: the four binaries llama.cpp-tools installs there.
+    const external = conf.bundle?.externalBin ?? []
+    const names = external.map((b) => b.split('/').pop())
+    for (const owned of ['llama-server', 'llama-cli', 'llama-bench', 'llama-quantize']) {
+      expect(names).not.toContain(owned)
+    }
   })
 })

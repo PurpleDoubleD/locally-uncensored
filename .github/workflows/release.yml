@@ -154,8 +154,8 @@ jobs:
         shell: bash
         run: |
           case "${{ matrix.sidecar_triple }}" in
-            *-windows-*) test -f "src-tauri/bin/llama-server-${{ matrix.sidecar_triple }}.exe" ;;
-            *)           test -x "src-tauri/bin/llama-server-${{ matrix.sidecar_triple }}" ;;
+            *-windows-*) test -f "src-tauri/bin/lu-llama-server-${{ matrix.sidecar_triple }}.exe" ;;
+            *)           test -x "src-tauri/bin/lu-llama-server-${{ matrix.sidecar_triple }}" ;;
           esac
           ls -la src-tauri/bin/
 
