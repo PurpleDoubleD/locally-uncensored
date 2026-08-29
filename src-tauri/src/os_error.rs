@@ -57,11 +57,24 @@ fn kind_phrase(kind: ErrorKind) -> Option<&'static str> {
 /// seen would be inventing an English error to replace a true German one.
 fn code_phrase(code: i32) -> Option<&'static str> {
     Some(match code {
-        // Windows
+        // Windows. The first two are gated because those numbers are also unix
+        // errnos with entirely different meanings: 32 is EPIPE and 33 is EDOM,
+        // so the ungated table told a Mac that a broken pipe was a file in use.
+        // Found while wiring the whisper pipe errors through here, where EPIPE
+        // is the everyday case on Mac and Linux.
+        #[cfg(windows)]
         32 => "the file is in use by another process",
+        #[cfg(windows)]
         33 => "the file is locked by another process",
+        // No unix errno reaches these, so they need no gate. Linux stops at
+        // 133 and macOS well below that.
         145 => "the directory is not empty",
         1224 => "the file is open by another process",
+        // The whisper server's stdin, after the python process died: the box
+        // showed "stdin flush: Die Pipe wird gerade geschlossen. (os error 232)"
+        // in the red hint over the microphone (B4 Gegenprobe, 29.08.).
+        // ERROR_NO_DATA, and no unix errno collides with it.
+        232 => "the pipe is closing",
         10013 => "the port is blocked, by permissions or by a firewall",
         // hyper-util logs a failed set_nodelay with this one, and that log
         // line is what showed German text in lu-app-exit.log on the box.
@@ -229,6 +242,46 @@ mod tests {
         assert!(ours.contains(&format!("os error {}", REFUSED)), "got: {}", ours);
     }
 
+    /// The exact code from the box, which must read the same on any machine.
+    ///
+    /// `sanitize_os_wording` cannot help here and this test is why it is not
+    /// used at that call site: it repairs a line by asking THIS machine for the
+    /// code's wording, and a Mac has no German to recognise. `english()` at the
+    /// call site never asks, so the answer is fixed by us on every platform.
+    #[test]
+    fn the_pipe_code_from_the_box_reads_in_our_words_on_every_platform() {
+        let ours = io_english(&Error::from_raw_os_error(232));
+        assert_eq!(ours, "the pipe is closing (os error 232)");
+    }
+
+    /// The whole failure the user saw, rebuilt, and the shape it has now.
+    #[test]
+    fn the_red_hint_over_the_microphone_is_english() {
+        let e = Error::from_raw_os_error(232);
+        // What the three call sites used to write: the error's own Display,
+        // which on a German Windows is "Die Pipe wird gerade geschlossen.".
+        let before = format!("stdin flush: {}", e);
+        // What they write now.
+        let after = format!("stdin flush: {}", io_english(&e));
+        assert_eq!(after, "stdin flush: the pipe is closing (os error 232)");
+        // On a German box `before` is German; here it is only "Unknown error",
+        // so the assertion that says something on every platform is that the
+        // new wording no longer depends on what the system happens to say.
+        assert!(!after.contains(&e.to_string()) || e.to_string() == io_english(&e));
+    }
+
+    /// The gate, from the side that was wrong.
+    #[test]
+    #[cfg(unix)]
+    fn a_broken_pipe_on_unix_is_not_described_as_a_file_in_use() {
+        // errno 32 is EPIPE here and ERROR_SHARING_VIOLATION there. Rust
+        // categorises this one, so the kind carries it.
+        let ours = io_english(&Error::from_raw_os_error(32));
+        assert!(ours.contains("broken pipe"), "got: {}", ours);
+        assert!(!ours.contains("in use by another process"), "got: {}", ours);
+        assert!(ours.contains("os error 32"), "got: {}", ours);
+    }
+
     #[test]
     fn the_number_survives_even_when_the_code_has_no_name() {
         // A code no table knows. It must still be searchable.
@@ -351,7 +404,11 @@ mod tests {
     fn every_named_code_reads_as_a_sentence_and_none_is_empty() {
         // A guard on the tables: an entry added with an empty or capitalised
         // string would read wrong inside "Failed to X: <phrase>".
-        for code in [32, 33, 145, 1224, 10013, 10022, 10048, 10049, 10060, 10061] {
+        #[cfg(windows)]
+        const NAMED: &[i32] = &[32, 33, 145, 232, 1224, 10013, 10022, 10048, 10049, 10060, 10061];
+        #[cfg(not(windows))]
+        const NAMED: &[i32] = &[145, 232, 1224, 10013, 10022, 10048, 10049, 10060, 10061];
+        for &code in NAMED {
             let p = code_phrase(code).expect("table entry vanished");
             assert!(!p.is_empty());
             assert!(p.chars().next().unwrap().is_lowercase(), "code {} is capitalised", code);
@@ -389,6 +446,13 @@ mod drift_guard {
         // of these: reqwest renders its own source chain, and the leaf of that
         // chain on a refused localhost port is the operating system talking.
         ".send()", ".bytes()", ".chunk()",
+        // The pipe calls. These are how we talk to the sidecars, and the
+        // whisper server's stdin is where the German text came back a second
+        // time: writing to a dead child fails with ERROR_NO_DATA, and the
+        // three call sites rendered that straight into the red hint over the
+        // microphone (B4 Gegenprobe 29.08.). The guard did not look at write
+        // or flush, so nothing complained.
+        ".write_all(", ".flush()", ".read_to_end(", ".read_to_string(",
     ];
 
     /// How many lines a single call may be spread over.
@@ -514,5 +578,12 @@ mod drift_guard {
             r#"json!({"status": "error", "error": os_error::english(&e)})"#
         ));
         assert!(!is_suspect_field(r#"json!({"error": "All search tiers failed"})"#));
+        // The widened list: the three whisper pipe writes are the shape that
+        // slipped past the guard, so they have to fail it now.
+        assert!(is_suspect(r#"stdin.flush().map_err(|e| format!("stdin flush: {}", e))?;"#));
+        assert!(is_suspect(r#"stdin.write_all(b"\n").map_err(|e| format!("stdin newline: {}", e))?;"#));
+        assert!(!is_suspect(
+            r#"stdin.flush().map_err(|e| format!("stdin flush: {}", os_error::english(&e)))?;"#
+        ));
     }
 }

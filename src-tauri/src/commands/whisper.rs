@@ -35,6 +35,28 @@ fn drain_stale(rx: &mpsc::Receiver<serde_json::Value>) -> usize {
     n
 }
 
+/// Does this `send_command` failure mean the server is gone, rather than the
+/// request being bad or merely slow?
+///
+/// Anchored on the prefixes `send_command` writes itself, never on the words
+/// after them: those come from the operating system and are in whatever
+/// language Windows was installed in, so matching on them would work on an
+/// English box and quietly stop working on a German one.
+///
+/// "Whisper transcription timed out" is deliberately NOT in this list. A long
+/// dictation is a living server doing its job, and restarting under it would
+/// throw the take away for nothing.
+pub fn is_pipe_failure(message: &str) -> bool {
+    const GONE: &[&str] = &[
+        "stdin write:",
+        "stdin newline:",
+        "stdin flush:",
+        "No stdin connection",
+        "No response channel",
+    ];
+    GONE.iter().any(|p| message.starts_with(p))
+}
+
 impl WhisperServer {
     pub fn new() -> Self {
         Self {
@@ -167,9 +189,21 @@ impl WhisperServer {
         let stdin = self.stdin_tx.as_mut().ok_or("No stdin connection")?;
         let json_str = serde_json::to_string(cmd).map_err(|e| e.to_string())?;
 
-        stdin.write_all(json_str.as_bytes()).map_err(|e| format!("stdin write: {}", e))?;
-        stdin.write_all(b"\n").map_err(|e| format!("stdin newline: {}", e))?;
-        stdin.flush().map_err(|e| format!("stdin flush: {}", e))?;
+        // os_error::english, not the error's own Display. When the python
+        // process dies the write fails with ERROR_NO_DATA, and Windows words
+        // that failure in the language it was installed in: the box showed
+        // "stdin flush: Die Pipe wird gerade geschlossen. (os error 232)" in
+        // the red hint over the microphone, in an app set to English
+        // (B4 Gegenprobe 29.08.). english() never asks the system for words.
+        stdin
+            .write_all(json_str.as_bytes())
+            .map_err(|e| format!("stdin write: {}", os_error::english(&e)))?;
+        stdin
+            .write_all(b"\n")
+            .map_err(|e| format!("stdin newline: {}", os_error::english(&e)))?;
+        stdin
+            .flush()
+            .map_err(|e| format!("stdin flush: {}", os_error::english(&e)))?;
 
         // Wait for response (60s timeout for transcription)
         let rx = self.response_rx.as_ref().ok_or("No response channel")?;
@@ -180,6 +214,29 @@ impl WhisperServer {
     /// Whether the whisper server child is currently running (model resident).
     pub fn is_running(&self) -> bool {
         self.process.is_some()
+    }
+
+    /// Has the child gone away?
+    ///
+    /// `try_wait` is the only honest answer. The `Child` value survives the
+    /// process it describes, so `process.is_some()` keeps saying yes to a
+    /// corpse, and that is exactly why a killed whisper server stayed
+    /// registered: `needs_start` saw a process, skipped the start, and every
+    /// take from then on wrote into a pipe nobody holds, until the app was
+    /// restarted (B4 Gegenprobe 29.08.).
+    ///
+    /// Reaps as a side effect, which is the point: `try_wait` collects the
+    /// exit status, so the dead python is not left as a zombie either.
+    pub fn has_exited(&mut self) -> bool {
+        match self.process.as_mut() {
+            Some(child) => match child.try_wait() {
+                Ok(Some(_)) => true,
+                Ok(None) => false,
+                // We cannot ask about it any more, so it is not ours to use.
+                Err(_) => true,
+            },
+            None => true,
+        }
     }
 
     pub fn stop(&mut self) {
@@ -329,31 +386,37 @@ fn transcribe_blocking(
     // Lazy-start Whisper on first use — it is no longer pre-started at launch
     // (it kept ~360 MB resident even in Cloud mode). Block until the server is
     // spawned; send_command below then waits for the model to finish loading.
-    {
-        let needs_start = state.whisper.lock().map(|w| w.process.is_none()).unwrap_or(true);
-        if needs_start {
-            // Resolve the SAME interpreter install_whisper used (ComfyUI venv if
-            // present, else system Python). Using state.python_bin here meant a
-            // venv install was invisible at runtime → STT silently dead after
-            // relaunch on boxes with a ComfyUI venv (#78).
-            let python_bin = crate::commands::install::resolve_lu_python(state.inner());
-            if python_bin.is_empty() {
-                return Err("Whisper unavailable: no Python runtime detected. Install Python in the setup step, then retry.".to_string());
-            }
-            auto_start_whisper_sync(app, &python_bin, &state.whisper)?;
+    //
+    // Self-healing, first half: this also reaps a server that died since the
+    // last take, so what follows is a real start and not a send into a closed
+    // pipe.
+    ensure_whisper_running(app, state)?;
+
+    let cmd = serde_json::json!({
+        "action": "transcribe",
+        "path": audio_path,
+    });
+
+    // Send to persistent whisper server
+    let mut result = send_to_whisper(state, &cmd);
+
+    // Self-healing, second half: the server died DURING this take, so the send
+    // found a pipe nobody holds any more. Start it again and send the same
+    // audio once more; the user only hears about it if that fails too. Before
+    // this, the first failure was permanent: every later recording hit the
+    // same dead pipe until the app was restarted (B4 Gegenprobe 29.08.).
+    if let Err(ref why) = result {
+        if whisper_is_gone(state, why) {
+            println!("[Whisper] server gone ({}), restarting once and retrying the take", why);
+            info!("whisper restart after a dead pipe");
+            result = match restart_whisper(app, state) {
+                Ok(()) => send_to_whisper(state, &cmd),
+                Err(e) => Err(e),
+            };
         }
     }
 
-    // Send to persistent whisper server
-    let result = {
-        let mut whisper = state.whisper.lock().unwrap();
-        whisper.send_command(&serde_json::json!({
-            "action": "transcribe",
-            "path": audio_path,
-        }))
-    };
-
-    // Clean up temp file
+    // Clean up temp file, after the retry, which reads the same file.
     let _ = std::fs::remove_file(&tmp_file);
 
     match result {
@@ -370,6 +433,72 @@ fn transcribe_blocking(
             error!(error = %e, "transcribe failed");
             Err(e)
         }
+    }
+}
+
+/// One transcribe request to the running server, with the lock held for no
+/// longer than the send.
+fn send_to_whisper(
+    state: &State<'_, AppState>,
+    cmd: &serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    let mut whisper = state.whisper.lock().unwrap();
+    whisper.send_command(cmd)
+}
+
+/// Clear a whisper child that has exited, then start one if none is running.
+///
+/// The clearing is the new half. `stop()` resets `process`, `stdin_tx`,
+/// `response_rx` and `ready` together, so what starts afterwards is a whole
+/// server and not a fresh process wired to the dead one's channels.
+fn ensure_whisper_running(app: &AppHandle, state: &State<'_, AppState>) -> Result<(), String> {
+    let needs_start = match state.whisper.lock() {
+        Ok(mut w) => {
+            if w.is_running() && w.has_exited() {
+                println!("[Whisper] the server process is gone, clearing it before this take");
+                w.stop();
+            }
+            !w.is_running()
+        }
+        Err(_) => true,
+    };
+    if !needs_start {
+        return Ok(());
+    }
+    // Resolve the SAME interpreter install_whisper used (ComfyUI venv if
+    // present, else system Python). Using state.python_bin here meant a
+    // venv install was invisible at runtime → STT silently dead after
+    // relaunch on boxes with a ComfyUI venv (#78).
+    let python_bin = crate::commands::install::resolve_lu_python(state.inner());
+    if python_bin.is_empty() {
+        return Err("Whisper unavailable: no Python runtime detected. Install Python in the setup step, then retry.".to_string());
+    }
+    auto_start_whisper_sync(app, &python_bin, &state.whisper)
+}
+
+/// Tear the server down and bring it back up, once.
+fn restart_whisper(app: &AppHandle, state: &State<'_, AppState>) -> Result<(), String> {
+    if let Ok(mut w) = state.whisper.lock() {
+        w.stop();
+    }
+    ensure_whisper_running(app, state)
+}
+
+/// Is this failure worth a restart?
+///
+/// Two independent answers, either of which is enough: the message says the
+/// pipe is gone, or the child has actually exited. The second catches a server
+/// that died without the write noticing yet, and the first catches a pipe that
+/// closed under a process still technically alive.
+fn whisper_is_gone(state: &State<'_, AppState>, why: &str) -> bool {
+    if is_pipe_failure(why) {
+        return true;
+    }
+    match state.whisper.lock() {
+        Ok(mut w) => w.has_exited(),
+        // A poisoned lock is not evidence of a dead server, and restarting on
+        // it would hide a panic behind a retry loop.
+        Err(_) => false,
     }
 }
 
@@ -486,5 +615,234 @@ mod response_channel_tests {
         assert_eq!(drain_stale(&rx), 0);
         assert!(started.elapsed() < std::time::Duration::from_millis(50));
         drop(tx);
+    }
+}
+
+/// B4 Gegenprobe, 29.08.: the whisper server was killed mid-session on the
+/// Windows box. Two things went wrong and both are covered here.
+///
+///  1. The failure reached the red hint over the microphone in German:
+///     "stdin flush: Die Pipe wird gerade geschlossen. (os error 232)".
+///  2. Nothing healed. Every recording after that hit the same dead pipe until
+///     the app was restarted.
+#[cfg(test)]
+mod dead_server_tests {
+    use super::*;
+    use serde_json::json;
+
+    /// A child that is gone almost at once.
+    fn spawn_quick() -> Child {
+        let mut cmd = if cfg!(windows) {
+            let mut c = Command::new("cmd");
+            c.args(["/C", "exit"]);
+            c
+        } else {
+            let mut c = Command::new("sh");
+            c.args(["-c", "exit 0"]);
+            c
+        };
+        cmd.stdin(Stdio::piped()).stdout(Stdio::null()).stderr(Stdio::null());
+        cmd.spawn().expect("a shell exists on the machine running the tests")
+    }
+
+    /// A child that sits and waits on stdin, the way whisper_server.py does.
+    fn spawn_lingering() -> Child {
+        let mut cmd = if cfg!(windows) {
+            let mut c = Command::new("cmd");
+            c.args(["/C", "pause"]);
+            c
+        } else {
+            let mut c = Command::new("sh");
+            c.args(["-c", "read line"]);
+            c
+        };
+        cmd.stdin(Stdio::piped()).stdout(Stdio::null()).stderr(Stdio::null());
+        cmd.spawn().expect("a shell exists on the machine running the tests")
+    }
+
+    /// A server wired to `child`, in the state it has between two dictations.
+    ///
+    /// The sender comes back with it and has to be kept alive by the caller:
+    /// dropping it would disconnect the response channel, and a disconnected
+    /// channel is a different failure than the one under test.
+    fn server_around(child: Child) -> (WhisperServer, mpsc::Sender<serde_json::Value>) {
+        let mut ws = WhisperServer::new();
+        let mut child = child;
+        if let Some(stdin) = child.stdin.take() {
+            ws.stdin_tx = Some(std::io::BufWriter::new(stdin));
+        }
+        let (tx, rx) = mpsc::channel();
+        ws.response_rx = Some(rx);
+        ws.ready = true;
+        ws.process = Some(child);
+        (ws, tx)
+    }
+
+    #[test]
+    fn a_live_server_does_not_read_as_gone() {
+        let (mut ws, _tx) = server_around(spawn_lingering());
+        assert!(ws.is_running());
+        assert!(!ws.has_exited(), "a waiting server was declared dead");
+        ws.stop();
+    }
+
+    #[test]
+    fn a_dead_server_is_seen_even_though_the_child_value_is_still_there() {
+        let (mut ws, _tx) = server_around(spawn_quick());
+        // The exact trap: the Child outlives the process, so this keeps
+        // answering yes and `needs_start` kept skipping the restart.
+        assert!(ws.is_running(), "the handle is still registered, as it was");
+        let mut saw_it = false;
+        for _ in 0..100 {
+            if ws.has_exited() {
+                saw_it = true;
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        assert!(saw_it, "the exited child was never noticed");
+        ws.stop();
+    }
+
+    #[test]
+    fn a_server_that_was_never_started_counts_as_gone() {
+        let mut ws = WhisperServer::new();
+        assert!(!ws.is_running());
+        assert!(ws.has_exited());
+    }
+
+    /// The whole failure, at the wire: kill the server the way the box did,
+    /// then send a take into it.
+    #[test]
+    fn sending_into_a_killed_server_fails_in_english_and_is_recognised_as_a_dead_pipe() {
+        let (mut ws, _tx) = server_around(spawn_lingering());
+        if let Some(child) = ws.process.as_mut() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+        assert!(ws.has_exited());
+
+        let err = ws
+            .send_command(&json!({ "action": "transcribe", "path": "/tmp/x.wav" }))
+            .expect_err("writing into a dead pipe must fail");
+
+        // The message is ours all the way through. The operating system's own
+        // sentence for this is German on a German Windows; none of these
+        // assertions care which language it was, because none of it survives.
+        // Printed so a `cargo test -- --nocapture` run shows the exact wording
+        // that replaced the German line, on whatever machine ran the suite.
+        println!("[dead pipe] {}", err);
+        assert!(is_pipe_failure(&err), "not recognised as a dead pipe: {}", err);
+        assert!(err.contains("os error"), "the searchable number is gone: {}", err);
+        assert!(err.is_ascii(), "non ascii in a message we wrote: {}", err);
+        // And it is one of our three prefixes, so the retry above can key on it.
+        assert!(
+            err.starts_with("stdin write:")
+                || err.starts_with("stdin newline:")
+                || err.starts_with("stdin flush:"),
+            "unexpected shape: {}",
+            err
+        );
+        ws.stop();
+    }
+
+    #[test]
+    fn every_way_the_pipe_can_be_gone_asks_for_a_restart() {
+        for m in [
+            "stdin write: the pipe is closing (os error 232)",
+            "stdin newline: broken pipe (os error 32)",
+            "stdin flush: the pipe is closing (os error 232)",
+            "No stdin connection",
+            "No response channel",
+        ] {
+            assert!(is_pipe_failure(m), "should restart on: {}", m);
+        }
+    }
+
+    /// NEGATIVE CONTROL. Restarting on any of these would make things worse:
+    /// a long dictation would lose its take, and a model still loading would be
+    /// thrown away and reloaded for another five minutes.
+    #[test]
+    fn a_slow_or_busy_server_is_left_alone() {
+        for m in [
+            "Whisper transcription timed out",
+            "Whisper server not ready",
+            "Whisper server error: Model load failed: out of memory",
+            "Empty audio data",
+            "base64 decode: invalid byte",
+            "Whisper server did not become ready within 5 minutes",
+        ] {
+            assert!(!is_pipe_failure(m), "must not restart on: {}", m);
+        }
+    }
+
+    /// NEGATIVE CONTROL for the language rule: the German sentence the box
+    /// showed must not be what the check keys on, or the fix works only where
+    /// the bug never appeared.
+    #[test]
+    fn the_check_does_not_depend_on_the_systems_own_words() {
+        let german = "stdin flush: Die Pipe wird gerade geschlossen. (os error 232)";
+        let english = "stdin flush: the pipe is closing (os error 232)";
+        assert!(is_pipe_failure(german));
+        assert!(is_pipe_failure(english));
+        // Same prefix, so the same verdict either way.
+        assert!(!is_pipe_failure("Die Pipe wird gerade geschlossen. (os error 232)"));
+    }
+}
+
+/// The wiring the unit tests above cannot reach: `transcribe_blocking` needs a
+/// Tauri AppHandle and a live AppState, so the ORDER of the healing is guarded
+/// at the source, in the style of the drift guard in os_error.rs.
+#[cfg(test)]
+mod healing_is_wired_in {
+    /// The SHIPPING half of this file, with every `#[cfg(test)]` module cut
+    /// off. Without the cut the guard reads its own assertions and passes on
+    /// the strength of the strings it was written with.
+    fn source() -> String {
+        let all = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/commands/whisper.rs"),
+        )
+        .expect("this file is readable");
+        match all.find("#[cfg(test)]") {
+            Some(at) => all[..at].to_string(),
+            None => all,
+        }
+    }
+
+    #[test]
+    fn the_guard_reads_only_the_shipping_code() {
+        let s = source();
+        assert!(s.contains("fn transcribe_blocking"), "the cut took too much");
+        assert!(!s.contains("mod healing_is_wired_in"), "the guard is reading itself");
+    }
+
+    #[test]
+    fn a_take_starts_by_clearing_a_dead_server() {
+        let s = source();
+        assert!(s.contains("ensure_whisper_running(app, state)?;"), "the pre-take check is gone");
+        // The old shape, which asked only whether a handle existed.
+        assert!(
+            !s.contains("let needs_start = state.whisper.lock().map(|w| w.process.is_none())"),
+            "the corpse-blind check is back"
+        );
+    }
+
+    #[test]
+    fn a_take_that_hits_a_dead_pipe_is_retried_once() {
+        let s = source();
+        assert!(s.contains("if whisper_is_gone(state, why)"), "the retry gate is gone");
+        assert!(s.contains("Ok(()) => send_to_whisper(state, &cmd),"), "the retry send is gone");
+        // Once, not in a loop: a second failure is the user's answer.
+        assert_eq!(s.matches("restart_whisper(app, state)").count(), 1);
+    }
+
+    #[test]
+    fn the_temp_file_outlives_the_retry() {
+        let s = source();
+        let send = s.find("let mut result = send_to_whisper").expect("the send is gone");
+        let retry = s.find("if whisper_is_gone(state, why)").expect("the retry is gone");
+        let cleanup = s.find("let _ = std::fs::remove_file(&tmp_file);").expect("the cleanup is gone");
+        assert!(send < retry, "the retry must come after the first send");
+        assert!(retry < cleanup, "the audio was deleted before the retry could read it");
     }
 }

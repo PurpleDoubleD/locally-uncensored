@@ -207,7 +207,11 @@ async function localApiFailure(res: Response, what: string): Promise<LocalSttErr
       /* not JSON after all, keep the raw text */
     }
   }
-  detail = detail.slice(0, 200);
+  // Cut at CHARACTER boundaries. whisper.rs once panicked on exactly this
+  // mistake (a byte index landing inside a multibyte character), and in JS the
+  // same cut through a surrogate pair leaves half a character that renders as
+  // a replacement box in the red bubble.
+  detail = Array.from(detail).slice(0, 200).join("");
   return new LocalSttError(
     detail ? `${what} (HTTP ${res.status}): ${detail}` : `${what} (HTTP ${res.status})`,
     res.status,

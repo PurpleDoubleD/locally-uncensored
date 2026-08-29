@@ -53,6 +53,25 @@ export function sttErrorMessage(err: unknown): string {
   return "Transcription failed, check the microphone and try again";
 }
 
+/** What to tell the user when a take came back with no words in it.
+ *
+ * B4 Gegenprobe, 29.08.: a silent recording ended in nothing at all. No text,
+ * no hint, the composer simply unchanged, and the user with no way to tell a
+ * silent room from a broken microphone. Whisper answers a silent clip with an
+ * empty transcript and a 200, which is not a failure, so nothing on the error
+ * path ever fired.
+ *
+ * Returns null when there IS something to insert, so the caller can hand the
+ * answer straight to setSttError.
+ *
+ * Whisper itself sometimes invents a word on silence, usually "You". That is
+ * the model, not this code, and a transcript of "You" is indistinguishable
+ * from someone actually saying it, so it is left alone.
+ */
+export function noSpeechMessage(transcript: string): string | null {
+  return transcript.trim() ? null : "No speech detected, try again";
+}
+
 // Speak-generation counter + abort plumbing, module-scoped (NOT per hook
 // instance) because playback is a process-wide singleton (one HTMLAudioElement
 // in api/voice): every SpeakerButton mounts its own useVoice, and a Stop click
@@ -269,6 +288,10 @@ export function useVoice() {
       try {
         const transcript = cloudVoice ? await transcribeAudioCloud(blob) : await transcribeAudio(blob);
         store.setTranscript(transcript);
+        // A silent take is not an error, but it must not be silence in the UI
+        // too: the bubble says so and clears itself after six seconds.
+        const nothingHeard = noSpeechMessage(transcript);
+        if (nothingHeard) store.setSttError(nothingHeard);
         return transcript;
       } catch (err) {
         log.error("Whisper transcription error", { err });
