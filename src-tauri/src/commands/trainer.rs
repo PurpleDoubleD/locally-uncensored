@@ -185,28 +185,36 @@ fn force_python_utf8(cmd: &mut Command) {
 /// cu121 wheels carry kernels up to sm_90 (Hopper). Blackwell reports
 /// compute capability 12.x, so every RTX 50 card needs the cu128 build.
 /// An unreadable probe keeps the cu121 default.
-fn torch_index_for_cap(cap_major: Option<u32>) -> &'static str {
+///
+/// One entry each: the trainer is proven on exactly these two channels and a
+/// silent hop to a neighbouring one would be a change nobody measured. The
+/// slice shape exists so the ROCm branch, which has three living channels,
+/// can share one plan type.
+const TRAINER_CU128: &[&str] = &["https://download.pytorch.org/whl/cu128"];
+const TRAINER_CU121: &[&str] = &["https://download.pytorch.org/whl/cu121"];
+
+fn torch_index_for_cap(cap_major: Option<u32>) -> &'static [&'static str] {
     match cap_major {
-        Some(major) if major >= 12 => "https://download.pytorch.org/whl/cu128",
-        _ => "https://download.pytorch.org/whl/cu121",
+        Some(major) if major >= 12 => TRAINER_CU128,
+        _ => TRAINER_CU121,
     }
 }
 
-/// PyTorch's ROCm channel, which is what an AMD card needs instead of a CUDA
-/// build. Measured against download.pytorch.org on 2026-08-19: the rocm6.2,
-/// rocm6.3, rocm6.4 and rocm7.0 channels all exist and every torch wheel in
-/// every one of them is `manylinux_2_28_x86_64`. There is no win_amd64 ROCm
-/// wheel anywhere, which is the whole reason the Windows branch below refuses
-/// instead of downloading something. rocm6.4 carries torch 2.9.1 and is the
-/// older of the two living channels, so it is the smaller step from the CUDA
-/// builds the trainer is proven on.
-const ROCM_INDEX: &str = "https://download.pytorch.org/whl/rocm6.4";
+/// PyTorch's ROCm channels, which is what an AMD card needs instead of a CUDA
+/// build. The list is shared with the ComfyUI installer and is walked live at
+/// install time, newest first, so a channel that gets retired costs a probe
+/// instead of a broken install. Re-read on 2026-08-28: there is still no
+/// win_amd64 ROCm wheel in any of them, which is the whole reason the Windows
+/// branch below refuses instead of downloading something.
+use crate::commands::torch_wheels::ROCM_CHANNELS;
 
 /// What the two pip steps should do about torch on THIS machine.
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum TorchPlan {
-    /// Install from this wheel index, and say this while doing it.
-    Wheels { index: &'static str, note: String },
+    /// Install from the first of these wheel indexes that answers, and say
+    /// this while doing it. Never empty; the last entry is the fallback that
+    /// gets used even when no probe answers.
+    Wheels { candidates: &'static [&'static str], note: String },
     /// No wheel exists that could drive this GPU on this OS. Nothing is
     /// downloaded and the sentence is the whole answer.
     NoWheels(String),
@@ -231,26 +239,25 @@ pub(crate) fn trainer_torch_plan(
     os: &str,
 ) -> TorchPlan {
     if has_nvidia || nvidia_cap_major.is_some() || !has_amd {
-        let index = torch_index_for_cap(nvidia_cap_major);
+        let candidates = torch_index_for_cap(nvidia_cap_major);
         return TorchPlan::Wheels {
-            index,
+            candidates,
             note: format!(
-                "GPU compute capability: {}, PyTorch wheels: {index}",
+                "GPU compute capability: {}, PyTorch wheels: {}",
                 nvidia_cap_major.map_or("unknown".to_string(), |c| format!("{c}.x")),
+                candidates[0],
             ),
         };
     }
     if os == "linux" {
         return TorchPlan::Wheels {
-            index: ROCM_INDEX,
-            note: format!(
-                concat!(
-                    "AMD GPU detected, PyTorch wheels: {} (the ROCm build). ",
-                    "Honest limit: the training step runs an 8 bit optimizer that we ",
-                    "have only ever proven on CUDA, so this environment may still stop there.",
-                ),
-                ROCM_INDEX,
-            ),
+            candidates: ROCM_CHANNELS,
+            note: concat!(
+                "AMD GPU detected, installing the ROCm build of PyTorch. ",
+                "Honest limit: the training step runs an 8 bit optimizer that we ",
+                "have only ever proven on CUDA, so this environment may still stop there.",
+            )
+            .to_string(),
         };
     }
     TorchPlan::NoWheels(
@@ -273,11 +280,7 @@ pub(crate) fn trainer_torch_plan(
 /// knows about. That probe already survives a missing rocm-smi, which is the
 /// only reason an AMD card is visible here at all.
 fn gpu_vendors_present() -> (bool, bool) {
-    let gpus = crate::commands::gpu::detect_gpus().unwrap_or_default();
-    (
-        gpus.iter().any(|g| g.vendor == "nvidia"),
-        gpus.iter().any(|g| g.vendor == "amd"),
-    )
+    crate::commands::torch_wheels::gpu_vendors_present()
 }
 
 /// The card a training run would use, as a name for messages. None means the
@@ -849,11 +852,20 @@ fn provision_trainer_env(
     // no GPU at all.
     let (has_nvidia, has_amd) = gpu_vendors_present();
     let cap = crate::commands::install::detect_nvidia_compute_cap_major();
-    let (torch_index, wheel_note) =
+    let (candidates, wheel_note) =
         match trainer_torch_plan(has_nvidia, cap, has_amd, std::env::consts::OS) {
-            TorchPlan::Wheels { index, note } => (index, note),
+            TorchPlan::Wheels { candidates, note } => (candidates, note),
             TorchPlan::NoWheels(why) => return Err(why),
         };
+    // The channel is picked here and not inside the plan: the plan stays a
+    // pure function the tests can drive, and only the real install pays for a
+    // network probe.
+    let torch_index = crate::commands::torch_wheels::first_live_index(
+        candidates,
+        crate::commands::torch_wheels::index_serves_torch,
+    )
+    .unwrap_or(candidates[0]);
+    let wheel_note = format!("{wheel_note} (wheel index: {torch_index})");
 
     let _ = fs::create_dir_all(root.join("models"));
 
@@ -1425,11 +1437,11 @@ mod tests {
     #[test]
     fn blackwell_routes_to_cu128_and_older_cards_keep_cu121() {
         use super::torch_index_for_cap;
-        assert_eq!(torch_index_for_cap(Some(12)), "https://download.pytorch.org/whl/cu128");
-        assert_eq!(torch_index_for_cap(Some(13)), "https://download.pytorch.org/whl/cu128");
-        assert_eq!(torch_index_for_cap(Some(9)), "https://download.pytorch.org/whl/cu121");
-        assert_eq!(torch_index_for_cap(Some(8)), "https://download.pytorch.org/whl/cu121");
-        assert_eq!(torch_index_for_cap(None), "https://download.pytorch.org/whl/cu121");
+        assert_eq!(torch_index_for_cap(Some(12))[0], "https://download.pytorch.org/whl/cu128");
+        assert_eq!(torch_index_for_cap(Some(13))[0], "https://download.pytorch.org/whl/cu128");
+        assert_eq!(torch_index_for_cap(Some(9))[0], "https://download.pytorch.org/whl/cu121");
+        assert_eq!(torch_index_for_cap(Some(8))[0], "https://download.pytorch.org/whl/cu121");
+        assert_eq!(torch_index_for_cap(None)[0], "https://download.pytorch.org/whl/cu121");
     }
 
     #[test]
@@ -1438,8 +1450,12 @@ mod tests {
         // numbrain and lapbo: no NVIDIA card, so the old probe answered None
         // and the plan was the same cu121 a machine with no GPU at all gets.
         match trainer_torch_plan(false, None, true, "linux") {
-            TorchPlan::Wheels { index, note } => {
-                assert_eq!(index, "https://download.pytorch.org/whl/rocm6.4");
+            TorchPlan::Wheels { candidates, note } => {
+                assert!(
+                    candidates.iter().all(|c| c.contains("/rocm")),
+                    "an AMD card may only be offered ROCm channels: {candidates:?}",
+                );
+                assert_eq!(candidates, crate::commands::torch_wheels::ROCM_CHANNELS);
                 assert!(note.contains("AMD"), "the log line names the card: {note}");
                 // Never sold as proven: the 8 bit optimizer is CUDA only here.
                 assert!(note.contains("Honest limit"), "note hides the limit: {note}");
@@ -1478,8 +1494,8 @@ mod tests {
             (true, Some(8), true),
         ] {
             match trainer_torch_plan(has_nvidia, cap, has_amd, "windows") {
-                TorchPlan::Wheels { index, .. } => assert_eq!(
-                    index,
+                TorchPlan::Wheels { candidates, .. } => assert_eq!(
+                    candidates,
                     torch_index_for_cap(cap),
                     "nvidia={has_nvidia} cap={cap:?} amd={has_amd} moved channel",
                 ),

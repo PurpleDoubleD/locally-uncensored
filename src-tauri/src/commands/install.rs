@@ -130,6 +130,8 @@ pub(crate) fn detect_nvidia_compute_cap_major() -> Option<u32> {
     parse_compute_cap_output(&s)
 }
 
+use crate::commands::torch_wheels;
+
 // ── pip helpers (issue #32: PyTorch / ComfyUI install reliability) ───────────
 
 /// Push a log line to the shared install state. Best-effort — silently
@@ -660,53 +662,43 @@ pub(crate) fn process_read_bytes(_pid: u32) -> Option<u64> {
     None
 }
 
-/// Pure: the wheel index for a GPU situation, kept apart from the nvidia-smi
-/// probes so the channel choice is testable.
+/// GPU probe + wheel choice + pip args, shared between the first install and
+/// `repair_comfyui_env` so the two can never drift apart.
 ///
-/// Bug #10 (vokurta, RTX 6000 Blackwell, 2026-05-11): SM 12.0 GPUs need
-/// PyTorch cu128 wheels; older channels simply don't ship the kernel and the
-/// first compute call dies with "no kernel image is available".
+/// Bug #10 (vokurta, RTX 6000 Blackwell, 2026-05-11): SM 12.0 GPUs need their
+/// own CUDA channel, older ones simply do not ship the kernel and the first
+/// compute call dies with "no kernel image is available".
 ///
 /// Box measurement 2026-08-16 (W2, #98): everything below Blackwell used to
 /// get cu121, but that channel is frozen at torch 2.5.1 while ComfyUI's own
 /// unpinned requirements move on. Current cores import comfy_kitchen, whose
 /// custom ops use builtin generic annotations (`kernel_size: list[int]`) that
 /// torch only accepts from 2.6 on, so a freshly repaired venv died at import
-/// with the infer_schema ValueError. cu126 is the living channel (torch 2.6+,
-/// sm_50 through sm_90, ComfyUI's own documented default), so repaired and
-/// fresh installs follow the requirements instead of trailing them.
-pub(crate) fn pytorch_index_for(
-    has_nvidia: bool,
-    compute_cap_major: Option<u32>,
-) -> Option<&'static str> {
-    match compute_cap_major {
-        Some(major) if major >= 12 => Some("https://download.pytorch.org/whl/cu128"),
-        Some(_) => Some("https://download.pytorch.org/whl/cu126"),
-        None if has_nvidia => Some("https://download.pytorch.org/whl/cu126"),
-        None => None,
-    }
-}
-
-/// GPU probe + wheel choice + pip args, shared between the first install and
-/// `repair_comfyui_env` so the two can never drift apart (same cu128/cu126/
-/// CPU decision, same flags).
+/// with the infer_schema ValueError.
+///
+/// AMD bundle 2026-08-28 (numbrain, lapbo, petermanmancusso, sancora): the
+/// probe was `nvidia-smi` and nothing else, so an AMD card came out of it
+/// looking exactly like a machine with no card, and the venv got the
+/// processor wheels. Those wheels install cleanly and then answer
+/// "Torch not compiled with CUDA enabled" the moment the user forces the GPU.
+/// The vendor list now decides, and the choice itself lives in
+/// `torch_wheels` where it is testable without any of the hardware.
 pub(crate) fn plan_pytorch_install() -> (Vec<String>, String) {
-    let mut nv = Command::new("nvidia-smi");
-    nv.stdout(Stdio::piped()).stderr(Stdio::piped());
-    #[cfg(target_os = "windows")]
-    nv.creation_flags(CREATE_NO_WINDOW);
-    let has_nvidia = nv.output().map(|o| o.status.success()).unwrap_or(false);
-
+    let (has_nvidia, has_amd) = torch_wheels::gpu_vendors_present();
     let compute_cap_major = if has_nvidia { detect_nvidia_compute_cap_major() } else { None };
-    let pytorch_index = pytorch_index_for(has_nvidia, compute_cap_major);
-
-    let gpu_info = match (has_nvidia, compute_cap_major) {
-        (true, Some(major)) if major >= 12 => "NVIDIA Blackwell GPU detected (SM 12.0+) — installing PyTorch cu128",
-        (true, Some(_)) => "NVIDIA GPU detected, installing CUDA PyTorch (cu126)",
-        (true, None) => "NVIDIA GPU detected (compute capability probe failed), falling back to cu126",
-        (false, _) => "No NVIDIA GPU — installing CPU PyTorch",
+    let plan = torch_wheels::comfy_wheel_plan(
+        has_nvidia,
+        compute_cap_major,
+        has_amd,
+        std::env::consts::OS,
+    );
+    let note = plan.note().to_string();
+    let index = torch_wheels::resolve_plan_index(&plan);
+    let gpu_info = match index {
+        Some(url) => format!("{note} ({url})"),
+        None => note,
     };
-    (pytorch_pip_args(pytorch_index), gpu_info.to_string())
+    (pytorch_pip_args(index), gpu_info)
 }
 
 #[tauri::command]
@@ -3602,28 +3594,39 @@ mod tests {
 
     #[test]
     fn pytorch_index_rides_living_channels() {
+        use crate::commands::torch_wheels::{comfy_wheel_plan, WheelPlan};
+        let first = |nv, cap, amd, os| match comfy_wheel_plan(nv, cap, amd, os) {
+            WheelPlan::Index { candidates, .. } => Some(candidates[0]),
+            WheelPlan::Cpu { .. } => None,
+        };
         assert_eq!(
-            pytorch_index_for(true, Some(12)),
+            first(true, Some(12), false, "windows"),
             Some("https://download.pytorch.org/whl/cu128")
         );
         assert_eq!(
-            pytorch_index_for(true, Some(8)),
+            first(true, Some(8), false, "windows"),
             Some("https://download.pytorch.org/whl/cu126")
         );
         assert_eq!(
-            pytorch_index_for(true, None),
+            first(true, None, false, "windows"),
             Some("https://download.pytorch.org/whl/cu126")
         );
-        assert_eq!(pytorch_index_for(false, None), None);
+        assert_eq!(first(false, None, false, "linux"), None);
     }
 
     #[test]
     fn pytorch_index_never_picks_the_frozen_cu121_channel() {
         // Negative control: cu121 is stuck at torch 2.5.1, which current
         // ComfyUI cores reject at import (comfy_kitchen infer_schema).
+        use crate::commands::torch_wheels::{comfy_wheel_plan, WheelPlan};
         for (nv, cap) in [(true, Some(6)), (true, Some(7)), (true, Some(8)), (true, Some(9)), (true, Some(12)), (true, None)] {
-            let idx = pytorch_index_for(nv, cap).unwrap_or("");
-            assert!(!idx.contains("cu121"), "frozen channel chosen for cap {:?}", cap);
+            if let WheelPlan::Index { candidates, .. } = comfy_wheel_plan(nv, cap, false, "linux") {
+                assert!(
+                    !candidates.iter().any(|c| c.contains("cu121")),
+                    "frozen channel chosen for cap {:?}",
+                    cap
+                );
+            }
         }
     }
 

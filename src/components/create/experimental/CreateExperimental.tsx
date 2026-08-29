@@ -167,10 +167,15 @@ function CreateExperimentalInner() {
             {/* The right AMD path differs per OS — three users followed the
                 generic ZLUDA pointer on Linux, where ZLUDA guides are
                 Windows-only dead ends (numbrain/lapbo/suraj3014, 2026-08-02).
-                Linux AMD wants a ROCm torch inside ComfyUI's own venv. */}
+                Linux AMD wants a ROCm torch inside ComfyUI's own venv.
+                Since 2.6.7 the ComfyUI installer picks the ROCm wheels itself
+                on an AMD Linux box, so the fix is a reinstall and not a pip
+                line the user has to type by hand. Windows has no ROCm wheel at
+                all, so it gets the honest version instead of a channel that
+                does not exist there. */}
             {isLinux()
-              ? ' AMD GPU? Install the ROCm build of PyTorch into ComfyUI’s venv (pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/rocm6.2), then set Settings → Hardware → ComfyUI GPU to force GPU.'
-              : ' AMD GPU? Point LU at a ROCm/ZLUDA ComfyUI and set Settings → Hardware → ComfyUI GPU to force GPU.'}
+              ? ' AMD GPU? LU installs the ROCm build of PyTorch for AMD cards now. Reinstall the ComfyUI environment from Settings → ComfyUI, then set Settings → Hardware → ComfyUI GPU to Auto.'
+              : ' AMD GPU? PyTorch ships no ROCm wheels for Windows, so this card needs a DirectML or ZLUDA ComfyUI of your own. Point LU at it and set Settings → Hardware → ComfyUI GPU to force GPU.'}
           </span>
         </div>
       )}
