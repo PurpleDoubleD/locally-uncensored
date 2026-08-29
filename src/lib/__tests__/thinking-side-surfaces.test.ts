@@ -2,16 +2,16 @@
  * Loch 5, 6 und 7 des Denk-Audits (2.6.7, 2026-08-29): the three surfaces
  * beside chat, agent and coding.
  *
- *   5. Workflow engine — carried its own hand-written copy of the balanced
+ *   5. Workflow engine, which carried its own hand-written copy of the balanced
  *      `<think>` regex. It missed the pre-opened Qwen3 shape (closer without
  *      opener), a turn cut off mid-thought, and every non-canonical marker.
  *      A workflow step's output is not only shown, it becomes a workflow
  *      VARIABLE and rides into every later step's prompt, so leaked reasoning
  *      compounds down the chain.
- *   6. A/B compare — sent no thinking signal at all and stripped nothing, so
+ *   6. A/B compare, which sent no thinking signal at all and stripped nothing, so
  *      the comparison ran on whatever the backend happened to default to and
  *      the raw reasoning was part of what the user was comparing.
- *   7. Benchmark — counted a reasoning chunk only on the NATIVE channel. A
+ *   7. Benchmark, which counted a reasoning chunk only on the NATIVE channel. A
  *      backend without one sends the thought inline as `<think>` inside the
  *      content (Ollama with the flag unset, llama.cpp with reasoning-format
  *      none, LM Studio), so it landed in the answer text the correctness

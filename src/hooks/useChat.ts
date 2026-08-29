@@ -820,7 +820,7 @@ export function useChat() {
             finishReason = chunk.finishReason
             useChatStore.getState().updateMessageFinishReason(convId!, assistantMessage.id, chunk.finishReason)
           }
-          // Final settlement — the shared one, so plain chat catches the same
+          // Final settlement, the shared one, so plain chat catches the same
           // orphan shapes the agent loops do. Before this the char-by-char
           // machine above was the whole story here, and it only ever fires on
           // a literal `<think>`: a Qwen3 template that pre-opens the thought

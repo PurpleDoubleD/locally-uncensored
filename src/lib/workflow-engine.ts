@@ -298,7 +298,7 @@ export class WorkflowEngine {
     // Loch 5). This used to be a hand-written copy of the balanced-block
     // regex, so a pre-opened Qwen3 thought (closer without opener), a turn cut
     // off mid-thought and every non-canonical marker went straight into the
-    // step output — which is not only shown, it becomes a workflow VARIABLE
+    // step output, which is not only shown: it becomes a workflow VARIABLE
     // and rides into every later step's prompt.
     output = settleThinking(output, '', false).content
 

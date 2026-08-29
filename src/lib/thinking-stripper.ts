@@ -198,7 +198,7 @@ export function settleThinking(
     think = think ? `${think}\n\n${part}` : part
   }
 
-  // Balanced blocks first — the common, well-formed case.
+  // Balanced blocks first, the common well-formed case.
   out = out.replace(/<think>([\s\S]*?)<\/think>/gi, (_m, inner: string) => {
     add(inner)
     return ''

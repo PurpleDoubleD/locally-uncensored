@@ -161,7 +161,7 @@ describe('a local server that refuses the field is not mistaken for one that can
  * Before the template switch, plain chat and the coding loop appended "reason
  * inside <think></think> tags" to the system prompt for every OpenAI-compatible
  * endpoint that declared nothing. On a LOCAL backend that now arrives on top of
- * a template that has already opened the thought — the same double instruction
+ * a template that has already opened the thought. That is the same double instruction
  * that trapped David's cloud Qwen3.6 in a reasoning loop on 2026-07-12, one
  * layer down. Cloud endpoints that declare nothing keep the injection: it is
  * still the only thing that can ask them.
