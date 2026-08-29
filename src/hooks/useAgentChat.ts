@@ -9,7 +9,7 @@ import {
   drainApprovals,
 } from '../lib/approval-queue'
 import { v4 as uuid } from 'uuid'
-import { streamProviderTurn } from '../lib/provider-stream'
+import { streamProviderTurn, type StreamedProviderTurn } from '../lib/provider-stream'
 import { createHermesDisplayFilter, createThinkStreamSplitter, createTurnThinkingSink } from '../lib/hermes-stream'
 import { beginAgentRun, endAgentRun, setActiveAgentModel, renderWorkspaceSection, takeChatArtifacts, type AgentRunContext } from '../api/agent-context'
 import { resolveChatWorkspaceSlug } from '../api/workspace-slug'
@@ -984,7 +984,11 @@ export function useAgentChat() {
                   },
                   (t) => {
                     dropThinkingBlock()
-                    if (settings.thinkingEnabled === true) {
+                    // The one gate for the whole step. Reading the raw setting
+                    // here disagreed with the end-of-turn routing for an
+                    // 'always' reasoner: nothing streamed live, then the whole
+                    // thought appeared at once when the turn ended.
+                    if (keepThinking) {
                       thinkingRef.current = t
                       scheduleUIUpdate()
                     }
@@ -1074,7 +1078,8 @@ export function useAgentChat() {
             }
             const onLiveThinking = (t: string) => {
               dropThinkingBlock()
-              if (settings.thinkingEnabled === true) {
+              // Same gate as the end-of-turn routing, see the Ollama branch.
+              if (keepThinking) {
                 thinkingRef.current = t
                 scheduleUIUpdate()
               }
@@ -1178,7 +1183,18 @@ export function useAgentChat() {
             contentRef.current = shown
             scheduleUIUpdate()
           }
-          const hermesTurn = await streamProviderTurn(
+          // The tri-state, not a hole. Until the 2.6.7 Denk-Audit this branch
+          // passed `thinking: undefined` and threw the switch away, in both
+          // directions: ON never reached the model, and OFF never turned
+          // anything off either, because undefined means "server decides" and
+          // the Qwen3 family decides yes. The prompt transport is where every
+          // strict template and every tool-less local model lands, the
+          // built-in engine included, so that was a whole transport with a
+          // dead Think button. The tool contract travels as TEXT here, so a
+          // thinking flag cannot disturb it.
+          const hermesOpts = { ...chatOptions }
+          let hermesTurn: StreamedProviderTurn
+          const runHermes = (opts: typeof hermesOpts) => streamProviderTurn(
             provider,
             modelToUse,
             // Bug B3 round 2: this used to rebuild every message as bare
@@ -1187,7 +1203,7 @@ export function useAgentChat() {
             // contract decides what a template can render; it must be given
             // the whole message to decide on.
             sendMessages,
-            { ...chatOptions, thinking: undefined as unknown as boolean },
+            opts,
             (_full, delta) => feedUI(splitter.feed(display.feed(delta))),
             // A prompt-transport backend can still answer on the NATIVE
             // reasoning channel: the built-in engine extracts <think> into
@@ -1197,6 +1213,19 @@ export function useAgentChat() {
             // floor and the block stayed empty with the Think button on.
             (full) => { thinkSink.native(full); paintThink() },
           )
+          try {
+            hermesTurn = await runHermes(hermesOpts)
+          } catch (thinkErr: any) {
+            // Same downgrade the native branches carry: an old Ollama build or
+            // an endpoint that predates the knob answers 400, and the run must
+            // survive that instead of ending on it.
+            if (hermesOpts.thinking !== undefined
+              && (thinkErr?.message?.includes('does not support thinking') || httpStatusOf(thinkErr) === 400)) {
+              hermesTurn = await runHermes({ ...hermesOpts, thinking: undefined as unknown as boolean })
+            } else {
+              throw thinkErr
+            }
+          }
           feedUI(splitter.feed(display.flush()))
           feedUI(splitter.flush())
           if (hermesTurn.thinking) {
@@ -1489,7 +1518,7 @@ export function useAgentChat() {
           // the one top-of-bubble field. A run with NO tool activity keeps
           // the classic bubble (plain chat look, and the tool-intent hint
           // in MessageBubble reads message.thinking).
-          if (executedCallKeys.size > 0 && turnThinking.trim() && settings.thinkingEnabled === true) {
+          if (executedCallKeys.size > 0 && turnThinking.trim() && keepThinking) {
             addBlock(convId!, assistantMessage.id, {
               id: uuid(),
               phase: 'thinking',
@@ -1511,7 +1540,7 @@ export function useAgentChat() {
         // The top-level field is cleared so the same thought never shows twice;
         // the next round's live stream refills it while streaming and lands
         // here again when that round completes.
-        if (turnThinking.trim() && settings.thinkingEnabled === true) {
+        if (turnThinking.trim() && keepThinking) {
           addBlock(convId!, assistantMessage.id, {
             id: uuid(),
             phase: 'thinking',

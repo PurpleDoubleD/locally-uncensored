@@ -1423,11 +1423,21 @@ export function useCodex() {
               liveContent(shown)
             }
           }
-          const hermesTurn = await streamProviderTurn(
+          // The tri-state, not a hole. Until the 2.6.7 Denk-Audit this branch
+          // passed `thinking: undefined` and threw the switch away in both
+          // directions: ON never reached the model, and OFF turned nothing
+          // off either, because undefined means "server decides" and the
+          // Qwen3 family decides yes. The prompt transport is where every
+          // strict template and every tool-less local model lands, the
+          // built-in engine included. The tool contract travels as TEXT here,
+          // so a thinking flag cannot disturb it.
+          const hermesOpts = { ...chatOptions, contextWindow: numCtx }
+          let hermesTurn: StreamedProviderTurn
+          const runHermes = (opts: typeof hermesOpts) => streamProviderTurn(
             provider,
             modelToUse,
             sendMessages.map(m => ({ role: m.role, content: m.content })),
-            { ...chatOptions, thinking: undefined as unknown as boolean, contextWindow: numCtx },
+            opts,
             (_full, delta) => feedUI(splitter.feed(display.feed(delta))),
             // A prompt-transport backend can still answer on the NATIVE
             // reasoning channel: llama-server extracts <think> into
@@ -1438,6 +1448,19 @@ export function useCodex() {
             // empty with the Think button switched on.
             (full) => { thinkSink.native(full); paintThink() },
           )
+          try {
+            hermesTurn = await runHermes(hermesOpts)
+          } catch (thinkErr: any) {
+            // Same downgrade the native branch carries: an old Ollama build or
+            // an endpoint that predates the knob answers 400, and the run must
+            // survive that instead of ending on it.
+            if (hermesOpts.thinking !== undefined
+              && (thinkErr?.message?.includes('does not support thinking') || httpStatusOf(thinkErr) === 400)) {
+              hermesTurn = await runHermes({ ...hermesOpts, thinking: undefined as unknown as boolean })
+            } else {
+              throw thinkErr
+            }
+          }
           feedUI(splitter.feed(display.flush()))
           feedUI(splitter.flush())
           if (keepThinking && hermesTurn.thinking) {

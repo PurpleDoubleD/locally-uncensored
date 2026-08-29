@@ -130,4 +130,23 @@ describe('both agent loops are wired to it, on the prompt transport too', () => 
     expect(agent).toContain('if (hermesTurn.thinking)')
     expect(codex).toContain('if (keepThinking && hermesTurn.thinking)')
   })
+
+  // Loch 8: the same branch also threw the SEND side away. It passed
+  // `thinking: undefined`, which is not "off", it is "server decides", and
+  // the Qwen3 family decides yes. So the button did nothing in either
+  // direction on the transport every strict template and every tool-less
+  // local model takes, the built-in engine included.
+  it('the prompt transport carries the tri-state instead of discarding it', () => {
+    for (const src of [agent, codex]) {
+      expect(src).toContain('const runHermes = (opts: typeof hermesOpts)')
+      expect(src).toContain('hermesTurn = await runHermes(hermesOpts)')
+    }
+  })
+
+  it('NEGATIVE CONTROL: and still downgrades when the endpoint refuses the knob', () => {
+    for (const src of [agent, codex]) {
+      expect(src).toContain("hermesOpts.thinking !== undefined")
+      expect(src).toContain('runHermes({ ...hermesOpts, thinking: undefined as unknown as boolean })')
+    }
+  })
 })
