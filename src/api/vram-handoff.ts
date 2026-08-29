@@ -69,12 +69,13 @@ import {
   buildTxt2VidWorkflow,
   snapToVideoGrid,
   MODEL_TYPE_DEFAULTS,
+  isPromptQueued,
   type VideoBackend,
 } from './comfyui'
 import type { ModelCapabilities } from './comfyui-nodes'
 import { getActiveAgentModel } from './agent-context'
 import { comfyWS, CLIENT_ID } from './comfyui-ws'
-import { PaceTracker, overBudget, renderBudgetNotice, renderTimeoutNotice, warmupExceeded, swapWarmupNotice } from '../lib/render-budget'
+import { PaceTracker, overBudget, renderBudgetNotice, renderTimeoutNotice, warmupExceeded, swapWarmupNotice, loadPhaseGraceMs, finishGraceMs, warmupBudgetMs, SWAP_WARMUP_BUDGET_MS } from '../lib/render-budget'
 import { log } from '../lib/logger'
 
 /**
@@ -1325,7 +1326,6 @@ async function generateVideo(
  * message VERBATIM (Bug-G / honest-UX: an OOM reads as an OOM).
  */
 async function pollAndExtract(promptId: string, prompt: string, kindLabel: string, timeoutMs: number): Promise<string> {
-  const deadline = Date.now() + timeoutMs
   // G19-1 render budget: read the pace off ComfyUI's own progress events and
   // give up EARLY, with the job cancelled, once the projection says the render
   // cannot land inside the budget (R32: a 30 to 60 minute Wan job burned the
@@ -1337,19 +1337,61 @@ async function pollAndExtract(promptId: string, prompt: string, kindLabel: strin
   // (R17c: 19 minutes of "loading model into VRAM"). Track whether ANY prompt
   // progressed; if the WS is alive and nothing on the GPU has moved for the
   // whole warm-up budget, the load is wedged and the job gets abandoned.
+  //
+  // Z36 finding 4 (W3 run 2026-08-16): a forced z_image_bf16 render in the chat
+  // tool was abandoned after 352.6 s while the Create tab renders the same job.
+  // The first load of the big bf16 checkpoint on a 3060 outlasted the warm-up
+  // budget, and neither guard here could tell a slow load from a wedged one.
+  // Two things change. The warm-up guard asks ComfyUI whether the prompt is
+  // still queued before calling the load wedged, the same life signal the
+  // Create watchdog uses. And the flat deadline is recomputed every tick with
+  // the measured load phase added, so the render budget is spent on the render.
+  // The pace verdict keeps the RAW budget, so a hopeless render (R32) still
+  // dies after three sampler steps.
   const startedAt = Date.now()
   let sawAnyProgress = false
+  let firstOwnProgressAt: number | null = null
+  let finishGraceUsed = 0
+  // Z36 finding 4, second half: before calling a long load wedged, ask ComfyUI
+  // whether our prompt is still in its queue. That is the same life signal the
+  // Create watchdog uses (useCreate: isPromptQueued refreshes lastActivity), and
+  // it is the reason the Create tab finishes a render the agent path abandoned.
+  // Asked only once the plain warm-up budget is spent, and at most every 30 s,
+  // so a healthy render never pays for the extra request.
+  let promptAlive = false
+  let aliveCheckedAt = 0
   const offProgress = comfyWS.on((ev) => {
     if (ev.type === 'progress') {
       sawAnyProgress = true
       if (ev.data.prompt_id === promptId) {
-        pace.tick(ev.data.value, ev.data.max, Date.now())
+        const at = Date.now()
+        if (firstOwnProgressAt === null) firstOwnProgressAt = at
+        pace.tick(ev.data.value, ev.data.max, at)
       }
     }
   })
   void comfyWS.connect().catch(() => { /* degrade to the flat deadline */ })
   try {
-    while (Date.now() < deadline) {
+    for (;;) {
+      const deadline = startedAt + timeoutMs
+        + loadPhaseGraceMs(comfyWS.connected, startedAt, firstOwnProgressAt, Date.now(), warmupBudgetMs(promptAlive))
+        + finishGraceUsed
+      if (Date.now() >= deadline) {
+        // Adopt a render that is seconds from done instead of throwing away the
+        // load and the sampling it already paid for. Granted at most once.
+        const grace = finishGraceUsed === 0 ? finishGraceMs(pace.projectedRemainingMs()) : 0
+        if (grace > 0) {
+          finishGraceUsed = grace
+          log.info('vram_handoff.render_finish_grace', { promptId, graceMs: grace })
+          continue
+        }
+        // Deadline reached: the wait ends AND the job ends. The old return here
+        // walked away and left the render burning the GPU with no owner.
+        const elapsedMs = Date.now() - startedAt
+        log.warn('vram_handoff.render_timeout_abort', { promptId, budgetMs: timeoutMs, elapsedMs })
+        await abandonPrompt(promptId)
+        return renderTimeoutNotice(kindLabel, timeoutMs, elapsedMs)
+      }
       // User hit the in-chat cancel button — ComfyUI was already sent /interrupt
       // + queue-clear by requestGenerationCancel(); stop polling so runHandoff's
       // finally can restore the text model into VRAM instead of waiting out the
@@ -1391,17 +1433,16 @@ async function pollAndExtract(promptId: string, prompt: string, kindLabel: strin
         return renderBudgetNotice(kindLabel, projected!, timeoutMs)
       }
       const warmupElapsed = Date.now() - startedAt
-      if (warmupExceeded(sawAnyProgress, comfyWS.connected, warmupElapsed)) {
-        log.warn('vram_handoff.swap_warmup_abort', { promptId, elapsedMs: warmupElapsed })
+      if (!sawAnyProgress && warmupElapsed > SWAP_WARMUP_BUDGET_MS && Date.now() - aliveCheckedAt > 30_000) {
+        aliveCheckedAt = Date.now()
+        promptAlive = await isPromptQueued(promptId)
+      }
+      if (warmupExceeded(sawAnyProgress, comfyWS.connected, warmupElapsed, warmupBudgetMs(promptAlive))) {
+        log.warn('vram_handoff.swap_warmup_abort', { promptId, elapsedMs: warmupElapsed, promptAlive })
         await abandonPrompt(promptId)
         return swapWarmupNotice(kindLabel, warmupElapsed)
       }
     }
-    // Deadline reached: the wait ends AND the job ends. The old return here
-    // walked away and left the render burning the GPU with no owner.
-    log.warn('vram_handoff.render_timeout_abort', { promptId, budgetMs: timeoutMs })
-    await abandonPrompt(promptId)
-    return renderTimeoutNotice(kindLabel, timeoutMs)
   } finally {
     offProgress()
   }
