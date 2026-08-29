@@ -21,6 +21,16 @@ interface ModelState {
   activePulls: Record<string, PullState>
   isModelLoading: boolean
   categoryFilter: ModelCategory
+  /** Has a model list ever landed here. A counter must show a loading mark
+   *  until it has, never a 0 (Befund 2 of the abnahme counter-check
+   *  2026-08-29: "Installed 0" next to three Installed cards). */
+  inventoryLoaded: boolean
+  /** How many inventory refreshes are in flight. A number, not a flag,
+   *  because fetchModels is called from several mounted components at once
+   *  and the first one to finish must not declare the count settled. */
+  inventoryRefreshes: number
+  beginInventoryRefresh: () => void
+  endInventoryRefresh: () => void
   setModels: (models: AIModel[]) => void
   setActiveModel: (name: string | null) => void
   startPull: (name: string, controller: AbortController) => void
@@ -40,6 +50,12 @@ export const useModelStore = create<ModelState>()(
       activePulls: {},
       isModelLoading: false,
       categoryFilter: 'all',
+      inventoryLoaded: false,
+      inventoryRefreshes: 0,
+
+      beginInventoryRefresh: () => set((state) => ({ inventoryRefreshes: state.inventoryRefreshes + 1 })),
+      endInventoryRefresh: () =>
+        set((state) => ({ inventoryRefreshes: Math.max(0, state.inventoryRefreshes - 1) })),
 
       setModels: (models) =>
         set((state) => {
@@ -59,6 +75,7 @@ export const useModelStore = create<ModelState>()(
           const firstChat = models.find((m) => m.type !== 'image' && m.type !== 'video')
           return {
             models,
+            inventoryLoaded: true,
             activeModel: stillValid
               ? state.activeModel
               : (firstChat ? firstChat.name : null),

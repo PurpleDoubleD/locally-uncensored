@@ -62,6 +62,7 @@ async function resumeEmbedServer(bundled: BundledModel[]) {
 export function useModels() {
   const {
     models: allModels, activeModel, activePulls, categoryFilter,
+    inventoryLoaded, inventoryRefreshes,
     setModels, setActiveModel, startPull, updatePullProgress,
     pausePull, completePull, dismissPull, setCategoryFilter,
   } = useModelStore()
@@ -103,6 +104,12 @@ export function useModels() {
   }, [])
 
   const fetchModels = useCallback(async () => {
+    // Announced before the first await, cleared in the finally below. A
+    // counter reading 0 while this is up has not counted anything yet and
+    // says so instead of stating a number (Befund 2, abnahme counter-check
+    // 2026-08-29: the Models page opened on "Installed 0" beside three
+    // Installed cards, and was right again five seconds later).
+    useModelStore.getState().beginInventoryRefresh()
     try {
       const allModels: AIModel[] = []
       // Built-in engine (2.5.7): when the managed OpenAI-compat backend is the
@@ -238,6 +245,8 @@ export function useModels() {
       setModels([...allModels, ...comfyModels])
     } catch (err) {
       log.warn('[useModels] Model list refresh failed', { err })
+    } finally {
+      useModelStore.getState().endInventoryRefresh()
     }
   }, [setModels])
 
@@ -354,6 +363,9 @@ export function useModels() {
 
   return {
     models, activeModel, activePulls, isPulling, categoryFilter,
+    // What the counters need to tell "nothing installed" apart from "not
+    // counted yet". See lib/inventory-counter.ts.
+    inventoryLoaded, inventoryRefreshing: inventoryRefreshes > 0,
     fetchModels, pullModel, pausePull, dismissPull,
     removeModel, setActiveModel: activateModel, setCategoryFilter, getFilteredModels, isPullingModel,
   }
