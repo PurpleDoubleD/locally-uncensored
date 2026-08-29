@@ -77,7 +77,7 @@
 ;
 ; aldrich_ironhart, 2026-08-10: the update stopped at "Error opening file for
 ; writing: D:\Locally Uncensored\llama-server.exe" with Abort, Retry, Ignore.
-; llama-server.exe is our own sidecar (externalBin), and Windows locks a running
+; The sidecar is our own (externalBin), and Windows locks a running
 ; image against writes, so the copy cannot succeed while it lives. Rust kills it
 ; on every orderly exit (state.rs shutdown_subprocesses), which is exactly why
 ; the installer never accounted for the cases that are left: the app still open
@@ -108,18 +108,22 @@
 ; the hook, and it beats the stock dialog where Retry loops on the same lock
 ; and Ignore leaves the new app running last release's engine. The leftover is
 ; swept at the start of the next install.
-!macro LU_FREE_SIDECAR
+; The file name is a parameter since GitHub #120 renamed the sidecar to
+; lu-llama-server.exe. An update coming from 2.6.6 or older still finds the old
+; llama-server.exe in the install folder, possibly with a live process on it,
+; so both names get freed and the one we no longer ship gets swept away.
+!macro LU_FREE_SIDECAR EXE
   Push $R3
   Push $R4
   Push $R9
-  Delete "$INSTDIR\llama-server.exe.old"
+  Delete "$INSTDIR\${EXE}.old"
   StrCpy $R4 0
   ${Do}
-    ${IfNot} ${FileExists} "$INSTDIR\llama-server.exe"
+    ${IfNot} ${FileExists} "$INSTDIR\${EXE}"
       ${ExitDo}
     ${EndIf}
     ClearErrors
-    FileOpen $R3 "$INSTDIR\llama-server.exe" a
+    FileOpen $R3 "$INSTDIR\${EXE}" a
     ${IfNot} ${Errors}
       FileClose $R3
       ${ExitDo}
@@ -127,11 +131,11 @@
     ${If} $R4 >= 4
       ; Still locked after four rounds, so it is not our engine holding it.
       ; Move it out of the way instead of spinning here or failing the copy.
-      Rename "$INSTDIR\llama-server.exe" "$INSTDIR\llama-server.exe.old"
+      Rename "$INSTDIR\${EXE}" "$INSTDIR\${EXE}.old"
       ${ExitDo}
     ${EndIf}
     IntOp $R4 $R4 + 1
-    nsExec::Exec `"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -Command "Get-CimInstance Win32_Process | Where-Object { $$_.ExecutablePath -eq '$INSTDIR\llama-server.exe' } | ForEach-Object { Stop-Process -Id $$_.ProcessId -Force }"`
+    nsExec::Exec `"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -Command "Get-CimInstance Win32_Process | Where-Object { $$_.ExecutablePath -eq '$INSTDIR\${EXE}' } | ForEach-Object { Stop-Process -Id $$_.ProcessId -Force }"`
     Pop $R9
     Sleep 800
   ${Loop}
@@ -140,8 +144,18 @@
   Pop $R3
 !macroend
 
+; What 2.6.6 and older left behind. We do not ship this file any more, so it is
+; freed for the same reason (a live orphan would keep answering on our port)
+; and then removed rather than left as a 3 GB stranger in the install folder.
+!macro LU_SWEEP_OLD_SIDECAR
+  !insertmacro LU_FREE_SIDECAR "llama-server.exe"
+  Delete "$INSTDIR\llama-server.exe"
+  Delete "$INSTDIR\llama-server.exe.old"
+!macroend
+
 !macro NSIS_HOOK_PREINSTALL
-  !insertmacro LU_FREE_SIDECAR
+  !insertmacro LU_FREE_SIDECAR "lu-llama-server.exe"
+  !insertmacro LU_SWEEP_OLD_SIDECAR
 
 !if "${PRODUCTNAME}" != "Locally Uncensored"
   !insertmacro LU_REMOVE_OLD_NSIS HKCU

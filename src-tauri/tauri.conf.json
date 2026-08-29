@@ -52,7 +52,7 @@
       "../dist"
     ],
     "externalBin": [
-      "bin/llama-server"
+      "bin/lu-llama-server"
     ],
     "icon": [
       "icons/32x32.png",

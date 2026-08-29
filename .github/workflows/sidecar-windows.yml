@@ -61,7 +61,7 @@ jobs:
       - name: Boot smoke — real model load + /health
         shell: pwsh
         run: |
-          $bin = "src-tauri\bin\llama-server-x86_64-pc-windows-msvc.exe"
+          $bin = "src-tauri\bin\lu-llama-server-x86_64-pc-windows-msvc.exe"
           if (-not (Test-Path $bin)) { throw "sidecar binary missing" }
           & $bin --version
           if ($LASTEXITCODE -ne 0) { throw "llama-server --version exited $LASTEXITCODE" }
@@ -90,6 +90,6 @@ jobs:
       - name: Upload sidecar artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: llama-server-x86_64-pc-windows-msvc
-          path: src-tauri/bin/llama-server-x86_64-pc-windows-msvc.exe
+          name: lu-llama-server-x86_64-pc-windows-msvc
+          path: src-tauri/bin/lu-llama-server-x86_64-pc-windows-msvc.exe
           retention-days: 14

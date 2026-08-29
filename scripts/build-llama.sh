@@ -76,10 +76,15 @@ cmake_flags_for() {
   esac
 }
 
+# The bundled file carries the app prefix (GitHub #120): Tauri's deb bundler
+# copies external binaries into /usr/bin, and Debian's own llama.cpp-tools
+# package already owns /usr/bin/llama-server, so a plain name made dpkg refuse
+# the whole install. Only the OUTPUT name changes; the binary llama.cpp itself
+# builds is still called llama-server and is found under that name above.
 out_name_for() {
   case "$1" in
-    *-windows-*) echo "llama-server-$1.exe" ;;
-    *)           echo "llama-server-$1" ;;
+    *-windows-*) echo "lu-llama-server-$1.exe" ;;
+    *)           echo "lu-llama-server-$1" ;;
   esac
 }
 
