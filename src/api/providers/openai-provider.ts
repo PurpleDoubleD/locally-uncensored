@@ -19,7 +19,7 @@ import { repairJson } from '../../lib/tool-call-repair'
 import { signalCreditsExhausted } from '../../lib/credits-exhausted'
 import { parseRetryAfter } from '../../lib/http-status'
 import { localFetch, localFetchStream, isPrivateOrLanHost, isDirectFetchAllowed, hostnameOf, ensureProxyAllowsHost, backendCall } from '../backend'
-import { ensureBuiltinEngineAlive, explainDeadEngine, isManagedBuiltinSlot } from '../builtin-ensure'
+import { ensureBuiltinEngineAlive, explainDeadEngine, explainEngineTransportMessage, isManagedBuiltinSlot } from '../builtin-ensure'
 import { applyTemplateContract } from './normalize-system'
 
 // Transport routing lives in the `useLocalProxy` getter (below) plus the shared
@@ -1105,6 +1105,20 @@ export class OpenAIProvider implements ProviderClient {
         "(plus a GPU runtime if you have one).\n\n" +
         "Once the runtime is downloaded, come back here and resend your message, " +
         "no need to restart LU."
+    }
+
+    // Our OWN engine could not be reached. The failure never arrives as a
+    // thrown error on the streaming path: localFetchStream turns a refused
+    // connection into Response(503, {"error": "proxy_localhost_stream_chunked:
+    // ..."}), so the raw Rust command name landed in the chat bubble
+    // (counter-check round 2, 2026-08-29). Say it in English instead. Last in
+    // the chain so a server that answered with real words keeps them.
+    if (this.config.managed === true) {
+      const friendly = explainEngineTransportMessage(message, this.baseUrl)
+      if (friendly) {
+        message = friendly
+        code = 'network'
+      }
     }
 
     return new ProviderError(message, 'openai', code, res.status, undefined, parseRetryAfter(res))
