@@ -11,7 +11,8 @@ import {
 import { v4 as uuid } from 'uuid'
 import { streamProviderTurn } from '../lib/provider-stream'
 import { createHermesDisplayFilter, createThinkStreamSplitter } from '../lib/hermes-stream'
-import { beginAgentRun, endAgentRun, chatWorkspaceSlug, setActiveAgentModel, renderWorkspaceSection, takeChatArtifacts, type AgentRunContext } from '../api/agent-context'
+import { beginAgentRun, endAgentRun, setActiveAgentModel, renderWorkspaceSection, takeChatArtifacts, type AgentRunContext } from '../api/agent-context'
+import { resolveChatWorkspaceSlug } from '../api/workspace-slug'
 import { isOllamaLocal } from '../api/backend'
 import { requestGenerationCancel } from '../api/vram-handoff'
 import { resolveWorkspace } from '../api/agents/workspace-resolve'
@@ -321,12 +322,15 @@ export function useAgentChat() {
     // built-in tools land in `~/agent-workspace/<slug>/`. Previously
     // this was the raw conversation UUID — folders were technically
     // isolated but the user couldn't tell which chat owned which
-    // workspace by looking. The slug derives from the chat title
-    // (which auto-rename gives a meaningful one after the first user
-    // message) plus a short id suffix to keep two chats with the same
-    // title from colliding.
+    // workspace by looking.
+    //
+    // Resolved, not recomputed: the name is pinned to the conversation the
+    // first time it is needed and frozen there. Deriving it from the title on
+    // every turn meant the app's own auto-rename moved the folder mid-run and
+    // the agent lost its files between round one and round two (counter-check
+    // round 2, 2026-08-29). See api/workspace-slug.ts.
     const convForSlug = useChatStore.getState().conversations.find((c) => c.id === convId)
-    const slug = chatWorkspaceSlug(convId, convForSlug?.title)
+    const slug = await resolveChatWorkspaceSlug(convId, convForSlug?.title)
 
     // Multi-Repo Agent (B15) + workspace unification (B17): pin the
     // resolved workspace so chatCtx() in builtin-tools.ts threads it

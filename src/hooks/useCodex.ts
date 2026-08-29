@@ -17,7 +17,8 @@ import { CODEX_CONFIRM_TOOLS } from './codexShellGate'
 import { buildHermesToolPrompt, buildHermesToolResult, buildHermesToolCall, parseHermesToolCalls, stripToolCallTags, hasToolCallTags } from '../api/hermes-tool-calling'
 import { streamProviderTurn, type StreamedProviderTurn } from '../lib/provider-stream'
 import { createHermesDisplayFilter } from '../lib/hermes-stream'
-import { beginAgentRun, endAgentRun, chatWorkspaceSlug, setActiveAgentModel, type AgentRunContext } from '../api/agent-context'
+import { beginAgentRun, endAgentRun, setActiveAgentModel, type AgentRunContext } from '../api/agent-context'
+import { resolveChatWorkspaceSlug } from '../api/workspace-slug'
 import { codexModeKnobs, CODEX_MODE_LABELS, type CodexMode } from '../lib/codex-mode'
 import { CODEX_PLAN_SYSTEM_PROMPT } from '../lib/codex-plan-prompt'
 import { resolveWorkspace } from '../api/agents/workspace-resolve'
@@ -326,7 +327,13 @@ export function useCodex() {
     // Slug uses the chat title so the folder is recognisable in
     // Explorer; falls back to a stable id-derived suffix when the
     // title is empty. Cleared in the finally block.
+    //
+    // Resolved ONCE per turn and reused everywhere below. The name is pinned
+    // to the conversation on first use, so the auto-rename after the first
+    // message can no longer move the folder out from under a running agent
+    // (counter-check round 2, 2026-08-29). See api/workspace-slug.ts.
     const convForSlug = store.conversations.find((c) => c.id === convId)
+    const workspaceSlug = await resolveChatWorkspaceSlug(convId, convForSlug?.title)
 
     // Multi-Repo Agent (B15) + Codex/Agent workspace unification (B17):
     // pin the resolved workspace so the bridge resolves relative paths
@@ -429,7 +436,7 @@ export function useCodex() {
     // ERZWINGUNG, blocker S3). The finally closes it, and closing only clears
     // the process-wide mirror when this run still owns it.
     const run: AgentRunContext = beginAgentRun({
-      chatId: chatWorkspaceSlug(convId, convForSlug?.title),
+      chatId: workspaceSlug,
       conversationId: convId,
       workspace: runWorkspace,
       readOnlyShellTurn: effectiveReadOnly,
@@ -1785,7 +1792,7 @@ export function useCodex() {
         // rendered as a 100% insert — hiding exactly the deletions/overwrites
         // the user needs to see before approving a staged change.
         const readCtx: { chatId?: string; workingDirectory?: string } =
-          workDir && workDir !== '.' ? { chatId: convId, workingDirectory: workDir } : { chatId: convId }
+          workDir && workDir !== '.' ? { chatId: workspaceSlug, workingDirectory: workDir } : { chatId: workspaceSlug }
         const oldContents = new Map<string, string>()
         await Promise.all(
           batch
@@ -1831,7 +1838,7 @@ export function useCodex() {
             ? path
             : `${workDir.replace(/[\\/]+$/, '')}${workDir.includes('\\') ? '\\' : '/'}${path.replace(/^[\\/]+/, '')}`
           const stageReadCtx: { chatId?: string; workingDirectory?: string } =
-            workDir && workDir !== '.' ? { chatId: convId, workingDirectory: workDir } : { chatId: convId }
+            workDir && workDir !== '.' ? { chatId: workspaceSlug, workingDirectory: workDir } : { chatId: workspaceSlug }
           // A prior staged entry for this path already knows the DISK state —
           // reuse it so the reviewed diff stays disk → latest even when the
           // model writes the same file twice in one run.
@@ -1878,7 +1885,7 @@ export function useCodex() {
             ? path
             : `${workDir.replace(/[\\/]+$/, '')}${workDir.includes('\\') ? '\\' : '/'}${path.replace(/^[\\/]+/, '')}`
           const stageReadCtx: { chatId?: string; workingDirectory?: string } =
-            workDir && workDir !== '.' ? { chatId: convId, workingDirectory: workDir } : { chatId: convId }
+            workDir && workDir !== '.' ? { chatId: workspaceSlug, workingDirectory: workDir } : { chatId: workspaceSlug }
           // Read-your-writes: chain onto the STAGED content when this path is
           // already pending. Without this the base was re-read from DISK —
           // which never saw the staged write — so a second edit to the same

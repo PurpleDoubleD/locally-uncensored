@@ -350,6 +350,17 @@ export function renderWorkspaceSection(ws: AgentWorkspace | null): string {
 }
 
 /**
+ * The stable half of a workspace slug: the conversation id, hyphens removed,
+ * first six characters. It is the ONLY part of a folder name that survives an
+ * auto-rename, which is what makes it the key the fallback search in
+ * `api/workspace-slug.ts` matches on. Empty id yields `noid`, which is a
+ * shared bucket and therefore never a legitimate search key.
+ */
+export function workspaceIdPart(id: string): string {
+  return (id || '').replace(/-/g, '').slice(0, 6) || 'noid'
+}
+
+/**
  * Build a human-readable workspace slug for a chat.
  *
  * Folders used to be named after the conversation UUID
@@ -367,7 +378,7 @@ export function renderWorkspaceSection(ws: AgentWorkspace | null): string {
  * defence in depth.
  */
 export function chatWorkspaceSlug(id: string, title?: string | null): string {
-  const idPart = (id || '').replace(/-/g, '').slice(0, 6) || 'noid'
+  const idPart = workspaceIdPart(id)
   const rawTitle = (title || '').toLowerCase().trim()
   if (!rawTitle) return idPart
   const slug = rawTitle

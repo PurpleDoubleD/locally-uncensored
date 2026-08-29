@@ -207,6 +207,7 @@ fn main() {
             commands::agent::file_write,
             commands::agent::set_chat_workspace_override,
             commands::agent::get_chat_workspace_override,
+            commands::agent::list_agent_workspaces,
             // Shell
             commands::shell::shell_execute,
             // Filesystem
