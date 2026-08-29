@@ -8,9 +8,27 @@
 // untagged, so each participant can tell who said what without any provider
 // support for multi-speaker roles.
 import type { Message } from '../types/chat'
+import type { AIModel } from '../types/models'
 
 export const GROUP_CHAT_MIN = 2
 export const GROUP_CHAT_MAX = 4
+
+/**
+ * The models that may sit at the table.
+ *
+ * Counter-check round 2 (2026-08-29): the picker listed the whole model store,
+ * so `sd_turbo.safetensors`, `Realistic_Vision_V6.0_NV_B1_fp16.safetensors` and
+ * `z_image_bf16.safetensors` were offered as conversation partners. An image
+ * checkpoint has nothing to say in a talking round. The chat model picker has
+ * always filtered on `type === 'text'`; the group picker simply never did.
+ *
+ * Anything already picked stays in the list even when it fails the test, so a
+ * group saved before this fix can still be taken apart by hand instead of
+ * showing a member nobody can reach.
+ */
+export function groupChatCandidates(models: AIModel[], selected: string[] = []): AIModel[] {
+  return models.filter((m) => m.type === 'text' || selected.includes(m.name))
+}
 
 /** True when this conversation runs as a group. */
 export function isGroupChat(groupModels: string[] | undefined): groupModels is string[] {

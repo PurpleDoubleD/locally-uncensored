@@ -4,7 +4,7 @@ import { useSettingsStore } from '../../stores/settingsStore'
 import { useChatStore } from '../../stores/chatStore'
 import { useModelStore } from '../../stores/modelStore'
 import { useToolSupport } from '../../hooks/useToolSupport'
-import { GROUP_CHAT_MAX, isGroupChat } from '../../lib/group-chat'
+import { GROUP_CHAT_MAX, isGroupChat, groupChatCandidates } from '../../lib/group-chat'
 import type { CavemanMode } from '../../types/settings'
 
 const CAVEMAN_MODES: { value: CavemanMode; label: string; desc: string }[] = [
@@ -277,7 +277,7 @@ export function PluginsDropdown({
                   <p className="px-2 pb-0.5 text-[0.5rem] leading-snug text-gray-400">
                     Pick 2 to {GROUP_CHAT_MAX} models. They answer in turn on every message, and each sees what the others said.
                   </p>
-                  {models.map((m) => {
+                  {groupChatCandidates(models, groupModels).map((m) => {
                     const on = groupModels.includes(m.name)
                     const full = !on && groupModels.length >= GROUP_CHAT_MAX
                     return (
