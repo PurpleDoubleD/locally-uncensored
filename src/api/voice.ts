@@ -172,6 +172,48 @@ export function stopSpeaking(): void {
 
 // --- Local Whisper STT ---
 
+/**
+ * A dictation failure whose message is already written FOR THE USER, so
+ * useVoice shows it verbatim instead of the generic microphone hint.
+ *
+ * GitHub #115 (graysoncooper) had a second half behind the 415: the browser
+ * transcribe path called res.json() on every answer. The /local-api gates
+ * reply in text/plain, so a refusal died in the JSON parser, the thrown
+ * SyntaxError carried no reason, and the bubble told the user to check the
+ * microphone while the truth was a refused request. The same happened to the
+ * handler's own 200-with-error bodies ("Whisper not available", "Whisper
+ * model is still loading, please wait..."), which are honest English already.
+ */
+export class LocalSttError extends Error {
+  readonly status: number;
+  constructor(message: string, status = 0) {
+    super(message);
+    this.name = "LocalSttError";
+    this.status = status;
+  }
+}
+
+/** Turn a refused /local-api answer into an English, user-facing failure.
+ *  The gates answer text/plain, the handler answers JSON, so read the body as
+ *  text and lift `error` out of it when it happens to be JSON. */
+async function localApiFailure(res: Response, what: string): Promise<LocalSttError> {
+  const raw = (await res.text().catch(() => "")).trim();
+  let detail = raw;
+  if (raw.startsWith("{")) {
+    try {
+      const parsed = JSON.parse(raw) as { error?: unknown };
+      if (typeof parsed.error === "string" && parsed.error.trim()) detail = parsed.error.trim();
+    } catch {
+      /* not JSON after all, keep the raw text */
+    }
+  }
+  detail = detail.slice(0, 200);
+  return new LocalSttError(
+    detail ? `${what} (HTTP ${res.status}): ${detail}` : `${what} (HTTP ${res.status})`,
+    res.status,
+  );
+}
+
 export async function checkWhisperAvailable(): Promise<{
   available: boolean;
   backend: string | null;
@@ -189,6 +231,12 @@ export async function checkWhisperAvailable(): Promise<{
     const res = await fetch("/local-api/transcribe-status", {
       headers: { "x-locally-uncensored": "true" },
     });
+    // A refused probe answers text/plain, which used to blow up in res.json()
+    // and left the mic disabled with no reason anywhere (#115).
+    if (!res.ok) {
+      const err = await localApiFailure(res, "Speech-to-text probe refused");
+      return { available: false, backend: null, error: err.message };
+    }
     return res.json();
   } catch {
     return { available: false, backend: null, error: "Failed to reach transcribe-status endpoint" };
@@ -213,7 +261,9 @@ export async function transcribeAudio(audioBlob: Blob): Promise<string> {
       audioBase64,
       contentType: audioBlob.type || "audio/wav",
     });
-    if (data.error) throw new Error(data.error);
+    // The Rust side writes these for the user ("Speech-to-text needs
+    // faster-whisper, which is not installed"), so keep them readable.
+    if (data.error) throw new LocalSttError(String(data.error));
     return data.transcript || "";
   }
 
@@ -226,8 +276,20 @@ export async function transcribeAudio(audioBlob: Blob): Promise<string> {
     },
     body: audioBlob,
   });
-  const data = await res.json();
-  if (data.error) throw new Error(data.error);
+  // Every refusal in front of the whisper handler (415 on the body type, 403
+  // on the CSRF header or the origin, 405, a 404 from a dev server without
+  // the plugin) answers in text/plain. Reading it as JSON threw a parse error
+  // that hid the reason and pointed the user at the microphone (#115).
+  if (!res.ok) throw await localApiFailure(res, "Transcription request refused");
+  let data: { error?: string; transcript?: string };
+  try {
+    data = await res.json();
+  } catch {
+    throw new LocalSttError("Transcription returned a non-JSON response", res.status);
+  }
+  // The handler reports "Whisper not available" and "Whisper model is still
+  // loading, please wait..." with HTTP 200, both are honest English already.
+  if (data.error) throw new LocalSttError(String(data.error), res.status);
   return data.transcript || "";
 }
 
