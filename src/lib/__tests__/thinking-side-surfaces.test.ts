@@ -132,3 +132,25 @@ describe('the benchmark counts an inline thought as a thought', () => {
     expect(m.thinkTokens).toBeGreaterThan(0)
   })
 })
+
+// ── Loch 11: the two silent agents ─────────────────────────────
+describe('what a hidden agent hands back is an answer, not a thought', () => {
+  it('the architect plan is settled before it becomes a system prompt', () => {
+    // The plan is pasted into the EDITOR's system prompt verbatim, so leaked
+    // reasoning rides into every coding turn after it.
+    expect(read('../../api/agents/architect.ts')).toContain("settleThinking(content ?? '', '', false).content")
+  })
+
+  it('a sub-agent result is settled before it becomes a tool result', () => {
+    expect(read('../../api/agents/sub-agent.ts')).toContain("settleThinking(turn.content || '', '', false).content")
+  })
+
+  it('which is what keeps a pre-opened thought out of the parent context', () => {
+    const raw = 'The plan, roughly.</think>1. read the file\n2. patch it'
+    expect(settleThinking(raw, '', false).content).toBe('1. read the file\n2. patch it')
+  })
+
+  it('NEGATIVE CONTROL: a plan without reasoning is passed through as it is', () => {
+    expect(settleThinking('1. read the file', '', false).content).toBe('1. read the file')
+  })
+})

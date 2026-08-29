@@ -11,6 +11,7 @@
  * filtering, the model has no syntactically valid path to recurse.
  */
 
+import { settleThinking } from '../../lib/thinking-stripper'
 import type { MCPToolDefinition } from '../mcp/types'
 import { executeParallel, type ExecutionRequest } from './tool-executor'
 import type { AgentRunContext } from '../agent-context'
@@ -169,7 +170,11 @@ export async function defaultSubAgentRunner(
       return `${options.budget.haltMessage()} ${finalContent || '(no partial answer)'}`
     }
     const turn = await provider.chatWithTools(modelId, messages, llmTools, {})
-    finalContent = turn.content || finalContent
+    // What a sub-agent returns becomes a TOOL RESULT in the parent's context,
+    // so leaked reasoning floods the run it was supposed to shorten (2.6.7
+    // Denk-Audit, Loch 11). Same settlement as every visible surface.
+    const settled = settleThinking(turn.content || '', '', false).content
+    finalContent = settled || finalContent
     if (!turn.toolCalls || turn.toolCalls.length === 0) break
 
     options.budget.addToolCalls(turn.toolCalls.length)

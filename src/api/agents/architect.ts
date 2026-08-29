@@ -1,3 +1,4 @@
+import { settleThinking } from '../../lib/thinking-stripper'
 import type { ChatMessage } from '../providers/types'
 import { getProviderForModel } from '../providers'
 
@@ -78,7 +79,10 @@ export async function planWithArchitect(
     signal: input.signal,
   })
   return {
-    plan: (content ?? '').trim(),
+    // The plan is pasted into the EDITOR's system prompt verbatim, so a
+    // thinking model's reasoning would ride into every coding turn after it
+    // (2.6.7 Denk-Audit, Loch 11). Same settlement as every visible surface.
+    plan: settleThinking(content ?? '', '', false).content,
     modelUsed: input.model,
     tookMs: Date.now() - t0,
   }
