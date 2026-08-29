@@ -46,7 +46,7 @@ import { useToolAuditStore } from '../stores/toolAuditStore'
 import { makeInTurnCacheLookup } from '../api/agents/in-turn-cache'
 import { explainError as explainToolError } from '../api/agents/error-hints'
 import { budgetFromSettings } from '../api/agents/budget'
-import { finalStripThinkingTags, splitOrphanCloser, splitUnclosedThink } from '../lib/thinking-stripper'
+import { settleThinking } from '../lib/thinking-stripper'
 import { openPlanGap, planReconcileSteer, PLAN_RECONCILE_BUDGET } from '../lib/plan-reconcile'
 import { PlanStaleness, planStalenessSteer } from '../lib/plan-staleness'
 import { planResumeAnchor } from '../lib/plan-resume'
@@ -1459,42 +1459,18 @@ export function useCodex() {
           }
         }
 
-        // Inline <think>…</think> tags — route inner text into thinking
-        // block when toggle is ON, else discard. Non-canonical markers
-        // (Gemma channel tags, <thought>, <reasoning>, etc.) are always
-        // stripped — they are never user-facing content.
+        // End-of-turn settlement, through the ONE shared routine every path
+        // uses now (lib/thinking-stripper settleThinking): balanced blocks,
+        // the pre-opened Qwen3 thought that only ever sends its closer, a
+        // turn cut off mid-thought, and the non-canonical markers. Routed
+        // into the thinking panel only when the toggle is ON.
         {
-          turnContent = turnContent.replace(/<think>([\s\S]*?)<\/think>/g, (_m, inner) => {
-            if (keepThinking) {
-              thinkingContent += (thinkingContent ? '\n\n' : '') + inner
-              useChatStore.getState().updateMessageThinking(convId!, assistantMsg.id, thinkingContent)
-            }
-            return ''
-          })
-          // The Qwen3 chat templates put the opening `<think>` in the PROMPT,
-          // so the reply starts mid-thought and closes a tag it never opened.
-          // Nothing above matches that, and with thinking ON the raw closer
-          // plus the whole thought stayed in the answer.
-          const orphanClose = splitOrphanCloser(turnContent)
-          if (orphanClose.thinking) {
-            turnContent = orphanClose.content
-            if (keepThinking) {
-              thinkingContent += (thinkingContent ? '\n\n' : '') + orphanClose.thinking
-              useChatStore.getState().updateMessageThinking(convId!, assistantMsg.id, thinkingContent)
-            }
+          const settled = settleThinking(turnContent, thinkingContent, keepThinking)
+          turnContent = settled.content
+          if (settled.thinking !== thinkingContent) {
+            thinkingContent = settled.thinking
+            useChatStore.getState().updateMessageThinking(convId!, assistantMsg.id, thinkingContent)
           }
-          // A turn cut off mid-thought leaves the opener without its closer,
-          // which the regex above cannot match. It belongs in the thinking
-          // panel, never in the answer.
-          const orphanThink = splitUnclosedThink(turnContent)
-          if (orphanThink.thinking) {
-            turnContent = orphanThink.content
-            if (keepThinking) {
-              thinkingContent += (thinkingContent ? '\n\n' : '') + orphanThink.thinking
-              useChatStore.getState().updateMessageThinking(convId!, assistantMsg.id, thinkingContent)
-            }
-          }
-          turnContent = finalStripThinkingTags(turnContent, keepThinking)
         }
 
         // Silent-retry on system-prompt echo — Gemma 4 sometimes

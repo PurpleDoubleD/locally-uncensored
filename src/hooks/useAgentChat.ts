@@ -69,7 +69,7 @@ import { executeParallel, applyResultToToolCall, type ExecutionRequest } from '.
 import { useToolAuditStore } from '../stores/toolAuditStore'
 import { makeInTurnCacheLookup } from '../api/agents/in-turn-cache'
 import { explainError as explainToolError } from '../api/agents/error-hints'
-import { finalStripThinkingTags, splitOrphanCloser, splitUnclosedThink } from '../lib/thinking-stripper'
+import { settleThinking } from '../lib/thinking-stripper'
 import { openPlanGap, planReconcileSteer, PLAN_RECONCILE_BUDGET } from '../lib/plan-reconcile'
 import { PlanStaleness, planStalenessSteer } from '../lib/plan-staleness'
 import { planResumeAnchor } from '../lib/plan-resume'
@@ -1216,52 +1216,17 @@ export function useAgentChat() {
           }
         }
 
-        // Parse <think>…</think> tags. Always strip them from the content
-        // (otherwise raw tags land in the assistant bubble). Only ROUTE
-        // them into the collapsible thinking block when the user actually
-        // toggled Thinking on — thinking-only models (QwQ, DeepSeek-R1)
-        // emit these tags unconditionally, and we must not surface them
-        // when the user asked for thinking to be OFF.
-        turnContent = turnContent.replace(/<think>([\s\S]*?)<\/think>/g, (_match, inner) => {
-          if (keepThinking) {
-            turnThinking = turnThinking
-              ? `${turnThinking}\n\n${inner}`
-              : inner
-          }
-          return ''
-        })
-        // The Qwen3 chat templates put the opening `<think>` in the PROMPT, so
-        // the reply starts mid-thought and closes a tag it never opened. With
-        // thinking ON the raw closer plus the whole thought stayed in the
-        // bubble.
-        const orphanClose = splitOrphanCloser(turnContent)
-        if (orphanClose.thinking) {
-          turnContent = orphanClose.content
-          if (keepThinking) {
-            turnThinking = turnThinking
-              ? `${turnThinking}\n\n${orphanClose.thinking}`
-              : orphanClose.thinking
-          }
+        // End-of-turn settlement, through the ONE shared routine every path
+        // uses now (lib/thinking-stripper settleThinking): balanced blocks,
+        // the pre-opened Qwen3 thought that only ever sends its closer, a
+        // turn cut off mid-thought, and the non-canonical markers. Routed
+        // into the collapsible block only when the user asked for thinking:
+        // reasoners emit the tags unconditionally and OFF has to mean off.
+        {
+          const settled = settleThinking(turnContent, turnThinking, keepThinking)
+          turnContent = settled.content
+          turnThinking = settled.thinking
         }
-        // A turn cut off mid-thought leaves the opener without its closer,
-        // which the regex above cannot match. It belongs in the thinking
-        // block, never in the assistant bubble.
-        const orphanThink = splitUnclosedThink(turnContent)
-        if (orphanThink.thinking) {
-          turnContent = orphanThink.content
-          if (keepThinking) {
-            turnThinking = turnThinking
-              ? `${turnThinking}\n\n${orphanThink.thinking}`
-              : orphanThink.thinking
-          }
-        }
-        // Strip non-canonical thinking markers (Gemma channel tags,
-        // `<thought>`, `<reasoning>`, etc.) that the canonical regex above
-        // doesn't catch. These never belong in the assistant bubble.
-        turnContent = finalStripThinkingTags(turnContent, keepThinking)
-        // Also drop any orphan native-thinking that leaked through when the
-        // toggle is OFF (e.g. provider returned `turn.thinking` anyway).
-        if (!keepThinking) turnThinking = ''
 
         // Update UI — but DON'T overwrite contentRef during intermediate
         // turns. Previously every iteration did `contentRef.current =

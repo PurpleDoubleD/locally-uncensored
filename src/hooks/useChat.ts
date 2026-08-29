@@ -27,7 +27,7 @@ import { getProviderForModel, getProviderIdFromModel } from "../api/providers"
 import { modelOutOfMode } from "../lib/modeGate"
 import { syncOllamaHealthFromError } from "../lib/sync-ollama-health"
 import { isThinkingCompatible, isPlainTextPlanner } from "../lib/model-compatibility"
-import { stripNonCanonicalTags, finalStripThinkingTags } from "../lib/thinking-stripper"
+import { stripNonCanonicalTags, finalStripThinkingTags, settleThinking } from "../lib/thinking-stripper"
 import { isMultimodalUnsupportedError, MULTIMODAL_UNSUPPORTED_MESSAGE } from "../lib/ollama-errors"
 import type { ImageAttachment, Message } from "../types/chat"
 import { isGroupChat, groupSystemPrompt, groupHistory, stripImpersonatedSpeakers } from "../lib/group-chat"
@@ -203,7 +203,15 @@ async function runGroupTurn(convId: string, model: string, allModels: string[], 
       }
       if (chunk.done) {
         if (chunk.finishReason) groupFinish = chunk.finishReason
-        contentAcc = stripImpersonatedSpeakers(finalStripThinkingTags(contentAcc, keepThinking), others)
+        // Same settlement as every other path (2.6.7 Denk-Audit): the state
+        // machine above only fires on a literal `<think>`, and a Qwen3
+        // template pre-opens the thought in the prompt, so a group speaker
+        // used to put its whole reasoning plus a raw closer in the bubble.
+        {
+          const settled = settleThinking(contentAcc, thinkingAcc, keepThinking)
+          contentAcc = stripImpersonatedSpeakers(settled.content, others)
+          thinkingAcc = settled.thinking
+        }
         useChatStore.getState().updateMessageContent(convId, assistantMessage.id, contentAcc)
         if (keepThinking && thinkingAcc) {
           useChatStore.getState().updateMessageThinking(convId, assistantMessage.id, thinkingAcc)
@@ -804,9 +812,17 @@ export function useChat() {
             finishReason = chunk.finishReason
             useChatStore.getState().updateMessageFinishReason(convId!, assistantMessage.id, chunk.finishReason)
           }
-          // Final safety pass — catches any orphan tags that leaked through
-          // mid-stream (partial chunks, provider restarts, etc.).
-          contentRef.current = finalStripThinkingTags(contentRef.current, keepThinking)
+          // Final settlement — the shared one, so plain chat catches the same
+          // orphan shapes the agent loops do. Before this the char-by-char
+          // machine above was the whole story here, and it only ever fires on
+          // a literal `<think>`: a Qwen3 template that pre-opens the thought
+          // in the prompt left the whole reasoning plus a raw closer standing
+          // in the answer with the Think button ON and the block empty.
+          {
+            const settled = settleThinking(contentRef.current, thinkingRef.current, keepThinking)
+            contentRef.current = settled.content
+            thinkingRef.current = settled.thinking
+          }
           useChatStore
             .getState()
             .updateMessageContent(convId!, assistantMessage.id, contentRef.current)
