@@ -1,5 +1,6 @@
 import { comfyuiUrl, localFetch } from './backend'
 import { log } from '../lib/logger'
+import { readComboOptions } from './comfyui-enum'
 // Type-only import — erased at runtime, so it cannot form a comfyui.ts ↔
 // comfyui-nodes.ts import cycle. classifyModel/MODEL_TYPE_DEFAULTS (runtime
 // values) are pulled via a DYNAMIC import inside getModelCapabilities() below.
@@ -177,10 +178,12 @@ export function categorizeNodes(allNodes: Record<string, NodeMetadata>): Categor
 // ─── Extract available models from node info ───
 
 export function detectAvailableModels(allNodes: Record<string, NodeMetadata>): AvailableModels {
+  // Shared reader, both schemas. Hand-reading slot 0 here meant motionModels
+  // came back empty on any box where AnimateDiff-Evolved answers in the newer
+  // COMBO schema, which is what a real ComfyUI does (see comfyui-enum.ts).
   const extract = (nodeName: string, fieldName: string): string[] => {
     const spec = allNodes[nodeName]?.input?.required?.[fieldName]
-    if (Array.isArray(spec) && Array.isArray(spec[0])) return spec[0]
-    return []
+    return readComboOptions(spec) ?? []
   }
 
   return {
@@ -196,14 +199,14 @@ export function detectAvailableModels(allNodes: Record<string, NodeMetadata>): A
 
 export function getSamplerOptions(allNodes: Record<string, NodeMetadata>): string[] {
   const spec = allNodes.KSampler?.input?.required?.sampler_name
-  if (Array.isArray(spec) && Array.isArray(spec[0])) return spec[0]
-  return ['euler']
+  const options = readComboOptions(spec)
+  return options && options.length > 0 ? options : ['euler']
 }
 
 export function getSchedulerOptions(allNodes: Record<string, NodeMetadata>): string[] {
   const spec = allNodes.KSampler?.input?.required?.scheduler
-  if (Array.isArray(spec) && Array.isArray(spec[0])) return spec[0]
-  return ['normal']
+  const options = readComboOptions(spec)
+  return options && options.length > 0 ? options : ['normal']
 }
 
 // ─── Model capability discovery (v2.5.0 — "every model fully chat-controllable") ───
@@ -298,8 +301,8 @@ export async function getModelCapabilities(model: string): Promise<ModelCapabili
   }
   const enumOpts = (node: string, field: string): string[] | undefined => {
     const spec = allNodes[node]?.input?.required?.[field] ?? allNodes[node]?.input?.optional?.[field]
-    if (Array.isArray(spec) && Array.isArray(spec[0]) && spec[0].length > 0) return spec[0] as string[]
-    return undefined
+    const options = readComboOptions(spec)
+    return options && options.length > 0 ? options : undefined
   }
   const frameFrom = (node: string, field: string, fbMin: number, fbMax: number): { min: number; max: number } => {
     const r = numRange(node, field)

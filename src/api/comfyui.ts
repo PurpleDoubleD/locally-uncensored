@@ -1,6 +1,7 @@
 import { comfyuiUrl, localFetch, fetchLocalhostBytes, isTauri, backendCall } from "./backend"
 import { log } from "../lib/logger"
 import { LU_CLIENT_PREFIX } from "./comfyui-ws"
+import { nodeComboOptions } from "./comfyui-enum"
 import { resolveRunSeed } from '../lib/run-seed'
 
 // ─── Control-plane fetch timeouts ───
@@ -544,26 +545,42 @@ async function nodeExists(nodeName: string): Promise<boolean> {
   }
 }
 
-export async function getCheckpoints(): Promise<string[]> {
-  const res = await localFetch(comfyuiUrl('/object_info/CheckpointLoaderSimple'), { timeoutMs: COMFY_LIST_TIMEOUT_MS })
-  if (!res.ok) throw new Error(`ComfyUI /object_info/CheckpointLoaderSimple failed (HTTP ${res.status})`)
+/** One /object_info call for one node, read through the shared combo reader.
+ *
+ *  `strict` is for the two loaders whose absence means ComfyUI itself is not
+ *  answering: those still throw on an HTTP error so the caller can tell "no
+ *  models installed" apart from "no engine". Everything else soft-fails to an
+ *  empty list, because an optional pack that is not installed is not an error.
+ *
+ *  Nothing here reads the spec by hand any more. The AnimateDiff node answers
+ *  in the newer COMBO schema while the stock loaders answer in the legacy one
+ *  (proven on the box, see comfyui-enum.ts), and one hand-read spec was enough
+ *  to take the whole video discovery down. */
+async function fetchNodeOptions(
+  node: string,
+  field: string,
+  opts: { strict?: boolean } = {},
+): Promise<string[]> {
+  const res = await localFetch(comfyuiUrl(`/object_info/${node}`), { timeoutMs: COMFY_LIST_TIMEOUT_MS })
+  if (!res.ok) {
+    if (opts.strict) throw new Error(`ComfyUI /object_info/${node} failed (HTTP ${res.status})`)
+    return []
+  }
   const data = await res.json()
-  return data?.CheckpointLoaderSimple?.input?.required?.ckpt_name?.[0] ?? []
+  return nodeComboOptions(data, node, field)
+}
+
+export async function getCheckpoints(): Promise<string[]> {
+  return fetchNodeOptions('CheckpointLoaderSimple', 'ckpt_name', { strict: true })
 }
 
 export async function getDiffusionModels(): Promise<string[]> {
-  const res = await localFetch(comfyuiUrl('/object_info/UNETLoader'), { timeoutMs: COMFY_LIST_TIMEOUT_MS })
-  if (!res.ok) throw new Error(`ComfyUI /object_info/UNETLoader failed (HTTP ${res.status})`)
-  const data = await res.json()
-  return data?.UNETLoader?.input?.required?.unet_name?.[0] ?? []
+  return fetchNodeOptions('UNETLoader', 'unet_name', { strict: true })
 }
 
 export async function getVAEModels(): Promise<string[]> {
   try {
-    const res = await localFetch(comfyuiUrl('/object_info/VAELoader'), { timeoutMs: COMFY_LIST_TIMEOUT_MS })
-    if (!res.ok) return []
-    const data = await res.json()
-    return data?.VAELoader?.input?.required?.vae_name?.[0] ?? []
+    return await fetchNodeOptions('VAELoader', 'vae_name')
   } catch (err) {
     log.warn('comfyui.fetch_vae_failed', { err })
     return []
@@ -572,10 +589,7 @@ export async function getVAEModels(): Promise<string[]> {
 
 export async function getCLIPModels(): Promise<string[]> {
   try {
-    const res = await localFetch(comfyuiUrl('/object_info/CLIPLoader'), { timeoutMs: COMFY_LIST_TIMEOUT_MS })
-    if (!res.ok) return []
-    const data = await res.json()
-    return data?.CLIPLoader?.input?.required?.clip_name?.[0] ?? []
+    return await fetchNodeOptions('CLIPLoader', 'clip_name')
   } catch (err) {
     log.warn('comfyui.fetch_clip_failed', { err })
     return []
@@ -590,10 +604,7 @@ export async function getCLIPModels(): Promise<string[]> {
  */
 export async function getLoraModels(): Promise<string[]> {
   try {
-    const res = await localFetch(comfyuiUrl('/object_info/LoraLoader'), { timeoutMs: COMFY_LIST_TIMEOUT_MS })
-    if (!res.ok) return []
-    const data = await res.json()
-    return data?.LoraLoader?.input?.required?.lora_name?.[0] ?? []
+    return await fetchNodeOptions('LoraLoader', 'lora_name')
   } catch (err) {
     log.warn('comfyui.fetch_lora_failed', { err })
     return []
@@ -602,10 +613,9 @@ export async function getLoraModels(): Promise<string[]> {
 
 export async function getSamplers(): Promise<string[]> {
   try {
-    const res = await localFetch(comfyuiUrl('/object_info/KSampler'), { timeoutMs: COMFY_LIST_TIMEOUT_MS })
-    if (!res.ok) throw new Error('Failed')
-    const data = await res.json()
-    return data?.KSampler?.input?.required?.sampler_name?.[0] ?? []
+    const list = await fetchNodeOptions('KSampler', 'sampler_name')
+    if (list.length === 0) throw new Error('KSampler listed no samplers')
+    return list
   } catch {
     return ['euler', 'euler_ancestral', 'dpmpp_2m', 'dpmpp_2m_sde', 'dpmpp_sde', 'uni_pc', 'ddim']
   }
@@ -613,10 +623,9 @@ export async function getSamplers(): Promise<string[]> {
 
 export async function getSchedulers(): Promise<string[]> {
   try {
-    const res = await localFetch(comfyuiUrl('/object_info/KSampler'), { timeoutMs: COMFY_LIST_TIMEOUT_MS })
-    if (!res.ok) throw new Error('Failed')
-    const data = await res.json()
-    return data?.KSampler?.input?.required?.scheduler?.[0] ?? []
+    const list = await fetchNodeOptions('KSampler', 'scheduler')
+    if (list.length === 0) throw new Error('KSampler listed no schedulers')
+    return list
   } catch {
     return ['normal', 'karras', 'simple', 'exponential', 'sgm_uniform']
   }
@@ -626,14 +635,15 @@ export async function getSchedulers(): Promise<string[]> {
  *  live under ComfyUI\models: the pack keeps them in
  *  custom_nodes/ComfyUI-AnimateDiff-Evolved/models, which is why the four
  *  ComfyUI\models loaders cannot see them and why every surface that only read
- *  those four reported an installed AnimateDiff bundle as nothing at all. */
+ *  those four reported an installed AnimateDiff bundle as nothing at all.
+ *
+ *  This is also the node that answers in the newer COMBO schema on a real box,
+ *  so it is the one that used to hand a bare "COMBO" string to callers. */
 export async function getAnimateDiffModels(): Promise<string[]> {
   try {
-    const res = await localFetch(comfyuiUrl('/object_info/ADE_LoadAnimateDiffModel'), { timeoutMs: COMFY_LIST_TIMEOUT_MS })
-    if (!res.ok) return []
-    const data = await res.json()
-    return data?.ADE_LoadAnimateDiffModel?.input?.required?.model_name?.[0] ?? []
-  } catch {
+    return await fetchNodeOptions('ADE_LoadAnimateDiffModel', 'model_name')
+  } catch (err) {
+    log.warn('comfyui.fetch_animatediff_failed', { err })
     return []
   }
 }
@@ -789,6 +799,28 @@ export async function getAnimateDiffMotionModels(): Promise<ClassifiedModel[]> {
   return names.map((name) => ({ name, type: 'animatediff' as ModelType, source: 'motion_module' as const }))
 }
 
+/** One lane of the inventory, read on its own. A lane that fails costs itself
+ *  and one log line, never the lanes beside it.
+ *
+ *  Counter-check on the Windows box, 2026-08-29: the AnimateDiff lane threw
+ *  ("(intermediate value).map is not a function", because that node answers in
+ *  the newer COMBO schema) and took the ENTIRE video discovery with it. The
+ *  Models page then showed a Video tab with no number, Installed 0 and "No
+ *  video models installed" while three cards correctly said Installed, and the
+ *  whole thing was a warn line nobody saw. The reader below is fixed at the
+ *  root, but a single lane must never again be able to empty the page. */
+async function inventoryLane(
+  lane: string,
+  read: () => Promise<ClassifiedModel[]>,
+): Promise<ClassifiedModel[]> {
+  try {
+    return await read()
+  } catch (err) {
+    log.warn('comfyui.inventory_lane_failed', { lane, err })
+    return []
+  }
+}
+
 /** Everything installed in the video lane, for the INVENTORY surfaces: the
  *  Models rail counter and the Installed tab.
  *
@@ -813,10 +845,13 @@ export async function getAnimateDiffMotionModels(): Promise<ClassifiedModel[]> {
  *  Not used by detectVideoBackend, the Create picker or model-pick: those ask
  *  for a main model and getVideoModels still answers exactly what it did. */
 export async function getInstalledVideoModels(): Promise<ClassifiedModel[]> {
-  const [videoModels, motionModels] = await Promise.all([getVideoModels(), getAnimateDiffMotionModels()])
+  const [videoModels, motionModels] = await Promise.all([
+    inventoryLane('video', getVideoModels),
+    inventoryLane('animatediff', getAnimateDiffMotionModels),
+  ])
   const out: ClassifiedModel[] = [...videoModels, ...motionModels]
   if (motionModels.length > 0) {
-    const imageModels = await getImageModels()
+    const imageModels = await inventoryLane('image', getImageModels)
     for (const m of imageModels) {
       if (m.source !== 'checkpoint') continue
       if (out.some((x) => x.name === m.name)) continue
@@ -836,11 +871,9 @@ export async function getInstalledVideoModels(): Promise<ClassifiedModel[]> {
  *  UNETLoader for UnetLoaderGGUF by extension. */
 export async function getGgufUnetModels(): Promise<string[]> {
   try {
-    const res = await localFetch(comfyuiUrl('/object_info/UnetLoaderGGUF'), { timeoutMs: COMFY_LIST_TIMEOUT_MS })
-    if (!res.ok) return []
-    const data = await res.json()
-    return data?.UnetLoaderGGUF?.input?.required?.unet_name?.[0] ?? []
-  } catch {
+    return await fetchNodeOptions('UnetLoaderGGUF', 'unet_name')
+  } catch (err) {
+    log.warn('comfyui.fetch_gguf_failed', { err })
     return []
   }
 }
