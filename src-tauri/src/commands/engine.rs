@@ -308,15 +308,67 @@ fn split_shard_stem(stem: &str) -> Option<(&str, u32, u32)> {
 /// installed model (same rule a9ea114 established for MLX downloads).
 pub(crate) fn scan_gguf_models(dir: &Path) -> Vec<BundledModel> {
     let mut out = Vec::new();
-    // (base, total) → (part-numbers seen, path of part 1, byte sum)
-    let mut sets: std::collections::HashMap<(String, u32), (Vec<u32>, Option<String>, u64)> =
+    // (dir, base, total) → (part-numbers seen, path of part 1, byte sum).
+    // The directory is part of the key: two unrelated split sets that share a
+    // base name in different subfolders must never merge into one entry.
+    let mut sets: std::collections::HashMap<(PathBuf, String, u32), (Vec<u32>, Option<String>, u64)> =
         std::collections::HashMap::new();
+    scan_gguf_dir(dir, 0, &mut out, &mut sets);
+    for ((_dir, base, total), (mut parts, first_path, size)) in sets {
+        parts.sort_unstable();
+        parts.dedup();
+        let complete = parts.len() as u32 == total && parts.first() == Some(&1);
+        if let (true, Some(path)) = (complete, first_path) {
+            out.push(BundledModel {
+                name: base,
+                path,
+                size,
+            });
+        }
+    }
+    // A name is the picker id, so it has to be unique. The shallowest copy
+    // wins (the flat app dir is the canonical place); ties fall to the path.
+    out.sort_by(|a, b| {
+        let depth = |p: &str| p.matches(['/', '\\']).count();
+        a.name
+            .cmp(&b.name)
+            .then(depth(&a.path).cmp(&depth(&b.path)))
+            .then(a.path.cmp(&b.path))
+    });
+    out.dedup_by(|a, b| a.name == b.name);
+    out
+}
+
+/// How far below the app models dir the scan walks. 0 alone was the shipped
+/// behaviour and it is still where every model the app writes today lands.
+///
+/// GH #118 (nayffy, 2026-08-27): before the download-routing fix, a chat model
+/// installed on a fresh box was written to `<models>/<user>/<repo>/x.gguf`,
+/// the LM Studio layout. The routing is fixed, but the boxes that already ran
+/// the broken build have multi-gigabyte files sitting in those folders. Two
+/// levels reach them, so those installs heal on the next model refresh instead
+/// of asking the user to download everything a second time. Deeper than that
+/// buys nothing and only costs directory reads.
+const MAX_SCAN_DEPTH: usize = 2;
+
+fn scan_gguf_dir(
+    dir: &Path,
+    depth: usize,
+    out: &mut Vec<BundledModel>,
+    sets: &mut std::collections::HashMap<(PathBuf, String, u32), (Vec<u32>, Option<String>, u64)>,
+) {
     let entries = match std::fs::read_dir(dir) {
         Ok(e) => e,
-        Err(_) => return out,
+        Err(_) => return,
     };
     for entry in entries.flatten() {
         let path = entry.path();
+        if path.is_dir() {
+            if depth < MAX_SCAN_DEPTH {
+                scan_gguf_dir(&path, depth + 1, out, sets);
+            }
+            continue;
+        }
         if !path.is_file() {
             continue;
         }
@@ -349,8 +401,9 @@ pub(crate) fn scan_gguf_models(dir: &Path) -> Vec<BundledModel> {
         }
         let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
         if let Some((base, part, total)) = split_shard_stem(&name) {
+            let parent = path.parent().map(Path::to_path_buf).unwrap_or_default();
             let slot = sets
-                .entry((base.to_string(), total))
+                .entry((parent, base.to_string(), total))
                 .or_insert((Vec::new(), None, 0));
             slot.0.push(part);
             if part == 1 {
@@ -365,20 +418,6 @@ pub(crate) fn scan_gguf_models(dir: &Path) -> Vec<BundledModel> {
             size,
         });
     }
-    for ((base, total), (mut parts, first_path, size)) in sets {
-        parts.sort_unstable();
-        parts.dedup();
-        let complete = parts.len() as u32 == total && parts.first() == Some(&1);
-        if let (true, Some(path)) = (complete, first_path) {
-            out.push(BundledModel {
-                name: base,
-                path,
-                size,
-            });
-        }
-    }
-    out.sort_by(|a, b| a.name.cmp(&b.name));
-    out
 }
 
 /// App-owned models directory for the built-in engine:
@@ -565,6 +604,117 @@ fn wait_for_health(port: u16, timeout: Duration) -> Result<(), String> {
     ))
 }
 
+/// How a health wait ended.
+#[derive(Debug, PartialEq)]
+enum HealthWait {
+    Ready,
+    /// The child we spawned is gone. Nothing more will happen on that port.
+    ChildExited,
+    TimedOut,
+}
+
+/// Block until `/health` returns 200, the child exits, or the budget runs out.
+///
+/// The child half is the GH #118 half: `wait_for_health` watched only the
+/// port, so an engine that died on a missing runtime library or a GPU backend
+/// it could not initialise still left the user staring at a spinner for the
+/// full budget (60 s, and up to 10 minutes on a big GGUF) before any message
+/// appeared. The process is ours, its exit is knowable in milliseconds, so it
+/// is checked on the same 300 ms tick as the port.
+fn wait_for_health_or_exit(state: &AppState, port: u16, timeout: Duration) -> HealthWait {
+    let deadline = Instant::now() + timeout;
+    while Instant::now() < deadline {
+        if engine_healthy(port) {
+            return HealthWait::Ready;
+        }
+        let gone = {
+            let mut guard = state.bundled_engine.lock().unwrap();
+            match guard.as_mut() {
+                Some(e) => e.child.try_wait().ok().flatten().is_some(),
+                None => true,
+            }
+        };
+        if gone {
+            // One last look: a server can bind, answer, and the process can
+            // still be reaped between the two checks on a fast load.
+            return if engine_healthy(port) { HealthWait::Ready } else { HealthWait::ChildExited };
+        }
+        std::thread::sleep(Duration::from_millis(300));
+    }
+    HealthWait::TimedOut
+}
+
+/// Markers in llama-server's stderr that point at the GPU rather than at the
+/// model file or the app. Lower-cased input.
+fn stderr_blames_the_gpu(stderr: &str) -> bool {
+    const MARKERS: &[&str] = &[
+        "cuda",
+        "no kernel image",
+        "hip",
+        "rocm",
+        "vulkan",
+        "out of memory",
+        "cublas",
+        "device memory",
+        "ggml_backend_alloc",
+        "failed to allocate",
+        "compute capability",
+    ];
+    let lower = stderr.to_ascii_lowercase();
+    MARKERS.iter().any(|m| lower.contains(m))
+}
+
+/// Markers that point at the model file itself.
+fn stderr_blames_the_model(stderr: &str) -> bool {
+    const MARKERS: &[&str] = &[
+        "unknown model architecture",
+        "failed to load model",
+        "invalid magic",
+        "unsupported model",
+        "wrong number of tensors",
+        "tensor .* not found",
+        "gguf_init_from_file",
+    ];
+    let lower = stderr.to_ascii_lowercase();
+    MARKERS.iter().any(|m| lower.contains(m))
+}
+
+/// One English sentence a user can act on, plus llama-server's own last words
+/// so a bug report still carries them.
+///
+/// GH #118: "did not become healthy" named no cause, and the fresh-install
+/// case named nothing at all because no start was ever attempted. The GPU
+/// hint matters most on new cards: a Blackwell RTX 50-series board with a
+/// driver or engine build that does not know it fails at load time, and
+/// setting GPU Layers to 0 is the one setting in this app that gets the user
+/// chatting anyway.
+pub(crate) fn start_failure_message(failure: &StartFailure, port: u16, budget: Duration) -> String {
+    let head = if failure.port_taken {
+        format!(
+            "Port {port} answers health checks, but the engine this app just started exited immediately. Another llama-server (likely left over from a previous session or crash) is occupying the port. Quit that process or reboot, then try again."
+        )
+    } else if failure.died {
+        let hint = if stderr_blames_the_gpu(&failure.stderr) {
+            " This looks like a graphics-card problem. Open Settings, Built-in Engine and set GPU Layers to 0 to run on the CPU, then try again."
+        } else if stderr_blames_the_model(&failure.stderr) {
+            " The engine refused the model file. Open Models, Discover and install a different quant."
+        } else {
+            " Reinstall Locally Uncensored if this keeps happening, or pick a different backend in Settings, AI Backends."
+        };
+        format!("The built-in engine started and exited again before it could serve on port {port}. It was tried twice.{hint}")
+    } else {
+        format!(
+            "The built-in engine did not become healthy on port {port} within {}s (the budget scales with model size, and huge GGUFs can take minutes on a cold first load).",
+            budget.as_secs()
+        )
+    };
+    if failure.stderr.is_empty() {
+        head
+    } else {
+        format!("{head}\n\n{}", failure.stderr)
+    }
+}
+
 // ── Commands ─────────────────────────────────────────────────────────────────
 
 /// Start (or reuse) the managed chat engine for `model_path`. Idempotent: if
@@ -676,15 +826,93 @@ fn start_bundled_engine_blocking(
     }
 
     let binary = resolve_engine_binary(app).ok_or_else(|| {
+        // This used to name a build script. On a user's machine that is not an
+        // instruction, it is noise; the only real remedies are a reinstall or a
+        // different backend (GH #118).
         format!(
-            "Bundled engine binary not found ({}). Run scripts/build-llama.sh to produce the sidecar.",
+            "The built-in engine program ({}) is missing from this installation. Reinstall Locally Uncensored, or pick a different backend in Settings, AI Backends.",
             sidecar_binary_name()
         )
     })?;
 
+    // Attempt 1, then exactly one clean retry.
+    //
+    // GH #118 (nayffy, 2026-08-27): the only thing a user ever saw when this
+    // chain failed was a refused connection on 127.0.0.1:8127. Two things were
+    // wrong with the old shape. The health wait watched only the port, so a
+    // child that died in the first second still burned the whole budget (60 s
+    // and up, scaled by model size) before saying anything. And a start was
+    // one shot: the VRAM this very function asks ComfyUI and Ollama to release
+    // is released ASYNCHRONOUSLY, so an engine that lost the race to a driver
+    // still holding those pages had no second chance. House rule is
+    // self-healing before an error message, so a died-on-start attempt gets
+    // one more try after a short settle, and only what survives that becomes a
+    // message.
+    let deadline = health_timeout_for(&model_path);
+    let ctx = effective_ctx(&tuning);
+    let first = spawn_engine_attempt(state, &binary, &desired_args, &model_path, port, ctx);
+    let failure = match first {
+        Ok(()) => {
+            println!("[Engine] Built-in engine healthy on port {port}");
+            return Ok(serde_json::json!({
+                "status": "started",
+                "port": port,
+                "model_path": model_path,
+                "ctx": ctx,
+            }));
+        }
+        Err(f) => f,
+    };
+
+    if !failure.died {
+        // The budget ran out with the child still alive: it is loading slowly,
+        // not failing. Retrying would just spend the budget twice.
+        return Err(start_failure_message(&failure, port, deadline));
+    }
+
+    println!("[Engine] first start attempt exited immediately, retrying once");
+    std::thread::sleep(Duration::from_millis(1500));
+    match spawn_engine_attempt(state, &binary, &desired_args, &model_path, port, ctx) {
+        Ok(()) => {
+            println!("[Engine] Built-in engine healthy on port {port} (second attempt)");
+            Ok(serde_json::json!({
+                "status": "started",
+                "port": port,
+                "model_path": model_path,
+                "ctx": ctx,
+                "retried": true,
+            }))
+        }
+        Err(second) => Err(start_failure_message(&second, port, deadline)),
+    }
+}
+
+/// What one spawn-and-wait produced when it did not come up.
+pub(crate) struct StartFailure {
+    /// The child was gone before the health budget ran out. Distinguishes a
+    /// crash (retry is worth it) from a slow load (retry is not).
+    pub died: bool,
+    /// True when the port answered health checks but our own child was dead.
+    /// Somebody else owns that port.
+    pub port_taken: bool,
+    /// llama-server's own last words. Empty when it said nothing.
+    pub stderr: String,
+}
+
+/// Spawn the engine and wait for it, watching BOTH the health endpoint and the
+/// child. Reaps the child on every failure path so no half-loaded server is
+/// left behind.
+fn spawn_engine_attempt(
+    state: &State<'_, AppState>,
+    binary: &Path,
+    args: &[String],
+    model_path: &str,
+    port: u16,
+    ctx: u32,
+) -> Result<(), StartFailure> {
     println!("[Engine] Starting built-in llama-server on port {port} — {model_path}");
-    let mut cmd = Command::new(&binary);
-    cmd.args(&desired_args)
+    let mut cmd = Command::new(binary);
+    cmd.args(args)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         // llama-server writes the REASON a start fails here: a GGUF it refuses,
@@ -701,62 +929,62 @@ fn start_bundled_engine_blocking(
     #[cfg(target_os = "windows")]
     cmd.creation_flags(CREATE_NO_WINDOW);
 
-    let mut child = cmd
-        .spawn()
-        .map_err(|e| format!("Failed to spawn bundled engine: {}", os_error::english(&e)))?;
+    let mut child = match cmd.spawn() {
+        Ok(c) => c,
+        Err(e) => {
+            return Err(StartFailure {
+                died: true,
+                port_taken: false,
+                stderr: format!("Failed to spawn bundled engine: {}", os_error::english(&e)),
+            })
+        }
+    };
     let diagnostics = child.stderr.take().map(super::shell::drain);
 
     *state.bundled_engine.lock().unwrap() = Some(BundledEngine {
         child,
-        model_path: model_path.clone(),
+        model_path: model_path.to_string(),
         port,
-        ctx: Some(effective_ctx(&tuning)),
-        args: desired_args,
+        ctx: Some(ctx),
+        args: args.to_vec(),
     });
 
-    // Wait for the model to load. On failure, reap the child so we don't leave
-    // a zombie half-loaded server behind.
-    if let Err(e) = wait_for_health(port, health_timeout_for(&model_path)) {
-        let why = diagnostics
-            .map(|(buf, _)| tail_lines(&super::shell::captured_text(&buf), 12))
-            .unwrap_or_default();
-        stop_engine_locked(state);
-        return Err(if why.is_empty() { e } else { format!("{e}\n\n{why}") });
-    }
-
-    // Health said OK — but was it OUR child that answered? A spawn that loses
-    // the port to an orphaned llama-server (left behind by a crashed or
-    // hard-killed session) dies on "address already in use" within
-    // milliseconds, and the probe above then hits the STRANGER: unknown model,
-    // unknown ctx, tuning that silently never applies, and a process no
-    // shutdown of ours can ever reap. Fail honestly with the child's own
-    // stderr instead of adopting it. (Live repro 2026-07-28: an embed server
-    // orphaned by a previous dev session made every later start look green.)
-    let spawn_died = {
-        let mut guard = state.bundled_engine.lock().unwrap();
-        match guard.as_mut() {
-            Some(e) => e.child.try_wait().ok().flatten().is_some(),
-            None => true,
+    let outcome = wait_for_health_or_exit(&**state, port, health_timeout_for(model_path));
+    if matches!(outcome, HealthWait::Ready) {
+        // Health said OK, but was it OUR child that answered? A spawn that
+        // loses the port to an orphaned llama-server (left behind by a crashed
+        // or hard-killed session) dies on "address already in use" within
+        // milliseconds, and the probe then hits the STRANGER: unknown model,
+        // unknown ctx, tuning that silently never applies, and a process no
+        // shutdown of ours can ever reap. Fail honestly instead of adopting
+        // it. (Live repro 2026-07-28: an embed server orphaned by a previous
+        // dev session made every later start look green.)
+        let ours_alive = {
+            let mut guard = state.bundled_engine.lock().unwrap();
+            match guard.as_mut() {
+                Some(e) => e.child.try_wait().ok().flatten().is_none(),
+                None => false,
+            }
+        };
+        if ours_alive {
+            return Ok(());
         }
-    };
-    if spawn_died {
         let why = diagnostics
             .map(|(buf, _)| tail_lines(&super::shell::captured_text(&buf), 12))
             .unwrap_or_default();
         stop_engine_locked(state);
-        return Err(format!(
-            "Port {port} answers health checks, but the engine this app just started exited immediately — another llama-server (likely left over from a previous session or crash) is occupying the port. Quit that process or reboot, then try again.{}",
-            if why.is_empty() { String::new() } else { format!("\n\n{why}") }
-        ));
+        return Err(StartFailure { died: true, port_taken: true, stderr: why });
     }
 
-    println!("[Engine] Built-in engine healthy on port {port}");
-    Ok(serde_json::json!({
-        "status": "started",
-        "port": port,
-        "model_path": model_path,
-        "ctx": effective_ctx(&tuning),
-    }))
+    let why = diagnostics
+        .map(|(buf, _)| tail_lines(&super::shell::captured_text(&buf), 12))
+        .unwrap_or_default();
+    stop_engine_locked(state);
+    Err(StartFailure {
+        died: matches!(outcome, HealthWait::ChildExited),
+        port_taken: false,
+        stderr: why,
+    })
 }
 
 /// Stop the managed engine, killing the child. Idempotent.
@@ -1681,6 +1909,207 @@ mod tests {
         assert_eq!(models[1].size, 1);
 
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    // ── GH #118 ────────────────────────────────────────────────────────────
+
+    #[test]
+    fn scan_finds_a_model_the_broken_routing_nested_under_user_and_repo() {
+        // The exact shape a v2.6.6 fresh install produced: no active chat
+        // model, so the LM Studio branch wrote the GGUF two levels down and
+        // the flat scan reported an empty models folder while a 8 GB file sat
+        // right there (nayffy, 2026-08-27).
+        let dir = std::env::temp_dir().join(format!("lu-engine-nested-{}", std::process::id()));
+        let nested = dir.join("TheDrummer").join("Cydonia-24B-v4.1-GGUF");
+        std::fs::create_dir_all(&nested).unwrap();
+        std::fs::write(nested.join("Cydonia-24B-v4.1-Q4_K_M.gguf"), b"aaaa").unwrap();
+
+        let models = scan_gguf_models(&dir);
+        assert_eq!(models.len(), 1, "the nested model must be listed");
+        assert_eq!(models[0].name, "Cydonia-24B-v4.1-Q4_K_M");
+        assert!(models[0].path.ends_with("Cydonia-24B-v4.1-Q4_K_M.gguf"));
+        assert_eq!(models[0].size, 4);
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn scan_stops_below_two_levels_and_prefers_the_flat_copy() {
+        let dir = std::env::temp_dir().join(format!("lu-engine-depth-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        // Flat copy: the canonical location, and the one the picker must get.
+        std::fs::write(dir.join("dup.gguf"), b"a").unwrap();
+        let nested = dir.join("user").join("repo");
+        std::fs::create_dir_all(&nested).unwrap();
+        std::fs::write(nested.join("dup.gguf"), b"bb").unwrap();
+        // Three levels down is out of reach on purpose.
+        let deep = dir.join("a").join("b").join("c");
+        std::fs::create_dir_all(&deep).unwrap();
+        std::fs::write(deep.join("toodeep.gguf"), b"ccc").unwrap();
+
+        let models = scan_gguf_models(&dir);
+        let names: Vec<&str> = models.iter().map(|m| m.name.as_str()).collect();
+        assert_eq!(names, vec!["dup"], "one id per name, nothing from level 3");
+        assert!(
+            !models[0].path.contains("user"),
+            "the flat copy wins: {}",
+            models[0].path
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn shard_sets_in_different_folders_never_merge() {
+        // Two halves of the same base name in two repos are two broken sets,
+        // not one complete one. Merging them would offer a model that cannot
+        // load, which is the rule a9ea114 established for MLX downloads.
+        let dir = std::env::temp_dir().join(format!("lu-engine-shardsplit-{}", std::process::id()));
+        let one = dir.join("userA").join("repo");
+        let two = dir.join("userB").join("repo");
+        std::fs::create_dir_all(&one).unwrap();
+        std::fs::create_dir_all(&two).unwrap();
+        std::fs::write(one.join("Big-00001-of-00002.gguf"), b"a").unwrap();
+        std::fs::write(two.join("Big-00002-of-00002.gguf"), b"b").unwrap();
+
+        assert!(scan_gguf_models(&dir).is_empty());
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// A port nothing on this machine serves, so `engine_healthy` answers
+    /// "refused" immediately instead of talking to a real engine.
+    const DEAD_PORT: u16 = 49871;
+
+    fn park_child(state: &AppState, child: std::process::Child) {
+        *state.bundled_engine.lock().unwrap() = Some(BundledEngine {
+            child,
+            model_path: "/tmp/does-not-matter.gguf".into(),
+            port: DEAD_PORT,
+            ctx: Some(8192),
+            args: Vec::new(),
+        });
+    }
+
+    #[test]
+    #[cfg_attr(target_os = "windows", ignore = "uses sh")]
+    fn a_child_that_dies_on_start_is_reported_at_once_and_not_after_the_budget() {
+        // GH #118: the health wait watched only the port, so an engine that
+        // exited in the first second (a missing runtime library, a GPU backend
+        // that will not initialise) still burned the whole budget before the
+        // user was told anything. The budget here is 30s; the answer has to
+        // arrive in a fraction of that.
+        let state = AppState::new();
+        let child = std::process::Command::new("sh")
+            .args(["-c", "exit 3"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("spawn a child that exits immediately");
+        park_child(&state, child);
+
+        let began = Instant::now();
+        let out = wait_for_health_or_exit(&state, DEAD_PORT, Duration::from_secs(30));
+        let took = began.elapsed();
+
+        assert_eq!(out, HealthWait::ChildExited);
+        assert!(took < Duration::from_secs(5), "waited {took:?}, which is the old dead wait");
+    }
+
+    #[test]
+    fn an_empty_engine_slot_is_not_something_to_wait_for() {
+        let state = AppState::new();
+        let began = Instant::now();
+        assert_eq!(
+            wait_for_health_or_exit(&state, DEAD_PORT, Duration::from_secs(30)),
+            HealthWait::ChildExited
+        );
+        assert!(began.elapsed() < Duration::from_secs(5));
+    }
+
+    #[test]
+    #[cfg_attr(target_os = "windows", ignore = "uses sleep")]
+    fn a_child_that_is_still_loading_is_left_alone_until_the_budget_ends() {
+        // Negative control for the check above: a LIVE child must still get
+        // its full budget, or a big GGUF on a cold disk would be declared dead
+        // while it is only slow (ENG-4).
+        let state = AppState::new();
+        let child = std::process::Command::new("sleep")
+            .arg("30")
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("spawn a live child");
+        park_child(&state, child);
+
+        assert_eq!(
+            wait_for_health_or_exit(&state, DEAD_PORT, Duration::from_millis(900)),
+            HealthWait::TimedOut
+        );
+
+        // Do not leave the sleeper behind.
+        {
+            let mut guard = state.bundled_engine.lock().unwrap();
+            if let Some(e) = guard.as_mut() {
+                let _ = e.child.kill();
+                let _ = e.child.wait();
+            }
+        }
+    }
+
+    #[test]
+    fn a_dead_start_names_the_graphics_card_when_the_engine_blamed_it() {
+        let f = StartFailure {
+            died: true,
+            port_taken: false,
+            stderr: "ggml_cuda_init: failed to initialize CUDA: no kernel image is available for execution on the device".into(),
+        };
+        let msg = start_failure_message(&f, 8127, Duration::from_secs(60));
+        assert!(msg.contains("exited again"), "{msg}");
+        assert!(msg.contains("tried twice"), "{msg}");
+        assert!(msg.contains("GPU Layers to 0"), "{msg}");
+        // llama-server's own words survive so a bug report still carries them.
+        assert!(msg.contains("no kernel image"), "{msg}");
+    }
+
+    #[test]
+    fn a_dead_start_points_at_the_model_when_the_engine_blamed_the_file() {
+        let f = StartFailure {
+            died: true,
+            port_taken: false,
+            stderr: "llama_model_load: error loading model: unknown model architecture 'wanx'".into(),
+        };
+        let msg = start_failure_message(&f, 8127, Duration::from_secs(60));
+        assert!(msg.contains("refused the model file"), "{msg}");
+        assert!(!msg.contains("GPU Layers"), "{msg}");
+    }
+
+    #[test]
+    fn a_stranger_on_the_port_keeps_its_own_message() {
+        let f = StartFailure { died: true, port_taken: true, stderr: String::new() };
+        let msg = start_failure_message(&f, 8127, Duration::from_secs(60));
+        assert!(msg.contains("occupying the port"), "{msg}");
+        assert!(!msg.contains("tried twice"), "{msg}");
+    }
+
+    #[test]
+    fn a_slow_load_still_reports_the_budget_and_never_claims_a_crash() {
+        let f = StartFailure { died: false, port_taken: false, stderr: String::new() };
+        let msg = start_failure_message(&f, 8127, Duration::from_secs(220));
+        assert!(msg.contains("did not become healthy on port 8127 within 220s"), "{msg}");
+        assert!(!msg.contains("exited"), "{msg}");
+    }
+
+    #[test]
+    fn gpu_blame_needs_actual_gpu_words() {
+        assert!(stderr_blames_the_gpu("CUDA error: out of memory"));
+        assert!(stderr_blames_the_gpu("ggml_vulkan: no devices found"));
+        // Negative control: a plain port collision is not a GPU problem, and
+        // sending that user into the GPU Layers setting would waste their time.
+        assert!(!stderr_blames_the_gpu("error: bind(): Address already in use"));
+        assert!(!stderr_blames_the_model("error: bind(): Address already in use"));
     }
 
     #[test]

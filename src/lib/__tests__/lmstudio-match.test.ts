@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { matchesLmStudioInstalled, modelIdentity, extractQuant, type InstalledModelLike } from '../lmstudio-match'
+import { matchesLmStudioInstalled, matchesLocalGgufInstalled, modelIdentity, extractQuant, type InstalledModelLike } from '../lmstudio-match'
 
 const lms = (id: string, field: 'model' | 'name' | 'lmsKey' = 'model'): InstalledModelLike => ({
   provider: 'openai',
@@ -91,5 +91,38 @@ describe('split GGUF (-NNNNN-of-NNNNN) shard tails', () => {
   it('does not mistake short numeric names for shard tails', () => {
     expect(modelIdentity('llama-2-of-3.gguf')).toBe('llama2of3')
     expect(extractQuant('phi-4-Q4_K_M.gguf')).toBe('q4km')
+  })
+})
+
+// GH #118 (nayffy, 2026-08-27): "If i close and reopen LU, it changed from
+// 'Installed' to 'Get', but the 'Get' button doesn't do anything as the files
+// are still downloaded." The badge only ever asked the LM Studio half of the
+// installed list, and a built-in-engine model is stamped
+// providerName: 'Built-in Engine'. The in-session download store was the only
+// other evidence and it does not survive a restart.
+const builtin = (id: string): InstalledModelLike => ({
+  provider: 'openai',
+  providerName: 'Built-in Engine',
+  model: id,
+})
+
+describe('matchesLocalGgufInstalled: the built-in engine counts as installed too', () => {
+  it('lights the badge for a GGUF the built-in engine reports from disk', () => {
+    // list_bundled_models returns the file STEM, no .gguf.
+    expect(matchesLocalGgufInstalled('Cydonia-24B-v4.1-Q4_K_M.gguf', [builtin('Cydonia-24B-v4.1-Q4_K_M')])).toBe(true)
+  })
+  it('still lights for LM Studio, so the old path is untouched', () => {
+    expect(matchesLocalGgufInstalled('Hermes-3-Llama-3.1-8B.Q4_K_M.gguf', [lms('hermes-3-llama-3.1-8b.q4_k_m.gguf')])).toBe(true)
+  })
+  it('keeps the quant rule: a sibling quant on the built-in engine does NOT light the row', () => {
+    expect(matchesLocalGgufInstalled('Cydonia-24B-v4.1-Q4_K_M.gguf', [builtin('Cydonia-24B-v4.1-Q6_K')])).toBe(false)
+  })
+  it('ignores a cloud slot that happens to sit on provider openai', () => {
+    expect(matchesLocalGgufInstalled('Cydonia-24B-v4.1-Q4_K_M.gguf', [
+      { provider: 'openai', providerName: 'OpenAI', model: 'Cydonia-24B-v4.1-Q4_K_M' },
+    ])).toBe(false)
+  })
+  it('the LM-Studio-only function stays LM-Studio-only', () => {
+    expect(matchesLmStudioInstalled('Cydonia-24B-v4.1-Q4_K_M.gguf', [builtin('Cydonia-24B-v4.1-Q4_K_M')])).toBe(false)
   })
 })

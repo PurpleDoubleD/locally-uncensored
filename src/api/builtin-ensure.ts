@@ -203,3 +203,105 @@ export async function ensureBuiltinAgentCtx(modelName: string): Promise<void> {
     } catch { /* the lazy self-heal on the next send takes over */ }
   }
 }
+
+// ── "Why is the built-in engine not answering?" ──────────────────────────────
+
+export interface BuiltinEngineDiagnosis {
+  /** The engine answers /v1 on its port right now. */
+  ok: boolean
+  /** English, user-facing, empty when `ok` or when this slot is not ours. */
+  reason: string
+  /** True when this diagnosis actually started the engine. */
+  repaired: boolean
+}
+
+const OK: BuiltinEngineDiagnosis = { ok: true, reason: '', repaired: false }
+const NOT_OURS: BuiltinEngineDiagnosis = { ok: false, reason: '', repaired: false }
+
+/**
+ * GH #118 (nayffy, 2026-08-27): the Built-in Engine test in Settings, AI
+ * Backends answered with nothing but a red dot while the console carried
+ * `GET http://127.0.0.1:8127/v1/models net::ERR_CONNECTION_REFUSED`. A refused
+ * connection to a server the app owns is not a verdict, it is a question the
+ * app can answer itself, so this asks it: is the engine up, is there a model
+ * to run at all, and does a start attempt succeed. House rule is self-healing
+ * before an error message, so with `repair` the obvious repair (start the
+ * engine on an installed GGUF) is attempted before anything is reported.
+ *
+ * Never throws. A missing Tauri backend (browser/dev) reports `NOT_OURS`, so
+ * the caller keeps whatever it did before.
+ */
+export async function diagnoseBuiltinEngine(
+  opts: { repair?: boolean; preferModel?: string | null } = {},
+): Promise<BuiltinEngineDiagnosis> {
+  if (!isManagedBuiltinSlot()) return NOT_OURS
+
+  let status: EngineStatusLite | null
+  try {
+    status = await backendCall<EngineStatusLite>('bundled_engine_status')
+  } catch {
+    return NOT_OURS
+  }
+  if (status?.healthy) return OK
+
+  let models: Array<{ name: string; path: string }>
+  try {
+    const res = await backendCall<BundledList>('list_bundled_models')
+    models = res?.models ?? []
+  } catch (e) {
+    return {
+      ok: false,
+      repaired: false,
+      reason: `The built-in engine is not running and its model folder could not be read: ${errText(e)}`,
+    }
+  }
+
+  const runnable = models.filter((m) => !isEmbeddingGguf(m.name))
+  if (runnable.length === 0) {
+    return {
+      ok: false,
+      repaired: false,
+      reason:
+        'The built-in engine is installed but has no chat model to load yet. Open Models, Discover and install one, then test again.',
+    }
+  }
+
+  if (!opts.repair) {
+    return {
+      ok: false,
+      repaired: false,
+      reason: `The built-in engine is not running. ${runnable.length} model${runnable.length === 1 ? ' is' : 's are'} installed. Pick one in the chat model picker to start the engine.`,
+    }
+  }
+
+  const bare = opts.preferModel
+    ? opts.preferModel.includes('::')
+      ? opts.preferModel.split('::')[1]
+      : opts.preferModel
+    : ''
+  const pick = runnable.find((m) => m.name === bare) ?? runnable[0]
+  try {
+    const tuning = useSettingsStore.getState().settings.builtinEngine
+    await backendCall('start_bundled_engine', { modelPath: pick.path, tuning })
+    return { ok: true, reason: '', repaired: true }
+  } catch (e) {
+    return {
+      ok: false,
+      repaired: false,
+      reason: `The built-in engine could not start "${pick.name}": ${errText(e)}`,
+    }
+  }
+}
+
+function errText(e: unknown): string {
+  return e instanceof Error ? e.message : String(e ?? 'unknown error')
+}
+
+// Duplicated from api/engine.ts on purpose: importing it would pull the
+// provider/model layer into this module and reintroduce the import cycle the
+// header warns about. Two patterns, one meaning, both covered by tests.
+const EMBED_NAME_PATTERNS = [/embed/, /nomic-embed/, /bge-/, /e5-/, /gte-/, /sentence-/]
+function isEmbeddingGguf(name: string): boolean {
+  const lower = name.toLowerCase()
+  return EMBED_NAME_PATTERNS.some((p) => p.test(lower))
+}
