@@ -599,7 +599,7 @@ fn wait_for_health(port: u16, timeout: Duration) -> Result<(), String> {
         std::thread::sleep(Duration::from_millis(300));
     }
     Err(format!(
-        "Built-in engine did not become healthy on port {port} within {}s (the budget scales with model size — huge GGUFs can take minutes on a cold first load)",
+        "Built-in engine did not become healthy on port {port} within {}s (the budget scales with model size, huge GGUFs can take minutes on a cold first load)",
         timeout.as_secs()
     ))
 }
@@ -1509,7 +1509,7 @@ fn start_bundled_embed_blocking(
             .unwrap_or_default();
         stop_embed_locked(state);
         return Err(format!(
-            "Port {port} answers health checks, but the embeddings server this app just started exited immediately — another llama-server (likely left over from a previous session or crash) is occupying the port. Quit that process or reboot, then try again.{}",
+            "Port {port} answers health checks, but the embeddings server this app just started exited immediately. Another llama-server (likely left over from a previous session or crash) is occupying the port. Quit that process or reboot, then try again.{}",
             if why.is_empty() { String::new() } else { format!("\n\n{why}") }
         ));
     }
