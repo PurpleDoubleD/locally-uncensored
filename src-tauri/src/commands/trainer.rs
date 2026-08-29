@@ -586,6 +586,10 @@ fn run_streamed(
     let mut child = cmd
         .spawn()
         .map_err(|e| format!("{label} could not start: {}", os_error::english(&e)))?;
+    // The trainer is the longest lived and most VRAM hungry child the app
+    // spawns. `shutdown_subprocesses` kills it on a clean quit; the job object
+    // covers the quits that never reach that code.
+    crate::commands::process::tie_child_to_app_lifetime(child.id());
     if let Ok(mut slot) = pid_slot.lock() {
         *slot = Some(child.id());
     }

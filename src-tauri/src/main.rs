@@ -2,6 +2,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod commands;
+mod crash_report;
 mod install_state;
 mod os_error;
 mod os_paths;
@@ -107,6 +108,14 @@ where
 }
 
 fn main() {
+    // First thing of all: a panic anywhere must leave a trace. The release
+    // profile is `panic = "abort"`, so a panic on any thread ends the process
+    // immediately, and a shipped Windows build has no console to print to.
+    // Without this hook such a death is indistinguishable from the app being
+    // killed from outside, which is exactly the confusion the 2026-08-29
+    // Windows investigation had to untangle by hand.
+    crash_report::install_panic_hook();
+
     #[cfg(target_os = "linux")]
     apply_linux_webkit_workarounds();
     // Before anything can spawn a child: an AppImage exports PYTHONHOME and

@@ -29,16 +29,55 @@ pub fn comfy_supported_here() -> bool {
 #[cfg(target_os = "windows")]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 
-/// Assign a child process to a Windows Job Object with KILL_ON_JOB_CLOSE.
-/// When the Tauri parent process dies (even via Task Manager), the OS kernel
-/// automatically terminates all processes in the job — no Drop needed.
+/// Assign a child process to the app-wide Windows Job Object with
+/// KILL_ON_JOB_CLOSE. When the Tauri parent process dies (even via Task
+/// Manager, even via a hard kill from a build script), the OS kernel
+/// automatically terminates every process in the job, with no Drop needed.
 #[cfg(target_os = "windows")]
 fn assign_to_kill_on_close_job(child: &std::process::Child) {
     assign_pid_to_kill_on_close_job(child.id());
 }
 
+/// The ONE kill-on-close job object of this process, created on first use.
+///
+/// It used to be one fresh job per child, with the handle leaked on purpose so
+/// the job outlived the call. That is correct for a child spawned once, and a
+/// slow leak for one spawned again and again: the built-in engine is restarted
+/// on every model swap, and a session that switches models a few dozen times
+/// (measured on the Windows box on 2026-08-29: 30 restarts in eleven minutes)
+/// leaked a kernel job handle every single time. A process may belong to
+/// several jobs on Windows 8 and later, so one shared job holds every child
+/// just as well and leaks exactly one handle for the whole run.
+#[cfg(target_os = "windows")]
+fn kill_on_close_job() -> isize {
+    use std::sync::OnceLock;
+    use windows_sys::Win32::System::JobObjects::*;
+
+    // The raw HANDLE is a pointer and therefore not `Sync`; the numeric value
+    // is, and it is what every call site needs.
+    static JOB: OnceLock<isize> = OnceLock::new();
+    *JOB.get_or_init(|| unsafe {
+        let job = CreateJobObjectW(std::ptr::null(), std::ptr::null());
+        if job.is_null() {
+            return 0;
+        }
+        let mut info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = std::mem::zeroed();
+        info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        SetInformationJobObject(
+            job,
+            JobObjectExtendedLimitInformation,
+            &info as *const _ as *const _,
+            std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+        );
+        // Intentionally never closed. The handle must stay alive for the
+        // lifetime of the app. When the app dies the OS closes it and
+        // KILL_ON_JOB_CLOSE takes the children with it.
+        job as isize
+    })
+}
+
 /// PID-based variant of [`assign_to_kill_on_close_job`]. Usable from spawn paths
-/// that don't own a `std::process::Child` — notably `tokio::process::Child`
+/// that don't own a `std::process::Child`, notably `tokio::process::Child`
 /// (whose `id()` is `Option<u32>`) in the background-task runner (bg_tasks.rs).
 /// Same KILL_ON_JOB_CLOSE semantics; a pid of 0 is ignored.
 #[cfg(target_os = "windows")]
@@ -47,20 +86,9 @@ pub(crate) fn assign_pid_to_kill_on_close_job(pid: u32) {
     use windows_sys::Win32::Foundation::*;
 
     if pid == 0 { return; }
+    let job = kill_on_close_job();
+    if job == 0 { return; }
     unsafe {
-        let job = CreateJobObjectW(std::ptr::null(), std::ptr::null());
-        if job.is_null() { return; }
-
-        let mut info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = std::mem::zeroed();
-        info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
-
-        SetInformationJobObject(
-            job,
-            JobObjectExtendedLimitInformation,
-            &info as *const _ as *const _,
-            std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
-        );
-
         let handle = windows_sys::Win32::System::Threading::OpenProcess(
             windows_sys::Win32::System::Threading::PROCESS_SET_QUOTA
             | windows_sys::Win32::System::Threading::PROCESS_TERMINATE,
@@ -68,13 +96,32 @@ pub(crate) fn assign_pid_to_kill_on_close_job(pid: u32) {
             pid,
         );
         if !handle.is_null() {
-            AssignProcessToJobObject(job, handle);
+            AssignProcessToJobObject(job as _, handle);
             CloseHandle(handle);
         }
-        // Intentionally leak the job handle — it must stay alive for the duration
-        // of the parent process. When the parent dies, the handle is closed by the
-        // OS and KILL_ON_JOB_CLOSE triggers.
     }
+}
+
+/// Tie a spawned child to the lifetime of the app: on Windows it joins the
+/// kill-on-close job object, everywhere else this is a no-op (Unix children of
+/// a dead parent are reparented, and the graceful shutdown path plus the
+/// process-group kill in `process_util` cover what matters there).
+///
+/// Every long lived child goes through here: the bundled llama-server (chat
+/// and embeddings), Ollama, the whisper server, the trainer, ComfyUI. Before
+/// 2.6.7 only ComfyUI, Ollama-by-Drop and the background-task runner were
+/// covered, so an app that died without running its shutdown path left a
+/// llama-server behind holding the whole model in VRAM. Proved on the Windows
+/// box on 2026-08-29: the app was terminated at 09:48:19, both ComfyUI
+/// processes went with it, and lu-llama-server stayed up on 3633 MiB.
+///
+/// Cross platform on purpose (no `#[cfg]` at the call sites) so the call is
+/// visible and testable on every platform, not only the one that needs it.
+pub(crate) fn tie_child_to_app_lifetime(pid: u32) {
+    #[cfg(target_os = "windows")]
+    assign_pid_to_kill_on_close_job(pid);
+    #[cfg(not(target_os = "windows"))]
+    let _ = pid;
 }
 
 /// Show the main window (called from frontend after React renders)
@@ -1065,6 +1112,10 @@ fn start_ollama_blocking(state: &AppState) -> Result<serde_json::Value, String> 
             // shutdown (kj103x — Discord 2026-05-23 #help-chat 1507756765612216411).
             // Note: tasklist check above means we only get here if WE start it,
             // so we never kill a user-managed ollama serve.
+            //
+            // The Drop only covers a shutdown that runs. A hard kill of the app
+            // does not run one, so the child also joins the kill-on-close job.
+            tie_child_to_app_lifetime(child.id());
             *state.ollama_process.lock().unwrap() = Some(child);
             println!("[Ollama] Started");
             info!("ollama spawned");
@@ -2024,6 +2075,7 @@ pub fn auto_start_ollama(state: &AppState) {
     match cmd.spawn() {
         Ok(child) => {
             // Same orphan-prevention rationale as `start_ollama` above.
+            tie_child_to_app_lifetime(child.id());
             *state.ollama_process.lock().unwrap() = Some(child);
             println!("[Ollama] Started");
         }
@@ -2670,5 +2722,127 @@ mod ollama_probe_tests {
             "the probe cannot see a socket that is demonstrably listening",
         );
         drop(listener);
+    }
+}
+
+/// Orphan safety: every long lived child the app spawns has to die with the
+/// app, including the deaths that never reach `shutdown_subprocesses` (a hard
+/// kill, Task Manager, a build script that clears the way for itself).
+///
+/// The evidence these tests were written from, Windows box 2026-08-29: the app
+/// was terminated at 09:48:19, both ComfyUI processes went with it because
+/// ComfyUI was in the kill-on-close job, and lu-llama-server survived holding
+/// 3633 MiB of VRAM because the engine spawn was not.
+#[cfg(test)]
+mod orphan_safety_tests {
+    use super::*;
+
+    /// Source of the files that spawn a long lived child, read at compile
+    /// time. A grep in a test is a blunt instrument, but it is the only guard
+    /// available for a Windows kernel behaviour that cannot be exercised on
+    /// this machine, and it fails loudly when a NEW spawn path forgets the
+    /// call rather than after the next VRAM leak in the field.
+    const ENGINE_RS: &str = include_str!("engine.rs");
+    const WHISPER_RS: &str = include_str!("whisper.rs");
+    const TRAINER_RS: &str = include_str!("trainer.rs");
+    const PROCESS_RS: &str = include_str!("process.rs");
+
+    fn ties(src: &str) -> usize {
+        src.matches("tie_child_to_app_lifetime(").count()
+            - src.matches("fn tie_child_to_app_lifetime(").count()
+    }
+
+    #[test]
+    fn the_bundled_engine_and_the_embeddings_server_are_both_tied_to_the_app() {
+        // Two spawns in engine.rs: the chat server and the embeddings server.
+        // Neither was tied before 2.6.7, and the chat one is the orphan that
+        // was measured holding 3633 MiB after the app was gone.
+        assert!(
+            ENGINE_RS.contains("tie_child_to_app_lifetime(child.id())"),
+            "the bundled engine spawn must tie its child to the app lifetime"
+        );
+        assert_eq!(
+            ties(ENGINE_RS),
+            2,
+            "engine.rs has two long lived spawns (chat + embeddings); both must be tied"
+        );
+    }
+
+    /// process.rs up to this test module. The assertions below mention the
+    /// call by name many times over, and counting those as call sites would
+    /// make the guard meaningless.
+    fn process_rs_production_code() -> &'static str {
+        PROCESS_RS
+            .split_once("mod orphan_safety_tests {")
+            .map(|(head, _)| head)
+            .expect("this module is part of process.rs")
+    }
+
+    #[test]
+    fn the_other_long_lived_children_are_tied_too() {
+        assert_eq!(ties(WHISPER_RS), 1, "the persistent whisper server must be tied");
+        assert_eq!(ties(TRAINER_RS), 1, "the trainer must be tied");
+        // Ollama is spawned twice: the command and the auto-start path.
+        assert_eq!(
+            ties(process_rs_production_code()),
+            2,
+            "both ollama spawns must be tied"
+        );
+    }
+
+    #[test]
+    fn comfyui_keeps_the_job_it_already_had() {
+        // Negative control: the fix must not have moved ComfyUI off the
+        // mechanism that demonstrably worked on 2026-08-29.
+        assert_eq!(
+            process_rs_production_code()
+                .matches("assign_to_kill_on_close_job(&child)")
+                .count(),
+            2,
+            "both ComfyUI spawns must stay on the kill-on-close job"
+        );
+    }
+
+    #[test]
+    fn tying_a_child_leaves_it_running_and_a_zero_pid_is_ignored() {
+        // The call is a no-op off Windows and must never be a way to kill
+        // something by accident. A pid of 0 means "no process" on both
+        // families and must not be handed to the OS at all.
+        tie_child_to_app_lifetime(0);
+
+        #[cfg(not(target_os = "windows"))]
+        {
+            let mut child = std::process::Command::new("sleep")
+                .arg("5")
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+                .expect("spawn a sleeper");
+            tie_child_to_app_lifetime(child.id());
+            std::thread::sleep(std::time::Duration::from_millis(200));
+            assert!(
+                child.try_wait().expect("try_wait").is_none(),
+                "tying a child must not disturb it"
+            );
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+    }
+
+    #[test]
+    fn the_job_object_is_created_once_and_shared() {
+        // The old code made a fresh job per child and leaked the handle every
+        // time; the engine restarts on every model swap (30 restarts in eleven
+        // minutes were logged on 2026-08-29), so that leaked 30 handles.
+        assert_eq!(
+            process_rs_production_code().matches("CreateJobObjectW(").count(),
+            1,
+            "there must be exactly one place that creates the job object"
+        );
+        assert!(
+            PROCESS_RS.contains("static JOB: OnceLock<isize>"),
+            "the job handle must be created once and reused"
+        );
     }
 }

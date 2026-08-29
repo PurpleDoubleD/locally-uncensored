@@ -1,4 +1,5 @@
 use crate::os_error;
+use super::process::tie_child_to_app_lifetime;
 
 // P1 — Built-in inference engine (bundled llama.cpp `llama-server`).
 //
@@ -953,6 +954,15 @@ fn spawn_engine_attempt(
             })
         }
     };
+    // Tie the engine to the app's lifetime BEFORE anything else can go wrong.
+    // The graceful shutdown path in `AppState::shutdown_subprocesses` kills this
+    // child on a normal quit, but nothing runs on a hard kill or a crash, and
+    // this is the single most expensive orphan the app can leave: a whole GGUF
+    // resident in VRAM with no owner left to free it. Proved on the Windows box
+    // on 2026-08-29 (app terminated 09:48:19, lu-llama-server still holding
+    // 3633 MiB afterwards). ComfyUI survived the same event correctly because
+    // it was already in the job and the engine was not.
+    tie_child_to_app_lifetime(child.id());
     let diagnostics = child.stderr.take().map(super::shell::drain);
 
     *state.bundled_engine.lock().unwrap() = Some(BundledEngine {
@@ -1487,6 +1497,8 @@ fn start_bundled_embed_blocking(
     let mut child = cmd
         .spawn()
         .map_err(|e| format!("Failed to spawn embeddings server: {}", os_error::english(&e)))?;
+    // Same orphan rule as the chat engine above.
+    tie_child_to_app_lifetime(child.id());
     let diagnostics = child.stderr.take().map(super::shell::drain);
 
     *state.bundled_embed.lock().unwrap() = Some(BundledEngine {
