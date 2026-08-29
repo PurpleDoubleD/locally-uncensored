@@ -1,6 +1,7 @@
 import type { ChatMessage, ToolCall, ToolDefinition } from '../api/providers/types'
 import { ollamaUrl, localFetchStream } from '../api/backend'
 import { repairToolCallArgs } from './tool-call-repair'
+import { applyTemplateContract } from '../api/providers/normalize-system'
 
 /**
  * Streaming Ollama `/api/chat` call with native `tools` support.
@@ -31,7 +32,15 @@ export async function streamOllamaChatWithTools(
   onContent: (content: string) => void,
   onThinking: (thinking: string) => void,
 ): Promise<{ content: string; toolCalls: ToolCall[]; thinking: string; promptEvalCount: number; evalCount: number }> {
-  const ollamaMessages = messages.map((m) => {
+  // Bug B3: this path talks to /api/chat behind the provider's back, so it
+  // needs the same contract. It always sends a native `tools` payload (the
+  // strategy resolution only routes here after Ollama reported the model's
+  // `tools` capability), so the tool channel stays native and only the
+  // system-first rule is enforced.
+  const ollamaMessages = applyTemplateContract(messages, {
+    toolRole: 'native',
+    alternate: false,
+  }).map((m) => {
     const msg: Record<string, any> = { role: m.role, content: m.content }
     if (m.tool_calls) msg.tool_calls = m.tool_calls
     if ((m as any).images?.length) msg.images = (m as any).images.map((img: any) => img.data)

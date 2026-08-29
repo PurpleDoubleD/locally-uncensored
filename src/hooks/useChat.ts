@@ -31,6 +31,7 @@ import { stripNonCanonicalTags, finalStripThinkingTags } from "../lib/thinking-s
 import { isMultimodalUnsupportedError, MULTIMODAL_UNSUPPORTED_MESSAGE } from "../lib/ollama-errors"
 import type { ImageAttachment, Message } from "../types/chat"
 import { isGroupChat, groupSystemPrompt, groupHistory, stripImpersonatedSpeakers } from "../lib/group-chat"
+import { explainSendRefusal } from "../lib/template-refusal"
 import { emptyAnswerExplanation } from "../lib/answer-notes"
 import { log } from "../lib/logger"
 import { CREDITS_EXHAUSTED_MESSAGE } from '../lib/credits-exhausted'
@@ -203,10 +204,14 @@ async function runGroupTurn(convId: string, model: string, allModels: string[], 
   } catch (err) {
     if ((err as Error).name !== 'AbortError') {
       syncOllamaHealthFromError(err)
+      // Bug B3 round 2: a group round on a strict template used to paste the
+      // template's own Jinja trace into the bubble. Say what happened instead,
+      // and keep the raw text underneath it for support.
+      const refusal = explainSendRefusal(err)
       useChatStore.getState().updateMessageContent(
         convId,
         assistantMessage.id,
-        `Error from ${model}: ${(err as Error).message || 'Connection failed'}`,
+        refusal ?? `Error from ${model}: ${(err as Error).message || 'Connection failed'}`,
       )
     }
   }
@@ -541,6 +546,15 @@ export function useChat() {
               ? `${cavemanReminder}\n${m.content}`
               : m.content,
             ...(m.images?.length ? { images: m.images.map(img => ({ data: img.data, mimeType: img.mimeType })) } : {}),
+            // Bug B3 round 2: a plain chat can hold tool turns, because the
+            // chat tools (web_search and friends) run inside it by default.
+            // The store keeps tool_calls and tool_call_id for exactly this
+            // rebuild, and this rebuild dropped both, so every later send
+            // showed the model a tool RESULT with no call in front of it.
+            // Where the model's template cannot render them, the contract in
+            // api/providers/normalize-system.ts carries them as prompt text.
+            ...(m.tool_calls?.length ? { tool_calls: m.tool_calls } : {}),
+            ...(m.tool_call_id ? { tool_call_id: m.tool_call_id } : {}),
           })),
       ]),
       {
@@ -846,6 +860,9 @@ export function useChat() {
           : (err as any).code === 'rate_limit'
             ? (err as Error).message
             : `Error: ${(err as Error).message || 'Connection failed'}`
+        // Bug B3 round 2: a refusal that produced nothing at all gets its own
+        // English sentence, not the template's raw Jinja trace.
+        const sendRefusal = explainSendRefusal(err)
 
         // Image attached to a non-vision model → friendly guidance instead of
         // the raw 400 JSON (gthvidsten, GH Discussion #67).
@@ -864,6 +881,15 @@ export function useChat() {
             (contentRef.current ? contentRef.current + '\n\n' : '') + CREDITS_EXHAUSTED_MESSAGE
           )
         // Show user-friendly message for thinking errors
+        // Bug B3 round 2: same treatment as the agent path. A template that
+        // raised produced nothing at all, and its Jinja trace is not an
+        // answer to anything the user asked.
+        } else if (sendRefusal) {
+          useChatStore.getState().updateMessageContent(
+            convId!,
+            assistantMessage.id,
+            (contentRef.current ? contentRef.current + "\n\n" : "") + sendRefusal,
+          )
         } else if (errorMsg.includes('does not support thinking')) {
           useChatStore.getState().updateMessageContent(
             convId!,

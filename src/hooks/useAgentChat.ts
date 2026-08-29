@@ -31,7 +31,7 @@ import { resolveToolCallingStrategy } from '../lib/agent-strategy'
 import { isMultimodalUnsupportedError, MULTIMODAL_UNSUPPORTED_MESSAGE } from '../lib/ollama-errors'
 import { stripVisionFeedbackMessages } from '../lib/vision-heal'
 import { log } from '../lib/logger'
-import { buildHermesToolPrompt, buildHermesToolResult, parseHermesToolCalls, stripToolCallTags, hasToolCallTags } from '../api/hermes-tool-calling'
+import { buildHermesToolPrompt, buildHermesToolResult, buildHermesToolCall, parseHermesToolCalls, stripToolCallTags, hasToolCallTags } from '../api/hermes-tool-calling'
 import { parseLooseToolCalls, stripMatchedCalls, stripToolCallText, canonicalToolName } from '../lib/loose-tool-parse'
 import { mediaCallSucceeded } from '../lib/media-result'
 import { summarizeTurn } from '../lib/turn-summary'
@@ -76,6 +76,7 @@ import { reasoningOnlyRound, REASONING_CONTINUE_BUDGET, REASONING_CONTINUE_STEER
 import { findUnbackedLinks, unbackedLinksSteer } from '../lib/unbacked-links'
 import { useTodoStore } from '../stores/todoStore'
 import { platformPromptLine, hostClockLine } from '../lib/host-platform'
+import { explainSendRefusal } from '../lib/template-refusal'
 import { httpStatusOf, isTerminalModelError, retryDelayMs } from '../lib/http-status'
 import { CREDITS_EXHAUSTED_MESSAGE } from '../lib/credits-exhausted'
 
@@ -547,6 +548,16 @@ export function useAgentChat() {
             ? `${cavemanReminder}\n${m.content}`
             : m.content,
           ...(m.images?.length ? { images: m.images.map(img => ({ data: img.data, mimeType: img.mimeType })) } : {}),
+          // Bug B3 round 2: the store persists tool_calls and tool_call_id
+          // (types/chat.ts says so, and says why), and this rebuild threw both
+          // away. From the second user message of a chat on, the model got a
+          // tool RESULT with no call in front of it and no id to tie it to
+          // one. A mutilated history on a tolerant template, and on the id
+          // strict cloud shape a 422 on every follow-up turn. Carried through
+          // now; where the template cannot render them, the contract in
+          // api/providers/normalize-system.ts turns both into prompt text.
+          ...(m.tool_calls?.length ? { tool_calls: m.tool_calls as unknown as ChatMessage['tool_calls'] } : {}),
+          ...(m.tool_call_id ? { tool_call_id: m.tool_call_id } : {}),
         })),
     ]
 
@@ -1137,7 +1148,12 @@ export function useAgentChat() {
           const hermesTurn = await streamProviderTurn(
             provider,
             modelToUse,
-            sendMessages.map(m => ({ role: m.role, content: m.content })),
+            // Bug B3 round 2: this used to rebuild every message as bare
+            // role+content, which dropped tool_calls, tool_call_id AND image
+            // attachments on the prompt-transport path only. The provider
+            // contract decides what a template can render; it must be given
+            // the whole message to decide on.
+            sendMessages,
             { ...chatOptions, thinking: undefined as unknown as boolean },
             (_full, delta) => feedUI(splitter.feed(display.feed(delta))),
           )
@@ -1814,7 +1830,28 @@ export function useAgentChat() {
           guardKeyOfResult.set(msg as unknown as object, guardKeyFor(tc))
           return msg
         }
-        if (providerId === 'openai' || providerId === 'anthropic' || providerId === 'lu-cloud') {
+        // Bug B3 round 2, the first cause the counter-check proved on the
+        // real engine: this chain asked WHICH PROVIDER, never WHICH TRANSPORT.
+        // The built-in engine and LM Studio are providerId 'openai', so a run
+        // on the prompt transport still wrote its results into the native
+        // `tool` role, a role the model's template has no branch for, and no
+        // `tools` payload anywhere in the request to justify it. The wire read
+        // [system, user, assistant, tool] and the strict template raised on
+        // the next round. The transport decides the shape; the provider only
+        // decides whether the native shape needs ids.
+        if (strategy === 'hermes_xml') {
+          for (const { tc } of batch) {
+            const result = results.find((r) => r.id === batch.find((b) => b.tc === tc)?.ac.id)!
+            agentMessages.push({
+              role: 'assistant',
+              content: buildHermesToolCall(tc.function.name, tc.function.arguments),
+            })
+            agentMessages.push(rememberResult({
+              role: 'user',
+              content: buildHermesToolResult(tc.function.name, resultTextFor(result) + mediaNote(tc.function.name, result)),
+            }, tc))
+          }
+        } else if (providerId === 'openai' || providerId === 'anthropic' || providerId === 'lu-cloud') {
           agentMessages.push({
             role: 'assistant',
             content: turnContent || '',
@@ -1844,11 +1881,14 @@ export function useAgentChat() {
             }, tc))
           }
         } else {
+          // Ollama on a non-native strategy that is not hermes_xml. Same
+          // prompt transport, same dialect, written by the same builders as
+          // the branch above so the two can never drift apart again.
           for (const { tc } of batch) {
             const result = results.find((r) => r.id === batch.find((b) => b.tc === tc)?.ac.id)!
             agentMessages.push({
               role: 'assistant',
-              content: `<tool_call>\n{"name": "${tc.function.name}", "arguments": ${JSON.stringify(tc.function.arguments)}}\n</tool_call>`,
+              content: buildHermesToolCall(tc.function.name, tc.function.arguments),
             })
             agentMessages.push(rememberResult({
               role: 'user',
@@ -1965,6 +2005,10 @@ export function useAgentChat() {
     } catch (err) {
       if ((err as Error).name !== 'AbortError') {
         const errorMsg = (err as Error).message || 'Connection failed'
+        // Bug B3 round 2: a refusal that produced nothing at all (the model's
+        // chat template raised, or the backend 400'd) gets its own English
+        // sentence instead of the raw Jinja trace under an "Agent error" head.
+        const sendRefusal = explainSendRefusal(err)
 
         if (isMultimodalUnsupportedError(errorMsg)) {
           useChatStore.getState().updateMessageContent(
@@ -2038,6 +2082,16 @@ export function useAgentChat() {
             convId!, assistantMessage.id,
             (contentRef.current ? contentRef.current + '\n\n' : '') +
             `The server is limiting how many requests this account may send in a short window, and the run waited for it once already. Give it ${when}, then send your message again. Nothing was charged for the refused attempts.`
+          )
+        } else if (sendRefusal) {
+          // Bug B3 round 2, nebenbefund 3: a chat-tools turn in PLAIN chat
+          // runs through this same executor, so the template's own Jinja
+          // stack trace used to reach the user under the heading "Agent
+          // error" with Agent mode switched off. It is neither the agent's
+          // failure nor a sentence anyone can act on.
+          useChatStore.getState().updateMessageContent(
+            convId!, assistantMessage.id,
+            (contentRef.current ? contentRef.current + '\n\n' : '') + sendRefusal,
           )
         } else if (/failed to fetch|connection refused|connection reset|error sending request|proxy_localhost|network ?error|timed out|timeout|tcp connect|llama runner process|backend unreachable|HTTP 5\d\d/i.test(errorMsg)) {
           // Connection-class failure — after the transient retries above this

@@ -168,3 +168,22 @@ export function stripToolCallTags(output: string): string {
 export function hasToolCallTags(output: string): boolean {
   return /<tool_call>/.test(output)
 }
+
+// ── Build a Tool CALL as prompt text ────────────────────────────
+
+/**
+ * The other half of the prompt transport: the model's own call, written back
+ * into the history as text.
+ *
+ * On the native channel the call rides in `assistant.tool_calls` and the chat
+ * template renders it. A template that has no tool support renders nothing at
+ * all for that field, so the next turn shows the model a RESULT for a call it
+ * can no longer see. Same dialect as buildHermesToolResult, so a history that
+ * mixes the two reads as one conversation to the model.
+ */
+export function buildHermesToolCall(toolName: string, args: unknown): string {
+  const body = JSON.stringify({ name: String(toolName ?? ''), arguments: args ?? {} })
+  return `<tool_call>
+${neutralizeToolTags(body)}
+</tool_call>`
+}

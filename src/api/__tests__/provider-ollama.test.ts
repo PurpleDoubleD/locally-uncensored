@@ -697,13 +697,19 @@ describe('OllamaProvider', () => {
         tool_calls: [{ function: { name: 'test', arguments: { x: 1 } } }],
       }
 
+      // Bug B3 round 2: with a real tool contract in the request the native
+      // tool channel is kept untouched. Without one (tools: []) the model was
+      // never shown a tool contract at all, so a tool_calls field in the
+      // history is a shape the chat template has no branch for, and the
+      // contract in providers/normalize-system.ts carries it as prompt text
+      // instead. That case is proven in providers/__tests__/template-contract.
       await provider.chatWithTools(
         'llama3.1:8b',
         [
           { role: 'user', content: 'test' },
           toolCallMessage,
         ],
-        [],
+        [{ type: 'function', function: { name: 'test', description: '', parameters: { type: 'object', properties: {}, required: [] } } }],
       )
 
       const body = JSON.parse(mockLocalFetch.mock.calls[0][1]?.body as string)
