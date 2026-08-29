@@ -24,6 +24,7 @@ import { detectLocalBackends, type DetectedBackend } from '../../lib/backend-det
 import { whenRunsIdle } from '../../lib/run-idle'
 import { backendCall, isTauri } from '../../api/backend'
 import { idbStorage } from '../../lib/idbStorage'
+import { STORE_KEYS, IDB_STORE_KEYS, collectStoreSnapshot } from '../../lib/store-backup'
 import { idbKeysToRestore, mayReloadForIdbRestore } from '../../lib/idb-restore'
 import { log } from '../../lib/logger'
 import type { AIModel } from '../../types/models'
@@ -160,27 +161,10 @@ export function AppShell() {
   }, [settings.comfyGpuMode])
 
   // ── Store backup/restore: survive NSIS updates that wipe WebView2 data ──
-  const STORE_KEYS = [
-    'chat-conversations', 'chat-settings', 'chat-models', 'lu-providers',
-    'create-store', 'locally-uncensored-codex',
-    'locally-uncensored-permissions', 'locally-uncensored-mcp-servers',
-    'locally-uncensored-agent-mode', 'locally-uncensored-memory',
-    'locally-uncensored-agent-workflows', 'locally-uncensored-agent',
-    'locally-uncensored-voice', 'lu-benchmark-store', 'lu-update-checker-v2',
-    'rag-store', 'workflow-store', 'lu-cloud-catalog',
-    // One-shot notices — back these up so "seen it once" survives an NSIS
-    // update that wipes WebView2 localStorage. `lu_cloud_notice` (the Create
-    // retention line) claimed in its own comment that it survived an update
-    // and did not, because it was never listed here.
-    'lu_cloud_notice', 'locally-uncensored-model-health',
-    // The standing goal (/goal) is per conversation and outlives a session.
-    'locally-uncensored-agent-goal',
-  ]
+  // The key lists and the snapshot builder live in lib/store-backup so the
+  // update path can ask for a backup too. It used to hand the process to the
+  // installer with whatever the 5 s interval last wrote (Bug A1, 2.6.7).
   const STORE_KEYS_SET = new Set(STORE_KEYS)
-  // These two persist via idbStorage (IndexedDB) since v2.5.0 — the backup
-  // snapshot must read them from there; their localStorage copy is deleted by
-  // the one-time idb migration, so localStorage.getItem returns nothing.
-  const IDB_STORE_KEYS = new Set(['chat-conversations', 'locally-uncensored-memory'])
 
   // Feature FF: reserved key under which memory embeddings ride inside the RAG
   // chunk backup file. Never collides with a real documentId (those are UUIDs).
@@ -406,16 +390,7 @@ export function AppShell() {
         if (backupInflight) return
         backupInflight = true
         try {
-          const snapshot: Record<string, string> = { __ts: new Date().toISOString() }
-          for (const key of STORE_KEYS) {
-            const val = IDB_STORE_KEYS.has(key)
-              ? await Promise.resolve(idbStorage.getItem(key))
-              : localStorage.getItem(key)
-            if (val) {
-              snapshot[key] = val
-              if (IDB_STORE_KEYS.has(key)) idbCache[key] = val
-            }
-          }
+          const snapshot = await collectStoreSnapshot(idbCache)
           // Always fire — we want backup even if snapshot is mostly empty, and the
           // sentinel tells the restore-flow this is a valid backup.
           localStorage.setItem('lu-restore-complete', '1')

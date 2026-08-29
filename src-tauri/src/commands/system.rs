@@ -324,12 +324,118 @@ pub(crate) fn merged_backup(previous: &str, incoming: &str, lost: &[String]) -> 
     serde_json::Value::Object(next).to_string()
 }
 
+/// How many rotated generations of the store backup are kept beside the live
+/// one. Three plus the live file plus store_backup.prev.json is a handful of
+/// megabytes on a big history, and it is the difference between one file
+/// standing between a user and their chats and several.
+pub(crate) const BACKUP_GENERATIONS: usize = 3;
+
+/// A generation is only cut when the newest one is at least this old. The
+/// backup triad fires every 5 s and after every chat mutation, so rotating on
+/// every write would burn through the whole ring in under a minute and leave
+/// three copies of the same instant.
+const ROTATE_AFTER_SECS: u64 = 30 * 60;
+
+/// Whether the ring should be shifted. `None` means there is no generation
+/// yet, which is the first rotation.
+pub(crate) fn should_rotate(newest_age: Option<std::time::Duration>) -> bool {
+    match newest_age {
+        None => true,
+        Some(age) => age.as_secs() >= ROTATE_AFTER_SECS,
+    }
+}
+
+/// The backup files a restore may read, newest first.
+///
+/// store_backup.prev.json comes last: it is the one set aside when a snapshot
+/// arrived with a key missing, so it is older than every generation, and it is
+/// only worth reading when nothing newer can be parsed at all.
+pub(crate) fn backup_candidates(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
+    let mut paths = vec![dir.join("store_backup.json")];
+    for i in 1..=BACKUP_GENERATIONS {
+        paths.push(dir.join(format!("store_backup.{i}.json")));
+    }
+    paths.push(dir.join("store_backup.prev.json"));
+    paths
+}
+
+/// A backup is worth restoring from when it parses as a JSON object that still
+/// carries at least one non-empty string value.
+///
+/// The rename below is atomic, so a half written file should not be reachable,
+/// but the payload is not on the platter yet when the rename lands unless the
+/// write was synced, and a machine that loses power there can come back with a
+/// zero length or garbled file under the right name. That is the same class of
+/// event that took the chats in the first place, so the restore path must not
+/// stop at the newest name and call it a day.
+pub(crate) fn is_usable_backup(raw: &str) -> bool {
+    let Ok(serde_json::Value::Object(map)) = serde_json::from_str::<serde_json::Value>(raw) else {
+        return false;
+    };
+    map.iter()
+        .any(|(k, v)| k != "__ts" && !v.as_str().unwrap_or("").is_empty())
+}
+
+/// The candidate to restore from: the first usable one in the order given, or
+/// the newest unusable one when the whole ring reads as nothing.
+///
+/// Handing an unusable file back rather than `None` keeps the caller's own "no
+/// backup at all" branch for the case it was written for, a machine that has
+/// never written one.
+///
+/// Lazy over the iterator on purpose: a full history is a multi megabyte file
+/// and there are up to five of them, so a healthy boot reads exactly one.
+pub(crate) fn pick_backup<I: IntoIterator<Item = String>>(candidates: I) -> Option<String> {
+    let mut newest: Option<String> = None;
+    for raw in candidates {
+        if is_usable_backup(&raw) {
+            return Some(raw);
+        }
+        if newest.is_none() {
+            newest = Some(raw);
+        }
+    }
+    newest
+}
+
+/// Copy the live backup into the ring and drop the oldest generation, but only
+/// when the newest generation has had time to age. Best effort throughout: a
+/// generation that cannot be written is not a reason to refuse the backup that
+/// actually matters.
+fn rotate_generations(dir: &std::path::Path) {
+    let live = dir.join("store_backup.json");
+    if !live.exists() {
+        return;
+    }
+    let newest = dir.join("store_backup.1.json");
+    let age = std::fs::metadata(&newest)
+        .ok()
+        .and_then(|m| m.modified().ok())
+        .and_then(|t| t.elapsed().ok());
+    if !should_rotate(if newest.exists() { age } else { None }) {
+        return;
+    }
+    for i in (1..BACKUP_GENERATIONS).rev() {
+        let from = dir.join(format!("store_backup.{i}.json"));
+        let to = dir.join(format!("store_backup.{}.json", i + 1));
+        if from.exists() {
+            let _ = std::fs::rename(&from, &to);
+        }
+    }
+    let _ = std::fs::copy(&live, &newest);
+}
+
 /// Backup all stores to %APPDATA% (survives NSIS updates). Atomic write (temp
 /// file + rename) so a crash mid-write cannot truncate a previous backup.
 ///
 /// Never destructive: a snapshot that lost a key keeps the old value for it,
 /// and the untouched previous file is set aside once as store_backup.prev.json
 /// so the loss can still be looked at afterwards. See merged_backup.
+///
+/// The temp file is synced before the rename. Without that the rename can land
+/// while the bytes are still only in the page cache, and a hard kill there
+/// leaves a file with the right name and no usable contents, which is exactly
+/// the shape of failure this whole path exists to survive.
 #[tauri::command]
 pub fn backup_stores(data: String) -> Result<(), String> {
     let dir = persistent_dir()?;
@@ -354,21 +460,28 @@ pub fn backup_stores(data: String) -> Result<(), String> {
         merged_backup(&previous, &data, &lost)
     };
 
-    std::fs::write(&tmp, &payload).map_err(|e| os_error::english(&e))?;
+    rotate_generations(&dir);
+
+    {
+        use std::io::Write;
+        let mut file = std::fs::File::create(&tmp).map_err(|e| os_error::english(&e))?;
+        file.write_all(payload.as_bytes()).map_err(|e| os_error::english(&e))?;
+        file.sync_all().map_err(|e| os_error::english(&e))?;
+    }
     std::fs::rename(&tmp, &target).map_err(|e| os_error::english(&e))?;
     Ok(())
 }
 
-/// Restore stores from %APPDATA% backup
+/// Restore stores from the %APPDATA% backup, falling back through the rotated
+/// generations when the newest file cannot be read as a backup at all.
 #[tauri::command]
 pub fn restore_stores() -> Result<Option<String>, String> {
-    let path = persistent_dir()?.join("store_backup.json");
-    if path.exists() {
-        let data = std::fs::read_to_string(&path).map_err(|e| os_error::english(&e))?;
-        Ok(Some(data))
-    } else {
-        Ok(None)
-    }
+    let dir = persistent_dir()?;
+    Ok(pick_backup(
+        backup_candidates(&dir)
+            .into_iter()
+            .filter_map(|p| std::fs::read_to_string(p).ok()),
+    ))
 }
 
 /// Backup the IndexedDB RAG chunks (embedding vectors) to %APPDATA%.
@@ -698,5 +811,146 @@ mod tests {
     fn the_shipped_deadline_is_sane() {
         assert!(SCREENSHOT_TIMEOUT >= std::time::Duration::from_secs(5));
         assert!(SCREENSHOT_TIMEOUT <= std::time::Duration::from_secs(60));
+    }
+
+    // ── Bug A1 (2.6.7): more than one file stands between a user and their
+    // chats, and the newest name is not automatically the usable one.
+
+    fn scratch_dir(tag: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "lu-a1-{tag}-{}-{:?}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// aldrich_ironhart lost the chats to a boot that came back with the
+    /// IndexedDB gone. The file on disk was fine that time. It does not have
+    /// to be: the rename that publishes store_backup.json is atomic in name
+    /// only, the bytes are not on the platter until they are synced, and a
+    /// hard kill in that window leaves the right name over nothing readable.
+    ///
+    /// So the restore walks the ring instead of stopping at the newest name.
+    #[test]
+    fn a_newest_backup_that_reads_as_nothing_is_stepped_over() {
+        let corrupt = String::from("\u{0}\u{0}\u{0}");
+        let truncated = String::from("{\"chat-conversations\":\"{\\\"chats");
+        let good = String::from(r#"{"__ts":"older","chat-conversations":"{\"chats\":42}"}"#);
+
+        let picked = pick_backup([corrupt.clone(), truncated.clone(), good.clone()]);
+        assert_eq!(picked.as_deref(), Some(good.as_str()));
+
+        // And a ring where nothing is usable still answers with the newest
+        // file, so the caller's "no backup at all" branch stays reserved for a
+        // machine that has never written one.
+        assert_eq!(
+            pick_backup([corrupt.clone(), truncated.clone()]).as_deref(),
+            Some(corrupt.as_str())
+        );
+        assert_eq!(pick_backup(Vec::<String>::new()), None);
+
+        // NEGATIVE CONTROL: the old rule was "read store_backup.json, hand it
+        // over". On this disk that is the corrupt file, and the chats sitting
+        // one generation away are never looked at.
+        let old_rule = corrupt.clone();
+        assert!(!is_usable_backup(&old_rule));
+        assert!(!old_rule.contains("chat-conversations"));
+    }
+
+    /// A backup with nothing but its own timestamp in it is not a backup. It
+    /// is what a boot with wiped storage would produce, and restoring from it
+    /// would be the loss all over again.
+    #[test]
+    fn a_snapshot_with_only_a_timestamp_is_not_usable() {
+        assert!(!is_usable_backup(r#"{"__ts":"2026-08-28T00:00:00.000Z"}"#));
+        assert!(!is_usable_backup(r#"{"__ts":"x","chat-conversations":""}"#));
+        assert!(!is_usable_backup(""));
+        assert!(!is_usable_backup("[1,2,3]"));
+        assert!(is_usable_backup(r#"{"__ts":"x","chat-settings":"{}"}"#));
+    }
+
+    /// Newest first, and the file set aside before a loss is the last resort
+    /// rather than the first answer.
+    #[test]
+    fn the_candidate_order_runs_newest_to_oldest() {
+        let dir = std::path::Path::new("/nowhere");
+        let names: Vec<String> = backup_candidates(dir)
+            .iter()
+            .map(|p| p.file_name().unwrap().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(
+            names,
+            vec![
+                "store_backup.json",
+                "store_backup.1.json",
+                "store_backup.2.json",
+                "store_backup.3.json",
+                "store_backup.prev.json",
+            ]
+        );
+    }
+
+    /// The triad writes every 5 s and after every chat mutation. Rotating on
+    /// each of those would fill the ring with three copies of the same minute
+    /// and throw away the older states that make a ring worth having.
+    #[test]
+    fn the_ring_is_only_cut_when_the_newest_generation_has_aged() {
+        assert!(should_rotate(None));
+        assert!(!should_rotate(Some(std::time::Duration::from_secs(5))));
+        assert!(!should_rotate(Some(std::time::Duration::from_secs(60))));
+        assert!(should_rotate(Some(std::time::Duration::from_secs(ROTATE_AFTER_SECS))));
+        assert!(should_rotate(Some(std::time::Duration::from_secs(60 * 60 * 24))));
+    }
+
+    /// Shifting the ring keeps the agreed number of generations and no more.
+    #[test]
+    fn rotating_shifts_the_ring_and_drops_the_oldest() {
+        let dir = scratch_dir("rotate");
+        std::fs::write(dir.join("store_backup.json"), "live-1").unwrap();
+        rotate_generations(&dir);
+        assert_eq!(
+            std::fs::read_to_string(dir.join("store_backup.1.json")).unwrap(),
+            "live-1"
+        );
+
+        // A second rotation right away is refused, the newest generation is
+        // seconds old.
+        std::fs::write(dir.join("store_backup.json"), "live-2").unwrap();
+        rotate_generations(&dir);
+        assert_eq!(
+            std::fs::read_to_string(dir.join("store_backup.1.json")).unwrap(),
+            "live-1"
+        );
+
+        // Force the shifts the clock would otherwise take an hour and a half
+        // to allow, by moving the ring by hand the way rotate_generations does.
+        std::fs::rename(dir.join("store_backup.1.json"), dir.join("store_backup.2.json")).unwrap();
+        std::fs::write(dir.join("store_backup.1.json"), "gen-1").unwrap();
+        std::fs::write(dir.join("store_backup.3.json"), "gen-3").unwrap();
+        std::fs::remove_file(dir.join("store_backup.1.json")).unwrap();
+        std::fs::write(dir.join("store_backup.json"), "live-3").unwrap();
+        rotate_generations(&dir);
+
+        assert_eq!(std::fs::read_to_string(dir.join("store_backup.1.json")).unwrap(), "live-3");
+        assert_eq!(std::fs::read_to_string(dir.join("store_backup.3.json")).unwrap(), "live-1");
+        // BACKUP_GENERATIONS is the cap, nothing beyond it is written.
+        assert!(!dir.join(format!("store_backup.{}.json", BACKUP_GENERATIONS + 1)).exists());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Nothing to rotate must not create an empty generation that then reads
+    /// as a backup on the next boot.
+    #[test]
+    fn a_first_run_with_no_live_backup_writes_no_generation() {
+        let dir = scratch_dir("first");
+        rotate_generations(&dir);
+        assert!(!dir.join("store_backup.1.json").exists());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

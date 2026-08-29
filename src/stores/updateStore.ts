@@ -1,16 +1,54 @@
 import { create } from 'zustand'
 import { withDetail } from '../lib/error-text'
+import { log } from '../lib/logger'
 import { persist } from 'zustand/middleware'
 import { version as currentVersion } from '../../package.json'
 import { isTauri, backendCall, openExternal } from '../api/backend'
 import { stopBundledEngine, stopBundledEmbed } from '../api/engine'
 import { flushChatPersist } from './chatStore'
 import { flushStagedPersist } from './stagedChangesStore'
+// Static on purpose. The next thing that happens after this is called is an
+// installer overwriting the binary, which is the worst imaginable moment to be
+// fetching a chunk off disk for the first time.
+import { backupStoresNow } from '../lib/store-backup'
 import type { Update } from '@tauri-apps/plugin-updater'
 
 /** Quiet time between the last persisted write and handing the process to
  *  the installer. See installAndRestart for why it is a hedge. */
 const UPDATE_SETTLE_MS = 250
+
+/** How long the update waits for the persistence layer before it gives up and
+ *  hands over anyway.
+ *
+ *  flush() resolves when the IndexedDB put has landed, and an IndexedDB put
+ *  does not always land. A blocked upgrade, a database Chromium has already
+ *  decided is broken, a disk that is full: in every one of those the promise
+ *  simply never settles, and `await` on it is forever. Without a deadline the
+ *  update button turns into a spinner that never comes back, on exactly the
+ *  machines whose storage is in trouble, which is to say on aldrich's. Ten
+ *  seconds is far beyond a healthy multi megabyte write and short enough that
+ *  nobody thinks the app has died.
+ *
+ *  Same reasoning for the pre-update backup: it is worth waiting for, it is
+ *  not worth waiting for forever. */
+const UPDATE_FLUSH_TIMEOUT_MS = 10_000
+
+/**
+ * Resolve when `work` resolves, or after `ms`, whichever comes first, and
+ * never reject. The caller wants to know it may proceed, not what happened.
+ *
+ * Exported for the test: a flush that never settles is not something a store
+ * can be talked into from the outside.
+ */
+export function settledOrTimedOut(work: Promise<unknown>, ms: number): Promise<'settled' | 'timeout'> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve('timeout'), ms)
+    work.then(
+      () => { clearTimeout(timer); resolve('settled') },
+      () => { clearTimeout(timer); resolve('settled') },
+    )
+  })
+}
 
 // ── Types ─────────────────────────────────────────────────────
 
@@ -269,7 +307,29 @@ export const useUpdateStore = create<UpdateState>()(
           // the engine does with its own log and compaction after a commit is
           // not something a page can await. A quarter second of an update the
           // user already agreed to costs nothing.
-          await Promise.allSettled([flushChatPersist(), flushStagedPersist()])
+          //
+          // Under a deadline, though. An IndexedDB write that never settles is
+          // not a hypothetical on a database that is already in trouble, and
+          // `await` on it would leave the user staring at "installing" until
+          // they kill the app, which is the very kill this path exists to
+          // avoid (Bug A1, 2.6.7).
+          const flushed = await settledOrTimedOut(
+            Promise.allSettled([flushChatPersist(), flushStagedPersist()]),
+            UPDATE_FLUSH_TIMEOUT_MS,
+          )
+          if (flushed === 'timeout') {
+            log.warn('[update] the persisted stores did not finish writing before the install, going ahead with the file backup')
+          }
+
+          // Then put a copy on disk that does NOT live in the WebView2 profile.
+          // The backup triad writes one every 5 s, so what survives an update
+          // is whatever the interval last caught, up to a whole answer old.
+          // This is the moment that copy is worth the most, because the next
+          // thing that happens is a process kill, and it is the one moment
+          // nothing used to ask for one. Awaited, so the file is on disk
+          // before the installer arrives, and under the same deadline.
+          await settledOrTimedOut(backupStoresNow(), UPDATE_FLUSH_TIMEOUT_MS)
+
           await new Promise((r) => setTimeout(r, UPDATE_SETTLE_MS))
 
           await _pendingUpdate.install()
