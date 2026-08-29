@@ -9,8 +9,8 @@ import {
   drainApprovals,
 } from '../lib/approval-queue'
 import { v4 as uuid } from 'uuid'
-import { streamProviderTurn } from '../lib/provider-stream'
-import { createHermesDisplayFilter, createThinkStreamSplitter } from '../lib/hermes-stream'
+import { streamProviderTurn, type StreamedProviderTurn } from '../lib/provider-stream'
+import { createHermesDisplayFilter, createThinkStreamSplitter, createTurnThinkingSink } from '../lib/hermes-stream'
 import { beginAgentRun, endAgentRun, setActiveAgentModel, renderWorkspaceSection, takeChatArtifacts, type AgentRunContext } from '../api/agent-context'
 import { resolveChatWorkspaceSlug } from '../api/workspace-slug'
 import { isOllamaLocal } from '../api/backend'
@@ -69,7 +69,7 @@ import { executeParallel, applyResultToToolCall, type ExecutionRequest } from '.
 import { useToolAuditStore } from '../stores/toolAuditStore'
 import { makeInTurnCacheLookup } from '../api/agents/in-turn-cache'
 import { explainError as explainToolError } from '../api/agents/error-hints'
-import { finalStripThinkingTags, splitOrphanCloser, splitUnclosedThink } from '../lib/thinking-stripper'
+import { settleThinking } from '../lib/thinking-stripper'
 import { openPlanGap, planReconcileSteer, PLAN_RECONCILE_BUDGET } from '../lib/plan-reconcile'
 import { PlanStaleness, planStalenessSteer } from '../lib/plan-staleness'
 import { planResumeAnchor } from '../lib/plan-resume'
@@ -984,7 +984,11 @@ export function useAgentChat() {
                   },
                   (t) => {
                     dropThinkingBlock()
-                    if (settings.thinkingEnabled === true) {
+                    // The one gate for the whole step. Reading the raw setting
+                    // here disagreed with the end-of-turn routing for an
+                    // 'always' reasoner: nothing streamed live, then the whole
+                    // thought appeared at once when the turn ended.
+                    if (keepThinking) {
                       thinkingRef.current = t
                       scheduleUIUpdate()
                     }
@@ -1074,7 +1078,8 @@ export function useAgentChat() {
             }
             const onLiveThinking = (t: string) => {
               dropThinkingBlock()
-              if (settings.thinkingEnabled === true) {
+              // Same gate as the end-of-turn routing, see the Ollama branch.
+              if (keepThinking) {
                 thinkingRef.current = t
                 scheduleUIUpdate()
               }
@@ -1158,15 +1163,38 @@ export function useAgentChat() {
           // end-of-turn parse on the full raw text stays authoritative.
           const splitter = createThinkStreamSplitter({ startInThink: keepThinking })
           let shown = ''
+          // Two live reasoning sources on this transport, merged by the one
+          // shared sink so neither can overwrite the other: the <think> spans
+          // the splitter pulls out of the text stream, and the native
+          // reasoning channel the backend may fill instead. Paint only; the
+          // end-of-turn parse on the full raw text stays authoritative.
+          const thinkSink = createTurnThinkingSink()
+          const paintThink = () => {
+            if (!keepThinking) return
+            thinkingRef.current = thinkSink.live()
+            scheduleUIUpdate()
+          }
           const feedUI = (chunk: { prose: string; thinking: string }) => {
             if (chunk.thinking && keepThinking) {
-              thinkingRef.current += chunk.thinking.replace(/<think>/g, '')
+              thinkSink.inline(chunk.thinking)
+              paintThink()
             }
             if (chunk.prose) shown += chunk.prose
             contentRef.current = shown
             scheduleUIUpdate()
           }
-          const hermesTurn = await streamProviderTurn(
+          // The tri-state, not a hole. Until the 2.6.7 Denk-Audit this branch
+          // passed `thinking: undefined` and threw the switch away, in both
+          // directions: ON never reached the model, and OFF never turned
+          // anything off either, because undefined means "server decides" and
+          // the Qwen3 family decides yes. The prompt transport is where every
+          // strict template and every tool-less local model lands, the
+          // built-in engine included, so that was a whole transport with a
+          // dead Think button. The tool contract travels as TEXT here, so a
+          // thinking flag cannot disturb it.
+          const hermesOpts = { ...chatOptions }
+          let hermesTurn: StreamedProviderTurn
+          const runHermes = (opts: typeof hermesOpts) => streamProviderTurn(
             provider,
             modelToUse,
             // Bug B3 round 2: this used to rebuild every message as bare
@@ -1175,11 +1203,36 @@ export function useAgentChat() {
             // contract decides what a template can render; it must be given
             // the whole message to decide on.
             sendMessages,
-            { ...chatOptions, thinking: undefined as unknown as boolean },
+            opts,
             (_full, delta) => feedUI(splitter.feed(display.feed(delta))),
+            // A prompt-transport backend can still answer on the NATIVE
+            // reasoning channel: the built-in engine extracts <think> into
+            // reasoning_content itself and the provider yields it as
+            // `thinking`. This branch passed no thinking callback and never
+            // read hermesTurn.thinking either, so that reasoning fell on the
+            // floor and the block stayed empty with the Think button on.
+            (full) => { thinkSink.native(full); paintThink() },
           )
+          try {
+            hermesTurn = await runHermes(hermesOpts)
+          } catch (thinkErr: any) {
+            // Same downgrade the native branches carry: an old Ollama build or
+            // an endpoint that predates the knob answers 400, and the run must
+            // survive that instead of ending on it.
+            if (hermesOpts.thinking !== undefined
+              && (thinkErr?.message?.includes('does not support thinking') || httpStatusOf(thinkErr) === 400)) {
+              hermesTurn = await runHermes({ ...hermesOpts, thinking: undefined as unknown as boolean })
+            } else {
+              throw thinkErr
+            }
+          }
           feedUI(splitter.feed(display.flush()))
           feedUI(splitter.flush())
+          if (hermesTurn.thinking) {
+            turnThinking = turnThinking
+              ? `${turnThinking}\n\n${hermesTurn.thinking}`
+              : hermesTurn.thinking
+          }
           const rawContent = hermesTurn.content
 
           if (hasToolCallTags(rawContent)) {
@@ -1192,52 +1245,17 @@ export function useAgentChat() {
           }
         }
 
-        // Parse <think>…</think> tags. Always strip them from the content
-        // (otherwise raw tags land in the assistant bubble). Only ROUTE
-        // them into the collapsible thinking block when the user actually
-        // toggled Thinking on — thinking-only models (QwQ, DeepSeek-R1)
-        // emit these tags unconditionally, and we must not surface them
-        // when the user asked for thinking to be OFF.
-        turnContent = turnContent.replace(/<think>([\s\S]*?)<\/think>/g, (_match, inner) => {
-          if (keepThinking) {
-            turnThinking = turnThinking
-              ? `${turnThinking}\n\n${inner}`
-              : inner
-          }
-          return ''
-        })
-        // The Qwen3 chat templates put the opening `<think>` in the PROMPT, so
-        // the reply starts mid-thought and closes a tag it never opened. With
-        // thinking ON the raw closer plus the whole thought stayed in the
-        // bubble.
-        const orphanClose = splitOrphanCloser(turnContent)
-        if (orphanClose.thinking) {
-          turnContent = orphanClose.content
-          if (keepThinking) {
-            turnThinking = turnThinking
-              ? `${turnThinking}\n\n${orphanClose.thinking}`
-              : orphanClose.thinking
-          }
+        // End-of-turn settlement, through the ONE shared routine every path
+        // uses now (lib/thinking-stripper settleThinking): balanced blocks,
+        // the pre-opened Qwen3 thought that only ever sends its closer, a
+        // turn cut off mid-thought, and the non-canonical markers. Routed
+        // into the collapsible block only when the user asked for thinking:
+        // reasoners emit the tags unconditionally and OFF has to mean off.
+        {
+          const settled = settleThinking(turnContent, turnThinking, keepThinking)
+          turnContent = settled.content
+          turnThinking = settled.thinking
         }
-        // A turn cut off mid-thought leaves the opener without its closer,
-        // which the regex above cannot match. It belongs in the thinking
-        // block, never in the assistant bubble.
-        const orphanThink = splitUnclosedThink(turnContent)
-        if (orphanThink.thinking) {
-          turnContent = orphanThink.content
-          if (keepThinking) {
-            turnThinking = turnThinking
-              ? `${turnThinking}\n\n${orphanThink.thinking}`
-              : orphanThink.thinking
-          }
-        }
-        // Strip non-canonical thinking markers (Gemma channel tags,
-        // `<thought>`, `<reasoning>`, etc.) that the canonical regex above
-        // doesn't catch. These never belong in the assistant bubble.
-        turnContent = finalStripThinkingTags(turnContent, keepThinking)
-        // Also drop any orphan native-thinking that leaked through when the
-        // toggle is OFF (e.g. provider returned `turn.thinking` anyway).
-        if (!keepThinking) turnThinking = ''
 
         // Update UI — but DON'T overwrite contentRef during intermediate
         // turns. Previously every iteration did `contentRef.current =
@@ -1500,7 +1518,7 @@ export function useAgentChat() {
           // the one top-of-bubble field. A run with NO tool activity keeps
           // the classic bubble (plain chat look, and the tool-intent hint
           // in MessageBubble reads message.thinking).
-          if (executedCallKeys.size > 0 && turnThinking.trim() && settings.thinkingEnabled === true) {
+          if (executedCallKeys.size > 0 && turnThinking.trim() && keepThinking) {
             addBlock(convId!, assistantMessage.id, {
               id: uuid(),
               phase: 'thinking',
@@ -1522,7 +1540,7 @@ export function useAgentChat() {
         // The top-level field is cleared so the same thought never shows twice;
         // the next round's live stream refills it while streaming and lands
         // here again when that round completes.
-        if (turnThinking.trim() && settings.thinkingEnabled === true) {
+        if (turnThinking.trim() && keepThinking) {
           addBlock(convId!, assistantMessage.id, {
             id: uuid(),
             phase: 'thinking',

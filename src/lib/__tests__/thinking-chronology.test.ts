@@ -42,7 +42,11 @@ describe('the Agent loop emits per-round thinking blocks', () => {
   })
 
   it('NEGATIVE CONTROL: thoughts are only emitted when thinking is enabled', () => {
-    expect(agent.match(/settings\.thinkingEnabled === true\) \{\n\s+addBlock/g)?.length).toBeGreaterThanOrEqual(1)
+    // The 2.6.7 Denk-Audit collapsed the raw setting read here into the one
+    // per-step gate the rest of the loop already used, so an 'always'
+    // reasoner cannot stream live and then lose its block at the end.
+    expect(agent.match(/keepThinking\) \{\n\s+addBlock/g)?.length).toBeGreaterThanOrEqual(1)
+    expect(agent).toContain("const keepThinking = agentThinkMode === 'always' || (settings.thinkingEnabled === true && canThinkAgent)")
   })
 })
 

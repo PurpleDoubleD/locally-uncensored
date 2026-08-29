@@ -166,3 +166,57 @@ export function finalStripThinkingTags(content: string, keepCanonicalThink = fal
   }
   return out.trim()
 }
+
+/**
+ * The end-of-turn settlement, in ONE place for every path.
+ *
+ * Four call sites used to do this by hand and only two of them did it fully.
+ * The agent loop and the coding loop ran the balanced block, then
+ * splitOrphanCloser, then splitUnclosedThink, then the final strip. Plain chat
+ * and group chat ran the char-by-char state machine and nothing else, and that
+ * machine only ever triggers on a literal `<think>`. The Qwen3 chat templates
+ * put the opener in the PROMPT: the reply starts mid-thought and only ever
+ * sends the closer, the machine never switches, and with the Think button ON
+ * `finalStripThinkingTags` deliberately leaves canonical markers alone. So the
+ * whole thought plus a raw `</think>` stood in the answer bubble and the
+ * thinking block stayed empty. That is a thinking model that visibly does not
+ * think, on the two paths a user reaches first.
+ *
+ * `content` is what the turn produced, `thinking` whatever the native channel
+ * already delivered. Returns both, settled: reasoning out of the answer, and
+ * into the block when the toggle says so.
+ */
+export function settleThinking(
+  content: string,
+  thinking: string,
+  keepThinking: boolean,
+): { content: string; thinking: string } {
+  let out = content
+  let think = thinking
+  const add = (part: string) => {
+    if (!keepThinking || !part) return
+    think = think ? `${think}\n\n${part}` : part
+  }
+
+  // Balanced blocks first, the common well-formed case.
+  out = out.replace(/<think>([\s\S]*?)<\/think>/gi, (_m, inner: string) => {
+    add(inner)
+    return ''
+  })
+  // Closer without opener: the pre-opened Qwen3 thought.
+  const closer = splitOrphanCloser(out)
+  if (closer.thinking) {
+    out = closer.content
+    add(closer.thinking)
+  }
+  // Opener without closer: a turn stopped or cut off mid-thought.
+  const opener = splitUnclosedThink(out)
+  if (opener.thinking) {
+    out = opener.content
+    add(opener.thinking)
+  }
+  // Non-canonical markers (Gemma channel tags, <thought>, <reasoning>, …).
+  out = finalStripThinkingTags(out, keepThinking)
+  if (!keepThinking) think = ''
+  return { content: out, thinking: think }
+}

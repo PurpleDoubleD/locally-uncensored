@@ -165,7 +165,18 @@ describe('the agent hermes branch is wired through the splitter', () => {
   })
 
   it('NEGATIVE CONTROL: the authoritative end-of-turn parse still runs on the raw text', () => {
+    // The live splitter is UI only. What the turn KEEPS is decided on the
+    // full raw text, by the one shared settlement (2.6.7 Denk-Audit moved the
+    // hand-written copy of that sequence into lib/thinking-stripper).
     expect(src).toContain('const rawContent = hermesTurn.content')
-    expect(src).toMatch(/turnContent = turnContent\.replace\(\/<think>/)
+    expect(src).toContain('settleThinking(turnContent, turnThinking, keepThinking)')
+  })
+
+  it('and the same branch keeps the NATIVE reasoning channel too', () => {
+    // Loch 2: this branch used to pass streamProviderTurn no thinking
+    // callback and never read hermesTurn.thinking, so a backend that parses
+    // <think> into reasoning_content by itself lost the whole thought.
+    expect(src).toContain('thinkSink.native(full); paintThink()')
+    expect(src).toContain('if (hermesTurn.thinking)')
   })
 })

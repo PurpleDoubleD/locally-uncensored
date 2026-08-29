@@ -20,7 +20,7 @@ import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
 
-import { splitUnclosedThink, finalStripThinkingTags } from '../thinking-stripper'
+import { splitUnclosedThink, finalStripThinkingTags, settleThinking } from '../thinking-stripper'
 
 const read = (p: string) =>
   readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), p), 'utf8')
@@ -77,24 +77,39 @@ describe('the hole this closes', () => {
   })
 })
 
-describe('both agent loops call it', () => {
-  it('the coding surface routes the orphan into the thinking panel', () => {
-    const src = read('../../hooks/useCodex.ts')
-    expect(src).toMatch(/splitUnclosedThink\(turnContent\)/)
-    expect(src).toMatch(/updateMessageThinking\(convId!, assistantMsg\.id, thinkingContent\)/)
+// The 2.6.7 Denk-Audit moved the four hand-written copies of this sequence
+// into ONE routine, `settleThinking`, because two of the four were missing
+// steps. The order inside it is what these used to pin per call site, and
+// `settleThinking` is now the only place that can get it wrong.
+describe('the settlement runs the splits BEFORE the final strip', () => {
+  it('a turn cut off mid-thought lands in the panel, not in the answer', () => {
+    const r = settleThinking("answer so far<think> Okay, let's see", '', true)
+    expect(r.content).toBe('answer so far')
+    expect(r.thinking).toBe(" Okay, let's see")
   })
 
-  it('the agent surface does the same', () => {
-    const src = read('../../hooks/useAgentChat.ts')
-    expect(src).toMatch(/splitUnclosedThink\(turnContent\)/)
-    expect(src).toMatch(/orphanThink\.thinking/)
+  it('NEGATIVE CONTROL: thinking OFF drops it instead of showing it', () => {
+    const r = settleThinking("answer so far<think> Okay, let's see", '', false)
+    expect(r.content).toBe('answer so far')
+    expect(r.thinking).toBe('')
   })
+})
 
-  it('and both do it BEFORE the final strip, or the strip would hide it', () => {
-    for (const f of ['../../hooks/useCodex.ts', '../../hooks/useAgentChat.ts']) {
-      const src = read(f)
-      expect(src.indexOf('splitUnclosedThink(turnContent)'))
-        .toBeLessThan(src.indexOf('finalStripThinkingTags(turnContent, keepThinking)'))
+describe('every path routes through it', () => {
+  for (const f of [
+    '../../hooks/useCodex.ts',
+    '../../hooks/useAgentChat.ts',
+    '../../hooks/useChat.ts',
+  ]) {
+    it(`${f} calls settleThinking`, () => {
+      expect(read(f)).toContain('settleThinking(')
+    })
+  }
+
+  it('and none of them keeps a hand-written copy of the split sequence', () => {
+    for (const f of ['../../hooks/useCodex.ts', '../../hooks/useAgentChat.ts', '../../hooks/useChat.ts']) {
+      expect(read(f)).not.toContain('splitUnclosedThink(')
+      expect(read(f)).not.toContain('splitOrphanCloser(')
     }
   })
 })

@@ -10,6 +10,7 @@ import { useSettingsStore } from '../stores/settingsStore'
 import { useMemoryStore } from '../stores/memoryStore'
 import { getOllamaTools, executeAgentTool } from '../api/tool-registry'
 import { streamProviderTurn } from './provider-stream'
+import { settleThinking } from './thinking-stripper'
 import { buildHermesToolPrompt, parseHermesToolCalls, stripToolCallTags, hasToolCallTags } from '../api/hermes-tool-calling'
 import { resolveToolCallingStrategy } from './agent-strategy'
 import type { AgentWorkflow, WorkflowStep, StepResult, WorkflowEngineCallbacks } from '../types/agent-workflows'
@@ -293,8 +294,13 @@ export class WorkflowEngine {
       }
     }
 
-    // Strip think tags
-    output = output.replace(/<think>[\s\S]*?<\/think>/g, '').trim()
+    // Strip reasoning through the SHARED settlement (2.6.7 Denk-Audit,
+    // Loch 5). This used to be a hand-written copy of the balanced-block
+    // regex, so a pre-opened Qwen3 thought (closer without opener), a turn cut
+    // off mid-thought and every non-canonical marker went straight into the
+    // step output, which is not only shown: it becomes a workflow VARIABLE
+    // and rides into every later step's prompt.
+    output = settleThinking(output, '', false).content
 
     return {
       stepId: step.id,
