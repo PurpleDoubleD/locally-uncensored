@@ -25,6 +25,14 @@ interface VoiceState {
   sttError: string | null;
 
   // Persisted settings
+  /** UNUSED, kept only so a persisted store from an older build still parses.
+   *  Nothing reads it and Settings offers no switch for it: the microphone is
+   *  gated on `sttAvailable` (a fresh probe of what is installed) plus cloud
+   *  voice. Do not write user-facing copy against this flag. The mic tooltip
+   *  used to say "Speech-to-text off. Enable it in Settings" and named exactly
+   *  this dead flag as the cause, while the real cause was a missing
+   *  faster-whisper (Gegenprobe 2026-08-30). Whether it gets removed or grown
+   *  into a real switch is open (design question to David). */
   sttEnabled: boolean;
   ttsEnabled: boolean;
   /** Read each finished response aloud automatically (#77, ElBiggus). Opt-in,

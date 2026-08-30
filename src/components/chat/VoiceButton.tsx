@@ -3,6 +3,33 @@ import { motion } from "framer-motion"
 import { Mic, MicOff, Loader2 } from "lucide-react"
 import { useVoice } from "../../hooks/useVoice"
 import { useVoiceStore } from "../../stores/voiceStore"
+import { useSettingsStore } from "../../stores/settingsStore"
+
+/**
+ * Why the microphone is greyed out, in the user's terms.
+ *
+ * The old wording was "Speech-to-text off. Enable it in Settings, Voice &
+ * Remote", which named a switch as the cause. The Gegenprobe on the Windows
+ * build (2026-08-30) took the faster_whisper package out of every Python it
+ * could find and got exactly that sentence, while the real cause was the
+ * missing package. There is no speech-to-text switch to flip either: the mic
+ * is gated on `sttAvailable`, a fresh probe of what is installed, and the
+ * persisted `sttEnabled` flag is read by nobody and offered nowhere in
+ * Settings. So the text now names the state the app actually found and points
+ * at the control that fixes it.
+ *
+ * Two states can grey the button out, and they need different sentences:
+ *  - Local mode: faster-whisper is not installed. Voice & Remote has the
+ *    Download & Install button right there.
+ *  - Cloud mode without a usable cloud account: dictation is hosted, and the
+ *    Voice tab deliberately shows no install button in cloud mode, so the way
+ *    out is the account, not an install.
+ */
+export function micUnavailableHint(cloudMode: boolean): string {
+  return cloudMode
+    ? "Cloud dictation needs a signed-in account with credits. Sign in under Settings → Account."
+    : "Speech-to-text is not installed. Install faster-whisper in Settings → Voice & Remote."
+}
 
 interface Props {
   onTranscript: (text: string) => void
@@ -14,6 +41,9 @@ interface Props {
 
 export function VoiceButton({ onTranscript, onInterim, onRecordingChange, disabled }: Props) {
   const { isRecording, isTranscribing, sttSupported, sttError, clearSttError, startRecording, stopRecording, recheckStt, maxRecordingMs } = useVoice()
+  // Only for the greyed-out hint: cloud mode and local mode fail for different
+  // reasons and have different ways out.
+  const appMode = useSettingsStore((s) => s.settings.appMode)
   // Auto-stop timer for cloud dictation — the transcribe route rejects takes
   // past ~6.5 min (12 MiB) with a 413 that loses the WHOLE recording, so the
   // take is stopped and transcribed just under the cap instead.
@@ -86,17 +116,19 @@ export function VoiceButton({ onTranscript, onInterim, onRecordingChange, disabl
   }
 
   if (!sttSupported) {
+    const hint = micUnavailableHint(appMode === "cloud")
     return (
       <div className="relative group/mic shrink-0">
         <button
           disabled
           className="p-1.5 rounded-lg text-gray-300 dark:text-gray-600 cursor-not-allowed shrink-0"
           aria-label="Microphone unavailable"
+          title={hint}
         >
           <MicOff size={14} />
         </button>
-        <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2 py-1 bg-gray-800 dark:bg-gray-700 text-white text-[0.6rem] rounded whitespace-nowrap opacity-0 group-hover/mic:opacity-100 transition-opacity pointer-events-none">
-          Speech-to-text off. Enable it in Settings → Voice &amp; Remote
+        <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2 py-1 w-max max-w-[240px] bg-gray-800 dark:bg-gray-700 text-white text-[0.6rem] leading-snug rounded text-center opacity-0 group-hover/mic:opacity-100 transition-opacity pointer-events-none">
+          {hint}
         </div>
       </div>
     )
