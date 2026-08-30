@@ -28,6 +28,7 @@ import {
   warmupBudgetMs,
   LOAD_PHASE_GRACE_CAP_MS,
   FINISH_GRACE_CAP_MS,
+  cpuCauseSuffix,
 } from '../render-budget'
 
 const here = dirname(fileURLToPath(import.meta.url))
@@ -310,7 +311,7 @@ describe('wiring in the poll loop', () => {
   it('Z36 finding 4: a nearly finished render is adopted once, then the job ends', () => {
     expect(handoff).toContain('finishGraceUsed === 0 ? finishGraceMs(pace.projectedRemainingMs()) : 0')
     expect(handoff).toContain('finishGraceUsed = grace')
-    expect(handoff).toContain('renderTimeoutNotice(kindLabel, timeoutMs, elapsedMs)')
+    expect(handoff).toContain('renderTimeoutNotice(kindLabel, timeoutMs, elapsedMs,')
   })
 
   it('abandonPrompt kills only OUR job: pending delete first, interrupt only if ours runs', () => {
@@ -323,5 +324,99 @@ describe('wiring in the poll loop', () => {
 
   it('NEGATIVE CONTROL: the user cancel path is untouched', () => {
     expect(handoff).toContain('if (_genCancelRequested) return `${kindLabel} generation cancelled.`')
+  })
+})
+
+/**
+ * Runde 12, Punkt 2. A render that ran on the processor got three different
+ * failure messages and not one of them said so: renderBudgetNotice told the
+ * customer to use fewer steps, swapWarmupNotice told him to free VRAM on a
+ * machine that was not using any, and renderTimeoutNotice said nothing at all.
+ * shd_scorpion sent us the screenshot of one of them, and the cause was not in
+ * it, so the support answer had to guess.
+ */
+describe('a render without a GPU says so (Runde 12)', () => {
+  const onCpu = { startedCpu: true, hasAmd: false, isWindows: false }
+  const amdLinux = { startedCpu: true, hasAmd: true, isWindows: false }
+  const amdWindows = { startedCpu: true, hasAmd: true, isWindows: true }
+
+  it('names the processor as the cause, in one shared sentence', () => {
+    const s = cpuCauseSuffix(onCpu)
+    expect(s).toContain('running on the CPU')
+    expect(s).toContain('no supported GPU path is active')
+    expect(s).toContain('many times slower')
+  })
+
+  it('an AMD card is told the way out its own OS actually has', () => {
+    // Linux: LU installs ROCm wheels since 2.6.7, so a rebuild is a real fix.
+    expect(cpuCauseSuffix(amdLinux)).toContain('Repair environment')
+    // Windows: no rebuild can conjure a wheel, so it must not be offered.
+    expect(cpuCauseSuffix(amdWindows)).not.toContain('Repair environment')
+    expect(cpuCauseSuffix(amdWindows)).toContain('on Windows')
+  })
+
+  it('NEGATIVE CONTROL: says nothing when the render had a GPU or we do not know', () => {
+    expect(cpuCauseSuffix({ startedCpu: false, hasAmd: true, isWindows: true })).toBe('')
+    expect(cpuCauseSuffix(null)).toBe('')
+    expect(cpuCauseSuffix(undefined)).toBe('')
+  })
+
+  it('the pace verdict stops blaming the step count for a hardware switch', () => {
+    const n = renderBudgetNotice('Image', 40 * 60_000, 10 * 60_000, onCpu)
+    expect(n).toContain('running on the CPU')
+    // the measured facts are still there, the cause is added, not swapped in
+    expect(n).toContain('about 40 minutes')
+    expect(n).toContain('10 minute budget')
+    // NEGATIVE CONTROL: on a GPU the message is byte for byte what it was
+    expect(renderBudgetNotice('Image', 40 * 60_000, 10 * 60_000)).not.toContain('CPU')
+    expect(renderBudgetNotice('Image', 40 * 60_000, 10 * 60_000, null))
+      .toBe(renderBudgetNotice('Image', 40 * 60_000, 10 * 60_000))
+  })
+
+  it('the flat deadline names the cause too', () => {
+    const n = renderTimeoutNotice('Video', 20 * 60_000, 30 * 60_000, amdLinux)
+    expect(n).toContain('running on the CPU')
+    expect(n).toContain('20 minute budget')
+    // NEGATIVE CONTROL
+    expect(renderTimeoutNotice('Video', 20 * 60_000, 30 * 60_000, null))
+      .toBe(renderTimeoutNotice('Video', 20 * 60_000, 30 * 60_000))
+  })
+
+  it('the warm-up abort stops advising VRAM on a machine that uses none', () => {
+    const n = swapWarmupNotice('Image', 6 * 60_000, onCpu)
+    expect(n).not.toContain('VRAM')
+    expect(n).not.toContain('GPU is free again')
+    expect(n).toContain('running on the CPU')
+    expect(n).toContain('6 minutes')
+    // NEGATIVE CONTROL: on a real GPU the VRAM advice is correct and stays.
+    const gpu = swapWarmupNotice('Image', 6 * 60_000)
+    expect(gpu).toContain('Free some VRAM')
+    expect(gpu).toContain('loading into VRAM')
+    expect(swapWarmupNotice('Image', 6 * 60_000, null)).toBe(gpu)
+  })
+})
+
+describe('the CPU cause is wired into all five failure exits (Runde 12)', () => {
+  const handoff = read('../../api/vram-handoff.ts')
+  const create = read('../../hooks/useCreate.ts')
+  const process_rs = read('../../../src-tauri/src/commands/process.rs')
+
+  it('the backend hands the frontend the vendor, not just the device', () => {
+    expect(process_rs).toContain('"startedCpu": started_cpu, "hasAmd": has_amd')
+  })
+
+  it('the three agent-path exits ask before they blame', () => {
+    expect(handoff).toContain('renderTimeoutNotice(kindLabel, timeoutMs, elapsedMs, await cpuRenderFacts())')
+    expect(handoff).toContain('renderBudgetNotice(kindLabel, projected!, timeoutMs, await cpuRenderFacts())')
+    expect(handoff).toContain('swapWarmupNotice(kindLabel, warmupElapsed, await cpuRenderFacts())')
+    // asked only on the way out, so a healthy render pays nothing for it
+    expect(handoff.match(/await cpuRenderFacts\(\)/g)?.length).toBe(3)
+  })
+
+  it('both Create stall watchdogs carry it too', () => {
+    // They fire from a timer and cannot await, so the answer is fetched when
+    // the render starts and read from the cache here.
+    expect(create).toContain('void cpuRenderFacts()')
+    expect(create.match(/cpuCauseSuffix\(lastCpuRenderFacts\(\)\)/g)?.length).toBe(2)
   })
 })

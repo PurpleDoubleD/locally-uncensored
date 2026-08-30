@@ -52,6 +52,15 @@ export function isLinux(): boolean {
   return (/Linux/.test(plat) || /Linux/.test(ua)) && !/Android/.test(ua);
 }
 
+/** True on Windows (WebView2 reports "Win32" / "Windows NT"). Same
+ *  runtime-check rule as isMacOS and isLinux — one dist serves all three. */
+export function isWindows(): boolean {
+  if (typeof navigator === "undefined") return false;
+  const plat = navigator.platform || "";
+  const ua = navigator.userAgent || "";
+  return /Win/.test(plat) || /Windows NT/.test(ua);
+}
+
 /**
  * Launch policy: the macOS desktop app is now a full local+cloud app like
  * Windows/Linux (David 2026-07-22 — local mode built + tested). The former

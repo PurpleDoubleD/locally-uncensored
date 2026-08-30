@@ -44,7 +44,7 @@
  * of call #2 and re-trigger the exact OOM we are avoiding.
  */
 
-import { backendCall, ollamaUrl, localFetch, isOllamaLocal } from './backend'
+import { backendCall, ollamaUrl, localFetch, isOllamaLocal, isWindows } from './backend'
 import { listRunningModels, loadModel, unloadModel } from './ollama'
 import { startBundledEngine } from './engine'
 import { useSettingsStore } from '../stores/settingsStore'
@@ -75,7 +75,7 @@ import {
 import type { ModelCapabilities } from './comfyui-nodes'
 import { getActiveAgentModel } from './agent-context'
 import { comfyWS, CLIENT_ID } from './comfyui-ws'
-import { PaceTracker, overBudget, renderBudgetNotice, renderTimeoutNotice, warmupExceeded, swapWarmupNotice, loadPhaseGraceMs, finishGraceMs, warmupBudgetMs, SWAP_WARMUP_BUDGET_MS } from '../lib/render-budget'
+import { PaceTracker, overBudget, renderBudgetNotice, renderTimeoutNotice, warmupExceeded, swapWarmupNotice, loadPhaseGraceMs, finishGraceMs, warmupBudgetMs, SWAP_WARMUP_BUDGET_MS, type CpuRenderFacts } from '../lib/render-budget'
 import { log } from '../lib/logger'
 
 /**
@@ -1319,6 +1319,32 @@ async function generateVideo(
   }
 }
 
+let _cpuRenderFacts: CpuRenderFacts | null = null
+
+/**
+ * Which device LU's ComfyUI is actually on, for the failure messages.
+ *
+ * Asked only when a render is about to fail, so a healthy render never pays for
+ * the call. `null` on any error and on the web build, where the notice simply
+ * stays as it was. The answer is cached for the watchdogs in useCreate, which
+ * fire from a timer and cannot await anything.
+ */
+export async function cpuRenderFacts(): Promise<CpuRenderFacts | null> {
+  try {
+    const s = await backendCall<{ startedCpu?: boolean | null; hasAmd?: boolean | null }>('get_comfy_gpu_status')
+    if (!s) return null
+    _cpuRenderFacts = { startedCpu: s.startedCpu === true, hasAmd: s.hasAmd === true, isWindows: isWindows() }
+    return _cpuRenderFacts
+  } catch {
+    return null
+  }
+}
+
+/** The last answer `cpuRenderFacts()` got, for callers that cannot await. */
+export function lastCpuRenderFacts(): CpuRenderFacts | null {
+  return _cpuRenderFacts
+}
+
 /**
  * Poll ComfyUI history until the prompt completes, then build the result string
  * in the exact legacy shape so ToolCallBlock renders it inline and useAgentChat
@@ -1390,7 +1416,7 @@ async function pollAndExtract(promptId: string, prompt: string, kindLabel: strin
         const elapsedMs = Date.now() - startedAt
         log.warn('vram_handoff.render_timeout_abort', { promptId, budgetMs: timeoutMs, elapsedMs })
         await abandonPrompt(promptId)
-        return renderTimeoutNotice(kindLabel, timeoutMs, elapsedMs)
+        return renderTimeoutNotice(kindLabel, timeoutMs, elapsedMs, await cpuRenderFacts())
       }
       // User hit the in-chat cancel button — ComfyUI was already sent /interrupt
       // + queue-clear by requestGenerationCancel(); stop polling so runHandoff's
@@ -1430,7 +1456,7 @@ async function pollAndExtract(promptId: string, prompt: string, kindLabel: strin
       if (overBudget(projected, timeoutMs)) {
         log.warn('vram_handoff.render_budget_abort', { promptId, projectedMs: Math.round(projected!), budgetMs: timeoutMs })
         await abandonPrompt(promptId)
-        return renderBudgetNotice(kindLabel, projected!, timeoutMs)
+        return renderBudgetNotice(kindLabel, projected!, timeoutMs, await cpuRenderFacts())
       }
       const warmupElapsed = Date.now() - startedAt
       if (!sawAnyProgress && warmupElapsed > SWAP_WARMUP_BUDGET_MS && Date.now() - aliveCheckedAt > 30_000) {
@@ -1440,7 +1466,7 @@ async function pollAndExtract(promptId: string, prompt: string, kindLabel: strin
       if (warmupExceeded(sawAnyProgress, comfyWS.connected, warmupElapsed, warmupBudgetMs(promptAlive))) {
         log.warn('vram_handoff.swap_warmup_abort', { promptId, elapsedMs: warmupElapsed, promptAlive })
         await abandonPrompt(promptId)
-        return swapWarmupNotice(kindLabel, warmupElapsed)
+        return swapWarmupNotice(kindLabel, warmupElapsed, await cpuRenderFacts())
       }
     }
   } finally {

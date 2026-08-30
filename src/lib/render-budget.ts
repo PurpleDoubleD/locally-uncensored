@@ -117,10 +117,53 @@ export function warmupBudgetMs(promptConfirmedAlive: boolean): number {
   return promptConfirmedAlive ? SWAP_WARMUP_ALIVE_BUDGET_MS : SWAP_WARMUP_BUDGET_MS
 }
 
+/**
+ * What LU knows about the device this render actually used.
+ *
+ * `startedCpu` is true only when LU itself started ComfyUI with `--cpu` this
+ * session, which is the one case where we can say the cause instead of guessing
+ * at it. Read from `get_comfy_gpu_status`.
+ */
+export interface CpuRenderFacts {
+  startedCpu: boolean
+  hasAmd: boolean
+  isWindows: boolean
+}
+
+/**
+ * The sentence every render failure gets when the render never had a GPU.
+ *
+ * The three notices below all used to blame the user's settings or the VRAM,
+ * because none of them knew about the device: `renderBudgetNotice` told an AMD
+ * customer to use fewer steps while the real answer was that his card was never
+ * in play, and `swapWarmupNotice` told him to free VRAM on a machine that was
+ * not using any. Empty string whenever we do not know, so nothing is claimed
+ * that was not measured.
+ */
+export function cpuCauseSuffix(facts: CpuRenderFacts | null | undefined): string {
+  if (!facts?.startedCpu) return ''
+  const head = 'Image generation is running on the CPU because no supported GPU path is active, so it is many times slower than it would be on a card.'
+  if (facts.hasAmd && facts.isWindows) {
+    return ` ${head} Your card is AMD and LU could not install a PyTorch that drives it on Windows.`
+  }
+  if (facts.hasAmd) {
+    return ` ${head} Your card is AMD and the PyTorch in this ComfyUI environment cannot reach it. Rebuild it from Settings, ComfyUI, Repair environment.`
+  }
+  return ` ${head}`
+}
+
 /** Tool result for a warm-up abort. Says what was observed, not a guess. */
-export function swapWarmupNotice(kindLabel: string, elapsedMs: number): string {
+export function swapWarmupNotice(kindLabel: string, elapsedMs: number, cpu?: CpuRenderFacts | null): string {
   const m = Math.max(1, Math.round(elapsedMs / 60_000))
-  return `${kindLabel} generation stopped: after ${m} minute${m === 1 ? '' : 's'} the model was still loading into VRAM and sampling never started. The job was cancelled so the GPU is free again. Free some VRAM (close other GPU apps, or set VRAM hand-off to "always" in Settings so the chat model is evicted first), or pick a smaller model.`
+  const minutes = `${m} minute${m === 1 ? '' : 's'}`
+  if (cpu?.startedCpu) {
+    // Neither half of the normal message is true here: nothing was loading into
+    // VRAM, no GPU was freed by the cancel, and freeing VRAM cannot help. A big
+    // checkpoint crawling into system RAM on the processor overruns this budget
+    // on its own.
+    return `${kindLabel} generation stopped: after ${minutes} the model was still loading and sampling never started. The job was cancelled.${cpuCauseSuffix(cpu)} Pick a smaller model.`
+  }
+  return `${kindLabel} generation stopped: after ${minutes} the model was still loading into VRAM and sampling never started. The job was cancelled so the GPU is free again. Free some VRAM (close other GPU apps, or set VRAM hand-off to "always" in Settings so the chat model is evicted first), or pick a smaller model.`
 }
 
 /**
@@ -192,10 +235,13 @@ export function finishGraceMs(
 const advice = 'Try fewer frames, a smaller resolution or fewer steps, or pick a lighter model. The generation timeout is adjustable in Settings.'
 
 /** Tool result for a pace-based early stop. Honest about what was measured. */
-export function renderBudgetNotice(kindLabel: string, projectedMs: number, budgetMs: number): string {
+export function renderBudgetNotice(kindLabel: string, projectedMs: number, budgetMs: number, cpu?: CpuRenderFacts | null): string {
   const p = Math.max(1, Math.round(projectedMs / 60_000))
   const b = Math.max(1, Math.round(budgetMs / 60_000))
-  return `${kindLabel} generation stopped early: at the measured pace this render needs about ${p} minutes, more than the ${b} minute budget. The job was cancelled so the GPU is free again. ${advice}`
+  // This is the exit a processor render reaches FIRST: the sampler ticks do
+  // arrive, just twenty times too slowly, so without the suffix the message
+  // blames the user's step count for the hardware switch.
+  return `${kindLabel} generation stopped early: at the measured pace this render needs about ${p} minutes, more than the ${b} minute budget. The job was cancelled so the GPU is free again.${cpuCauseSuffix(cpu)} ${advice}`
 }
 
 /**
@@ -203,11 +249,11 @@ export function renderBudgetNotice(kindLabel: string, projectedMs: number, budge
  * the wait outlasted the budget because the checkpoint had to load first, say
  * so instead of reporting a budget the run visibly overran.
  */
-export function renderTimeoutNotice(kindLabel: string, budgetMs: number, elapsedMs?: number): string {
+export function renderTimeoutNotice(kindLabel: string, budgetMs: number, elapsedMs?: number, cpu?: CpuRenderFacts | null): string {
   const b = Math.max(1, Math.round(budgetMs / 60_000))
   const e = typeof elapsedMs === 'number' && Number.isFinite(elapsedMs) ? Math.max(1, Math.round(elapsedMs / 60_000)) : null
   const spent = e !== null && e > b
     ? ` It ran for about ${e} minutes: the ${b} minute budget plus the time the model spent loading.`
     : ''
-  return `${kindLabel} generation hit the ${b} minute budget and was cancelled so the GPU is free again.${spent} ${advice}`
+  return `${kindLabel} generation hit the ${b} minute budget and was cancelled so the GPU is free again.${spent}${cpuCauseSuffix(cpu)} ${advice}`
 }

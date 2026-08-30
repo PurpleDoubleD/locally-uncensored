@@ -1811,7 +1811,12 @@ pub fn set_comfy_gpu_mode(mode: String, state: State<'_, AppState>) -> Result<se
 pub fn get_comfy_gpu_status(state: State<'_, AppState>) -> Result<serde_json::Value, String> {
     let mode = state.comfy_gpu_mode.lock().unwrap().clone();
     let started_cpu = *state.comfy_started_cpu.lock().unwrap();
-    Ok(serde_json::json!({ "mode": mode, "startedCpu": started_cpu }))
+    // The vendor is what turns "this ran on the processor" into a sentence the
+    // user can act on: an AMD card on Linux wants a rebuilt environment, the
+    // same card on Windows wants to be told no rebuild can help. Same probe the
+    // hardware picker and the installers use.
+    let (_, has_amd) = crate::commands::torch_wheels::gpu_vendors_present();
+    Ok(serde_json::json!({ "mode": mode, "startedCpu": started_cpu, "hasAmd": has_amd }))
 }
 
 #[tauri::command]

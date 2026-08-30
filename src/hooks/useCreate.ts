@@ -32,10 +32,13 @@ import {
 } from '../api/comfyui'
 import {
   comfyErrorHint,
+  cpuRenderFacts,
+  lastCpuRenderFacts,
   evictChatBackendsForRender,
   restoreChatBackendsAfterRender,
   type RenderEviction,
 } from '../api/vram-handoff'
+import { cpuCauseSuffix } from '../lib/render-budget'
 import {
   comfyWS, CLIENT_ID,
   LOADER_NODES, CLIP_LOADER_NODES, VAE_LOADER_NODES, SAMPLER_NODES, DECODE_NODES,
@@ -1040,6 +1043,12 @@ export function useCreate() {
         }
       }
 
+      // Ask which device ComfyUI is on while the render is still healthy: both
+      // stall watchdogs below fire from a timer and cannot await anything, and
+      // a stall message that never names the processor is the reason an AMD
+      // customer blames his settings for a hardware switch.
+      void cpuRenderFacts()
+
       // Try WebSocket-driven progress, fall back to polling
       const maxTime = mode === 'video' ? 60 * 60 * 1000 : 20 * 60 * 1000
       let useWS = false
@@ -1087,7 +1096,7 @@ export function useCreate() {
           const timeoutTimer = setInterval(() => {
             if (Date.now() - lastActivity > maxTime) {
               cleanup()
-              reject(new Error(`Generation stalled: no progress from ComfyUI for ${Math.round(maxTime / 60000)} minutes`))
+              reject(new Error(`Generation stalled: no progress from ComfyUI for ${Math.round(maxTime / 60000)} minutes.${cpuCauseSuffix(lastCpuRenderFacts())}`))
             }
           }, 15000)
 
@@ -1291,7 +1300,7 @@ export function useCreate() {
                 lastActivity = Date.now()
               } else {
                 if (pollRef.current) clearInterval(pollRef.current)
-                reject(new Error(`Generation stalled: no progress from ComfyUI for ${Math.round(maxTime / 60000)} minutes`))
+                reject(new Error(`Generation stalled: no progress from ComfyUI for ${Math.round(maxTime / 60000)} minutes.${cpuCauseSuffix(lastCpuRenderFacts())}`))
                 return
               }
             }
