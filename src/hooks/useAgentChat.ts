@@ -400,6 +400,11 @@ export function useAgentChat() {
       role: 'assistant' as const,
       content: '',
       thinking: '',
+      // Same record the plain path writes (Meldung 4, R5 re-measure
+      // 2026-08-30): the answer names the model that produced it. modelToUse
+      // rather than activeModel, because that is the runner this turn goes to,
+      // including the "-agent" variant when one exists.
+      modelId: modelToUse,
       timestamp: Date.now(),
       agentBlocks: [],
     }

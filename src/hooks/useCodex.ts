@@ -460,6 +460,9 @@ export function useCodex() {
     // (default collapsed; live-streams while running) — David 2026-06-12.
     const assistantMsg = {
       id: uuid(), role: 'assistant' as const, content: '', thinking: '', timestamp: Date.now(), agentBlocks: [],
+      // The answer records the model that produced it, same as both chat
+      // paths (Meldung 4, R5 re-measure 2026-08-30).
+      modelId: activeModel,
       ...(slash ? { slashCommand: slash.command.name } : {}),
     }
     useChatStore.getState().addMessage(convId, assistantMsg)

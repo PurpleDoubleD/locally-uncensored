@@ -209,8 +209,12 @@ function MessageBubbleImpl({ message, onRegenerate, onEdit, pendingApprovalId, o
       </div>
 
       <div className="max-w-[80%] space-y-0.5">
-        {/* Group chat: name the speaker. Only group turns carry modelId, so
-            single-model chats render exactly as before. */}
+        {/* Name the model that produced this answer. Group chats have always
+            done this; since the R5 re-measure (2026-08-30) every assistant
+            turn carries it, because the app had no model name at a single
+            answer anywhere and therefore no way to be honest about an older
+            chat. Turns from before that carry none and get no line, rather
+            than a guess. */}
         {!isUser && message.modelId && (
           <div className="text-[0.55rem] font-mono text-gray-400 dark:text-gray-500 pl-1">{message.modelId}</div>
         )}

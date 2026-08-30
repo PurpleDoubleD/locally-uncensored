@@ -90,10 +90,13 @@ fn split_model_ref(name: &str) -> (String, String) {
 
 /// The model subdirs LU downloads into / ComfyUI enumerates from. Delete
 /// searches exactly these — never custom_nodes, never arbitrary paths.
+/// embeddings and style_models joined on 2026-08-30, with the five folders the
+/// R5 re-measure found missing from the inventory. A file the Installed list
+/// names has to be deletable from that same list, or the list is a wall.
 const MODEL_SUBDIRS: &[&str] = &[
     "checkpoints", "diffusion_models", "unet", "vae", "loras",
     "text_encoders", "clip", "clip_vision", "audio_encoders",
-    "controlnet", "upscale_models",
+    "controlnet", "upscale_models", "embeddings", "style_models",
 ];
 
 /// Delete one installed model file from the ComfyUI models tree (the Model

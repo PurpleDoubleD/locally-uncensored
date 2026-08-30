@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useMemo } from 'react'
 import { listModels, pullModel as pullModelApi, pullModelTauri, deleteModel as deleteModelApi } from '../api/ollama'
-import { isTauri, isMacOS } from '../api/backend'
+import { isTauri, isMacOS, backendCall } from '../api/backend'
+import {
+  inventoryOwesRetry, refetchWhenComfyReady, type ComfyReadyStatus,
+} from '../lib/comfy-ready-retry'
 import {
   getInstalledImageModels as getComfyImageModels,
   getInstalledVideoModels as getComfyVideoModels,
   checkComfyConnection,
-  filterPartialFiles,
   readModelDiskSizes,
 } from '../api/comfyui'
 import { parseNDJSONStream } from '../api/stream'
@@ -44,6 +46,50 @@ async function resumeBuiltinEngines(bundled: BundledModel[]) {
     }
   } catch { /* engine unavailable — non-critical */ }
   await resumeEmbedServer(bundled)
+}
+
+/** One arm at a time. fetchModels runs from several mounted components, and a
+ *  cold start would otherwise start a wait per caller. */
+let comfyRetryRunning = false
+
+/**
+ * Meldung 2 of the R5 re-measure (2026-08-30): opening the Model Manager while
+ * ComfyUI was still coming up left the counter on `Installed 0` for good,
+ * beside cards that carried green Installed ticks. The first pass asked an
+ * engine that could not answer, wrote the empty answer down as the count, and
+ * nothing ever asked again. Only a manual Refresh repaired it.
+ *
+ * The counter stays on "counting" for as long as this runs, because that is
+ * the truth: nothing has been counted. beginInventoryRefresh is what says so,
+ * and it is held until the wait settles one way or the other.
+ */
+function armComfyInventoryRetry(refetch: () => Promise<void>): void {
+  if (comfyRetryRunning) return
+  if (isMacOS()) return
+  comfyRetryRunning = true
+  useModelStore.getState().beginInventoryRefresh()
+  void refetchWhenComfyReady({
+    status: async () => {
+      try {
+        return await backendCall<ComfyReadyStatus>('comfyui_status')
+      } catch {
+        return null
+      }
+    },
+    refetch: async () => { await refetch() },
+  })
+    .then((outcome) => { log.info('[useModels] ComfyUI inventory second pass', { outcome }) })
+    .catch((err) => { log.warn('[useModels] ComfyUI inventory second pass failed', { err }) })
+    .finally(() => {
+      comfyRetryRunning = false
+      useModelStore.getState().endInventoryRefresh()
+    })
+}
+
+/** Test seam. The arm is module state on purpose (one per app, not one per
+ *  mounted component), so a test needs a way back to a clean slate. */
+export function __resetComfyInventoryRetryForTests(): void {
+  comfyRetryRunning = false
 }
 
 // The bundled embeddings server serves RAG/memory for ANY local backend that
@@ -192,10 +238,18 @@ export function useModels() {
       }
 
       let comfyModels: AIModel[] = []
+      // Did the ComfyUI lanes produce an answer at all this pass. Not whether
+      // the answer had anything in it: an engine that is up and holds no
+      // models is a counted zero, an engine that could not be reached has
+      // counted nothing. Drives the second pass at the bottom of this
+      // function (Meldung 2, R5 re-measure 2026-08-30).
+      // True on the Mac and in the web build, where there is nothing to ask.
+      let comfyAnswered = true
       // Hard rule: Mac local media is MLX-only — ComfyUI never auto-starts
       // there (process.rs::auto_start_comfyui), so skip the probe outright
       // instead of a doomed connection check on every model-list refresh.
       const comfyOk = !isMacOS() && (await checkComfyConnection())
+      if (!isMacOS() && !comfyOk) comfyAnswered = false
       if (comfyOk) {
         // Settled, not all: a folder ComfyUI cannot read costs that one lane,
         // never the whole list. The old code lost both to a single throw.
@@ -221,12 +275,19 @@ export function useModels() {
         }
         const imageModels = imageResult.status === 'fulfilled' ? imageResult.value : []
         const videoModels = videoResult.status === 'fulfilled' ? videoResult.value : []
+        // Both lanes down is not an inventory, it is an engine that answered
+        // the handshake and then nothing else.
+        if (imageResult.status === 'rejected' && videoResult.status === 'rejected') {
+          comfyAnswered = false
+        }
 
-        // Still drop half-downloaded multipart files, as before.
-        const complete = await filterPartialFiles([
-          ...imageModels.map((m) => m.name),
-          ...videoModels.map((m) => m.name),
-        ])
+        // No second partial filter here. The inventory readers above are the
+        // one reader for this list and they already decided what is on the
+        // disk; asking the catalogue a second time is what hid
+        // llava_llama3_fp8_scaled.safetensors (2.4 GB on the box, 8.5 GB in
+        // our catalogue) from every surface in the app while its three folder
+        // neighbours showed up (R5 re-measure, 2026-08-30). A catalogue size
+        // is a claim about the file we ship, not about the file the user has.
         const format = (name: string) =>
           name.toLowerCase().endsWith('.gguf') ? 'gguf' : 'safetensors'
         // What each file weighs, asked once for both lanes. Every ComfyUI
@@ -238,11 +299,13 @@ export function useModels() {
           architecture: m.type, type, providerName: 'ComfyUI' as const,
         })
         comfyModels = [
-          ...imageModels.filter((m) => complete.has(m.name)).map((m) => toModel(m, 'image') as ImageModel),
-          ...videoModels.filter((m) => complete.has(m.name)).map((m) => toModel(m, 'video') as VideoModel),
+          ...imageModels.map((m) => toModel(m, 'image') as ImageModel),
+          ...videoModels.map((m) => toModel(m, 'video') as VideoModel),
         ]
       }
       setModels([...allModels, ...comfyModels])
+      // eslint-disable-next-line @typescript-eslint/no-use-before-define
+      if (inventoryOwesRetry(comfyAnswered)) armComfyInventoryRetry(fetchModels)
     } catch (err) {
       log.warn('[useModels] Model list refresh failed', { err })
     } finally {
