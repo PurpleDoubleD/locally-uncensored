@@ -1,8 +1,16 @@
-import { useState, useEffect } from 'react'
-import { Wifi, WifiOff, Loader2, Eye, EyeOff, ChevronDown, Plus, Power, Play } from 'lucide-react'
+import { useState, useEffect, useRef } from 'react'
+import { Wifi, WifiOff, Loader2, Eye, EyeOff, ChevronDown, Plus, Power, Play, Trash2 } from 'lucide-react'
 import { useProviderStore } from '../../stores/providerStore'
 import { providerRowIds, isReturnableRow } from '../../lib/provider-visibility'
-import { slotTakeoverUpdate, slotHandbackUpdate, standbyOccupant } from '../../lib/openai-slot-handover'
+import {
+  slotTakeoverUpdate,
+  slotHandbackUpdate,
+  standbyOccupant,
+  occupantIsRemovable,
+  standbyIsRemovable,
+  slotRemoveOccupantUpdate,
+  slotForgetStandbyUpdate,
+} from '../../lib/openai-slot-handover'
 import { useMemoryStore } from '../../stores/memoryStore'
 import { getProvider } from '../../api/providers'
 import { PROVIDER_PRESETS } from '../../api/providers/types'
@@ -159,6 +167,56 @@ export function ProviderSettings() {
   // The backend Add Provider pushed out of the shared `openai` slot, if any.
   // It keeps a card instead of disappearing (Nebenbefund 3, R10 re-measure).
   const standby = standbyOccupant(providers.openai)
+
+  // Remove, armed by a second click on the same button (Nebenbefund (b), R11
+  // re-measure). The house has one confirmation and this is it: the Reset
+  // button, the Cloud switch and the message delete all arm and wait for a
+  // second click, and none of them opens a dialog. Which button is armed has to
+  // be part of the state, because the occupant card and the standby card each
+  // have one and arming one must not arm the other.
+  const [armedRemove, setArmedRemove] = useState<'occupant' | 'standby' | null>(null)
+  const armTimer = useRef<number | null>(null)
+  useEffect(() => () => { if (armTimer.current) window.clearTimeout(armTimer.current) }, [])
+
+  function disarmRemove() {
+    if (armTimer.current) window.clearTimeout(armTimer.current)
+    armTimer.current = null
+    setArmedRemove(null)
+  }
+
+  // First click arms and writes nothing, second click within 4 s does it. Same
+  // window as the Reset button, so the two behave alike.
+  function armOrRun(which: 'occupant' | 'standby', run: () => void) {
+    if (armedRemove !== which) {
+      if (armTimer.current) window.clearTimeout(armTimer.current)
+      setArmedRemove(which)
+      armTimer.current = window.setTimeout(() => setArmedRemove(null), 4000)
+      return
+    }
+    disarmRemove()
+    run()
+  }
+
+  // Remove on the backend that holds the shared local slot: the slot goes back
+  // to what it held before the takeover, and the removed backend is forgotten
+  // instead of parked on standby. Offered only where `displaced` knows a state
+  // to return to, so the app's own engine and the three other slots have no
+  // Remove at all.
+  function removeOccupant() {
+    const update = slotRemoveOccupantUpdate(providers.openai)
+    if (!update) return
+    setProviderConfig('openai', update)
+    setStatuses(prev => ({ ...prev, openai: 'idle' }))
+    setExpandedProvider('openai')
+  }
+
+  // Remove on the standby card: forget the backend waiting there. The slot
+  // itself is not touched.
+  function removeStandby() {
+    const update = slotForgetStandbyUpdate(providers.openai)
+    if (!update) return
+    setProviderConfig('openai', update)
+  }
 
   // Hand the `openai` slot back to the backend on standby. Same effect the
   // Reset button has for this one slot, without resetting anything else, and
@@ -435,6 +493,25 @@ export function ProviderSettings() {
                   >
                     Disable
                   </button>
+                  {/* Remove, for a backend the user put into the shared local
+                      slot on top of another one. The slot goes back to what it
+                      held before, which is the only thing "remove" can mean
+                      here, and the reason it is not offered anywhere else. */}
+                  {id === 'openai' && occupantIsRemovable(providers.openai) && (
+                    <button
+                      data-testid="provider-remove"
+                      onClick={() => armOrRun('occupant', removeOccupant)}
+                      title={`Remove ${view.label} and put ${standby?.name} back in the local slot`}
+                      className={`flex items-center gap-1 px-2 py-0.5 rounded border text-[0.6rem] transition-colors ${
+                        armedRemove === 'occupant'
+                          ? 'bg-red-500/15 border-red-500/30 text-red-300 font-medium'
+                          : 'bg-white/5 border-white/8 text-gray-400 hover:text-red-300 hover:border-red-500/20'
+                      }`}
+                    >
+                      <Trash2 size={10} />
+                      {armedRemove === 'occupant' ? 'Click again to remove' : 'Remove'}
+                    </button>
+                  )}
                   {/* Bug (g): only render when this is the LM Studio provider AND
                       we have positive evidence that the binary is on disk but the
                       server isn't up. The same Tauri command is idempotent so
@@ -513,6 +590,21 @@ export function ProviderSettings() {
               <span className="text-[0.65rem] text-gray-500 font-medium truncate">{standby.name}</span>
               <span className="text-[0.5rem] px-1 py-0.5 rounded bg-white/5 text-gray-500 shrink-0">STANDBY</span>
             </div>
+            {standbyIsRemovable(providers.openai) && (
+              <button
+                data-testid="standby-remove"
+                onClick={() => armOrRun('standby', removeStandby)}
+                title={`Forget ${standby.name} and stop offering it here`}
+                className={`shrink-0 flex items-center gap-1 px-2 py-0.5 rounded border text-[0.6rem] transition-colors ${
+                  armedRemove === 'standby'
+                    ? 'bg-red-500/15 border-red-500/30 text-red-300 font-medium'
+                    : 'bg-white/5 border-white/8 text-gray-500 hover:text-red-300 hover:border-red-500/20'
+                }`}
+              >
+                <Trash2 size={10} />
+                {armedRemove === 'standby' ? 'Click again to remove' : 'Remove'}
+              </button>
+            )}
             <button
               onClick={handBackSlot}
               className="shrink-0 px-2 py-0.5 rounded bg-green-500/10 border border-green-500/20 text-[0.6rem] text-green-300 hover:text-green-200 hover:bg-green-500/15 transition-colors"

@@ -141,3 +141,71 @@ export function slotHandbackUpdate(slot: HandoverSlot): Partial<ProviderConfig> 
   // left at all. Handing the slot back there must not also lose Jan.
   return slotTakeoverUpdate({ ...slot, enabled: true, displaced: undefined }, back)
 }
+
+/**
+ * Whether the backend SITTING IN the slot may be removed, and whether the one
+ * waiting beside it may be.
+ *
+ * Nebenbefund (b) of the R11 re-measure (2026-08-30): a provider added through
+ * Add Provider could not be taken off the list again. The card offers Endpoint,
+ * Test and Disable, and nothing else, in every state, so the only way back to
+ * the shipped list was `Reset AI Backends to defaults`, which also throws away
+ * every other backend the user had set up.
+ *
+ * Remove is not a new mechanic, it is the handover read the other way round.
+ * The four slot ids (`ollama`, `openai`, `anthropic`, `lu-cloud`) are the fixed
+ * shape of the store and none of them can be deleted; what a user really added
+ * is a BACKEND placed into the shared `openai` slot on top of something else,
+ * and removing it means putting the slot back the way it was before the
+ * takeover. That is exactly what `displaced` remembers, so Remove is offered
+ * where, and only where, there is a remembered state to return to:
+ *
+ *  - on the occupant, when it is not the app's own engine. The built-in engine
+ *    is the floor everybody else stands on; removing it would leave the slot
+ *    with nothing to fall back to and re-open the hole R10 closed.
+ *  - on the standby card, for the same reason in the other direction: after a
+ *    handback the added backend is the one waiting there, and forgetting it is
+ *    the same wish as removing it. The built-in engine on standby is never
+ *    forgotten, because that card IS the way back.
+ */
+export function occupantIsRemovable(slot: HandoverSlot): boolean {
+  if (slot.managed) return false
+  return standbyOccupant(slot) !== null
+}
+
+/** True when the backend on the standby card may be forgotten. */
+export function standbyIsRemovable(slot: HandoverSlot): boolean {
+  const waiting = standbyOccupant(slot)
+  return !!waiting && !waiting.managed
+}
+
+/**
+ * The patch Remove on the occupant writes: the slot goes back to the state it
+ * was in before the takeover, and the backend that is leaving is forgotten
+ * rather than parked.
+ *
+ * That is the whole difference to Enable on the standby card, which swaps. A
+ * user who presses Remove is not asking for a card in the other corner.
+ */
+export function slotRemoveOccupantUpdate(slot: HandoverSlot): Partial<ProviderConfig> | null {
+  const back = standbyOccupant(slot)
+  if (!back || !occupantIsRemovable(slot)) return null
+  return {
+    enabled: true,
+    name: back.name,
+    baseUrl: back.baseUrl,
+    isLocal: back.isLocal,
+    managed: !!back.managed,
+    // The slot is being handed back on purpose, so it carries neither the
+    // Disable mark nor a memory of the backend that just left.
+    disabledByUser: false,
+    displaced: undefined,
+  }
+}
+
+/** The patch Remove on the standby card writes: forget the backend waiting
+ *  there, and leave the occupant of the slot alone. */
+export function slotForgetStandbyUpdate(slot: HandoverSlot): Partial<ProviderConfig> | null {
+  if (!standbyIsRemovable(slot)) return null
+  return { displaced: undefined }
+}
