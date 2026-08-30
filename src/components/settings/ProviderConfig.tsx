@@ -268,7 +268,7 @@ export function ProviderSettings() {
 
   return (
     <div className="space-y-2">
-      {/* Providers List — enabled rows, plus the ones the user switched off */}
+      {/* Providers List: enabled rows, plus the ones the user switched off */}
       {rowIds.map(id => {
         const config = providers[id]
         const view = providerSlotView(id, config)
