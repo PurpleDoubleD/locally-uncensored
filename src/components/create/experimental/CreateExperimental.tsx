@@ -5,6 +5,8 @@ import { useCreateStore, type GalleryItem } from '../../../stores/createStore'
 import { useCloudNoticeStore, CLOUD_RETENTION_DAYS, shouldShowRetentionNotice } from '../../../stores/cloudNoticeStore'
 import { useComfyNoticeStore } from '../../../stores/comfyNoticeStore'
 import { loadComfyCorsSignature, shouldShowCorsNotice } from '../../../lib/comfy-cors-notice'
+import { comfyIdleNotice, shouldWatchComfyIdle, IDLE_WATCH_INTERVAL_MS } from '../../../lib/comfy-idle-watch'
+import type { ComfyGuardStatus } from '../../../lib/comfy-restart-guard'
 import { useWorkflowStore } from '../../../stores/workflowStore'
 import { CreateExpProvider, useCreateExp } from './CreateContext'
 import { IntentBar } from './IntentBar'
@@ -84,6 +86,36 @@ function CreateExperimentalInner() {
     })()
     return () => { cancelled = true }
   }, [backend, connected, adoptCorsSignature])
+
+  // R18 Befund 2 (2026-08-30, Windows box): ComfyUI was killed while the app
+  // sat idle on this tab and the Create surface said NOTHING for 180 seconds.
+  // `connected` is probed once on mount and never again, so a death nobody
+  // asked about produced no error to show. The next render heals it (R16
+  // Befund 5, comfy-restart-guard) — the user just had no way to know that.
+  //
+  // A glance every 30s while this tab is open and idle, no restart of its own:
+  // holding an engine warm for work nobody asked for costs RAM and VRAM, and
+  // the render path already fixes it on demand. Wording in lib/comfy-idle-watch.
+  const [idleNotice, setIdleNotice] = useState('')
+  const idleTimerRef = useRef<(() => void) | null>(null)
+  useEffect(() => {
+    let cancelled = false
+    const clear = () => { if (!cancelled) setIdleNotice('') }
+    void (async () => {
+      const { isMacOS } = await import('../../../api/backend')
+      if (cancelled) return
+      if (!shouldWatchComfyIdle(backend === 'local', isMacOS(), isGenerating)) { clear(); return }
+      const { backendCall } = await import('../../../api/backend')
+      const look = async () => {
+        const st = await backendCall<ComfyGuardStatus>('comfyui_status').catch(() => null)
+        if (!cancelled) setIdleNotice(comfyIdleNotice(st))
+      }
+      await look()
+      const timer = setInterval(() => { void look() }, IDLE_WATCH_INTERVAL_MS)
+      idleTimerRef.current = () => clearInterval(timer)
+    })()
+    return () => { cancelled = true; idleTimerRef.current?.(); idleTimerRef.current = null }
+  }, [backend, isGenerating])
 
   const fixCorsForMe = useCallback(async () => {
     setCorsFixing(true)
@@ -200,6 +232,17 @@ function CreateExperimentalInner() {
         <div className="flex items-center gap-2 px-4 py-2 bg-yellow-500/5 border-b border-yellow-500/10 text-yellow-300 text-xs shrink-0">
           <AlertTriangle size={12} className="shrink-0" />
           <span>{comfyCpuBanner}</span>
+        </div>
+      )}
+
+      {/* Idle outage (R18 Befund 2): ComfyUI died while nobody was rendering
+          and the tab said nothing about it for 180 seconds. One quiet line,
+          no button: the render path restarts it and this says so. Nothing is
+          started from here — see lib/comfy-idle-watch.ts for why. */}
+      {idleNotice && (
+        <div className="flex items-center gap-2 px-4 py-2 bg-yellow-500/5 border-b border-yellow-500/10 text-yellow-300 text-xs shrink-0">
+          <AlertTriangle size={12} className="shrink-0" />
+          <span className="flex-1 min-w-0">{idleNotice}</span>
         </div>
       )}
 
