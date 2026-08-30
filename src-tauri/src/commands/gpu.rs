@@ -262,20 +262,113 @@ fn detect_macos() -> Vec<DetectedGpu> {
 #[cfg(not(target_os = "macos"))]
 fn detect_macos() -> Vec<DetectedGpu> { vec![] }
 
+/// Vendor from an adapter's human name. Shared by both Windows probes so the
+/// registry branch and the wmic branch can never disagree about a card.
+fn vendor_from_adapter_name(name: &str) -> &'static str {
+    let lname = name.to_lowercase();
+    if lname.contains("intel") { "intel" }
+    else if lname.contains("amd") || lname.contains("radeon") { "amd" }
+    else if lname.contains("nvidia") || lname.contains("geforce") || lname.contains("rtx") || lname.contains("gtx") { "nvidia" }
+    else { "unknown" }
+}
+
+/// The Windows adapter list straight out of the display-driver registry branch.
+///
+/// This is the probe that replaced wmic. `DriverDesc` carries the card's name
+/// under the same numbered subkey `HardwareInformation.qwMemorySize` carries
+/// its true size, so one branch answers both questions the picker asks, and
+/// `reg.exe` is not going anywhere. Pure over the two parsed queries for the
+/// same reason the wmic parser is: the CI runners are not Windows.
+fn detect_other_via_registry_from(
+    names: &[(String, String)],
+    sizes: &[(String, String)],
+    have_rocm: bool,
+) -> Vec<DetectedGpu> {
+    let mut gpus = Vec::new();
+    // Per-vendor counters, exactly as on the other two paths: HIP_VISIBLE_DEVICES
+    // and ONEAPI_DEVICE_SELECTOR are vendor-scoped.
+    let mut next: std::collections::HashMap<&str, u32> = std::collections::HashMap::new();
+    for (key, raw_name) in names {
+        let name = raw_name.trim().to_string();
+        if name.is_empty() { continue }
+        let vendor = vendor_from_adapter_name(&name);
+        // See the lspci path: nvidia-smi ships with the driver so its entry is
+        // always richer, and rocm-smi does NOT ship with the AMD driver, so an
+        // AMD card must survive its absence.
+        if vendor == "nvidia" { continue }
+        if vendor == "amd" && have_rocm { continue }
+        let memory_mib = sizes
+            .iter()
+            .find(|(k, _)| k == key)
+            .and_then(|(_, v)| parse_reg_hex(v))
+            .filter(|b| *b > 0)
+            .map(|b| b / 1024 / 1024);
+        let index = next.entry(vendor).or_insert(0);
+        gpus.push(DetectedGpu {
+            index: *index,
+            vendor: vendor.into(),
+            name,
+            memory_mib,
+            source: "registry".into(),
+            note: note_for(vendor),
+        });
+        *index += 1;
+    }
+    gpus
+}
+
+/// Which of the two Windows probes decides, given what each one produced.
+///
+/// The registry answers first and wmic is only reached when the registry said
+/// nothing AT ALL. Splitting the choice out as a pure function is what lets a
+/// test drive the case that matters (`wmic_raw: None`, which is every Windows
+/// 11 from 23H2 on) without a Windows box.
+fn windows_fallback_from(
+    registry_names: &[(String, String)],
+    registry_sizes: &[(String, String)],
+    wmic_raw: Option<&str>,
+    have_rocm: bool,
+) -> Vec<DetectedGpu> {
+    if !registry_names.is_empty() {
+        return detect_other_via_registry_from(registry_names, registry_sizes, have_rocm);
+    }
+    match wmic_raw {
+        Some(raw) => detect_other_via_wmic_from(raw, have_rocm, &[]),
+        None => vec![],
+    }
+}
+
 #[cfg(target_os = "windows")]
-fn detect_other_via_wmic(have_rocm: bool) -> Vec<DetectedGpu> {
-    // Windows fallback for Intel Arc and other GPUs that don't surface via
-    // nvidia-smi / rocm-smi. Modern PowerShell deprecated wmic.exe but it's
-    // still on Win10/11 Home for the time being. We probe it but treat
-    // failure as benign (the user can just not see the Intel card and pick
-    // "auto" instead).
-    let raw = match run_cmd("wmic", &["path", "Win32_VideoController", "get", "Name,AdapterRAM", "/format:csv"]) {
-        Some(s) => s,
-        None => return vec![],
-    };
-    // AdapterRAM below is a uint32 and lies about anything past 4 GiB, so the
-    // driver's registry entry is the source of truth for size when it answers.
-    detect_other_via_wmic_from(&raw, have_rocm, &vram_mib_by_adapter_name())
+fn detect_other_on_windows(have_rocm: bool) -> Vec<DetectedGpu> {
+    // Microsoft disabled wmic.exe by default in Windows 11 23H2 and 24H2 and
+    // removed it outright in the August 2026 servicing update, where it is no
+    // longer even a Feature on Demand. It used to be this module's only way to
+    // see a card without a vendor CLI, which meant an AMD card on any current
+    // Windows was invisible: no entry in the picker, and `plan_pytorch_install`
+    // deciding as if the machine had no GPU at all.
+    //
+    // The display-driver registry branch is the replacement, and it was already
+    // half in use here for VRAM sizes. wmic stays behind it for the older
+    // Windows where it still exists and for the case where `reg query` itself
+    // comes back empty.
+    let names = run_cmd("reg", &["query", DISPLAY_CLASS_KEY, "/s", "/v", "DriverDesc"])
+        .map(|s| parse_reg_query(&s, "DriverDesc"))
+        .unwrap_or_default();
+    let sizes = run_cmd(
+        "reg",
+        &["query", DISPLAY_CLASS_KEY, "/s", "/v", "HardwareInformation.qwMemorySize"],
+    )
+    .map(|s| parse_reg_query(&s, "HardwareInformation.qwMemorySize"))
+    .unwrap_or_default();
+    if !names.is_empty() {
+        return windows_fallback_from(&names, &sizes, None, have_rocm);
+    }
+    // Only now is wmic worth its five second ceiling.
+    let wmic = run_cmd(
+        "wmic",
+        &["path", "Win32_VideoController", "get", "Name,AdapterRAM", "/format:csv"],
+    );
+    windows_fallback_from(&names, &sizes, wmic.as_deref(), have_rocm)
 }
 
 /// The parser, split out the same way the lspci one is: wmic only exists on
@@ -306,11 +399,7 @@ fn detect_other_via_wmic_from(
         let ram_bytes: Option<u64> = parts[1].parse().ok();
         let name = parts[2].to_string();
         if name.is_empty() || name.eq_ignore_ascii_case("name") { continue }
-        let lname = name.to_lowercase();
-        let vendor = if lname.contains("intel") { "intel" }
-                     else if lname.contains("amd") || lname.contains("radeon") { "amd" }
-                     else if lname.contains("nvidia") || lname.contains("geforce") || lname.contains("rtx") || lname.contains("gtx") { "nvidia" }
-                     else { "unknown" };
+        let vendor = vendor_from_adapter_name(&name);
         // See the lspci path: rocm-smi is not part of the AMD driver, so an
         // AMD card must survive its absence. ROCm on Windows is rare and ZLUDA
         // users have no rocm-smi at all (lapbo, Win11 + ZLUDA).
@@ -345,7 +434,7 @@ fn detect_other_via_wmic_from(
 }
 
 #[cfg(not(target_os = "windows"))]
-fn detect_other_via_wmic(_have_rocm: bool) -> Vec<DetectedGpu> { vec![] }
+fn detect_other_on_windows(_have_rocm: bool) -> Vec<DetectedGpu> { vec![] }
 
 /// Class GUID of the display-adapter registry branch. Every installed GPU
 /// driver gets a numbered subkey (0000, 0001, …) under it.
@@ -409,44 +498,12 @@ fn parse_reg_hex(value: &str) -> Option<u64> {
     u64::from_str_radix(hex, 16).ok()
 }
 
-/// Adapter name → VRAM in MiB, read from the driver's own registry entry.
-///
-/// WMI's `AdapterRAM` is a uint32, so it cannot express more than 4 GiB and
-/// reports nonsense above it: bobbyt5667's Arc Pro B60 with 24 GB showed up as
-/// 2 GB, which is also the card this whole module was written for. The driver
-/// writes the true size next to itself as a 64-bit qword, so that is the
-/// number we believe whenever it answers.
-#[allow(dead_code)]
-fn vram_mib_by_adapter_name() -> Vec<(String, u64)> {
-    let names = match run_cmd("reg", &["query", DISPLAY_CLASS_KEY, "/s", "/v", "DriverDesc"]) {
-        Some(s) => parse_reg_query(&s, "DriverDesc"),
-        None => return vec![],
-    };
-    let sizes = match run_cmd(
-        "reg",
-        &["query", DISPLAY_CLASS_KEY, "/s", "/v", "HardwareInformation.qwMemorySize"],
-    ) {
-        Some(s) => parse_reg_query(&s, "HardwareInformation.qwMemorySize"),
-        None => return vec![],
-    };
-    join_name_and_size(&names, &sizes)
-}
-
-/// Join the two registry queries on their shared subkey. Split out so the
-/// join itself is testable without a registry.
-fn join_name_and_size(names: &[(String, String)], sizes: &[(String, String)]) -> Vec<(String, u64)> {
-    names
-        .iter()
-        .filter_map(|(key, name)| {
-            let raw = sizes.iter().find(|(k, _)| k == key).map(|(_, v)| v)?;
-            let bytes = parse_reg_hex(raw)?;
-            if bytes == 0 {
-                return None;
-            }
-            Some((name.trim().to_string(), bytes / 1024 / 1024))
-        })
-        .collect()
-}
+// The name → VRAM join that used to live here is gone: the registry branch is
+// no longer a side probe that patches wmic's broken uint32 AdapterRAM, it IS
+// the adapter list, so `detect_other_via_registry_from` reads both values off
+// the same subkey directly. WMI's `AdapterRAM` cannot express more than 4 GiB
+// (bobbyt5667's 24 GB Arc Pro B60 came out of it as 2 GB), which is why the
+// qword is still the number we believe.
 
 #[tauri::command]
 pub fn detect_gpus() -> Result<Vec<DetectedGpu>, String> {
@@ -459,7 +516,7 @@ pub fn detect_gpus() -> Result<Vec<DetectedGpu>, String> {
     let have_rocm = !amd.is_empty();
     gpus.extend(amd);
     gpus.extend(detect_other_via_lspci(have_rocm));
-    gpus.extend(detect_other_via_wmic(have_rocm));
+    gpus.extend(detect_other_on_windows(have_rocm));
     gpus.extend(detect_macos());
     Ok(gpus)
 }
@@ -579,23 +636,29 @@ End of search: 2 match(es) found.
     }
 
     /// The bug: WMI's uint32 AdapterRAM reported 2 GB for a 24 GB Arc Pro B60.
-    /// The registry qword has the real number, and that is what we join on.
+    /// The registry qword has the real number, and the registry probe reads it
+    /// off the same subkey the name came from.
     #[test]
-    fn join_recovers_the_true_size_of_a_card_larger_than_uint32() {
+    fn the_registry_reports_the_true_size_of_a_card_larger_than_uint32() {
         let names = parse_reg_query(DRIVER_DESC_OUT, "DriverDesc");
         let sizes = parse_reg_query(QW_MEMORY_OUT, "HardwareInformation.qwMemorySize");
-        let joined = join_name_and_size(&names, &sizes);
+        let found = detect_other_via_registry_from(&names, &sizes, false);
+        let sized: Vec<(String, Option<u64>)> =
+            found.iter().map(|g| (g.name.clone(), g.memory_mib)).collect();
         assert_eq!(
-            joined,
+            sized,
             vec![
-                ("Intel(R) Arc(TM) Pro B60 Graphics".to_string(), 24576),
-                ("AMD Radeon RX 6800 XT".to_string(), 16384),
+                ("Intel(R) Arc(TM) Pro B60 Graphics".to_string(), Some(24576)),
+                ("AMD Radeon RX 6800 XT".to_string(), Some(16384)),
             ]
         );
+        // NEGATIVE CONTROL: wmic's own number for that card. Anything that
+        // rounds a 24 GB card down to 2 GB must not be what the picker shows.
+        assert_ne!(sized[0].1, Some(2048));
     }
 
     #[test]
-    fn join_drops_adapters_without_a_size_and_zero_sized_ones() {
+    fn the_registry_leaves_the_size_open_when_there_is_none_to_read() {
         let names = vec![
             ("0000".to_string(), "Intel(R) Arc(TM) Pro B60 Graphics".to_string()),
             ("0001".to_string(), "Microsoft Basic Display Adapter".to_string()),
@@ -605,8 +668,12 @@ End of search: 2 match(es) found.
             ("0000".to_string(), "0x600000000".to_string()),
             ("0002".to_string(), "0x0".to_string()),
         ];
-        let joined = join_name_and_size(&names, &sizes);
-        assert_eq!(joined, vec![("Intel(R) Arc(TM) Pro B60 Graphics".to_string(), 24576)]);
+        let found = detect_other_via_registry_from(&names, &sizes, false);
+        // A missing or zero qword means "size unknown", never a made-up number:
+        // the app sizes models against this.
+        assert_eq!(found[0].memory_mib, Some(24576));
+        assert_eq!(found[1].memory_mib, None);
+        assert_eq!(found[2].memory_mib, None);
     }
 
     #[test]
@@ -766,6 +833,106 @@ End of search: 2 match(es) found.
         let found = detect_other_via_wmic_from(raw, false, &[]);
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].name, "Intel(R) Arc A770");
+    }
+
+    // ── Windows 11 23H2 and newer: wmic is gone ───────────────────────────
+    //
+    // Microsoft disabled wmic.exe by default in 23H2/24H2 and removed it in the
+    // August 2026 servicing update, where it is not even a Feature on Demand
+    // any more. It was this module's only Windows probe that did not need a
+    // vendor CLI, and rocm-smi is not part of the AMD driver, so on a current
+    // Windows an AMD card fell out of detection entirely: no entry in the
+    // picker, and every decision downstream taken as if the box had no GPU.
+
+    /// `reg query … /v DriverDesc` on lapbo's kind of box: one AMD card, no
+    /// vendor CLI anywhere.
+    const DRIVER_DESC_AMD_ONLY: &str = r"
+HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}\0000
+    DriverDesc    REG_SZ    AMD Radeon RX 7900 XTX
+
+End of search: 1 match(es) found.
+";
+
+    #[test]
+    fn an_amd_card_is_still_found_on_a_windows_that_has_no_wmic() {
+        let names = parse_reg_query(DRIVER_DESC_AMD_ONLY, "DriverDesc");
+        let found = windows_fallback_from(&names, &[], None, false);
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert_eq!(found[0].vendor, "amd");
+        assert_eq!(found[0].name, "AMD Radeon RX 7900 XTX");
+        assert_eq!(found[0].index, 0, "the only AMD card is HIP device 0");
+        assert_eq!(found[0].source, "registry");
+        assert!(found[0].note.is_some(), "found without ROCm tools, say so");
+
+        // NEGATIVE CONTROL: the same machine as the code saw it before this
+        // change, where wmic was the only probe. Nothing at all comes back,
+        // which is the whole bug.
+        assert!(windows_fallback_from(&[], &[], None, false).is_empty());
+    }
+
+    #[test]
+    fn wmic_still_answers_on_the_older_windows_that_still_has_it() {
+        // The registry stays first, but nothing may regress for a box where
+        // `reg query` comes back empty and wmic is alive.
+        let raw = "\r\nNode,AdapterRAM,Name\r\nBOX,1073741824,AMD Radeon RX 7900 XTX\r\n";
+        let found = windows_fallback_from(&[], &[], Some(raw), false);
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].vendor, "amd");
+        assert_eq!(found[0].source, "wmic");
+    }
+
+    #[test]
+    fn the_registry_wins_over_wmic_when_both_answer() {
+        // Same card from both probes must not become two cards, and the entry
+        // that carries a real VRAM number is the one to keep.
+        let names = parse_reg_query(DRIVER_DESC_AMD_ONLY, "DriverDesc");
+        let sizes = vec![("0000".to_string(), "0x600000000".to_string())];
+        let wmic = "\r\nNode,AdapterRAM,Name\r\nBOX,1073741824,AMD Radeon RX 7900 XTX\r\n";
+        let found = windows_fallback_from(&names, &sizes, Some(wmic), false);
+        assert_eq!(found.len(), 1, "one card, not one per probe: {found:?}");
+        assert_eq!(found[0].source, "registry");
+        assert_eq!(found[0].memory_mib, Some(24576));
+    }
+
+    /// The test gap this round was asked to close.
+    ///
+    /// `force_gpu_warning` already has a test forbidding the "Reinstall the
+    /// ComfyUI environment" advice for a Windows AMD box, because no rebuild
+    /// can produce a wheel that does not exist. That test mocks `has_amd` to
+    /// true and so stayed green while the product answered the opposite: on a
+    /// wmic-less Windows the detection handed it `false`, and the message fell
+    /// into the generic branch that gives exactly the forbidden advice.
+    ///
+    /// This one runs the real detection first and feeds its verdict in, so the
+    /// two halves can no longer disagree.
+    #[test]
+    fn windows_amd_never_gets_reinstall_advice_when_the_detection_is_the_real_one() {
+        use crate::commands::process::{force_gpu_warning, ComfyGpuMode};
+        let names = parse_reg_query(DRIVER_DESC_AMD_ONLY, "DriverDesc");
+        let has_amd = windows_fallback_from(&names, &[], None, false)
+            .iter()
+            .any(|g| g.vendor == "amd");
+        assert!(has_amd, "the detection has to see the card for any of this to work");
+        let warn = force_gpu_warning(ComfyGpuMode::ForceGpu, Some(false), has_amd, "windows")
+            .expect("a forced GPU on a torch without one is worth a word");
+        assert!(
+            !warn.contains("Reinstall the ComfyUI environment"),
+            "advice no rebuild can deliver: {warn}",
+        );
+
+        // NEGATIVE CONTROL: the wmic-only detection, which is what every
+        // Windows 11 from 23H2 on had. It reports no AMD card, and the product
+        // then gives the user precisely the advice the older test forbids.
+        let blind = windows_fallback_from(&[], &[], None, false)
+            .iter()
+            .any(|g| g.vendor == "amd");
+        assert!(!blind, "wmic is gone, so this probe is blind");
+        let wrong = force_gpu_warning(ComfyGpuMode::ForceGpu, Some(false), blind, "windows")
+            .expect("still a warning, just the wrong one");
+        assert!(
+            wrong.contains("Reinstall the ComfyUI environment"),
+            "if this ever stops holding the negative control has rotted: {wrong}",
+        );
     }
 
     #[test]
