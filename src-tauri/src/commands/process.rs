@@ -350,7 +350,15 @@ pub(crate) fn force_gpu_warning(
             "Your card is AMD and this environment holds CUDA-only wheels. Reinstall the              ComfyUI environment from Settings > ComfyUI: LU now installs the ROCm build              of PyTorch when it sees an AMD card."
         }
         (true, "windows") => {
-            "Your card is AMD and PyTorch ships no ROCm wheels for Windows, so no              reinstall can fix this here. Use a ComfyUI of your own on DirectML or              ZLUDA, or set ComfyUI GPU back to Auto and render on the processor."
+            // Since Runde 12 LU does install AMD's own Windows ROCm wheels for
+            // the RDNA 3, 3.5 and 4 cards AMD supports, so the old absolute
+            // "PyTorch ships no ROCm wheels for Windows" is no longer true.
+            // What IS true whenever this branch fires is that the environment
+            // ended up with processor wheels anyway, either because the card is
+            // outside that list or because the index did not answer. Still no
+            // reinstall advice: on the cards that reach this message a rebuild
+            // lands in the same place.
+            "Your card is AMD, and this ComfyUI environment holds processor wheels:              pytorch.org publishes no Windows ROCm wheels, and AMD's own Windows ROCm              index either does not cover this card or did not answer when the              environment was built. Use a ComfyUI of your own on ZLUDA or DirectML, or              set ComfyUI GPU back to Auto and render on the processor."
         }
         _ => {
             "Reinstall the ComfyUI environment from Settings > ComfyUI so PyTorch is              rebuilt for the card LU detects, or set ComfyUI GPU back to Auto."

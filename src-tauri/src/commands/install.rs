@@ -588,16 +588,15 @@ pub fn pip_install_streaming_with_retry_cancellable(
 /// Pure: the pip argument set for the PyTorch install, for a given wheel
 /// index. Split from the probe so the arg shapes are testable without
 /// nvidia-smi on the machine.
-pub(crate) fn pytorch_pip_args(index_url: Option<&str>) -> Vec<String> {
-    let mut args: Vec<String> = [
-        "-m", "pip", "install",
-        "--progress-bar", "off",
-        "--no-input",
-        "torch", "torchvision", "torchaudio",
-    ]
-    .iter()
-    .map(|s| s.to_string())
-    .collect();
+pub(crate) fn pytorch_pip_args(index_url: Option<&str>, packages: &[&str]) -> Vec<String> {
+    let mut args: Vec<String> = ["-m", "pip", "install", "--progress-bar", "off", "--no-input"]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+    // The package names come from the plan: AMD's Windows index serves a slim
+    // torch plus a device package behind an extra, so "torch" alone would build
+    // an environment with no kernels for any card.
+    args.extend(packages.iter().map(|s| s.to_string()));
     if let Some(u) = index_url {
         args.push("--index-url".to_string());
         args.push(u.to_string());
@@ -698,21 +697,26 @@ pub(crate) fn process_read_bytes(_pid: u32) -> Option<u64> {
 /// The vendor list now decides, and the choice itself lives in
 /// `torch_wheels` where it is testable without any of the hardware.
 pub(crate) fn plan_pytorch_install() -> (Vec<String>, String) {
-    let (has_nvidia, has_amd) = torch_wheels::gpu_vendors_present();
+    let (has_nvidia, has_amd, amd_names) = torch_wheels::gpu_vendor_facts();
     let compute_cap = if has_nvidia { detect_nvidia_compute_cap() } else { None };
+    let amd_refs: Vec<&str> = amd_names.iter().map(|s| s.as_str()).collect();
     let plan = torch_wheels::comfy_wheel_plan(
         has_nvidia,
         compute_cap,
         has_amd,
+        &amd_refs,
         std::env::consts::OS,
     );
-    let note = plan.note().to_string();
-    let index = torch_wheels::resolve_plan_index(&plan);
+    // The note is resolved WITH the index: a plan that reached for AMD's
+    // Windows channel and found it dead falls back to the processor wheels,
+    // and then the sentence in "Step 2/3" has to be the fallback's, not the
+    // one the plan set out with.
+    let (index, packages, note) = torch_wheels::resolve_plan(&plan);
     let gpu_info = match index {
         Some(url) => format!("{note} ({url})"),
         None => note,
     };
-    (pytorch_pip_args(index), gpu_info)
+    (pytorch_pip_args(index, packages), gpu_info)
 }
 
 #[tauri::command]
@@ -3609,8 +3613,9 @@ mod tests {
     #[test]
     fn pytorch_index_rides_living_channels() {
         use crate::commands::torch_wheels::{comfy_wheel_plan, WheelPlan};
-        let first = |nv, cap, amd, os| match comfy_wheel_plan(nv, cap, amd, os) {
+        let first = |nv, cap, amd, os| match comfy_wheel_plan(nv, cap, amd, &[], os) {
             WheelPlan::Index { candidates, .. } => Some(candidates[0]),
+            WheelPlan::IndexOrCpu { candidates, .. } => Some(candidates[0]),
             WheelPlan::Cpu { .. } => None,
         };
         assert_eq!(
@@ -3642,7 +3647,7 @@ mod tests {
             (true, Some((12, 0))),
             (true, None),
         ] {
-            if let WheelPlan::Index { candidates, .. } = comfy_wheel_plan(nv, cap, false, "linux") {
+            if let WheelPlan::Index { candidates, .. } = comfy_wheel_plan(nv, cap, false, &[], "linux") {
                 assert!(
                     !candidates.iter().any(|c| c.contains("cu121")),
                     "frozen channel chosen for cap {:?}",
@@ -3697,7 +3702,8 @@ mod tests {
 
     #[test]
     fn pytorch_args_carry_the_wheel_index_when_given() {
-        let args = pytorch_pip_args(Some("https://download.pytorch.org/whl/cu128"));
+        use crate::commands::torch_wheels::TORCH_TRIO;
+        let args = pytorch_pip_args(Some("https://download.pytorch.org/whl/cu128"), TORCH_TRIO);
         assert_eq!(args.first().map(String::as_str), Some("-m"));
         assert!(args.contains(&"torch".to_string()));
         assert!(args.contains(&"torchvision".to_string()));
@@ -3709,9 +3715,24 @@ mod tests {
 
     #[test]
     fn pytorch_args_without_index_stay_on_pypi() {
-        let args = pytorch_pip_args(None);
+        use crate::commands::torch_wheels::TORCH_TRIO;
+        let args = pytorch_pip_args(None, TORCH_TRIO);
         assert!(!args.iter().any(|a| a == "--index-url"));
         assert!(args.contains(&"torch".to_string()));
+    }
+
+    #[test]
+    fn pytorch_args_pass_a_channels_own_package_names_through_untouched() {
+        // AMD's Windows index serves torch behind a device extra. pip has to
+        // see "torch[device-all]" verbatim; a bare "torch" from that index is
+        // an environment with no kernels for any card.
+        use crate::commands::torch_wheels::{TORCH_TRIO, TORCH_TRIO_AMD_WINDOWS};
+        let args = pytorch_pip_args(Some("https://repo.amd.com/rocm/whl-multi-arch/"), TORCH_TRIO_AMD_WINDOWS);
+        assert!(args.contains(&"torch[device-all]".to_string()), "{args:?}");
+        assert!(args.contains(&"torchvision".to_string()));
+        // NEGATIVE CONTROL: the extra is never bolted onto the normal channels.
+        let plain = pytorch_pip_args(Some("https://download.pytorch.org/whl/cu130"), TORCH_TRIO);
+        assert!(!plain.iter().any(|a| a.contains('[')), "{plain:?}");
     }
 
     // ── install_custom_node helpers (#72 bob: VHS install loop) ─────────
