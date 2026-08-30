@@ -170,12 +170,14 @@ function CreateExperimentalInner() {
                 Linux AMD wants a ROCm torch inside ComfyUI's own venv.
                 Since 2.6.7 the ComfyUI installer picks the ROCm wheels itself
                 on an AMD Linux box, so the fix is a reinstall and not a pip
-                line the user has to type by hand. Windows has no ROCm wheel at
-                all, so it gets the honest version instead of a channel that
-                does not exist there. */}
+                line the user has to type by hand. The Windows half said there
+                was no Windows ROCm wheel at all and pointed at DirectML, which
+                the round 12 research disproved: AMD publishes its own Windows
+                wheels, LU installs them for the cards AMD supports, and
+                DirectML has been frozen on an old PyTorch since 2024. */}
             {isLinux()
               ? ' AMD GPU? LU installs the ROCm build of PyTorch for AMD cards now. Reinstall the ComfyUI environment from Settings → ComfyUI, then set Settings → Hardware → ComfyUI GPU to Auto.'
-              : ' AMD GPU? PyTorch ships no ROCm wheels for Windows, so this card needs a DirectML or ZLUDA ComfyUI of your own. Point LU at it and set Settings → Hardware → ComfyUI GPU to force GPU.'}
+              : " AMD GPU? LU installs AMD's own ROCm build of PyTorch for RX 7000 and RX 9000 cards on Windows. Reinstall the ComfyUI environment from Settings → ComfyUI to try that again. For any other AMD card you need a ZLUDA ComfyUI of your own: point LU at it and set Settings → Hardware → ComfyUI GPU to force GPU."}
           </span>
         </div>
       )}

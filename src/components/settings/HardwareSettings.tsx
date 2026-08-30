@@ -205,7 +205,7 @@ export function HardwareSettings() {
         <div className="grid grid-cols-1 gap-1">
           {([
             ['auto', 'Auto (recommended)', 'NVIDIA runs on the GPU. On an AMD / other card LU checks whether your ComfyUI has a GPU-capable torch (ROCm or ZLUDA) and uses it, otherwise falls back to CPU.'],
-            ['gpu', 'Force GPU', 'Never fall back to CPU. Use if you run a DirectML / ROCm ComfyUI that LU cannot auto-detect. If your ComfyUI has no working GPU torch it will fail to start.'],
+            ['gpu', 'Force GPU', 'Never fall back to CPU. Use if you run a ROCm or ZLUDA ComfyUI of your own that LU cannot auto-detect. If your ComfyUI has no working GPU torch it will fail to start.'],
             ['cpu', 'Force CPU', 'Always run image / video on the CPU. Slow but stable, useful if generation crashes your GPU by running out of VRAM.'],
           ] as const).map(([val, label, help]) => (
             <label key={val} className="flex items-start gap-2 cursor-pointer p-1.5 rounded hover:bg-white/[0.04] border border-transparent has-[input:checked]:border-white/10 has-[input:checked]:bg-white/[0.03]">
@@ -223,8 +223,17 @@ export function HardwareSettings() {
             </label>
           ))}
         </div>
+        {/* Written before 2.6.7 and untrue since: LU picks the wheels by card
+            now (57196b31, 6d5dc61e, 3570ce53), so "installs an NVIDIA / CPU
+            ComfyUI by default" would send an AMD user looking for a ComfyUI of
+            his own that the app has already installed for him. The families no
+            wheel carries kernels for are named too, because staying on the
+            processor there is a decision and not a failure. */}
         <div className="text-[0.55rem] text-gray-500 mt-1 leading-relaxed">
-          AMD image / video needs a ComfyUI built for your card (ROCm or ZLUDA). LU installs an NVIDIA / CPU ComfyUI by default. Takes effect on next ComfyUI start.
+          AMD image / video: on Linux LU installs the ROCm build of PyTorch, except for the cards
+          no ROCm wheel carries kernels for, which stay on the processor build on purpose. On
+          Windows LU installs AMD's own ROCm build for RX 7000 and RX 9000 cards, and the
+          processor build for everything else. Takes effect on next ComfyUI start.
         </div>
       </div>
       )}
