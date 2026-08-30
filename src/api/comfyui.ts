@@ -808,7 +808,36 @@ export async function filterPartialFiles(filenames: string[]): Promise<Set<strin
 
 // ─── Classified Model Lists ───
 
-export async function getImageModels(): Promise<ClassifiedModel[]> {
+/**
+ * The main-model folders (checkpoints\, diffusion_models\, and the GGUF unets
+ * beside them), classified and narrowed to one lane.
+ *
+ * `hidePartialDownloads` is the entire difference between the two kinds of
+ * caller, and it is the R7 re-measure (2026-08-30) written down as a switch:
+ *
+ *  - A PICKER asks "what can I render with", so a file that is confirmed too
+ *    small for the catalogue entry of the same name is worth hiding: picking it
+ *    would only hand the user a broken graph.
+ *  - The INVENTORY asks "what is lying on my disk", and for that question a
+ *    catalogue size is meaningless. It is a claim about the file WE ship, never
+ *    about the file the user has.
+ *
+ * On the box a 13 MB `diffusion_models\flux1-dev-fp8.safetensors` was invisible
+ * in the whole app while a byte-identical copy named
+ * `flux1-dev-fp8-r67.safetensors` in the SAME folder listed fine: the catalogue
+ * ships FLUX.1 [dev] FP8 under the first name at 16.1 GB, so the size probe
+ * called the file partial and getImageModels dropped it, and the inventory read
+ * getImageModels. The user had a file on the disk he could neither see, nor
+ * measure, nor delete. Same shape as the R5 re-measure that took the filter out
+ * of the addon lanes, one folder further in.
+ *
+ * The catalogue card keeps its own verdict (discover.ts filters there) and goes
+ * on saying honestly that the package is not fully downloaded.
+ */
+async function mainModelLane(
+  keep: (type: ModelType) => boolean,
+  hidePartialDownloads: boolean,
+): Promise<ClassifiedModel[]> {
   // GGUF quants are listed by ComfyUI-GGUF's own loader, NOT by UNETLoader
   // (which only enumerates .safetensors/.sft). Leaving them out meant a user
   // could install a GGUF bundle straight from our own Model Manager and then be
@@ -820,11 +849,13 @@ export async function getImageModels(): Promise<ClassifiedModel[]> {
     getGgufUnetModels(),
   ])
   const unets = [...new Set([...diffModels, ...ggufModels])]
-  const complete = await filterPartialFiles([...checkpoints, ...unets])
+  const complete = hidePartialDownloads
+    ? await filterPartialFiles([...checkpoints, ...unets])
+    : null
   const result: ClassifiedModel[] = []
 
   for (const name of checkpoints) {
-    if (!complete.has(name)) continue
+    if (complete && !complete.has(name)) continue
     const type = classifyModel(name)
     // One predicate for both loops. isImageModelType lets 'unknown' through, so
     // a checkpoint the classifier cannot name is still offered, while the video
@@ -832,18 +863,18 @@ export async function getImageModels(): Promise<ClassifiedModel[]> {
     // stay in their own pickers. The old branch renamed anything unmatched to
     // sdxl instead of skipping it, which put an ACE-Step music checkpoint at
     // the top of the image picker on a real box.
-    if (!isImageModelType(type)) continue
+    if (!keep(type)) continue
     result.push({ name, type, source: 'checkpoint' })
   }
 
   for (const name of unets) {
-    if (!complete.has(name)) continue
+    if (complete && !complete.has(name)) continue
     const type = classifyModel(name)
     // isImageModelType already lets 'unknown' through, so a UNET the classifier
     // cannot name is still offered. The lane-specific architectures (ACE audio,
     // Wan S2V/Animate/VACE) are excluded by that same predicate and stay in
     // their own pickers.
-    if (isImageModelType(type)) {
+    if (keep(type)) {
       result.push({ name, type, source: 'diffusion_model' })
     }
   }
@@ -851,37 +882,29 @@ export async function getImageModels(): Promise<ClassifiedModel[]> {
   return result
 }
 
+/** The Create image picker and model-pick: main models that are usable. */
+export async function getImageModels(): Promise<ClassifiedModel[]> {
+  return mainModelLane(isImageModelType, true)
+}
+
+/** The Create video picker and detectVideoBackend: same deal one lane over.
+ *  Our own catalogue ships Wan video models as GGUF quants, and UNETLoader does
+ *  not list those, so downloading one from the Model Manager used to leave the
+ *  video tool insisting nothing was installed. */
 export async function getVideoModels(): Promise<ClassifiedModel[]> {
-  // Same GGUF gap as getImageModels: our own catalogue ships Wan video models
-  // as GGUF quants, and UNETLoader does not list those, so downloading one from
-  // the Model Manager left the video tool insisting nothing was installed.
-  const [checkpoints, diffModels, ggufModels] = await Promise.all([
-    getCheckpoints(),
-    getDiffusionModels(),
-    getGgufUnetModels(),
-  ])
-  const unets = [...new Set([...diffModels, ...ggufModels])]
-  const complete = await filterPartialFiles([...checkpoints, ...unets])
-  const result: ClassifiedModel[] = []
+  return mainModelLane(isVideoModelType, true)
+}
 
-  // Video checkpoints (e.g. SVD)
-  for (const name of checkpoints) {
-    if (!complete.has(name)) continue
-    const type = classifyModel(name)
-    if (isVideoModelType(type)) {
-      result.push({ name, type, source: 'checkpoint' })
-    }
-  }
+/** The main image folders for the INVENTORY surfaces: everything on the disk,
+ *  no catalogue-size verdict. See mainModelLane for why the switch exists. */
+export async function getInstalledMainImageModels(): Promise<ClassifiedModel[]> {
+  return mainModelLane(isImageModelType, false)
+}
 
-  for (const name of unets) {
-    if (!complete.has(name)) continue
-    const type = classifyModel(name)
-    if (isVideoModelType(type)) {
-      result.push({ name, type, source: 'diffusion_model' })
-    }
-  }
-
-  return result
+/** The main video folders for the INVENTORY surfaces. Video twin of
+ *  getInstalledMainImageModels. */
+export async function getInstalledMainVideoModels(): Promise<ClassifiedModel[]> {
+  return mainModelLane(isVideoModelType, false)
 }
 
 /** The AnimateDiff motion modules, as classified models. (getMotionModels,
@@ -943,12 +966,12 @@ async function inventoryLane(
  *  for a main model and getVideoModels still answers exactly what it did. */
 export async function getInstalledVideoModels(): Promise<ClassifiedModel[]> {
   const [videoModels, motionModels] = await Promise.all([
-    inventoryLane('video', getVideoModels),
+    inventoryLane('video', getInstalledMainVideoModels),
     inventoryLane('animatediff', getAnimateDiffMotionModels),
   ])
   const out: ClassifiedModel[] = [...videoModels, ...motionModels]
   if (motionModels.length > 0) {
-    const imageModels = await inventoryLane('image', getImageModels)
+    const imageModels = await inventoryLane('image', getInstalledMainImageModels)
     for (const m of imageModels) {
       if (m.source !== 'checkpoint') continue
       if (out.some((x) => x.name === m.name)) continue
@@ -1097,7 +1120,7 @@ export const INSTALLED_ADDON_SUBFOLDERS: string[] =
  *  main model, and this function is the only place that says otherwise. */
 export async function getInstalledImageModels(): Promise<ClassifiedModel[]> {
   const [imageModels, ...addons] = await Promise.all([
-    inventoryLane('image', getImageModels),
+    inventoryLane('image', getInstalledMainImageModels),
     ...INSTALLED_ADDON_LANES.map((lane) => inventoryLane(lane.source, lane.read)),
   ])
   const out: ClassifiedModel[] = []
