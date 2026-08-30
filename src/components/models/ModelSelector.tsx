@@ -17,6 +17,7 @@ import { isLmStudioProvider } from '../../lib/hf-to-provider'
 import { lmStudioSlotUpdate, adoptionReplacesBuiltinEngine } from '../../lib/lmstudio-backend-adopt'
 import { nextProbeDelayMs } from '../../lib/probe-backoff'
 import { noChatBackendEnabled } from '../../lib/provider-visibility'
+import { cloudTeaserModels } from '../../lib/cloud-teaser-models'
 import type { AIModel } from '../../types/models'
 
 // ── Local-mode cloud discovery (2.5.8): an "LU Cloud" section at the list's
@@ -31,7 +32,14 @@ function CloudTeaserSection({ onOpen }: { onOpen: () => void }) {
   const setCloudGateOpen = useUIStore((s) => s.setCloudGateOpen)
   const allModels = useModelStore((s) => s.models)
   if (appMode === 'cloud' || !teasersEnabled) return null
-  const cloudChat = allModels.filter((m) => m.provider === 'lu-cloud' && m.type === 'text').slice(0, 5)
+  // The five used to be the head of the list as `/v1/models` happened to send
+  // it, and that order is not stable, so the strip showed a different five on
+  // every look (Nebenbefund 3, R9 re-measure). Same five every time now, and
+  // the ones that did not fit are counted instead of silently dropped.
+  const { shown: cloudChat, more: cloudMore } = cloudTeaserModels(
+    allModels.filter((m) => m.provider === 'lu-cloud' && m.type === 'text'),
+    (m) => (('displayName' in m && m.displayName) || displayModelName(m.name)) as string,
+  )
   const open = () => { onOpen(); setCloudGateOpen(true) }
   return (
     <div className="mt-1 border-t border-white/[0.05]">
@@ -41,8 +49,7 @@ function CloudTeaserSection({ onOpen }: { onOpen: () => void }) {
           LU Cloud
         </span>
       </div>
-      {cloudChat.length > 0 ? (
-        cloudChat.map((m) => (
+      {cloudChat.map((m) => (
           <button
             key={m.name}
             onClick={open}
@@ -55,8 +62,19 @@ function CloudTeaserSection({ onOpen }: { onOpen: () => void }) {
             </span>
             <span className="ml-auto text-[8px] text-violet-500 dark:text-violet-200">Cloud</span>
           </button>
-        ))
-      ) : (
+      ))}
+      {cloudChat.length > 0 && cloudMore > 0 && (
+        <button
+          onClick={open}
+          className="w-full flex items-center gap-2 px-2.5 py-1.5 text-left hover:bg-white/[0.04] transition-colors"
+          title="See the whole hosted catalogue"
+        >
+          <span className="text-[0.62rem] text-gray-500">
+            {cloudMore} more cloud {cloudMore === 1 ? 'model' : 'models'}, see them all
+          </span>
+        </button>
+      )}
+      {cloudChat.length === 0 && (
         <button
           onClick={open}
           className="w-full flex items-center gap-2 px-2.5 py-1.5 text-left hover:bg-white/[0.04] transition-colors"
