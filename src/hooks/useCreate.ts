@@ -39,6 +39,10 @@ import {
   type RenderEviction,
 } from '../api/vram-handoff'
 import { cpuCauseSuffix } from '../lib/render-budget'
+import { backendCall } from '../api/backend'
+import {
+  ensureComfyForRender, comfyGuardMessage, type ComfyGuardStatus,
+} from '../lib/comfy-restart-guard'
 import {
   comfyWS, CLIENT_ID,
   type ComfyWSEvent,
@@ -777,13 +781,32 @@ export function useCreate() {
       }
     }
 
-    const isRunning = await checkComfyConnection()
-    if (!isRunning) {
-      setError('ComfyUI is not running. Wait for it to start.')
+    // R16 Befund 5: this used to be a bare probe with the line "ComfyUI is not
+    // running. Wait for it to start." Nothing was waiting to start it. LU
+    // starts ComfyUI at app launch and never again, so a ComfyUI killed
+    // mid-session stayed dead, and the box sat on that sentence for ten
+    // minutes with port 8188 shut. If LU started it, LU restarts it, and if it
+    // is not LU's to start, the line says so instead of promising an actor
+    // that does not exist.
+    //
+    // The waiting area is opened BEFORE the guard runs, because a restart can
+    // take a minute and the line explaining it has to be somewhere the user
+    // can read it.
+    setIsGenerating(true)
+    setProgress(0, 'Checking ComfyUI...')
+    const guard = await ensureComfyForRender({
+      probe: () => checkComfyConnection(),
+      status: () => backendCall<ComfyGuardStatus>('comfyui_status').catch(() => null),
+      start: async () => { await backendCall('start_comfyui') },
+      onProgress: (line) => setProgress(0, line),
+    })
+    if (guard === 'unmanaged' || guard === 'failed') {
+      setIsGenerating(false)
+      setProgress(0)
+      setError(comfyGuardMessage(guard))
       return
     }
 
-    setIsGenerating(true)
     setProgress(0, 'Preparing workflow...')
     abortRef.current = new AbortController()
 
