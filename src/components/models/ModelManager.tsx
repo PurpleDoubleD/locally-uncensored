@@ -54,7 +54,7 @@ export function ModelManager() {
     models, activeModel, setActiveModel, fetchModels, removeModel,
     categoryFilter, setCategoryFilter, inventoryLoaded, inventoryRefreshing,
   } = useModels()
-  const { setView } = useUIStore()
+  const { setView, openSettingsAt } = useUIStore()
   const ollamaEnabled = useProviderStore(s => s.providers.ollama.enabled)
   const [pullOpen, setPullOpen] = useState(false)
   const [infoOpen, setInfoOpen] = useState(false)
@@ -328,8 +328,13 @@ export function ModelManager() {
                       {mode === 'image' ? 'Image' : 'Video'} models are served by ComfyUI, which isn't running right now, so the ones you've downloaded can't be listed yet. Open Settings, go to AI Backends, and press Start under ComfyUI (Image &amp; Video), then come back.
                     </p>
                   </div>
+                  {/* Nebenbefund 3, R8 re-measure: the sentence above names a
+                      Start button that sits inside a collapsed section, and
+                      said nothing about unfolding it. The button knows the
+                      whole route, so it walks all of it: Settings, the AI
+                      Backends tab, the ComfyUI section open. */}
                   <button
-                    onClick={() => setView('settings')}
+                    onClick={() => openSettingsAt({ tab: 'backends', section: 'comfyui' })}
                     className="flex items-center gap-1.5 mt-1 px-3 py-1.5 rounded-md bg-gray-900 dark:bg-white/10 hover:bg-gray-800 dark:hover:bg-white/15 text-white text-[0.65rem] font-medium transition-colors"
                   >
                     <SettingsIcon size={11} /> Open Settings

@@ -57,8 +57,12 @@ describe('THE FIX: the ComfyUI-is-down hint names the control that exists', () =
 
   it('the button under the text goes where the text says', () => {
     // It used to read "Go to Create" and call setView('create'), which dropped
-    // the user on the tab that has no such control.
-    expect(modelManager).toMatch(/onClick=\{\(\) => setView\('settings'\)\}[\s\S]{0,400}Open Settings/)
+    // the user on the tab that has no such control. Since round 9 it carries
+    // the last step of the route too, the open ComfyUI section
+    // (settings-deeplink-comfyui.test.ts holds that end of it).
+    expect(modelManager).toMatch(
+      /onClick=\{\(\) => openSettingsAt\(\{ tab: 'backends', section: 'comfyui' \}\)\}[\s\S]{0,400}Open Settings/,
+    )
     expect(modelManager).not.toMatch(/Go to Create/)
   })
 })
@@ -69,7 +73,7 @@ describe('the control the hint names is really there', () => {
   })
 
   it('with a ComfyUI (Image & Video) section', () => {
-    expect(settingsPage).toMatch(/<Section title="ComfyUI \(Image & Video\)">/)
+    expect(settingsPage).toMatch(/<Section title="ComfyUI \(Image & Video\)"/)
   })
 
   it('and a Start button in it that really starts ComfyUI', () => {
