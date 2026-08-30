@@ -273,6 +273,22 @@ export function ProviderSettings() {
   // back on clears the mark, and the row is a normal row again.
   function toggleProvider(id: ProviderId) {
     const nextEnabled = !providers[id].enabled
+    // Nebenbefund (c), R11 re-measure: Disable on the backend that had taken
+    // the shared local slot left the machine with NO local backend at all. Jan
+    // went to DISABLED, the built-in engine stayed on STANDBY carrying the now
+    // untrue sentence "Jan took over the local slot", and the chat fell back to
+    // "Select Model". Switching a backend off is not a wish to be left without
+    // one: the engine that was waiting for exactly this slot takes it back, and
+    // the backend that is leaving takes the standby card in its place. That is
+    // the same swap Enable does, only pressed from the other side.
+    if (!nextEnabled && id === 'openai') {
+      const handback = slotHandbackUpdate(providers.openai)
+      if (handback) {
+        setProviderConfig('openai', handback)
+        setStatuses(prev => ({ ...prev, openai: 'idle' }))
+        return
+      }
+    }
     setProviderConfig(id, { enabled: nextEnabled, disabledByUser: !nextEnabled })
     setStatuses(prev => ({ ...prev, [id]: 'idle' }))
     if (nextEnabled) setExpandedProvider(id)
@@ -612,11 +628,23 @@ export function ProviderSettings() {
               Enable
             </button>
           </div>
-          <p className="px-2 pb-1.5 text-[0.55rem] text-gray-600 leading-snug">
-            {providers.openai.name} took over the local OpenAI compatible slot, which holds one
-            backend at a time. Press Enable to hand the slot back to {standby.name}.
-            {' '}{providers.openai.name} then waits here in its place.
-          </p>
+          {/* The sentence has to describe the state that is really on screen.
+              Disable on the slot holder hands the slot back now, so it cannot
+              produce a switched-off holder any more, but onboarding still parks
+              this slot without anyone pressing anything, and then the takeover
+              wording would be a lie. */}
+          {providers.openai.enabled ? (
+            <p className="px-2 pb-1.5 text-[0.55rem] text-gray-600 leading-snug">
+              {providers.openai.name} took over the local OpenAI compatible slot, which holds one
+              backend at a time. Press Enable to hand the slot back to {standby.name}.
+              {' '}{providers.openai.name} then waits here in its place.
+            </p>
+          ) : (
+            <p className="px-2 pb-1.5 text-[0.55rem] text-gray-600 leading-snug">
+              {providers.openai.name} holds the local OpenAI compatible slot and is switched off,
+              so no local backend is running. Press Enable to give the slot back to {standby.name}.
+            </p>
+          )}
         </div>
       )}
 
