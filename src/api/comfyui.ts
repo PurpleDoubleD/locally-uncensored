@@ -567,6 +567,28 @@ export async function getSystemVRAM(): Promise<number | null> {
   return null
 }
 
+/**
+ * The running ComfyUI's own version string, or null if it does not say.
+ *
+ * /system_stats carries `system.comfyui_version` on every current build; very
+ * old ones simply have no such field, and that is an answer too (the caller
+ * maps it to the `unknown` placeholder). Used by the Create tab's cross-origin
+ * notice to tell "the same ComfyUI as when you dismissed this" from "a
+ * different one", see lib/comfy-cors-notice.ts. Not cached: a restart under
+ * LU's management, or a user update, is exactly the change worth noticing.
+ */
+export async function getComfyVersion(): Promise<string | null> {
+  try {
+    const res = await localFetch(comfyuiUrl('/system_stats'), { timeoutMs: COMFY_STATS_TIMEOUT_MS })
+    if (!res.ok) return null
+    const data = await res.json()
+    const v = data?.system?.comfyui_version
+    return typeof v === 'string' && v.trim() ? v.trim() : null
+  } catch {
+    return null
+  }
+}
+
 // Check if a specific node exists in ComfyUI (lightweight, single node check)
 async function nodeExists(nodeName: string): Promise<boolean> {
   try {

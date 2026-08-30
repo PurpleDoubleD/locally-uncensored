@@ -3,6 +3,8 @@ import { AnimatePresence, motion } from 'framer-motion'
 import { AlertTriangle, Cloud, X } from 'lucide-react'
 import { useCreateStore, type GalleryItem } from '../../../stores/createStore'
 import { useCloudNoticeStore, CLOUD_RETENTION_DAYS, shouldShowRetentionNotice } from '../../../stores/cloudNoticeStore'
+import { useComfyNoticeStore } from '../../../stores/comfyNoticeStore'
+import { loadComfyCorsSignature, shouldShowCorsNotice } from '../../../lib/comfy-cors-notice'
 import { useWorkflowStore } from '../../../stores/workflowStore'
 import { CreateExpProvider, useCreateExp } from './CreateContext'
 import { IntentBar } from './IntentBar'
@@ -36,6 +38,9 @@ function CreateExperimentalInner() {
   const comfyCorsBlocked = useCreateStore((s) => s.comfyCorsBlocked)
   const setComfyCorsBlocked = useCreateStore((s) => s.setComfyCorsBlocked)
   const isGenerating = useCreateStore((s) => s.isGenerating)
+  const corsNoticeDismissedFor = useComfyNoticeStore((s) => s.corsNoticeDismissedFor)
+  const dismissCorsNotice = useComfyNoticeStore((s) => s.dismissCorsNotice)
+  const adoptCorsSignature = useComfyNoticeStore((s) => s.adoptCorsSignature)
   const retentionNoticeSeen = useCloudNoticeStore((s) => s.retentionNoticeSeen)
   const setRetentionNoticeSeen = useCloudNoticeStore((s) => s.setRetentionNoticeSeen)
   const setManagerNoticeSeen = useWorkflowStore((s) => s.setManagerNoticeSeen)
@@ -54,6 +59,32 @@ function CreateExperimentalInner() {
   // error explains the manual route and stays visible in the banner.
   const [corsFixing, setCorsFixing] = useState(false)
   const [corsFixError, setCorsFixError] = useState<string | null>(null)
+
+  // R18 Befund 1 (2026-08-30, Windows box, ComfyUI 0.33.0): the cross-origin
+  // bar came back after EVERY render, dismissed or not. The X only flipped the
+  // session flag that the next preview image set again (useComfyMedia). The
+  // dismissal now sticks against a cause signature (which ComfyUI, which
+  // version) and is persisted, so it survives a restart and only lifts if that
+  // cause actually changes. Rules and reasoning: lib/comfy-cors-notice.ts.
+  const [corsSignature, setCorsSignature] = useState<string | null>(null)
+  useEffect(() => {
+    if (backend !== 'local') return
+    let cancelled = false
+    void (async () => {
+      const { getComfyHost, getComfyPort } = await import('../../../api/backend')
+      const { getComfyVersion } = await import('../../../api/comfyui')
+      const sig = await loadComfyCorsSignature({
+        host: getComfyHost, port: getComfyPort, version: getComfyVersion,
+      })
+      if (cancelled || !sig) return
+      setCorsSignature(sig)
+      // A dismissal made before the signature landed is upgraded to it, or the
+      // very next render would show the bar again — the finding itself.
+      adoptCorsSignature(sig)
+    })()
+    return () => { cancelled = true }
+  }, [backend, connected, adoptCorsSignature])
+
   const fixCorsForMe = useCallback(async () => {
     setCorsFixing(true)
     setCorsFixError(null)
@@ -178,8 +209,12 @@ function CreateExperimentalInner() {
           live progress bar + native video seeking degrade. David 2026-07-17: keep
           the message short and offer a one-click fix — LU restarts ComfyUI under
           its own management, which always passes the CORS flag. Local only,
-          dismissible; the long manual-flag hint only appears if the fix fails. */}
-      {backend === 'local' && comfyCorsBlocked && (
+          dismissible; the long manual-flag hint only appears if the fix fails.
+
+          R18 Befund 1: dismissible now MEANS dismissed. shouldShowCorsNotice
+          holds the X against the cause signature, so the bar cannot return
+          after every render the way it did on the box with ComfyUI 0.33.0. */}
+      {backend === 'local' && shouldShowCorsNotice(comfyCorsBlocked, corsSignature, corsNoticeDismissedFor) && (
         <div className="flex items-start gap-2 px-4 py-2 bg-yellow-500/5 border-b border-yellow-500/10 text-yellow-300 text-xs shrink-0">
           <AlertTriangle size={12} className="shrink-0 mt-0.5" />
           <span className="flex-1 min-w-0">
@@ -199,7 +234,7 @@ function CreateExperimentalInner() {
               Let me do it for you!
             </button>
           )}
-          <button onClick={() => { setComfyCorsBlocked(false); setCorsFixError(null) }} className="shrink-0 text-yellow-300/70 hover:text-yellow-100" title="Dismiss">
+          <button onClick={() => { setComfyCorsBlocked(false); setCorsFixError(null); dismissCorsNotice(corsSignature) }} className="shrink-0 text-yellow-300/70 hover:text-yellow-100" title="Dismiss">
             <X size={14} />
           </button>
         </div>

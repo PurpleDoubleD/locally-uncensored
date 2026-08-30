@@ -32,6 +32,7 @@ export const SETTINGS_STORAGE_KEYS = [
   'lu-update-checker-v2',
   'lu-benchmark-store',
   'lu_cloud_notice',
+  'lu_comfy_notice',
 ]
 
 /** Force the (initially hidden) Tauri window visible so recovery UI is seen. */

@@ -29,7 +29,7 @@ export const STORE_KEYS = [
   'locally-uncensored-agent-workflows', 'locally-uncensored-agent',
   'locally-uncensored-voice', 'lu-benchmark-store', 'lu-update-checker-v2',
   'rag-store', 'workflow-store', 'lu-cloud-catalog',
-  'lu_cloud_notice', 'locally-uncensored-model-health',
+  'lu_cloud_notice', 'lu_comfy_notice', 'locally-uncensored-model-health',
   'locally-uncensored-agent-goal',
 ]
 
