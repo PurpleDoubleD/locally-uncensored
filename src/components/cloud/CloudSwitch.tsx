@@ -89,8 +89,16 @@ export function CloudSwitch() {
         className="shrink-0 select-none dark:invert-0 invert"
       />
       {/* The armed switch says what the next click will do, in the place the
-          finger already is. */}
-      <span className="text-[0.65rem] font-medium leading-none">
+          finger already is. No transition on this text on purpose: the label
+          has to change on the same frame as the click, or the first click
+          looks like it did nothing at all (Nebenbefund 2, R10 re-measure).
+          The testid is so a prober can read the state without guessing at
+          class names, the way aria-checked reads the mode. */}
+      <span
+        data-testid="cloud-switch-label"
+        data-state={armed ? 'armed' : on ? 'on' : 'off'}
+        className="text-[0.65rem] font-medium leading-none"
+      >
         {armed ? 'Switch to Cloud?' : 'Cloud'}
       </span>
       <span
