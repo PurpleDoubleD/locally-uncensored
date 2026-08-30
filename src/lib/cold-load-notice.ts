@@ -33,7 +33,7 @@ export const COLD_LOAD_HINT_AFTER_MS = 12_000
 
 /** The line itself. Said once, so the component cannot drift from the test. */
 export const COLD_LOAD_HINT =
-  'Loading the model into memory. The first render after a ComfyUI start waits the longest, later ones reuse the loaded model.'
+  'Loading the model into memory. The first render after a ComfyUI start waits the longest.'
 
 /**
  * The notice for a waiting area, or '' when there is nothing to say.
