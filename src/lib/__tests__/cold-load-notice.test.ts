@@ -47,13 +47,24 @@ describe('coldLoadHint', () => {
   })
 
   it('is English, promises nothing it cannot know, and carries no dash', () => {
-    expect(COLD_LOAD_HINT).toMatch(/^Loading the model into memory\./)
-    expect(COLD_LOAD_HINT).toContain('ComfyUI start')
+    expect(COLD_LOAD_HINT).toMatch(/^Loading the model into memory\.\.\.$/)
     // It must not claim to count jobs. LU has no such counter in this view,
     // so "this is the first job" would be an invention.
     expect(COLD_LOAD_HINT).not.toMatch(/this is the first/i)
     // en dash and em dash, written as escapes so this file carries neither.
     expect(COLD_LOAD_HINT).not.toMatch(/[\u2013\u2014]/)
+  })
+
+  it('NEGATIVE: makes no claim about which render waits longest', () => {
+    // R16 Befund 2, measured on the Windows box (12 GB GPU, 16 GB RAM,
+    // z_image_bf16 at 11.46 GB): ComfyUI dropped the model after EVERY render
+    // (RAM 7.68 GB back to 672 MB), and all five runs sat 69 s to 75 s before
+    // the first sampling step. "The first render after a ComfyUI start waits
+    // the longest" was simply false there, and this line is shown on exactly
+    // that machine. A line may only claim what holds whenever it is shown.
+    expect(COLD_LOAD_HINT).not.toMatch(/longest|first render|slower|faster|only takes/i)
+    // No comparison between runs at all: the waiting area sees one render.
+    expect(COLD_LOAD_HINT).not.toMatch(/\bthan\b/i)
   })
 })
 
