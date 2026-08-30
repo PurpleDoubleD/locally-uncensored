@@ -1,5 +1,7 @@
+import { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
 import { Cpu, Sparkles, ImageDown, Maximize2, Download, Wand2, MonitorOff, AudioLines } from 'lucide-react'
+import { coldLoadHint } from '../../../lib/cold-load-notice'
 import { useCreateStore, type GalleryItem, type ProgressPhase } from '../../../stores/createStore'
 import { backendCall, downloadComfyFile, isTauri } from '../../../api/backend'
 import { isMlxImageHost } from '../../../api/mlx-image'
@@ -20,6 +22,31 @@ function phaseIcon(phase: ProgressPhase) {
   if (phase === 'sampling') return <Sparkles size={20} className="text-green-300" />
   if (phase === 'decoding') return <ImageDown size={20} className="text-lu-accent" />
   return <Sparkles size={20} className="text-gray-400" />
+}
+
+/**
+ * The line that explains a long load phase (R14 Nebenbefund 3: the first
+ * render after a ComfyUI start sat 57 s in `Loading model...` with nothing on
+ * screen saying why).
+ *
+ * Its own component on purpose. It is mounted only while the load phase runs,
+ * so its clock starts with the phase and is thrown away with it, and there is
+ * no reset to get wrong. The three loader phases are one stretch to the parent,
+ * so a checkpoint handing over to the text encoder does not restart the count.
+ * coldLoadHint stays silent until the wait is long enough to be worth a word.
+ *
+ * The line names ComfyUI, so the Mac never draws it: local media there is MLX
+ * in the app's own process, and its short load phase has no ComfyUI behind it.
+ */
+function ColdLoadLine() {
+  const [elapsedMs, setElapsedMs] = useState(0)
+  useEffect(() => {
+    const id = setInterval(() => setElapsedMs((ms) => ms + 1000), 1000)
+    return () => clearInterval(id)
+  }, [])
+  const hint = coldLoadHint(true, elapsedMs)
+  if (!hint) return null
+  return <p className="t-body text-gray-500 text-center max-w-[22rem]">{hint}</p>
 }
 
 // Generation progress — phase-aware animation.
@@ -55,6 +82,7 @@ export function GeneratingView() {
           )}
         </div>
         <p className="t-body text-gray-400 tracking-wide">{progressText || 'Generating…'}</p>
+        {isLoading && !isMlxImageHost() && <ColdLoadLine />}
         {progress > 0 && (
           <div className="w-56 h-1 bg-white/10 rounded-full overflow-hidden">
             <motion.div className="h-full rounded-full bg-lu-accent" initial={{ width: 0 }} animate={{ width: `${Math.min(progress, 100)}%` }} transition={{ duration: 0.3 }} />
