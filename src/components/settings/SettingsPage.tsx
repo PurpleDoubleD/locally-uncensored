@@ -964,6 +964,15 @@ const SETTINGS_TABS: { id: SettingsTab; label: string; icon: ReactNode }[] = [
 // no confirm and no feedback, so users reported it as "does nothing". Now:
 // arm-then-confirm (second click within 4s), per-tab scope, and an explicit
 // success line after the reset.
+//
+// Nebenbefund 2 of the R9 re-measure (2026-08-30) read the first click as a
+// dud. Checked and kept as it is: the armed button relabels to "Click again to
+// reset <tab>", turns red and goes medium weight, and the first click writes
+// nothing at all. That is the same arm-then-confirm the Cloud switch got in
+// round 6, and the same reasoning holds here: two clicks on one control is the
+// cheapest confirmation there is, no dialog and no mouse travel. The three
+// visible signals are pinned by
+// src/lib/__tests__/reset-arming-is-visible.test.ts.
 function ResetSection({ tab }: { tab: SettingsTab }) {
   const resetSettingsKeys = useSettingsStore((s) => s.resetSettingsKeys)
   const resetSettings = useSettingsStore((s) => s.resetSettings)
