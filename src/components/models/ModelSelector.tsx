@@ -14,6 +14,7 @@ import { canUseTools, resolveToolSupport, type ToolSupport } from '../../lib/too
 import { backendCall } from '../../api/backend'
 import { listLoadedLmStudioModels, loadLmStudioModel, unloadLmStudioModel } from '../../api/lmstudio'
 import { isLmStudioProvider } from '../../lib/hf-to-provider'
+import { lmStudioSlotUpdate, adoptionReplacesBuiltinEngine } from '../../lib/lmstudio-backend-adopt'
 import { nextProbeDelayMs } from '../../lib/probe-backoff'
 import type { AIModel } from '../../types/models'
 
@@ -122,6 +123,10 @@ function LmStudioServerHint({ onStarted }: { onStarted: () => void }) {
   const [starting, setStarting] = useState(false)
   const [startError, setStartError] = useState('')
   const [dismissed, setDismissed] = useState(LM_HINT_DISMISSED_THIS_SESSION)
+  // Starting the server also hands LM Studio the local backend slot (see
+  // lib/lmstudio-backend-adopt). When the built-in engine holds that slot the
+  // user learns it here, before the click, together with the way back.
+  const replacesBuiltinEngine = useProviderStore((s) => adoptionReplacesBuiltinEngine(s.providers.openai))
 
   useEffect(() => {
     let cancelled = false
@@ -153,6 +158,13 @@ function LmStudioServerHint({ onStarted }: { onStarted: () => void }) {
         if (fresh) {
           setStatus(fresh)
           if (fresh.running) {
+            // A running server is only half of what the sentence above
+            // promises. The picker lists ENABLED provider slots, so without
+            // this the models stay invisible and the button leads into a dead
+            // end (Nebenbefund 4, R8 re-measure). Same call the
+            // BackendSelector makes, no LM-Studio-only path.
+            const update = lmStudioSlotUpdate(useProviderStore.getState().providers.openai)
+            if (update) useProviderStore.getState().setProviderConfig('openai', update)
             onStarted()
             break
           }
@@ -186,6 +198,11 @@ function LmStudioServerHint({ onStarted }: { onStarted: () => void }) {
         {starting ? <Loader2 size={10} className="animate-spin" /> : <PlayCircle size={10} />}
         <span>{starting ? 'Starting LM Studio server…' : 'Start LM Studio Server'}</span>
       </button>
+      {replacesBuiltinEngine && (
+        <p className="text-[0.55rem] text-gray-500 dark:text-gray-400 mt-1 leading-snug">
+          This also makes LM Studio your local chat backend in place of the built-in engine. You can switch back under Settings, AI Backends, Providers.
+        </p>
+      )}
       {startError && (
         <p className="text-[0.55rem] text-red-600/80 dark:text-red-300/70 mt-1 leading-snug">{startError}</p>
       )}
