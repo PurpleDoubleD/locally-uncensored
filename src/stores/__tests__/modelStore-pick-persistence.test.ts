@@ -83,7 +83,10 @@ describe('the pick is written to disk in the first place', () => {
   it('the mode reselect no longer decides anything by hand', () => {
     // It asks pickForMode, which holds the empty list harmless. The old
     // inline version is what cleared the pick on mount.
-    expect(shellSrc).toContain('pickForMode(activeModel, allModels, appMode)')
+    // The fourth argument is the model the user named on the way into cloud
+    // mode by clicking its row in the picker (Nebenbefund 1, R10 re-measure).
+    // The call is still the rule, not a hand-rolled decision.
+    expect(shellSrc).toContain('pickForMode(activeModel, allModels, appMode, pendingCloudModel)')
     expect(shellSrc).not.toMatch(/const inMode = \(name: string \| null\)/)
   })
 })

@@ -66,6 +66,6 @@ describe('wiring: the gate sits at the choke points', () => {
     const src = read('../../components/layout/AppShell.tsx')
     expect(src).toContain('if (pick.change) setActiveModel(pick.next)')
     const cloudOnly = [{ name: 'lu-cloud::glm-5.3', type: 'text', provider: 'lu-cloud' }]
-    expect(pickForMode('lu-cloud::glm-5.3', cloudOnly, 'local')).toEqual({ change: true, next: null })
+    expect(pickForMode('lu-cloud::glm-5.3', cloudOnly, 'local')).toMatchObject({ change: true, next: null })
   })
 })
