@@ -336,9 +336,12 @@ describe('wiring in the poll loop', () => {
  * it, so the support answer had to guess.
  */
 describe('a render without a GPU says so (Runde 12)', () => {
-  const onCpu = { startedCpu: true, hasAmd: false, isWindows: false }
-  const amdLinux = { startedCpu: true, hasAmd: true, isWindows: false }
-  const amdWindows = { startedCpu: true, hasAmd: true, isWindows: true }
+  // `mode: 'auto'` is what these three cases really were: LU fell back to the
+  // processor on its own. Round 14 added the field because the same notices
+  // were reporting that fallback to a user who had picked Force CPU himself.
+  const onCpu = { startedCpu: true, mode: 'auto', hasAmd: false, isWindows: false } as const
+  const amdLinux = { startedCpu: true, mode: 'auto', hasAmd: true, isWindows: false } as const
+  const amdWindows = { startedCpu: true, mode: 'auto', hasAmd: true, isWindows: true } as const
 
   it('names the processor as the cause, in one shared sentence', () => {
     const s = cpuCauseSuffix(onCpu)
@@ -356,7 +359,10 @@ describe('a render without a GPU says so (Runde 12)', () => {
   })
 
   it('NEGATIVE CONTROL: says nothing when the render had a GPU or we do not know', () => {
-    expect(cpuCauseSuffix({ startedCpu: false, hasAmd: true, isWindows: true })).toBe('')
+    expect(cpuCauseSuffix({ startedCpu: false, mode: 'auto', hasAmd: true, isWindows: true })).toBe('')
+    // and a Force CPU pick that LU has not (re)started ComfyUI under yet is
+    // still no render on the processor, so still nothing to say
+    expect(cpuCauseSuffix({ startedCpu: false, mode: 'cpu', hasAmd: false, isWindows: true })).toBe('')
     expect(cpuCauseSuffix(null)).toBe('')
     expect(cpuCauseSuffix(undefined)).toBe('')
   })

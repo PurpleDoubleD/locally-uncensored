@@ -68,6 +68,20 @@ export function amdCpuAdvice(isLinux: boolean): string {
 const SLOW = 'Generation will be extremely slow and may time out.'
 
 /**
+ * Why the processor is in play when the user asked for it.
+ *
+ * Exported because the Create tab's banner is not the only surface that had the
+ * wrong reason in it: the render failure notices in lib/render-budget.ts said
+ * "because no supported GPU path is active" for the same press. One wording,
+ * one place, so the two cannot drift apart.
+ */
+export const FORCE_CPU_REASON = 'you selected Force CPU'
+
+/** ... and the way back out of it, likewise said once. */
+export const FORCE_CPU_WAY_BACK =
+  'Set Settings → Hardware → ComfyUI GPU back to Auto and restart ComfyUI from Settings → AI Backends to use your card again.'
+
+/**
  * The whole banner text, or '' when there is no banner to draw.
  *
  * Empty string is the single "say nothing" answer, so a caller cannot render a
@@ -80,7 +94,7 @@ export function comfyCpuBannerText(facts: ComfyCpuBannerFacts | null | undefined
   //    broken, and the AMD route is beside the point: the way out is the
   //    switch he set himself, so that is the only thing worth naming.
   if (facts.mode === 'cpu') {
-    return `ComfyUI is running on the CPU because you selected Force CPU. ${SLOW} Set Settings → Hardware → ComfyUI GPU back to Auto and restart ComfyUI from Settings → AI Backends to use your card again.`
+    return `ComfyUI is running on the CPU because ${FORCE_CPU_REASON}. ${SLOW} ${FORCE_CPU_WAY_BACK}`
   }
 
   // 2. and 3. LU fell back to the processor on its own, so the old sentence is

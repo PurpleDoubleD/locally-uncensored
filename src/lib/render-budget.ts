@@ -11,6 +11,8 @@
  * the GPU stops burning (the timeout used to orphan it).
  */
 
+import { FORCE_CPU_REASON, FORCE_CPU_WAY_BACK, type ComfyGpuModeName } from './comfy-cpu-banner'
+
 /** Sampler steps observed before we trust the pace. */
 export const MIN_STEPS_FOR_VERDICT = 3
 
@@ -123,9 +125,15 @@ export function warmupBudgetMs(promptConfirmedAlive: boolean): number {
  * `startedCpu` is true only when LU itself started ComfyUI with `--cpu` this
  * session, which is the one case where we can say the cause instead of guessing
  * at it. Read from `get_comfy_gpu_status`.
+ *
+ * `mode` is the user's own ComfyUI GPU pick from the same reply, required
+ * rather than optional so no construction site can forget to ask: without it
+ * these notices told a user who had chosen Force CPU that no supported GPU path
+ * was active, which is a fault report about a machine that had none.
  */
 export interface CpuRenderFacts {
   startedCpu: boolean
+  mode: ComfyGpuModeName
   hasAmd: boolean
   isWindows: boolean
 }
@@ -139,9 +147,21 @@ export interface CpuRenderFacts {
  * in play, and `swapWarmupNotice` told him to free VRAM on a machine that was
  * not using any. Empty string whenever we do not know, so nothing is claimed
  * that was not measured.
+ *
+ * Round 14 closed the last wrong reason in it. Nebenbefund 1 of the R12/R13
+ * re-measure caught the Create tab's banner claiming no usable GPU had been
+ * found on a box with a working, correctly detected RTX 3060, where the user
+ * had picked Force CPU himself. These three notices carried the same claim in
+ * their own words, so they get the same answer, out of the same two constants:
+ * the reason he can act on is the switch he set, and no fault report goes with
+ * it. The AMD paragraph is skipped there for the reason it always had, that it
+ * describes a driver problem, and this user does not have one.
  */
 export function cpuCauseSuffix(facts: CpuRenderFacts | null | undefined): string {
   if (!facts?.startedCpu) return ''
+  if (facts.mode === 'cpu') {
+    return ` Image generation is running on the CPU because ${FORCE_CPU_REASON}, so it is many times slower than it would be on a card. ${FORCE_CPU_WAY_BACK}`
+  }
   const head = 'Image generation is running on the CPU because no supported GPU path is active, so it is many times slower than it would be on a card.'
   if (facts.hasAmd && facts.isWindows) {
     return ` ${head} Your card is AMD and LU could not install a PyTorch that drives it on Windows.`

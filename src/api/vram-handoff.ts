@@ -76,6 +76,7 @@ import type { ModelCapabilities } from './comfyui-nodes'
 import { getActiveAgentModel } from './agent-context'
 import { comfyWS, CLIENT_ID } from './comfyui-ws'
 import { PaceTracker, overBudget, renderBudgetNotice, renderTimeoutNotice, warmupExceeded, swapWarmupNotice, loadPhaseGraceMs, finishGraceMs, warmupBudgetMs, SWAP_WARMUP_BUDGET_MS, type CpuRenderFacts } from '../lib/render-budget'
+import { asComfyGpuMode } from '../lib/comfy-cpu-banner'
 import { log } from '../lib/logger'
 
 /**
@@ -1331,9 +1332,13 @@ let _cpuRenderFacts: CpuRenderFacts | null = null
  */
 export async function cpuRenderFacts(): Promise<CpuRenderFacts | null> {
   try {
-    const s = await backendCall<{ startedCpu?: boolean | null; hasAmd?: boolean | null }>('get_comfy_gpu_status')
+    const s = await backendCall<{ startedCpu?: boolean | null; mode?: string | null; hasAmd?: boolean | null }>('get_comfy_gpu_status')
     if (!s) return null
-    _cpuRenderFacts = { startedCpu: s.startedCpu === true, hasAmd: s.hasAmd === true, isWindows: isWindows() }
+    // `mode` rides along since round 14: the notices used to report a missing
+    // GPU path to a user who had picked Force CPU himself. Same reply, same
+    // normaliser the Create tab's banner uses, so an unknown or absent value
+    // reads as 'auto' and can never claim a press that never happened.
+    _cpuRenderFacts = { startedCpu: s.startedCpu === true, mode: asComfyGpuMode(s.mode), hasAmd: s.hasAmd === true, isWindows: isWindows() }
     return _cpuRenderFacts
   } catch {
     return null
