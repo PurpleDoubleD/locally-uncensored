@@ -16,7 +16,6 @@ import { MaskEditor } from './MaskEditor'
 import { VhsInstallModal } from './VhsInstallModal'
 import { INTENT_MAP, isIntentAvailable } from './intents'
 import { isMlxImageHost } from '../../../api/mlx-image'
-import { isLinux } from '../../../api/backend'
 import { fetchGalleryItemBlob } from './galleryUrl'
 import { loadImageRef } from './loadImage'
 
@@ -40,7 +39,7 @@ function CreateExperimentalInner() {
   const retentionNoticeSeen = useCloudNoticeStore((s) => s.retentionNoticeSeen)
   const setRetentionNoticeSeen = useCloudNoticeStore((s) => s.setRetentionNoticeSeen)
   const setManagerNoticeSeen = useWorkflowStore((s) => s.setManagerNoticeSeen)
-  const { modelLoadError, connected, comfyOnCpu } = useCreateExp()
+  const { modelLoadError, connected, comfyOnCpu, comfyCpuBanner } = useCreateExp()
 
   const [shownId, setShownId] = useState<string | null>(null)
   const [advancedOpen, setAdvancedOpen] = useState(false)
@@ -155,30 +154,21 @@ function CreateExperimentalInner() {
         )}
       </AnimatePresence>
 
-      {/* CPU-mode warning — persistent while LU's ComfyUI runs with --cpu.
-          Without it an AMD/non-NVIDIA user sees "Ready to generate" and then
-          a bare 20-minute timeout (shd_scorpion, RX 7900 XTX). Local renders
-          only — cloud jobs never touch the local ComfyUI. */}
-      {backend === 'local' && connected === true && comfyOnCpu && (
+      {/* CPU-mode warning, persistent while LU's ComfyUI runs with --cpu.
+          Without it a user sees "Ready to generate" and then a bare 20-minute
+          timeout (shd_scorpion, RX 7900 XTX). Local renders only, cloud jobs
+          never touch the local ComfyUI.
+
+          The sentence itself lives in lib/comfy-cpu-banner.ts, because it is
+          three sentences: the R12/R13 re-measure caught this bar telling a user
+          with a working, correctly detected RTX 3060 that no usable GPU had
+          been found, when he had chosen Force CPU himself, and then walking him
+          through the AMD route on a machine with no AMD card in it. Same three
+          facts the backend was already sending, now all three read. */}
+      {backend === 'local' && connected === true && comfyOnCpu && comfyCpuBanner && (
         <div className="flex items-center gap-2 px-4 py-2 bg-yellow-500/5 border-b border-yellow-500/10 text-yellow-300 text-xs shrink-0">
           <AlertTriangle size={12} className="shrink-0" />
-          <span>
-            ComfyUI is running on the CPU (no usable GPU detected). Generation will be extremely slow and may time out.
-            {/* The right AMD path differs per OS — three users followed the
-                generic ZLUDA pointer on Linux, where ZLUDA guides are
-                Windows-only dead ends (numbrain/lapbo/suraj3014, 2026-08-02).
-                Linux AMD wants a ROCm torch inside ComfyUI's own venv.
-                Since 2.6.7 the ComfyUI installer picks the ROCm wheels itself
-                on an AMD Linux box, so the fix is a reinstall and not a pip
-                line the user has to type by hand. The Windows half said there
-                was no Windows ROCm wheel at all and pointed at DirectML, which
-                the round 12 research disproved: AMD publishes its own Windows
-                wheels, LU installs them for the cards AMD supports, and
-                DirectML has been frozen on an old PyTorch since 2024. */}
-            {isLinux()
-              ? ' AMD GPU? LU installs the ROCm build of PyTorch for AMD cards now. Reinstall the ComfyUI environment from Settings → ComfyUI, then set Settings → Hardware → ComfyUI GPU to Auto.'
-              : " AMD GPU? LU installs AMD's own ROCm build of PyTorch for RX 7000 and RX 9000 cards on Windows. Reinstall the ComfyUI environment from Settings → ComfyUI to try that again. For any other AMD card you need a ZLUDA ComfyUI of your own: point LU at it and set Settings → Hardware → ComfyUI GPU to force GPU."}
-          </span>
+          <span>{comfyCpuBanner}</span>
         </div>
       )}
 

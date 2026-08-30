@@ -36,7 +36,11 @@ const repo = resolve(here, '../../../..')
 const read = (rel: string) => readFileSync(resolve(repo, rel), 'utf8')
 
 const hardware = read('src/components/settings/HardwareSettings.tsx')
-const createTab = read('src/components/create/experimental/CreateExperimental.tsx')
+// Round 14 moved the Create tab's CPU banner copy out of the .tsx and into a
+// pure module, because the banner became three sentences instead of one and the
+// node-environment runner cannot render the component. Same copy, same pins,
+// one file further along.
+const createTab = read('src/lib/comfy-cpu-banner.ts')
 const wheels = read('src-tauri/src/commands/torch_wheels.rs')
 
 describe('THE FIX: the AMD copy says what the app does', () => {
@@ -96,6 +100,6 @@ describe('NEGATIVE CONTROL: the sentences that were already true', () => {
       return text.slice(i, j)
     }
     expect(from(hardware, 'Written before 2.6.7', 'Takes effect on next ComfyUI start')).not.toMatch(/[–—]/)
-    expect(from(createTab, 'The Windows half said', 'to force GPU."}')).not.toMatch(/[–—]/)
+    expect(from(createTab, 'The AMD half of the banner', 'to force GPU."')).not.toMatch(/[–—]/)
   })
 })

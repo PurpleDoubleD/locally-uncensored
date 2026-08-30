@@ -6,7 +6,8 @@ import { useCreateStore, type GalleryItem } from '../../../stores/createStore'
 import { getLoraModels, getVAEModels, checkComfyConnection, refreshComfyModels, bundleForVideoIntent } from '../../../api/comfyui'
 import { getAllNodeInfo, clearNodeCache } from '../../../api/comfyui-nodes'
 import { installCustomNodes, getImageBundles, getVideoBundles, getAudioBundles, getLipsyncBundles, getMotionBundles, startModelDownload, getDownloadProgress, modelsNotVisibleInComfy, ENUM_SUBFOLDERS } from '../../../api/discover'
-import { backendCall, isMacOS } from '../../../api/backend'
+import { backendCall, isMacOS, isLinux } from '../../../api/backend'
+import { asComfyGpuMode, comfyCpuBannerText, type ComfyCpuBannerFacts } from '../../../lib/comfy-cpu-banner'
 import { installMlxStack } from '../../../api/mlx-install'
 import { useDownloadStore } from '../../../stores/downloadStore'
 import { downloadBundleFiles, waitOrAbort, waitForModelsVisible } from '../../../lib/bundle-install'
@@ -76,6 +77,11 @@ interface CreateExpValue {
    *  RX 7900 XTX): surfaces the honest slow-mode warning instead of a silent
    *  20-minute timeout. */
   comfyOnCpu: boolean
+  /** The finished banner sentence for that state, '' when there is none. It
+   *  differs by WHY the processor is in play (Force CPU vs nothing usable
+   *  found) and only mentions AMD on a machine that has an AMD card, see
+   *  lib/comfy-cpu-banner.ts. */
+  comfyCpuBanner: string
   /** Install a missing capability in place: ensure ComfyUI runs (installing it
    *  first if needed), download the custom node when one is required, restart,
    *  and re-probe until available. Reports progress via the optional callback
@@ -116,7 +122,9 @@ export function CreateExpProvider({ children }: { children: ReactNode }) {
   const setCaps = useCreateStore((s) => s.setCaps)
   const [loraList, setLoraList] = useState<string[]>([])
   const [vaeList, setVaeList] = useState<string[]>(['auto'])
-  const [comfyOnCpu, setComfyOnCpu] = useState(false)
+  const [comfyCpu, setComfyCpu] = useState<ComfyCpuBannerFacts | null>(null)
+  const comfyOnCpu = comfyCpu?.startedCpu === true
+  const comfyCpuBanner = comfyCpuBannerText(comfyCpu)
 
   // Never strand the session on a dead axis: losing the license/logging out
   // while 'cloud' is selected falls back to local rendering.
@@ -155,16 +163,29 @@ export function CreateExpProvider({ children }: { children: ReactNode }) {
     fetchModels()
   }, [checkConnection, fetchModels])
 
-  // Surface a CPU-only ComfyUI (no usable GPU detected) so an AMD / non-NVIDIA
-  // user isn't left staring at a silent 20-minute timeout. The Rust side records
-  // the launch mode at every ComfyUI (re)start; re-read it whenever the
-  // connection (re)establishes. Desktop-only (web has no such command → false).
+  // Surface a CPU-only ComfyUI so a user isn't left staring at a silent
+  // 20-minute timeout. The Rust side records the launch mode at every ComfyUI
+  // (re)start; re-read it whenever the connection (re)establishes. Desktop-only
+  // (web has no such command → no banner).
+  //
+  // `mode` and `hasAmd` come along since the R12/R13 re-measure: the banner used
+  // to tell a user with a working RTX 3060 that no usable GPU had been detected,
+  // when he had picked Force CPU himself, and then handed him AMD instructions
+  // on a machine with no AMD card. All three facts were already in this reply.
   useEffect(() => {
-    if (connected !== true) { setComfyOnCpu(false); return }
+    if (connected !== true) { setComfyCpu(null); return }
     let cancelled = false
-    backendCall<{ startedCpu?: boolean | null }>('get_comfy_gpu_status')
-      .then((s) => { if (!cancelled) setComfyOnCpu(s?.startedCpu === true) })
-      .catch(() => { if (!cancelled) setComfyOnCpu(false) })
+    backendCall<{ startedCpu?: boolean | null; mode?: string | null; hasAmd?: boolean | null }>('get_comfy_gpu_status')
+      .then((s) => {
+        if (cancelled) return
+        setComfyCpu({
+          startedCpu: s?.startedCpu === true,
+          mode: asComfyGpuMode(s?.mode),
+          hasAmd: s?.hasAmd === true,
+          isLinux: isLinux(),
+        })
+      })
+      .catch(() => { if (!cancelled) setComfyCpu(null) })
     return () => { cancelled = true }
   }, [connected])
 
@@ -497,7 +518,7 @@ export function CreateExpProvider({ children }: { children: ReactNode }) {
     enhanceVideo: cloud.enhanceVideo,
     makeVoice: cloud.makeVoice,
     samplerList, schedulerList, loraList, vaeList, refreshModelLists,
-    connected, modelsLoaded, modelLoadError, mlxMissing, comfyOnCpu, installCapability, installModelBundle,
+    connected, modelsLoaded, modelLoadError, mlxMissing, comfyOnCpu, comfyCpuBanner, installCapability, installModelBundle,
     cloudAvailable, quota, refreshQuota,
   }
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>
