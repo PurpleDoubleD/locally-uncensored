@@ -1491,6 +1491,19 @@ export function comfyErrorHint(nodeType: string | undefined, _excType: string | 
       m.includes('hyvideomodel') && m.includes('diffusion_model')) {
     return 'This is a bug in the installed ComfyUI-FramePackWrapper custom node (its model loader and sampler are out of sync), not in LU. Update the node from ComfyUI Manager (search "FramePack"), or pick a different image-to-video model (SVD works on 12 GB; Wan 2.2 5B is the recommended higher-quality option).'
   }
+  // An AMD card the ROCm wheels have no kernels for (Runde 12). The install
+  // succeeded, torch imported, HIP enumerated the device, and the FIRST kernel
+  // is where it falls apart. The wheel choice holds back the families we can
+  // name from the card's own name, but a Ryzen APU reports itself as
+  // "AMD Radeon(TM) Graphics" and tells us nothing, so this is the net under
+  // the ones we cannot place. Without it the user gets a raw HIP traceback
+  // that reads like a broken install and sends him rebuilding the environment
+  // over and over, which cannot help.
+  if (m.includes('invalid device function') ||
+      m.includes('hiperrornobinaryforgpu') ||
+      m.includes('tensilelibrary')) {
+    return 'Your AMD card was found and used, but the ROCm build of PyTorch in this ComfyUI environment carries no compute kernels for this particular chip, so the first step of the render had nothing to run. Rebuilding the environment installs the same wheels and will not change this. Set Settings → Hardware → ComfyUI GPU to Force CPU to render on the processor instead: much slower, but it completes. Running ComfyUI with HSA_OVERRIDE_GFX_VERSION=10.3.0 is the community workaround for RDNA 2 cards; it is not supported by AMD and LU does not set it for you.'
+  }
   if (m.includes('out of memory') || m.includes('outofmemory') || _excType === 'torch.OutOfMemoryError') {
     return 'Ran out of GPU memory. Try a shorter clip / lower resolution, set VRAM hand-off to "always" in Settings so the chat model is evicted first, or pick a lighter model.'
   }

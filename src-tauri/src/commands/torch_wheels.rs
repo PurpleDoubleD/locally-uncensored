@@ -132,16 +132,11 @@ pub(crate) enum WheelPlan {
     Cpu { note: String },
 }
 
-impl WheelPlan {
-    /// The sentence the install log shows while this plan runs.
-    pub(crate) fn note(&self) -> &str {
-        match self {
-            WheelPlan::Index { note, .. } => note,
-            WheelPlan::IndexOrCpu { note, .. } => note,
-            WheelPlan::Cpu { note } => note,
-        }
-    }
-}
+// `WheelPlan::note()` used to be the accessor the installer read its sentence
+// from. It is gone because a plan can now change its mind: `IndexOrCpu` falls
+// back to the processor wheels when its channel does not answer, and then the
+// sentence to show is the fallback's. `resolve_plan` hands out the index and
+// the note together so the two can never drift apart.
 
 /// What is known about an AMD card LU can only see by the name the OS gives it.
 ///
@@ -287,6 +282,17 @@ pub(crate) fn comfy_wheel_plan(
     if has_amd {
         let coverage = amd_fleet_coverage(amd_names, os);
         if os == "linux" {
+            // The card families no wheel carries would INSTALL fine here and
+            // then die at the first kernel, which is worse than what 2.6.6 did
+            // for them (slow, but running). Only cards we can actually name are
+            // held back; a card we cannot place keeps the ROCm wheels, because
+            // guessing the other way would take the fix away from the cards it
+            // was built for.
+            if coverage == AmdCoverage::NoKernels {
+                return WheelPlan::Cpu {
+                    note: amd_uncovered_linux_note(amd_names),
+                };
+            }
             return WheelPlan::Index {
                 candidates: ROCM_CHANNELS,
                 note: "AMD GPU detected, installing the ROCm build of PyTorch. \
@@ -355,6 +361,39 @@ fn nvidia_plan(cap: Option<(u32, u32)>) -> WheelPlan {
 /// ROCm wheels for. Windows is the case that matters (all four reporters of
 /// the AMD bundle who are not on Linux are there); anything else that is not
 /// Linux gets the same honest answer minus the Windows-only names.
+/// What an AMD card gets told on Linux when the ROCm wheels have no kernels
+/// for it.
+///
+/// The install itself would succeed, which is the trap: pip is happy, the venv
+/// looks right, and the first sampler step dies with "HIP error: invalid device
+/// function" or a rocBLAS complaint about a missing TensileLibrary. For these
+/// cards the ROCm wheels are 3 GB of download that ends worse than the
+/// processor build they replaced.
+pub(crate) fn amd_uncovered_linux_note(names: &[&str]) -> String {
+    let head = "AMD GPU detected, but no official ROCm wheel carries kernels for this card \
+                (checked 2026-08-30 against the code object lists inside the published \
+                wheels: gfx1010, gfx1012, gfx1031, gfx1032 and gfx1034 appear in none of \
+                them). Installing the ROCm build would download about 3 GB and then fail \
+                at the first render with \"HIP error: invalid device function\", so LU is \
+                installing the processor build instead, which is slow but works.";
+    // RDNA 2 below the 6800 is the one family with a real workaround, because
+    // gfx1030 kernels ARE in the wheels and the runtime can be pointed at them.
+    // RDNA 1 has no such neighbour, so it is not offered one.
+    let has_rdna2 = names
+        .iter()
+        .any(|n| matches!(radeon_rx_model(n), Some(6000..=6799)));
+    if has_rdna2 {
+        format!(
+            "{head} If you want to try the card anyway, the community route is to set \
+             HSA_OVERRIDE_GFX_VERSION=10.3.0 before starting ComfyUI, which makes an \
+             RDNA 2 card use the gfx1030 kernels. LU does not do that for you, because \
+             AMD does not support it and we cannot test it."
+        )
+    } else {
+        head.to_string()
+    }
+}
+
 pub(crate) fn amd_without_rocm_note(os: &str) -> String {
     let head = "AMD GPU detected, but pytorch.org publishes ROCm wheels for Linux only \
                 (checked 2026-08-28: every wheel in the rocm7.2, rocm7.1 and rocm6.4 \
@@ -672,6 +711,63 @@ mod tests {
         assert!(matches!(
             comfy_wheel_plan(false, None, true, &[RX_6700, RX_7900], "windows"),
             WheelPlan::IndexOrCpu { .. },
+        ));
+    }
+
+    // ── Linux, the families no wheel carries, Runde 12 ────────────────────
+    //
+    // The gfx targets in the published wheels were read out of the wheels
+    // themselves on 2026-08-30. gfx1010, 1012, 1031, 1032 and 1034 are in none
+    // of them. For those cards the ROCm wheels install cleanly and the first
+    // kernel dies, which is WORSE than 2.6.6, where the same machine rendered
+    // on the processor: slow, but finishing.
+
+    #[test]
+    fn a_linux_card_with_no_kernels_anywhere_keeps_the_processor_wheels() {
+        for name in [RX_6700, RX_5700, "AMD Radeon RX 6600 XT", "AMD Radeon RX 6500 XT"] {
+            match comfy_wheel_plan(false, None, true, &[name], "linux") {
+                WheelPlan::Cpu { note } => {
+                    assert!(note.contains("no official ROCm wheel carries kernels"), "{name}: {note}");
+                    // The reason has to be IN the step message, not only in a log
+                    assert!(note.contains("invalid device function"), "{name}: {note}");
+                    assert!(note.contains("processor build"), "{name}: {note}");
+                }
+                other => panic!("{name} would die at the first kernel, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn the_rdna2_workaround_is_named_only_where_it_can_work() {
+        // gfx1030 kernels ARE in the wheels, so an RDNA 2 card can be pointed
+        // at them. RDNA 1 has no such neighbour and must not be sent chasing one.
+        assert!(amd_uncovered_linux_note(&[RX_6700]).contains("HSA_OVERRIDE_GFX_VERSION=10.3.0"));
+        assert!(!amd_uncovered_linux_note(&[RX_5700]).contains("HSA_OVERRIDE"));
+        // and it is offered, never done for the user
+        assert!(amd_uncovered_linux_note(&[RX_6700]).contains("LU does not do that for you"));
+    }
+
+    #[test]
+    fn the_cards_the_linux_fix_was_built_for_still_get_the_rocm_wheels() {
+        // NEGATIVE CONTROL for the brake: it may only catch the families that
+        // were measured as uncovered. Everything else, INCLUDING a card whose
+        // name tells us nothing, keeps the wheels 57196b31 gave it.
+        for name in [RX_7900, RX_9070, RX_6800, APU, "AMD Radeon Pro W7900", "AMD Radeon Graphics"] {
+            match comfy_wheel_plan(false, None, true, &[name], "linux") {
+                WheelPlan::Index { candidates, .. } => assert_eq!(candidates, ROCM_CHANNELS, "{name}"),
+                other => panic!("{name} must keep the ROCm wheels, got {other:?}"),
+            }
+        }
+        // A box with an uncovered card AND a covered one renders on the covered
+        // one, so the brake must not take the wheels away from it.
+        assert!(matches!(
+            comfy_wheel_plan(false, None, true, &[RX_6700, RX_7900], "linux"),
+            WheelPlan::Index { .. },
+        ));
+        // and the brake is an AMD brake: it cannot reach an NVIDIA box
+        assert!(matches!(
+            comfy_wheel_plan(true, Some((8, 6)), true, &[RX_6700], "linux"),
+            WheelPlan::Index { candidates, .. } if candidates[0].contains("/cu"),
         ));
     }
 

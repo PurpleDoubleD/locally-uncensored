@@ -296,6 +296,33 @@ describe('comfyErrorHint', () => {
   it('does not false-positive the FramePack hint on an unrelated node', () => {
     expect(comfyErrorHint('KSampler', 'AttributeError', 'diffusion_model missing')).toBe('')
   })
+
+  // Runde 12: an AMD card the ROCm wheels carry no kernels for. Everything
+  // upstream succeeded, so the raw error reads like a broken install and sends
+  // the user rebuilding the environment forever. The wheel choice holds back
+  // the families it can name from the card's own name, but a Ryzen APU calls
+  // itself "AMD Radeon(TM) Graphics" and tells us nothing, so this catches the
+  // ones we cannot place.
+  it('a HIP kernel that does not exist for this chip is explained, not dumped', () => {
+    // the three error texts this failure actually produces
+    for (const msg of [
+      'HIP error: invalid device function',
+      'hipErrorNoBinaryForGPU: Unable to find code object for all current devices!',
+      'rocBLAS error: Cannot read TensileLibrary.dat: No such file or directory for GPU arch : gfx1031',
+    ]) {
+      const h = comfyErrorHint('KSampler', 'RuntimeError', msg)
+      expect(h).toMatch(/no compute kernels/i)
+      // it must talk the user OUT of the rebuild, which cannot help here
+      expect(h).toMatch(/will not change this/i)
+      // and give him something that does complete
+      expect(h).toContain('Force CPU')
+    }
+  })
+
+  it('NEGATIVE CONTROL: the kernel hint does not fire on ordinary GPU errors', () => {
+    expect(comfyErrorHint('KSampler', 'RuntimeError', 'CUDA error: device-side assert triggered')).toBe('')
+    expect(comfyErrorHint('KSampler', 'torch.OutOfMemoryError', 'HIP out of memory')).toMatch(/GPU memory/i)
+  })
 })
 
 // ── helpers for the orchestrator tests ────────────────────────────

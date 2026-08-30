@@ -53,7 +53,7 @@ export function isLinux(): boolean {
 }
 
 /** True on Windows (WebView2 reports "Win32" / "Windows NT"). Same
- *  runtime-check rule as isMacOS and isLinux — one dist serves all three. */
+ *  runtime-check rule as isMacOS and isLinux, one dist serves all three. */
 export function isWindows(): boolean {
   if (typeof navigator === "undefined") return false;
   const plat = navigator.platform || "";
