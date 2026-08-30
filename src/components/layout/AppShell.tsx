@@ -124,8 +124,17 @@ export function AppShell() {
     // out-of-mode model active when the new mode has nothing to offer: a
     // lu-cloud model left active in Local mode kept billing credits after the
     // switch said Local (Discord 2026-08-09, helpslowlydying).
-    const pick = pickForMode(activeModel, allModels, appMode)
+    //
+    // The fourth argument is the model the user NAMED on the way in, by
+    // clicking its row in the local-mode LU Cloud strip. Without it every one
+    // of those rows merely opened the gate and the fallback below decided
+    // which hosted model came out, which is why clicking DeepSeek V3.2 landed
+    // on Kimi K3 (Nebenbefund 1, R10 re-measure 2026-08-30). The request is
+    // dropped the moment it is answered, so it never steers a later flip.
+    const { pendingCloudModel, setPendingCloudModel } = useUIStore.getState()
+    const pick = pickForMode(activeModel, allModels, appMode, pendingCloudModel)
     if (pick.change) setActiveModel(pick.next)
+    if (pick.usedRequest) setPendingCloudModel(null)
   }, [appMode, allModels])
 
   // Local-hardware views (Models/Benchmark) don't exist in cloud mode — the

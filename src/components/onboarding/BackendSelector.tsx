@@ -8,7 +8,7 @@
  * from Settings → Providers going forward.
  */
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Modal } from '../ui/Modal'
 import { useProviderStore } from '../../stores/providerStore'
 import { useUIStore } from '../../stores/uiStore'
@@ -23,6 +23,17 @@ interface Props {
 
 export function BackendSelector({ open, backends, onClose }: Props) {
   const [selected, setSelected] = useState<string>(backends[0]?.id || '')
+  // AppShell mounts this with an EMPTY `backends` array and fills it seconds
+  // later, once the idle-time detection has run. A useState initialiser runs
+  // once, so the default above read `[]` and `selected` stayed the empty
+  // string for good: the dialog opened with no row marked, and "Use selected"
+  // found nothing under that name, dismissed itself and configured nothing.
+  // Same class as the picker bug of R10, a position taken from a list before
+  // the list exists. Re-seed it the moment a list arrives, and never overwrite
+  // a choice the user has already made.
+  useEffect(() => {
+    setSelected((cur) => (backends.some((b) => b.id === cur) ? cur : backends[0]?.id || ''))
+  }, [backends])
   // Pre-checked: the common case is "saw it once, don't bug me again". User can
   // uncheck if they want it to re-appear on next launch.
   const [dontShowAgain, setDontShowAgain] = useState(true)

@@ -42,45 +42,45 @@ const LOCAL_LIST = [
 describe('the picked model survives a restart', () => {
   it('THE FIX: the mount-time run against an empty list changes nothing', () => {
     // This is the exact moment the pick used to die.
-    expect(pickForMode(QWEN, [], 'local')).toEqual({ change: false, next: QWEN })
+    expect(pickForMode(QWEN, [], 'local')).toMatchObject({ change: false, next: QWEN })
   })
 
   it('the list lands a moment later and the pick is still the pick', () => {
-    expect(pickForMode(QWEN, LOCAL_LIST, 'local')).toEqual({ change: false, next: QWEN })
+    expect(pickForMode(QWEN, LOCAL_LIST, 'local')).toMatchObject({ change: false, next: QWEN })
   })
 
   it('NEGATIVE CONTROL: a model that really is gone still hands over to the first one', () => {
     // The dead-name guard is the reason this rule exists. A picker showing a
     // model the provider no longer has opens an empty list on click.
     expect(pickForMode('openai::deleted-model', LOCAL_LIST, 'local'))
-      .toEqual({ change: true, next: HERMES })
+      .toMatchObject({ change: true, next: HERMES })
   })
 
   it('NEGATIVE CONTROL: flipping to Cloud still moves off a local model', () => {
     const withCloud = [...LOCAL_LIST, { name: 'lu-cloud::glm-5.3', type: 'text', provider: 'lu-cloud' }]
-    expect(pickForMode(QWEN, withCloud, 'cloud')).toEqual({ change: true, next: 'lu-cloud::glm-5.3' })
+    expect(pickForMode(QWEN, withCloud, 'cloud')).toMatchObject({ change: true, next: 'lu-cloud::glm-5.3' })
   })
 
   it('NEGATIVE CONTROL: Local mode with nothing but cloud models clears the pick', () => {
     // A lu-cloud model left active in Local mode kept spending credits after
     // the switch said Local. That must still clear, not linger.
     const cloudOnly = [{ name: 'lu-cloud::glm-5.3', type: 'text', provider: 'lu-cloud' }]
-    expect(pickForMode('lu-cloud::glm-5.3', cloudOnly, 'local')).toEqual({ change: true, next: null })
+    expect(pickForMode('lu-cloud::glm-5.3', cloudOnly, 'local')).toMatchObject({ change: true, next: null })
   })
 
   it('NEGATIVE CONTROL: a ComfyUI checkpoint never becomes the active chat model', () => {
     // It shares this list and carries no provider, so a bare provider check
     // would pin it. It routes to Ollama and every send fails.
     const mediaOnly = [{ name: 'sd_turbo.safetensors', type: 'image' }]
-    expect(pickForMode(null, mediaOnly, 'local')).toEqual({ change: false, next: null })
-    expect(pickForMode(QWEN, mediaOnly, 'local')).toEqual({ change: true, next: null })
+    expect(pickForMode(null, mediaOnly, 'local')).toMatchObject({ change: false, next: null })
+    expect(pickForMode(QWEN, mediaOnly, 'local')).toMatchObject({ change: true, next: null })
   })
 
   it('an empty list does not clear an already empty selection either', () => {
-    expect(pickForMode(null, [], 'local')).toEqual({ change: false, next: null })
+    expect(pickForMode(null, [], 'local')).toMatchObject({ change: false, next: null })
   })
 
   it('a first launch with models and no pick takes the first in-mode one', () => {
-    expect(pickForMode(null, LOCAL_LIST, 'local')).toEqual({ change: true, next: HERMES })
+    expect(pickForMode(null, LOCAL_LIST, 'local')).toMatchObject({ change: true, next: HERMES })
   })
 })

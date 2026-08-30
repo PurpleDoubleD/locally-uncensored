@@ -30,6 +30,7 @@ function CloudTeaserSection({ onOpen }: { onOpen: () => void }) {
   const appMode = useSettingsStore((s) => s.settings.appMode)
   const teasersEnabled = useSettingsStore((s) => s.settings.cloudTeasersEnabled)
   const setCloudGateOpen = useUIStore((s) => s.setCloudGateOpen)
+  const setPendingCloudModel = useUIStore((s) => s.setPendingCloudModel)
   const allModels = useModelStore((s) => s.models)
   if (appMode === 'cloud' || !teasersEnabled) return null
   // The five used to be the head of the list as `/v1/models` happened to send
@@ -40,7 +41,20 @@ function CloudTeaserSection({ onOpen }: { onOpen: () => void }) {
     allModels.filter((m) => m.provider === 'lu-cloud' && m.type === 'text'),
     (m) => (('displayName' in m && m.displayName) || displayModelName(m.name)) as string,
   )
-  const open = () => { onOpen(); setCloudGateOpen(true) }
+  // Every row used to call this with nothing, so the row you pressed and the
+  // model you got afterwards were unrelated: the gate flipped the mode and the
+  // mode rule then handed out the head of the catalogue, in whatever order the
+  // last `/v1/models` answer had arrived in (Nebenbefund 1, R10 re-measure
+  // 2026-08-30, DeepSeek V3.2 landed on Kimi K3). A model row now names its
+  // model, by name and never by its position in any list, and the mode rule
+  // honours that name when the flip lands. The rows that stand for the
+  // catalogue as a whole, the rest-counter and the logged-out line, still ask
+  // for nothing in particular.
+  const open = (model?: string) => {
+    setPendingCloudModel(model ?? null)
+    onOpen()
+    setCloudGateOpen(true)
+  }
   return (
     <div className="mt-1 border-t border-white/[0.05]">
       <div className="px-2.5 pt-2 pb-0.5 flex items-center gap-1">
@@ -52,7 +66,7 @@ function CloudTeaserSection({ onOpen }: { onOpen: () => void }) {
       {cloudChat.map((m) => (
           <button
             key={m.name}
-            onClick={open}
+            onClick={() => open(m.name)}
             className="w-full flex items-center gap-2 px-2.5 py-1.5 text-left hover:bg-white/[0.04] transition-colors"
             title="Runs on LU Cloud, tap to see plans"
           >
@@ -65,7 +79,7 @@ function CloudTeaserSection({ onOpen }: { onOpen: () => void }) {
       ))}
       {cloudChat.length > 0 && cloudMore > 0 && (
         <button
-          onClick={open}
+          onClick={() => open()}
           className="w-full flex items-center gap-2 px-2.5 py-1.5 text-left hover:bg-white/[0.04] transition-colors"
           title="See the whole hosted catalogue"
         >
@@ -76,7 +90,7 @@ function CloudTeaserSection({ onOpen }: { onOpen: () => void }) {
       )}
       {cloudChat.length === 0 && (
         <button
-          onClick={open}
+          onClick={() => open()}
           className="w-full flex items-center gap-2 px-2.5 py-1.5 text-left hover:bg-white/[0.04] transition-colors"
           title="Runs on LU Cloud, tap to see plans"
         >

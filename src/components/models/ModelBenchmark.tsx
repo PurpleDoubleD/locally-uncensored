@@ -63,7 +63,13 @@ export function BenchmarkLeaderboard() {
       </h3>
       <div className="space-y-1.5">
         {leaderboard.map((entry, i) => {
-          const maxTps = leaderboard[0].avgTps
+          // Same class as the picker bug of R10: a position in a list that is
+          // ordered by something else. getLeaderboard sorts by score
+          // (avgTps × accuracy), so row 1 is not the fastest row, and
+          // `leaderboard[0].avgTps` as the scale drew bars past 100% for every
+          // model that was faster but less accurate than the leader. The
+          // longest bar is asked for by value now, not by position.
+          const maxTps = Math.max(...leaderboard.map((e) => e.avgTps))
           const barWidth = maxTps > 0 ? (entry.avgTps / maxTps) * 100 : 0
 
           return (

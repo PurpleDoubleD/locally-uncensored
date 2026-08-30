@@ -122,9 +122,19 @@ export function CloudGateModal() {
     }
   }, [open, available, setOpen, updateSettings])
 
+  // Backing out of the gate drops the model the user named on the way in
+  // (clicking an LU Cloud row in the local picker). It described that one
+  // click, so it must not be lying in wait for the next flip, which could
+  // happen minutes later and mean something else.
+  const setPendingCloudModel = useUIStore((s) => s.setPendingCloudModel)
+  const close = () => {
+    setPendingCloudModel(null)
+    setOpen(false)
+  }
+
   const stayLocal = () => {
     updateSettings({ appMode: 'local' })
-    setOpen(false)
+    close()
   }
 
   // Re-probe on open — someone staring at this gate shouldn't wait for the
@@ -143,7 +153,7 @@ export function CloudGateModal() {
   const signedOut = status === 'signed-out' || !user
 
   return (
-    <Modal open={open} onClose={() => setOpen(false)} title="LU Cloud" hideHeader>
+    <Modal open={open} onClose={close} title="LU Cloud" hideHeader>
       {signedOut ? (
         step === 'intro' ? (
           <div className="space-y-5 pt-2">
