@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { Wifi, WifiOff, Loader2, Eye, EyeOff, ChevronDown, Plus, Power, Play } from 'lucide-react'
 import { useProviderStore } from '../../stores/providerStore'
 import { providerRowIds, isReturnableRow } from '../../lib/provider-visibility'
+import { slotTakeoverUpdate, slotHandbackUpdate, standbyOccupant } from '../../lib/openai-slot-handover'
 import { useMemoryStore } from '../../stores/memoryStore'
 import { getProvider } from '../../api/providers'
 import { PROVIDER_PRESETS } from '../../api/providers/types'
@@ -155,6 +156,21 @@ export function ProviderSettings() {
   // only control that could bring the provider back (Nebenbefund 1, R9
   // re-measure). A switched-off row stays, greyed, with Enable on it.
   const rowIds = providerRowIds(providers) as ProviderId[]
+  // The backend Add Provider pushed out of the shared `openai` slot, if any.
+  // It keeps a card instead of disappearing (Nebenbefund 3, R10 re-measure).
+  const standby = standbyOccupant(providers.openai)
+
+  // Hand the `openai` slot back to the backend on standby. Same effect the
+  // Reset button has for this one slot, without resetting anything else, and
+  // it swaps rather than forgets: the backend now leaving the slot takes the
+  // standby card in its turn.
+  function handBackSlot() {
+    const update = slotHandbackUpdate(providers.openai)
+    if (!update) return
+    setProviderConfig('openai', update)
+    setStatuses(prev => ({ ...prev, openai: 'idle' }))
+    setExpandedProvider('openai')
+  }
 
   // Add a preset (enable a provider without disabling others)
   function selectPreset(preset: typeof PROVIDER_PRESETS[0]) {
@@ -173,9 +189,20 @@ export function ProviderSettings() {
     } else if (preset.providerId === 'anthropic') {
       setProviderConfig('anthropic', { enabled: true, name: preset.name, baseUrl: preset.baseUrl, isLocal: false })
     } else {
-      // `managed` must be set explicitly so switching to LM Studio/vLLM clears
-      // the built-in flag, and re-selecting Built-in restores it.
-      setProviderConfig('openai', { enabled: true, name: preset.name, baseUrl: preset.baseUrl, isLocal: preset.isLocal, managed: !!preset.managed })
+      // Every OpenAI-protocol backend shares the one `openai` slot, so adding
+      // one pushes out whatever was in it. That used to happen in silence:
+      // Add Provider, Jan, and the Built-in Engine card was gone with no word
+      // about where it went (Nebenbefund 3, R10 re-measure 2026-08-30). The
+      // slot remembers who it displaced now, and the list keeps a standby card
+      // for it. `managed` is still set explicitly in both directions, so
+      // switching to LM Studio/vLLM clears the built-in flag and re-selecting
+      // Built-in restores it.
+      setProviderConfig('openai', slotTakeoverUpdate(providers.openai, {
+        name: preset.name,
+        baseUrl: preset.baseUrl,
+        isLocal: preset.isLocal,
+        managed: preset.managed,
+      }))
     }
 
     setDropdownOpen(false)
@@ -470,6 +497,36 @@ export function ProviderSettings() {
           </div>
         )
       })}
+
+      {/* The backend Add Provider pushed out of the shared local slot. It used
+          to vanish without a word, and the way back (Add Provider, Built-in
+          Engine) was there but unlabelled. Same shape as the switched-off row
+          above, with the reason written out. */}
+      {standby && (
+        <div className="rounded-lg border border-white/8 bg-white/[0.01] overflow-hidden">
+          <div className="flex items-center gap-2 px-2 py-1.5">
+            <button onClick={handBackSlot} className="group flex items-center" title="Put this backend back in the local slot">
+              <Power size={10} className="text-gray-500 group-hover:text-green-400 transition-colors" />
+            </button>
+            <div className="flex-1 flex items-center gap-2 min-w-0">
+              <span className="w-1.5 h-1.5 rounded-full shrink-0 bg-gray-600" />
+              <span className="text-[0.65rem] text-gray-500 font-medium truncate">{standby.name}</span>
+              <span className="text-[0.5rem] px-1 py-0.5 rounded bg-white/5 text-gray-500 shrink-0">STANDBY</span>
+            </div>
+            <button
+              onClick={handBackSlot}
+              className="shrink-0 px-2 py-0.5 rounded bg-green-500/10 border border-green-500/20 text-[0.6rem] text-green-300 hover:text-green-200 hover:bg-green-500/15 transition-colors"
+            >
+              Enable
+            </button>
+          </div>
+          <p className="px-2 pb-1.5 text-[0.55rem] text-gray-600 leading-snug">
+            {providers.openai.name} took over the local OpenAI compatible slot, which holds one
+            backend at a time. Press Enable to hand the slot back to {standby.name}.
+            {' '}{providers.openai.name} then waits here in its place.
+          </p>
+        </div>
+      )}
 
       {/* No backend warning. With a switched-off row on screen the honest
           sentence names that row first, because pressing Enable on it is the
