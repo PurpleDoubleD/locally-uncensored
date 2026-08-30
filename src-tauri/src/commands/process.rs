@@ -2545,7 +2545,7 @@ pub async fn offload_local_models(app: tauri::AppHandle, include_comfyui: Option
     .map_err(|e| format!("offload_local_models task: {e}"))?
 }
 
-fn offload_local_models_blocking(state: &AppState, include_comfyui: Option<bool>) -> Result<serde_json::Value, String> {
+pub(crate) fn offload_local_models_blocking(state: &AppState, include_comfyui: Option<bool>) -> Result<serde_json::Value, String> {
     let free_comfy = include_comfyui.unwrap_or(true);
     let mut freed: Vec<&str> = Vec::new();
 

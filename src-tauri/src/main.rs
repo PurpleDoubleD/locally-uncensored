@@ -41,6 +41,27 @@ fn apply_linux_webkit_workarounds() {
     }
 }
 
+/// How long the app waits after the window went to the tray before it releases
+/// the local model backends. Long enough that a mis-click plus an immediate
+/// reopen costs nothing, short enough that the GPU is not pinned for a coffee
+/// break by a window the user believes is closed.
+const HIDE_OFFLOAD_GRACE: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// Should the delayed post-hide offload still run?
+///
+/// `visible_now` is what the window reports once the grace period is over, so
+/// a reopen inside the grace period cancels the offload. `hide_generation` is
+/// the counter value the timer was started with and `current_generation` the
+/// value now: a hide → show → hide sequence leaves an older timer in flight,
+/// and that stale timer must not free the VRAM of the newer session seconds
+/// after it started. Only the newest timer for a still-hidden window offloads.
+///
+/// Pure on purpose: the window handle is not constructible in a unit test, the
+/// decision is. See `tests::hidden_offload_*`.
+fn should_offload_after_hide(visible_now: bool, hide_generation: u64, current_generation: u64) -> bool {
+    !visible_now && hide_generation == current_generation
+}
+
 /// Initialise tracing-subscriber once on app start. `LU_LOG_FORMAT=json`
 /// switches to single-line JSON output (one object per event) for users
 /// who pipe LU's stdout into Loki / Vector / a log file consumed by
@@ -429,6 +450,7 @@ fn main() {
             // ─── Close → hide to tray instead of quit ───
             if let Some(window) = app.get_webview_window("main") {
                 let w = window.clone();
+                let hide_gen = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
                 window.on_window_event(move |event| {
                     if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                         api.prevent_close();
@@ -439,6 +461,37 @@ fn main() {
                         // both before the window goes to the tray.
                         let _ = w.emit("app:hidden", ());
                         let _ = w.hide();
+
+                        // Gegenprobe 2026-08-30: the window vanished from the
+                        // taskbar but lu-llama-server kept the whole model in
+                        // VRAM, with no visible sign anything was still
+                        // running (the tray icon sits in the overflow). The
+                        // user pressed the X, believes the app is gone, and
+                        // the GPU stays full. Hiding stays the behaviour, but
+                        // it now releases the local backends the same way the
+                        // switch into Cloud mode does. Everything restarts
+                        // lazily on first use after Show, which is exactly
+                        // what a fresh launch does (nothing but Ollama and
+                        // ComfyUI auto-start there either).
+                        let generation = hide_gen.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+                        let w2 = w.clone();
+                        let gen_handle = hide_gen.clone();
+                        std::thread::spawn(move || {
+                            // The grace period keeps a mis-click free: hide,
+                            // reopen, nothing was ever unloaded.
+                            std::thread::sleep(HIDE_OFFLOAD_GRACE);
+                            let visible = w2.is_visible().unwrap_or(false);
+                            let current = gen_handle.load(std::sync::atomic::Ordering::SeqCst);
+                            if !should_offload_after_hide(visible, generation, current) {
+                                return;
+                            }
+                            let app = w2.app_handle();
+                            let state = app.state::<AppState>();
+                            match commands::process::offload_local_models_blocking(&state, Some(true)) {
+                                Ok(v) => println!("[Window] hidden to tray, released local backends: {v}"),
+                                Err(e) => println!("[Window] hidden to tray, offload failed: {e}"),
+                            }
+                        });
                     }
                 });
             }
@@ -565,6 +618,69 @@ mod tests {
         );
         assert_eq!(after_first, after_second, "second call should be a no-op");
         cleanup();
+    }
+
+    // ─── Close-to-tray releases the GPU (Gegenprobe 2026-08-30) ───
+    //
+    // The window cross hides the app instead of quitting it, and until this
+    // round lu-llama-server kept the model in VRAM behind a window that was
+    // gone from the taskbar. The offload now runs after a grace period; these
+    // cover exactly when it may and may not fire.
+
+    #[test]
+    fn hidden_offload_runs_when_the_window_stayed_hidden() {
+        // Plain case: hidden at the start of the grace period, still hidden at
+        // the end, no newer hide in between. This is the case that frees VRAM.
+        assert!(super::should_offload_after_hide(false, 1, 1));
+    }
+
+    #[test]
+    fn hidden_offload_skipped_when_the_user_reopened() {
+        // Mis-click: cross pressed, window reopened from the tray inside the
+        // grace period. Unloading the model under a visible window would be a
+        // pointless reload, so the timer must back off.
+        assert!(!super::should_offload_after_hide(true, 1, 1));
+    }
+
+    #[test]
+    fn hidden_offload_skipped_when_a_newer_hide_owns_the_timer() {
+        // hide → show → hide: the first timer fires while the window is hidden
+        // again, but its grace period belongs to the OLD hide. Letting it
+        // through would free the VRAM seconds after the second hide instead of
+        // a full grace period later. The newest generation wins.
+        assert!(!super::should_offload_after_hide(false, 1, 2));
+        assert!(super::should_offload_after_hide(false, 2, 2));
+    }
+
+    #[test]
+    fn hiding_to_tray_is_actually_wired_to_the_offload() {
+        // The decision helper proves nothing on its own if nobody calls it.
+        // Before this round the CloseRequested arm ended at `w.hide()` and the
+        // engine kept the whole model in VRAM, which is exactly what the
+        // Gegenprobe measured. Pin the wiring next to the hide call so a
+        // refactor that drops it fails here instead of on someone's GPU.
+        let src = include_str!("main.rs");
+        let hide = src
+            .find("let _ = w.hide();")
+            .expect("close-to-tray hide call should exist");
+        let after = &src[hide..(hide + 2500).min(src.len())];
+        assert!(
+            after.contains("should_offload_after_hide"),
+            "hiding to the tray must consult the offload decision"
+        );
+        assert!(
+            after.contains("offload_local_models_blocking"),
+            "hiding to the tray must release the local model backends"
+        );
+    }
+
+    #[test]
+    fn hidden_offload_grace_is_a_real_wait_and_not_a_coffee_break() {
+        // A zero grace would unload on every stray hide, and a very long one
+        // would leave the GPU pinned for as long as the user is away from the
+        // machine. Bracket it so a future edit cannot quietly do either.
+        let secs = super::HIDE_OFFLOAD_GRACE.as_secs();
+        assert!((5..=120).contains(&secs), "grace period out of range: {secs}s");
     }
 }
 
