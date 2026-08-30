@@ -41,9 +41,9 @@ import {
 import { cpuCauseSuffix } from '../lib/render-budget'
 import {
   comfyWS, CLIENT_ID,
-  LOADER_NODES, CLIP_LOADER_NODES, VAE_LOADER_NODES, SAMPLER_NODES, DECODE_NODES,
   type ComfyWSEvent,
 } from '../api/comfyui-ws'
+import { phaseForExecutingNode, phaseForProgressStep } from '../lib/render-phase-labels'
 import { buildDynamicWorkflow, buildLocalOpWorkflow, checkVideoOutputCapability } from '../api/dynamic-workflow'
 import { getAllNodeInfo, clearNodeCache } from '../api/comfyui-nodes'
 import { restartComfyForNewNodes } from '../api/comfy-restart'
@@ -1193,29 +1193,20 @@ export function useCreate() {
                   break
                 }
                 const classType = nodeClassMap.get(nodeId) || ''
-                if (LOADER_NODES.has(classType)) {
-                  st.setProgressPhase('loading-model')
-                  setPhase(15, 'Loading model...')
-                } else if (CLIP_LOADER_NODES.has(classType)) {
-                  st.setProgressPhase('loading-clip')
-                  setPhase(25, 'Loading text encoder...')
-                } else if (VAE_LOADER_NODES.has(classType)) {
-                  st.setProgressPhase('loading-vae')
-                  setPhase(30, 'Loading VAE...')
-                } else if (SAMPLER_NODES.has(classType)) {
-                  st.setProgressPhase('sampling')
-                  setPhase(35, 'Sampling...')
-                } else if (DECODE_NODES.has(classType)) {
-                  st.setProgressPhase('decoding')
-                  setPhase(90, 'Decoding frames, the last long stretch...')
+                const step = phaseForExecutingNode(classType, mode === 'video' ? 'video' : 'image')
+                if (step) {
+                  st.setProgressPhase(step.phase)
+                  setPhase(step.pct, step.label)
                 }
                 break
               }
               case 'progress': {
                 const { value, max } = event.data
-                const stepPct = 35 + (value / max) * 55 // 35% to 90%
-                st.setProgressPhase('sampling')
-                setPhase(Math.round(stepPct), `Sampling step ${value}/${max}...`)
+                const step = phaseForProgressStep(value, max, st.progressPhase)
+                if (step) {
+                  st.setProgressPhase(step.phase)
+                  setPhase(step.pct, step.label)
+                }
                 break
               }
               case 'execution_complete': {
