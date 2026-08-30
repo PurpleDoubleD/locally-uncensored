@@ -437,6 +437,12 @@ export function useChat() {
       role: "assistant" as const,
       content: "",
       thinking: "",
+      // The answer records the model that produced it (Meldung 4, R5
+      // re-measure 2026-08-30). The conversation field alone could not: it
+      // holds one name for a chat two models may have answered in, and it is
+      // rewritten every time the picker moves. Written here, at the turn, so
+      // it is a measurement and not a guess.
+      modelId: activeModel,
       timestamp: Date.now(),
     }
     useChatStore.getState().addMessage(convId, assistantMessage)

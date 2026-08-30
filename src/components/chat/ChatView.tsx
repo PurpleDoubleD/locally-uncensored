@@ -15,6 +15,7 @@ import { useSettingsStore } from '../../stores/settingsStore'
 import { FileText, ChevronDown, Download, Wrench, Radio, RefreshCw, X } from 'lucide-react'
 import { PluginsDropdown } from './PluginsDropdown'
 import { ModelSelector } from '../models/ModelSelector'
+import { ConversationModelNote } from './ConversationModelNote'
 import { GoalBar } from './GoalBar'
 import { PlanBar } from './PlanBar'
 import { LoopBar } from './LoopBar'
@@ -348,7 +349,14 @@ export function ChatView() {
                 // mode has here. Plain chat leaves "/cmd" as ordinary text.
                 slashCommands={isAgentActive}
                 onAttachDocs={appMode !== 'cloud' ? () => setRagPanelOpen(true) : undefined}
-                composerModel={<ModelSelector openUpward />}
+                composerModel={
+                  <div className="flex items-center gap-1.5">
+                    {/* What this chat's answers were written by, when that is
+                        not what the picker says (Meldung 4, R5 re-measure). */}
+                    <ConversationModelNote />
+                    <ModelSelector openUpward />
+                  </div>
+                }
                 // No plan lives here. The prompt window is the prompt window
                 // (David, 2026-08-22): the plan band sits under the header row
                 // above, next to the other standing status controls.

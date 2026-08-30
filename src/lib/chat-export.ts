@@ -8,11 +8,17 @@
 
 import type { Conversation } from '../types/chat'
 import { isTauri, backendCall } from '../api/backend'
+import { conversationModelOf } from './conversation-model'
 
 export function exportAsMarkdown(conversation: Conversation): string {
   const lines: string[] = []
   lines.push(`# ${conversation.title}`)
-  lines.push(`_Model: ${conversation.model} | ${new Date(conversation.createdAt).toLocaleString()}_`)
+  // The model of the last answer, not the conversation field. That field is
+  // rewritten every time the picker moves, so an export could name a model
+  // that produced none of the text below it (Meldung 4, R5 re-measure
+  // 2026-08-30). Old chats whose answers carry no model fall back to the
+  // field, which is all that was ever known about them.
+  lines.push(`_Model: ${conversationModelOf(conversation)} | ${new Date(conversation.createdAt).toLocaleString()}_`)
   lines.push('')
 
   if (conversation.systemPrompt) {
