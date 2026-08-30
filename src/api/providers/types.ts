@@ -22,6 +22,13 @@ export interface ProviderConfig {
   // (the Tauri command), not `/v1/models`. Undefined = a normal user-configured
   // backend, unchanged behavior.
   managed?: boolean
+  // Set when the user switched this provider off with the Disable button in
+  // Settings, AI Backends, and cleared when Enable puts it back. The list keeps
+  // such a row visible (greyed, with Enable) instead of dropping it, so the
+  // control that turns a backend off is not also the control that hides the way
+  // back (Nebenbefund 1, R9 re-measure 2026-08-30). Undefined = a slot nobody
+  // has touched here; it stays out of the list as before.
+  disabledByUser?: boolean
 }
 
 // ── Provider Presets (auto-fill URL) ───────────────────────────

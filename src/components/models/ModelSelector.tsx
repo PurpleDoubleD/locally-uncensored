@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Ban, ChevronDown, Loader2, Power, PlayCircle, Wrench, X, Cloud } from 'lucide-react'
+import { Ban, ChevronDown, Loader2, Power, PlayCircle, Settings as SettingsIcon, Wrench, X, Cloud } from 'lucide-react'
 import { useModels } from '../../hooks/useModels'
 import { useModelStore } from '../../stores/modelStore'
 import { useProviderStore } from '../../stores/providerStore'
@@ -16,6 +16,7 @@ import { listLoadedLmStudioModels, loadLmStudioModel, unloadLmStudioModel } from
 import { isLmStudioProvider } from '../../lib/hf-to-provider'
 import { lmStudioSlotUpdate, adoptionReplacesBuiltinEngine } from '../../lib/lmstudio-backend-adopt'
 import { nextProbeDelayMs } from '../../lib/probe-backoff'
+import { noChatBackendEnabled } from '../../lib/provider-visibility'
 import type { AIModel } from '../../types/models'
 
 // ── Local-mode cloud discovery (2.5.8): an "LU Cloud" section at the list's
@@ -476,6 +477,11 @@ export function ModelSelector({ openUpward = false, surface = 'chat' }: ModelSel
   // Deliberate, but the picker never SAID so, and the silence reads as "my
   // local models are gone" (it cost a whole repro round on 2026-08-07).
   const appMode = useSettingsStore((s) => s.settings.appMode)
+  // Whether the empty list is empty because nothing is switched on at all.
+  // That has a different answer from "the engine did not start", and it has a
+  // button (Nebenbefund 1, R9 re-measure 2026-08-30).
+  const noBackendEnabled = useProviderStore((s) => noChatBackendEnabled(s.providers, appMode))
+  const openSettingsAt = useUIStore((s) => s.openSettingsAt)
   const [open, setOpen] = useState(false)
   // Read by the empty-state probe below, which runs before the render that
   // computes textModels. A ref keeps it out of the effect's dependency list.
@@ -850,7 +856,23 @@ export function ModelSelector({ openUpward = false, surface = 'chat' }: ModelSel
               {textModels.length === 0 && (
                 <div className="px-2.5 py-3 text-center">
                   <p className="text-[0.65rem] text-gray-600">No models available</p>
-                  {emptyReason && (
+                  {/* An empty picker after the user switched the last backend
+                      off in Settings used to say only that, which reads like a
+                      machine with nothing installed (Nebenbefund 1, R9
+                      re-measure). The reason and the way back belong here. */}
+                  {noBackendEnabled ? (
+                    <>
+                      <p className="mt-1 text-[0.6rem] text-amber-300/90 leading-snug text-left">
+                        No AI backend is enabled, so there is nothing to list. Open Settings, go to AI Backends, and press Enable on the backend you switched off, or Add Provider.
+                      </p>
+                      <button
+                        onClick={() => { setOpen(false); openSettingsAt({ tab: 'backends' }) }}
+                        className="mt-2 inline-flex items-center gap-1 px-2 py-1 rounded bg-white/5 border border-white/10 text-[0.6rem] text-gray-300 hover:bg-white/10 transition-colors"
+                      >
+                        <SettingsIcon size={10} /> Open Settings
+                      </button>
+                    </>
+                  ) : emptyReason && (
                     <p className="mt-1 text-[0.6rem] text-amber-300/90 leading-snug text-left">{emptyReason}</p>
                   )}
                 </div>

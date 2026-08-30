@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { Wifi, WifiOff, Loader2, Eye, EyeOff, ChevronDown, Plus, Power, Play } from 'lucide-react'
 import { useProviderStore } from '../../stores/providerStore'
+import { providerRowIds, isReturnableRow } from '../../lib/provider-visibility'
 import { useMemoryStore } from '../../stores/memoryStore'
 import { getProvider } from '../../api/providers'
 import { PROVIDER_PRESETS } from '../../api/providers/types'
@@ -149,6 +150,11 @@ export function ProviderSettings() {
 
   // Get all enabled providers
   const enabledProviderIds = (Object.keys(providers) as ProviderId[]).filter(id => providers[id].enabled)
+  // The rows the list draws: everything enabled, PLUS everything the user
+  // switched off right here. Disabling used to delete the card, and with it the
+  // only control that could bring the provider back (Nebenbefund 1, R9
+  // re-measure). A switched-off row stays, greyed, with Enable on it.
+  const rowIds = providerRowIds(providers) as ProviderId[]
 
   // Add a preset (enable a provider without disabling others)
   function selectPreset(preset: typeof PROVIDER_PRESETS[0]) {
@@ -177,10 +183,14 @@ export function ProviderSettings() {
     setExpandedProvider(preset.providerId)
   }
 
-  // Toggle a provider on/off independently
+  // Toggle a provider on/off independently. The off state is marked as the
+  // user's own doing so the row survives it and can offer Enable; turning it
+  // back on clears the mark, and the row is a normal row again.
   function toggleProvider(id: ProviderId) {
-    setProviderConfig(id, { enabled: !providers[id].enabled })
+    const nextEnabled = !providers[id].enabled
+    setProviderConfig(id, { enabled: nextEnabled, disabledByUser: !nextEnabled })
     setStatuses(prev => ({ ...prev, [id]: 'idle' }))
+    if (nextEnabled) setExpandedProvider(id)
   }
 
   const handleTest = async (providerId: ProviderId) => {
@@ -258,10 +268,43 @@ export function ProviderSettings() {
 
   return (
     <div className="space-y-2">
-      {/* Active Providers List */}
-      {enabledProviderIds.map(id => {
+      {/* Providers List — enabled rows, plus the ones the user switched off */}
+      {rowIds.map(id => {
         const config = providers[id]
         const view = providerSlotView(id, config)
+
+        // Switched off by the user: the row stays and carries the way back.
+        // Nothing to test and nothing to configure while it is off, so the row
+        // is one line and one button.
+        if (isReturnableRow(config)) {
+          return (
+            <div key={id} className="rounded-lg border border-white/8 bg-white/[0.01] overflow-hidden">
+              <div className="flex items-center gap-2 px-2 py-1.5">
+                <button
+                  onClick={() => toggleProvider(id)}
+                  className="group flex items-center"
+                  title="Enable provider"
+                >
+                  <Power size={10} className="text-gray-500 group-hover:text-green-400 transition-colors" />
+                </button>
+                <div className="flex-1 flex items-center gap-2 min-w-0">
+                  <span className="w-1.5 h-1.5 rounded-full shrink-0 bg-gray-600" />
+                  <span className="text-[0.65rem] text-gray-500 font-medium truncate">{view.label}</span>
+                  <span className="text-[0.5rem] px-1 py-0.5 rounded bg-white/5 text-gray-500 shrink-0">DISABLED</span>
+                </div>
+                <button
+                  onClick={() => toggleProvider(id)}
+                  className="shrink-0 px-2 py-0.5 rounded bg-green-500/10 border border-green-500/20 text-[0.6rem] text-green-300 hover:text-green-200 hover:bg-green-500/15 transition-colors"
+                >
+                  Enable
+                </button>
+              </div>
+              <p className="px-2 pb-1.5 text-[0.55rem] text-gray-600 leading-snug">
+                Switched off, so its models are not offered in the chat model picker. Press Enable to use it again.
+              </p>
+            </div>
+          )
+        }
         const needsKey = view.needsKey
         const currentKey = getProviderApiKey(id)
         const status = statuses[id] || 'idle'
@@ -428,9 +471,15 @@ export function ProviderSettings() {
         )
       })}
 
-      {/* No backend warning */}
+      {/* No backend warning. With a switched-off row on screen the honest
+          sentence names that row first, because pressing Enable on it is the
+          shorter way back than adding a provider again. */}
       {noBackend && (
-        <p className="text-[0.6rem] text-red-400">No backend configured. Add one below to start chatting.</p>
+        <p className="text-[0.6rem] text-red-400">
+          {rowIds.length > 0
+            ? 'No backend is enabled. Press Enable on one above, or add one below, to start chatting.'
+            : 'No backend configured. Add one below to start chatting.'}
+        </p>
       )}
 
       {/* Add Provider Dropdown */}
