@@ -80,6 +80,9 @@ export function ChatInput({ onSend, onStop, isGenerating, pendingApproval, onApp
   const isTranscribing = useVoiceStore((s) => s.isTranscribing)
   const thinkingEnabled = useSettingsStore((s) => s.settings.thinkingEnabled)
   const updateSettings = useSettingsStore((s) => s.updateSettings)
+  // Cloud mode is a money state: the next Send is billed. It gets drawn here,
+  // where the user is typing, not only on the switch in the header corner.
+  const cloudMode = useSettingsStore((s) => s.settings.appMode) === 'cloud'
   const activeModel = useModelStore((s) => s.activeModel)
   const activeModelMeta = useModelStore((s) => s.models.find((m) => m.name === s.activeModel))
   // Server-declared capability (LU Cloud carries thinkMode from /models) wins
@@ -252,10 +255,18 @@ export function ChatInput({ onSend, onStop, isGenerating, pendingApproval, onApp
           they belong to. ChatView owns the Enter/Esc keyboard layer. */}
 
       <div
+        // Cloud mode is drawn on the box the user is about to type into, not
+        // only on a switch in the far corner of the header (Nebenbefund 4, R5
+        // re-measure 2026-08-30: a single stray click moved the app to Cloud
+        // and the next question was billed, with nothing in the writing area
+        // saying anything had changed).
+        data-cloud={cloudMode ? 'on' : undefined}
         className={`relative flex flex-col rounded-lg border transition-colors ${
           isDragOver
             ? 'bg-blue-500/5 border-blue-500/30'
-            : 'bg-gray-50 dark:bg-white/[0.03] border-gray-200 dark:border-white/[0.06] focus-within:border-gray-400 dark:focus-within:border-white/15'
+            : cloudMode
+              ? 'bg-[#7c3aed]/[0.04] border-[#7c3aed]/40 focus-within:border-[#7c3aed]/70'
+              : 'bg-gray-50 dark:bg-white/[0.03] border-gray-200 dark:border-white/[0.06] focus-within:border-gray-400 dark:focus-within:border-white/15'
         }`}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
@@ -444,6 +455,28 @@ export function ChatInput({ onSend, onStop, isGenerating, pendingApproval, onApp
 
           {/* View-specific actions (Docs · Plugins · Tools) */}
           <div className="flex flex-nowrap items-center gap-1 shrink-0">{composerActions}</div>
+
+          {/* Cloud is a money state and it is said here, in words, on the row
+              the user looks at while typing. The tinted box around this row
+              carries the same message; a colour alone is not a statement
+              (Nebenbefund 4, R5 re-measure 2026-08-30). */}
+          {cloudMode && (
+            <span
+              data-testid="composer-cloud-state"
+              title="Cloud mode: this message runs on LU's hosted GPUs and is billed to your lu-labs.ai credits. The Cloud switch up in the header turns it off."
+              className="flex items-center gap-1 px-1.5 py-1.5 rounded-md shrink-0 text-[0.6rem] font-medium bg-[#7c3aed]/15 text-[#7c3aed] dark:text-[#a78bfa] border border-[#7c3aed]/30"
+            >
+              <img
+                src="/LU-monogram-bw.png"
+                alt=""
+                width={10}
+                height={10}
+                draggable={false}
+                className="shrink-0 select-none dark:invert-0 invert"
+              />
+              <span>Cloud</span>
+            </span>
+          )}
 
           <div className="flex-1 min-w-0" />
 
