@@ -8,6 +8,13 @@ import { markGalleryItemAvailable } from './galleryUrl'
 import { useComfyMedia } from './useComfyMedia'
 import { cn } from '../ui/cn'
 
+// The icon in the waiting circle says which PHASE the render is in, never
+// which device it runs on. The chip is the loading phase, the spark is
+// sampling. R14 Nebenbefund 2 read the chip as a CPU marker that had gone
+// missing, because the R13 screenshot caught a load and the R14 pair caught
+// two samplings. Checked in git: this mapping has not changed since the
+// surface was ported (eaeff304, 2026-07-04), so nothing was lost. The device
+// is said in words, by the yellow banner in the Create tab.
 function phaseIcon(phase: ProgressPhase) {
   if (phase === 'loading-model' || phase === 'loading-clip' || phase === 'loading-vae') return <Cpu size={20} className="text-amber-300" />
   if (phase === 'sampling') return <Sparkles size={20} className="text-green-300" />
