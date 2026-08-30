@@ -52,9 +52,23 @@ export const LU_CLIENT_PREFIX = 'lu-'
 /** Shared client ID used for both WS connection and workflow submission */
 export const CLIENT_ID = `${LU_CLIENT_PREFIX}${uuid()}`
 
+/**
+ * How many frames the replay buffer keeps.
+ *
+ * A render's own events are a handful (`execution_start`, one `executing` per
+ * node, one `progress` per step, `execution_complete`), so the only way to
+ * push a run's opening events out of a 400 entry window is a long sampling run
+ * whose steps have already been seen. Which is exactly when nothing needs
+ * replaying.
+ */
+export const WS_REPLAY_BUFFER = 400
+
 class ComfyWSClient {
   private ws: WebSocket | null = null
   private listeners = new Set<ComfyWSListener>()
+  /** The last frames that came in, newest last, for `on(listener, since)`. */
+  private buffer: { seq: number; event: ComfyWSEvent }[] = []
+  private seq = 0
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null
   private reconnectDelay = 1000
   private maxReconnectDelay = 30000
@@ -115,12 +129,7 @@ class ComfyWSClient {
       await listen<string>('comfy-ws-message', (ev) => {
         try {
           const msg = JSON.parse(ev.payload)
-          if (msg.type && msg.data) {
-            const event = msg as ComfyWSEvent
-            for (const listener of this.listeners) {
-              listener(event)
-            }
-          }
+          if (msg.type && msg.data) this.dispatch(msg as ComfyWSEvent)
         } catch { /* ignore non-JSON messages */ }
       })
       await listen('comfy-ws-closed', () => {
@@ -158,12 +167,7 @@ class ComfyWSClient {
         this.ws.onmessage = (ev) => {
           try {
             const msg = JSON.parse(ev.data)
-            if (msg.type && msg.data) {
-              const event = msg as ComfyWSEvent
-              for (const listener of this.listeners) {
-                listener(event)
-              }
-            }
+            if (msg.type && msg.data) this.dispatch(msg as ComfyWSEvent)
           } catch { /* ignore non-JSON messages */ }
         }
 
@@ -210,8 +214,53 @@ class ComfyWSClient {
     }, this.reconnectDelay)
   }
 
-  on(listener: ComfyWSListener) {
+  /** Hand one frame to everyone listening, and keep it for a late listener. */
+  private dispatch(event: ComfyWSEvent) {
+    this.buffer.push({ seq: ++this.seq, event })
+    if (this.buffer.length > WS_REPLAY_BUFFER) {
+      this.buffer.splice(0, this.buffer.length - WS_REPLAY_BUFFER)
+    }
+    for (const listener of this.listeners) {
+      listener(event)
+    }
+  }
+
+  /**
+   * A token for "everything from here on", to be handed back to `on`.
+   *
+   * R16 Befund 1: a render's caller cannot register its listener until the
+   * submit has told it which prompt id to filter on, and ComfyUI starts
+   * executing the moment the submit lands. Marking before the submit and
+   * replaying after it closes that window instead of hoping to win the race.
+   */
+  mark(): number {
+    return this.seq
+  }
+
+  /**
+   * Listen. With `since` from `mark()`, the frames that arrived in between are
+   * handed over, in the order they came in.
+   *
+   * The replay runs in a microtask, not inline: a caller typically writes
+   * `const off = comfyWS.on(...)` and its own teardown closes over `off`, so a
+   * replayed completion or error delivered DURING the call would reach a
+   * teardown whose `off` is not assigned yet. The microtask also means a
+   * listener that is removed again straight away is never replayed to.
+   */
+  on(listener: ComfyWSListener, since?: number) {
     this.listeners.add(listener)
+    if (typeof since === 'number') {
+      const held = this.buffer.filter((b) => b.seq > since)
+      if (held.length) {
+        queueMicrotask(() => {
+          if (!this.listeners.has(listener)) return
+          for (const b of held) {
+            if (!this.listeners.has(listener)) return
+            listener(b.event)
+          }
+        })
+      }
+    }
     return () => { this.listeners.delete(listener) }
   }
 

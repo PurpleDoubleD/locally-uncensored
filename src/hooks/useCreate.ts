@@ -1023,6 +1023,34 @@ export function useCreate() {
         outputHeight = hires.height
       }
 
+      // Open the progress socket BEFORE the submit, and remember where the
+      // stream stands, because ComfyUI starts executing the instant the submit
+      // lands and addresses this run's frames at our client id alone.
+      //
+      // R16 Befund 1: the connect used to sit AFTER the submit. On the first
+      // render of an app run that costs a dynamic import, two Tauri listener
+      // registrations and the Rust websocket handshake, and every frame
+      // ComfyUI sent in that window went to a socket that did not exist yet.
+      // ComfyUI buffers nothing, so the three load lines (model, text encoder,
+      // VAE) were simply gone, and the waiting area showed nothing at all
+      // until the render was 34 s old. From the second render on the socket
+      // was already up, the connect returned at once, and the lines appeared,
+      // which is why this only ever hit the first picture after a start.
+      //
+      // The mark closes the rest of the window: the listener below cannot be
+      // registered until the submit has returned the prompt id it filters on,
+      // so anything that arrives in between is replayed instead of raced for.
+      const maxTime = mode === 'video' ? 60 * 60 * 1000 : 20 * 60 * 1000
+      let useWS = false
+      let wsMark = 0
+      try {
+        await comfyWS.connect(3000)
+        useWS = true
+        wsMark = comfyWS.mark()
+      } catch {
+        console.warn('[useCreate] WebSocket unavailable, using polling fallback')
+      }
+
       setProgress(10, 'Submitting to ComfyUI...')
       let promptId: string
       try {
@@ -1048,16 +1076,6 @@ export function useCreate() {
       // a stall message that never names the processor is the reason an AMD
       // customer blames his settings for a hardware switch.
       void cpuRenderFacts()
-
-      // Try WebSocket-driven progress, fall back to polling
-      const maxTime = mode === 'video' ? 60 * 60 * 1000 : 20 * 60 * 1000
-      let useWS = false
-      try {
-        await comfyWS.connect(3000)
-        useWS = true
-      } catch {
-        console.warn('[useCreate] WebSocket unavailable, using polling fallback')
-      }
 
       if (useWS) {
         // ── WebSocket-driven progress ──
@@ -1178,6 +1196,8 @@ export function useCreate() {
             removeListener()
           }
 
+          // `wsMark` was taken before the submit, so the frames ComfyUI sent
+          // while this closure was being built are handed over first.
           const removeListener = comfyWS.on((event: ComfyWSEvent) => {
             // Only handle events for our prompt
             if ('prompt_id' in event.data && event.data.prompt_id !== promptId) return
@@ -1257,7 +1277,7 @@ export function useCreate() {
                 break
               }
             }
-          })
+          }, wsMark)
 
           // Also check abort
           abortCheck = setInterval(() => {
