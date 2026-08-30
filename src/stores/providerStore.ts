@@ -9,6 +9,7 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import type { ProviderId, ProviderConfig } from '../api/providers/types'
 import { clearProviderCache } from '../api/providers/registry'
+import { onLocalSlotChanged } from '../lib/builtin-slot-eviction'
 import { secretGet, secretSet, secretDelete } from '../api/backend'
 import { CLOUD_BASE } from '../api/cloud/config'
 
@@ -136,6 +137,7 @@ export const useProviderStore = create<ProviderState>()(
       setHideBackendSelector: (hide) => set({ hideBackendSelector: hide }),
 
       setProviderConfig: (id, updates) => {
+        const before = get().providers[id]
         set((state) => ({
           providers: {
             ...state.providers,
@@ -143,6 +145,12 @@ export const useProviderStore = create<ProviderState>()(
           },
         }))
         clearProviderCache() // invalidate cached clients
+        // Every route that moves the shared local slot comes through here (Add
+        // Provider, Enable on the standby card, Remove, Disable, onboarding), so
+        // the memory question is asked here, once. R12/R13 measured the answer
+        // it used to get: Jan takes the slot, lu-llama-server keeps PID and
+        // model in RAM until the app is restarted. See lib/builtin-slot-eviction.
+        if (id === 'openai') onLocalSlotChanged(before, get().providers.openai)
       },
 
       setProviderApiKey: (id, key) => {
@@ -182,12 +190,14 @@ export const useProviderStore = create<ProviderState>()(
       },
 
       resetProvider: (id) => {
+        const before = get().providers[id]
         set((state) => ({
           providers: {
             ...state.providers,
             [id]: DEFAULT_PROVIDERS[id],
           },
         }))
+        if (id === 'openai') onLocalSlotChanged(before, get().providers.openai)
         if (keychainReady) {
           void secretDelete(id).catch(() => { /* vault delete best-effort */ })
         }
@@ -195,6 +205,7 @@ export const useProviderStore = create<ProviderState>()(
       },
 
       resetProvidersToDefaults: () => {
+        const before = get().providers.openai
         set((state) => {
           const next = {} as Record<ProviderId, ProviderConfig>
           for (const id of Object.keys(DEFAULT_PROVIDERS) as ProviderId[]) {
@@ -207,6 +218,9 @@ export const useProviderStore = create<ProviderState>()(
           return { providers: next }
         })
         clearProviderCache()
+        // Reset hands the slot back to the app's own engine, which voids a
+        // pending unload rather than causing one.
+        onLocalSlotChanged(before, get().providers.openai)
       },
 
       hydrateProviderKeys: async () => {
