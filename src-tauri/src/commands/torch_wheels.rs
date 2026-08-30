@@ -361,37 +361,59 @@ fn nvidia_plan(cap: Option<(u32, u32)>) -> WheelPlan {
 /// ROCm wheels for. Windows is the case that matters (all four reporters of
 /// the AMD bundle who are not on Linux are there); anything else that is not
 /// Linux gets the same honest answer minus the Windows-only names.
-/// What an AMD card gets told on Linux when the ROCm wheels have no kernels
-/// for it.
+/// The measured fact behind the Linux brake, and the one sentence every caller
+/// starts from.
+///
+/// It lives here alone because two environments have to say it, and a fact that
+/// is written twice is a fact that gets updated once. `install.rs` puts the
+/// ComfyUI consequence behind it, `trainer.rs` puts the trainer's behind it,
+/// and neither restates the measurement.
 ///
 /// The install itself would succeed, which is the trap: pip is happy, the venv
-/// looks right, and the first sampler step dies with "HIP error: invalid device
+/// looks right, and the first kernel dies with "HIP error: invalid device
 /// function" or a rocBLAS complaint about a missing TensileLibrary. For these
 /// cards the ROCm wheels are 3 GB of download that ends worse than the
-/// processor build they replaced.
-pub(crate) fn amd_uncovered_linux_note(names: &[&str]) -> String {
-    let head = "AMD GPU detected, but no official ROCm wheel carries kernels for this card \
-                (checked 2026-08-30 against the code object lists inside the published \
-                wheels: gfx1010, gfx1012, gfx1031, gfx1032 and gfx1034 appear in none of \
-                them). Installing the ROCm build would download about 3 GB and then fail \
-                at the first render with \"HIP error: invalid device function\", so LU is \
-                installing the processor build instead, which is slow but works.";
-    // RDNA 2 below the 6800 is the one family with a real workaround, because
-    // gfx1030 kernels ARE in the wheels and the runtime can be pointed at them.
-    // RDNA 1 has no such neighbour, so it is not offered one.
+/// processor build they would replace.
+pub(crate) const AMD_UNCOVERED_GFX_FACT: &str =
+    "AMD GPU detected, but no official ROCm wheel carries kernels for this card \
+     (checked 2026-08-30 against the code object lists inside the published wheels: \
+     gfx1010, gfx1012, gfx1031, gfx1032 and gfx1034 appear in none of them). \
+     Installing the ROCm build would download about 3 GB and then fail at the first \
+     kernel with \"HIP error: invalid device function\".";
+
+/// The one workaround that exists, offered only where it can work.
+///
+/// RDNA 2 below the 6800 has a real one, because gfx1030 kernels ARE in the
+/// wheels and the runtime can be pointed at them. RDNA 1 has no such neighbour,
+/// so it is not sent chasing one. `before_what` is what the user would start
+/// with the variable set, which is a different program per caller.
+pub(crate) fn amd_rdna2_override_hint(names: &[&str], before_what: &str) -> Option<String> {
     let has_rdna2 = names
         .iter()
         .any(|n| matches!(radeon_rx_model(n), Some(6000..=6799)));
-    if has_rdna2 {
-        format!(
-            "{head} If you want to try the card anyway, the community route is to set \
-             HSA_OVERRIDE_GFX_VERSION=10.3.0 before starting ComfyUI, which makes an \
-             RDNA 2 card use the gfx1030 kernels. LU does not do that for you, because \
-             AMD does not support it and we cannot test it."
-        )
-    } else {
-        head.to_string()
+    if !has_rdna2 {
+        return None;
     }
+    Some(format!(
+        "If you want to try the card anyway, the community route is to set \
+         HSA_OVERRIDE_GFX_VERSION=10.3.0 before starting {before_what}, which makes an \
+         RDNA 2 card use the gfx1030 kernels. LU does not do that for you, because \
+         AMD does not support it and we cannot test it."
+    ))
+}
+
+/// What an AMD card gets told on Linux when the ROCm wheels have no kernels
+/// for it: the shared fact, then what the ComfyUI installer does about it.
+pub(crate) fn amd_uncovered_linux_note(names: &[&str]) -> String {
+    let mut note = format!(
+        "{AMD_UNCOVERED_GFX_FACT} So LU is installing the processor build instead, \
+         which is slow but works."
+    );
+    if let Some(hint) = amd_rdna2_override_hint(names, "ComfyUI") {
+        note.push(' ');
+        note.push_str(&hint);
+    }
+    note
 }
 
 pub(crate) fn amd_without_rocm_note(os: &str) -> String {

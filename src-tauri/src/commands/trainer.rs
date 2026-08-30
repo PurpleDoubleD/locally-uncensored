@@ -236,6 +236,7 @@ pub(crate) fn trainer_torch_plan(
     has_nvidia: bool,
     nvidia_cap_major: Option<u32>,
     has_amd: bool,
+    amd_names: &[&str],
     os: &str,
 ) -> TorchPlan {
     if has_nvidia || nvidia_cap_major.is_some() || !has_amd {
@@ -250,6 +251,19 @@ pub(crate) fn trainer_torch_plan(
         };
     }
     if os == "linux" {
+        // The same brake 3570ce53 put on the ComfyUI path, from the same
+        // source: the families measured as carried by no wheel install fine
+        // and die at the first kernel, so the ROCm channels are 3 GB spent on
+        // an environment that cannot finish a step. ComfyUI can fall back to
+        // the processor there; the trainer cannot, so its honest answer is the
+        // one it already gives on Windows, which is to refuse before anything
+        // is downloaded. Only cards we can NAME are held back, exactly as on
+        // the ComfyUI side: a card we cannot place keeps the wheels.
+        if crate::commands::torch_wheels::amd_fleet_coverage(amd_names, os)
+            == crate::commands::torch_wheels::AmdCoverage::NoKernels
+        {
+            return TorchPlan::NoWheels(amd_uncovered_linux_refusal(amd_names));
+        }
         return TorchPlan::Wheels {
             candidates: ROCM_CHANNELS,
             note: concat!(
@@ -260,19 +274,64 @@ pub(crate) fn trainer_torch_plan(
             .to_string(),
         };
     }
-    TorchPlan::NoWheels(
-        concat!(
-            "Training a character needs a PyTorch build that can drive your AMD card, ",
-            "and PyTorch ships those for Linux only (checked 2026-08-19: the rocm6.2, ",
-            "rocm6.3, rocm6.4 and rocm7.0 channels all exist and every wheel in them ",
-            "is a Linux wheel, there is no Windows one). ZLUDA does not close that gap ",
-            "either, it stands in for the CUDA runtime and not for the CUDA PyTorch ",
-            "build. So this machine needs an NVIDIA card or Linux with ROCm to train. ",
-            "Everything else in LU keeps running on your AMD card, and nothing was ",
-            "downloaded.",
+    TorchPlan::NoWheels(amd_no_trainer_wheels_note(os))
+}
+
+/// The Linux refusal for a card no wheel carries kernels for: the measured fact
+/// from `torch_wheels`, then what the TRAINER does about it, then the one
+/// workaround, where it exists.
+///
+/// The consequence differs from ComfyUI's on purpose. ComfyUI keeps the
+/// processor build, because a slow render still finishes. A LoRA run on the
+/// processor does not, and the optimizer it uses is a CUDA build, so offering
+/// it would be the same false promise the ROCm wheels are here.
+fn amd_uncovered_linux_refusal(names: &[&str]) -> String {
+    let mut note = format!(
+        "{} Training on the processor is not a way out either: a LoRA run would take days \
+         there, and the 8 bit optimizer the trainer uses has only ever been proven on CUDA. \
+         So this machine needs an NVIDIA card, or an AMD card the ROCm wheels carry kernels \
+         for, to train. Everything else in LU keeps running on your card, and nothing was \
+         downloaded.",
+        crate::commands::torch_wheels::AMD_UNCOVERED_GFX_FACT,
+    );
+    if let Some(hint) =
+        crate::commands::torch_wheels::amd_rdna2_override_hint(names, "the trainer")
+    {
+        note.push(' ');
+        note.push_str(&hint);
+    }
+    note
+}
+
+/// The refusal on an operating system pytorch.org publishes no ROCm wheels for.
+///
+/// The old text (2026-08-19) named the rocm6.2, rocm6.3, rocm6.4 and rocm7.0
+/// channels, which have moved on, and it said there was no Windows ROCm PyTorch
+/// at all. The first half is stale, the second half is wrong: the round 12
+/// research found AMD publishing win_amd64 ROCm wheels from its own indexes,
+/// and LU's ComfyUI installer uses one of them since 6d5dc61e. A customer who
+/// reads ComfyUI's README finds that channel in a minute, so a refusal that
+/// denies it exists loses the whole answer. What is still true is the reason
+/// the TRAINER does not go there.
+fn amd_no_trainer_wheels_note(os: &str) -> String {
+    let head = "Training a character needs a PyTorch build that can drive your AMD card, \
+                and pytorch.org publishes those for Linux only (checked 2026-08-30: every \
+                wheel in the rocm7.2, rocm7.1 and rocm6.4 channels is a Linux wheel).";
+    let tail = "ZLUDA does not close the gap either, it stands in for the CUDA runtime and \
+                not for the CUDA PyTorch build. So this machine needs an NVIDIA card or \
+                Linux with ROCm to train. Everything else in LU keeps running on your AMD \
+                card, and nothing was downloaded.";
+    if os == "windows" {
+        format!(
+            "{head} AMD publishes its own Windows ROCm wheels, and LU installs those for \
+             ComfyUI on the RDNA 3, 3.5 and 4 cards AMD supports there, but the trainer \
+             does not use them: the training step runs an 8 bit optimizer that exists as a \
+             CUDA build only, so the environment would install and then stop at exactly \
+             that step. {tail}"
         )
-        .to_string(),
-    )
+    } else {
+        format!("{head} {tail}")
+    }
 }
 
 /// Which vendors this machine actually has, from the same probe the hardware
@@ -481,6 +540,10 @@ fn already_explained(err: &str) -> bool {
         // nothing was downloaded, and pointing at Set up trainer would only
         // walk the customer into the same wall again.
         || err.contains("needs an NVIDIA card or Linux with ROCm")
+        // Third one, round 13: the Linux card no ROCm wheel carries kernels
+        // for. Same shape, same reason to be left alone, and a different
+        // sentence, so it needs its own marker.
+        || err.contains("no official ROCm wheel carries kernels")
 }
 
 /// The repair stopped before it even finished. Same dead end for the customer
@@ -854,10 +917,14 @@ fn provision_trainer_env(
     // to find out. The probe is the vendor list, not nvidia-smi alone, which
     // is what left numbrain and lapbo indistinguishable from a machine with
     // no GPU at all.
-    let (has_nvidia, has_amd) = gpu_vendors_present();
+    // The card NAMES come along now, because the wheel question is no longer
+    // "AMD yes or no": on Linux the answer depends on the family, and the name
+    // is the only thing any probe here reports (round 12, torch_wheels.rs).
+    let (has_nvidia, has_amd, amd_names) = crate::commands::torch_wheels::gpu_vendor_facts();
+    let amd_names: Vec<&str> = amd_names.iter().map(String::as_str).collect();
     let cap = crate::commands::install::detect_nvidia_compute_cap_major();
     let (candidates, wheel_note) =
-        match trainer_torch_plan(has_nvidia, cap, has_amd, std::env::consts::OS) {
+        match trainer_torch_plan(has_nvidia, cap, has_amd, &amd_names, std::env::consts::OS) {
             TorchPlan::Wheels { candidates, note } => (candidates, note),
             TorchPlan::NoWheels(why) => return Err(why),
         };
@@ -1365,6 +1432,14 @@ fn cancel_character_training_blocking(state: &AppState) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
+    // Card names exactly as the probes spell them, round 12. The wheel matrix
+    // behind them was read out of the published wheels on 2026-08-30 and lives
+    // in torch_wheels.rs; these are only the strings.
+    const RX_7900: &str = "AMD Radeon RX 7900 XTX";
+    const RX_6700: &str = "AMD Radeon RX 6700 XT";
+    const RX_5700: &str = "AMD Radeon RX 5700 XT";
+    const AMD_APU: &str = "AMD Radeon(TM) Graphics";
+
     /// Cancelling a training run has to reach the process that actually holds
     /// the card, not just the launcher.
     ///
@@ -1453,7 +1528,7 @@ mod tests {
         use super::{trainer_torch_plan, TorchPlan};
         // numbrain and lapbo: no NVIDIA card, so the old probe answered None
         // and the plan was the same cu121 a machine with no GPU at all gets.
-        match trainer_torch_plan(false, None, true, "linux") {
+        match trainer_torch_plan(false, None, true, &[RX_7900], "linux") {
             TorchPlan::Wheels { candidates, note } => {
                 assert!(
                     candidates.iter().all(|c| c.contains("/rocm")),
@@ -1469,7 +1544,7 @@ mod tests {
         // Windows and macOS have no ROCm wheel to install at all, so the only
         // honest move is to say so before anything is downloaded.
         for os in ["windows", "macos"] {
-            match trainer_torch_plan(false, None, true, os) {
+            match trainer_torch_plan(false, None, true, &[RX_7900], os) {
                 TorchPlan::NoWheels(why) => {
                     assert!(why.contains("Linux only"), "{os}: {why}");
                     assert!(why.contains("ZLUDA"), "{os} answer ignores ZLUDA: {why}");
@@ -1481,6 +1556,103 @@ mod tests {
                 other => panic!("{os} has no ROCm wheel, got {other:?}"),
             }
         }
+    }
+
+    // ── Runde 13: the Linux brake reaches the trainer too ─────────────────
+    //
+    // 3570ce53 held the uncovered AMD families back on the ComfyUI path. The
+    // trainer walked the same road with the same map and no brake: RDNA 1 and
+    // the RX 6400 to 6750 would have pulled the ROCm wheels, imported torch,
+    // enumerated the device, and died at the first kernel. ComfyUI can fall
+    // back to the processor there; a LoRA run cannot, so the trainer refuses,
+    // which is the answer it already gives on Windows.
+
+    #[test]
+    fn a_linux_card_with_no_kernels_is_refused_before_anything_is_downloaded() {
+        use super::{trainer_torch_plan, TorchPlan};
+        for name in [RX_6700, RX_5700, "AMD Radeon RX 6600 XT", "AMD Radeon RX 6500 XT"] {
+            match trainer_torch_plan(false, None, true, &[name], "linux") {
+                TorchPlan::NoWheels(why) => {
+                    // the measured fact, from torch_wheels and not restated here
+                    assert!(why.contains("no official ROCm wheel carries kernels"), "{name}: {why}");
+                    assert!(why.contains("invalid device function"), "{name}: {why}");
+                    // and the trainer's own consequence, which is not ComfyUI's
+                    assert!(why.contains("nothing was downloaded"), "{name}: {why}");
+                    assert!(!why.contains("installing the processor build"), "{name}: {why}");
+                    // it carries its own way out, so the disk-and-network
+                    // wrapper has to leave it alone
+                    assert!(super::already_explained(&why), "{name} answer gets rewrapped");
+                }
+                other => panic!("{name} would die at the first kernel, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn the_rdna2_workaround_is_named_to_the_trainer_only_where_it_can_work() {
+        use super::{trainer_torch_plan, TorchPlan};
+        let why = |name: &str| match trainer_torch_plan(false, None, true, &[name], "linux") {
+            TorchPlan::NoWheels(w) => w,
+            other => panic!("{name}: {other:?}"),
+        };
+        // gfx1030 kernels ARE in the wheels, so an RDNA 2 card can be pointed
+        // at them, and the sentence names the trainer rather than ComfyUI.
+        assert!(why(RX_6700).contains("HSA_OVERRIDE_GFX_VERSION=10.3.0"));
+        assert!(why(RX_6700).contains("before starting the trainer"));
+        assert!(why(RX_6700).contains("LU does not do that for you"));
+        // RDNA 1 has no neighbour and must not be sent chasing one.
+        assert!(!why(RX_5700).contains("HSA_OVERRIDE"));
+    }
+
+    #[test]
+    fn negative_control_the_brake_only_catches_the_measured_families() {
+        use super::{trainer_torch_plan, TorchPlan};
+        // Cards the wheels do carry, and a card whose name says nothing, keep
+        // the ROCm channels they had before this commit.
+        for name in [RX_7900, "AMD Radeon RX 9070 XT", "AMD Radeon RX 6800 XT", AMD_APU] {
+            match trainer_torch_plan(false, None, true, &[name], "linux") {
+                TorchPlan::Wheels { candidates, .. } => {
+                    assert_eq!(candidates, crate::commands::torch_wheels::ROCM_CHANNELS, "{name}")
+                }
+                other => panic!("{name} must keep the ROCm wheels, got {other:?}"),
+            }
+        }
+        // A box with an uncovered card AND a covered one trains on the covered
+        // one, so the brake must not take the wheels away from it.
+        assert!(matches!(
+            trainer_torch_plan(false, None, true, &[RX_6700, RX_7900], "linux"),
+            TorchPlan::Wheels { .. },
+        ));
+        // and it is an AMD brake on Linux: an NVIDIA box is untouched
+        assert!(matches!(
+            trainer_torch_plan(true, Some(8), true, &[RX_6700], "linux"),
+            TorchPlan::Wheels { candidates, .. } if candidates[0].contains("/cu"),
+        ));
+    }
+
+    #[test]
+    fn the_windows_refusal_tells_the_truth_of_the_round_12_research() {
+        use super::{trainer_torch_plan, TorchPlan};
+        let TorchPlan::NoWheels(why) = trainer_torch_plan(false, None, true, &[RX_7900], "windows")
+        else {
+            panic!("windows still has no trainer wheels for an AMD card");
+        };
+        // The channel names of 2026-08-19 are gone, and the ones that are named
+        // are the ones torch_wheels actually walks.
+        assert!(!why.contains("rocm6.2"), "{why}");
+        assert!(!why.contains("rocm7.0"), "{why}");
+        assert!(why.contains("rocm7.2"), "{why}");
+        // The claim that no Windows ROCm PyTorch exists is gone with them, and
+        // the reason the trainer still says no is named instead.
+        assert!(why.contains("AMD publishes its own Windows ROCm wheels"), "{why}");
+        assert!(why.contains("8 bit optimizer"), "{why}");
+        // The AMD sentence belongs to Windows and nowhere else.
+        let TorchPlan::NoWheels(mac) = trainer_torch_plan(false, None, true, &[RX_7900], "macos")
+        else {
+            panic!("macos still has no trainer wheels for an AMD card");
+        };
+        assert!(!mac.contains("Windows ROCm wheels"), "{mac}");
+        assert!(mac.contains("Linux only"), "{mac}");
     }
 
     #[test]
@@ -1497,7 +1669,7 @@ mod tests {
             // A box with both cards trains on the NVIDIA one.
             (true, Some(8), true),
         ] {
-            match trainer_torch_plan(has_nvidia, cap, has_amd, "windows") {
+            match trainer_torch_plan(has_nvidia, cap, has_amd, &[RX_6700], "windows") {
                 TorchPlan::Wheels { candidates, .. } => assert_eq!(
                     candidates,
                     torch_index_for_cap(cap),
