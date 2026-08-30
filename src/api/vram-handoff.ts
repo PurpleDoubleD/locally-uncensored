@@ -2014,6 +2014,28 @@ async function restoreBody(evicted: RenderEviction, graceMs: number, myEpoch: nu
   // Give the chat backends their VRAM back. freeMemory drops ComfyUI's
   // cached checkpoint; without it the reloads below can OOM right after a
   // big render.
+  //
+  // R16 Befund 6a, what this costs, written down because it was measured and
+  // not guessed. On the Windows box (2026-08-30, 12 GB GPU, 16 GB RAM,
+  // z_image_bf16 at 11.46 GB) ComfyUI dropped the model after every render,
+  // RAM going 7.68 GB back to 672 MB, and every one of the five runs then
+  // spent 69 s to 75 s reading it back in before the first sampling step.
+  //
+  // Where that unload comes from: `/free {unload_models, free_memory}` is the
+  // only such call in LU, ComfyUI is started with no memory flags at all
+  // (process.rs, `--cpu` and `--use-flash-attention` are the only conditional
+  // ones), and smart memory is left on. So this line is the prime suspect, but
+  // it only fires when a local chat backend was actually resident to evict,
+  // and whether one was on the box that evening is not established here. The
+  // log lines that settle it are `render_juggle.evicted` and
+  // `render_juggle.restored` below; without them ComfyUI dropped the model by
+  // itself and the 30+ s belongs to a 16 GB machine, not to us.
+  //
+  // Left as it is on purpose. It is the deliberate hand-off (a resident chat
+  // model squatting the card is what forced heavy CPU offload and the OOMs on
+  // the 14B lanes), and `exclusiveVramMode: 'never'` already turns the whole
+  // juggle off. Trading a render's load time against a chat model's is David's
+  // call, not a fixer's.
   try { await freeMemory() } catch { /* best effort */ }
   if (todo.bundled) {
     try {
