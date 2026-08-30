@@ -644,7 +644,7 @@ export function ModelSelector({ openUpward = false, surface = 'chat' }: ModelSel
         const loaded = new Set(list)
         setLmsLoaded(loaded)
         if (!loaded.has(id)) {
-          setSelectError(`Couldn't load "${displayModelName(model.name)}" into LM Studio. Try the power button, or load it in LM Studio directly.`)
+          setSelectError(`Couldn't load "${displayModelName(model.name)}" into LM Studio. Try the On/Off button on the model's row, or load it in LM Studio directly.`)
           return // keep dropdown open; don't activate an unloaded model
         }
         setActiveModel(model.name)

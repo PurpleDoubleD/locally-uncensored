@@ -231,7 +231,7 @@ export function HardwareSettings() {
 
       {showRestartHint && (vendor !== 'auto' || indices.length > 0) && (
         <div className="text-[0.6rem] text-amber-300 italic">
-          GPU pick takes effect on next Ollama / ComfyUI spawn. Restart both via the Power button (top-right) or close LU to apply.
+          GPU pick takes effect on next Ollama / ComfyUI spawn. Restart ComfyUI under AI Backends, ComfyUI (Image &amp; Video), or close LU to apply it to both.
         </div>
       )}
     </div>

@@ -845,7 +845,7 @@ fn graceful_error(msg: &str) -> Response {
 /// generic error.
 fn graceful_perm_error(tool: &str, permission: &str) -> Response {
     let msg = format!(
-        "Tool `{}` is gated behind the `{}` permission. Open Settings (gear icon) and toggle it on.",
+        "Tool `{}` is gated behind the `{}` permission. Open the Menu, tap Settings, and turn it on under Remote Permissions.",
         tool, permission
     );
     eprintln!("[Remote agent] tool `{}` blocked: missing permission `{}`", tool, permission);
