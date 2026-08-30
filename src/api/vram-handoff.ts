@@ -77,7 +77,27 @@ import { getActiveAgentModel } from './agent-context'
 import { comfyWS, CLIENT_ID } from './comfyui-ws'
 import { PaceTracker, overBudget, renderBudgetNotice, renderTimeoutNotice, warmupExceeded, swapWarmupNotice, loadPhaseGraceMs, finishGraceMs, warmupBudgetMs, SWAP_WARMUP_BUDGET_MS, type CpuRenderFacts } from '../lib/render-budget'
 import { asComfyGpuMode } from '../lib/comfy-cpu-banner'
+import { comfyHoldsNoVram } from '../lib/comfy-device'
 import { log } from '../lib/logger'
+
+/**
+ * Is the ComfyUI we are about to render on running on the processor?
+ *
+ * R14 Nebenbefund 1: both hand-off paths below evicted the chat engine before
+ * every render, including renders on a ComfyUI started with `--cpu`, which
+ * holds no VRAM at all. Same reply `cpuRenderFacts` reads, asked separately so
+ * this decision never disturbs the cached facts the failure notices use, and
+ * so a missing reply (web build, ComfyUI never started by LU) answers `false`
+ * and leaves the hand-off exactly as it was.
+ */
+async function comfyRendersOnCpu(): Promise<boolean> {
+  try {
+    const s = await backendCall<{ startedCpu?: boolean | null; mode?: string | null }>('get_comfy_gpu_status')
+    return comfyHoldsNoVram({ startedCpu: s?.startedCpu === true, mode: asComfyGpuMode(s?.mode) })
+  } catch {
+    return false
+  }
+}
 
 /**
  * Resolve a casual model name the user/LLM typed (e.g. "FramePack", "wan",
@@ -793,7 +813,21 @@ async function runHandoff(kind: 'image' | 'video', args: VramHandoffArgs, seq: n
   let willUnload = false
   let willUnloadLms = false
   let willUnloadBundled = false
-  if (textModel || lmsTarget || bundledTarget) {
+  // R14 Nebenbefund 1: a ComfyUI LU started with `--cpu` never touches the
+  // card, so there is no VRAM to hand over. Evicting the chat engine for it
+  // buys nothing and costs a full cold reload after every picture. Asked once
+  // per generation, and only when there is something that WOULD be evicted.
+  const comfyOnCpu = (textModel || lmsTarget || bundledTarget) ? await comfyRendersOnCpu() : false
+  if (comfyOnCpu) {
+    log.info('vram_handoff.skipped_cpu_comfy', {
+      kind,
+      targetModel,
+      textModel,
+      lmsModel: lmsTarget?.id ?? null,
+      bundledModel: bundledTarget?.modelPath ?? null,
+    })
+  }
+  if (!comfyOnCpu && (textModel || lmsTarget || bundledTarget)) {
     try {
       const [footprint, systemVram, mode] = await Promise.all([
         Promise.resolve(estimateModelFootprintGB(targetModel)),
@@ -1894,6 +1928,15 @@ async function evictBody(): Promise<RenderEviction> {
   if (getExclusiveVramMode() === 'never') {
     // The user opted out of VRAM juggling; do not touch the resident chat
     // backends. An inherited haul still needs restoring after this render.
+    return inherited ?? { ...EMPTY_EVICTION }
+  }
+
+  // R14 Nebenbefund 1: a ComfyUI LU started with `--cpu` renders without ever
+  // claiming the card, so the eager eviction above has nothing to make room
+  // for. On the box this cost a full reload of the chat model after every
+  // picture. An inherited haul still gets restored after this render.
+  if (await comfyRendersOnCpu()) {
+    log.info('render_juggle.skipped_cpu_comfy', {})
     return inherited ?? { ...EMPTY_EVICTION }
   }
 
