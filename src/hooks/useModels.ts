@@ -5,7 +5,6 @@ import {
   getInstalledImageModels as getComfyImageModels,
   getInstalledVideoModels as getComfyVideoModels,
   checkComfyConnection,
-  filterPartialFiles,
   readModelDiskSizes,
 } from '../api/comfyui'
 import { parseNDJSONStream } from '../api/stream'
@@ -222,11 +221,13 @@ export function useModels() {
         const imageModels = imageResult.status === 'fulfilled' ? imageResult.value : []
         const videoModels = videoResult.status === 'fulfilled' ? videoResult.value : []
 
-        // Still drop half-downloaded multipart files, as before.
-        const complete = await filterPartialFiles([
-          ...imageModels.map((m) => m.name),
-          ...videoModels.map((m) => m.name),
-        ])
+        // No second partial filter here. The inventory readers above are the
+        // one reader for this list and they already decided what is on the
+        // disk; asking the catalogue a second time is what hid
+        // llava_llama3_fp8_scaled.safetensors (2.4 GB on the box, 8.5 GB in
+        // our catalogue) from every surface in the app while its three folder
+        // neighbours showed up (R5 re-measure, 2026-08-30). A catalogue size
+        // is a claim about the file we ship, not about the file the user has.
         const format = (name: string) =>
           name.toLowerCase().endsWith('.gguf') ? 'gguf' : 'safetensors'
         // What each file weighs, asked once for both lanes. Every ComfyUI
@@ -238,8 +239,8 @@ export function useModels() {
           architecture: m.type, type, providerName: 'ComfyUI' as const,
         })
         comfyModels = [
-          ...imageModels.filter((m) => complete.has(m.name)).map((m) => toModel(m, 'image') as ImageModel),
-          ...videoModels.filter((m) => complete.has(m.name)).map((m) => toModel(m, 'video') as VideoModel),
+          ...imageModels.map((m) => toModel(m, 'image') as ImageModel),
+          ...videoModels.map((m) => toModel(m, 'video') as VideoModel),
         ]
       }
       setModels([...allModels, ...comfyModels])

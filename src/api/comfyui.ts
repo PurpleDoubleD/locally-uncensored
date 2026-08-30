@@ -147,11 +147,19 @@ export interface ClassifiedModel {
   type: ModelType
   /** Which ComfyUI enum listed this file. `motion_module` is the AnimateDiff
    *  one, and it lives outside ComfyUI\models entirely (see getMotionModels).
-   *  `lora`, `vae` and `text_encoder` are the addon folders: files that are
-   *  not a model on their own, take up real disk, and used to appear in no
-   *  list and no counter at all (counter-check 2026-08-29). */
-  source: 'checkpoint' | 'diffusion_model' | 'motion_module' | 'lora' | 'vae' | 'text_encoder'
+   *  The rest are the addon folders: files that are not a model on their own,
+   *  take up real disk, and used to appear in no list and no counter at all
+   *  (counter-check 2026-08-29, and five more folders in the R5 re-measure
+   *  the day after). */
+  source: 'checkpoint' | 'diffusion_model' | 'motion_module' | AddonSource
 }
+
+/** The ComfyUI\models folders that hold files a user installs, none of which
+ *  is a main model. One name per folder, and INSTALLED_ADDON_LANES below is
+ *  the single place that says which loader enumerates it. */
+export type AddonSource =
+  | 'lora' | 'vae' | 'text_encoder'
+  | 'clip_vision' | 'controlnet' | 'upscale_model' | 'embedding' | 'style_model'
 
 /** Where a listed file actually sits, by the enum that listed it. The disk
  *  probe needs the folder, and the delete command resolves the same set.
@@ -168,6 +176,11 @@ export function subfolderForSource(source: ClassifiedModel['source']): string {
     case 'lora': return 'loras'
     case 'vae': return 'vae'
     case 'text_encoder': return 'text_encoders'
+    case 'clip_vision': return 'clip_vision'
+    case 'controlnet': return 'controlnet'
+    case 'upscale_model': return 'upscale_models'
+    case 'embedding': return 'embeddings'
+    case 'style_model': return 'style_models'
   }
 }
 
@@ -632,6 +645,69 @@ export async function getLoraModels(): Promise<string[]> {
   }
 }
 
+/** The five folders the R5 re-measure (2026-08-30) found missing entirely.
+ *
+ *  A dummy .safetensors was dropped into ten ComfyUI model folders. ComfyUI
+ *  listed all ten at once; the app showed five of them and never mentioned the
+ *  other five. Two real files were invisible with them, an 817 MB CLIP-Vision
+ *  encoder and, once the partial filter below was fixed, a 2.4 GB text
+ *  encoder. Each of these is a stock ComfyUI loader over a stock folder, and
+ *  each soft-fails to an empty list, so a distro that lacks one of the nodes
+ *  costs that folder and nothing around it. */
+export async function getCLIPVisionModels(): Promise<string[]> {
+  try {
+    return await fetchNodeOptions('CLIPVisionLoader', 'clip_name')
+  } catch (err) {
+    log.warn('comfyui.fetch_clip_vision_failed', { err })
+    return []
+  }
+}
+
+export async function getControlNetModels(): Promise<string[]> {
+  try {
+    return await fetchNodeOptions('ControlNetLoader', 'control_net_name')
+  } catch (err) {
+    log.warn('comfyui.fetch_controlnet_failed', { err })
+    return []
+  }
+}
+
+export async function getUpscaleModels(): Promise<string[]> {
+  try {
+    return await fetchNodeOptions('UpscaleModelLoader', 'model_name')
+  } catch (err) {
+    log.warn('comfyui.fetch_upscale_failed', { err })
+    return []
+  }
+}
+
+export async function getStyleModels(): Promise<string[]> {
+  try {
+    return await fetchNodeOptions('StyleModelLoader', 'style_model_name')
+  } catch (err) {
+    log.warn('comfyui.fetch_style_models_failed', { err })
+    return []
+  }
+}
+
+/** Embeddings are the one folder no loader node enumerates: ComfyUI serves
+ *  them from its own /embeddings route instead, and that route hands back
+ *  BASE NAMES with the extension stripped. So this list alone cannot be shown
+ *  as installed files, and resolveEmbeddingFiles below puts the extension
+ *  back before anything reaches the inventory. */
+export async function getEmbeddingNames(): Promise<string[]> {
+  try {
+    const res = await localFetch(comfyuiUrl('/embeddings'), { timeoutMs: COMFY_LIST_TIMEOUT_MS })
+    if (!res.ok) return []
+    const data = await res.json()
+    if (!Array.isArray(data)) return []
+    return data.filter((n): n is string => typeof n === 'string' && n.length > 0)
+  } catch (err) {
+    log.warn('comfyui.fetch_embeddings_failed', { err })
+    return []
+  }
+}
+
 export async function getSamplers(): Promise<string[]> {
   try {
     const list = await fetchNodeOptions('KSampler', 'sampler_name')
@@ -882,20 +958,127 @@ export async function getInstalledVideoModels(): Promise<ClassifiedModel[]> {
   return out
 }
 
+/** Extensions a model file on the disk actually carries. Everything ComfyUI
+ *  enumerates by filename ends in one of these. */
+const MODEL_FILE_EXTENSIONS = [
+  '.safetensors', '.sft', '.ckpt', '.pt', '.pth', '.bin', '.gguf', '.onnx', '.pkl',
+]
+
+/**
+ * Is this enum entry a file on the disk at all.
+ *
+ * R5 re-measure, 2026-08-30: the Installed list under Image carried an entry
+ * called `pixel_space`, type safetensors, no size. A search over the whole C:
+ * drive found no such file, because there is none. `pixel_space` is ComfyUI's
+ * built-in pixel-space pseudo VAE, and VAELoader offers it in the same enum as
+ * the real files, exactly like the built-in taesd family beside it. The app
+ * read that enum as a list of installed files and invented a model the user
+ * neither downloaded nor can delete.
+ *
+ * The rule is the general one rather than a name list: an inventory entry
+ * claims a file occupies the disk, and a name with no file extension is not a
+ * file. That covers pixel_space, taesd, taesdxl, taesd3, taef1 and whatever
+ * ComfyUI builds in next, without this having to be told about it.
+ */
+export function isInstalledModelFile(name: string): boolean {
+  const lower = name.toLowerCase()
+  return MODEL_FILE_EXTENSIONS.some((ext) => lower.endsWith(ext))
+}
+
 /** One addon folder, as classified models. These files are not a model on
  *  their own, which is why no picker offers them and why every inventory
  *  surface used to skip them. They still occupy the disk and the user still
- *  has to be able to see and remove them. */
+ *  has to be able to see and remove them.
+ *
+ *  No partial filter here any more, and that is the second half of the R5
+ *  re-measure (2026-08-30). `text_encoders\llava_llama3_fp8_scaled.safetensors`
+ *  weighs 2.4 GB on the box and appeared nowhere, while its three folder
+ *  neighbours appeared. The catalogue ships that name at 8.5 GB, the disk
+ *  probe called 2.4 GB too small, and filterPartialFiles dropped it. But a
+ *  catalogue size is a claim about the file WE ship, never about the file the
+ *  user has, and this list answers one question only: what is lying on the
+ *  disk. ComfyUI enumerates the file, so ComfyUI can load it; hiding it left
+ *  2.4 GB the user could not see and could not delete. The bundle cards and
+ *  the Create pickers keep their partial filter, because "is this usable" is
+ *  their question and it is a different one. */
 async function addonLane(
   read: () => Promise<string[]>,
-  source: 'lora' | 'vae' | 'text_encoder',
+  source: AddonSource,
 ): Promise<ClassifiedModel[]> {
   const names = await read()
-  const complete = await filterPartialFiles(names)
   return names
-    .filter((name) => complete.has(name))
+    .filter(isInstalledModelFile)
     .map((name) => ({ name, type: classifyModel(name), source }))
 }
+
+/**
+ * The embeddings folder, as real filenames.
+ *
+ * ComfyUI has no loader node over embeddings: they are served by the
+ * /embeddings route, which strips the extension off every name. A stripped
+ * name is not a file, so it fails isInstalledModelFile, cannot be measured and
+ * cannot be deleted. So the extension is put back by asking the disk which of
+ * the candidates exists, in ONE batched probe for the whole folder.
+ *
+ * Best effort: a probe that fails costs the embeddings lane and nothing else,
+ * which is the same deal every other lane gets.
+ */
+async function embeddingLane(): Promise<ClassifiedModel[]> {
+  const bases = await getEmbeddingNames()
+  if (bases.length === 0) return []
+  // A name that already carries an extension needs no guessing.
+  const ready = bases.filter(isInstalledModelFile)
+  const stripped = bases.filter((n) => !isInstalledModelFile(n))
+  const found = new Set<string>(ready)
+  if (stripped.length > 0) {
+    try {
+      const files = stripped.flatMap((base) =>
+        MODEL_FILE_EXTENSIONS.map((ext) => ({
+          subfolder: 'embeddings', filename: `${base}${ext}`, expectedBytes: 0,
+        })),
+      )
+      const results: Array<{ filename: string; exists?: boolean }> =
+        await backendCall('check_model_sizes', { files })
+      const onDisk = new Set(results.filter((r) => r.exists).map((r) => r.filename))
+      for (const base of stripped) {
+        const hit = MODEL_FILE_EXTENSIONS.map((ext) => `${base}${ext}`).find((f) => onDisk.has(f))
+        if (hit) found.add(hit)
+      }
+    } catch (err) {
+      log.warn('comfyui.embedding_filename_probe_failed', { err })
+    }
+  }
+  return [...found].map((name) => ({ name, type: classifyModel(name), source: 'embedding' as const }))
+}
+
+/**
+ * Which loader answers for which ComfyUI model folder. ONE table, because the
+ * folder list was spread over the readers that happened to need a folder, and
+ * a folder nobody happened to need was simply invisible: five of them at the
+ * R5 re-measure on 2026-08-30 (clip_vision, controlnet, upscale_models,
+ * embeddings, style_models), holding among other things an 817 MB CLIP-Vision
+ * encoder that no surface in the app had ever named.
+ *
+ * The main-model folders (checkpoints, diffusion_models, and the GGUF unets
+ * beside them) are not here: those are read by getImageModels, which the
+ * pickers share. Everything else a user drops into ComfyUI\models is.
+ */
+const INSTALLED_ADDON_LANES: Array<{ source: AddonSource; read: () => Promise<ClassifiedModel[]> }> = [
+  { source: 'lora', read: () => addonLane(getLoraModels, 'lora') },
+  { source: 'vae', read: () => addonLane(getVAEModels, 'vae') },
+  { source: 'text_encoder', read: () => addonLane(getCLIPModels, 'text_encoder') },
+  { source: 'clip_vision', read: () => addonLane(getCLIPVisionModels, 'clip_vision') },
+  { source: 'controlnet', read: () => addonLane(getControlNetModels, 'controlnet') },
+  { source: 'upscale_model', read: () => addonLane(getUpscaleModels, 'upscale_model') },
+  { source: 'style_model', read: () => addonLane(getStyleModels, 'style_model') },
+  { source: 'embedding', read: embeddingLane },
+]
+
+/** Every ComfyUI\models folder the inventory reads, by its subfolder name.
+ *  Exported so a test can hold it against ComfyUI's own folder truth instead
+ *  of against the list that happens to be here. */
+export const INSTALLED_ADDON_SUBFOLDERS: string[] =
+  INSTALLED_ADDON_LANES.map((lane) => subfolderForSource(lane.source))
 
 /** Everything installed in the image lane, for the INVENTORY surfaces: the
  *  Models rail counter and the Installed tab. The image twin of
@@ -913,18 +1096,16 @@ async function addonLane(
  *  and getImageModels still answers exactly what it did. A VAE is never a
  *  main model, and this function is the only place that says otherwise. */
 export async function getInstalledImageModels(): Promise<ClassifiedModel[]> {
-  const [imageModels, loras, vaes, textEncoders] = await Promise.all([
+  const [imageModels, ...addons] = await Promise.all([
     inventoryLane('image', getImageModels),
-    inventoryLane('lora', () => addonLane(getLoraModels, 'lora')),
-    inventoryLane('vae', () => addonLane(getVAEModels, 'vae')),
-    inventoryLane('text_encoder', () => addonLane(getCLIPModels, 'text_encoder')),
+    ...INSTALLED_ADDON_LANES.map((lane) => inventoryLane(lane.source, lane.read)),
   ])
   const out: ClassifiedModel[] = []
   const seen = new Set<string>()
   // First lane wins. A name that two loaders both list (a checkpoint ComfyUI
   // also offers as a VAE) is one file on the disk and belongs in the list
   // once, or the Installed count starts inventing entries.
-  for (const m of [...imageModels, ...loras, ...vaes, ...textEncoders]) {
+  for (const m of [imageModels, ...addons].flat()) {
     if (seen.has(m.name)) continue
     seen.add(m.name)
     out.push(m)
