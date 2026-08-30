@@ -33,6 +33,17 @@ interface ModelState {
   beginInventoryRefresh: () => void
   endInventoryRefresh: () => void
   setModels: (models: AIModel[]) => void
+  /** Drop every inventory row for a file that is provably gone from the disk.
+   *  Nebenbefund 2 of the R8 re-measure: after a confirmed delete the row and
+   *  the counter stood unchanged for about ten seconds while the file was long
+   *  gone, because the list only ever changed at the END of the reconcile
+   *  chain (ComfyUI rescan, reachability probe, two /object_info reads, a stat
+   *  over every remaining file). Nothing here guesses: the delete command has
+   *  already returned Ok. The chain still runs and still has the last word.
+   *  Every row, not the first: one checkpoint file is one row under Image and
+   *  one under Video. `activeModel` is untouched on purpose, this serves the
+   *  ComfyUI lanes and an image file is never the active chat model. */
+  removeInventoryModel: (name: string) => void
   setActiveModel: (name: string | null) => void
   startPull: (name: string, controller: AbortController) => void
   updatePullProgress: (name: string, progress: PullProgress) => void
@@ -89,6 +100,16 @@ export const useModelStore = create<ModelState>()(
               ? state.activeModel
               : (firstChat ? firstChat.name : null),
           }
+        }),
+
+      removeInventoryModel: (name) =>
+        set((state) => {
+          if (!name) return state
+          const models = state.models.filter((m) => m.name !== name)
+          // A no-op must stay a no-op: returning a fresh array for a name that
+          // was not in the list would re-render every counter for nothing.
+          if (models.length === state.models.length) return state
+          return { models }
         }),
 
       setActiveModel: (name) => {

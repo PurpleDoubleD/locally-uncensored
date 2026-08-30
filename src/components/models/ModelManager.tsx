@@ -6,6 +6,7 @@ import {
   Settings as SettingsIcon,
 } from 'lucide-react'
 import { useModels } from '../../hooks/useModels'
+import { useModelStore } from '../../stores/modelStore'
 import { useUIStore } from '../../stores/uiStore'
 import { useProviderStore } from '../../stores/providerStore'
 import { ModelCard } from './ModelCard'
@@ -116,11 +117,20 @@ export function ModelManager() {
         // ComfyUI file model (cpl.sardinas7489, Discord): delete the file from
         // the models tree, then rescan so the enum and the list drop it.
         await backendCall('delete_comfy_model', { filename: name })
+        // Nebenbefund 2 of the R8 re-measure: the rescan below is the slow
+        // part (ComfyUI re-reads its model tree, then a reachability probe,
+        // two /object_info reads and a stat over every remaining file), and
+        // until it landed the dialog, the row and the counter all still showed
+        // a file that was already off the disk. The command above returned Ok,
+        // so they can say so now. The rescan still runs and still has the last
+        // word.
+        setConfirmDelete(null)
+        useModelStore.getState().removeInventoryModel(name)
         await refreshComfyModels().catch(() => { /* rescan is best-effort */ })
         await fetchModels()
-      } else {
-        await removeModel(name)
+        return
       }
+      await removeModel(name)
       setConfirmDelete(null)
     } catch (e) {
       setDeleteError(e instanceof Error ? e.message : String(e))
