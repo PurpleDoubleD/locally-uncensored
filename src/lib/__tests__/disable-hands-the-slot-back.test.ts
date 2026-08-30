@@ -81,16 +81,24 @@ describe('THE FIX: Disable on the slot holder gives the slot back', () => {
 
   it('the standby sentence can no longer claim a takeover that is switched off', () => {
     const pane = read('src/components/settings/ProviderConfig.tsx')
-    // the takeover wording is now bound to the slot actually being on
-    expect(pane).toMatch(/\{providers\.openai\.enabled \? \([\s\S]{0,400}took over the local OpenAI compatible slot/)
+    // the takeover wording is now bound to the slot actually being on. Round 14
+    // put the user's own Disable in front of this branch (Nebenbefund 3,
+    // R12/R13), so the condition is no longer the first one in the chain, but
+    // it is the same condition and it still guards the same sentence.
+    expect(pane).toMatch(/providers\.openai\.enabled \? \([\s\S]{0,400}took over the local OpenAI compatible slot/)
     // and the other state has a sentence of its own that says what is true
     expect(pane).toMatch(/holds the local OpenAI compatible slot and is switched off,\s*\n?\s*so no local backend is running/)
   })
 
   it('the wiring: the Disable button routes through the handback', () => {
     const pane = read('src/components/settings/ProviderConfig.tsx')
-    expect(pane).toMatch(/if \(!nextEnabled && id === 'openai'\) \{\s*\n\s*const handback = slotHandbackUpdate\(providers\.openai\)/)
+    // Round 14: the same handback, wrapped so the backend that leaves is
+    // labelled DISABLED rather than STANDBY. slotDisableOccupantUpdate IS
+    // slotHandbackUpdate plus that mark, see openai-slot-handover.ts.
+    expect(pane).toMatch(/if \(!nextEnabled && id === 'openai'\) \{\s*\n\s*const handback = slotDisableOccupantUpdate\(providers\.openai\)/)
     expect(pane).toMatch(/setProviderConfig\('openai', handback\)/)
+    const lib = read('src/lib/openai-slot-handover.ts')
+    expect(lib).toMatch(/const patch = slotHandbackUpdate\(slot\)/)
   })
 })
 

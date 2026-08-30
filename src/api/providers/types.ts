@@ -41,6 +41,11 @@ export interface ProviderConfig {
     baseUrl: string
     isLocal: boolean
     managed?: boolean
+    // Set when this backend left the slot because the user pressed Disable on
+    // it, rather than because something else took the slot from it. The card
+    // then reads DISABLED instead of STANDBY, which is the button that was
+    // pressed (Nebenbefund 3, R12/R13 re-measure 2026-08-30).
+    disabledByUser?: boolean
   }
 }
 

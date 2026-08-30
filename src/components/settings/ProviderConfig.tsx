@@ -5,6 +5,7 @@ import { providerRowIds, isReturnableRow } from '../../lib/provider-visibility'
 import {
   slotTakeoverUpdate,
   slotHandbackUpdate,
+  slotDisableOccupantUpdate,
   standbyOccupant,
   occupantIsRemovable,
   standbyIsRemovable,
@@ -167,6 +168,10 @@ export function ProviderSettings() {
   // The backend Add Provider pushed out of the shared `openai` slot, if any.
   // It keeps a card instead of disappearing (Nebenbefund 3, R10 re-measure).
   const standby = standbyOccupant(providers.openai)
+  // Was it pushed aside, or did the user switch it off. The slot looks the
+  // same from here either way, so the mark rides on the card (Nebenbefund 3,
+  // R12/R13 re-measure).
+  const standbyOff = standby?.disabledByUser === true
 
   // Remove, armed by a second click on the same button (Nebenbefund (b), R11
   // re-measure). The house has one confirmation and this is it: the Reset
@@ -281,8 +286,14 @@ export function ProviderSettings() {
     // one: the engine that was waiting for exactly this slot takes it back, and
     // the backend that is leaving takes the standby card in its place. That is
     // the same swap Enable does, only pressed from the other side.
+    //
+    // Nebenbefund 3, R12/R13 re-measure: the swap was right, the label was not.
+    // The card of the backend that leaves said STANDBY, which is the word for a
+    // backend that was pushed aside, and this one was switched off by hand. It
+    // says DISABLED now and carries the same disabledByUser mark every other
+    // switched-off row carries. Enable and Remove stay on it, unchanged.
     if (!nextEnabled && id === 'openai') {
-      const handback = slotHandbackUpdate(providers.openai)
+      const handback = slotDisableOccupantUpdate(providers.openai)
       if (handback) {
         setProviderConfig('openai', handback)
         setStatuses(prev => ({ ...prev, openai: 'idle' }))
@@ -591,20 +602,28 @@ export function ProviderSettings() {
         )
       })}
 
-      {/* The backend Add Provider pushed out of the shared local slot. It used
-          to vanish without a word, and the way back (Add Provider, Built-in
+      {/* The backend that is no longer in the shared local slot. It used to
+          vanish without a word, and the way back (Add Provider, Built-in
           Engine) was there but unlabelled. Same shape as the switched-off row
-          above, with the reason written out. */}
+          above, with the reason written out.
+
+          Two ways to land here, and they are not the same state (Nebenbefund 3,
+          R12/R13 re-measure): something else TOOK the slot, or the user pressed
+          Disable on this backend and the slot went back to the engine waiting
+          for it. The first is STANDBY, the second is DISABLED, because that is
+          the button the user pressed. Enable and Remove sit on both. */}
       {standby && (
         <div className="rounded-lg border border-white/8 bg-white/[0.01] overflow-hidden">
           <div className="flex items-center gap-2 px-2 py-1.5">
-            <button onClick={handBackSlot} className="group flex items-center" title="Put this backend back in the local slot">
+            <button onClick={handBackSlot} className="group flex items-center" title={standbyOff ? 'Switch this backend back on and give it the local slot' : 'Put this backend back in the local slot'}>
               <Power size={10} className="text-gray-500 group-hover:text-green-400 transition-colors" />
             </button>
             <div className="flex-1 flex items-center gap-2 min-w-0">
               <span className="w-1.5 h-1.5 rounded-full shrink-0 bg-gray-600" />
               <span className="text-[0.65rem] text-gray-500 font-medium truncate">{standby.name}</span>
-              <span className="text-[0.5rem] px-1 py-0.5 rounded bg-white/5 text-gray-500 shrink-0">STANDBY</span>
+              {standbyOff
+                ? <span className="text-[0.5rem] px-1 py-0.5 rounded bg-white/5 text-gray-500 shrink-0">DISABLED</span>
+                : <span className="text-[0.5rem] px-1 py-0.5 rounded bg-white/5 text-gray-500 shrink-0">STANDBY</span>}
             </div>
             {standbyIsRemovable(providers.openai) && (
               <button
@@ -633,7 +652,13 @@ export function ProviderSettings() {
               produce a switched-off holder any more, but onboarding still parks
               this slot without anyone pressing anything, and then the takeover
               wording would be a lie. */}
-          {providers.openai.enabled ? (
+          {standbyOff ? (
+            <p className="px-2 pb-1.5 text-[0.55rem] text-gray-600 leading-snug">
+              You switched {standby.name} off, so the local OpenAI compatible slot went back to
+              {' '}{providers.openai.name}, which holds it now. Press Enable to switch {standby.name}
+              {' '}back on and give it the slot again.
+            </p>
+          ) : providers.openai.enabled ? (
             <p className="px-2 pb-1.5 text-[0.55rem] text-gray-600 leading-snug">
               {providers.openai.name} took over the local OpenAI compatible slot, which holds one
               backend at a time. Press Enable to hand the slot back to {standby.name}.

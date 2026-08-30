@@ -50,6 +50,17 @@ export interface SlotOccupant {
   baseUrl: string
   isLocal: boolean
   managed?: boolean
+  /**
+   * This backend is waiting beside the slot because the USER switched it off,
+   * not because something else took the slot from it.
+   *
+   * Nebenbefund 3 of the R12/R13 re-measure (2026-08-30): Disable on the slot
+   * holder gives the slot back correctly, but then labelled Jan STANDBY. The
+   * button says Disable and the user pressed it, so the card has to say the
+   * backend is off. Parked and switched off are two different states and only
+   * the card can tell them apart, because the slot itself looks identical.
+   */
+  disabledByUser?: boolean
 }
 
 /** The part of the `openai` slot this decision reads. */
@@ -140,6 +151,33 @@ export function slotHandbackUpdate(slot: HandoverSlot): Partial<ProviderConfig> 
   // re-measure ended in: Jan added, then Jan disabled, and no local backend
   // left at all. Handing the slot back there must not also lose Jan.
   return slotTakeoverUpdate({ ...slot, enabled: true, displaced: undefined }, back)
+}
+
+/**
+ * The patch DISABLE on the slot holder writes.
+ *
+ * Same swap as the handback, because that is the part R11 got right: switching
+ * a backend off is not a wish to be left without one, and the engine waiting
+ * beside the slot takes it back. The one difference is the label the leaving
+ * backend gets, which is Nebenbefund 3 of the R12/R13 re-measure:
+ *
+ *   "Disable auf dem Slot-Inhaber setzt den Anbieter nicht auf DISABLED,
+ *    sondern auf STANDBY. Das ist die freundlichere Auslegung ... Es weicht
+ *    aber von der Beschriftung ab: der Knopf heisst Disable, das Ergebnis ist
+ *    ein Rollentausch."
+ *
+ * So the card says DISABLED and carries the same `disabledByUser` mark every
+ * other switched-off row carries. Enable and Remove stay on it either way: the
+ * way back must not depend on how the backend got there.
+ *
+ * Null when there is nobody to hand the slot to, and then the plain Disable
+ * path applies unchanged (the row goes greyed DISABLED where it always did).
+ */
+export function slotDisableOccupantUpdate(slot: HandoverSlot): Partial<ProviderConfig> | null {
+  const patch = slotHandbackUpdate(slot)
+  const leaving = (patch as { displaced?: SlotOccupant } | null)?.displaced
+  if (!patch || !leaving) return patch
+  return { ...patch, displaced: { ...leaving, disabledByUser: true } }
 }
 
 /**
