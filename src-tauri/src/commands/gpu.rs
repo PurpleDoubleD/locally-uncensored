@@ -279,15 +279,40 @@ fn vendor_from_adapter_name(name: &str) -> &'static str {
 /// its true size, so one branch answers both questions the picker asks, and
 /// `reg.exe` is not going anywhere. Pure over the two parsed queries for the
 /// same reason the wmic parser is: the CI runners are not Windows.
+///
+/// The order is not the registry's. This is the second registry hole from the
+/// AMD deep-dive of 2026-08-31: a card that was pulled out of the machine keeps
+/// its numbered subkey and its `DriverDesc`, and the registry has no flag that
+/// says present or not present. Firefox and System Informer both leave the
+/// registry for this and ask SetupAPI with `DIGCF_PRESENT` or CfgMgr32 instead.
+///
+/// What is done about it here, and it is a ranking and not a detector: an entry
+/// whose subkey also carries a readable `HardwareInformation.qwMemorySize` has
+/// positive evidence that a miniport driver measured real hardware there, so it
+/// sorts ahead of an entry that has none. Index 0 of a vendor then goes to the
+/// card we have evidence for rather than to whichever subkey was numbered first
+/// by installation order, and that index is what the picker shows first and
+/// what `HIP_VISIBLE_DEVICES` names.
+///
+/// Where this stops, written down rather than glossed over:
+///
+/// - Nothing is dropped. An AMD or Intel iGPU legitimately has no
+///   `qwMemorySize` (the value is undocumented and often absent on integrated
+///   parts), so a filter would delete real cards. It only loses its head start.
+/// - It does not identify a leftover. A card that ran on this machine and was
+///   then removed keeps the value it once wrote, so it carries the same
+///   evidence a present card does. The ranking helps where a leftover never
+///   ran here; it does nothing for the case the deep-dive named as the worst
+///   one.
+/// - Closing that case for real means SetupAPI or CfgMgr32, which is a new
+///   Windows dependency and a different change than this one.
 fn detect_other_via_registry_from(
     names: &[(String, String)],
     sizes: &[(String, String)],
     have_rocm: bool,
 ) -> Vec<DetectedGpu> {
-    let mut gpus = Vec::new();
-    // Per-vendor counters, exactly as on the other two paths: HIP_VISIBLE_DEVICES
-    // and ONEAPI_DEVICE_SELECTOR are vendor-scoped.
-    let mut next: std::collections::HashMap<&str, u32> = std::collections::HashMap::new();
+    // (has presence evidence, vendor, name, VRAM), before the ranking.
+    let mut rows: Vec<(bool, &'static str, String, Option<u64>)> = Vec::new();
     for (key, raw_name) in names {
         let name = raw_name.trim().to_string();
         if name.is_empty() { continue }
@@ -303,6 +328,17 @@ fn detect_other_via_registry_from(
             .and_then(|(_, v)| parse_reg_hex(v))
             .filter(|b| *b > 0)
             .map(|b| b / 1024 / 1024);
+        rows.push((memory_mib.is_some(), vendor, name, memory_mib));
+    }
+    // Stable, so entries that carry the same amount of evidence keep the
+    // registry's own order among themselves.
+    rows.sort_by_key(|(has_evidence, ..)| !has_evidence);
+
+    let mut gpus = Vec::new();
+    // Per-vendor counters, exactly as on the other two paths: HIP_VISIBLE_DEVICES
+    // and ONEAPI_DEVICE_SELECTOR are vendor-scoped.
+    let mut next: std::collections::HashMap<&str, u32> = std::collections::HashMap::new();
+    for (_, vendor, name, memory_mib) in rows {
         let index = next.entry(vendor).or_insert(0);
         gpus.push(DetectedGpu {
             index: *index,
@@ -436,11 +472,49 @@ fn detect_other_via_wmic_from(
 #[cfg(not(target_os = "windows"))]
 fn detect_other_on_windows(_have_rocm: bool) -> Vec<DetectedGpu> { vec![] }
 
-/// Class GUID of the display-adapter registry branch. Every installed GPU
+/// Class GUID of the display-adapter registry branch, lowercase, as
+/// `adapter_subkey` matches it. Microsoft lists it as the "Display Adapters"
+/// setup class, and the software key of every display adapter is created under
+/// it.
+const DISPLAY_CLASS_GUID: &str = "{4d36e968-e325-11ce-bfc1-08002be10318}";
+
+/// The same branch as a full key path for `reg query`. Every installed GPU
 /// driver gets a numbered subkey (0000, 0001, …) under it.
 #[allow(dead_code)]
 const DISPLAY_CLASS_KEY: &str =
     r"HKLM\SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}";
+
+/// The numbered adapter subkey out of one `reg query` key line, or `None` when
+/// the line is not an adapter at all.
+///
+/// This is the first of the two registry holes the AMD deep-dive of 2026-08-31
+/// found. MEASURED on the Windows box: `reg query <CLASS> /s` returns 27 keys
+/// and exactly one of them is an adapter. The branch also carries
+/// `<CLASS>\Configuration` with a whole subtree under it
+/// (`Control\Video\$VideoId\Video`, `Device`, `Driver`,
+/// `Services\$Service\Video`, `Variables\…`) and `<CLASS>\Properties`, which is
+/// closed even to administrators (`reg query /s` skips it silently and still
+/// exits 0, so there is no error to handle and none that should be raised).
+///
+/// The rule that holds: exactly one path segment after the class GUID, and
+/// that segment is four digits. Anything deeper or differently named is part
+/// of the branch's own bookkeeping, not a card. `/v DriverDesc` already keeps
+/// most of it out, because `reg query` then prints only keys that carry the
+/// value, but "most" is not a rule, and a `Configuration\…\Video` that carried
+/// a `DriverDesc` would have been counted as a GPU.
+fn adapter_subkey(key_line: &str) -> Option<&str> {
+    let at = key_line.to_ascii_lowercase().find(DISPLAY_CLASS_GUID)?;
+    // to_ascii_lowercase never changes byte lengths, so the index is valid in
+    // the original line too.
+    let sub = key_line[at + DISPLAY_CLASS_GUID.len()..].strip_prefix('\\')?;
+    // Four digits and nothing else. A deeper path fails this on the backslash
+    // it still carries, so one check covers both halves of the rule.
+    if sub.len() == 4 && sub.bytes().all(|b| b.is_ascii_digit()) {
+        Some(sub)
+    } else {
+        None
+    }
+}
 
 /// Pull `<subkey> → <value>` pairs out of `reg query … /s /v <name>` output.
 ///
@@ -464,14 +538,11 @@ fn parse_reg_query(raw: &str, value_name: &str) -> Vec<(String, String)> {
             continue;
         }
         if !trimmed.starts_with(char::is_whitespace) {
-            // Key line. Remember the leaf ("0000"), which is what the two
-            // queries have in common.
-            if trimmed.starts_with("HKEY_") {
-                current = trimmed.rsplit('\\').next().map(|s| s.to_string());
-            } else {
-                // "End of search: N match(es) found." and its localized twins.
-                current = None;
-            }
+            // Key line. Remember the numbered subkey ("0000"), which is what
+            // the two queries have in common. Everything that is not an adapter
+            // key clears it, which is also what happens to
+            // "End of search: N match(es) found." and its localized twins.
+            current = adapter_subkey(trimmed).map(|s| s.to_string());
             continue;
         }
         let Some(key) = current.as_ref() else { continue };
@@ -626,6 +697,105 @@ End of search: 2 match(es) found.
     #[test]
     fn parse_reg_query_skips_other_value_names() {
         assert!(parse_reg_query(DRIVER_DESC_OUT, "HardwareInformation.qwMemorySize").is_empty());
+    }
+
+    // ── Runde 20: the two registry holes from the AMD deep-dive ───────────
+
+    /// The branch as it really looks. MEASURED on the Windows box on
+    /// 2026-08-31: `reg query <CLASS> /s` returns 27 keys and exactly one of
+    /// them is an adapter; the rest is `<CLASS>\Configuration` with its subtree
+    /// and `<CLASS>\Properties`. The `DriverDesc` values sitting inside the
+    /// Configuration subtree here are the constructed worst case, not a
+    /// measured one: `/v DriverDesc` keeps that subtree out only as long as
+    /// nothing in it carries that value, which is likely but not a rule.
+    const NOISY_DRIVER_DESC_OUT: &str = r"
+HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}\0000
+    DriverDesc    REG_SZ    AMD Radeon RX 7900 XTX
+
+HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}\Configuration\AMD_RADEON_RX_7900_XTX\00\00\Control\Video\{9f7f7c19-1111-2222-3333-444444444444}\Video
+    DriverDesc    REG_SZ    Configuration subtree, not an adapter
+
+HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}\Configuration\AMD_RADEON_RX_7900_XTX\00\00\Services\amdkmdap\Video
+    DriverDesc    REG_SZ    Services subtree, not an adapter either
+
+End of search: 3 match(es) found.
+";
+
+    #[test]
+    fn only_a_four_digit_subkey_under_the_class_guid_counts_as_an_adapter() {
+        let got = parse_reg_query(NOISY_DRIVER_DESC_OUT, "DriverDesc");
+        assert_eq!(got, vec![("0000".to_string(), "AMD Radeon RX 7900 XTX".to_string())]);
+
+        // NEGATIVE CONTROL, backwards: the rule this replaced was "leaf name of
+        // any line starting with HKEY_". Run it over the same text and the box
+        // grows two cards it does not have.
+        let old_rule: Vec<String> = NOISY_DRIVER_DESC_OUT
+            .lines()
+            .filter(|l| l.starts_with("HKEY_"))
+            .filter_map(|l| l.rsplit('\\').next().map(|s| s.to_string()))
+            .collect();
+        assert_eq!(old_rule.len(), 3, "the old rule took every key line: {old_rule:?}");
+        assert!(old_rule.contains(&"Video".to_string()), "{old_rule:?}");
+    }
+
+    #[test]
+    fn the_subkey_rule_takes_the_numbered_keys_and_nothing_around_them() {
+        let base = r"HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}";
+        assert_eq!(adapter_subkey(&format!(r"{base}\0000")), Some("0000"));
+        assert_eq!(adapter_subkey(&format!(r"{base}\0013")), Some("0013"));
+        // Case: reg.exe is not required to echo the GUID in lowercase.
+        let shouting = format!(r"{}\0001", base.to_ascii_uppercase());
+        assert_eq!(adapter_subkey(&shouting), Some("0001"));
+        // Everything the branch carries besides adapters.
+        assert_eq!(adapter_subkey(&format!(r"{base}\Configuration")), None);
+        assert_eq!(adapter_subkey(&format!(r"{base}\Properties")), None);
+        assert_eq!(adapter_subkey(&format!(r"{base}\Configuration\X\00\00\Video")), None);
+        assert_eq!(adapter_subkey(&format!(r"{base}\0000\Session\vbios")), None);
+        assert_eq!(adapter_subkey(&format!(r"{base}\000")), None);
+        assert_eq!(adapter_subkey(&format!(r"{base}\00001")), None);
+        assert_eq!(adapter_subkey(&format!(r"{base}\00a0")), None);
+        assert_eq!(adapter_subkey(base), None);
+        // A different device class entirely, in case a query is ever widened.
+        assert_eq!(
+            adapter_subkey(r"HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\Class\{4d36e972-e325-11ce-bfc1-08002be10318}\0000"),
+            None,
+        );
+        assert_eq!(adapter_subkey("End of search: 3 match(es) found."), None);
+    }
+
+    #[test]
+    fn an_entry_with_no_sign_of_present_hardware_sorts_behind_one_that_has_it() {
+        // 0000 is the leftover of a card that is no longer in the box: the
+        // subkey and its DriverDesc survive removal, and the size query has
+        // nothing for it. 0001 is the card that is actually installed. 0002 is
+        // the Microsoft basic display driver, which the deep-dive measured out
+        // of C:\Windows\INF\display.inf.
+        let names = vec![
+            ("0000".to_string(), "AMD Radeon RX 6800 XT".to_string()),
+            ("0001".to_string(), "AMD Radeon RX 9070 XT".to_string()),
+            ("0002".to_string(), "Microsoft Basic Display Adapter".to_string()),
+        ];
+        let sizes = vec![("0001".to_string(), "0x400000000".to_string())];
+        let found = detect_other_via_registry_from(&names, &sizes, false);
+
+        // The card with evidence leads its vendor, so index 0 and the first row
+        // in the picker are the one we can show a measurement for.
+        assert_eq!(found[0].name, "AMD Radeon RX 9070 XT");
+        assert_eq!((found[0].index, found[0].memory_mib), (0, Some(16384)));
+        assert_eq!(found[1].name, "AMD Radeon RX 6800 XT");
+        assert_eq!((found[1].index, found[1].memory_mib), (1, None));
+
+        // NEGATIVE CONTROL, backwards: registry order alone put the leftover
+        // first, which is what HIP_VISIBLE_DEVICES=0 would then have named.
+        assert_ne!(found[0].name, names[0].1, "still ranking by subkey number");
+
+        // The ranking demotes, it never deletes: an integrated card has no
+        // qwMemorySize either and has to stay in the list.
+        assert_eq!(found.len(), 3, "{found:?}");
+        // And the basic display driver stays "unknown" instead of being talked
+        // into a vendor, because without a vendor driver ROCm cannot run anyway.
+        assert_eq!(found[2].vendor, "unknown");
+        assert_eq!(found[2].index, 0, "vendors are counted separately");
     }
 
     #[test]
