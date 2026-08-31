@@ -13,6 +13,13 @@ interface Props {
    * reset settings) instead of the small inline card.
    */
   root?: boolean
+  /**
+   * Called by the inline "Retry" button *in addition to* clearing the error
+   * state. LazyView uses it to throw away the memoized React.lazy payload —
+   * without that, a chunk whose import() rejected once stays rejected for the
+   * rest of the session and the Retry button would be decoration.
+   */
+  onRetry?: () => void
 }
 
 interface State {
@@ -36,6 +43,7 @@ export class ErrorBoundary extends Component<Props, State> {
 
   handleReset = () => {
     this.setState({ hasError: false, error: null })
+    this.props.onRetry?.()
   }
 
   render() {

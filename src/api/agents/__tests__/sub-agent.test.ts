@@ -48,7 +48,13 @@ vi.mock('../../providers', () => ({
   }),
 }))
 
-vi.mock('../../mcp', () => ({
+// M7 / Audit W-T2: sub-agent.ts holt `toolRegistry` seit der Auflösung der
+// INEFFECTIVE_DYNAMIC_IMPORT-Warnung direkt aus `mcp/tool-registry` statt aus
+// der Tonne `mcp` (der alte `await import('../mcp')` konnte nie splitten und
+// war nur da, um einen Modulzyklus zu brechen). Der Stub zeigt deshalb jetzt
+// auf dieselbe Naht unter ihrem echten Namen — Inhalt und Erwartungen dieses
+// Tests sind unverändert.
+vi.mock('../../mcp/tool-registry', () => ({
   toolRegistry: {
     getAll: () => [SHELL_DEF],
     resolveExecutable: (name: string) => (name === 'shell_execute' ? SHELL_DEF : undefined),

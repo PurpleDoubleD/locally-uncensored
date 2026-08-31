@@ -1388,6 +1388,13 @@ export function registerBuiltinTools(registry: ToolRegistry) {
       registry.registerBuiltin(tool, executor)
     }
   }
+  // M7 / Audit W-T2: der Redirect für zurückgezogene Namen wird hier ANGEMELDET,
+  // statt dass execute() ihn sich per `await import('./builtin-tools')` zurück-
+  // holt. Der alte Rück-Import konnte nie in einen eigenen Chunk splitten
+  // (mcp/index.ts lädt dieses Modul ohnehin statisch) und war damit genau das
+  // Muster, das M7 anprangert. Die Richtung stimmt jetzt: die konkreten Tools
+  // kennen die Registry, nicht umgekehrt.
+  registry.setRetiredRunner(runRetiredTool)
 }
 
 // ── Retired tools (2.6.6 merge, plan E5) ────────────────────────

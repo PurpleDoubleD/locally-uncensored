@@ -4,13 +4,16 @@ import { StaleModelsBanner } from './StaleModelsBanner'
 import { StorageQuotaToast } from './StorageQuotaToast'
 import { Sidebar } from './Sidebar'
 import { ChatView } from '../chat/ChatView'
-import { ModelManager } from '../models/ModelManager'
-import { SettingsPage } from '../settings/SettingsPage'
-import { CreateExperimental } from '../create/experimental/CreateExperimental'
-import { BenchmarkView } from '../models/BenchmarkView'
-import { Onboarding } from '../onboarding/Onboarding'
 import { BackendSelector } from '../onboarding/BackendSelector'
 import { ErrorBoundary } from '../ui/ErrorBoundary'
+import { LazyView } from './LazyView'
+import {
+  BenchmarkSkeleton,
+  CreateSkeleton,
+  ModelManagerSkeleton,
+  OnboardingSkeleton,
+  SettingsSkeleton,
+} from './ViewSkeletons'
 import { useUIStore } from '../../stores/uiStore'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { useCompareStore } from '../../stores/compareStore'
@@ -46,6 +49,29 @@ import { Titlebar } from './Titlebar'
 // no-backup fallback, browser give-up); module-level so a reload starts fresh.
 let resolveRestoreDecided: () => void = () => {}
 const restoreDecided = new Promise<void>((resolve) => { resolveRestoreDecided = resolve })
+
+// M7 / Audit W-T2 — Lazy-Grenzen der Top-Level-Views.
+//
+// ChatView bleibt bewusst ein *statischer* Import: `currentView` wird nicht
+// persistiert (uiStore.partialize), jeder Start landet also auf 'chat'. Ihn
+// lazy zu laden hieße, Bundle-Größe gegen einen weißen Blitz beim Kaltstart zu
+// tauschen — genau der Handel, den dieses Audit verbietet.
+//
+// Die übrigen fünf Views sieht niemand, bevor er sie anklickt. Onboarding ist
+// der Grenzfall: es ist beim allerersten Start sofort sichtbar. Es liegt
+// trotzdem hinter der Grenze, weil (a) es genau *einmal* im Leben einer
+// Installation gezeigt wird, (b) der Rahmen davor ohnehin `restoring` abwartet,
+// und (c) sein Fallback den Vollbild-Hintergrund von index.html trägt, der
+// Übergang vom HTML-Splash also farblich nahtlos ist statt weiß.
+//
+// Die Loader stehen auf Modulebene, damit LazyView eine stabile Identität
+// bekommt — eine Factory, die pro Render neu entsteht, würde den View bei jedem
+// Repaint neu mounten.
+const loadModelManager = () => import('../models/ModelManager').then((m) => ({ default: m.ModelManager }))
+const loadBenchmarkView = () => import('../models/BenchmarkView').then((m) => ({ default: m.BenchmarkView }))
+const loadSettingsPage = () => import('../settings/SettingsPage').then((m) => ({ default: m.SettingsPage }))
+const loadCreateExperimental = () => import('../create/experimental/CreateExperimental').then((m) => ({ default: m.CreateExperimental }))
+const loadOnboarding = () => import('../onboarding/Onboarding').then((m) => ({ default: m.Onboarding }))
 
 export function AppShell() {
   // Targeted, NOT `useUIStore()`. A whole-store subscription here put the
@@ -801,7 +827,7 @@ export function AppShell() {
   if (restoring) return null
 
   if (!onboardingDone) {
-    return <Onboarding />
+    return <LazyView load={loadOnboarding} fallback={<OnboardingSkeleton />} />
   }
 
   return (
@@ -814,11 +840,15 @@ export function AppShell() {
         <div className="flex-1 flex overflow-hidden gap-2 p-2">
           {!isComparing && <Sidebar />}
           <main className="flex-1 overflow-hidden rounded-xl bg-white dark:bg-[#1e1e1e] ring-1 ring-black/[0.04] dark:ring-white/[0.05]">
+            {/* Boot-View: statisch, damit der Kaltstart sofort etwas zeigt. */}
             {currentView === 'chat' && <ErrorBoundary><ChatView /></ErrorBoundary>}
-            {currentView === 'models' && <ErrorBoundary><ModelManager /></ErrorBoundary>}
-            {currentView === 'benchmark' && <ErrorBoundary><BenchmarkView /></ErrorBoundary>}
-            {currentView === 'settings' && <ErrorBoundary><SettingsPage /></ErrorBoundary>}
-            {currentView === 'create' && <ErrorBoundary><CreateExperimental /></ErrorBoundary>}
+            {/* LazyView bringt seine eigene ErrorBoundary *um* die Suspense-
+                Grenze mit — ein abgelehnter Chunk-Import wird dort gefangen,
+                statt bis zur Root-Boundary durchzuschlagen. */}
+            {currentView === 'models' && <LazyView load={loadModelManager} fallback={<ModelManagerSkeleton />} />}
+            {currentView === 'benchmark' && <LazyView load={loadBenchmarkView} fallback={<BenchmarkSkeleton />} />}
+            {currentView === 'settings' && <LazyView load={loadSettingsPage} fallback={<SettingsSkeleton />} />}
+            {currentView === 'create' && <LazyView load={loadCreateExperimental} fallback={<CreateSkeleton />} />}
           </main>
         </div>
       </div>

@@ -51,8 +51,36 @@ export class ToolRegistry {
   private builtinNames = new Set<string>()
   /** Collisions refused since startup, for the MCP settings panel / report. */
   private rejectedExternal: { serverId: string; toolName: string }[] = []
+  /**
+   * Fallback für zurückgezogene Tool-Namen (2.6.6 tool merge), gesetzt von
+   * registerBuiltinTools.
+   *
+   * M7 / Audit W-T2: hier stand vorher `await import('./builtin-tools')`
+   * mitten in execute(). Der Kommentar daneben nannte den echten Grund —
+   * „keeps the module graph acyclic" —, aber gesplittet hat dieser import()
+   * nie: mcp/index.ts zieht builtin-tools ohnehin statisch herein, also lag das
+   * Modul immer schon im selben Chunk. Rolldown hat das als
+   * INEFFECTIVE_DYNAMIC_IMPORT gemeldet, und zu Recht.
+   *
+   * Ein statischer Import wäre die falsche Auflösung gewesen: die generische
+   * Registry darf die konkreten Builtins nicht kennen (dieselbe Regel, wegen
+   * der RETIRED_MUTATING_NAMES schon in lib/retired-tools.ts ausgelagert ist).
+   * Also wird die Abhängigkeit umgedreht — builtin-tools *meldet* seinen
+   * Redirect an, statt dass die Registry ihn sich holt. Kante weg, Zyklus weg,
+   * Warnung weg.
+   */
+  private retiredRunner:
+    | ((name: string, args: Record<string, any>, run?: AgentRunContext) => Promise<string | null>)
+    | null = null
 
   // ── Registration ──────────────────────────────────────────────
+
+  /** Siehe `retiredRunner`. Wird von registerBuiltinTools() verdrahtet. */
+  setRetiredRunner(
+    run: (name: string, args: Record<string, any>, run?: AgentRunContext) => Promise<string | null>,
+  ) {
+    this.retiredRunner = run
+  }
 
   registerBuiltin(tool: MCPToolDefinition, executor: ToolExecutor) {
     this.builtinNames.add(tool.name)
@@ -197,9 +225,9 @@ export class ToolRegistry {
     if (!entry) {
       // Retired names (2.6.6 tool merge) still run: a restored session or a
       // model that knows git_status from its context must not burn the step
-      // on "Unknown tool". Dynamic import keeps the module graph acyclic.
-      const { runRetiredTool } = await import('./builtin-tools')
-      const redirected = await runRetiredTool(name, args, run)
+      // on "Unknown tool". Der Redirect kommt über setRetiredRunner herein
+      // (siehe `retiredRunner`) statt über einen Rück-Import auf builtin-tools.
+      const redirected = this.retiredRunner ? await this.retiredRunner(name, args, run) : null
       if (redirected !== null) return redirected
       return `Error: Unknown tool "${name}"`
     }

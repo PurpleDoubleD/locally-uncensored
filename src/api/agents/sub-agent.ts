@@ -12,6 +12,21 @@
  */
 
 import { settleThinking } from '../../lib/thinking-stripper'
+// M7 / Audit W-T2: hier stand zweimal `await import('../mcp')`. Gesplittet hat
+// das nie — die Tonne mcp/index.ts hängt über useAgentChat, useCodex und
+// api/tool-registry.ts ohnehin statisch im Graph, also meldete Rolldown
+// INEFFECTIVE_DYNAMIC_IMPORT. Der import() war auch nie fürs Splitten da,
+// sondern um den Zyklus mcp/index → builtin-tools → sub-agent → mcp/index zu
+// brechen.
+//
+// Die ehrliche Auflösung ist ein statischer Import auf das Modul, das hier
+// wirklich gebraucht wird, statt auf die Tonne: `mcp/tool-registry` hält den
+// Singleton und importiert selbst nichts aus diesem Cluster (seit die
+// retired-Kante invertiert ist), der Zyklus entsteht also gar nicht erst.
+// Die Registrierung der Builtins ist dabei garantiert schon gelaufen: beide
+// Einstiegspunkte dieser Datei hängen am `delegate_task`-Executor, den erst
+// registerBuiltinTools() verdrahtet.
+import { toolRegistry } from '../mcp/tool-registry'
 import type { MCPToolDefinition } from '../mcp/types'
 import type { AgentToolCall } from '../../types/agent-mode'
 import type { ApprovalEntry } from '../../lib/approval-queue'
@@ -180,8 +195,7 @@ export async function buildSubAgentGates(run?: AgentRunContext): Promise<SubAgen
   const abortSignal = run?.abortSignal
   const refusals = new Map<string, string>()
 
-  const [{ toolRegistry }, { usePermissionStore }, approvals] = await Promise.all([
-    import('../mcp'),
+  const [{ usePermissionStore }, approvals] = await Promise.all([
     import('../../stores/permissionStore'),
     import('../../lib/approval-queue'),
   ])
@@ -281,7 +295,6 @@ export async function defaultSubAgentRunner(
 ): Promise<string> {
   const { useModelStore } = await import('../../stores/modelStore')
   const { getProviderForModel } = await import('../providers')
-  const { toolRegistry } = await import('../mcp')
   const activeModel = useModelStore.getState().activeModel
   if (!activeModel) return 'Error: No active model configured.'
   const { provider, modelId } = getProviderForModel(activeModel)
