@@ -23,7 +23,12 @@ export function MemorySettings() {
   const [confirmClear, setConfirmClear] = useState(false)
   const [addingNew, setAddingNew] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
-  const [contextBudgetLabel, setContextBudgetLabel] = useState('')
+  // Only the ASYNC half of the budget line is state; "no model selected" is a
+  // fact the render already has and is derived below. Writing it from the
+  // effect was a cascading render for something nothing had to be fetched for
+  // (React 19 `set-state-in-effect`).
+  const activeModel = useModelStore((s) => s.activeModel)
+  const [budgetLabel, setBudgetLabel] = useState('')
   // Feature FF: reveal outdated (stale/superseded) entries, read-only.
   const [showOutdated, setShowOutdated] = useState(false)
   const [reembedState, setReembedState] = useState<'idle' | 'running' | 'done'>('idle')
@@ -42,23 +47,23 @@ export function MemorySettings() {
   const [editContent, setEditContent] = useState('')
 
   // ── Context budget detection ────────────────────────────────
+  const contextBudgetLabel = activeModel ? budgetLabel : 'No model selected'
   useEffect(() => {
-    const model = useModelStore.getState().activeModel
-    if (!model) {
-      setContextBudgetLabel('No model selected')
-      return
-    }
-    getModelMaxTokens(model).then((ctx) => {
+    if (!activeModel) return
+    let cancelled = false
+    getModelMaxTokens(activeModel).then((ctx) => {
+      if (cancelled) return
       const override = settings.maxMemoriesOverride
       const budget = effectiveMemoryBudget(ctx, override)
       const manual = override != null && override > 0 ? ' (manual)' : ''
       if (budget.budgetTokens === 0) {
-        setContextBudgetLabel(`${Math.round(ctx / 1024)}K ctx, memory injection disabled`)
+        setBudgetLabel(`${Math.round(ctx / 1024)}K ctx, memory injection disabled`)
       } else {
-        setContextBudgetLabel(`${Math.round(ctx / 1024)}K ctx, up to ${budget.maxMemories} memories injected${manual}`)
+        setBudgetLabel(`${Math.round(ctx / 1024)}K ctx, up to ${budget.maxMemories} memories injected${manual}`)
       }
-    }).catch(() => setContextBudgetLabel(''))
-  }, [settings.maxMemoriesOverride])
+    }).catch(() => { if (!cancelled) setBudgetLabel('') })
+    return () => { cancelled = true }
+  }, [activeModel, settings.maxMemoriesOverride])
 
   const isEntryStale = (e: MemoryFile) => e.stale === true || typeof e.supersededBy === 'string'
   const staleCount = entries.filter(isEntryStale).length

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Loader2, Check, X, Circle, Send, Square } from 'lucide-react'
 import { useAgentWorkflowStore } from '../../stores/agentWorkflowStore'
 import type { StepStatus } from '../../types/agent-workflows'
@@ -39,6 +39,19 @@ export function WorkflowRunner({
   const execution = useAgentWorkflowStore((s) => s.executions.find(e => e.id === executionId))
   const [inputValue, setInputValue] = useState('')
 
+  // The clock the "Running… Ns" line divides by. It used to be `Date.now()`
+  // read straight from the render body — impure (React 19 `purity`), and it
+  // only advanced when the store happened to push a step update, so a slow
+  // step froze the counter. A one-second tick while the run is live says the
+  // same thing honestly; a finished run needs no clock at all.
+  const live = execution?.status === 'running' || execution?.status === 'waiting_input'
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    if (!live) return
+    const t = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(t)
+  }, [live, executionId])
+
   if (!execution) return null
 
   const handleSubmitInput = () => {
@@ -49,7 +62,7 @@ export function WorkflowRunner({
 
   const elapsed = execution.completedAt
     ? Math.round((execution.completedAt - execution.startedAt) / 1000)
-    : Math.round((Date.now() - execution.startedAt) / 1000)
+    : Math.max(0, Math.round((now - execution.startedAt) / 1000))
 
   return (
     <div className="space-y-3 p-3 rounded-lg border border-white/10 bg-white/[0.02]">

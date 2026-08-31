@@ -79,8 +79,13 @@ export function ModelPickerCard({ request }: { request: ModelPickRequest }) {
   // Auto-continue 5s before the store's headless fallback so the countdown
   // resolves with the user's ON-SCREEN selection, not just the default.
   const [secondsLeft, setSecondsLeft] = useState(Math.max(5, Math.floor((MODEL_PICK_TIMEOUT_MS - 5000) / 1000)))
+  // Refreshed from an effect, not from the render body: a ref written while
+  // rendering is a mutation React may discard or replay (React 19 `refs`). The
+  // only reader is the interval below, which first fires a full second after
+  // the effects of the render it was started in, so it still reads the pick
+  // that is on screen.
   const stateRef = useRef({ selected, save })
-  stateRef.current = { selected, save }
+  useEffect(() => { stateRef.current = { selected, save } })
 
   useEffect(() => {
     const t = setInterval(() => {

@@ -25,18 +25,24 @@ export function CloudSwitch() {
   // model silently, and bill the next question (Nebenbefund 4, R5 re-measure
   // 2026-08-30). See lib/cloud-switch-guard for why it is two clicks on this
   // one control and not a dialog.
-  const [armed, setArmed] = useState(false)
+  const [armedRaw, setArmed] = useState(false)
+  // A mode change made anywhere else settles the switch too. That used to be
+  // an effect writing `false` back into state after the fact (React 19
+  // `set-state-in-effect`); "armed while already in cloud" is simply not a
+  // state this switch has, so it is ruled out by the derivation instead — and
+  // now on the same frame as the mode change rather than a paint later.
+  const armed = armedRaw && !on
 
   // An armed switch goes back to sleep on its own, so it is never lying in
   // wait minutes later for a click that means something else entirely.
+  // Keyed on the raw flag, not the derived one: the timer has to run down even
+  // while the derivation is already hiding the armed state, or a mode change
+  // made elsewhere would leave the flag standing indefinitely.
   useEffect(() => {
-    if (!armed) return
+    if (!armedRaw) return
     const t = setTimeout(() => setArmed(false), CLOUD_ARM_TIMEOUT_MS)
     return () => clearTimeout(t)
-  }, [armed])
-
-  // A mode change made anywhere else settles the switch too.
-  useEffect(() => { if (on) setArmed(false) }, [on])
+  }, [armedRaw])
 
   const toggle = () => {
     switch (cloudSwitchClick({ on, available, armed })) {

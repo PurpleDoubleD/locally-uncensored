@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import { useChatStore } from '../../stores/chatStore'
 import { useAutoScroll } from '../../hooks/useAutoScroll'
@@ -85,8 +85,13 @@ export function MessageList({ isGenerating, isThisChatGenerating, isLoadingModel
   // across renders. Binding the conversation id and the parent's callbacks
   // through a ref keeps ONE function alive for the whole list instead of
   // minting a fresh closure per message on every streaming frame.
+  // The refresh happens in an effect, not in the render body: writing a ref
+  // while rendering is a mutation React is allowed to throw away or replay
+  // (React 19 `refs`). Both readers below are user-event handlers, which never
+  // run before the effects of the render they belong to, so they still only
+  // ever see the current conversation and callbacks.
   const bind = useRef({ conversation, onRegenerate, onEdit })
-  bind.current = { conversation, onRegenerate, onEdit }
+  useEffect(() => { bind.current = { conversation, onRegenerate, onEdit } })
 
   const handleRegenerate = useCallback((messageId: string) => {
     const { conversation: c, onRegenerate: cb } = bind.current

@@ -46,6 +46,27 @@ interface Props {
   composerActions?: ReactNode
 }
 
+/** How long the synchronous double-fire guard below stays shut. */
+const SEND_LOCK_MS = 700
+
+/**
+ * The double-fire guard's clock read, deliberately OUTSIDE the component.
+ *
+ * Reading `Date.now()` from a function declared in the component body puts an
+ * impure call in the render path as far as React 19 is concerned (`purity`),
+ * and the rule is right about where such a read belongs: not in a component,
+ * not in a hook. Moving the whole check out here keeps it exactly as
+ * synchronous as it was — the point of the guard is that it decides inside the
+ * same tick as the second keydown — and makes it a thing that can be reasoned
+ * about (and tested) on its own. Returns false when the send must be dropped.
+ */
+function passSendLock(lock: { current: number }): boolean {
+  const now = Date.now()
+  if (now - lock.current < SEND_LOCK_MS) return false
+  lock.current = now
+  return true
+}
+
 function fileToImageAttachment(file: File): Promise<ImageAttachment> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader()
@@ -153,9 +174,7 @@ export function ChatInput({ onSend, onStop, isGenerating, pendingApproval, onApp
   const handleSend = () => {
     const trimmed = input.trim()
     if ((!trimmed && images.length === 0) || isGenerating || disabled) return
-    const now = Date.now()
-    if (now - sendLockRef.current < 700) return
-    sendLockRef.current = now
+    if (!passSendLock(sendLockRef)) return
     onSend(trimmed || '(image)', images.length > 0 ? images : undefined)
     setInput('')
     setImages([])

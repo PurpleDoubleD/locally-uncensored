@@ -6,7 +6,7 @@ import {
 } from 'lucide-react'
 import { useCreateStore, type ImageRef } from '../../../stores/createStore'
 import { uploadImage } from '../../../api/comfyui'
-import { MaskCanvasEngine, type Tool } from '../canvas/MaskCanvasEngine'
+import { MaskCanvasEngine, defaultBrushSize, type Tool } from '../canvas/MaskCanvasEngine'
 import { Slider } from '../ui/Slider'
 import { Button } from '../ui/Button'
 import { cn } from '../ui/cn'
@@ -47,16 +47,50 @@ function MaskEditorInner({ onClose }: { onClose: () => void }) {
   const engineRef = useRef<MaskCanvasEngine | null>(null)
 
   const [tool, setTool] = useState<Tool>('brush')
-  const [brushSize, setBrushSize] = useState(0)
+  // Seeded from the same pure formula the engine's constructor uses, so the
+  // slider is right on the very first paint. It used to start at 0 and be
+  // corrected from the init effect by reading the fresh engine back (React 19
+  // `set-state-in-effect`).
+  const [brushSize, setBrushSize] = useState(() => defaultBrushSize(source.width, source.height))
   const [view, setView] = useState({ scale: 1, x: 0, y: 0 })
-  const [, force] = useState(0)
-  const rerender = useCallback(() => force((n) => n + 1), [])
+
+  // What the toolbar needs to know about the engine, mirrored into state at the
+  // moments that change it. This used to be a forced re-render (`force`) plus a
+  // read of engineRef.current straight from the render body — a ref read while
+  // rendering (React 19 `refs`), and one that can tear: the ref is free to hold
+  // a different engine than the tree currently being rendered.
+  const [history, setHistory] = useState({ canUndo: false, canRedo: false })
+  const syncHistory = useCallback(() => {
+    const e = engineRef.current
+    setHistory({ canUndo: !!e?.canUndo(), canRedo: !!e?.canRedo() })
+  }, [])
+
+  // A swapped source means the init effect below builds a NEW engine: default
+  // brush, empty undo/redo. Both are settled here, while rendering, so the
+  // toolbar never paints the previous image's brush size or a live Undo button
+  // for history that no longer exists. This is the same reset the effect used
+  // to do afterwards, one paint earlier.
+  const [renderedFor, setRenderedFor] = useState(source)
+  if (renderedFor !== source) {
+    setRenderedFor(source)
+    setBrushSize(defaultBrushSize(source.width, source.height))
+    setHistory({ canUndo: false, canRedo: false })
+  }
 
   const painting = useRef(false)
   const spaceDown = useRef(false)
   const panning = useRef(false)
   const panStart = useRef({ x: 0, y: 0, vx: 0, vy: 0 })
   const touched = useRef(false)
+
+  // `panning` and `spaceDown` stay refs — a pointer stream must not wait for a
+  // re-render to know whether it is panning — but the cursor they decide IS
+  // rendered, so it is mirrored into state at the four events that move them.
+  // Reading the refs from the render body was wrong twice over: a render-time
+  // ref read (React 19 `refs`), and holding Space re-renders nothing by itself,
+  // so the grab cursor only ever appeared on the next unrelated render.
+  const [grabCursor, setGrabCursor] = useState(false)
+  const syncCursor = useCallback(() => setGrabCursor(panning.current || spaceDown.current), [])
 
   const maxBrush = Math.round(Math.max(source.width, source.height) * 0.4)
 
@@ -69,7 +103,6 @@ function MaskEditorInner({ onClose }: { onClose: () => void }) {
   useEffect(() => {
     const e = new MaskCanvasEngine(source.width, source.height)
     engineRef.current = e
-    setBrushSize(e.brushSize)
 
     const img = new Image()
     img.onload = () => {
@@ -78,9 +111,10 @@ function MaskEditorInner({ onClose }: { onClose: () => void }) {
     }
     img.src = source.url
     renderOverlay()
-    rerender()
+    // No history sync here any more: a brand-new engine has empty stacks, which
+    // is exactly what the state above already says for this source.
     return () => { engineRef.current = null }
-  }, [source, renderOverlay, rerender])
+  }, [source, renderOverlay])
 
   // ── fit view to viewport ──
   useLayoutEffect(() => {
@@ -121,6 +155,7 @@ function MaskEditorInner({ onClose }: { onClose: () => void }) {
     const eng = engineRef.current!
     if (spaceDown.current || e.button === 1) {
       panning.current = true
+      syncCursor()
       panStart.current = { x: e.clientX, y: e.clientY, vx: view.x, vy: view.y }
       try { (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId) } catch { /* synthetic / unsupported */ }
       return
@@ -148,8 +183,9 @@ function MaskEditorInner({ onClose }: { onClose: () => void }) {
   }
 
   const endInteraction = () => {
-    if (painting.current) { engineRef.current!.endStroke(); painting.current = false; rerender() }
+    if (painting.current) { engineRef.current!.endStroke(); painting.current = false; syncHistory() }
     panning.current = false
+    syncCursor()
   }
 
   const onWheel = (e: React.WheelEvent) => {
@@ -168,24 +204,24 @@ function MaskEditorInner({ onClose }: { onClose: () => void }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') { onClose(); return }
-      if (e.key === ' ') { spaceDown.current = true; return }
+      if (e.key === ' ') { spaceDown.current = true; syncCursor(); return }
       const eng = engineRef.current
       if (!eng) return
       const mod = e.metaKey || e.ctrlKey
-      if (mod && e.key.toLowerCase() === 'z') { e.preventDefault(); if (e.shiftKey) eng.redo(); else eng.undo(); renderOverlay(); rerender(); return }
-      if (e.key === 'y') { eng.redo(); renderOverlay(); rerender(); return }
+      if (mod && e.key.toLowerCase() === 'z') { e.preventDefault(); if (e.shiftKey) eng.redo(); else eng.undo(); renderOverlay(); syncHistory(); return }
+      if (e.key === 'y') { eng.redo(); renderOverlay(); syncHistory(); return }
       if (e.key === '[') { setBrush(eng, Math.max(4, eng.brushSize - 8)) }
       if (e.key === ']') { setBrush(eng, Math.min(maxBrush, eng.brushSize + 8)) }
       if (e.key.toLowerCase() === 'b') { eng.tool = 'brush'; setTool('brush') }
       if (e.key.toLowerCase() === 'e') { eng.tool = 'eraser'; setTool('eraser') }
-      if (e.key.toLowerCase() === 'i') { eng.invert(); renderOverlay(); rerender() }
+      if (e.key.toLowerCase() === 'i') { eng.invert(); renderOverlay(); syncHistory() }
     }
-    const onUp = (e: KeyboardEvent) => { if (e.key === ' ') spaceDown.current = false }
+    const onUp = (e: KeyboardEvent) => { if (e.key === ' ') { spaceDown.current = false; syncCursor() } }
     const setBrush = (eng: MaskCanvasEngine, n: number) => { eng.brushSize = n; setBrushSize(n) }
     window.addEventListener('keydown', onKey)
     window.addEventListener('keyup', onUp)
     return () => { window.removeEventListener('keydown', onKey); window.removeEventListener('keyup', onUp) }
-  }, [onClose, renderOverlay, rerender, maxBrush])
+  }, [onClose, renderOverlay, syncHistory, syncCursor, maxBrush])
 
   const apply = async () => {
     const eng = engineRef.current!
@@ -207,7 +243,6 @@ function MaskEditorInner({ onClose }: { onClose: () => void }) {
     onClose()
   }
 
-  const eng = engineRef.current
   return (
     <motion.div
       initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
@@ -230,15 +265,15 @@ function MaskEditorInner({ onClose }: { onClose: () => void }) {
       {/* toolbar */}
       <div className="flex items-center gap-2 px-4 py-2 border-b border-white/[0.05] shrink-0 flex-wrap">
         <div className="inline-flex gap-0.5 p-0.5 rounded-[var(--radius-control)] bg-white/[0.04] border border-white/[0.06]">
-          <ToolBtn active={tool === 'brush'} icon={Brush} label="Brush (B)" onClick={() => { eng && (eng.tool = 'brush'); setTool('brush') }} />
-          <ToolBtn active={tool === 'eraser'} icon={Eraser} label="Eraser (E)" onClick={() => { eng && (eng.tool = 'eraser'); setTool('eraser') }} />
+          <ToolBtn active={tool === 'brush'} icon={Brush} label="Brush (B)" onClick={() => { const e = engineRef.current; if (e) e.tool = 'brush'; setTool('brush') }} />
+          <ToolBtn active={tool === 'eraser'} icon={Eraser} label="Eraser (E)" onClick={() => { const e = engineRef.current; if (e) e.tool = 'eraser'; setTool('eraser') }} />
         </div>
-        <div className="w-40"><Slider label="Size" min={4} max={maxBrush} step={1} value={brushSize} onChange={(v) => { if (eng) eng.brushSize = v; setBrushSize(v) }} unit="px" /></div>
+        <div className="w-40"><Slider label="Size" min={4} max={maxBrush} step={1} value={brushSize} onChange={(v) => { const e = engineRef.current; if (e) e.brushSize = v; setBrushSize(v) }} unit="px" /></div>
         <Divider />
-        <Button variant="ghost" size="sm" icon={Undo2} iconOnly title="Undo (⌘Z)" disabled={!eng?.canUndo()} onClick={() => { eng?.undo(); renderOverlay(); rerender() }} />
-        <Button variant="ghost" size="sm" icon={Redo2} iconOnly title="Redo (⇧⌘Z)" disabled={!eng?.canRedo()} onClick={() => { eng?.redo(); renderOverlay(); rerender() }} />
-        <Button variant="ghost" size="sm" icon={FlipHorizontal2} iconOnly title="Invert (I)" onClick={() => { eng?.invert(); renderOverlay(); rerender() }} />
-        <Button variant="ghost" size="sm" icon={Trash2} iconOnly title="Clear" onClick={() => { eng?.clear(); renderOverlay(); rerender() }} />
+        <Button variant="ghost" size="sm" icon={Undo2} iconOnly title="Undo (⌘Z)" disabled={!history.canUndo} onClick={() => { engineRef.current?.undo(); renderOverlay(); syncHistory() }} />
+        <Button variant="ghost" size="sm" icon={Redo2} iconOnly title="Redo (⇧⌘Z)" disabled={!history.canRedo} onClick={() => { engineRef.current?.redo(); renderOverlay(); syncHistory() }} />
+        <Button variant="ghost" size="sm" icon={FlipHorizontal2} iconOnly title="Invert (I)" onClick={() => { engineRef.current?.invert(); renderOverlay(); syncHistory() }} />
+        <Button variant="ghost" size="sm" icon={Trash2} iconOnly title="Clear" onClick={() => { engineRef.current?.clear(); renderOverlay(); syncHistory() }} />
         <Divider />
         <Button variant="ghost" size="sm" icon={ZoomOut} iconOnly title="Zoom out" onClick={() => setView((v) => ({ ...v, scale: Math.max(0.05, v.scale / 1.2) }))} />
         <Button variant="ghost" size="sm" icon={ZoomIn} iconOnly title="Zoom in" onClick={() => setView((v) => ({ ...v, scale: Math.min(8, v.scale * 1.2) }))} />
@@ -253,7 +288,7 @@ function MaskEditorInner({ onClose }: { onClose: () => void }) {
         ref={viewportRef}
         onWheel={onWheel}
         className="flex-1 min-h-0 min-w-0 overflow-hidden relative flex items-center justify-center"
-        style={{ cursor: panning.current || spaceDown.current ? 'grab' : 'none' }}
+        style={{ cursor: grabCursor ? 'grab' : 'none' }}
       >
         <div
           ref={stackRef}

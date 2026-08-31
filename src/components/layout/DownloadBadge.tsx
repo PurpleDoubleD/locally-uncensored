@@ -8,6 +8,7 @@ import { isPermanentDownloadError } from '../../api/discover'
 import { useMlxInstallStore } from '../../stores/mlxInstallStore'
 import { isMlxImageHost } from '../../api/mlx-image'
 import { formatBytes } from '../../lib/formatters'
+import { trayAfterPulse, TRAY_CLOSED, NO_PULSE } from '../../lib/download-tray'
 
 function ProgressBar({ progress }: { progress: number }) {
   return (
@@ -21,7 +22,12 @@ export function DownloadBadge() {
   const { activePulls, pullModel, pausePull, dismissPull } = useModels()
   const comfyDownloads = useDownloadStore(s => s.downloads)
   const bundleMap = useDownloadStore(s => s.bundleMap)
-  const [open, setOpen] = useState(false)
+  // Whether the tray is open, and whether it was the TRAY that opened it —
+  // one value, because the two are only ever decided together. `auto` used
+  // to be a ref written from effects; see the transition block further down
+  // for why both moved out of effects.
+  const [tray, setTray] = useState(TRAY_CLOSED)
+  const open = tray.open
   const ref = useRef<HTMLDivElement>(null)
 
   // Text model entries
@@ -60,25 +66,26 @@ export function DownloadBadge() {
   // Click outside to close
   useEffect(() => {
     const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+      if (ref.current && !ref.current.contains(e.target as Node)) setTray((t) => ({ ...t, open: false }))
     }
     document.addEventListener('mousedown', handler)
     return () => document.removeEventListener('mousedown', handler)
   }, [])
 
-  // Auto-open when a new download starts
-  const autoOpened = useRef(false)
-  useEffect(() => {
-    if (totalActive > 0) { setOpen(true); autoOpened.current = true }
-  }, [totalActive])
-
-  // An auto-opened tray had no way back: cancel the download (or let the last
-  // one finish) and the panel kept hanging over the app reading "No active
-  // downloads" until you happened to click somewhere else. It only closes
-  // itself when it opened itself, so a tray the user opened by hand stays put.
-  useEffect(() => {
-    if (!hasAny && autoOpened.current) { setOpen(false); autoOpened.current = false }
-  }, [hasAny])
+  // The tray opens and closes itself with the downloads; trayAfterPulse
+  // (lib/download-tray) holds the rule and says why. Both halves used to be
+  // effects writing state back into React on every change of the download
+  // picture (React 19 `set-state-in-effect`), one paint too late. The same two
+  // transitions are applied here off the previous render's numbers, in React's
+  // documented "adjust state while rendering" shape: it re-runs this component
+  // and only this component, before anything paints.
+  const [seen, setSeen] = useState(NO_PULSE)
+  if (seen.active !== totalActive || seen.any !== hasAny) {
+    const now = { active: totalActive, any: hasAny }
+    setSeen(now)
+    const next = trayAfterPulse(tray, seen, now)
+    if (next !== tray) setTray(next)
+  }
 
   // Self-heal polling: comfy download progress comes from a polled Rust/bridge
   // endpoint, and polling was only ever kicked off from the Discover page. So a
@@ -98,7 +105,7 @@ export function DownloadBadge() {
     <div ref={ref} className="relative">
       {/* Icon trigger */}
       <button
-        onClick={() => { setOpen(!open); autoOpened.current = false }}
+        onClick={() => setTray({ open: !open, auto: false })}
         className={`relative p-1 rounded-md transition-colors ${
           hasAny
             ? 'text-blue-400 hover:bg-blue-500/10'

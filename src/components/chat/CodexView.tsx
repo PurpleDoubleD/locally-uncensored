@@ -83,10 +83,12 @@ export function CodexView() {
   // git_status/diff/commit/log; if git is missing those tools fail. Probe on
   // open and surface a minimal install banner when it's not on PATH.
   const [gitStatus, setGitStatus] = useState<GitStatus | null>(null)
-  const [gitChecking, setGitChecking] = useState(false)
+  // Starts as `true` because the probe below starts with the component: the
+  // effect used to flip it on synchronously, which is a cascading render for a
+  // value that was already knowable at mount (React 19 `set-state-in-effect`).
+  const [gitChecking, setGitChecking] = useState(true)
   useEffect(() => {
     let cancelled = false
-    setGitChecking(true)
     checkGitInstalled()
       .then((s) => { if (!cancelled) setGitStatus(s) })
       .catch(() => {})

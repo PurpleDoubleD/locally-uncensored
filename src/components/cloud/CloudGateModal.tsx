@@ -100,8 +100,16 @@ export function CloudGateModal() {
 
   // Signed-out walkthrough position. Reset to the hero every time the gate
   // opens so a re-open never lands mid-flow.
+  // The reset happens in the render where `open` flips, using React's
+  // documented "adjust state while rendering" shape. As an effect it was a
+  // cascading render (React 19 `set-state-in-effect`) that landed after paint,
+  // so a re-open showed one frame of the step the gate was last left on.
   const [step, setStep] = useState<Step>('intro')
-  useEffect(() => { if (open) setStep('intro') }, [open])
+  const [wasOpen, setWasOpen] = useState(open)
+  if (wasOpen !== open) {
+    setWasOpen(open)
+    if (open) setStep('intro')
+  }
 
   // The moment the account clears every gate — already provisioned when the
   // gate opens, a fresh login, or a re-check after subscribing — flip the

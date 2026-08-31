@@ -9,7 +9,7 @@ import { ModelPickerCard, ChangeModelInline, pickKindForToolCall } from './Model
 import { DiffView } from './DiffView'
 import { commandIcon } from '../../lib/shell-command-classify'
 import { requestGenerationCancel } from '../../api/vram-handoff'
-import { fileUrlToPath, readLocalFileAsBlobUrl } from '../../lib/local-media-url'
+import { fileUrlToPath, readLocalFileAsBlobUrl, displayableMedia, type MediaRead } from '../../lib/local-media-url'
 import { hiddenFromTranscript } from '../../lib/transcript-visibility'
 
 // F1 (konata3602 commitment 2026-05-23) + render fix (konata3602 bug 2026-06-07)
@@ -102,35 +102,34 @@ export function localMediaUrlFromResult(result: string | null | undefined): stri
  */
 function useDisplayableMediaUrl(url: string | null): { url: string | null; missing: boolean } {
   const path = url ? fileUrlToPath(url) : null
-  // Nothing creates a blob: URL for a tool result any more, so one appearing in
-  // a stored result necessarily came from an earlier session and its blob died
-  // with that window. Saying so beats rendering a broken picture frame.
-  const staleBlob = !!url && url.startsWith('blob:')
-  const [resolved, setResolved] = useState<string | null>(null)
-  const [missing, setMissing] = useState(false)
+  // Only the READ is state now; what the element shows is derived from it by
+  // displayableMedia (lib/local-media-url), which also carries the "a stored
+  // blob: URL is necessarily dead" rule. The two resets this hook used to write
+  // back from the effect body — no path at all, and a new path whose read has
+  // not landed yet — were cascading renders for facts the render already had
+  // (React 19 `set-state-in-effect`), and the `missing` one could land late
+  // enough to paint the previous file's "gone" over the new one.
+  const [read, setRead] = useState<MediaRead | null>(null)
 
   useEffect(() => {
-    if (!path) { setResolved(null); setMissing(false); return }
+    if (!path) return
     let live = true
     let made: string | null = null
-    setMissing(false)
     readLocalFileAsBlobUrl(path)
       .then((blobUrl) => {
         // Unmounted while reading: revoke immediately, nothing will show it.
         if (!live) { URL.revokeObjectURL(blobUrl); return }
         made = blobUrl
-        setResolved(blobUrl)
+        setRead({ path, url: blobUrl, missing: false })
       })
-      .catch(() => { if (live) setMissing(true) })
+      .catch(() => { if (live) setRead({ path, url: null, missing: true }) })
     return () => {
       live = false
       if (made) URL.revokeObjectURL(made)
     }
   }, [path])
 
-  if (staleBlob) return { url: null, missing: true }
-  if (!path) return { url, missing: false }
-  return { url: resolved, missing }
+  return displayableMedia(url, path, read)
 }
 
 // Pull the "<file>" back out of the "<kind> generated: <file> (prompt: …"
@@ -179,13 +178,23 @@ const SHELL_COMMAND_ICONS: Record<string, typeof Search> = {
   test: FlaskConical,
   read: FileText,
   terminal: Terminal,
+  // A backgrounded call or a task handle is a job, not a command.
+  background: History,
 }
 
-function shellIconFor(toolCall: AgentToolCall): typeof Search {
+/**
+ * Which SHELL_COMMAND_ICONS face a shell call wears.
+ *
+ * Returns the KEY, not the component. React 19's `static-components` rule
+ * cannot see through a helper that hands a component back, and it is right to
+ * be strict: a component built during render loses its state every time. The
+ * lookup itself therefore has to stay visible as a lookup, at the use site.
+ */
+function shellIconKey(toolCall: AgentToolCall): string {
   const command = toolCall.args?.command
-  if (toolCall.args?.background || typeof toolCall.args?.task === 'string') return History
-  if (typeof command !== 'string') return Terminal
-  return SHELL_COMMAND_ICONS[commandIcon(command)] ?? Terminal
+  if (toolCall.args?.background || typeof toolCall.args?.task === 'string') return 'background'
+  if (typeof command !== 'string') return 'terminal'
+  return commandIcon(command)
 }
 
 const STATUS_ICONS = {
@@ -215,7 +224,9 @@ function ToolCallBlockImpl({ toolCall, onApprove, onReject }: Props) {
   // Default: collapsed (closed)
   const [open, setOpen] = useState(toolCall.status === 'pending_approval')
 
-  const ToolIcon = toolCall.toolName === 'shell_execute' ? shellIconFor(toolCall) : (TOOL_ICONS[toolCall.toolName] || Terminal)
+  const ToolIcon = toolCall.toolName === 'shell_execute'
+    ? (SHELL_COMMAND_ICONS[shellIconKey(toolCall)] ?? Terminal)
+    : (TOOL_ICONS[toolCall.toolName] || Terminal)
   const StatusIcon = STATUS_ICONS[toolCall.status]
   const isRunning = toolCall.status === 'running'
   const isPending = toolCall.status === 'pending_approval'

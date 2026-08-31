@@ -17,17 +17,20 @@ interface Props {
 export function LoopBar({ onStop }: Props) {
   const loop = useAgentLoopStore((s) => s.loop)
   const activeConversationId = useChatStore((s) => s.activeConversationId)
-  // Re-render once a second so the countdown to the next pass actually counts.
-  const [, tick] = useState(0)
+  // The clock the countdown divides by, read once a second in the interval
+  // instead of on every render. Reading `Date.now()` down in the render body
+  // was impure (React 19 `purity`) AND it made the countdown depend on
+  // something re-rendering this bar, which is not what "counts down" means.
+  const [now, setNow] = useState(() => Date.now())
   useEffect(() => {
     if (!loop) return
-    const t = setInterval(() => tick((n) => n + 1), 1000)
+    const t = setInterval(() => setNow(Date.now()), 1000)
     return () => clearInterval(t)
   }, [loop])
 
   if (!loop || loop.conversationId !== activeConversationId) return null
 
-  const secs = Math.max(0, Math.ceil((loop.nextAt - Date.now()) / 1000))
+  const secs = Math.max(0, Math.ceil((loop.nextAt - now) / 1000))
   const passLabel = loop.cap > 0 ? `pass ${loop.pass} of ${loop.cap}` : `pass ${loop.pass}`
 
   return (

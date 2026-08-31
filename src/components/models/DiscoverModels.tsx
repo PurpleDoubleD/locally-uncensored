@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useCallback, useState, useEffect } from 'react'
 import { bundleIsComplete, bundleIsDownloading, bundleHasErrors } from '../../lib/bundle-state'
 import { motion } from 'framer-motion'
 import { Search, XCircle, Loader2, Sparkles, Unlock, ShieldCheck, ExternalLink, Download, CheckCircle } from 'lucide-react'
@@ -122,26 +122,30 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
 
   // Check which bundles are REALLY installed (file size validated, not just file existence)
   const [bundleStatuses, setBundleStatuses] = useState<Record<string, boolean>>({})
-  const refreshBundleStatuses = () => {
+  // Memoised so the two effects below can name it as the dependency it is
+  // instead of hiding it from the dep array. It only closes over `category`,
+  // so its identity changes exactly when the effects had to re-run anyway —
+  // no re-subscription loop.
+  const refreshBundleStatuses = useCallback(() => {
     if (category !== 'image' && category !== 'video') return
     const allBundles = [...getImageBundles(), ...getVideoBundles()]
     checkBundlesInstalled(allBundles).then(statuses => setBundleStatuses(statuses))
-  }
+  }, [category])
   useEffect(() => {
     refreshBundleStatuses()
-  }, [category])
+  }, [refreshBundleStatuses])
 
   // Re-check bundle statuses when a download completes
   useEffect(() => {
     const handler = () => refreshBundleStatuses()
     window.addEventListener('comfyui-model-downloaded', handler)
     return () => window.removeEventListener('comfyui-model-downloaded', handler)
-  }, [category])
+  }, [refreshBundleStatuses])
 
   // Start polling on mount if there are active downloads
   useEffect(() => {
     dlStore.getState().refresh()
-  }, [])
+  }, [dlStore])
 
   const isText = category === 'text'
   const isImage = category === 'image'

@@ -15,24 +15,28 @@ import { useCreateStore, type GalleryItem } from '../../../stores/createStore'
  */
 export function useComfyMedia(item: GalleryItem | null) {
   const base = item ? galleryItemUrl(item) : ''
-  const [src, setSrc] = useState(base)
+  // The proxy fallback's blob: URL, tagged with the base URL it stands in for.
+  // The tag is what turns the reset into a derivation: when the underlying URL
+  // changes (a cloud re-sign swaps remoteUrl) the tag simply stops matching and
+  // `src` falls back to the direct /view — no effect writing state back into
+  // React on the way (React 19 `set-state-in-effect`).
+  const [proxied, setProxied] = useState<{ base: string; url: string } | null>(null)
+  const src = proxied && proxied.base === base ? proxied.url : base
   const blobRef = useRef<string | null>(null)
   const triedProxy = useRef(false)
 
-  // Reset when the underlying URL changes (e.g. a cloud re-sign swaps remoteUrl).
+  // Re-arm the proxy fallback for the new URL, and release the blob the old one
+  // left behind — in the cleanup, so it is revoked at exactly the moment `src`
+  // stops pointing at it, and on unmount too.
   useEffect(() => {
     triedProxy.current = false
-    if (blobRef.current) {
-      URL.revokeObjectURL(blobRef.current)
-      blobRef.current = null
+    return () => {
+      if (blobRef.current) {
+        URL.revokeObjectURL(blobRef.current)
+        blobRef.current = null
+      }
     }
-    setSrc(base)
   }, [base])
-
-  // Release the blob when the element unmounts.
-  useEffect(() => () => {
-    if (blobRef.current) URL.revokeObjectURL(blobRef.current)
-  }, [])
 
   const onError = useCallback(() => {
     if (!item) return
@@ -44,7 +48,7 @@ export function useComfyMedia(item: GalleryItem | null) {
     void proxiedComfyBlobUrl(item).then((blob) => {
       if (blob) {
         blobRef.current = blob
-        setSrc(blob)
+        setProxied({ base, url: blob })
         // Proxy rescued a /view the direct load couldn't reach. On a LOCAL
         // host that means ComfyUI 0.19+ rejected the cross-origin load and
         // the --enable-cors-header hint is actionable. On a REMOTE host
@@ -56,7 +60,7 @@ export function useComfyMedia(item: GalleryItem | null) {
         recoverGalleryUrl(item)
       }
     })
-  }, [item])
+  }, [item, base])
 
   const onLoad = useCallback(() => { if (item) markGalleryItemAvailable(item) }, [item])
 

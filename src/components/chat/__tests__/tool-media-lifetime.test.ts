@@ -26,6 +26,7 @@ const read = (...p: string[]) => readFileSync(resolve(SRC, ...p), 'utf8')
 
 const tools = read('api', 'mcp', 'builtin-tools.ts')
 const block = read('components', 'chat', 'ToolCallBlock.tsx')
+const media = read('lib', 'local-media-url.ts')
 
 describe('nothing writes a session-scoped URL into a stored result', () => {
   it('the helper that minted them is gone', () => {
@@ -66,15 +67,22 @@ describe('the viewer owns the blob, so it can end', () => {
   })
 
   it('says so when the file is gone instead of showing a broken frame', () => {
-    expect(block).toMatch(/setMissing\(true\)/)
+    // The failed read is recorded AGAINST ITS PATH, so a stale "gone" can never
+    // paint over the next file's frame. What the element then shows is
+    // displayableMedia's job — see src/lib/__tests__/derived-ui-state.test.ts,
+    // which exercises pending / landed / failed / stale-tag directly. (Was a
+    // bare `setMissing(true)` before the React 19 set-state-in-effect fix.)
+    expect(block).toMatch(/setRead\(\{ path, url: null, missing: true \}\)/)
+    expect(block).toMatch(/return displayableMedia\(url, path, read\)/)
     expect(block).toMatch(/no longer on disk/)
   })
 
   it('treats a blob: URL in a stored result as already dead', () => {
     // Nothing creates one any more, so any that appears was recorded by an
-    // older build and its blob died with that window.
-    expect(block).toMatch(/const staleBlob = !!url && url\.startsWith\('blob:'\)/)
-    expect(block).toMatch(/if \(staleBlob\) return \{ url: null, missing: true \}/)
+    // older build and its blob died with that window. The rule moved into
+    // lib/local-media-url.ts with the rest of the display derivation; it is
+    // asserted end-to-end in derived-ui-state.test.ts.
+    expect(media).toMatch(/if \(rawUrl && rawUrl\.startsWith\('blob:'\)\) return \{ url: null, missing: true \}/)
   })
 
   it('picks the element kind from the raw result, not the resolved URL', () => {

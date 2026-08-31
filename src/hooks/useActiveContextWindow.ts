@@ -34,6 +34,11 @@ export interface ActiveContext {
   adjustable: boolean
 }
 
+/** What the hook reports while there is no model, or none resolved yet. */
+const NO_CONTEXT: ActiveContext = {
+  provider: 'unknown', contextWindow: 0, modelMax: 0, sendWindow: 0, isTrue: false, adjustable: false,
+}
+
 /**
  * Resolve the REAL context window of the active model, provider-aware, so the
  * TokenCounter denominator and the Context dropdown agree and never lie:
@@ -50,9 +55,15 @@ export function useActiveContextWindow(reloadTick = 0): ActiveContext {
   const builtinCtx = useSettingsStore((s) => s.settings.builtinEngine.ctx)
   const sendWindowTokens = useSettingsStore((s) => s.settings.codexSendWindowTokens)
   const capEnabled = useSettingsStore((s) => s.settings.contextDecay)
-  const [state, setState] = useState<ActiveContext>({
-    provider: 'unknown', contextWindow: 0, modelMax: 0, sendWindow: 0, isTrue: false, adjustable: false,
-  })
+  // The resolved window carries the model it was resolved FOR. That tag does
+  // two jobs: the "no model" case becomes a derivation instead of a setState
+  // fired from the effect body (React 19 `set-state-in-effect`), and a model
+  // switch no longer reports the PREVIOUS model's window during the probe.
+  // The second one matters for this hook in particular — everything above is
+  // about the counter never lying, and "62k of 262k" under a model that has
+  // 8k is exactly the lie. Unresolved reads as unknown, which is the state
+  // every consumer already handles on mount.
+  const [resolved, setResolved] = useState<{ model: string; ctx: ActiveContext } | null>(null)
 
   // Re-read whenever a model reload finishes anywhere (the Context dropdown
   // fires this), so every consumer — counter AND dropdown — reflects the new
@@ -65,12 +76,10 @@ export function useActiveContextWindow(reloadTick = 0): ActiveContext {
   }, [])
 
   useEffect(() => {
-    if (!activeModel) {
-      setState({ provider: 'unknown', contextWindow: 0, modelMax: 0, sendWindow: 0, isTrue: false, adjustable: false })
-      return
-    }
+    if (!activeModel) return
     let cancelled = false
     const providerId = getProviderIdFromModel(activeModel)
+    const setState = (ctx: ActiveContext) => setResolved({ model: activeModel, ctx })
 
     ;(async () => {
       // ── Ollama: num_ctx is per-request, so what we send == what runs. ──
@@ -177,5 +186,5 @@ export function useActiveContextWindow(reloadTick = 0): ActiveContext {
     return () => { cancelled = true }
   }, [activeModel, override, builtinCtx, sendWindowTokens, capEnabled, reloadTick, reloadBump])
 
-  return state
+  return activeModel && resolved?.model === activeModel ? resolved.ctx : NO_CONTEXT
 }
