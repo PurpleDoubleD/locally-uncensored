@@ -9,6 +9,7 @@ pub mod gguf;
 pub mod gpu;
 pub mod health;
 pub mod install;
+pub mod logging;
 pub mod media_cmds;
 pub mod mlx;
 pub mod oauth;

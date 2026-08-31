@@ -66,6 +66,12 @@ socket2 = "0.5"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+# Audit #01 — the rolling log FILE. A shipped desktop app has no stdout, so
+# until this crate arrived every line the app produced was thrown away and a
+# user's crash left no artefact to ask for. 0.2 is the series that pairs with
+# tracing-subscriber 0.3 (it re-exports `MakeWriter` from it); `max_log_files`
+# needs >= 0.2.3.
+tracing-appender = "0.2"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", features = ["Win32_System_JobObjects", "Win32_System_Threading", "Win32_Foundation", "Win32_Security"] }

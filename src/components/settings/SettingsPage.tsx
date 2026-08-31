@@ -7,6 +7,7 @@ import { useSettingsStore } from '../../stores/settingsStore'
 import { usePermissionStore } from '../../stores/permissionStore'
 import { useUIStore } from '../../stores/uiStore'
 import { SliderControl } from './SliderControl'
+import { LogFileSettings } from './LogFileSettings'
 import { PersonaPanel } from '../personas/PersonaPanel'
 import { AccountPanel } from '../auth/AccountPanel'
 import { useVoiceStore } from '../../stores/voiceStore'
@@ -2057,6 +2058,10 @@ function TroubleshootSection() {
           system_health failed: {error}
         </div>
       )}
+
+      {/* Audit #01 — where the log file is. Above the probe result because
+          "send us the log" is the most common outcome of opening this panel. */}
+      <LogFileSettings />
 
       {report && (
         <div className="space-y-2">

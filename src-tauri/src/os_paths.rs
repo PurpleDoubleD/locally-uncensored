@@ -21,6 +21,29 @@ pub fn cache_dir() -> PathBuf {
         .join("lu-labs")
 }
 
+/// Where the rolling application log is written (`init_tracing` in main.rs,
+/// read back by the `log_file_path` command).
+///
+/// Deliberately NOT Tauri's `app_log_dir()`, for two reasons:
+///
+/// 1. Lifetime. `app_log_dir()` needs an `AppHandle`, which only exists once
+///    `tauri::Builder::build()` has run. Tracing is initialised before that —
+///    it has to be, or every line the app emits while starting up (the very
+///    window where the hard-to-reproduce failures live) would be written to a
+///    subscriber that does not exist yet. The `WorkerGuard` for the file
+///    writer has the same problem: it must be created before the first event.
+/// 2. Support. `crash.log` already lives in `data_dir()` (crash_report.rs).
+///    Putting the rolling log in a sibling folder means one directory holds
+///    every artefact a support request needs, instead of the panic record and
+///    the log being two unrelated places on three different operating systems.
+///
+/// macOS:   ~/Library/Application Support/lu-labs/logs
+/// Windows: %LOCALAPPDATA%\lu-labs\logs
+/// Linux:   ~/.local/share/lu-labs/logs
+pub fn log_dir() -> PathBuf {
+    data_dir().join("logs")
+}
+
 /// Locate a usable Python interpreter. Returns the absolute path to the
 /// binary, or `None` if no real Python is on the system.
 ///
