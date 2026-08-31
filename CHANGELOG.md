@@ -4,6 +4,154 @@ All notable changes to Locally Uncensored are documented here.
 
 ## [Unreleased]
 
+## [2.6.7] - 2026-08-31
+
+The repair release. Every fix went back to a fresh tester who did not know what
+had been changed, driving the real installed build on Windows, and whatever
+they broke went into the next round. That loop ran seventeen times.
+
+### Added
+
+- **A ComfyUI that dies while the app is running restarts itself.** Three
+  attempts with a growing pause between them, and the render that triggered it
+  carries on afterwards. A ComfyUI on a foreign host, a missing installation
+  and an environment broken at import each get their own sentence instead,
+  because none of those is ours to restart.
+- **An idle app notices that ComfyUI is gone.** It used to sit silent for as
+  long as you left it and heal only at the next render. A quiet line now
+  appears within about half a minute: a ComfyUI the app started restarts with
+  your next render, a remote one does not, and the line says so without
+  promising a rescue.
+- **A cold ComfyUI start explains itself.** Once the loading phase passes
+  twelve seconds a line tells you the model is going into memory. Warm runs and
+  small checkpoints never see it.
+- **A test button under Settings, AI Backends** checks the built-in engine end
+  to end, repairs what it can and then reports what it found.
+
+### Fixed
+
+- **The very first render after starting the app shows its loading texts
+  again.** The websocket was connected after the job had already been
+  submitted, and that first connect costs up to five seconds, so every phase
+  message in that window was lost. On the test machine that meant 74 seconds of
+  model loading with nothing on screen but Queued.
+- **Sampling is only claimed once ComfyUI is really sampling.** The sampler's
+  executing event arrives before the work starts and the app read it as step
+  one, so the progress line ran forty seconds ahead of reality.
+- **A still image gets an honest decode line.** It used to announce that frames
+  were being decoded and call that the last long stretch. A picture has no
+  frames, and on measurement it is the shortest phase of the render.
+- **The loading line stopped promising a warm cache.** Measured on a large
+  model, a warm run took 22 seconds against 23 cold, because ComfyUI unloads
+  after every render.
+- **A dismissed cross origin warning stays dismissed.** The bar came back after
+  every single image because nothing remembered the click. It is now tied to
+  the host and ComfyUI version that caused it and survives a restart.
+- **The render watchdog stopped throwing away work that was still running.** It
+  asks ComfyUI whether the job is still queued before calling five quiet
+  minutes a hang, allows more time while a first checkpoint is loading, and
+  gives a render in its final steps another minute.
+- **A render on the processor leaves the chat engine where it is.** ComfyUI
+  started with the CPU flag touches no video memory, so unloading and reloading
+  the chat model around every picture cost a wait for nothing.
+- **The CPU notice names the reason it is actually there:** Force CPU with the
+  way back, no usable card, or an AMD card without ROCm. AMD help stopped
+  showing up on NVIDIA machines.
+- **A downloaded model shows up as installed** (#113). A bundle counted as
+  installed as soon as a neighbouring bundle had brought one shared file along.
+  Every file is checked now, and after a download the app keeps looking in the
+  background for a full minute instead of giving up after four seconds.
+- **The Installed inventory names every ComfyUI folder**, not only checkpoints
+  and diffusion models. LoRAs, VAEs, text encoders, CLIP vision, ControlNet,
+  upscalers, embeddings and style models were invisible.
+- **Your own file stops disappearing behind a catalogue price.** A model whose
+  catalogue entry lists 16 GB was thrown away as a partial download when the
+  file on disk was smaller. Pickers still filter, the inventory never does.
+- **The counters stopped reporting a zero they had not counted**, and a deleted
+  model disappears from the list immediately instead of standing there for
+  another ten seconds.
+- **The built-in engine starts on a fresh installation** (#118). Text downloads
+  picked their destination from the model you were chatting with, and a fresh
+  install has none, so the file landed where the engine never looks. An engine
+  that cannot start now says why in under a second instead of timing out.
+- **Adding your own provider no longer erases the built-in engine.** It kept
+  the same slot, so the card vanished without a trace. The built-in engine now
+  waits in standby with a labelled way back, and Disable on whichever provider
+  holds the slot hands it over.
+- **A disabled provider keeps its card and an Enable button**, and a provider
+  you added can be removed from the interface. Until now the only ways out were
+  Disable or a full reset.
+- **The LM Studio button in the picker sets the provider up.** It started a
+  server that nothing was configured to ask, so the model list stayed empty.
+- **Hints point at controls that exist.** Four of them named a power button on
+  Create, a gear icon and other things that were never there. Open Settings now
+  lands in the right tab with the right section already open.
+- **The LU Cloud row shows the same five models every time** and names how many
+  more there are. The order was whatever arrived first from the server.
+- **Thinking reaches the engine.** The switch was set, the engine never saw it,
+  and no bubble appeared. The signal now goes out on every path, including
+  group chat, workflows, A/B compare, the benchmark and the phone relay.
+- **Local models with strict chat templates stopped failing.** Tool results and
+  repeated roles broke templates that refuse anything but a clean alternation,
+  which is where a long chat or a group round from turn two would die. The
+  system prompt reaches the engine first and in one piece.
+- **Every answer records the model that wrote it**, so an old conversation
+  stops claiming a model it never ran on. Your pick also survives a restart.
+- **One stray click can no longer move the app into the cloud and bill you for
+  it.** Going into the cloud takes a second click within six seconds, going
+  back out stays a single click, and the composer shows which side you are on.
+- **The engine refuses a request that names a model it is not holding**, and
+  group chat loads each speaker's model before that speaker's turn.
+- **An agent workspace folder follows the chat, not its title**, so an
+  automatic rename no longer loses the folder.
+- **AMD cards on Windows are detected again.** The check ran through wmic,
+  which Microsoft removed in the August 2026 update, so on a current Windows
+  the app believed there was no AMD card at all. It reads the registry now,
+  with wmic left as a fallback.
+- **Windows with an RDNA3, RDNA3.5 or RDNA4 card gets AMD's own ROCm wheel
+  channel** instead of processor wheels and a recommendation for the frozen
+  DirectML build. Marked as researched rather than proven, because we have no
+  such card here.
+- **On Linux, AMD cards the wheels do not cover stay on the processor build
+  honestly.** They used to pass detection, report a working device and then
+  crash on the first kernel. The trainer refuses on them with a reason instead
+  of starting a run that cannot finish.
+- **Cards from Turing up use the cu130 channel** with cu126 as the fallback,
+  checked live before it is chosen.
+- **The Debian and Ubuntu package stopped fighting llama.cpp over a file name**
+  (#120). The engine ships as lu-llama-server, so both packages can be
+  installed in either order.
+- **Updating no longer risks your chats.** The app waits for open chat writes
+  before handing over to the installer, saves a fresh copy at that moment, and
+  keeps three rotating backups instead of one.
+- **Closing the window gives the video memory back.** The cross hides the app
+  by design, but the engine sat there holding its model. After a short grace
+  period it unloads and comes back on its own when you use it again.
+- **The engine dies with the app on Windows.** A crash used to leave it behind
+  holding several gigabytes of video memory, and every restart leaked a handle.
+  A crash also leaves a witness file now.
+- **Voice input says what actually went wrong.** A dead transcription server
+  reloads its model by itself and reports honestly if it cannot, refusals reach
+  you in their own words, and the microphone hint no longer blames a setting
+  the app had switched off itself.
+- **Error messages are English on a non English system.** Windows writes its
+  error text in the system language and we were passing it through. The number
+  stays, the text is ours.
+- **A very long hosted conversation is trimmed to fit instead of refused.** The
+  system prompt and the newest turns are kept, tool call pairs are never split,
+  and only if the provider still refuses does a clear message with the code
+  context_exceeded appear.
+
+### Security
+
+- **The model size check stopped following file names it was given.** A name
+  like an absolute path made the check look at that file and answer whether it
+  exists and how large it is, so a hostile or intercepted ComfyUI had an
+  existence and size oracle for arbitrary paths on the machine. Names now run
+  through the same filter the delete path uses, a rejected name gets the
+  ordinary not found answer, and the app never touches the disk for it. Nested
+  names such as `sdxl/pony.safetensors` keep working.
+
 ## [2.6.6] - 2026-08-22
 
 The release that makes an agent or coding run cost less to do the same work.
