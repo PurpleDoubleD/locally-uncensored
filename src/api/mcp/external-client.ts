@@ -41,8 +41,29 @@ export class MCPExternalClient {
   }>()
   private outputBuffer = ''
   private connected = false
+  /** True while OUR disconnect() is taking the process down, so the close
+   *  handler can tell a deliberate shutdown from a server that died. */
+  private closingOnPurpose = false
+  /** True once connect() has HANDED BACK tools, i.e. once somebody registered
+   *  them. A process that dies during the handshake is already reported by the
+   *  connect() rejection; announcing it twice would have the panel undo a
+   *  registration that never happened. */
+  private registered = false
 
-  constructor(private config: MCPServerConfig) {}
+  /**
+   * Called once when the server process exits WITHOUT us asking it to.
+   *
+   * Until now that event only flipped a private boolean: the server's tools
+   * stayed registered, the settings panel stayed green, and the model kept
+   * being offered tools whose process was gone — every call failing with
+   * "Not connected" for as long as the app stayed open. The owner of the
+   * registration is the only one who can undo it, so it gets told.
+   */
+  private onExit?: (serverId: string) => void
+
+  constructor(private config: MCPServerConfig, opts?: { onExit?: (serverId: string) => void }) {
+    this.onExit = opts?.onExit
+  }
 
   async connect(): Promise<MCPToolDefinition[]> {
     try {
@@ -76,9 +97,17 @@ export class MCPExternalClient {
         })
 
         command.on('close', () => {
+          const wasConnected = this.connected
           this.connected = false
           this.child = null
           this.rejectAllPending('Server process exited')
+          // A crash, an OOM kill, a server that quits on a bad config: the
+          // tools it registered are dead weight from this moment on, and the
+          // only honest UI is one that says so.
+          if (wasConnected && this.registered && !this.closingOnPurpose) {
+            log.warn(`[MCP:${this.config.name}] server process exited unexpectedly`, { id: this.config.id })
+            this.onExit?.(this.config.id)
+          }
         })
 
         try {
@@ -110,6 +139,7 @@ export class MCPExternalClient {
         serverId: this.config.id,
       }))
 
+      this.registered = true
       return tools
     } catch (err) {
       this.connected = false
@@ -143,6 +173,7 @@ export class MCPExternalClient {
   }
 
   async disconnect() {
+    this.closingOnPurpose = true
     this.connected = false
     this.rejectAllPending('Disconnecting')
     if (this.child) {

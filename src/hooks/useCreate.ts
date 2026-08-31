@@ -13,7 +13,7 @@ import {
   getSamplers,
   getSchedulers,
   detectVideoBackend,
-  cancelGeneration,
+  abandonPrompt,
   submitWorkflow,
   getHistory,
   isPromptQueued,
@@ -1414,6 +1414,17 @@ export function useCreate() {
         })
       }
     } catch (err) {
+      // However this render ended — Stop, the stall watchdog, a dead ComfyUI,
+      // a node error — our prompt can still be sitting in ComfyUI's queue with
+      // nobody watching it. The watchdogs used to just stop polling and walk
+      // away, which is how a "stalled" job kept the GPU busy for another hour
+      // and delivered its file to nowhere. Remove exactly OURS; a blanket
+      // /interrupt here would kill the Create render or the external ComfyUI
+      // tab that is actually running.
+      const ownPromptId = useCreateStore.getState().currentPromptId
+      if (ownPromptId) {
+        try { await abandonPrompt(ownPromptId) } catch { /* best effort */ }
+      }
       if (err instanceof Error && err.message === 'Cancelled') {
         // User cancelled, not an error
       } else {
@@ -1454,7 +1465,20 @@ export function useCreate() {
     if (trainingActive.current) {
       try { await cancelCharacterTraining() } catch {}
     }
-    try { await cancelGeneration() } catch {}
+    // Take OUR job out of the queue — do not blanket-/interrupt.
+    //
+    // /interrupt kills whatever ComfyUI is executing RIGHT NOW, which is only
+    // our render when ours happens to be at the front. Queued behind three
+    // others (R32 sat at position 4), Stop killed a stranger's job and left
+    // ours to start seconds later, unwatched: the GPU kept working, the file
+    // landed on disk, and nothing ever put it in the gallery because the poller
+    // was already gone. The same /interrupt also reaches an external ComfyUI
+    // tab on the same server. abandonPrompt deletes ours from pending and only
+    // interrupts when ours is the one running.
+    const ownPromptId = useCreateStore.getState().currentPromptId
+    if (ownPromptId) {
+      try { await abandonPrompt(ownPromptId) } catch { /* best effort */ }
+    }
     if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null }
     useCreateStore.getState().setIsGenerating(false)
     useCreateStore.getState().setProgress(0)

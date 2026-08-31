@@ -57,6 +57,7 @@ import { renderToolRoster, renderToolNames } from '../lib/tool-roster'
 import { MUTATING_TOOLS, allowedInReadOnlyTurn } from '../lib/mutating-tools'
 import { useAgentGoalStore, renderGoalSection } from '../stores/agentGoalStore'
 import { useAgentLoopStore } from '../stores/agentLoopStore'
+import { beginRun, isRunStopped, stopRun } from '../lib/run-stop'
 import { buildLoopRecheck, loopPassSaysDone } from '../lib/agent-commands'
 import { generateEmbeddings } from '../api/rag'
 import { truncateToolResult } from '../lib/truncate-tool-result'
@@ -96,9 +97,11 @@ export function useAgentChat() {
   const [pendingApproval, setPendingApproval] = useState<AgentToolCall | null>(null)
 
   const abortRef = useRef<AbortController | null>(null)
-  /** True once the user pressed stop, so the /loop driver does not start
-   *  another pass on the run they just killed. */
-  const userStoppedRef = useRef(false)
+  // "The user pressed stop" lives in lib/run-stop, keyed by conversation, NOT
+  // in a ref of this hook instance — for the same reason agentLoopTimer above
+  // is module scope. It was also never RESET: one stop anywhere in the session
+  // left the flag true forever, so every later /loop in Agent mode silently ran
+  // a single pass and stopped, with no message saying why.
   const contentRef = useRef('')
   const thinkingRef = useRef('')
   const blocksRef = useRef<AgentBlock[]>([])
@@ -317,6 +320,12 @@ export function useAgentChat() {
     if (!convId) {
       convId = store.createConversation(activeModel, persona?.systemPrompt || '')
     }
+
+    // A brand-new instruction clears a previous stop; a /loop pass inherits it,
+    // which is what makes Stop end the LOOP and not just the pass in flight.
+    // The old per-instance ref was set by stopAgent and never cleared anywhere,
+    // so after one Stop every later /loop ran exactly one pass, in silence.
+    if (!opts?.loop) beginRun(convId)
 
     // Publish a HUMAN-READABLE slug ("create-an-index-7f2c3d") so
     // built-in tools land in `~/agent-workspace/<slug>/`. Previously
@@ -1637,6 +1646,16 @@ export function useAgentChat() {
           })
         }
 
+        // Every call carries an id from here on. Only the NATIVE channel gives
+        // us one; a call lifted out of prose (parseLooseToolCalls) or
+        // synthesized by the media fallback had none, so the next turn pushed
+        // an assistant `tool_calls` entry with no id AND a tool result with
+        // `tool_call_id: undefined`. A strict OpenAI-compatible provider
+        // (lu-cloud/DeepInfra) rejects the whole conversation for that — and
+        // the prose fallback exists precisely for the weak models that can
+        // least afford to lose the run.
+        toolCalls = toolCalls.map((tc) => (tc.id ? tc : { ...tc, id: uuid() }))
+
         type BatchEntry = { tc: typeof toolCalls[number]; ac: AgentToolCall; blockId: string }
         const batch: BatchEntry[] = []
         budget.addToolCalls(toolCalls.length)
@@ -1702,12 +1721,29 @@ export function useAgentChat() {
         const auditIds = new Map<string, string>()
 
         const results = await executeParallel(requests, {
-          getTool: (name) => toolRegistry.resolveExecutable(name),
+          // The curated allow-list is enforced HERE, where it decides what
+          // runs, not only where the catalog is built (audit M2). Filtering the
+          // offered tools shaped what the model was TOLD about; the prose
+          // fallback then lifted any name out of the full registry —
+          // shell_execute included — so the "plain chat gets five safe tools"
+          // contract held everywhere except at the point of execution. The one
+          // surface that is guaranteed to carry attacker-controlled text
+          // (web_fetch output) is the one that can talk a weak model into
+          // naming a terminal tool. A tool the run never offered does not
+          // exist for this run, and the model gets told so and can retry with
+          // one that does.
+          getTool: (name) => (toolMatchesCurated(name) ? toolRegistry.resolveExecutable(name) : undefined),
           // Timeout backstop shared with Codex (audit B9): before this the
           // Agent loop had NO ceiling around a tool call, so one hung tool
           // wedged the whole run with no way out but a restart.
-          execute: (name: string, args: Record<string, any>, callRun?: AgentRunContext) =>
-            raceWithToolTimeout(toolRegistry.execute(name, args, 1, callRun), name, toolCallCapMs(name, args, settings)),
+          execute: (name: string, args: Record<string, any>, callRun?: AgentRunContext, signal?: AbortSignal) =>
+            raceWithToolTimeout(
+              // The run's Stop travels into the tool itself (audit M1), not
+              // just to the batch scheduler.
+              toolRegistry.execute(name, args, 1, callRun, signal ?? abort.signal),
+              name,
+              toolCallCapMs(name, args, settings),
+            ),
           lookupCache: convId ? makeInTurnCacheLookup({ convId, turnStartMs }) : undefined,
           explainError: (toolName, err) => explainToolError(toolName, err),
           awaitApproval: async (req) => {
@@ -2224,7 +2260,7 @@ export function useAgentChat() {
           id: uuid(), role: 'assistant', timestamp: Date.now(),
           content: `The loop stopped because the run was ${loopHalt}. Start it again once that is sorted.`,
         })
-      } else if (opts?.loop && convId && !userStoppedRef.current) {
+      } else if (opts?.loop && convId && !isRunStopped(convId)) {
         const loopState = opts.loop
         const saidDone = loopPassSaysDone(contentRef.current.trim())
         const cap = Math.max(0, useSettingsStore.getState().settings.loopMaxPasses ?? 0)
@@ -2275,8 +2311,13 @@ export function useAgentChat() {
 
   const stopAgent = useCallback(() => {
     // Stop means stop: also cancel a /loop pass waiting out its interval,
-    // otherwise the run the user just killed comes back by itself.
-    userStoppedRef.current = true
+    // otherwise the run the user just killed comes back by itself. Recorded per
+    // CONVERSATION so the finally of a pass started by a previous hook instance
+    // (the chat view unmounts on a view switch) sees it too, and so the flag is
+    // cleared again by the next real instruction instead of standing for the
+    // rest of the session.
+    const stoppedConvId = useChatStore.getState().activeConversationId
+    stopRun(stoppedConvId)
     if (agentLoopTimer) {
       clearTimeout(agentLoopTimer)
       agentLoopTimer = null
@@ -2289,7 +2330,7 @@ export function useAgentChat() {
     // the agent loop before, so a running image/video kept burning unless the user
     // happened to click the small in-chat tool Stop. Now both Stops agree.
     requestGenerationCancel()
-    drainApprovals(useChatStore.getState().activeConversationId)
+    drainApprovals(stoppedConvId)
     setIsAgentRunning(false)
   }, [])
 

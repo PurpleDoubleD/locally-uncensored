@@ -63,8 +63,10 @@ describe.each([
 
 describe('the ordinary loop is untouched', () => {
   it('a normal pass still reaches the scheduler through the else branch', () => {
-    expect(codex).toContain('} else if (loopState && convId && !userStoppedRef.current) {')
-    expect(agent).toContain('} else if (opts?.loop && convId && !userStoppedRef.current) {')
+    // Guarded by the module-scoped, per-conversation stop (audit M1) rather
+    // than by a ref of whichever hook instance happens to be mounted.
+    expect(codex).toContain('} else if (loopState && convId && !isRunStopped(convId)) {')
+    expect(agent).toContain('} else if (opts?.loop && convId && !isRunStopped(convId)) {')
   })
 
   it('LOOP_DONE and the pass cap are still the other two ways out', () => {

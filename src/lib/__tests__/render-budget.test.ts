@@ -273,8 +273,12 @@ describe('wiring in the poll loop', () => {
   })
 
   it('ALL THREE exits abandon the job instead of orphaning it', () => {
-    // pace verdict, warm-up verdict (G24), flat deadline
-    expect(handoff.match(/await abandonPrompt\(promptId\)/g)?.length).toBe(3)
+    // pace verdict, warm-up verdict (G24), flat deadline — counted inside the
+    // POLL LOOP only. The submit path abandons too since audit M1 (a Stop that
+    // lands while /prompt is in flight takes the job straight back out), and
+    // that one must not be able to stand in for a missing poll-loop exit.
+    const pollBody = handoff.slice(handoff.indexOf('async function pollAndExtract('))
+    expect(pollBody.match(/await abandonPrompt\(promptId\)/g)?.length).toBe(3)
     expect(handoff).not.toContain('generation timed out after')
   })
 

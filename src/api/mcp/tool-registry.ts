@@ -14,7 +14,11 @@ import type { AgentRunContext } from '../agent-context'
  * the process-wide singleton, so a second interleaving run cannot move their
  * goalposts mid-call. Tools that do not care simply ignore it.
  */
-type ToolExecutor = (args: Record<string, any>, run?: AgentRunContext) => Promise<string>
+type ToolExecutor = (
+  args: Record<string, any>,
+  run?: AgentRunContext,
+  signal?: AbortSignal,
+) => Promise<string>
 /** The pre-2.6.6 shape, still accepted from external servers and tests. */
 type LegacyToolExecutor = (args: Record<string, any>) => Promise<string>
 /**
@@ -31,11 +35,38 @@ interface RegisteredTool {
 
 export class ToolRegistry {
   private tools = new Map<string, RegisteredTool>()
+  /**
+   * Names the app itself owns. A third-party MCP server — the settings panel
+   * advertises those as "community tools" — could register under `file_write`
+   * or `shell_execute` and the Map.set simply replaced the builtin: every later
+   * call went to the foreign server, transparently, with the builtin's own
+   * description still selling it to the model. Disconnecting the server then
+   * ran unregisterServer, which deleted the entry by serverId and took the
+   * BUILTIN with it — permanently, for the rest of the session.
+   *
+   * Builtins are therefore untouchable: a colliding external name is refused,
+   * not merged, not suffixed. Suffixing would be worse than refusing, because
+   * the model would then see two tools that both claim to be the terminal.
+   */
+  private builtinNames = new Set<string>()
+  /** Collisions refused since startup, for the MCP settings panel / report. */
+  private rejectedExternal: { serverId: string; toolName: string }[] = []
 
   // ── Registration ──────────────────────────────────────────────
 
   registerBuiltin(tool: MCPToolDefinition, executor: ToolExecutor) {
+    this.builtinNames.add(tool.name)
     this.tools.set(tool.name, { definition: tool, executor })
+  }
+
+  /** Is this name owned by the app (and thus off-limits to MCP servers)? */
+  isBuiltinName(name: string): boolean {
+    return this.builtinNames.has(name)
+  }
+
+  /** External registrations refused because they collided with a builtin. */
+  getRejectedExternalTools(): readonly { serverId: string; toolName: string }[] {
+    return this.rejectedExternal
   }
 
   /**
@@ -56,6 +87,18 @@ export class ToolRegistry {
     const isTwoArg = executor.length >= 2
     for (const tool of tools) {
       const name = tool.name
+      // Name collision with an app tool: refuse the registration and say so.
+      // The alternative (overwrite) hands the app's own file and terminal tools
+      // to a third-party process without a word to the user, and the eventual
+      // disconnect deletes the builtin for good. See `builtinNames`.
+      if (this.builtinNames.has(name)) {
+        this.rejectedExternal.push({ serverId, toolName: name })
+        console.warn(
+          `[ToolRegistry] MCP server "${serverId}" tried to register "${name}", `
+          + 'which is a built-in tool. Registration refused; the built-in stays in place.',
+        )
+        continue
+      }
       const bound: ToolExecutor = isTwoArg
         ? (args: Record<string, any>) =>
             (executor as ExternalToolExecutor)(name, args)
@@ -69,10 +112,13 @@ export class ToolRegistry {
 
   unregisterServer(serverId: string) {
     for (const [name, entry] of this.tools) {
-      if (entry.definition.serverId === serverId) {
+      // `source === 'external'` as well as the serverId: a builtin can never be
+      // collateral of a disconnect, whatever a definition claims to carry.
+      if (entry.definition.serverId === serverId && !this.builtinNames.has(name)) {
         this.tools.delete(name)
       }
     }
+    this.rejectedExternal = this.rejectedExternal.filter((r) => r.serverId !== serverId)
   }
 
   // ── Query ─────────────────────────────────────────────────────
@@ -138,7 +184,15 @@ export class ToolRegistry {
     args: Record<string, any>,
     maxRetries = 1,
     run?: AgentRunContext,
+    signal?: AbortSignal,
   ): Promise<string> {
+    // The run's Stop, in the tool's own hands. Callers that predate the fourth
+    // argument still reach it through the run they already thread.
+    const abort = signal ?? run?.abortSignal
+    // Stop is not "finish the batch quietly": a call that has not started yet
+    // must not start. The executor checks this too, but the registry is also
+    // reached directly (sub-agents, retired-name redirects).
+    if (abort?.aborted) return `Error: cancelled by the user before "${name}" started.`
     const entry = this.tools.get(name)
     if (!entry) {
       // Retired names (2.6.6 tool merge) still run: a restored session or a
@@ -159,11 +213,12 @@ export class ToolRegistry {
 
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       try {
-        const result = await entry.executor(args, run)
+        const result = await entry.executor(args, run, abort)
         // If result is an error and we have retries left, retry
         if (result.startsWith('Error:') && attempt < maxRetries) {
-          // Only retry on transient errors (timeout, network)
-          if (retriable && isTransientText(result)) continue
+          // A retry after Stop would run the command the user just cancelled a
+          // second time — the one case where "transient" is the wrong read.
+          if (retriable && isTransientText(result) && !abort?.aborted) continue
         }
         return result
       } catch (err) {
@@ -172,7 +227,10 @@ export class ToolRegistry {
         // git_commit whose invoke threw after the commit landed, and aborted
         // calls. Same rule as the string path: transient + non-mutating only,
         // and an abort is the user speaking, not a network hiccup.
-        const aborted = (err as { name?: string })?.name === 'AbortError' || /abort/i.test(message)
+        const aborted =
+          (err as { name?: string })?.name === 'AbortError'
+          || /abort/i.test(message)
+          || abort?.aborted === true
         if (attempt < maxRetries && retriable && !aborted && isTransientText(message)) continue
         return `Error: ${message}`
       }

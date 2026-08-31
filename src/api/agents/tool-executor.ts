@@ -71,13 +71,21 @@ export interface ExecutionResult {
 
 /**
  * Dispatch one registered tool. The third argument is the run the call belongs
- * to (see ExecutionRequest.run); a runtime that does not care simply declares
- * two parameters.
+ * to (see ExecutionRequest.run); the fourth is the run's Stop.
+ *
+ * The signal used to stop at this boundary: executeParallel checked it before
+ * DISPATCHING a call and never again, so Stop only kept the not-yet-started
+ * calls of a batch from firing. A shell command that was already running kept
+ * mutating the repository for up to its full timeout (615 s) after the user
+ * pressed the one brake the product offers for an unattended agent with full
+ * shell access. A tool that can be cancelled needs the signal in its own hands;
+ * a runtime that does not care simply declares fewer parameters.
  */
 export type ExecutorFn = (
   name: string,
   args: Record<string, any>,
   run?: AgentRunContext,
+  signal?: AbortSignal,
 ) => Promise<string>
 
 /**
@@ -354,9 +362,55 @@ async function runSingle(
     })
   }
 
+  // The run's Stop. `opts.abortSignal` is what the hook passes; `req.run` is
+  // what a nested loop (delegate_task's sub-agent) carries — take whichever
+  // exists so no surface silently runs uncancellable.
+  const signal = opts.abortSignal ?? req.run?.abortSignal
+
+  // Approval can sit open for minutes. The abort check at schedule time is long
+  // stale by the time the user finally answers, so ask again here: a call the
+  // user approved before pressing Stop must not still be dispatched afterwards.
+  if (signal?.aborted) {
+    return finalize({
+      id: req.id,
+      toolName: req.toolName,
+      status: 'rejected',
+      error: 'Aborted before dispatch',
+      dispatchedArgs,
+      argsHash,
+      sideEffectKey,
+      startedAt,
+      cacheHit: false,
+      schemaValidated,
+    })
+  }
+
   // Dispatch.
   try {
-    const result = await runtime.execute(req.toolName, dispatchedArgs, req.run)
+    const result = await raceAbort(
+      runtime.execute(req.toolName, dispatchedArgs, req.run, signal),
+      signal,
+    )
+    if (result === ABORTED) {
+      // The tool got the signal and is expected to wind itself down; what this
+      // guarantees is that the RUN stops waiting. Without it, Stop was still a
+      // lie for the user even when the tool cooperated: the loop sat on the
+      // pending promise for the rest of the tool's own timeout, the typing dots
+      // stayed on, and nothing downstream (VRAM restore, staged-change review)
+      // could proceed.
+      return finalize({
+        id: req.id,
+        toolName: req.toolName,
+        status: 'rejected',
+        error: 'Aborted while running',
+        dispatchedArgs,
+        argsHash,
+        sideEffectKey,
+        startedAt,
+        cacheHit: false,
+        schemaValidated,
+      })
+    }
     return finalize({
       id: req.id,
       toolName: req.toolName,
@@ -386,6 +440,38 @@ async function runSingle(
       schemaValidated,
     })
   }
+}
+
+/** Sentinel for "the run was stopped while this tool was still in flight". */
+const ABORTED = Symbol('aborted')
+
+/**
+ * Resolve as soon as EITHER the tool finishes or the run is stopped.
+ *
+ * The abandoned tool promise is swallowed, not left dangling: a rejection with
+ * no handler takes the whole webview down in Tauri, and the tool result of a
+ * stopped run is worthless anyway.
+ */
+function raceAbort<T>(p: Promise<T>, signal?: AbortSignal): Promise<T | typeof ABORTED> {
+  if (!signal) return p
+  if (signal.aborted) {
+    p.catch(() => {})
+    return Promise.resolve(ABORTED)
+  }
+  return new Promise<T | typeof ABORTED>((resolve, reject) => {
+    const onAbort = () => resolve(ABORTED)
+    signal.addEventListener('abort', onAbort, { once: true })
+    p.then(
+      (v) => {
+        signal.removeEventListener('abort', onAbort)
+        resolve(v)
+      },
+      (e) => {
+        signal.removeEventListener('abort', onAbort)
+        reject(e)
+      },
+    )
+  })
 }
 
 function abortedResult(tagged: { req: ExecutionRequest; key?: string }): ExecutionResult {

@@ -237,3 +237,70 @@ describe('disconnect', () => {
     await expect(client.callTool('get_forecast', {})).rejects.toThrow('Not connected')
   })
 })
+
+describe('a server that dies on its own', () => {
+  it('tells its owner, so the tools can leave the registry and the UI can stop lying', async () => {
+    // Before this the close event only flipped a private boolean. The tools
+    // stayed registered and the settings panel stayed green, so the model was
+    // still offered a tool whose process was gone and every call came back
+    // "Not connected" for as long as the app stayed open.
+    const exits: string[] = []
+    const client = new MCPExternalClient(config, { onExit: (id) => exits.push(id) })
+    await client.connect()
+
+    lastServer!.emit('close')
+
+    expect(exits).toEqual(['srv-1'])
+    expect(client.isConnected()).toBe(false)
+  })
+
+  it('fails the in-flight calls instead of leaving them to time out', async () => {
+    const client = new MCPExternalClient(config)
+    await client.connect()
+    responder = () => null                       // the server answers nothing
+    const call = client.callTool('get_forecast', { city: 'Berlin' })
+
+    lastServer!.emit('close')
+
+    await expect(call).rejects.toThrow(/Server process exited/)
+  })
+
+  it('NEGATIVE CONTROL: our own disconnect is not reported as a death', async () => {
+    const exits: string[] = []
+    const client = new MCPExternalClient(config, { onExit: (id) => exits.push(id) })
+    await client.connect()
+
+    await client.disconnect()
+    lastServer!.emit('close')                    // the real plugin emits this too
+
+    expect(exits).toEqual([])
+  })
+
+  it('NEGATIVE CONTROL: a close before the handshake finished reports nothing', async () => {
+    const exits: string[] = []
+    const client = new MCPExternalClient(config, { onExit: (id) => exits.push(id) })
+    responder = () => null
+    const connecting = client.connect()
+    await serverStarted()
+    lastServer!.emit('close')
+
+    await expect(connecting).rejects.toThrow()
+    expect(exits).toEqual([])
+  })
+})
+
+describe('the settings panel is what acts on that', () => {
+  it('unregisters the dead server\'s tools and turns its light off', async () => {
+    const { readFileSync } = await import('node:fs')
+    const { resolve, dirname } = await import('node:path')
+    const { fileURLToPath } = await import('node:url')
+    const panel = readFileSync(
+      resolve(dirname(fileURLToPath(import.meta.url)), '../../../components/settings/MCPServerSettings.tsx'),
+      'utf8',
+    )
+    expect(panel).toContain('onExit: (id) => {')
+    expect(panel).toContain('toolRegistry.unregisterServer(id)')
+    expect(panel).toContain('setConnected(id, false)')
+    expect(panel).toContain('clearServerTools(id)')
+  })
+})

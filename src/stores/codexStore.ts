@@ -16,6 +16,24 @@ export interface CodexPlanApproval {
   createdAt: number
 }
 
+/**
+ * Ring size for a thread's event log.
+ *
+ * The log grew without a ceiling and kept every event of the session: each
+ * terminal_output carries the UNTRUNCATED shell result (the 60k-char cap in
+ * useCodex applies to what goes back to the MODEL, not to what is stored here)
+ * and each file_change carries a full unified diff. A 200-iteration run is tens
+ * of megabytes held for as long as the app is open.
+ *
+ * Nothing reads the CONTENT. The only consumer in the tree is CodexView, which
+ * uses `events.length` as one trigger of its auto-scroll key — and that hook
+ * re-pins through a ResizeObserver on every content-height change anyway, with
+ * the last message's text as the other half of the key. So a length that stops
+ * growing at the cap costs the pin nothing. 500 keeps the log long enough to be
+ * worth having if it ever gains a real reader.
+ */
+const CODEX_EVENT_LOG_MAX = 500
+
 interface CodexState {
   chatMode: ChatMode
   threads: Record<string, CodexThread>
@@ -168,12 +186,15 @@ export const useCodexStore = create<CodexState>()(
           const mutatesFs =
             event.type === 'file_change' ||
             event.type === 'terminal_output' // shell/code execution can touch files
+          const next = [...thread.events, event]
           return {
             threads: {
               ...state.threads,
               [conversationId]: {
                 ...thread,
-                events: [...thread.events, event],
+                events: next.length > CODEX_EVENT_LOG_MAX
+                  ? next.slice(next.length - CODEX_EVENT_LOG_MAX)
+                  : next,
               },
             },
             fileTreeVersion: mutatesFs ? state.fileTreeVersion + 1 : state.fileTreeVersion,

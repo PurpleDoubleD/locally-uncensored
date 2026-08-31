@@ -13,7 +13,8 @@ import { allowedInReadOnlyTurn } from '../lib/mutating-tools'
 import { applyGoalCommand } from '../lib/goal-command'
 import { useAgentGoalStore, renderGoalSection } from '../stores/agentGoalStore'
 import { useAgentLoopStore } from '../stores/agentLoopStore'
-import { CODEX_CONFIRM_TOOLS } from './codexShellGate'
+import { beginRun, isRunStopped, stopRun } from '../lib/run-stop'
+import { CODEX_CONFIRM_TOOLS, renderApprovalPreview } from './codexShellGate'
 import { buildHermesToolPrompt, buildHermesToolResult, buildHermesToolCall, parseHermesToolCalls, stripToolCallTags, hasToolCallTags } from '../api/hermes-tool-calling'
 import { streamProviderTurn, type StreamedProviderTurn } from '../lib/provider-stream'
 import { createHermesDisplayFilter, createThinkStreamSplitter, createTurnThinkingSink } from '../lib/hermes-stream'
@@ -245,9 +246,12 @@ export function useCodex() {
   const [isRunning, setIsRunning] = useState(false)
   const abortRef = useRef<AbortController | null>(null)
   const runningRef = useRef(false)
-  /** True once the user pressed stop, so the /loop driver does not start
-   *  another pass on the run they just killed. Cleared when a new run starts. */
-  const userStoppedRef = useRef(false)
+  // "The user pressed stop" lives in lib/run-stop, keyed by conversation, NOT
+  // in a ref of this hook instance. The Code view unmounts on every tab switch,
+  // and the /loop driver's finally runs in the closure of the instance that
+  // started the pass — a stop pressed by the remounted instance set a ref that
+  // closure never reads, so the finally re-armed the loop the user had just
+  // killed. The loop is uncapped by design; that made it unstoppable.
 
   const sendInstruction = useCallback(async (
     rawInstruction: string,
@@ -285,8 +289,6 @@ export function useCodex() {
     // fires the next pass, the proxy refuses it again, and the credits dialog
     // reopens every interval until the user finds Stop.
     let loopHalt: string | null = null
-    // A brand-new instruction clears a previous stop; a /loop pass inherits it.
-    if (!opts?.loop) userStoppedRef.current = false
     // `/loop [30s] …` — the interval is the PAUSE BETWEEN PASSES, and the
     // driver at the end of this function is what actually brings the model back.
     // The value of a loop is the re-check: a model that declares victory early
@@ -309,6 +311,10 @@ export function useCodex() {
     if (!convId) {
       convId = store.createConversation(activeModel, persona?.systemPrompt || '', 'codex')
     }
+
+    // A brand-new instruction clears a previous stop; a /loop pass inherits it,
+    // which is what makes Stop end the LOOP and not just the pass in flight.
+    if (!opts?.loop) beginRun(convId)
 
     // Mode of THIS conversation (plan 2.6.6, C1). A pick made while the
     // previous run was still going has been parked; a send is where it takes
@@ -1722,6 +1728,15 @@ export function useCodex() {
         // Phase 5b (v2.4.0), parallel tool execution via tool-executor.
         if (!runningRef.current || abort.signal.aborted) break
 
+        // Every call carries an id from here on. Only the NATIVE channel gives
+        // us one; a call recovered from prose or rebuilt from Hermes XML had
+        // none, and the next turn then sent `tool_call_id: undefined` next to
+        // an assistant tool_calls entry with no id. A strict OpenAI-compatible
+        // provider (lu-cloud/DeepInfra) 422s that and the whole run dies — on
+        // exactly the weak models that need the prose fallback in the first
+        // place.
+        toolCalls = toolCalls.map((tc) => (tc.id ? tc : { ...tc, id: uuid() }))
+
         // Loop-detector: narration first (the same line re-emitted every
         // iteration), then the batch itself (windowed signature repeats +
         // identical reads against an unchanged workspace).
@@ -1867,8 +1882,16 @@ export function useCodex() {
         // race only exists so a tool whose timer never fires cannot hold the
         // loop forever — and the timer is cleared when the tool wins (B10),
         // instead of parking a live closure for up to 615 s per call.
-        const withTimeout = (name: string, args: Record<string, any>) =>
-          raceWithToolTimeout(toolRegistry.execute(name, args, 1, run), name, toolCallCapMs(name, args, settings))
+        const withTimeout = (name: string, args: Record<string, any>, signal?: AbortSignal) =>
+          raceWithToolTimeout(
+            // The run's Stop travels all the way INTO the tool now (audit M1).
+            // Before, the signal stopped at the batch scheduler: a shell command
+            // already in flight kept mutating the repository for the rest of its
+            // 615 s budget after the user hit the only brake the product has.
+            toolRegistry.execute(name, args, 1, run, signal ?? abort.signal),
+            name,
+            toolCallCapMs(name, args, settings),
+          )
 
         // Multi-File Stage-and-Approve (B10). When the user has codex
         // stage mode on, file_write calls don't hit the disk — they
@@ -1986,7 +2009,7 @@ export function useCodex() {
           return `Staged for review: ${path} (surgical edit). The user will apply or reject the change before it lands on disk.`
         }
 
-        const dispatchTool = (name: string, args: Record<string, any>): Promise<string> => {
+        const dispatchTool = (name: string, args: Record<string, any>, signal?: AbortSignal): Promise<string> => {
           // Stage-and-Approve follows the MODE preset, not the raw setting:
           // Ask stages every write for review, Bypass writes straight through,
           // Plan never gets here because the write tools are stripped.
@@ -2007,21 +2030,21 @@ export function useCodex() {
                 if (hit) return Promise.resolve(stagedReadResult(hit))
               }
               if (name === 'file_list' || name === 'file_search') {
-                return withTimeout(name, args).then((r) => r + stagedListingNote(staged))
+                return withTimeout(name, args, signal).then((r) => r + stagedListingNote(staged))
               }
             }
           }
-          return withTimeout(name, args)
+          return withTimeout(name, args, signal)
         }
 
         const results = await executeParallel(requests, {
           getTool: (name) => toolRegistry.resolveExecutable(name),
-          execute: (name: string, args: Record<string, any>) => {
+          execute: (name: string, args: Record<string, any>, _run, signal) => {
             // A create tool the gate had closed still reaches the registry, so
             // the run self-heals: this call runs, and the next step offers the
             // schemas instead of pretending the capability is gone.
             if (isGatedTool(name)) createGateOpened = true
-            return dispatchTool(name, args)
+            return dispatchTool(name, args, signal)
           },
           lookupCache: convId ? makeInTurnCacheLookup({ convId, turnStartMs }) : undefined,
           explainError: (toolName, err) => explainToolError(toolName, err),
@@ -2058,7 +2081,12 @@ export function useCodex() {
                 // styled, and had no way to say "stop asking" (David 2026-07-24).
                 return useCodexConfirmStore.getState().ask({
                   toolName: req.toolName,
-                  command: String(a.command ?? a.code ?? a.script ?? '').slice(0, 800),
+                  // The FULL arguments, not `args.command`. See
+                  // renderApprovalPreview + CodexConfirmRequest.command: the
+                  // old one-field preview showed `python3 -` while the script
+                  // rode in on stdin, unseen and unapproved.
+                  command: renderApprovalPreview(req.toolName, a),
+                  args: a,
                   // "we ask because it is a cloud model" only holds when the
                   // user did not ask for it themselves and Ask mode is not
                   // what put the gate up.
@@ -2313,7 +2341,14 @@ export function useCodex() {
       // Apply button, so "auto on everything" really means auto (first
       // customer feedback, Morgan 2026-07-26). Failures stay in the queue for
       // manual retry via the Pending panel.
-      if (settings.codexStageMode && settings.codexAutoApply && convId) {
+      //
+      // Not after a Stop. Auto-apply sits on the loop's normal exit path, so a
+      // run the user aborted mid-edit still wrote its half-finished staged
+      // changes to disk — the opt-in says "apply what the run produced", and an
+      // aborted run did not produce it, it was interrupted producing it. The
+      // queue survives, so nothing is lost: the Pending panel still offers
+      // every change for review.
+      if (settings.codexStageMode && settings.codexAutoApply && convId && !isRunStopped(convId)) {
         const pending = useStagedChangesStore.getState().list(convId)
         if (pending.length > 0) {
           const applied = await applyAllStagedChanges(convId)
@@ -2430,7 +2465,7 @@ export function useCodex() {
       // repo content, so the user approves what they can actually read. The
       // mode the approval runs under is resolved in the UI and shown ON the
       // button, and it is never Bypass unless the user picked Bypass by hand.
-      if (convId && codexMode === 'plan' && !userStoppedRef.current && fullContent.trim()) {
+      if (convId && codexMode === 'plan' && !isRunStopped(convId) && fullContent.trim()) {
         useCodexStore.getState().setPlanApproval(convId, {
           planText: fullContent.trim(),
           messageId: assistantMsg.id,
@@ -2485,7 +2520,7 @@ export function useCodex() {
           id: uuid(), role: 'assistant', timestamp: Date.now(),
           content: `The loop stopped because the run was ${loopHalt}. Start it again once that is sorted.`,
         })
-      } else if (loopState && convId && !userStoppedRef.current) {
+      } else if (loopState && convId && !isRunStopped(convId)) {
         const saidDone = loopPassSaysDone(fullContent.trim())
         const cap = Math.max(0, settings.loopMaxPasses ?? 0)
         const nextPass = loopState.pass + 1
@@ -2548,7 +2583,13 @@ export function useCodex() {
   const stopCodex = useCallback(() => {
     // Stop means stop: also cancel a /loop pass that is waiting out its
     // interval, otherwise the run the user just killed comes back by itself.
-    userStoppedRef.current = true
+    const stoppedConvId = useChatStore.getState().activeConversationId
+    // Both of these reach a run a PREVIOUS hook instance started (the Code view
+    // remounts on every tab switch): the store holds that run's real aborter,
+    // and the module-scoped stop is readable from its loop driver's finally,
+    // which lives in that instance's closure and can read no ref of this one.
+    stopRun(stoppedConvId)
+    useGenerationStore.getState().abortConversation(stoppedConvId)
     if (codexLoopTimer) {
       clearTimeout(codexLoopTimer)
       codexLoopTimer = null
@@ -2557,10 +2598,6 @@ export function useCodex() {
     runningRef.current = false
     abortRef.current?.abort()
     abortRef.current = null
-    // The run may belong to a PREVIOUS hook instance (the Code view remounts
-    // on every tab switch) whose controller this instance never saw. The
-    // store-registered aborter reaches it regardless of who started it.
-    useGenerationStore.getState().abortConversation(useChatStore.getState().activeConversationId)
     setIsRunning(false)
   }, [])
 

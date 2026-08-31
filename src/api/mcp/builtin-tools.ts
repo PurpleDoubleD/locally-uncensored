@@ -622,7 +622,23 @@ async function executeFileSearch(args: Record<string, any>, run?: AgentRunContex
   return JSON.stringify(data)
 }
 
-async function executeShellExecute(args: Record<string, any>, run?: AgentRunContext): Promise<string> {
+async function executeShellExecute(
+  args: Record<string, any>,
+  run?: AgentRunContext,
+  signal?: AbortSignal,
+): Promise<string> {
+  // Stop reaches the terminal tool now (audit M1). What it can guarantee
+  // depends on the phase:
+  //   - not started yet  → refused here, nothing runs;
+  //   - background task  → really killed, via shell_task_kill;
+  //   - foreground, already spawned → the bridge has NO cancel for it. Rust
+  //     `shell_execute` takes no run id and there is no shell_execute_cancel,
+  //     so the child keeps running to its own timeout. The executor stops
+  //     WAITING on it (tool-executor raceAbort), which ends the run and the
+  //     UI, but the process survives. Closing that hole needs a bridge command
+  //     — noted in the audit report, deliberately not faked here.
+  const abort = signal ?? run?.abortSignal
+  if (abort?.aborted) return 'Cancelled: the user stopped the run before this command started.'
   // Background-task actions: the three shell_task_* tools folded in (2.6.6).
   const task = typeof args.task === 'string' ? args.task : ''
   if (task === 'list') return executeShellTaskList()
@@ -648,7 +664,7 @@ async function executeShellExecute(args: Record<string, any>, run?: AgentRunCont
     return 'Refused: this turn is read-only (/review, Code-Review Mode or Plan mode). Only inspection commands run here: git status/log/diff/show/blame, ls, cat, pwd. One command, no chaining.'
   }
 
-  if (args.background) return executeShellExecuteBg({ command, cwd: args.cwd })
+  if (args.background) return executeShellExecuteBg({ command, cwd: args.cwd }, run, abort)
 
   // The one refusal that stays hard after the merge: --no-verify on a commit.
   const refusal = rejectShellCommand(command)
@@ -701,7 +717,15 @@ async function executeShellExecute(args: Record<string, any>, run?: AgentRunCont
   return output || (err ? `stderr: ${err}` : 'Done.')
 }
 
-async function executeCodeExecute(args: Record<string, any>, run?: AgentRunContext): Promise<string> {
+async function executeCodeExecute(
+  args: Record<string, any>,
+  run?: AgentRunContext,
+  signal?: AbortSignal,
+): Promise<string> {
+  // Same contract as shell_execute: a stopped run does not START new code.
+  if ((signal ?? run?.abortSignal)?.aborted) {
+    return 'Cancelled: the user stopped the run before this code ran.'
+  }
   const data = await backendCall('execute_code', { code: args.code, timeout: 30000, ...chatCtx(run) })
   const output = data.stdout || ''
   const err = data.stderr || ''
@@ -721,11 +745,28 @@ async function runShell(command: string, cwd: string | undefined, timeout = 6000
   })
 }
 
-async function executeShellExecuteBg(args: Record<string, any>, run?: AgentRunContext): Promise<string> {
-  const { bgStart } = await import('../agents/bg-tasks')
+async function executeShellExecuteBg(
+  args: Record<string, any>,
+  run?: AgentRunContext,
+  signal?: AbortSignal,
+): Promise<string> {
+  const { bgStart, bgKill } = await import('../agents/bg-tasks')
   // Thread the chat context through, or the task starts in LU's own directory
   // instead of the workspace the foreground shell tool uses.
   const { id } = await bgStart({ command: args.command, cwd: args.cwd, ...chatCtx(run) })
+  // A detached task outlives the turn that started it BY DESIGN, but it must
+  // not outlive the user pressing Stop: nothing polls it after the run ends, so
+  // an unattended `npm run build`/deploy script would keep writing to the repo
+  // with no owner and no way to reach it from the UI. This is the one shell
+  // path the bridge can genuinely cancel, so it does.
+  const abort = signal ?? run?.abortSignal
+  if (abort) {
+    if (abort.aborted) {
+      void bgKill(id).catch(() => {})
+      return `Task ${id} was started and immediately cancelled — the user stopped the run.`
+    }
+    abort.addEventListener('abort', () => { void bgKill(id).catch(() => {}) }, { once: true })
+  }
   return `Task started: ${id}. Use shell_task_status to poll, shell_task_kill to cancel.`
 }
 
@@ -1314,7 +1355,10 @@ function htmlToText(html: string): string {
 
 // ── Registration ────────────────────────────────────────────────
 
-const EXECUTOR_MAP: Record<string, (args: Record<string, any>) => Promise<string>> = {
+const EXECUTOR_MAP: Record<
+  string,
+  (args: Record<string, any>, run?: AgentRunContext, signal?: AbortSignal) => Promise<string>
+> = {
   todo_write: executeTodoWrite,
   web_search: executeWebSearch,
   web_fetch: executeWebFetch,

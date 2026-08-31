@@ -14,8 +14,20 @@ import { create } from 'zustand'
 export interface CodexConfirmRequest {
   /** shell_execute / code_execute / shell_execute_background */
   toolName: string
-  /** The command itself, already trimmed for display. */
+  /**
+   * EVERYTHING that shapes the process, rendered for a human — not just
+   * `args.command`.
+   *
+   * It used to be the command alone, while the tool description sends the model
+   * to `stdin` for anything multi-line. The card then read `python3 -` and the
+   * script that is the actual code execution never appeared, so the one human
+   * checkpoint in front of arbitrary local code showed the starter instead of
+   * the payload. Built by renderApprovalPreview (hooks/codexShellGate).
+   */
   command: string
+  /** The raw args behind that preview, so a richer card can render them without
+   *  re-parsing text, and so a test can assert what was offered for approval. */
+  args?: Record<string, unknown>
   /** True when the CLOUD arm is the only reason we are asking, which changes
    *  both the hint we show and which setting "don't ask again" turns off. */
   cloudReason: boolean

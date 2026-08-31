@@ -86,7 +86,12 @@ describe('ownership marker and wiring', () => {
 
   it('every agent-path submission carries the id, so its jobs are sweepable later', () => {
     const handoff = read('../vram-handoff.ts')
-    expect(handoff.match(/await submitWorkflow\(workflow, CLIENT_ID\)/g)?.length).toBe(4)
+    // Since audit M1 the four call sites (image + three video lanes) go through
+    // ONE helper, which is also where the Stop-before/after-submit checks live.
+    // The ownership marker therefore has a single place to be forgotten in, and
+    // this asserts it is not: no raw submit anywhere, and the helper carries it.
+    expect(handoff.match(/await submitCancellable\(workflow, seq\)/g)?.length).toBe(4)
+    expect(handoff.match(/await submitWorkflow\(workflow, CLIENT_ID\)/g)?.length).toBe(1)
     expect(handoff).not.toContain('await submitWorkflow(workflow)')
   })
 
@@ -101,10 +106,17 @@ describe('ownership marker and wiring', () => {
     expect(read('../../hooks/useCreate.ts')).toContain('submitWorkflow(workflow, CLIENT_ID)')
   })
 
-  it('NEGATIVE CONTROL: the user Stop path and the G19-1 budget path are untouched', () => {
+  it('NEGATIVE CONTROL: the user Stop path and the G19-1 budget path still work by owner', () => {
     const handoff = read('../vram-handoff.ts')
-    expect(handoff).toContain('if (_activeHandoffs > 0) {')
-    // pace verdict, G24 warm-up verdict, flat deadline
-    expect(handoff.match(/await abandonPrompt\(promptId\)/g)?.length).toBe(3)
+    // Still gated on an actually-running chat-lane generation, so a plain text
+    // Stop never reaches ComfyUI. Since audit M1 it also removes only OUR job
+    // by id — the old /interrupt + `clear: true` took the Create tab's render
+    // and the user's own ComfyUI tab down with it.
+    expect(handoff).toContain('if (_activeHandoffs > 0 && _currentPromptId) {')
+    expect(handoff).toContain('void abandonPrompt(_currentPromptId)')
+    expect(handoff).not.toContain('void clearComfyQueue()')
+    // pace verdict, G24 warm-up verdict, flat deadline — inside the poll loop.
+    const pollBody = handoff.slice(handoff.indexOf('async function pollAndExtract('))
+    expect(pollBody.match(/await abandonPrompt\(promptId\)/g)?.length).toBe(3)
   })
 })
