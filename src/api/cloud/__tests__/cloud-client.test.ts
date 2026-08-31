@@ -19,6 +19,21 @@ beforeEach(() => {
   getAccessToken.mockResolvedValue('tok-123')
 })
 
+/** A fetch that never answers on its own, and that ends the same way a real
+ *  one does when its signal aborts — including a signal that was already
+ *  aborted before the call. */
+function hangingFetch(onAbort?: () => void) {
+  return (_url: string, init: RequestInit) =>
+    new Promise<Response>((_resolve, reject) => {
+      const stop = () => {
+        onAbort?.()
+        reject(new Error('aborted'))
+      }
+      if (init.signal?.aborted) stop()
+      else init.signal?.addEventListener('abort', stop, { once: true })
+    })
+}
+
 function jsonRes(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -43,6 +58,62 @@ describe('cloudFetch', () => {
       status: 401,
     })
     expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('gives up on a connection that never answers', async () => {
+    // The wedge this bounds: a half-open socket during an upload or a submit.
+    // fetch never settles on its own, every Create run awaits it, so the whole
+    // surface stayed frozen at "Submitting to the render queue…" until the app
+    // was restarted.
+    vi.useFakeTimers()
+    fetchMock.mockImplementation(hangingFetch())
+    const pending = cloudFetch('/api/jobs', { method: 'POST', body: '{"x":1}' })
+    const settled = pending.catch((e: unknown) => e)
+    await vi.advanceTimersByTimeAsync(120_000)
+    const err = await settled
+    expect(err).toBeInstanceOf(CloudJobError)
+    expect((err as CloudJobError).status).toBe(408)
+    vi.useRealTimers()
+  })
+
+  it('an upload gets a deadline that grows with the bytes it has to push', async () => {
+    // A flat ceiling would cut a legitimate large clip off on a slow uplink.
+    vi.useFakeTimers()
+    let aborted = false
+    fetchMock.mockImplementation(hangingFetch(() => { aborted = true }))
+    const big = new ArrayBuffer(40 * 1024 * 1024)
+    const settled = cloudFetch('/api/jobs/upload?role=video', { method: 'POST', body: big }).catch(
+      (e: unknown) => e,
+    )
+    await vi.advanceTimersByTimeAsync(120_000)
+    expect(aborted).toBe(false)
+    await vi.advanceTimersByTimeAsync(60 * 60_000)
+    expect(await settled).toBeInstanceOf(CloudJobError)
+    vi.useRealTimers()
+  })
+
+  it("hands the caller's abort signal through to the request", async () => {
+    // pollJob and generate() both hold an AbortController for the run; before
+    // this, cancelling could not reach a request already in flight.
+    const ac = new AbortController()
+    let seen: AbortSignal | undefined
+    fetchMock.mockImplementation((url: string, init: RequestInit) => {
+      seen = init.signal ?? undefined
+      return hangingFetch()(url, init)
+    })
+    const settled = cloudFetch('/api/me', { signal: ac.signal }).catch((e: unknown) => e)
+    ac.abort()
+    const err = await settled
+    expect(seen?.aborted).toBe(true)
+    // A cancelled run is not a timeout — it must not be relabelled as one.
+    expect(err).not.toBeInstanceOf(CloudJobError)
+  })
+
+  it('an already-aborted signal never reaches the network', async () => {
+    fetchMock.mockImplementation(hangingFetch())
+    const ac = new AbortController()
+    ac.abort()
+    await expect(cloudFetch('/api/me', { signal: ac.signal })).rejects.toThrow()
   })
 
   it('preserves method, body and extra headers', async () => {
@@ -77,6 +148,37 @@ describe('jsonOrError', () => {
     const res = new Response('gateway timeout', { status: 504 })
     const err = await jsonOrError(res).catch((e: unknown) => e)
     expect((err as CloudJobError).message).toBe('request failed (504)')
+  })
+
+  it('keeps the server code and retry-after, which a bare 429 cannot tell apart', async () => {
+    const res = new Response(JSON.stringify({ error: 'too many requests', code: 'rate_limited' }), {
+      status: 429,
+      headers: { 'content-type': 'application/json', 'retry-after': '30' },
+    })
+    const err = (await jsonOrError(res).catch((e: unknown) => e)) as CloudJobError
+    expect(err.code).toBe('rate_limited')
+    expect(err.retryAfterMs).toBe(30_000)
+  })
+
+  it('a 2xx whose body never finished arriving is an error, not an empty result', async () => {
+    // What a cut-off response looks like once cloudFetch's deadline aborts the
+    // read mid-body. Returning {} here handed submitCloudJob an undefined id
+    // and left the run polling a job that never existed.
+    const torn = new Response(
+      new ReadableStream({
+        start(c) {
+          c.enqueue(new TextEncoder().encode('{"id":"j1"'))
+          c.error(new Error('network closed'))
+        },
+      }),
+      { status: 200 },
+    )
+    await expect(jsonOrError(torn)).rejects.toThrow(/incomplete/)
+  })
+
+  it('but an empty 2xx body still resolves', async () => {
+    // A 204-style answer from a route that returns nothing is not a failure.
+    await expect(jsonOrError(new Response('', { status: 200 }))).resolves.toEqual({})
   })
 })
 

@@ -6,7 +6,9 @@
 // Session storage: OS keychain via the existing Rust `secret_*` commands
 // (Windows Credential Manager / macOS Keychain) — survives the NSIS-update
 // WebView2 wipe and keeps refresh tokens out of localStorage. Linux and the
-// browser dev build fall back to localStorage (same tiering as providerStore).
+// browser dev build have no vault to use (secret.rs is a stub there) and fall
+// back to localStorage under the same obfuscation providerStore gives API
+// keys — see FALLBACK_MARKER for what that is and is not worth.
 
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import { secretGet, secretSet, secretDelete, oauthStart, oauthWait, openExternal } from '../backend'
@@ -42,6 +44,51 @@ function keychainAccount(key: string): string {
 // physically, but must never sign anyone back in. getItem reports it as absent.
 const TOMBSTONE = '__lu_signed_out__'
 
+// ── localStorage fallback encoding ──────────────────────────────────────
+// Everything the keychain path does not take ends up here: Linux and the
+// browser dev build have no OS vault at all (commands/secret.rs compiles to an
+// "unsupported" stub there), and any keychain write that fails falls back for
+// that one call. What lands is the Supabase session — a refresh token that is
+// a full account bearer until it is revoked — and it used to be written
+// verbatim, so on Linux it sat greppable in WebKitGTK's profile directory
+// while providerStore's API keys on the very same platforms never do (those
+// are stored reversed + base64). This closes that gap: same platforms, same
+// treatment.
+//
+// It is obfuscation, NOT encryption. There is no key this app could hold that
+// a reader of the profile directory could not take as well, so it only stops
+// the token from being legible at a glance — a backup, a synced profile
+// folder, a support screenshot, another process grepping for `eyJ`. The real
+// store remains the OS vault, and a secret store for Linux is a Rust-side
+// change, not one this adapter can make.
+const FALLBACK_MARKER = 'lu.obf.1:'
+
+function packFallback(value: string): string {
+  try {
+    return FALLBACK_MARKER + btoa(encodeURIComponent(value))
+  } catch {
+    // Dropping the session here would sign the user out on the next launch for
+    // no reason at all, which is the worse failure of the two.
+    return value
+  }
+}
+
+function unpackFallback(stored: string): string {
+  // No marker = written by a build before this encoding existed. Those must
+  // keep working, or an update signs every Linux user out.
+  if (!stored.startsWith(FALLBACK_MARKER)) return stored
+  try {
+    return decodeURIComponent(atob(stored.slice(FALLBACK_MARKER.length)))
+  } catch {
+    return stored
+  }
+}
+
+function fallbackGet(key: string): string | null {
+  const raw = localStorage.getItem(key)
+  return raw === null ? null : unpackFallback(raw)
+}
+
 /** Exported for its unit tests — this adapter holds the refresh token, and the
  *  invariants in the comments above are worth asserting rather than trusting. */
 export const keychainStorage = {
@@ -55,13 +102,13 @@ export const keychainStorage = {
         // stores hold the key, localStorage is the newer one. A clean
         // keychain miss must also consult it, or a fallback-written session
         // is invisible on the next launch and the user is signed out.
-        value = localStorage.getItem(key) ?? fromKeychain
+        value = fallbackGet(key) ?? fromKeychain
       } catch (err) {
         if (keychainMissing(err)) keychainBroken = true
-        value = localStorage.getItem(key)
+        value = fallbackGet(key)
       }
     } else {
-      value = localStorage.getItem(key)
+      value = fallbackGet(key)
     }
     return value === TOMBSTONE ? null : value
   },
@@ -77,7 +124,7 @@ export const keychainStorage = {
         if (keychainMissing(err)) keychainBroken = true
       }
     }
-    localStorage.setItem(key, value)
+    localStorage.setItem(key, packFallback(value))
   },
   async removeItem(key: string): Promise<void> {
     // Always clear the fallback copy too — sign-out must never leave a
@@ -150,6 +197,17 @@ export async function getAccessToken(): Promise<string | null> {
 
 export type OAuthProvider = 'google' | 'github'
 
+/** The loopback callback is the one place in sign-in where text from outside
+ *  the app reaches the UI. commands/oauth.rs now only serves a genuine
+ *  top-level callback navigation, so this text comes from the provider — but
+ *  `error_description` is still free-form remote input, and an error line is
+ *  no place for a screenful of it. Control characters out, 200 chars max. */
+function providerErrorText(params: URLSearchParams): string {
+  const raw = params.get('error_description') || params.get('error') || ''
+  const clean = raw.replace(/\p{C}/gu, ' ').replace(/\s+/g, ' ').trim().slice(0, 200)
+  return clean || 'Sign-in was cancelled in the browser.'
+}
+
 /** Google/GitHub sign-in, same identities as lu-labs.ai. Flow: bind a
  *  127.0.0.1 loopback port (Rust, fixed ladder registered in the Supabase
  *  redirect allow-list) → open the provider consent in the SYSTEM browser →
@@ -184,7 +242,7 @@ export async function loginWithProvider(provider: OAuthProvider, signal?: AbortS
   const params = new URLSearchParams(query)
   const code = params.get('code')
   if (!code) {
-    throw new Error(params.get('error_description') || params.get('error') || 'Sign-in was cancelled in the browser.')
+    throw new Error(providerErrorText(params))
   }
   const { error: exchangeError } = await supabaseCloud().auth.exchangeCodeForSession(code)
   if (exchangeError) throw new Error(exchangeError.message)
