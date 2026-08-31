@@ -40,7 +40,18 @@ export function MCPServerSettings() {
     setError(null)
     try {
       const { MCPExternalClient } = await import('../../api/mcp/external-client')
-      const client = new MCPExternalClient(server)
+      // A server process can die on its own (crash, OOM kill, a bad config it
+      // quits on). Before this the panel stayed green and its tools stayed in
+      // the registry, so the model kept being offered a terminal that was not
+      // there and every call failed with "Not connected" until the app closed.
+      const client = new MCPExternalClient(server, {
+        onExit: (id) => {
+          toolRegistry.unregisterServer(id)
+          setConnected(id, false)
+          clearServerTools(id)
+          clients.delete(id)
+        },
+      })
       const tools = await client.connect()
       clients.set(server.id, client)
       setConnected(server.id, true)

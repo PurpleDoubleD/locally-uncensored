@@ -17,18 +17,16 @@ use std::path::{Path, PathBuf};
 /// SAME folder the file tools write to. Used as the fallback cwd when the
 /// caller doesn't pass one — without it the child process inherits the LU
 /// app's ambient cwd and dumps build output into ~/Documents (David 2026-06-04).
+///
+/// The slug comes from `agent::sanitize_chat_slug`, the one copy that drops
+/// `.`: this file used to carry its own that kept it, so a chat id of ".."
+/// resolved to `~/agent-workspace/..` == `$HOME` and the shell tool ran (and
+/// created directories) straight in the user's home (audit IPC-1).
 fn workspace_cwd(chat_id: Option<&str>) -> PathBuf {
-    let id = chat_id.unwrap_or("default");
-    let safe: String = id
-        .chars()
-        .take(64)
-        .map(|c| if c.is_ascii_alphanumeric() || c == '_' || c == '-' || c == '.' { c } else { '_' })
-        .collect();
-    let slug = if safe.is_empty() { "default".to_string() } else { safe };
     dirs::home_dir()
         .unwrap_or_default()
         .join("agent-workspace")
-        .join(slug)
+        .join(crate::commands::agent::sanitize_chat_slug(chat_id.unwrap_or("default")))
 }
 
 /// How much of a command's output travels back to the model. Anything past this
@@ -340,6 +338,108 @@ fn shell_execute_sync(
     }
 }
 
+/// The IPC surface itself, asserted against the shipped config files.
+///
+/// `shell:allow-spawn` is the only permission the WebView holds that starts a
+/// process, and it used to list ~20 programs with `"args": true` — every
+/// interpreter with a one-shot eval flag plus `docker`. Combined with
+/// `withGlobalTauri`, that turned any script-execution bug in the WebView into
+/// `node -e "…"` with the user's rights. These tests fail the moment either
+/// half comes back.
+#[cfg(test)]
+mod ipc_surface_tests {
+    use std::path::PathBuf;
+
+    fn manifest_dir() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+    }
+
+    fn read_json(rel: &str) -> serde_json::Value {
+        let p = manifest_dir().join(rel);
+        let raw = std::fs::read_to_string(&p).unwrap_or_else(|e| panic!("read {p:?}: {e}"));
+        serde_json::from_str(&raw).unwrap_or_else(|e| panic!("parse {p:?}: {e}"))
+    }
+
+    #[test]
+    fn the_spawn_allow_list_carries_no_general_purpose_interpreter() {
+        let cap = read_json("capabilities/default.json");
+        let mut spawn_entries = Vec::new();
+        for perm in cap["permissions"].as_array().expect("permissions") {
+            if perm.get("identifier").and_then(|v| v.as_str()) == Some("shell:allow-spawn") {
+                for entry in perm["allow"].as_array().expect("allow list") {
+                    spawn_entries.push(entry.clone());
+                }
+            }
+        }
+        assert!(!spawn_entries.is_empty(), "no shell:allow-spawn entry found");
+
+        // Anything that runs code handed to it on the command line, or that
+        // runs whatever a package.json / image says.
+        const BANNED: [&str; 15] = [
+            "node", "node.cmd", "deno", "deno.cmd", "bun", "bun.cmd", "python", "python3",
+            "py", "docker", "npm", "npm.cmd", "pnpm", "yarn", "uv",
+        ];
+        for entry in &spawn_entries {
+            let name = entry["name"].as_str().unwrap_or_default().to_lowercase();
+            let cmd = entry["cmd"].as_str().unwrap_or_default().to_lowercase();
+            for bad in BANNED {
+                assert_ne!(cmd, bad, "{bad} is back in the spawn allow-list");
+                assert_ne!(name, bad, "{bad} is back in the spawn allow-list");
+            }
+        }
+    }
+
+    /// `withGlobalTauri` publishes the whole JS API on `window.__TAURI__`, i.e.
+    /// hands any injected script a ready-made `shell.Command` without it having
+    /// to know the internal invoke shape. The app detects its runtime through
+    /// `__TAURI_INTERNALS__` (see `isTauri` in src/api/backend.ts), which Tauri
+    /// injects regardless, so nothing needs the global.
+    #[test]
+    fn the_full_js_api_is_not_published_on_the_window_object() {
+        let conf = read_json("tauri.conf.json");
+        assert_eq!(
+            conf["app"]["withGlobalTauri"],
+            serde_json::Value::Bool(false),
+            "withGlobalTauri is back on",
+        );
+    }
+
+    /// The reason turning it off is safe — asserted instead of assumed. A
+    /// `window.__TAURI__.something` anywhere in the frontend would go undefined
+    /// at runtime with no compile-time warning.
+    #[test]
+    fn no_frontend_code_calls_through_the_global() {
+        let src = manifest_dir().join("..").join("src");
+        if !src.is_dir() {
+            return; // source-less build tree: nothing to check
+        }
+        let mut offenders: Vec<String> = Vec::new();
+        for entry in walkdir::WalkDir::new(&src).into_iter().filter_map(|e| e.ok()) {
+            let p = entry.path();
+            let is_source = p
+                .extension()
+                .and_then(|e| e.to_str())
+                .map(|e| matches!(e, "ts" | "tsx" | "js" | "jsx" | "html"))
+                .unwrap_or(false);
+            if !is_source {
+                continue;
+            }
+            if let Ok(text) = std::fs::read_to_string(p) {
+                for (i, line) in text.lines().enumerate() {
+                    // A member access, not the `w.__TAURI__` presence check.
+                    if line.contains("__TAURI__.") {
+                        offenders.push(format!("{}:{}", p.display(), i + 1));
+                    }
+                }
+            }
+        }
+        assert!(
+            offenders.is_empty(),
+            "these still call through window.__TAURI__: {offenders:?}",
+        );
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -371,6 +471,27 @@ mod tests {
     fn small_output_comes_back_whole_and_unannotated() {
         let text = capture(b"hello\n".to_vec());
         assert_eq!(text, "hello\n");
+    }
+
+    /// The shell tool creates its fallback cwd with `create_dir_all`. With the
+    /// local sanitiser copy that still allowed `.`, a chat id of ".." resolved
+    /// to `~/agent-workspace/..` — the user's HOME — and every relative command
+    /// from that chat ran there (audit IPC-1, fixed in agent.rs only).
+    #[test]
+    fn a_dotted_chat_id_cannot_walk_the_cwd_out_of_the_workspace() {
+        let root = dirs::home_dir().unwrap_or_default().join("agent-workspace");
+        for id in ["..", ".", "../..", "a.b"] {
+            let cwd = workspace_cwd(Some(id));
+            assert!(cwd.starts_with(&root), "id {id:?} escaped to {cwd:?}");
+            assert_ne!(cwd, root, "id {id:?} landed on the workspace root itself");
+            assert!(
+                !cwd.to_string_lossy().contains('.'),
+                "id {id:?} kept a dot: {cwd:?}",
+            );
+        }
+        // Ordinary ids keep their own folder.
+        assert_eq!(workspace_cwd(Some("coding-agent-8b0c71")), root.join("coding-agent-8b0c71"));
+        assert_eq!(workspace_cwd(None), root.join("default"));
     }
 
     #[cfg(unix)]

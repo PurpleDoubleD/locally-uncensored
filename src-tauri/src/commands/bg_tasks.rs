@@ -55,6 +55,10 @@ struct BgTaskInner {
     output_buf: Vec<u8>,
     /// Send `()` to ask the reader task to terminate the child.
     cancel_tx: Option<tokio::sync::oneshot::Sender<()>>,
+    /// The shell's pid, kept out of the serialized status. The reader task owns
+    /// the `Child`, so this is the only handle the shutdown sweep below has on
+    /// a task it must kill.
+    pid: Option<u32>,
 }
 
 #[derive(Clone)]
@@ -232,7 +236,9 @@ pub(crate) async fn shell_task_start_impl(args: &Value) -> CmdResult {
         },
         output_buf: Vec::with_capacity(8 * 1024),
         cancel_tx: Some(cancel_tx),
+        pid: child.id(),
     }));
+    arm_exit_sweep();
 
     REGISTRY.insert(BgTask {
         inner: Arc::clone(&inner),
@@ -306,6 +312,9 @@ pub(crate) async fn shell_task_start_impl(args: &Value) -> CmdResult {
         g.status.finished_at = Some(now_secs());
         g.status.output_tail = render_tail(&g.output_buf);
         g.cancel_tx = None;
+        // Drop the pid with the process: the OS may hand that number to a
+        // stranger, and the shutdown sweep would then kill their tree.
+        g.pid = None;
     });
 
     Ok(json!({ "id": id }))
@@ -343,6 +352,71 @@ pub(crate) async fn shell_task_kill_impl(args: &Value) -> CmdResult {
         Ok(json!({ "ok": true, "cancelled": false, "reason": "already finished" }))
     }
 }
+
+/// Kill every still-running background task, children included.
+///
+/// These tasks exist for `pnpm install` / `cargo build`, so they are long-lived
+/// by design and their trees are deep. Windows ties each one to a kill-on-close
+/// Job Object at spawn, so LU dying takes them along; macOS and Linux have no
+/// equivalent, and `AppState::shutdown_subprocesses` only knows the pids IT
+/// holds — never this process-wide REGISTRY. A background build therefore
+/// outlived every quit, forever, still holding its port and CPU.
+// On Windows only the tests reach it — the Job Object gets there first.
+#[cfg_attr(target_os = "windows", allow(dead_code))]
+pub(crate) fn kill_all_background_tasks() {
+    let pids: Vec<u32> = {
+        // try_lock, not lock: this also runs from the process-exit hook, where
+        // a thread that is holding the registry mutex may never be scheduled
+        // again. Losing the sweep beats hanging the quit.
+        let mut got = None;
+        for _ in 0..20 {
+            if let Ok(g) = REGISTRY.tasks.try_lock() {
+                got = Some(
+                    g.iter()
+                        .filter_map(|t| {
+                            let inner = t.inner.try_lock().ok()?;
+                            inner.status.running.then_some(inner.pid).flatten()
+                        })
+                        .collect::<Vec<u32>>(),
+                );
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        match got {
+            Some(p) => p,
+            None => return,
+        }
+    };
+    for pid in pids {
+        crate::commands::shell::kill_tree(pid);
+    }
+}
+
+/// Run the sweep when the process exits.
+///
+/// Every quit path ends in `exit()` — the tray Quit, `exit_app`, the updater,
+/// Tauri's own `RunEvent::Exit` — and a C `atexit` handler fires on all of
+/// them, including the ones that never construct or drop `AppState`. Windows
+/// needs none of this: the Job Object from `shell_task_start_impl` already
+/// kills the tree when the app's handle closes.
+#[cfg(not(target_os = "windows"))]
+fn arm_exit_sweep() {
+    use std::sync::Once;
+    static ARMED: Once = Once::new();
+    extern "C" fn sweep() {
+        kill_all_background_tasks();
+    }
+    extern "C" {
+        fn atexit(cb: extern "C" fn()) -> std::os::raw::c_int;
+    }
+    ARMED.call_once(|| unsafe {
+        atexit(sweep);
+    });
+}
+
+#[cfg(target_os = "windows")]
+fn arm_exit_sweep() {}
 
 pub(crate) async fn shell_task_list_impl(_args: &Value) -> CmdResult {
     let mut tasks = REGISTRY.list();
@@ -538,6 +612,91 @@ mod cancel_tests {
             !alive(grandchild),
             "cancel killed the shell but left the grandchild ({grandchild}) running",
         );
+    }
+}
+
+/// Shutdown sweep (audit: bg tasks were only tied to the app's lifetime on
+/// Windows). The atexit registration itself cannot be exercised in-process —
+/// the handler runs after the test harness is gone — so the sweep it calls is
+/// tested directly, with a real tree.
+#[cfg(test)]
+mod shutdown_sweep_tests {
+    use super::*;
+
+    fn alive(pid: u32) -> bool {
+        let out = std::process::Command::new("ps")
+            .args(["-o", "state=", "-p", &pid.to_string()])
+            .output();
+        match out {
+            Ok(o) => {
+                let st = String::from_utf8_lossy(&o.stdout).trim().to_string();
+                !st.is_empty() && !st.starts_with('Z')
+            }
+            Err(_) => false,
+        }
+    }
+
+    #[tokio::test]
+    #[cfg_attr(target_os = "windows", ignore = "uses sh/ps; Windows has the Job Object")]
+    async fn quitting_takes_a_running_task_and_its_children_with_it() {
+        let start = shell_task_start_impl(&json!({
+            "command": "sleep 30 & echo $! ; wait",
+            "shell": "sh",
+        }))
+        .await
+        .expect("start");
+        let id = start["id"].as_str().expect("id").to_string();
+
+        let mut grandchild = None;
+        for _ in 0..50 {
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            let st = shell_task_status_impl(&json!({ "id": id })).await.expect("status");
+            let tail = st["output_tail"].as_str().unwrap_or("");
+            if let Some(line) = tail.lines().find(|l| l.trim().parse::<u32>().is_ok()) {
+                grandchild = line.trim().parse::<u32>().ok();
+                break;
+            }
+        }
+        let grandchild = grandchild.expect("grandchild never reported its pid");
+        let shell_pid = REGISTRY
+            .get(&id)
+            .and_then(|t| t.inner.lock().unwrap().pid)
+            .expect("a running task must carry its pid");
+        assert!(alive(shell_pid) && alive(grandchild), "test setup is wrong");
+
+        kill_all_background_tasks();
+
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while alive(shell_pid) || alive(grandchild) {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the quit sweep left {shell_pid}/{grandchild} running",
+            );
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+    }
+
+    /// A finished task's pid may already belong to somebody else — the sweep
+    /// must never fire at it. Sweeping an idle registry must also not panic.
+    #[tokio::test]
+    #[cfg_attr(target_os = "windows", ignore = "uses sh")]
+    async fn a_finished_task_is_not_swept() {
+        let start = shell_task_start_impl(&json!({ "command": "true", "shell": "sh" }))
+            .await
+            .expect("start");
+        let id = start["id"].as_str().unwrap().to_string();
+        for _ in 0..50 {
+            let st = shell_task_status_impl(&json!({ "id": id })).await.unwrap();
+            if !st["running"].as_bool().unwrap_or(true) {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+        assert!(
+            REGISTRY.get(&id).and_then(|t| t.inner.lock().unwrap().pid).is_none(),
+            "a finished task still carries a pid the sweep could kill",
+        );
+        kill_all_background_tasks();
     }
 }
 

@@ -409,6 +409,50 @@ pub async fn execute_code(
     .map_err(|e| format!("Code execution task failed to run: {e}"))?
 }
 
+/// Put the agent's script somewhere only this user can read it, under a name
+/// nobody can guess, and hand back the directory that owns its lifetime.
+///
+/// It used to be `<shared temp>/agent-code-<millis>.py`, executed by that exact
+/// path. Both halves are the problem: a millisecond timestamp is guessable by
+/// any process on the machine, and the shared temp directory is world-readable
+/// — the script (which carries whatever the user or the model put in it, file
+/// paths included) was readable by every account on the box, and a racing local
+/// process could swap the file between the write and the spawn.
+///
+/// `TempDir` creates a directory with a random name and removes it with its
+/// contents when the returned handle drops — including on every early return of
+/// the caller. The 0700 mode is passed to `mkdir` itself rather than chmod'ed
+/// afterwards (tempfile defaults to the umask, i.e. 0755), so the directory is
+/// never briefly readable. The file is created with `create_new`, so a
+/// pre-placed name is an error rather than a target, and 0600.
+fn write_private_script(code: &str) -> Result<(tempfile::TempDir, PathBuf), String> {
+    use std::io::Write;
+    let mut builder = tempfile::Builder::new();
+    builder.prefix("lu-agent-code-");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        builder.permissions(std::fs::Permissions::from_mode(0o700));
+    }
+    let dir = builder
+        .tempdir()
+        .map_err(|e| format!("Create temp dir: {}", os_error::english(&e)))?;
+    let path = dir.path().join("agent-code.py");
+    let mut opts = fs::OpenOptions::new();
+    opts.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        opts.mode(0o600);
+    }
+    let mut file = opts
+        .open(&path)
+        .map_err(|e| format!("Write temp script: {}", os_error::english(&e)))?;
+    file.write_all(code.as_bytes())
+        .map_err(|e| format!("Write temp script: {}", os_error::english(&e)))?;
+    Ok((dir, path))
+}
+
 #[allow(non_snake_case)]
 pub(crate) fn execute_code_blocking(
     code: String,
@@ -419,14 +463,9 @@ pub(crate) fn execute_code_blocking(
 ) -> Result<serde_json::Value, String> {
     let timeout_ms = timeout.unwrap_or(30000);
 
-    let tmp_dir = std::env::temp_dir();
-    let script_path = tmp_dir.join(format!("agent-code-{}.py", std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis())
-        .unwrap_or(0)));
-
-    fs::write(&script_path, &code)
-        .map_err(|e| format!("Write temp script: {}", os_error::english(&e)))?;
+    // The handle is never read, only held: dropping it deletes the directory,
+    // and it must outlive the interpreter that is running the script in it.
+    let (_script_dir, script_path) = write_private_script(&code)?;
 
     // cwd: prefer the agent's folder workspace (the repo the user picked,
     // threaded from chatCtx as workingDirectory) so a script's relative file
@@ -472,7 +511,6 @@ pub(crate) fn execute_code_blocking(
         match child.try_wait() {
             Ok(Some(status)) => {
                 super::shell::settle(&out_done, &err_done, std::time::Duration::from_millis(500));
-                let _ = fs::remove_file(&script_path);
                 return Ok(serde_json::json!({
                     "stdout": super::shell::captured_text(&out_buf),
                     "stderr": super::shell::captured_text(&err_buf),
@@ -486,7 +524,6 @@ pub(crate) fn execute_code_blocking(
                     let _ = child.kill();
                     let _ = child.wait();
                     super::shell::settle(&out_done, &err_done, std::time::Duration::from_millis(200));
-                    let _ = fs::remove_file(&script_path);
                     let mut stderr_str = super::shell::captured_text(&err_buf);
                     if !stderr_str.is_empty() {
                         stderr_str.push('\n');
@@ -502,7 +539,6 @@ pub(crate) fn execute_code_blocking(
                 std::thread::sleep(std::time::Duration::from_millis(50));
             }
             Err(e) => {
-                let _ = fs::remove_file(&script_path);
                 return Err(format!("Wait error: {}", e));
             }
         }
@@ -584,14 +620,32 @@ pub fn set_chat_workspace_override(
     path: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    let id = chatId.trim();
+    set_chat_workspace_override_impl(&chatId, path.as_deref(), state.inner())
+}
+
+/// The body of the command above, minus the `State` wrapper — the validation
+/// it performs is the reason it needs to be reachable from a test.
+pub(crate) fn set_chat_workspace_override_impl(
+    chat_id: &str,
+    path: Option<&str>,
+    state: &AppState,
+) -> Result<(), String> {
+    let id = chat_id.trim();
     if id.is_empty() {
         return Err("chatId cannot be empty".into());
     }
     let mut map = state.chat_workspace_overrides.lock().map_err(|e| e.to_string())?;
-    match path.as_ref().map(|s| s.trim().to_string()).filter(|s| !s.is_empty()) {
+    match path.map(|s| s.trim().to_string()).filter(|s| !s.is_empty()) {
         Some(p) => {
             let pb = std::path::PathBuf::from(p);
+            // This path becomes a JAIL ROOT for every later file op of this
+            // chat, including the ones the remote bridge serves — so it is
+            // checked here, once, instead of being trusted on every call. It is
+            // then remembered as a user-picked root, which is what lets a
+            // folder outside the structural rules (a mount point, a short path)
+            // work once the user has actually chosen it in the dialog.
+            crate::commands::filesystem::validate_workspace_root(&pb)?;
+            crate::commands::filesystem::remember_picked_root(&pb);
             // Best-effort: create the folder if missing so the first
             // file_write doesn't fail with "no such directory".
             let _ = std::fs::create_dir_all(&pb);
@@ -710,5 +764,118 @@ mod read_tests {
         assert_eq!(format_bytes(2048), "2.0 KB");
         assert_eq!(format_bytes(5 * 1024 * 1024), "5.0 MB");
         assert_eq!(format_bytes(3 * 1024 * 1024 * 1024), "3.0 GB");
+    }
+}
+
+/// The agent's script is code, and it used to be written to a world-readable
+/// temp path whose name was a millisecond timestamp — guessable, and swappable
+/// between the write and the spawn.
+#[cfg(test)]
+mod script_file_tests {
+    use super::*;
+
+    #[test]
+    fn the_script_lands_in_a_private_directory_under_an_unguessable_name() {
+        let (dir_a, path_a) = write_private_script("print('a')").expect("write");
+        let (dir_b, path_b) = write_private_script("print('b')").expect("write");
+
+        assert_eq!(fs::read_to_string(&path_a).unwrap(), "print('a')");
+        assert_ne!(dir_a.path(), dir_b.path(), "two runs shared a directory");
+        // No timestamp, no pid: nothing a second process can compute.
+        let name = dir_a.path().file_name().unwrap().to_string_lossy().to_string();
+        let suffix = name.trim_start_matches("lu-agent-code-");
+        assert!(suffix.len() >= 6, "name is too short to be unguessable: {name}");
+        assert!(
+            !suffix.chars().all(|c| c.is_ascii_digit()),
+            "the name is a plain number again: {name}",
+        );
+        drop(dir_b);
+        assert!(!path_b.exists(), "the script outlived its handle");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn nothing_outside_this_user_can_read_the_script() {
+        use std::os::unix::fs::PermissionsExt;
+        let (dir, path) = write_private_script("print('secret')").expect("write");
+
+        let dmode = fs::metadata(dir.path()).unwrap().permissions().mode() & 0o777;
+        assert_eq!(dmode, 0o700, "temp dir is {dmode:o}, not 0700");
+        let fmode = fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(fmode & 0o077, 0, "script is group/world accessible: {fmode:o}");
+    }
+
+    /// The whole directory goes with the handle, so no early return can leave
+    /// the script behind.
+    #[test]
+    fn dropping_the_handle_removes_the_directory() {
+        let (dir, path) = write_private_script("print('x')").expect("write");
+        let dir_path = dir.path().to_path_buf();
+        drop(dir);
+        assert!(!path.exists());
+        assert!(!dir_path.exists());
+    }
+
+    /// A name that already exists is an error, never a target: `create_new`
+    /// keeps a pre-placed file (or symlink) from being written through.
+    #[test]
+    fn an_existing_file_is_not_written_through() {
+        let (dir, path) = write_private_script("print('first')").expect("write");
+        let mut opts = fs::OpenOptions::new();
+        opts.write(true).create_new(true);
+        assert!(opts.open(&path).is_err(), "create_new accepted an existing path");
+        drop(dir);
+    }
+}
+
+/// The override path becomes a JAIL ROOT for every later file op of that chat,
+/// including the ones the remote HTTP bridge serves — so it is checked when it
+/// is set, not trusted on every call.
+#[cfg(test)]
+mod workspace_override_tests {
+    use super::*;
+
+    #[test]
+    fn a_system_or_home_root_is_refused() {
+        let state = AppState::new();
+        let home = dirs::home_dir().unwrap_or_default();
+        let home_s = home.to_string_lossy().to_string();
+        let ssh = home.join(".ssh").to_string_lossy().to_string();
+        let roots: Vec<&str> = if cfg!(windows) {
+            vec!["C:/", "C:/Windows", &home_s, &ssh]
+        } else {
+            vec!["/", "/etc", &home_s, &ssh]
+        };
+        for root in roots {
+            let got = set_chat_workspace_override_impl("__remote__", Some(root), &state);
+            assert!(got.is_err(), "{root:?} was accepted as a workspace override");
+        }
+        assert!(
+            state.chat_workspace_overrides.lock().unwrap().is_empty(),
+            "a refused root was still stored",
+        );
+    }
+
+    /// The real flow: the user picks a folder, it is stored, and it is
+    /// remembered as picked so the fs tools accept it as a root.
+    #[test]
+    fn a_picked_project_folder_is_stored_and_trusted_afterwards() {
+        let state = AppState::new();
+        let dir = std::env::temp_dir().join(format!("lu-ovr-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let s = dir.to_string_lossy().to_string();
+
+        set_chat_workspace_override_impl("__remote__", Some(&s), &state).expect("accepted");
+        assert_eq!(
+            state.chat_workspace_overrides.lock().unwrap().get("__remote__"),
+            Some(&dir),
+        );
+        assert!(dir.is_dir(), "the folder was not created");
+        assert!(crate::commands::filesystem::validate_workspace_root(&dir).is_ok());
+
+        // Clearing still works and takes the entry with it.
+        set_chat_workspace_override_impl("__remote__", None, &state).expect("cleared");
+        assert!(state.chat_workspace_overrides.lock().unwrap().is_empty());
+        let _ = fs::remove_dir_all(&dir);
     }
 }

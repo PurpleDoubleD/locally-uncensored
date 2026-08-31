@@ -1,10 +1,12 @@
 use crate::os_error;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 use std::time::UNIX_EPOCH;
 
 use base64::Engine;
 use glob::glob as glob_match;
+use once_cell::sync::Lazy;
 use regex::RegexBuilder;
 use walkdir::WalkDir;
 
@@ -47,32 +49,81 @@ fn lexical_normalize(p: &Path) -> PathBuf {
     out
 }
 
+/// Resolve symlinks as far as the path actually exists, then re-attach the
+/// rest verbatim.
+///
+/// Plain `canonicalize` is unusable here because half the paths that reach the
+/// jail don't exist yet (`file_write` creating a new file), and plain lexical
+/// normalization is unusable as a *boundary* because it believes the path
+/// string: a symlink inside the workspace pointing at `~/.ssh` reads as
+/// `<root>/link/id_rsa` and sails through containment while the open() behind
+/// it lands outside. Canonicalizing the deepest EXISTING ancestor covers both —
+/// the link is resolved, the not-yet-created tail is kept.
+fn resolve_existing_prefix(p: &Path) -> PathBuf {
+    let normalized = lexical_normalize(p);
+    let mut tail: Vec<std::ffi::OsString> = Vec::new();
+    let mut cur = normalized.clone();
+    loop {
+        if let Ok(real) = fs::canonicalize(&cur) {
+            let mut out = real;
+            for seg in tail.iter().rev() {
+                out.push(seg);
+            }
+            return out;
+        }
+        let name = match cur.file_name() {
+            Some(n) => n.to_os_string(),
+            None => return normalized, // hit a root / prefix: nothing exists
+        };
+        let parent = match cur.parent() {
+            Some(par) if par != cur && !par.as_os_str().is_empty() => par.to_path_buf(),
+            _ => return normalized,
+        };
+        tail.push(name);
+        cur = parent;
+    }
+}
+
+/// True when `cand` is `root` or lives under it, compared on normalized paths
+/// with a component boundary so `…/foo` never matches `…/foobar`.
+fn is_within(root: &Path, cand: &Path) -> bool {
+    #[cfg(windows)]
+    {
+        // Windows paths are case-insensitive; compare lowercased. Both sides go
+        // through the SAME key builder (which strips any `\\?\` verbatim prefix)
+        // so an extended-length root and a plain candidate — or vice versa —
+        // still compare equal.
+        let r = win_compare_key(root);
+        let c = win_compare_key(cand);
+        c == r || c.starts_with(&format!("{}/", r))
+    }
+    #[cfg(not(windows))]
+    {
+        cand == root || cand.starts_with(root)
+    }
+}
+
 /// Jail `candidate` to `root`: return the normalized path when it stays inside
 /// `root`, otherwise an error. This is the single containment boundary for
 /// every agent/remote file op — it stops a prompt-injected model or a remote
 /// client from reading `~/.ssh/id_rsa`, writing into `\Startup\`, or `..`-ing
 /// out of the workspace. Absolute paths are allowed ONLY when they fall within
 /// `root`, so the desktop coding agent can still use absolute paths inside the
-/// user-picked project folder (#62). Symlink-based escape is a residual (it
-/// needs a prior local write) and is intentionally out of scope here.
+/// user-picked project folder (#62).
+///
+/// The DECISION is made on symlink-resolved paths, the RETURNED path is the
+/// lexical one the caller asked for: canonicalize() hands back `\\?\C:\…` on
+/// Windows and `/private/var/…` on macOS, and that string is echoed to the UI
+/// and compared in the frontend. Opening the lexical path is equivalent —
+/// its link target was just proven to be inside the root.
 pub(crate) fn contain_within(root: &Path, candidate: &Path) -> Result<PathBuf, String> {
     let nroot = lexical_normalize(root);
     let ncand = lexical_normalize(candidate);
-    let within = {
-        #[cfg(windows)]
-        {
-            // Windows paths are case-insensitive; compare lowercased with a
-            // component boundary so `…/foo` can't match `…/foobar`. Both sides
-            // go through the SAME key builder (which strips any `\\?\` verbatim
-            // prefix) so an extended-length root and a plain candidate — or vice
-            // versa — still compare equal.
-            let r = win_compare_key(&nroot);
-            let c = win_compare_key(&ncand);
-            c == r || c.starts_with(&format!("{}/", r))
-        }
-        #[cfg(not(windows))]
-        { ncand == nroot || ncand.starts_with(&nroot) }
-    };
+    let within = is_within(&nroot, &ncand)
+        && is_within(
+            &resolve_existing_prefix(&nroot),
+            &resolve_existing_prefix(&ncand),
+        );
     if within {
         Ok(ncand)
     } else {
@@ -108,29 +159,177 @@ fn win_compare_key(p: &Path) -> String {
 /// The jail root for a file op: a configured folder workspace `working_dir`
 /// (the repo the user picked, threaded from the frontend as `workingDirectory`)
 /// when set; otherwise the per-chat sandbox `~/agent-workspace/<chat_id>/`.
-/// `chat_id` is sanitised to `[A-Za-z0-9_\-\.]` (else `_`), capped at 64 chars.
+///
+/// The `chat_id` slug goes through `agent::sanitize_chat_slug`, which is the
+/// ONLY sanitiser in the tree that drops `.`. This function used to keep its
+/// own copy that allowed it, so a chat id of `".."` made the root
+/// `~/agent-workspace/..` == `$HOME` and every containment check below it
+/// passed for the whole home directory (audit IPC-1) — the hole was fixed in
+/// agent.rs and left standing in this copy.
+///
+/// NOTE: this is a path derivation, not a permission check. A caller-supplied
+/// `working_dir` is only trustworthy once `check_workspace_root` has passed;
+/// `resolve_path` does that, direct callers must decide for themselves.
 pub(crate) fn workspace_root(chat_id: Option<&str>, working_dir: Option<&str>) -> PathBuf {
     if let Some(wd) = working_dir.map(str::trim).filter(|w| !w.is_empty()) {
         return PathBuf::from(wd);
     }
-    let id = chat_id.unwrap_or("default");
-    let safe: String = id
-        .chars()
-        .take(64)
-        .map(|c| if c.is_ascii_alphanumeric() || c == '_' || c == '-' || c == '.' { c } else { '_' })
-        .collect();
-    let slug = if safe.is_empty() { "default".to_string() } else { safe };
+    let slug = crate::commands::agent::sanitize_chat_slug(chat_id.unwrap_or("default"));
     dirs::home_dir().unwrap_or_default().join("agent-workspace").join(slug)
+}
+
+/// Folders the user picked in a native dialog this run. A registered root is
+/// trusted verbatim; everything else has to pass `check_workspace_root`.
+static PICKED_ROOTS: Lazy<Mutex<Vec<PathBuf>>> = Lazy::new(|| Mutex::new(Vec::new()));
+
+/// Record a folder the USER chose in a native dialog as a legitimate workspace
+/// root. Called by `set_chat_workspace_override` (the Remote dispatch picker).
+pub(crate) fn remember_picked_root(root: &Path) {
+    let norm = lexical_normalize(root);
+    if let Ok(mut roots) = PICKED_ROOTS.lock() {
+        if !roots.iter().any(|r| r == &norm) {
+            roots.push(norm);
+        }
+    }
+}
+
+/// Directories that are never a project workspace, only a target.
+fn forbidden_root_prefixes() -> Vec<PathBuf> {
+    let home = dirs::home_dir();
+    let mut system: Vec<PathBuf> = Vec::new();
+    #[cfg(not(windows))]
+    for p in [
+        "/etc", "/private/etc", "/dev", "/proc", "/sys", "/boot", "/root",
+        "/var/root", "/usr", "/bin", "/sbin", "/System", "/Library",
+    ] {
+        system.push(PathBuf::from(p));
+    }
+    #[cfg(windows)]
+    {
+        let drive = std::env::var("SystemDrive").unwrap_or_else(|_| "C:".to_string());
+        for rel in ["Windows", "Program Files", "Program Files (x86)", "ProgramData"] {
+            system.push(PathBuf::from(format!("{}\\{}", drive, rel)));
+        }
+    }
+    // A "system" directory that CONTAINS the user's home is not a system
+    // directory for this user: with HOME=/root (containers, some Linux setups)
+    // the agent workspace itself lives under /root.
+    let mut out: Vec<PathBuf> = system
+        .into_iter()
+        .filter(|p| match &home {
+            Some(h) => !is_within(&lexical_normalize(p), &lexical_normalize(h)),
+            None => true,
+        })
+        .collect();
+    if let Some(home) = home {
+        // The credential stores an escaped jail was worth escaping FOR.
+        for rel in [
+            ".ssh", ".aws", ".gnupg", ".kube", ".docker", ".config", ".lu",
+            "Library/Keychains", "AppData",
+        ] {
+            out.push(home.join(rel));
+        }
+    }
+    out
+}
+
+/// Directories that hold OTHER people's homes or every mounted volume. Denied
+/// as an exact root only — the folders inside them are ordinary workspaces.
+fn forbidden_exact_roots() -> Vec<PathBuf> {
+    let mut out: Vec<PathBuf> = ["/Users", "/home", "/Volumes", "/mnt", "/media"]
+        .iter()
+        .map(PathBuf::from)
+        .collect();
+    #[cfg(windows)]
+    {
+        let drive = std::env::var("SystemDrive").unwrap_or_else(|_| "C:".to_string());
+        out.push(PathBuf::from(format!("{}\\Users", drive)));
+    }
+    if let Some(home) = dirs::home_dir() {
+        out.push(home);
+    }
+    out
+}
+
+/// Count of NAMED components — `/` and `C:\` are 0, `/etc` is 1.
+fn named_depth(p: &Path) -> usize {
+    p.components()
+        .filter(|c| matches!(c, std::path::Component::Normal(_)))
+        .count()
+}
+
+/// Is this frontend-supplied path allowed to BE a jail root?
+///
+/// `contain_within` only ever answered "does the path stay inside the root" —
+/// the root itself arrived from the WebView on every call and was taken on
+/// faith, so `fs_read("/etc/shadow", null, "/")` passed containment perfectly
+/// and read the file. The jail was only ever as narrow as the string the caller
+/// chose for it.
+///
+/// A root is accepted when the user picked it in a native dialog (see
+/// `remember_picked_root`), or, failing that, when it is structurally a project
+/// folder: deep enough not to be a drive or filesystem root, not a container of
+/// other people's homes, and not inside a system or credential directory. The
+/// structural fallback exists because `system::pick_folder` — the one dialog
+/// every folder choice goes through — does not register its result yet; without
+/// it, enforcing the allowlist alone would refuse every workspace the user
+/// picked in an earlier session.
+fn check_workspace_root(root: &Path) -> Result<(), String> {
+    let norm = lexical_normalize(root);
+    if let Ok(roots) = PICKED_ROOTS.lock() {
+        if roots.iter().any(|r| is_within(r, &norm)) {
+            return Ok(());
+        }
+    }
+    let refuse = |why: &str| {
+        Err(format!(
+            "Not an allowed workspace folder ({}): {}",
+            why,
+            root.display()
+        ))
+    };
+    // `D:\Projects` is an ordinary Windows layout and only one component deep;
+    // on Unix the same depth is `/etc` or `/var`, which is not.
+    let min_depth = if cfg!(windows) { 1 } else { 2 };
+    if named_depth(&norm) < min_depth {
+        return refuse("a drive or filesystem root is not a workspace");
+    }
+    // Mutual containment == equality, and it stays case-insensitive on Windows
+    // the way every other comparison in this file is.
+    let same = |a: &Path, b: &Path| is_within(a, b) && is_within(b, a);
+    for bad in forbidden_exact_roots() {
+        if same(&lexical_normalize(&bad), &norm) {
+            return refuse("a home or mount container is not a workspace");
+        }
+    }
+    for bad in forbidden_root_prefixes() {
+        if is_within(&lexical_normalize(&bad), &norm) {
+            return refuse("system or credential directory");
+        }
+    }
+    Ok(())
+}
+
+/// `check_workspace_root` for callers outside this module (the Remote dispatch
+/// folder picker validates the folder before storing it as an override).
+pub(crate) fn validate_workspace_root(root: &Path) -> Result<(), String> {
+    check_workspace_root(root)
 }
 
 /// Resolve + CONTAIN a tool-call path. A relative path resolves against the
 /// workspace root (folder workspace #62, else the per-chat sandbox); an
-/// absolute path is accepted only when it falls inside that root. Returns an
-/// error on any escape (`..`, an out-of-root absolute path, etc.) — the
+/// absolute path is accepted only when it falls inside that root.
+///
+/// Two checks, and they are not the same one: `check_workspace_root` decides
+/// whether the caller-supplied root may be a jail at all, `contain_within`
+/// decides whether the path stays inside it. Only both together are the
 /// security boundary for fs_read/fs_write/fs_list/fs_search/fs_info.
 fn resolve_path(path: &str, chat_id: Option<&str>, working_dir: Option<&str>) -> Result<PathBuf, String> {
     let cleaned = normalize_duplicate_drive_prefix(path);
     let root = workspace_root(chat_id, working_dir);
+    if working_dir.map(str::trim).is_some_and(|w| !w.is_empty()) {
+        check_workspace_root(&root)?;
+    }
     let p = Path::new(&cleaned);
     let candidate = if p.is_absolute() { p.to_path_buf() } else { root.join(&cleaned) };
     contain_within(&root, &candidate)
@@ -168,9 +367,25 @@ fn file_meta(path: &Path) -> serde_json::Value {
     })
 }
 
+/// Reading a file is unbounded blocking IO — a multi-gigabyte model file on a
+/// slow external disk takes as long as it takes. As a plain sync `#[command]`
+/// that ran on the Tauri main thread, so the whole window froze for the
+/// duration; the work goes to the blocking pool instead (same treatment as
+/// `execute_code` and the shell tool).
 #[tauri::command]
 #[allow(non_snake_case)]
-pub fn fs_read(path: String, chatId: Option<String>, workingDirectory: Option<String>) -> Result<serde_json::Value, String> {
+pub async fn fs_read(
+    path: String,
+    chatId: Option<String>,
+    workingDirectory: Option<String>,
+) -> Result<serde_json::Value, String> {
+    tauri::async_runtime::spawn_blocking(move || fs_read_sync(path, chatId, workingDirectory))
+        .await
+        .map_err(|e| format!("fs_read task failed to run: {e}"))?
+}
+
+#[allow(non_snake_case)]
+pub(crate) fn fs_read_sync(path: String, chatId: Option<String>, workingDirectory: Option<String>) -> Result<serde_json::Value, String> {
     let full = resolve_path(&path, chatId.as_deref(), workingDirectory.as_deref())?;
     if !full.exists() {
         return Err(format!("File not found: {}", full.display()));
@@ -398,7 +613,15 @@ pub fn fs_list(
     Ok(serde_json::json!({ "entries": entries, "count": entries.len() }))
 }
 
-#[tauri::command]
+/// Walks up to eight directory levels and reads every file under a megabyte:
+/// on a real repo that is seconds of blocking IO, and as a plain sync
+/// `#[command]` every one of those seconds was spent on the Tauri main thread
+/// with the window frozen.
+///
+/// `#[command(async)]` — not an `async fn` — because this is also called
+/// directly (not awaited) from the Remote bridge; the attribute keeps the
+/// signature synchronous while Tauri runs the command off the main thread.
+#[tauri::command(async)]
 #[allow(non_snake_case)]
 pub fn fs_search(
     path: String,
@@ -863,6 +1086,143 @@ mod jail_adversarial_tests {
     }
 }
 
+/// The root itself used to be taken on faith. `contain_within` answered
+/// "does this path stay inside the root" perfectly — and the root arrived from
+/// the WebView on every single call, so the jail was only ever as narrow as the
+/// string the caller picked for it.
+#[cfg(test)]
+mod workspace_root_guard_tests {
+    use super::*;
+
+    #[test]
+    fn a_root_that_is_not_a_project_folder_is_refused() {
+        let home = dirs::home_dir().unwrap_or_default();
+        let sensitive = home.join(".ssh").to_string_lossy().to_string();
+        let home_s = home.to_string_lossy().to_string();
+        let roots: Vec<&str> = if cfg!(windows) {
+            vec!["C:/", "C:/Windows", "C:/Program Files", "C:/Users", &home_s, &sensitive]
+        } else {
+            vec!["/", "/etc", "/usr", "/Library", "/Users", "/home", &home_s, &sensitive]
+        };
+        for root in roots {
+            let probe = if cfg!(windows) { "Windows/win.ini" } else { "hosts" };
+            let got = resolve_path(probe, None, Some(root));
+            assert!(got.is_err(), "root {root:?} was accepted as a workspace: {got:?}");
+        }
+    }
+
+    /// The reported shape, verbatim: a root of `/` turns the containment check
+    /// into a formality, because everything is inside `/`.
+    #[test]
+    #[cfg(not(windows))]
+    fn the_filesystem_root_cannot_be_used_to_read_etc_shadow() {
+        let err = resolve_path("/etc/shadow", None, Some("/")).expect_err("must refuse");
+        assert!(err.contains("Not an allowed workspace folder"), "got: {err}");
+    }
+
+    /// The ordinary project folders — the cases that must keep working.
+    #[test]
+    fn an_ordinary_project_folder_is_still_a_valid_root() {
+        let home = dirs::home_dir().unwrap_or_default();
+        let under_home = home.join("dev").join("site").to_string_lossy().to_string();
+        let mut roots = vec![under_home];
+        if cfg!(windows) {
+            // A second drive is a normal Windows layout and only ONE component
+            // deep — the depth rule must not refuse it.
+            roots.push("D:/Projects".to_string());
+            roots.push("D:/Projects/site".to_string());
+        } else {
+            roots.push("/projects/site".to_string());
+            roots.push("/Volumes/Work/site".to_string());
+        }
+        for root in roots {
+            assert!(
+                resolve_path("src/main.rs", Some("c"), Some(&root)).is_ok(),
+                "root {root:?} was refused",
+            );
+        }
+    }
+
+    /// A folder the user picked in the native dialog is trusted verbatim, even
+    /// when the structural rules would have refused it.
+    #[test]
+    fn a_folder_the_user_picked_is_trusted() {
+        let odd = std::env::temp_dir().join(format!("lu-picked-{}", std::process::id()));
+        let _ = fs::create_dir_all(&odd);
+        remember_picked_root(&odd);
+        let root = odd.to_string_lossy().to_string();
+        assert!(resolve_path("notes.md", None, Some(&root)).is_ok());
+        // Registering a root does NOT widen the jail inside it.
+        assert!(resolve_path("../elsewhere.md", None, Some(&root)).is_err());
+        let _ = fs::remove_dir_all(&odd);
+    }
+
+    /// filesystem.rs kept its own copy of the chat-id sanitiser, and that copy
+    /// still allowed `.` — so a chat id of ".." made the sandbox root
+    /// `~/agent-workspace/..` == `$HOME` (audit IPC-1, fixed in agent.rs only).
+    #[test]
+    fn a_dotdot_chat_id_cannot_move_the_sandbox_root_to_home() {
+        let home = dirs::home_dir().unwrap_or_default();
+        assert_eq!(
+            workspace_root(Some(".."), None),
+            home.join("agent-workspace").join("__"),
+        );
+        for id in ["..", ".", "../.."] {
+            let target = home.join(".ssh").join("id_rsa");
+            assert!(
+                resolve_path(&target.to_string_lossy(), Some(id), None).is_err(),
+                "chat id {id:?} still reaches {target:?}",
+            );
+        }
+    }
+
+    /// A path that does not exist yet must still resolve — file_write creates
+    /// files, and the symlink hardening must not break that.
+    #[test]
+    fn a_file_that_does_not_exist_yet_still_resolves() {
+        let ws = std::env::temp_dir().join(format!("lu-newfile-{}", std::process::id()));
+        let _ = fs::create_dir_all(&ws);
+        let root = ws.to_string_lossy().to_string();
+        let got = resolve_path("deep/new/dir/notes.md", None, Some(&root)).expect("new path");
+        assert!(got.ends_with("deep/new/dir/notes.md"), "got: {got:?}");
+        let _ = fs::remove_dir_all(&ws);
+    }
+
+    /// Lexical normalization believes the path string. A symlink inside the
+    /// workspace reads as `<root>/link/…` and passed containment, while the
+    /// open() behind it landed wherever the link pointed.
+    #[test]
+    #[cfg(unix)]
+    fn a_symlink_pointing_out_of_the_workspace_is_refused() {
+        let base = std::env::temp_dir().join(format!("lu-symjail-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&base);
+        let ws = base.join("workspace");
+        let outside = base.join("outside");
+        fs::create_dir_all(&ws).unwrap();
+        fs::create_dir_all(&outside).unwrap();
+        fs::write(outside.join("secret.txt"), b"private").unwrap();
+        std::os::unix::fs::symlink(&outside, ws.join("escape")).unwrap();
+        let root = ws.to_string_lossy().to_string();
+
+        assert!(
+            resolve_path("escape/secret.txt", None, Some(&root)).is_err(),
+            "a symlink walked out of the workspace",
+        );
+        assert!(
+            fs_read_sync("escape/secret.txt".into(), None, Some(root.clone())).is_err(),
+            "fs_read followed the symlink out",
+        );
+        // A symlink that stays INSIDE the workspace is still fine.
+        let inner = ws.join("real");
+        fs::create_dir_all(&inner).unwrap();
+        fs::write(inner.join("ok.txt"), b"fine").unwrap();
+        std::os::unix::fs::symlink(&inner, ws.join("alias")).unwrap();
+        assert!(resolve_path("alias/ok.txt", None, Some(&root)).is_ok());
+
+        let _ = fs::remove_dir_all(&base);
+    }
+}
+
 #[cfg(test)]
 mod binary_read_tests {
     use super::*;
@@ -878,8 +1238,8 @@ mod binary_read_tests {
     /// A binary must come back as a MARKER, not as a payload. Every consumer
     /// discards the bytes, so encoding them only bought a memory spike
     /// proportional to the file — the phone relay already refused to do it.
-    #[test]
-    fn a_binary_file_reports_its_size_and_no_content() {
+    #[tokio::test]
+    async fn a_binary_file_reports_its_size_and_no_content() {
         let dir = ws("bin");
         // Invalid UTF-8 — what read_to_string rejects.
         fs::write(dir.join("model.gguf"), [0xff, 0xfe, 0x00, 0x01, 0x80]).unwrap();
@@ -889,6 +1249,7 @@ mod binary_read_tests {
             None,
             Some(dir.to_string_lossy().to_string()),
         )
+        .await
         .expect("read");
 
         assert_eq!(v["encoding"], "binary");
@@ -897,12 +1258,13 @@ mod binary_read_tests {
         let _ = fs::remove_dir_all(&dir);
     }
 
-    #[test]
-    fn a_text_file_still_comes_back_verbatim() {
+    #[tokio::test]
+    async fn a_text_file_still_comes_back_verbatim() {
         let dir = ws("txt");
         fs::write(dir.join("a.txt"), "hallo\nwelt\n").unwrap();
 
         let v = fs_read("a.txt".into(), None, Some(dir.to_string_lossy().to_string()))
+            .await
             .expect("read");
 
         assert_eq!(v["encoding"], "utf8");
@@ -911,8 +1273,8 @@ mod binary_read_tests {
     }
 
     /// The whole point: cost must not scale with the file any more.
-    #[test]
-    fn a_large_binary_is_cheap_to_read() {
+    #[tokio::test]
+    async fn a_large_binary_is_cheap_to_read() {
         let dir = ws("big");
         let mut big = vec![0x80u8; 8 * 1024 * 1024]; // 8 MiB, invalid UTF-8
         big[0] = 0xff;
@@ -920,6 +1282,7 @@ mod binary_read_tests {
 
         let started = std::time::Instant::now();
         let v = fs_read("big.bin".into(), None, Some(dir.to_string_lossy().to_string()))
+            .await
             .expect("read");
         let took = started.elapsed();
 
