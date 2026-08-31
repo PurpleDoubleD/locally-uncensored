@@ -94,7 +94,7 @@ interface ConnectedDevice {
   last_seen: number
 }
 
-interface RemotePermissions {
+export interface RemotePermissions {
   filesystem: boolean
   downloads: boolean
   process_control: boolean
@@ -102,6 +102,40 @@ interface RemotePermissions {
    *  (RCE-class; kept separate from filesystem). Older state without it reads
    *  as false. */
   shell?: boolean
+}
+
+/**
+ * RA-1: the permission panel used to be decoration. The store initialised
+ * `permissions` all-false locally, `refreshStatus` never mapped the server's
+ * copy, and there is no persist middleware — so the UI showed a guess, while
+ * `impl Default for RemotePermissions` on the Rust side started
+ * filesystem/downloads/process_control at TRUE. A user who deliberately
+ * granted nothing still handed a paired phone workspace read/write,
+ * screenshots, process_list, model pull/delete and ComfyUI start/stop.
+ *
+ * The fix has two halves. Rust now defaults every scope to false, and every
+ * response that can tell us the server's mind (`start_remote_server`,
+ * `restart_remote_server`, `remote_server_status`) carries the effective
+ * `permissions`. This helper is the single mapping point.
+ *
+ * Returns `null` when the payload carries no usable permissions object — an
+ * older backend that predates the read-back. In that case callers must LEAVE
+ * the current store value alone rather than invent one; coercing to all-false
+ * would just move the lie to the other side.
+ *
+ * Pure + exported for unit tests.
+ */
+export function normalizeRemotePermissions(raw: unknown): RemotePermissions | null {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
+  const r = raw as Record<string, unknown>
+  // Anything not explicitly `true` reads as denied: a missing or malformed
+  // field must never render as a granted capability.
+  return {
+    filesystem: r.filesystem === true,
+    downloads: r.downloads === true,
+    process_control: r.process_control === true,
+    shell: r.shell === true,
+  }
 }
 
 interface RemoteState {
@@ -200,7 +234,12 @@ export const useRemoteStore = create<RemoteState>()((set, get) => ({
         passcodeExpiresAt: number
         lanUrl: string
         mobileUrl: string
+        permissions?: RemotePermissions
       }>('start_remote_server', args)
+      // RA-1: read the server's effective permissions back in the SAME set()
+      // that flips `enabled: true`. There must be no window in which the panel
+      // renders one thing and the running server enforces another.
+      const startPerms = normalizeRemotePermissions(result.permissions)
       set({
         enabled: true,
         port: result.port,
@@ -208,6 +247,7 @@ export const useRemoteStore = create<RemoteState>()((set, get) => ({
         passcodeExpiresAt: result.passcodeExpiresAt,
         lanUrl: result.lanUrl,
         mobileUrl: result.mobileUrl,
+        ...(startPerms ? { permissions: startPerms } : {}),
         loading: false,
         qrVisible: true, // Bug #16: show QR right after a fresh dispatch
       })
@@ -257,8 +297,9 @@ export const useRemoteStore = create<RemoteState>()((set, get) => ({
         mobileUrl: string
         tunnelActive: boolean
         tunnelUrl: string
+        permissions?: RemotePermissions
       }>('remote_server_status')
-      set({
+      const next: Partial<RemoteState> = {
         enabled: status.running,
         port: status.port,
         passcode: status.passcode,
@@ -267,7 +308,14 @@ export const useRemoteStore = create<RemoteState>()((set, get) => ({
         mobileUrl: status.mobileUrl,
         tunnelActive: status.tunnelActive,
         tunnelUrl: status.tunnelUrl,
-      })
+      }
+      // RA-1: the server owns the permissions, the panel only renders them.
+      // This is also the path that surfaces a change a paired phone made
+      // through the mobile permissions panel. An older backend that doesn't
+      // report them leaves the current value untouched.
+      const perms = normalizeRemotePermissions(status.permissions)
+      if (perms) next.permissions = perms
+      set(next as RemoteState)
     } catch {
       // Non-critical
     }
@@ -319,9 +367,21 @@ export const useRemoteStore = create<RemoteState>()((set, get) => ({
   },
 
   setPermissions: async (perms: RemotePermissions) => {
+    // RA-1: never send a partial payload. `shell` is optional on the TS type,
+    // and an undefined field would land on the Rust side as serde's default —
+    // the store must state every scope explicitly so what we push is exactly
+    // what the panel shows. On failure the store is left untouched, so the UI
+    // keeps showing the server's last known truth instead of an unapplied
+    // toggle.
+    const payload = normalizeRemotePermissions(perms) ?? {
+      filesystem: false,
+      downloads: false,
+      process_control: false,
+      shell: false,
+    }
     try {
-      await backendCall('set_remote_permissions', { permissions: perms })
-      set({ permissions: perms })
+      await backendCall('set_remote_permissions', { permissions: payload })
+      set({ permissions: payload })
     } catch (err) {
       set({ error: String(err) })
     }
@@ -422,7 +482,11 @@ export const useRemoteStore = create<RemoteState>()((set, get) => ({
         passcodeExpiresAt: number
         lanUrl: string
         mobileUrl: string
+        permissions?: RemotePermissions
       }>('restart_remote_server', args)
+      // RA-1: same read-back as startServer — restart_remote_server delegates
+      // to start_remote_server on the Rust side and reports them identically.
+      const restartPerms = normalizeRemotePermissions(result.permissions)
       set({
         enabled: true,
         port: result.port,
@@ -430,6 +494,7 @@ export const useRemoteStore = create<RemoteState>()((set, get) => ({
         passcodeExpiresAt: result.passcodeExpiresAt,
         lanUrl: result.lanUrl,
         mobileUrl: result.mobileUrl,
+        ...(restartPerms ? { permissions: restartPerms } : {}),
         loading: false,
         qrVisible: true, // Bug #16: fresh restart → fresh passcode → show QR
       })

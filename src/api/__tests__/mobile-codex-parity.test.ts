@@ -123,13 +123,35 @@ describe('Mobile fallback final answer', () => {
 })
 
 describe('Mobile permissions', () => {
-  it('all permissions default to ON', () => {
-    // RemotePermissions::default() should have all true
-    expect(REMOTE_RS).toMatch(/impl\s+Default\s+for\s+RemotePermissions/)
-    // Check for `true` defaults (field names: filesystem, downloads, process_control)
-    expect(REMOTE_RS).toMatch(/filesystem:\s*true/)
-    expect(REMOTE_RS).toMatch(/downloads:\s*true/)
-    expect(REMOTE_RS).toMatch(/process_control:\s*true/)
+  // RA-1: this used to assert "all permissions default to ON" — and it passed
+  // for the wrong reason, because it matched `filesystem: true` ANYWHERE in the
+  // 6k-line file (the merge tests contain that literal). The default it was
+  // guarding was itself the bug: the desktop panel renders every toggle off on
+  // a fresh start, so a server that starts filesystem/downloads/process_control
+  // at `true` hands a paired phone workspace read/write, model pull/delete and
+  // ComfyUI start/stop that the user never granted. Now scoped to the actual
+  // `impl Default` block, and asserting the conservative default.
+  const defaultBlock = REMOTE_RS.match(
+    /impl\s+Default\s+for\s+RemotePermissions\s*\{[\s\S]*?\n\}/,
+  )?.[0]
+
+  it('has an impl Default for RemotePermissions', () => {
+    expect(defaultBlock).toBeTruthy()
+  })
+
+  it('defaults every permission to OFF, matching what the desktop panel shows', () => {
+    expect(defaultBlock).toMatch(/filesystem:\s*false/)
+    expect(defaultBlock).toMatch(/downloads:\s*false/)
+    expect(defaultBlock).toMatch(/process_control:\s*false/)
+    expect(defaultBlock).toMatch(/shell:\s*false/)
+    expect(defaultBlock).not.toMatch(/:\s*true/)
+  })
+
+  it('reports the effective permissions back to the desktop', () => {
+    // Without a read-back the panel is decoration: it can only ever show its
+    // own local guess. Both the start response and the status command carry
+    // them, and the store maps them in.
+    expect(REMOTE_RS).toContain('"permissions": permissions')
   })
 })
 

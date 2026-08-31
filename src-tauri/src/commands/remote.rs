@@ -58,12 +58,30 @@ pub struct RemotePermissions {
     pub shell: bool,
 }
 
+/// RA-1: EVERYTHING off by default.
+///
+/// The desktop permission panel renders its toggles from the frontend store,
+/// which starts all-false. The server used to start filesystem/downloads/
+/// process_control at `true`, so a user who deliberately left every switch
+/// off still handed a paired phone workspace read/write, screenshots,
+/// process_list, model pull/delete and ComfyUI start/stop. The displayed
+/// control was decoration.
+///
+/// Two halves fix that and both are needed: this conservative default (the
+/// server can no longer be more permissive than the panel claims) and the
+/// read-back — `start_remote_server` / `remote_server_status` now report the
+/// effective permissions so the panel can never drift from the server again
+/// (a paired phone may raise the three non-RCE scopes from the mobile
+/// permissions panel; the desktop now sees that).
+///
+/// `shell` stays off for the separate, stronger reason documented on the
+/// field: it is RCE-equivalent and desktop-controlled only.
 impl Default for RemotePermissions {
     fn default() -> Self {
         Self {
-            filesystem: true,
-            downloads: true,
-            process_control: true,
+            filesystem: false,
+            downloads: false,
+            process_control: false,
             shell: false,
         }
     }
@@ -5098,6 +5116,12 @@ pub async fn start_remote_server(
         *dsp = system_prompt.unwrap_or_default();
     }
 
+    // RA-1: the Arc moves into the axum state below, so keep a second handle to
+    // read the effective permissions back into the start response. The desktop
+    // store maps them in the same `set()` that flips `enabled: true`, so there
+    // is no window in which the panel shows something the server isn't doing.
+    let permissions_readback = permissions_arc.clone();
+
     let server_state = RemoteState {
         jwt_secret: jwt_secret_arc,
         passcode: passcode_arc,
@@ -5188,6 +5212,8 @@ pub async fn start_remote_server(
         .map(|ip| ip.to_string())
         .unwrap_or_else(|_| "127.0.0.1".to_string());
 
+    let permissions = permissions_readback.lock().await.clone();
+
     info!(port = port, "remote server started");
     Ok(serde_json::json!({
         "port": port,
@@ -5195,6 +5221,10 @@ pub async fn start_remote_server(
         "passcodeExpiresAt": now + PASSCODE_TTL_SECS,
         "lanUrl": format!("http://{}:{}", lan_ip, port),
         "mobileUrl": format!("http://{}:{}/mobile", lan_ip, port),
+        // RA-1: effective permissions, so the UI is never out of sync with the
+        // server it just started. `restart_remote_server` delegates here, so it
+        // reports them too.
+        "permissions": permissions,
     }))
 }
 
@@ -5263,7 +5293,7 @@ pub async fn stop_remote_server(
 pub async fn remote_server_status(
     state: tauri::State<'_, crate::state::AppState>,
 ) -> Result<serde_json::Value, String> {
-    let (running, port, passcode_arc, tunnel_url_arc, tunnel_pid) = {
+    let (running, port, passcode_arc, tunnel_url_arc, tunnel_pid, permissions_arc) = {
         let remote = state.remote.lock().map_err(|e| e.to_string())?;
         (
             remote.handle.is_some(),
@@ -5271,6 +5301,7 @@ pub async fn remote_server_status(
             remote.passcode.clone(),
             remote.tunnel_url.clone(),
             remote.tunnel_pid,
+            remote.permissions.clone(),
         )
     };
 
@@ -5286,6 +5317,12 @@ pub async fn remote_server_status(
         (pc.code.clone(), pc.expires_at)
     };
 
+    // RA-1: report the EFFECTIVE server permissions so the desktop panel reads
+    // the server's truth instead of showing a hardcoded all-false guess. This is
+    // also how a change made from the mobile permissions panel gets back to the
+    // desktop UI.
+    let permissions = permissions_arc.lock().await.clone();
+
     let tunnel_url = tunnel_url_arc.lock().await;
     let lan_ip = local_ip_address::local_ip()
         .map(|ip| ip.to_string())
@@ -5300,6 +5337,7 @@ pub async fn remote_server_status(
         "mobileUrl": if running { format!("http://{}:{}/mobile", lan_ip, port) } else { String::new() },
         "tunnelActive": tunnel_pid.is_some(),
         "tunnelUrl": tunnel_url.clone().unwrap_or_default(),
+        "permissions": permissions,
     }))
 }
 
@@ -6017,6 +6055,37 @@ mod remote_path_tests {
         // execution by default — it's RCE-class and opt-in only.
         let p = super::RemotePermissions::default();
         assert!(!p.shell, "remote `shell` permission must default to false");
+    }
+
+    #[test]
+    fn all_remote_permissions_are_off_by_default() {
+        // RA-1: the desktop panel renders every toggle OFF on a fresh start.
+        // The server default has to agree, otherwise a user who deliberately
+        // granted nothing still handed a paired phone workspace read/write,
+        // model pull/delete and ComfyUI start/stop.
+        let p = super::RemotePermissions::default();
+        assert!(!p.filesystem, "filesystem must default to false");
+        assert!(!p.downloads, "downloads must default to false");
+        assert!(!p.process_control, "process_control must default to false");
+        assert!(!p.shell, "shell must default to false");
+    }
+
+    #[test]
+    fn remote_permissions_serialize_with_snake_case_keys() {
+        // RA-1 read-back contract: `start_remote_server` / `remote_server_status`
+        // embed this struct as `permissions`, and the frontend store maps
+        // exactly these key names into RemoteState.permissions.
+        let json = serde_json::to_value(super::RemotePermissions {
+            filesystem: true,
+            downloads: false,
+            process_control: true,
+            shell: false,
+        })
+        .unwrap();
+        assert_eq!(json["filesystem"], serde_json::json!(true));
+        assert_eq!(json["downloads"], serde_json::json!(false));
+        assert_eq!(json["process_control"], serde_json::json!(true));
+        assert_eq!(json["shell"], serde_json::json!(false));
     }
 
     #[test]
