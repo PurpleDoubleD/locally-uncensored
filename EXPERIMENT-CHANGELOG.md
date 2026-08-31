@@ -193,3 +193,66 @@ betroffene Testdateien, **726 Tests grün**.
 ist, dass es überhaupt etwas anschaut. Der Beweis lief hier über eine
 Sonde (`export const kaputt: number = "string"`), die `tsc --noEmit` mit Exit 0
 passierte. Solche Sonden gehören vor jedes neue Gate, nicht dahinter.
+
+## Zwischenfall: der Experiment-Build hat in die echten Daten geschrieben
+
+**Das ist ein Fehler in meiner Sandkasten-Einrichtung, nicht im Produkt.** Er
+gehört hierher, weil er die zentrale Zusage des Plans verletzt hat („die echten
+Chats/Settings des Nutzers werden nie berührt").
+
+Beim ersten echten `npm run tauri dev` schrieb der Experiment-Build in
+`~/Library/Application Support/lu-labs/` — das Datenverzeichnis der echten App
+(erkennbar an `session.json` vom 1.7., `state.json` vom 4.7., `images/`,
+`videos/`, `mlx/`). Belegt per `lsof` auf den laufenden Prozess und per
+`find -newermt`. Betroffen: `store_backup.json`, `store_backup.1.json`,
+`rag_chunks_backup.json`, `logs/lu.2026-08-31.log`.
+
+**Ursache.** Ich hatte angenommen, die geänderte Tauri-`identifier` genüge. Sie
+trennt WebView-Speicher und Keychain — der Single-Instance-Socket heißt
+nachweislich `com_purpledoubled_locally_uncensored_experiment_si.sock`. Aber
+`src-tauri/src/os_paths.rs:15,21` hartkodiert `"lu-labs"` und leitet den Pfad
+gar nicht aus der Identität ab. Dieselbe Hartkodierung steht in `mlx.rs:807`
+und in den Pfaden von `video.rs` (`~/.cache/lu-labs`, `~/.config/lu-labs`).
+
+**Schaden und Reparatur.** In der Backup-Datei wurde `lu-providers`
+überschrieben und dabei `lu-cloud` von `enabled: true` auf `enabled: false`
+gekippt; `lu-update-checker-v2` bekam einen neuen Zeitstempel. Ich habe
+`lu-providers` aus der Vorgängerfassung zurückgeholt (Sicherungskopie:
+`/tmp/store_backup.before-repair.json`) und nachgemessen: 18 Schlüssel,
+`chat-conversations` weiterhin 6.741.552 Zeichen.
+
+**Warum die Chats überlebt haben — ehrlich:** nicht wegen der Isolation, sondern
+weil `backup_stores` in `system.rs` über `keys_lost`/`merged_backup` verlorene
+Schlüssel aus der Datei auf der Platte hinüberrettet. Das ist ein
+Sicherheitsnetz, keine Trennung. Ohne es wären sie weg gewesen. Bemerkenswert:
+genau die Merge-Logik, deren Beschreibung in dieser Session als falsch entlarvt
+und korrigiert wurde, hat hier die Daten gerettet.
+
+**Zweite Lücke, gemessen:** `~/Library/WebKit/com.purpledoubled.locally-uncensored`
+(die installierte App) ist seit dem 6.7. unangetastet — der Lauf schrieb
+stattdessen nach `~/Library/WebKit/locally-uncensored/`, dem gemeinsamen Topf
+für Dev-Läufe. Der Experiment-Build teilt sich localStorage also vermutlich mit
+`npm run tauri dev` aus dem Hauptrepo; von dort dürfte das `lu-providers` mit
+abgeschaltetem Cloud stammen.
+
+**Lehre.** Isolation, die nicht durch einen Test festgenagelt ist, ist eine
+Annahme. Sie wurde hier beim ersten echten Start widerlegt — und zwar erst, als
+zum ersten Mal wirklich gestartet wurde. Ein Review hätte das nie gefunden.
+
+## Etappenstand nach Muster M7, React 19 und dem Windows-Strang
+
+| Messgröße | Basis | jetzt |
+|---|---|---|
+| Boot-Chunk | 2016 kB | **711 kB** (Audit-Ziel < 800) |
+| `INEFFECTIVE_DYNAMIC_IMPORT` | 11 | **0** |
+| `react-hooks/*`-Verstöße | 47 | **10** (Rest in laufenden Paketen) |
+| eslint gesamt | 1040 | 1003 |
+| Typfehler | 118 | **0**, Gate per Sonde als scharf belegt |
+| vitest (Mac) | 5405 | **6684 grün, 0 rot** |
+| cargo test | 438 | **708 grün, 0 rot** |
+| vitest (Windows, echte Maschine) | 8 rot | **15/15** in der letzten roten Datei |
+
+Zusätzlich selbst nachgeholt statt übersprungen: die 51 Katalog-Downloads gegen
+ihre echten Dateigrößen per HEAD geprüft — **0 untertrieben**. Der im Kommentar
+dokumentierte Vorfall (13 GB angekündigt, 16,3 GB echt, Platte auf 0 Byte)
+wiederholt sich derzeit nicht.
