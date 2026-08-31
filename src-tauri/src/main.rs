@@ -6,6 +6,7 @@ mod crash_report;
 mod install_state;
 mod os_error;
 mod os_paths;
+mod private_tmp;
 mod process_util;
 mod python;
 mod state;

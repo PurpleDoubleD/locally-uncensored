@@ -419,38 +419,12 @@ pub async fn execute_code(
 /// paths included) was readable by every account on the box, and a racing local
 /// process could swap the file between the write and the spawn.
 ///
-/// `TempDir` creates a directory with a random name and removes it with its
-/// contents when the returned handle drops — including on every early return of
-/// the caller. The 0700 mode is passed to `mkdir` itself rather than chmod'ed
-/// afterwards (tempfile defaults to the umask, i.e. 0755), so the directory is
-/// never briefly readable. The file is created with `create_new`, so a
-/// pre-placed name is an error rather than a target, and 0600.
+/// The mechanics — 0700 directory, `create_new` 0600 file, lifetime owned by
+/// the returned handle — live in `private_tmp`, because the dictation take in
+/// commands/whisper.rs is the same problem and used to carry its own unfixed
+/// copy of this code.
 fn write_private_script(code: &str) -> Result<(tempfile::TempDir, PathBuf), String> {
-    use std::io::Write;
-    let mut builder = tempfile::Builder::new();
-    builder.prefix("lu-agent-code-");
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        builder.permissions(std::fs::Permissions::from_mode(0o700));
-    }
-    let dir = builder
-        .tempdir()
-        .map_err(|e| format!("Create temp dir: {}", os_error::english(&e)))?;
-    let path = dir.path().join("agent-code.py");
-    let mut opts = fs::OpenOptions::new();
-    opts.write(true).create_new(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        opts.mode(0o600);
-    }
-    let mut file = opts
-        .open(&path)
-        .map_err(|e| format!("Write temp script: {}", os_error::english(&e)))?;
-    file.write_all(code.as_bytes())
-        .map_err(|e| format!("Write temp script: {}", os_error::english(&e)))?;
-    Ok((dir, path))
+    crate::private_tmp::write_private_temp("lu-agent-code-", "agent-code.py", code.as_bytes())
 }
 
 #[allow(non_snake_case)]
@@ -640,12 +614,15 @@ pub(crate) fn set_chat_workspace_override_impl(
             let pb = std::path::PathBuf::from(p);
             // This path becomes a JAIL ROOT for every later file op of this
             // chat, including the ones the remote bridge serves — so it is
-            // checked here, once, instead of being trusted on every call. It is
-            // then remembered as a user-picked root, which is what lets a
-            // folder outside the structural rules (a mount point, a short path)
-            // work once the user has actually chosen it in the dialog.
+            // checked here, once, instead of being trusted on every call.
+            //
+            // Checked, and deliberately NOT recorded as picked: `path` arrived
+            // over IPC from the WebView, so recording it here would let the
+            // caller write its own entry into the allowlist that constrains it.
+            // The folder becomes allowed in `system::pick_folder`, i.e. when a
+            // human chooses it in the native dialog — which is exactly what the
+            // frontend does immediately before calling this.
             crate::commands::filesystem::validate_workspace_root(&pb)?;
-            crate::commands::filesystem::remember_picked_root(&pb);
             // Best-effort: create the folder if missing so the first
             // file_write doesn't fail with "no such directory".
             let _ = std::fs::create_dir_all(&pb);
@@ -856,14 +833,42 @@ mod workspace_override_tests {
         );
     }
 
-    /// The real flow: the user picks a folder, it is stored, and it is
-    /// remembered as picked so the fs tools accept it as a root.
+    /// The command takes its path from the WebView, so it may VALIDATE against
+    /// the allowlist but must never write to it. A folder nobody chose in the
+    /// native dialog is refused however ordinary it looks — otherwise a
+    /// compromised renderer would simply name its own jail root and the
+    /// allowlist would constrain nothing.
+    #[test]
+    fn a_folder_that_was_never_picked_cannot_be_made_a_workspace() {
+        let state = AppState::new();
+        let dir = std::env::temp_dir().join(format!("lu-unpicked-{}", std::process::id()));
+        let _ = fs::create_dir_all(&dir);
+        let s = dir.to_string_lossy().to_string();
+
+        let got = set_chat_workspace_override_impl("__remote__", Some(&s), &state);
+        assert!(got.is_err(), "an unpicked folder became a jail root: {got:?}");
+        assert!(
+            state.chat_workspace_overrides.lock().unwrap().is_empty(),
+            "a refused root was still stored",
+        );
+        assert!(
+            crate::commands::filesystem::validate_workspace_root(&dir).is_err(),
+            "the refused call still added the folder to the allowlist",
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// The real flow: the user picks a folder in the native dialog (which is
+    /// what puts it on the allowlist), the frontend passes that path here, and
+    /// it is stored.
     #[test]
     fn a_picked_project_folder_is_stored_and_trusted_afterwards() {
         let state = AppState::new();
         let dir = std::env::temp_dir().join(format!("lu-ovr-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         let s = dir.to_string_lossy().to_string();
+        // `system::pick_folder` does this for real; the dialog cannot run here.
+        crate::commands::filesystem::allow_root_for_test(&dir);
 
         set_chat_workspace_override_impl("__remote__", Some(&s), &state).expect("accepted");
         assert_eq!(

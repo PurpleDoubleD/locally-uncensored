@@ -35,6 +35,15 @@ const CREATE_NO_WINDOW: u32 = 0x08000000;
 
 const TAIL_BYTES: usize = 64 * 1024;
 
+/// How often the reader task checks whether the child has exited.
+///
+/// It polls instead of awaiting `child.wait()` because the reap has to happen
+/// under the task lock, together with clearing the pid — see the loop in
+/// `shell_task_start_impl`. These tasks are builds and installs; 50 ms of
+/// latency on noticing the exit of a multi-minute command is not observable,
+/// and it buys an ordering the shutdown sweep can rely on.
+const REAP_POLL: std::time::Duration = std::time::Duration::from_millis(50);
+
 #[derive(Clone, Debug, Serialize)]
 pub struct BgTaskStatus {
     pub id: String,
@@ -105,6 +114,22 @@ impl BgRegistry {
 }
 
 static REGISTRY: Lazy<BgRegistry> = Lazy::new(BgRegistry::default);
+
+/// Test isolation for the process-wide registry.
+///
+/// `kill_all_background_tasks` kills every RUNNING task in the registry, and
+/// the registry is one static shared by every test in this binary — so a test
+/// that sweeps and a test that is standing up a live task must not overlap, or
+/// the second one loses its child to the first one's quit. Both kinds hold this
+/// lock. (Poisoning is ignored on purpose: a panicking test has already failed,
+/// and turning that into a cascade of poisoned-lock failures hides which one.)
+#[cfg(test)]
+static SWEEP_ISOLATION: Mutex<()> = Mutex::new(());
+
+#[cfg(test)]
+fn sweep_isolation() -> std::sync::MutexGuard<'static, ()> {
+    SWEEP_ISOLATION.lock().unwrap_or_else(|e| e.into_inner())
+}
 
 fn now_secs() -> u64 {
     std::time::SystemTime::now()
@@ -278,28 +303,64 @@ pub(crate) async fn shell_task_start_impl(args: &Value) -> CmdResult {
             }
         });
 
-        // The pid has to be read BEFORE the wait — `child.wait()` reaps the
-        // process and `id()` then returns None, leaving nothing to walk.
-        let child_pid = child.id();
-        let wait_result = tokio::select! {
-            res = child.wait() => Ok(res),
-            _ = cancel_rx => Err(()),
-        };
-        let (exit_code, cancelled) = match wait_result {
-            Ok(Ok(status)) => (status.code(), false),
-            Ok(Err(_)) => (None, false),
-            Err(_) => {
+        // REAPING THE CHILD FREES ITS PID, and the shutdown sweep kills by pid.
+        // Those two must never be able to interleave.
+        //
+        // `tokio::select! { child.wait() }` could not give us that: the reap
+        // happens inside the await, while `pid` stays in the registry until
+        // this task takes the lock again — which is only after both readers
+        // have drained, and a grandchild that inherited the pipe can keep them
+        // draining for minutes. Everything in that window was a kill aimed at a
+        // number the kernel had already handed to somebody else, and this
+        // module's tasks are `pnpm install` / `cargo build`, so "somebody else"
+        // is whatever the user started next.
+        //
+        // The reap is therefore a non-blocking `try_wait` performed while
+        // HOLDING the task lock, in the same critical section that clears the
+        // pid — and the sweep kills while holding that same lock (see
+        // `kill_all_background_tasks`). Either the sweep sees a pid that is
+        // still a live process, or it sees none. The price is one poll interval
+        // of latency on noticing the exit of a task that runs for minutes by
+        // design.
+        let mut cancel_rx = cancel_rx;
+        let (exit_code, cancelled) = loop {
+            let cancel_requested = tokio::select! {
+                biased;
+                _ = &mut cancel_rx => true,
+                _ = tokio::time::sleep(REAP_POLL) => false,
+            };
+            if cancel_requested {
+                // Nothing has reaped this child — this task is its only reaper
+                // and it is right here — so the pid still means what it meant
+                // at spawn. Take it out of the registry BEFORE the kill below
+                // reaps it, so the sweep cannot pick it up afterwards.
+                let pid = reader_inner.lock().unwrap().pid.take();
                 // `child.kill()` sends SIGKILL to the SHELL only. This module
                 // exists for `pnpm install` / `cargo build` — the commands with
                 // the deepest process trees — so cancelling used to leave the
                 // actual worker running detached, exactly the bug 743c310 fixed
                 // for the foreground shell tool. The Windows job object does not
                 // help here either: it fires when LU dies, not on a cancel.
-                if let Some(pid) = child_pid {
+                if let Some(pid) = pid {
                     crate::commands::shell::kill_tree(pid);
                 }
                 let _ = child.kill().await;
-                (None, true)
+                break (None, true);
+            }
+            let mut g = reader_inner.lock().unwrap();
+            match child.try_wait() {
+                Ok(Some(status)) => {
+                    g.pid = None;
+                    break (status.code(), false);
+                }
+                // Still running: keep the pid, it still addresses this process.
+                Ok(None) => {}
+                Err(_) => {
+                    // We can no longer tell whether it is alive, so the pid is
+                    // no longer safe to shoot at.
+                    g.pid = None;
+                    break (None, false);
+                }
             }
         };
         // Wait for readers to drain so the tail is final.
@@ -312,8 +373,12 @@ pub(crate) async fn shell_task_start_impl(args: &Value) -> CmdResult {
         g.status.finished_at = Some(now_secs());
         g.status.output_tail = render_tail(&g.output_buf);
         g.cancel_tx = None;
-        // Drop the pid with the process: the OS may hand that number to a
-        // stranger, and the shutdown sweep would then kill their tree.
+        // Already cleared above, in the same critical section as the reap —
+        // this only pins the invariant for any path that reaches here without
+        // going through the loop. Clearing it HERE was the whole bug: by this
+        // line the process has been reaped for as long as the readers took to
+        // drain, and the number has belonged to a stranger for just as long.
+        debug_assert!(g.pid.is_none(), "a finished task still carries a reaped pid");
         g.pid = None;
     });
 
@@ -364,33 +429,58 @@ pub(crate) async fn shell_task_kill_impl(args: &Value) -> CmdResult {
 // On Windows only the tests reach it — the Job Object gets there first.
 #[cfg_attr(target_os = "windows", allow(dead_code))]
 pub(crate) fn kill_all_background_tasks() {
-    let pids: Vec<u32> = {
+    let tasks: Vec<BgTask> = {
         // try_lock, not lock: this also runs from the process-exit hook, where
         // a thread that is holding the registry mutex may never be scheduled
         // again. Losing the sweep beats hanging the quit.
         let mut got = None;
         for _ in 0..20 {
             if let Ok(g) = REGISTRY.tasks.try_lock() {
-                got = Some(
-                    g.iter()
-                        .filter_map(|t| {
-                            let inner = t.inner.try_lock().ok()?;
-                            inner.status.running.then_some(inner.pid).flatten()
-                        })
-                        .collect::<Vec<u32>>(),
-                );
+                got = Some(g.iter().cloned().collect::<Vec<BgTask>>());
                 break;
             }
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
         match got {
-            Some(p) => p,
+            Some(t) => t,
             None => return,
         }
     };
-    for pid in pids {
-        crate::commands::shell::kill_tree(pid);
+    for task in tasks {
+        // Kill while HOLDING the task's own lock, rather than collecting pids
+        // and firing afterwards. That lock is what makes the pid mean anything:
+        // the reader task reaps and clears the pid inside the same critical
+        // section, so a pid read here cannot be freed — and handed to a
+        // stranger — before the kill goes out. Reading it and releasing first
+        // reopened exactly the window this is closing.
+        let inner = match lock_briefly(&task) {
+            Some(g) => g,
+            None => continue,
+        };
+        if !inner.status.running {
+            continue;
+        }
+        // Read, do not take: the reader task is the one that clears the pid,
+        // and it does so in the same breath as the reap. Holding the lock is
+        // what makes the number valid here; removing it would only hide the
+        // task from a second sweep, which is already harmless.
+        if let Some(pid) = inner.pid {
+            crate::commands::shell::kill_tree(pid);
+        }
     }
+}
+
+/// `try_lock` with a short retry — same reasoning as the registry lock above:
+/// never block the quit forever, but do not give up on the first contention
+/// either (the reader task holds this lock for a `try_wait` at a time).
+fn lock_briefly(task: &BgTask) -> Option<std::sync::MutexGuard<'_, BgTaskInner>> {
+    for _ in 0..20 {
+        if let Ok(g) = task.inner.try_lock() {
+            return Some(g);
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    None
 }
 
 /// Run the sweep when the process exits.
@@ -582,6 +672,7 @@ mod cancel_tests {
     #[tokio::test]
     #[cfg_attr(target_os = "windows", ignore = "uses sh/ps")]
     async fn cancelling_takes_the_grandchild_with_it() {
+        let _isolation = super::sweep_isolation();
         // The shell prints its grandchild's pid, then waits on it.
         let start = shell_task_start_impl(&json!({
             "command": "sleep 30 & echo $! ; wait",
@@ -639,6 +730,7 @@ mod shutdown_sweep_tests {
     #[tokio::test]
     #[cfg_attr(target_os = "windows", ignore = "uses sh/ps; Windows has the Job Object")]
     async fn quitting_takes_a_running_task_and_its_children_with_it() {
+        let _isolation = super::sweep_isolation();
         let start = shell_task_start_impl(&json!({
             "command": "sleep 30 & echo $! ; wait",
             "shell": "sh",
@@ -676,11 +768,84 @@ mod shutdown_sweep_tests {
         }
     }
 
+    /// Is this number still a process — zombie included?
+    ///
+    /// `alive()` above reports a zombie as dead, which is the wrong question
+    /// here: a zombie has NOT been reaped, so its pid is still reserved. What
+    /// matters for the sweep is the moment the kernel is free to hand the
+    /// number out again, and that is the moment `ps` stops listing it at all.
+    #[cfg(unix)]
+    fn in_process_table(pid: u32) -> bool {
+        std::process::Command::new("ps")
+            .args(["-o", "pid=", "-p", &pid.to_string()])
+            .output()
+            .map(|o| !String::from_utf8_lossy(&o.stdout).trim().is_empty())
+            .unwrap_or(false)
+    }
+
+    /// The window the reaping fix closes.
+    ///
+    /// `child.wait()` reaps, and from that instant the pid may be reused. The
+    /// pid was cleared much later — after both output readers had drained —
+    /// and a grandchild that inherited stdout keeps them draining for as long
+    /// as it lives. So: shell exits immediately, grandchild holds the pipe, and
+    /// for the next three seconds the registry kept handing the sweep a number
+    /// that belonged to whatever the kernel gave it to next.
+    #[tokio::test]
+    #[cfg_attr(target_os = "windows", ignore = "uses sh/ps")]
+    #[cfg(unix)]
+    async fn a_reaped_pid_is_gone_from_the_registry_the_instant_it_is_freed() {
+        let _isolation = super::sweep_isolation();
+        let start = shell_task_start_impl(&json!({
+            // The shell exits at once; the grandchild inherits stdout and keeps
+            // the reader task running long after the shell has been reaped.
+            "command": "sleep 3 & exit 0",
+            "shell": "sh",
+        }))
+        .await
+        .expect("start");
+        let id = start["id"].as_str().expect("id").to_string();
+
+        let task = REGISTRY.get(&id).expect("the task is in the registry");
+        let shell_pid = task
+            .inner
+            .lock()
+            .unwrap()
+            .pid
+            .expect("a running task must carry its pid");
+
+        // Wait for the kernel to release the number — i.e. for the reap.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while in_process_table(shell_pid) {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the shell ({shell_pid}) never exited, so there is nothing to prove",
+            );
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+
+        // The reader is still draining the grandchild's pipe, so the task is
+        // still marked running — and that is exactly when the sweep would fire.
+        // Read the state out and release the lock BEFORE asserting: a panic
+        // holding this guard poisons the shared registry and every other test
+        // in the binary fails on the poison instead of on its own subject.
+        let (still_listed, running) = {
+            let inner = task.inner.lock().unwrap();
+            (inner.pid, inner.status.running)
+        };
+        assert!(
+            still_listed.is_none(),
+            "the registry still hands out {shell_pid}, which the kernel has already freed \
+             (running={running})",
+        );
+    }
+
     /// A finished task's pid may already belong to somebody else — the sweep
     /// must never fire at it. Sweeping an idle registry must also not panic.
     #[tokio::test]
     #[cfg_attr(target_os = "windows", ignore = "uses sh")]
     async fn a_finished_task_is_not_swept() {
+        let _isolation = super::sweep_isolation();
         let start = shell_task_start_impl(&json!({ "command": "true", "shell": "sh" }))
             .await
             .expect("start");

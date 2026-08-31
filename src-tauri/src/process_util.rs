@@ -82,19 +82,34 @@ fn tree_snapshot(root: u32) -> Vec<(u32, u64)> {
 /// Recursive process-tree kill: SIGTERM the whole tree now, SIGKILL whatever
 /// is left after a grace. Windows delegates the walk to `taskkill /T /F`.
 ///
-/// The Unix branch used to signal the process GROUP (`kill -- -PGID`). Only
-/// `spawn_piped` puts a child in its own group, and its one caller here
-/// (`video_cancel` → the mlx_video Python job) spawns through a plain
-/// `Command::spawn`, so `-PID` addressed a group that never existed: the kill
-/// went nowhere and the generation kept running on the GPU. The tree is
-/// therefore walked explicitly, and it MUST be walked before the root dies —
-/// afterwards its children are reparented to init and the parent links that
-/// identify them are gone.
+/// The Unix branch used to signal the process GROUP (`kill -- -PGID`). That
+/// only reaches a child that was made a group leader at spawn, and it is not
+/// what either caller here does:
+///
+/// * `video::video_cancel` (the mlx_video Python job) spawns through a plain
+///   `Command::spawn`, so the child is in OUR group and `-PID` addressed a
+///   group that never existed — the kill went nowhere and the generation kept
+///   running on the GPU. This is the case the explicit walk was written for.
+/// * `remote::kill_tunnel_child` (the cloudflared quick tunnel) spawns through
+///   `spawn_piped`, so that child IS its own group leader and the old group
+///   kill would have worked for it. The walk works for it too: it follows the
+///   parent links, which exist either way, and it never signals a pid that is
+///   not in the snapshot — so the wider process group is not a hazard.
+///
+/// What BOTH callers have to satisfy is the reaping contract: the tree MUST be
+/// walked before the root dies (afterwards its children are reparented to init
+/// and the parent links that identify them are gone), and the caller must not
+/// have reaped the child itself — the `waitpid` at the end of the detached
+/// thread is what keeps the pid reserved until the escalation has fired, and it
+/// is also what keeps the process from becoming a permanent zombie. Both
+/// callers hand over an unreaped `Child` and drop it afterwards without
+/// waiting, which is exactly right.
 ///
 /// Nothing here blocks the caller: `video_cancel` holds the `video_process`
 /// mutex across this call and the UI polls that same mutex, so the old
-/// 800 ms sleep froze the window for the whole grace. The grace, the escalation
-/// and the final reap run on a detached thread instead.
+/// 800 ms sleep froze the window for the whole grace. The tunnel path has the
+/// same shape on quit. The grace, the escalation and the final reap run on a
+/// detached thread instead.
 pub fn kill_tree(child: &mut Child) -> std::io::Result<()> {
     let pid = child.id();
     #[cfg(windows)]
@@ -246,9 +261,12 @@ mod kill_tree_tests {
         }
     }
 
-    /// The only caller (`video_cancel`) spawns with a plain `Command::spawn`,
-    /// so the child is NOT a process-group leader — which is exactly why the
-    /// old `kill(-pid)` signalled nothing and left the tree running.
+    /// One of the two callers (`video_cancel`) spawns with a plain
+    /// `Command::spawn`, so the child is NOT a process-group leader — which is
+    /// exactly why the old `kill(-pid)` signalled nothing and left the tree
+    /// running. (The other, `remote::kill_tunnel_child`, goes through
+    /// `spawn_piped` and IS a group leader; the parent-link walk covers both,
+    /// and the group-leader case is exercised in remote.rs's own tunnel tests.)
     #[test]
     fn a_child_without_a_process_group_still_loses_its_whole_tree() {
         let mut child = Command::new("sh")

@@ -219,6 +219,20 @@ fn capture_screen_to(_tmp: &std::path::Path) -> Result<(), String> {
     Err("Screenshot not implemented for this platform yet".to_string())
 }
 
+/// The native folder dialog — and the ONLY way a folder joins the workspace
+/// allowlist (`filesystem::remember_picked_root`).
+///
+/// That is the whole point of routing it through here: the jail root for every
+/// agent/remote file op used to be a string the WebView sent, so a script
+/// injected into the renderer could name `/` and read the disk through
+/// `fs_read`. A renderer cannot open this dialog or click in it, so "folders a
+/// human chose here" is a set it cannot extend.
+///
+/// Recording is best-effort on purpose: this dialog also picks folders that are
+/// not workspaces at all (the GGUF download path, for instance). A folder that
+/// may not be a jail root — `$HOME`, `/`, a credential directory — is simply
+/// not recorded, and the picker still returns it for those other uses; only
+/// `check_workspace_root` cares, and it refuses with the reason.
 #[tauri::command]
 pub async fn pick_folder(default_path: Option<String>) -> Result<Option<String>, String> {
     let mut dialog = rfd::AsyncFileDialog::new();
@@ -226,7 +240,11 @@ pub async fn pick_folder(default_path: Option<String>) -> Result<Option<String>,
         dialog = dialog.set_directory(p);
     }
     let result = dialog.pick_folder().await;
-    Ok(result.map(|f| f.path().to_string_lossy().to_string()))
+    let picked = result.map(|f| f.path().to_path_buf());
+    if let Some(ref p) = picked {
+        let _ = crate::commands::filesystem::remember_picked_root(p);
+    }
+    Ok(picked.map(|p| p.to_string_lossy().to_string()))
 }
 
 /// Exit the app — used by the auto-updater to let the NSIS installer swap

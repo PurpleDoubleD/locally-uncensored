@@ -4887,9 +4887,48 @@ async fn handle_qr(AxumState(state): AxumState<RemoteState>) -> Json<QrResponse>
 
 // ─── Devices ───
 
-async fn handle_devices(AxumState(state): AxumState<RemoteState>) -> Json<Vec<ConnectedDevice>> {
-    let devices = state.connected_devices.lock().await;
-    Json(devices.clone())
+/// The connected-device list as a stand-alone axum sub-state.
+///
+/// The two handlers below need nothing from `RemoteState` except this list, and
+/// `RemoteState` carries an `AppHandle` — which cannot be built in a unit test.
+/// Extracting the list instead of the whole state is what makes the handler
+/// BODIES (the caller check, the filtering) reachable from a test rather than
+/// only the helpers they call: a gegenprüfer who reverts a handler to its old
+/// body must see a red test, and that only works if the test runs the handler.
+#[derive(Clone)]
+struct DeviceRegistry(Arc<TokioMutex<Vec<ConnectedDevice>>>);
+
+impl axum::extract::FromRef<RemoteState> for DeviceRegistry {
+    fn from_ref(state: &RemoteState) -> Self {
+        DeviceRegistry(state.connected_devices.clone())
+    }
+}
+
+/// Show the caller its OWN row, and only that one.
+///
+/// "Authenticated" is not the only rung on this ladder any more (see
+/// `handle_disconnect` for the same class). This endpoint used to hand every
+/// paired phone the full list: the id, the LAN/public IP and the user agent of
+/// every OTHER device paired with this desktop. The id is the interesting part
+/// — it is the `sub` of the other device's session and was, until the fix below,
+/// all it took to end that session. The desktop's own list is not served over
+/// HTTP at all (`remote_connected_devices`, a Tauri command), so nothing that
+/// legitimately needs the full roster loses it here.
+fn own_device_rows(devices: &[ConnectedDevice], caller_id: &str) -> Vec<ConnectedDevice> {
+    devices.iter().filter(|d| d.id == caller_id).cloned().collect()
+}
+
+async fn handle_devices(
+    AxumState(DeviceRegistry(devices)): AxumState<DeviceRegistry>,
+    caller: Option<axum::Extension<CallerDevice>>,
+) -> Response {
+    // Set by auth_middleware on everything that got past it; this route is
+    // behind it, so a missing one means the caller was never identified.
+    let Some(axum::Extension(CallerDevice(caller_id))) = caller else {
+        return StatusCode::UNAUTHORIZED.into_response();
+    };
+    let devices = devices.lock().await;
+    Json(own_device_rows(&devices, &caller_id)).into_response()
 }
 
 #[derive(Deserialize)]
@@ -4921,7 +4960,7 @@ fn remove_own_device(
 }
 
 async fn handle_disconnect(
-    AxumState(state): AxumState<RemoteState>,
+    AxumState(DeviceRegistry(devices)): AxumState<DeviceRegistry>,
     caller: Option<axum::Extension<CallerDevice>>,
     Json(body): Json<DisconnectRequest>,
 ) -> StatusCode {
@@ -4931,7 +4970,7 @@ async fn handle_disconnect(
     let Some(axum::Extension(CallerDevice(caller_id))) = caller else {
         return StatusCode::UNAUTHORIZED;
     };
-    let mut devices = state.connected_devices.lock().await;
+    let mut devices = devices.lock().await;
     remove_own_device(&mut devices, &caller_id, &body.id)
 }
 
@@ -5155,6 +5194,76 @@ fn kill_tunnel_child(mut child: std::process::Child) {
     println!("[Tunnel] Stopped (PID {})", pid);
 }
 
+/// Spawn the tunnel and hand it to the shared state IN THE SAME STEP.
+///
+/// The child used to be held in a local variable for the whole of `start_tunnel`
+/// — the 15 s wait for the public URL plus the ~12 s edge-readiness probe. For
+/// those ~27 seconds on EVERY start the process was running and reachable from
+/// nothing: `stop_tunnel` found an empty slot, `Drop` found an empty slot, and a
+/// quit in that window left a live `*.trycloudflare.com` address pointing at
+/// this machine with the app's own indicator reading OFF. That is the same
+/// finding the `Child` was introduced for, just narrowed to a window.
+///
+/// So the slot is filled first and the outcome decided afterwards: from here on
+/// every failure path goes through `kill_registered_tunnel`, which takes the
+/// child back out of the slot instead of dropping a forgotten handle.
+///
+/// `stderr` is taken before the child leaves this function — it is the only
+/// thing the caller still needs, and after the handover the `Child` belongs to
+/// the shared state.
+fn spawn_and_register_tunnel(
+    cmd: std::process::Command,
+    remote: &std::sync::Mutex<RemoteServer>,
+) -> Result<(u32, std::process::ChildStderr), String> {
+    let mut child = crate::process_util::spawn_piped(cmd).map_err(|e| {
+        error!(error = %e, "cloudflared tunnel spawn failed");
+        format!("Failed to start cloudflared: {}", os_error::english(&e))
+    })?;
+    let pid = child.id();
+    // The tunnel is the one child whose survival is a security event and not
+    // just a leak: it publishes this machine on the internet. On Windows this
+    // puts it in the app's kill-on-close job object, so the OS takes it down
+    // even when nothing in this process gets to run a shutdown path.
+    crate::commands::process::tie_child_to_app_lifetime(pid);
+    let stderr = match child.stderr.take() {
+        Some(s) => s,
+        None => {
+            kill_tunnel_child(child);
+            return Err("cloudflared had no stderr handle".into());
+        }
+    };
+    // Anything already in the slot is killed rather than dropped — dropping a
+    // `Child` does not kill it, it just forgets it, which is how the leak this
+    // whole area fixes started.
+    let displaced = {
+        let mut guard = remote.lock().map_err(|e| e.to_string())?;
+        guard.tunnel_child.replace(child)
+    };
+    if let Some(old) = displaced {
+        kill_tunnel_child(old);
+    }
+    Ok((pid, stderr))
+}
+
+/// Take the tunnel back out of the shared slot and kill it — the failure-path
+/// counterpart of `spawn_and_register_tunnel`.
+///
+/// Only if the slot still holds THIS pid: a concurrent `start_tunnel` may have
+/// replaced it (and killed ours) already, and a failing start must never reap
+/// the tunnel that succeeded after it.
+fn kill_registered_tunnel(remote: &std::sync::Mutex<RemoteServer>, pid: u32) {
+    let child = match remote.lock() {
+        Ok(mut guard) => match guard.tunnel_child.as_ref().map(|c| c.id()) {
+            Some(held) if held == pid => guard.tunnel_child.take(),
+            _ => None,
+        },
+        Err(_) => None,
+    };
+    if let Some(child) = child {
+        kill_tunnel_child(child);
+    }
+}
+
 /// Last line of defence for the public tunnel.
 ///
 /// Tauri v2 does not reliably drop managed state on `app.exit(0)`, which is
@@ -5225,7 +5334,31 @@ fn is_stale_tunnel_process(process_name: &str, cmd: &[String], port: u16) -> boo
         return false;
     }
     let joined = cmd.join(" ");
-    joined.contains(&format!("127.0.0.1:{port}")) || joined.contains(&format!("localhost:{port}"))
+    targets_loopback_port(&joined, port)
+}
+
+/// Does this command line publish EXACTLY `port` on loopback?
+///
+/// A substring test does not answer that: `contains("127.0.0.1:1143")` is also
+/// true of `127.0.0.1:11435`, so the sweep for one port killed the tunnel of
+/// another — and this sweep runs before the bind, on processes the user may
+/// well have started for their own reasons. The whole digit run after the host
+/// has to equal the port, which rules out both a shorter prefix and a longer
+/// suffix.
+fn targets_loopback_port(text: &str, port: u16) -> bool {
+    let wanted = port.to_string();
+    for host in ["127.0.0.1:", "localhost:"] {
+        let mut rest = text;
+        while let Some(at) = rest.find(host) {
+            let tail = &rest[at + host.len()..];
+            let digits: String = tail.chars().take_while(char::is_ascii_digit).collect();
+            if digits == wanted {
+                return true;
+            }
+            rest = tail;
+        }
+    }
+    false
 }
 
 /// Kill cloudflared processes left over from a previous run that still publish
@@ -5829,26 +5962,11 @@ pub async fn start_tunnel(
     // 127.0.0.1 (not "localhost") avoids a ~2 s IPv6 (::1) connect detour on
     // some Windows boxes before cloudflared falls back to IPv4 (aldrich 2026-06).
     cmd.args(["tunnel", "--url", &format!("http://127.0.0.1:{}", port)]);
-    let mut child = crate::process_util::spawn_piped(cmd)
-        .map_err(|e| {
-            error!(error = %e, "cloudflared tunnel spawn failed");
-            format!("Failed to start cloudflared: {}", os_error::english(&e))
-        })?;
-
-    let pid = child.id();
-    // The tunnel is the one child whose survival is a security event and not
-    // just a leak: it publishes this machine on the internet. On Windows this
-    // puts it in the app's kill-on-close job object, so the OS takes it down
-    // even when nothing in this process gets to run a shutdown path.
-    crate::commands::process::tie_child_to_app_lifetime(pid);
+    // Registered in the shared slot BY the spawn, not once the start is judged
+    // successful — everything below this line can fail, and every one of those
+    // paths must be able to reach the process it left running.
+    let (pid, stderr) = spawn_and_register_tunnel(cmd, &state.remote)?;
     info!(pid = pid, port = port, "tunnel started");
-    let stderr = match child.stderr.take() {
-        Some(s) => s,
-        None => {
-            kill_tunnel_child(child);
-            return Err("cloudflared had no stderr handle".into());
-        }
-    };
     println!("[Tunnel] cloudflared started (PID {}), tunneling localhost:{}", pid, port);
 
     let captured_url = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
@@ -5923,7 +6041,7 @@ pub async fn start_tunnel(
         // records as `tunnelActive=false` while leaving a live public tunnel
         // behind is exactly the state this whole area is being fixed for.
         warn!(pid = pid, "tunnel URL did not appear within 15s");
-        kill_tunnel_child(child);
+        kill_registered_tunnel(&state.remote, pid);
         {
             let mut turl = tunnel_url_arc.lock().await;
             *turl = None;
@@ -5936,17 +6054,8 @@ pub async fn start_tunnel(
         ));
     }
 
-    // Store the tunnel process. Held as a `Child`, so every stop path and the
-    // `Drop` on `RemoteServer` can actually reap it. Anything already in the
-    // slot is killed rather than dropped — dropping a `Child` does not kill it,
-    // it just forgets it, which is how the leak this fixes started.
-    let displaced = {
-        let mut remote = state.remote.lock().map_err(|e| e.to_string())?;
-        remote.tunnel_child.replace(child)
-    };
-    if let Some(old) = displaced {
-        kill_tunnel_child(old);
-    }
+    // The process is already in the slot (`spawn_and_register_tunnel`), so all
+    // that is left is publishing the URL.
 
     // Store tunnel URL in shared state (so axum handlers see it)
     {
@@ -6518,6 +6627,103 @@ mod remote_hardening_tests {
         assert_eq!(devices.len(), 2, "a refused disconnect must change nothing");
     }
 
+    // ── the disconnect/devices HANDLERS, not just their helpers ──
+    //
+    // The two tests above prove `remove_own_device`. They do NOT prove that the
+    // endpoint uses it: a gegenprüfer put the old, vulnerable body back into
+    // `handle_disconnect` and the whole suite stayed green, because nothing ran
+    // the handler. These do — the handlers take the device list as their axum
+    // sub-state precisely so they can be called here.
+
+    fn registry(devices: Vec<ConnectedDevice>) -> DeviceRegistry {
+        DeviceRegistry(Arc::new(TokioMutex::new(devices)))
+    }
+
+    fn caller(id: &str) -> Option<axum::Extension<CallerDevice>> {
+        Some(axum::Extension(CallerDevice(id.to_string())))
+    }
+
+    async fn body_json(resp: Response) -> serde_json::Value {
+        let bytes = axum::body::to_bytes(resp.into_body(), 1 << 20).await.expect("read body");
+        serde_json::from_slice(&bytes).expect("json body")
+    }
+
+    #[tokio::test]
+    async fn the_disconnect_endpoint_refuses_to_end_someone_elses_session() {
+        let now = 1_700_000_000u64;
+        let reg = registry(vec![
+            device("mine", "192.168.1.10", now),
+            device("theirs", "192.168.1.77", now),
+        ]);
+        let code = handle_disconnect(
+            AxumState(reg.clone()),
+            caller("mine"),
+            Json(DisconnectRequest { id: "theirs".into() }),
+        )
+        .await;
+        assert_eq!(code, StatusCode::FORBIDDEN, "the endpoint ended another device's session");
+        let devices = reg.0.lock().await;
+        assert_eq!(devices.len(), 2, "a refused disconnect must change nothing");
+        assert!(devices.iter().any(|d| d.id == "theirs"), "the victim's row is gone");
+    }
+
+    #[tokio::test]
+    async fn the_disconnect_endpoint_still_ends_the_callers_own_session() {
+        let now = 1_700_000_000u64;
+        let reg = registry(vec![
+            device("mine", "192.168.1.10", now),
+            device("theirs", "192.168.1.77", now),
+        ]);
+        let code = handle_disconnect(
+            AxumState(reg.clone()),
+            caller("mine"),
+            Json(DisconnectRequest { id: "mine".into() }),
+        )
+        .await;
+        assert_eq!(code, StatusCode::OK);
+        let devices = reg.0.lock().await;
+        assert_eq!(devices.len(), 1);
+        assert_eq!(devices[0].id, "theirs");
+    }
+
+    #[tokio::test]
+    async fn an_unidentified_caller_cannot_touch_the_device_list() {
+        let now = 1_700_000_000u64;
+        let reg = registry(vec![device("mine", "192.168.1.10", now)]);
+        let code = handle_disconnect(
+            AxumState(reg.clone()),
+            None,
+            Json(DisconnectRequest { id: "mine".into() }),
+        )
+        .await;
+        assert_eq!(code, StatusCode::UNAUTHORIZED);
+        assert_eq!(reg.0.lock().await.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn the_devices_endpoint_shows_a_phone_only_its_own_row() {
+        // Same class as the disconnect finding: "paired" was the only rung, so
+        // every phone could read every other phone's id, address and user agent
+        // — and that id was all the disconnect endpoint asked for.
+        let now = 1_700_000_000u64;
+        let reg = registry(vec![
+            device("mine", "192.168.1.10", now),
+            device("theirs", "192.168.1.77", now),
+        ]);
+        let json = body_json(handle_devices(AxumState(reg), caller("mine")).await).await;
+        let rows = json.as_array().expect("a list of devices");
+        assert_eq!(rows.len(), 1, "the endpoint served somebody else's row: {json}");
+        assert_eq!(rows[0]["id"], "mine");
+        assert!(!json.to_string().contains("192.168.1.77"), "another device's address leaked");
+    }
+
+    #[tokio::test]
+    async fn the_devices_endpoint_refuses_an_unidentified_caller() {
+        let reg = registry(vec![device("mine", "192.168.1.10", 1_700_000_000)]);
+        let resp = handle_devices(AxumState(reg), None).await;
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    }
+
     // ── the pairing code ──
 
     #[test]
@@ -6547,13 +6753,38 @@ mod remote_hardening_tests {
 
     const REMOTE_RS: &str = include_str!("remote.rs");
 
-    /// remote.rs up to its first test module. The assertions below quote the
-    /// code they are guarding, and matching themselves would make them free.
+    /// remote.rs with EVERY `#[cfg(test)]` module cut out. The assertions below
+    /// quote the code they are guarding, and matching themselves would make
+    /// them free.
+    ///
+    /// This used to split on the first line of `jwt_refresh_tests` and keep the
+    /// head. Two test modules (`openai_bridge_tests`, `openai_bridge_live_tests`)
+    /// sit ABOVE that one, so their bodies counted as production code: a guard
+    /// that asserts a string is absent could be satisfied by a test having it,
+    /// and a guard that asserts a string is present could be satisfied by a
+    /// test quoting it. Every `#[cfg(test)]` block is removed instead, so the
+    /// result is the half that actually ships however the file is reordered.
     fn production_code() -> &'static str {
-        REMOTE_RS
-            .split_once("#[cfg(test)]\nmod jwt_refresh_tests {")
-            .map(|(head, _)| head)
-            .expect("remote.rs starts its tests with jwt_refresh_tests")
+        static PROD: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+        PROD.get_or_init(|| {
+            const MARKER: &str = "\n#[cfg(test)]\n";
+            let mut out = String::with_capacity(REMOTE_RS.len());
+            let mut rest = REMOTE_RS;
+            while let Some(at) = rest.find(MARKER) {
+                out.push_str(&rest[..=at]); // everything before the attribute
+                let block = &rest[at + 1..]; // starts at `#[cfg(test)]`
+                // A top-level item ends at the first `}` in column 0.
+                match block.find("\n}\n") {
+                    Some(end) => rest = &block[end + 3..],
+                    None => {
+                        rest = "";
+                        break;
+                    }
+                }
+            }
+            out.push_str(rest);
+            out
+        })
     }
 
     #[test]
@@ -6564,6 +6795,27 @@ mod remote_hardening_tests {
         assert!(head.len() < REMOTE_RS.len(), "the split kept the test modules");
         assert!(head.contains("async fn handle_auth("), "the split dropped production code");
         assert!(!head.contains("mod remote_hardening_tests"), "the split kept this module");
+        // EVERY test module, not just the first one: the modules above
+        // jwt_refresh_tests used to count as production code.
+        for m in [
+            "mod openai_bridge_tests",
+            "mod openai_bridge_live_tests",
+            "mod jwt_refresh_tests",
+            "mod proxy_gate_path_tests",
+            "mod remote_path_tests",
+            "mod mobile_decay_tests",
+            "mod mobile_environment_tests",
+        ] {
+            assert!(!head.contains(m), "the split kept {m}");
+        }
+        assert!(
+            !head.contains("#[cfg(test)]"),
+            "a test-only block survived the split",
+        );
+        // And it must not have eaten the production code that follows the
+        // first test module — build_router lives well below it.
+        assert!(head.contains("fn build_router("), "the split dropped everything after the first test module");
+        assert!(head.contains("pub async fn start_tunnel("), "the split dropped the tunnel code");
     }
 
     /// The body of a top-level `fn` in the production half, from its signature
@@ -6681,6 +6933,27 @@ mod remote_hardening_tests {
         assert!(!is_stale_tunnel_process("cloudflared", &cmd("cloudflared --version"), 11435));
     }
 
+    #[test]
+    fn a_sweep_for_one_port_does_not_kill_the_tunnel_of_another() {
+        // The port was matched as a substring, so `127.0.0.1:1143` was "found"
+        // inside `127.0.0.1:11435` — a sweep for 1143 killed the tunnel that
+        // publishes 11435, and this sweep runs before the bind on processes the
+        // user may have started themselves.
+        let cmd = |s: &str| s.split(' ').map(String::from).collect::<Vec<_>>();
+        let live = cmd("cloudflared tunnel --url http://127.0.0.1:11435");
+        assert!(!is_stale_tunnel_process("cloudflared", &live, 1143), "a prefix of the port matched");
+        assert!(!is_stale_tunnel_process("cloudflared", &live, 1), "a shorter prefix matched");
+        assert!(!is_stale_tunnel_process("cloudflared", &live, 435), "a suffix of the port matched");
+        assert!(is_stale_tunnel_process("cloudflared", &live, 11435), "the exact port stopped matching");
+        // Same rule for the spelled-out host.
+        let local = cmd("cloudflared tunnel --url http://localhost:11435");
+        assert!(!is_stale_tunnel_process("cloudflared", &local, 1143));
+        assert!(is_stale_tunnel_process("cloudflared", &local, 11435));
+        // A port that only appears as part of a longer number is not our port.
+        assert!(!targets_loopback_port("http://127.0.0.1:114350", 11435));
+        assert!(!targets_loopback_port("http://127.0.0.1:911435", 11435));
+    }
+
     /// A live child that outlives the test unless something kills it, spawned
     /// the way the tunnel is.
     #[cfg(unix)]
@@ -6744,6 +7017,62 @@ mod remote_hardening_tests {
 
     #[test]
     #[cfg(unix)]
+    fn the_tunnel_is_in_the_shared_slot_from_the_moment_it_is_spawned() {
+        // The finding the `Child` was introduced for, narrowed to a window: the
+        // process was held in a local variable until the start was judged
+        // successful — 15 s waiting for the public URL plus ~12 s probing the
+        // edge. For those ~27 seconds on EVERY start, `stop_tunnel` and `Drop`
+        // both looked at an empty slot while a public *.trycloudflare.com
+        // address was already live.
+        let remote = std::sync::Mutex::new(RemoteServer::new());
+        let mut cmd = std::process::Command::new("sleep");
+        cmd.arg("30");
+        let (pid, _stderr) = spawn_and_register_tunnel(cmd, &remote).expect("spawn a stand-in tunnel");
+        assert!(alive(pid), "the stand-in tunnel did not start");
+        assert_eq!(
+            remote.lock().unwrap().tunnel_pid(),
+            Some(pid),
+            "the spawned tunnel is not reachable from the state every stop path reads",
+        );
+
+        // ...which is exactly what makes the failure paths able to close it.
+        kill_registered_tunnel(&remote, pid);
+        assert!(remote.lock().unwrap().tunnel_pid().is_none(), "the slot still holds a dead tunnel");
+        assert!(
+            dies_within(pid, std::time::Duration::from_secs(5)),
+            "a failed start left the tunnel running",
+        );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn a_failed_start_never_reaps_the_tunnel_that_replaced_it() {
+        // Two starts race: the second replaces (and kills) the first, then the
+        // first one's timeout fires. It must not take the live tunnel down.
+        let remote = std::sync::Mutex::new(RemoteServer::new());
+        let mut first = std::process::Command::new("sleep");
+        first.arg("30");
+        let (first_pid, _e1) = spawn_and_register_tunnel(first, &remote).expect("spawn first");
+        let mut second = std::process::Command::new("sleep");
+        second.arg("30");
+        let (second_pid, _e2) = spawn_and_register_tunnel(second, &remote).expect("spawn second");
+        assert_ne!(first_pid, second_pid);
+        assert!(dies_within(first_pid, std::time::Duration::from_secs(5)), "the displaced tunnel survived");
+
+        kill_registered_tunnel(&remote, first_pid);
+        assert_eq!(
+            remote.lock().unwrap().tunnel_pid(),
+            Some(second_pid),
+            "the stale failure path evicted the live tunnel",
+        );
+        assert!(alive(second_pid), "the stale failure path killed the live tunnel");
+
+        kill_registered_tunnel(&remote, second_pid);
+        assert!(dies_within(second_pid, std::time::Duration::from_secs(5)));
+    }
+
+    #[test]
+    #[cfg(unix)]
     fn a_stopped_tunnel_is_reaped_and_not_left_as_a_zombie() {
         // The old kill-by-pid path never waited, so every stop left a zombie
         // for the rest of the app's life.
@@ -6754,6 +7083,36 @@ mod remote_hardening_tests {
             dies_within(pid, std::time::Duration::from_secs(5)),
             "the stopped tunnel is still running or left behind as a zombie"
         );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn stopping_the_tunnel_takes_its_children_with_it() {
+        // `process_util::kill_tree` has two callers, and they do not spawn the
+        // same way: video_cancel uses a plain `Command::spawn` (the child is in
+        // OUR process group), this one uses `spawn_piped` (the child is its own
+        // group leader). The walk is by parent link, so the difference must not
+        // matter — asserted here rather than assumed, because the comment on
+        // kill_tree used to claim video_cancel was the only caller.
+        let mut cmd = std::process::Command::new("sh");
+        cmd.arg("-c").arg("sleep 30 & sleep 30");
+        let child = crate::process_util::spawn_piped(cmd).expect("spawn a tunnel stand-in");
+        let pid = child.id();
+        std::thread::sleep(std::time::Duration::from_millis(400));
+
+        let mut sys = sysinfo::System::new();
+        sys.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
+        let kids = crate::commands::shell::descendants(pid, &sys);
+        assert!(!kids.is_empty(), "the stand-in spawned nothing — test setup is wrong");
+
+        kill_tunnel_child(child);
+
+        for p in kids.iter().copied().chain(std::iter::once(pid)) {
+            assert!(
+                dies_within(p, std::time::Duration::from_secs(5)),
+                "{p} survived the tunnel stop",
+            );
+        }
     }
 
     #[test]

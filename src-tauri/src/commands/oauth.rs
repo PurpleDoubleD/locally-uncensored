@@ -77,15 +77,37 @@ enum Verdict {
 ///   `<iframe>` pointed at the same URL. Absent (pre-2023 Safari, a non-
 ///   browser client) they simply do not vote.
 ///
-/// `state` is deliberately not checked, and this is the one hole left: the
-/// Supabase PKCE redirect carries `code` alone, so the only way to bind a
-/// per-attempt nonce would be to add a query parameter to the redirect URI —
-/// which the server's exact-match `uri_allow_list` would then refuse,
-/// breaking sign-in for everyone. What remains reachable after the checks
-/// above is a top-level navigation the attacker cannot make silently: a
-/// `window.open`/form submit needs a user gesture and opens a visible window.
-/// A code from a stranger is useless in any case — the PKCE verifier never
-/// leaves the app, so the exchange fails.
+/// KNOWN LIMITATION, stated plainly because the version of this comment that
+/// stood here was wrong and wrong in the reassuring direction.
+///
+/// It claimed that what survives the checks above "needs a user gesture and
+/// opens a visible window". It does not. `location.href = "http://127.0.0.1:
+/// 17872/callback?error=…"`, a `<meta http-equiv="refresh">` and a server-side
+/// 302 are all TOP-LEVEL navigations, any page the user already has open can
+/// start one with no gesture and nothing visible, and the browser sends exactly
+/// the shape this function accepts: `GET /callback`, the loopback `Host`, no
+/// `Origin`, `Sec-Fetch-Mode: navigate`, `Sec-Fetch-Dest: document`. Nothing in
+/// the request distinguishes it from Supabase's redirect.
+///
+/// So, while a sign-in is pending, any open tab can end the wait and choose the
+/// text the user is then shown. What it CANNOT do is sign anyone in: the PKCE
+/// verifier never leaves the app, so a stranger's `code` fails the exchange —
+/// the residual is a denial of the sign-in plus attacker-chosen text, and
+/// src/api/cloud/supabase.ts (`providerErrorText`) is what keeps that text from
+/// posing as LU's own words. `a_scripted_top_level_navigation_…` below pins the
+/// limitation so it stays visible.
+///
+/// What would actually close it is a per-attempt `state` nonce, and it cannot
+/// be built here alone: the Supabase PKCE redirect carries `code` alone, so the
+/// nonce would have to ride on the redirect URI as a query parameter
+/// (`…/callback?state=<nonce>`) — and that URI is matched against the Supabase
+/// project's `uri_allow_list`, which holds the three ladder URIs as EXACT
+/// entries. A redirect URI with a query would not match, GoTrue would fall back
+/// to the site URL, and sign-in would break for everyone. Making the nonce
+/// possible is a server-side change to that allow-list (see the note in the
+/// changelog); until it happens there is no half-measure worth adding here,
+/// because a nonce this listener generates but the redirect never carries is
+/// dead code that only looks like a defence.
 fn classify(req: &str, port: u16) -> Verdict {
     let mut lines = req.lines();
     let Some(request_line) = lines.next() else {
@@ -387,6 +409,43 @@ mod tests {
     fn a_post_is_never_the_redirect() {
         let req = format!("POST /callback?code=abc HTTP/1.1\r\nHost: 127.0.0.1:{PORT}\r\n\r\n");
         assert_eq!(classify(&req, PORT), Verdict::Reject);
+    }
+
+    /// THE RESIDUAL, pinned rather than described.
+    ///
+    /// `location.href = …` from any open tab produces this request — no user
+    /// gesture, no visible window, and byte for byte what Supabase's 302
+    /// produces. It is accepted, and it has to be: nothing in a top-level
+    /// navigation says who started it. Only a per-attempt `state` nonce
+    /// separates them, and the nonce needs a redirect URI with a query
+    /// parameter, which the Supabase project's exact-match `uri_allow_list`
+    /// refuses (see `classify`).
+    ///
+    /// This test therefore documents a limitation, not a guarantee. When the
+    /// allow-list gains an entry that tolerates `?state=`, this is the test
+    /// that must flip to `Reject` — and it will fail until someone does.
+    #[test]
+    fn a_scripted_top_level_navigation_is_indistinguishable_from_the_real_redirect() {
+        let scripted = format!(
+            "GET /callback?error=access_denied&error_description=Your+account+was+closed HTTP/1.1\r\n\
+             Host: 127.0.0.1:{PORT}\r\n\
+             Upgrade-Insecure-Requests: 1\r\n\
+             Accept: text/html,application/xhtml+xml\r\n\
+             Sec-Fetch-Site: cross-site\r\n\
+             Sec-Fetch-Mode: navigate\r\n\
+             Sec-Fetch-Dest: document\r\n\
+             Connection: close\r\n\r\n"
+        );
+        // Identical to what the provider's redirect sends — same method, same
+        // path, same Host, no Origin, same Sec-Fetch triple.
+        assert_eq!(
+            classify(&scripted, PORT),
+            classify(
+                &real_redirect("error=access_denied&error_description=Your+account+was+closed"),
+                PORT
+            ),
+            "the two are distinguishable now — if that is a `state` check, this test is stale",
+        );
     }
 
     // ── strays that must not end the attempt either ─────────────────────

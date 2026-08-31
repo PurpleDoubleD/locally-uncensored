@@ -373,11 +373,20 @@ mod ipc_surface_tests {
         }
         assert!(!spawn_entries.is_empty(), "no shell:allow-spawn entry found");
 
+        // Every one of the NINETEEN entries the hardening commit removed, and
+        // not a subset: the list had 15, so `bunx`, `bunx.cmd`, `pnpm.cmd` and
+        // `yarn.cmd` could have been put back without a single test noticing.
+        // `bunx` is the one that matters most — it is npx's exact equivalent,
+        // it fetches a package off the network and runs it, and it was in the
+        // allow-list with `"args": true`.
+        //
         // Anything that runs code handed to it on the command line, or that
         // runs whatever a package.json / image says.
-        const BANNED: [&str; 15] = [
-            "node", "node.cmd", "deno", "deno.cmd", "bun", "bun.cmd", "python", "python3",
-            "py", "docker", "npm", "npm.cmd", "pnpm", "yarn", "uv",
+        const BANNED: [&str; 19] = [
+            "node", "node.cmd", "deno", "deno.cmd",
+            "bun", "bun.cmd", "bunx", "bunx.cmd",
+            "python", "python3", "py", "docker",
+            "npm", "npm.cmd", "pnpm", "pnpm.cmd", "yarn", "yarn.cmd", "uv",
         ];
         for entry in &spawn_entries {
             let name = entry["name"].as_str().unwrap_or_default().to_lowercase();
@@ -484,9 +493,22 @@ mod tests {
             let cwd = workspace_cwd(Some(id));
             assert!(cwd.starts_with(&root), "id {id:?} escaped to {cwd:?}");
             assert_ne!(cwd, root, "id {id:?} landed on the workspace root itself");
+            // Only the SLUG, never the whole path: a machine whose home is
+            // /Users/max.mustermann has a dot in every path under it, and this
+            // assertion used to fail there for a reason that has nothing to do
+            // with the chat id.
+            //
+            // The last COMPONENT, not `file_name()`: `file_name()` answers None
+            // for a path ending in `..`, which is precisely the id this is
+            // guarding against — the check would pass by not looking.
+            let slug = cwd
+                .components()
+                .next_back()
+                .map(|c| c.as_os_str().to_string_lossy().to_string())
+                .unwrap_or_default();
             assert!(
-                !cwd.to_string_lossy().contains('.'),
-                "id {id:?} kept a dot: {cwd:?}",
+                !slug.contains('.'),
+                "id {id:?} kept a dot in its folder name: {slug:?} (from {cwd:?})",
             );
         }
         // Ordinary ids keep their own folder.

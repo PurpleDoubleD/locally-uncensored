@@ -104,18 +104,32 @@ fn is_within(root: &Path, cand: &Path) -> bool {
 }
 
 /// Jail `candidate` to `root`: return the normalized path when it stays inside
-/// `root`, otherwise an error. This is the single containment boundary for
-/// every agent/remote file op — it stops a prompt-injected model or a remote
-/// client from reading `~/.ssh/id_rsa`, writing into `\Startup\`, or `..`-ing
-/// out of the workspace. Absolute paths are allowed ONLY when they fall within
-/// `root`, so the desktop coding agent can still use absolute paths inside the
-/// user-picked project folder (#62).
+/// `root`, otherwise an error. Absolute paths are allowed ONLY when they fall
+/// within `root`, so the desktop coding agent can still use absolute paths
+/// inside the user-picked project folder (#62).
 ///
 /// The DECISION is made on symlink-resolved paths, the RETURNED path is the
 /// lexical one the caller asked for: canonicalize() hands back `\\?\C:\…` on
 /// Windows and `/private/var/…` on macOS, and that string is echoed to the UI
-/// and compared in the frontend. Opening the lexical path is equivalent —
-/// its link target was just proven to be inside the root.
+/// and compared in the frontend.
+///
+/// What this actually guarantees, and what it does not:
+///
+/// * It answers ONE question — does this path string, with `..` resolved and
+///   with the symlinks of its deepest existing ancestor followed, stay under
+///   `root`. That is enough for the traversal shapes a prompt-injected model
+///   sends (`../../.ssh/id_rsa`) and for a symlink planted inside the
+///   workspace, which is what `resolve_existing_prefix` is for.
+/// * It is a path check, not a permission check. Whether the caller-supplied
+///   ROOT may be a jail at all is `check_workspace_root`'s question, and
+///   nothing here asks it.
+/// * The check and the later `open()` are separate syscalls on a filesystem
+///   other processes can write. A component replaced by a symlink in between
+///   escapes it (TOCTOU); so does a hard link inside the workspace pointing at
+///   a file outside, which is indistinguishable from the file itself. Closing
+///   those needs `openat`/`O_NOFOLLOW` on a directory handle, not a string
+///   comparison — the workspace is assumed not to be attacker-writable while
+///   an operation is in flight.
 pub(crate) fn contain_within(root: &Path, candidate: &Path) -> Result<PathBuf, String> {
     let nroot = lexical_normalize(root);
     let ncand = lexical_normalize(candidate);
@@ -178,19 +192,101 @@ pub(crate) fn workspace_root(chat_id: Option<&str>, working_dir: Option<&str>) -
     dirs::home_dir().unwrap_or_default().join("agent-workspace").join(slug)
 }
 
-/// Folders the user picked in a native dialog this run. A registered root is
-/// trusted verbatim; everything else has to pass `check_workspace_root`.
-static PICKED_ROOTS: Lazy<Mutex<Vec<PathBuf>>> = Lazy::new(|| Mutex::new(Vec::new()));
+/// THE ALLOWLIST: folders the user chose in a native folder dialog.
+///
+/// Kept on disk, because a pick is a decision about a project and not about a
+/// run: the workspace the user selected last week arrives from the frontend's
+/// persisted state on the next launch, and an in-memory list would refuse it
+/// and force a re-pick every single start.
+///
+/// The file is only ever written from `remember_picked_root`, i.e. from the
+/// native dialog, and every entry is re-checked against
+/// `may_be_a_picked_root` when it is read back — an edited file cannot add `/`
+/// or `~/.ssh` to the allowlist.
+static PICKED_ROOTS: Lazy<Mutex<Vec<PathBuf>>> = Lazy::new(|| Mutex::new(load_picked_roots()));
+
+fn picked_roots_file() -> PathBuf {
+    crate::os_paths::data_dir().join("workspace-roots.json")
+}
+
+fn load_picked_roots() -> Vec<PathBuf> {
+    load_roots_from(&picked_roots_file())
+}
+
+/// Read the allowlist back, re-checking every entry.
+///
+/// The file is data, not authority: a corrupted or edited one may shrink the
+/// allowlist but must not be able to grow it past what a dialog could have
+/// produced — so `/` or `~/.ssh` in the file is dropped on the way in, exactly
+/// as a click on them would have been.
+fn load_roots_from(file: &Path) -> Vec<PathBuf> {
+    let raw = fs::read_to_string(file).unwrap_or_default();
+    serde_json::from_str::<Vec<String>>(&raw)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|s| lexical_normalize(Path::new(&s)))
+        .filter(|p| may_be_a_picked_root(p).is_ok())
+        .collect()
+}
+
+fn save_picked_roots(roots: &[PathBuf]) {
+    save_roots_to(&picked_roots_file(), roots)
+}
+
+fn save_roots_to(file: &Path, roots: &[PathBuf]) {
+    let list: Vec<String> = roots.iter().map(|p| p.to_string_lossy().to_string()).collect();
+    let Ok(json) = serde_json::to_string_pretty(&list) else { return };
+    if let Some(parent) = file.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    let _ = fs::write(file, json);
+}
+
+/// Test-only stand-in for the native dialog.
+///
+/// Same gate as `remember_picked_root` — a root a real pick could not produce
+/// is rejected here too — but it does not persist: a test run must not write
+/// its temp folders into the user's real allowlist.
+#[cfg(test)]
+pub(crate) fn allow_root_for_test(root: &Path) {
+    let norm = lexical_normalize(root);
+    may_be_a_picked_root(&norm).expect("a test root must be a folder a pick could produce");
+    let mut roots = PICKED_ROOTS.lock().expect("allowlist");
+    if !roots.iter().any(|r| r == &norm) {
+        roots.push(norm);
+    }
+}
 
 /// Record a folder the USER chose in a native dialog as a legitimate workspace
-/// root. Called by `set_chat_workspace_override` (the Remote dispatch picker).
-pub(crate) fn remember_picked_root(root: &Path) {
+/// root. The ONE caller is `system::pick_folder` — the dialog itself.
+///
+/// It must stay that way. Recording is what makes a folder a jail root, so a
+/// command the WebView can call with a path of its choosing (that is what
+/// `set_chat_workspace_override` is) must never record: it would hand the
+/// allowlist back to the caller it exists to constrain. Those callers
+/// VALIDATE against the list instead (`validate_workspace_root`).
+///
+/// Returns an error for the handful of folders that are not workspaces even
+/// when a human clicked them; see `may_be_a_picked_root`.
+pub(crate) fn remember_picked_root(root: &Path) -> Result<(), String> {
     let norm = lexical_normalize(root);
+    may_be_a_picked_root(&norm)?;
     if let Ok(mut roots) = PICKED_ROOTS.lock() {
         if !roots.iter().any(|r| r == &norm) {
             roots.push(norm);
+            save_picked_roots(&roots);
         }
     }
+    Ok(())
+}
+
+/// The app's OWN working directories — the per-chat sandboxes under
+/// `~/agent-workspace/`. They are roots nobody picks in a dialog because the
+/// app derives them itself (`workspace_root`), so the allowlist has to know
+/// them or a plain sandbox chat could not read its own files.
+fn is_app_work_dir(norm: &Path) -> bool {
+    let base = lexical_normalize(&dirs::home_dir().unwrap_or_default().join("agent-workspace"));
+    is_within(&base, norm)
 }
 
 /// Directories that are never a project workspace, only a target.
@@ -258,6 +354,43 @@ fn named_depth(p: &Path) -> usize {
         .count()
 }
 
+/// The folders that may never be a jail root, however they got proposed.
+///
+/// Second gate, not the first one: `check_workspace_root` decides membership of
+/// the allowlist, this decides whether the member is a sane workspace at all. A
+/// dialog click is consent to expose ONE project folder; the dialog opens
+/// wherever it was last pointed, and one mis-click on `$HOME`, `/Volumes` or
+/// `~/.ssh` would otherwise turn "the agent may work in this folder" into "the
+/// agent may read every credential on the machine" — permanently, because the
+/// pick is remembered.
+fn may_be_a_picked_root(norm: &Path) -> Result<(), String> {
+    let refuse = |why: &str| {
+        Err(format!(
+            "Not an allowed workspace folder ({}): {}",
+            why,
+            norm.display()
+        ))
+    };
+    // `/` and `C:\` have no named component at all.
+    if named_depth(norm) == 0 {
+        return refuse("a drive or filesystem root is not a workspace");
+    }
+    // Mutual containment == equality, and it stays case-insensitive on Windows
+    // the way every other comparison in this file is.
+    let same = |a: &Path, b: &Path| is_within(a, b) && is_within(b, a);
+    for bad in forbidden_exact_roots() {
+        if same(&lexical_normalize(&bad), norm) {
+            return refuse("a home or mount container is not a workspace");
+        }
+    }
+    for bad in forbidden_root_prefixes() {
+        if is_within(&lexical_normalize(&bad), norm) {
+            return refuse("system or credential directory");
+        }
+    }
+    Ok(())
+}
+
 /// Is this frontend-supplied path allowed to BE a jail root?
 ///
 /// `contain_within` only ever answered "does the path stay inside the root" —
@@ -266,52 +399,52 @@ fn named_depth(p: &Path) -> usize {
 /// and read the file. The jail was only ever as narrow as the string the caller
 /// chose for it.
 ///
-/// A root is accepted when the user picked it in a native dialog (see
-/// `remember_picked_root`), or, failing that, when it is structurally a project
-/// folder: deep enough not to be a drive or filesystem root, not a container of
-/// other people's homes, and not inside a system or credential directory. The
-/// structural fallback exists because `system::pick_folder` — the one dialog
-/// every folder choice goes through — does not register its result yet; without
-/// it, enforcing the allowlist alone would refuse every workspace the user
-/// picked in an earlier session.
+/// This is an ALLOWLIST, and it has to be one. The threat model this package
+/// writes down in `capabilities/default.json` is a script-execution bug in the
+/// WebView — a compromised renderer calling the IPC commands with arguments of
+/// its choosing. Against that caller a deny-list is the wrong shape: it has to
+/// enumerate every directory worth stealing on three operating systems, and one
+/// omission (`~/.mozilla`, `~/.thunderbird`, `~/Library/Messages`, a password
+/// manager's export folder, the user's whole `Documents`) is a full read of it.
+/// A renderer cannot open a native folder dialog and click in it, so the list of
+/// folders a human picked there is a boundary it cannot cross at all.
+///
+/// Two gates, in this order:
+///   1. the allowlist — an app work dir, or a folder the user picked in the
+///      native dialog (this run or an earlier one; see `PICKED_ROOTS`);
+///   2. `may_be_a_picked_root` — the handful of folders that are not a
+///      workspace even when a human clicked them.
+///
+/// Upgrade note: a workspace picked by a build older than this one was never
+/// recorded, so the first use after the update is refused until the user picks
+/// the folder again. That is one dialog, once, per folder — the alternative is
+/// trusting a path the WebView sent us, which is the hole being closed.
 fn check_workspace_root(root: &Path) -> Result<(), String> {
     let norm = lexical_normalize(root);
-    if let Ok(roots) = PICKED_ROOTS.lock() {
-        if roots.iter().any(|r| is_within(r, &norm)) {
-            return Ok(());
-        }
+    if is_app_work_dir(&norm) {
+        return Ok(());
     }
-    let refuse = |why: &str| {
-        Err(format!(
-            "Not an allowed workspace folder ({}): {}",
-            why,
+    let picked = PICKED_ROOTS
+        .lock()
+        .map(|roots| roots.iter().any(|r| is_within(r, &norm)))
+        .unwrap_or(false);
+    if !picked {
+        return Err(format!(
+            "Not an allowed workspace folder (only a folder you chose in LU's folder picker \
+             can be a workspace — pick it again to allow it): {}",
             root.display()
-        ))
-    };
-    // `D:\Projects` is an ordinary Windows layout and only one component deep;
-    // on Unix the same depth is `/etc` or `/var`, which is not.
-    let min_depth = if cfg!(windows) { 1 } else { 2 };
-    if named_depth(&norm) < min_depth {
-        return refuse("a drive or filesystem root is not a workspace");
+        ));
     }
-    // Mutual containment == equality, and it stays case-insensitive on Windows
-    // the way every other comparison in this file is.
-    let same = |a: &Path, b: &Path| is_within(a, b) && is_within(b, a);
-    for bad in forbidden_exact_roots() {
-        if same(&lexical_normalize(&bad), &norm) {
-            return refuse("a home or mount container is not a workspace");
-        }
-    }
-    for bad in forbidden_root_prefixes() {
-        if is_within(&lexical_normalize(&bad), &norm) {
-            return refuse("system or credential directory");
-        }
-    }
-    Ok(())
+    may_be_a_picked_root(&norm)
 }
 
 /// `check_workspace_root` for callers outside this module (the Remote dispatch
 /// folder picker validates the folder before storing it as an override).
+///
+/// Validate, never record: the path these callers hold came over IPC from the
+/// WebView, and a caller that could add its own argument to the allowlist would
+/// be the hole the allowlist exists to close. Only `system::pick_folder` — the
+/// native dialog — records.
 pub(crate) fn validate_workspace_root(root: &Path) -> Result<(), String> {
     check_workspace_root(root)
 }
@@ -798,7 +931,8 @@ pub async fn save_binary_file_dialog(
 
 #[cfg(test)]
 mod tests {
-    use super::{is_workspace_root_path, normalize_to_existing_style, resolve_path};
+    use super::{allow_root_for_test, is_workspace_root_path, normalize_to_existing_style, resolve_path};
+    use std::path::Path;
 
     // ── #11: fs_write preserves the existing file's EOL + BOM convention ──
     #[test]
@@ -894,6 +1028,7 @@ mod tests {
     // ── #62: relative paths must honor the folder workspace ──────────
     #[test]
     fn relative_path_resolves_against_working_dir() {
+        allow_root_for_test(Path::new("D:/Projects/site"));
         let got = resolve_path("src/main.rs", Some("chat-1"), Some("D:/Projects/site")).unwrap();
         let s = got.to_string_lossy().replace('\\', "/");
         assert_eq!(s, "D:/Projects/site/src/main.rs");
@@ -921,6 +1056,7 @@ mod tests {
         } else {
             ("/projects/site", "/projects/site/src/main.rs")
         };
+        allow_root_for_test(Path::new(root));
         let got = resolve_path(abs, Some("chat-1"), Some(root)).unwrap();
         let s = got.to_string_lossy().replace('\\', "/");
         assert_eq!(s, abs);
@@ -940,6 +1076,7 @@ mod tests {
 
     #[test]
     fn dotdot_traversal_out_of_working_dir_is_rejected() {
+        allow_root_for_test(Path::new("D:/Projects/site"));
         assert!(resolve_path("../../secret.txt", Some("c"), Some("D:/Projects/site")).is_err());
     }
 
@@ -1060,6 +1197,7 @@ mod jail_adversarial_tests {
         fs::create_dir_all(&ws).unwrap();
         fs::write(base.join("secret.txt"), b"private").unwrap();
         fs::write(ws.join("inside.txt"), b"ok").unwrap();
+        allow_root_for_test(&ws); // stands in for the user picking this folder
         let wd = Some(ws.to_string_lossy().to_string());
 
         // `*` matches dotfiles too (require_literal_leading_dot is false), so
@@ -1136,6 +1274,9 @@ mod workspace_root_guard_tests {
             roots.push("/Volumes/Work/site".to_string());
         }
         for root in roots {
+            // Each one stands for a folder the user chose in the dialog — the
+            // only way any of them becomes a workspace now.
+            allow_root_for_test(Path::new(&root));
             assert!(
                 resolve_path("src/main.rs", Some("c"), Some(&root)).is_ok(),
                 "root {root:?} was refused",
@@ -1149,7 +1290,7 @@ mod workspace_root_guard_tests {
     fn a_folder_the_user_picked_is_trusted() {
         let odd = std::env::temp_dir().join(format!("lu-picked-{}", std::process::id()));
         let _ = fs::create_dir_all(&odd);
-        remember_picked_root(&odd);
+        allow_root_for_test(&odd);
         let root = odd.to_string_lossy().to_string();
         assert!(resolve_path("notes.md", None, Some(&root)).is_ok());
         // Registering a root does NOT widen the jail inside it.
@@ -1182,6 +1323,7 @@ mod workspace_root_guard_tests {
     fn a_file_that_does_not_exist_yet_still_resolves() {
         let ws = std::env::temp_dir().join(format!("lu-newfile-{}", std::process::id()));
         let _ = fs::create_dir_all(&ws);
+        allow_root_for_test(&ws);
         let root = ws.to_string_lossy().to_string();
         let got = resolve_path("deep/new/dir/notes.md", None, Some(&root)).expect("new path");
         assert!(got.ends_with("deep/new/dir/notes.md"), "got: {got:?}");
@@ -1202,6 +1344,7 @@ mod workspace_root_guard_tests {
         fs::create_dir_all(&outside).unwrap();
         fs::write(outside.join("secret.txt"), b"private").unwrap();
         std::os::unix::fs::symlink(&outside, ws.join("escape")).unwrap();
+        allow_root_for_test(&ws);
         let root = ws.to_string_lossy().to_string();
 
         assert!(
@@ -1223,6 +1366,179 @@ mod workspace_root_guard_tests {
     }
 }
 
+/// The workspace root is an ALLOWLIST, not a deny-list.
+///
+/// The old guard accepted any path that LOOKED like a project folder. Under the
+/// threat model this package writes down — a script-execution bug in the
+/// WebView calling the IPC commands with arguments of its choosing — that is
+/// the wrong shape: `~/Documents`, `~/.mozilla`, a password manager's export
+/// folder and a mounted backup disk all look exactly like a project folder, and
+/// a deny-list has to name every one of them on three operating systems to hold.
+#[cfg(test)]
+mod workspace_allowlist_tests {
+    use super::*;
+
+    fn unique(tag: &str) -> PathBuf {
+        std::env::temp_dir().join(format!("lu-allow-{}-{}-{:?}", tag, std::process::id(), std::thread::current().id()))
+    }
+
+    #[test]
+    fn a_folder_nobody_picked_is_refused_however_ordinary_it_looks() {
+        // Structurally impeccable: deep, under the user's home, not a system or
+        // credential directory, not a mount container. The deny-list guard
+        // accepted it — and this is where the interesting files are.
+        let home = dirs::home_dir().unwrap_or_default();
+        for never_picked in [
+            home.join("Documents").join("Tax-2026"),
+            home.join("Desktop"),
+            home.join("Downloads").join("statements"),
+        ] {
+            let s = never_picked.to_string_lossy().to_string();
+            let got = check_workspace_root(&never_picked);
+            assert!(got.is_err(), "{never_picked:?} was accepted without anyone picking it");
+            // And the whole file API is closed for it, not just the predicate.
+            assert!(
+                resolve_path("passport.pdf", Some("c"), Some(&s)).is_err(),
+                "{never_picked:?} still resolved a file op",
+            );
+        }
+    }
+
+    #[test]
+    fn a_folder_the_user_picked_in_the_dialog_becomes_a_root() {
+        let dir = unique("picked");
+        let _ = fs::create_dir_all(&dir);
+        assert!(check_workspace_root(&dir).is_err(), "the test root was allowed before the pick");
+        allow_root_for_test(&dir);
+        assert!(check_workspace_root(&dir).is_ok(), "a picked folder was refused");
+        // Subfolders of a picked root are roots too — the same project.
+        assert!(check_workspace_root(&dir.join("packages").join("api")).is_ok());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_apps_own_sandbox_is_a_root_without_anyone_picking_it() {
+        // The per-chat sandbox is derived, never chosen, so the allowlist has
+        // to know it or a plain sandbox chat cannot read its own files.
+        let sandbox = workspace_root(Some("chat-1"), None);
+        assert!(check_workspace_root(&sandbox).is_ok(), "the agent sandbox is not a root");
+    }
+
+    #[test]
+    fn even_a_dialog_click_cannot_make_the_home_directory_a_workspace() {
+        // The dialog opens wherever it was last pointed. One mis-click on $HOME
+        // or a credential store must not turn "work in this folder" into "read
+        // every secret on the machine" — permanently, because picks are kept.
+        let home = dirs::home_dir().unwrap_or_default();
+        for bad in [home.clone(), home.join(".ssh"), home.join(".aws"), PathBuf::from("/")] {
+            assert!(
+                remember_picked_root(&bad).is_err(),
+                "{bad:?} was recorded as a workspace root",
+            );
+            assert!(check_workspace_root(&bad).is_err(), "{bad:?} passed as a root");
+        }
+    }
+
+    #[test]
+    fn a_tampered_allowlist_file_cannot_grant_what_a_dialog_could_not() {
+        // The file is data, not authority.
+        let dir = unique("file");
+        let _ = fs::create_dir_all(&dir);
+        let file = dir.join("workspace-roots.json");
+        let home = dirs::home_dir().unwrap_or_default();
+        let good = dir.join("project");
+        let payload = serde_json::to_string(&vec![
+            "/".to_string(),
+            home.to_string_lossy().to_string(),
+            home.join(".ssh").to_string_lossy().to_string(),
+            good.to_string_lossy().to_string(),
+        ])
+        .unwrap();
+        fs::write(&file, payload).unwrap();
+
+        let loaded = load_roots_from(&file);
+        assert_eq!(loaded, vec![lexical_normalize(&good)], "a forbidden root survived the read");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_pick_survives_a_restart() {
+        // Why the list is on disk at all: the frontend keeps the last workspace
+        // and sends it again on the next launch. An in-memory allowlist would
+        // refuse it and demand a fresh pick on every single start.
+        let dir = unique("restart");
+        let _ = fs::create_dir_all(&dir);
+        let file = dir.join("workspace-roots.json");
+        let project = dir.join("site");
+        save_roots_to(&file, &[lexical_normalize(&project)]);
+        assert_eq!(load_roots_from(&file), vec![lexical_normalize(&project)]);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_missing_or_corrupt_allowlist_file_is_an_empty_allowlist() {
+        // Fail CLOSED: no file, or garbage in it, must not mean "allow anything".
+        let dir = unique("corrupt");
+        let _ = fs::create_dir_all(&dir);
+        assert!(load_roots_from(&dir.join("nope.json")).is_empty());
+        let file = dir.join("workspace-roots.json");
+        fs::write(&file, b"{ not json").unwrap();
+        assert!(load_roots_from(&file).is_empty());
+        let _ = fs::remove_dir_all(&dir);
+    }
+}
+
+/// The two file tools that block for seconds run OFF the Tauri main thread.
+#[cfg(test)]
+mod off_main_thread_tests {
+    const FILESYSTEM_RS: &str = include_str!("filesystem.rs");
+
+    /// The attributes and doc comment directly above `sig`.
+    fn preamble_of(sig: &str) -> &'static str {
+        let at = FILESYSTEM_RS.find(sig).unwrap_or_else(|| panic!("{sig} is gone"));
+        let head = &FILESYSTEM_RS[..at];
+        let start = head.rfind("\n\n").map(|i| i + 2).unwrap_or(0);
+        &head[start..]
+    }
+
+    /// `fs_search` walks eight directory levels and reads every file under a
+    /// megabyte — seconds of blocking IO on a real repo, and as a plain
+    /// `#[tauri::command]` every one of those seconds was spent on the main
+    /// thread with the window frozen.
+    ///
+    /// This is a source guard, and deliberately so: the fix is which attribute
+    /// Tauri's macro sees. It changes how the COMMAND is dispatched, not what
+    /// the Rust function does, so no in-process call can observe it — awaiting
+    /// `fs_search` from a test runs the same code either way. The attribute is
+    /// pinned instead, on this function, so dropping it fails here rather than
+    /// in a bug report about a frozen window.
+    #[test]
+    fn fs_search_is_dispatched_off_the_main_thread() {
+        let pre = preamble_of("pub fn fs_search(");
+        assert!(
+            pre.contains("#[tauri::command(async)]"),
+            "fs_search lost its off-main-thread dispatch: {pre}",
+        );
+        assert!(
+            !pre.contains("#[tauri::command]"),
+            "fs_search is back on the plain (main-thread) command attribute: {pre}",
+        );
+    }
+
+    /// The guard on the guard: `preamble_of` must return the attributes of the
+    /// function asked for and not the whole file.
+    #[test]
+    fn the_preamble_slicer_reads_one_signature() {
+        let pre = preamble_of("pub fn fs_search(");
+        assert!(pre.len() < 2_000, "the slice ran past the attribute block");
+        assert!(!pre.contains("pub fn fs_info("), "the slice ran into another function");
+        // fs_read takes the other route to the same place: an `async fn` that
+        // hands the blocking work to spawn_blocking.
+        assert!(preamble_of("pub async fn fs_read(").contains("#[tauri::command]"));
+        assert!(FILESYSTEM_RS.contains("spawn_blocking(move || fs_read_sync("));
+    }
+}
+
 #[cfg(test)]
 mod binary_read_tests {
     use super::*;
@@ -1232,6 +1548,7 @@ mod binary_read_tests {
         let d = std::env::temp_dir().join(format!("lu-fsread-{}-{}", tag, std::process::id()));
         let _ = fs::remove_dir_all(&d);
         fs::create_dir_all(&d).unwrap();
+        allow_root_for_test(&d); // stands in for the user picking this folder
         d
     }
 
@@ -1304,6 +1621,7 @@ mod explorer_byte_read_tests {
         let d = std::env::temp_dir().join(format!("lu-fsbytes-{}-{}", tag, std::process::id()));
         let _ = fs::remove_dir_all(&d);
         fs::create_dir_all(&d).unwrap();
+        allow_root_for_test(&d); // stands in for the user picking this folder
         d
     }
 
