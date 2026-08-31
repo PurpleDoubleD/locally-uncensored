@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
+import { safeJSONStorage } from '../lib/storage-quota'
 import type { ModelType, ClassifiedModel } from '../api/comfyui'
 import { classifyModel } from '../api/comfyui'
 import type { HiresUpscaleMethod } from '../api/hires-fix'
@@ -817,6 +818,7 @@ export const useCreateStore = create<CreateState>()(
     }),
     {
       name: 'create-store',
+      storage: safeJSONStorage(),
       partialize: (state) => ({
         mode: state.mode,
         videoBackend: state.videoBackend,

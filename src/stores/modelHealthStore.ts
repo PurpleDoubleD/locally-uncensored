@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
+import { safeJSONStorage } from '../lib/storage-quota'
 
 /**
  * Tracks which installed Ollama models have stale manifests (rejected by
@@ -59,6 +60,7 @@ export const useModelHealthStore = create<ModelHealthState>()(
     }),
     {
       name: 'locally-uncensored-model-health',
+      storage: safeJSONStorage(),
       // `dismissed` persists as of 2.5.9: the banner re-ran its startup scan and
       // came back on EVERY launch while a stale model sat on disk, so closing it
       // meant nothing. A fresh scan that finds stale models clears the flag

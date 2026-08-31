@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
+import { safeJSONStorage } from '../lib/storage-quota'
 import type { SettingsTab } from '../lib/settings-reset'
 
 export type View = 'chat' | 'models' | 'settings' | 'create' | 'benchmark'
@@ -111,6 +112,7 @@ export const useUIStore = create<UIState>()(
     }),
     {
       name: 'locally-uncensored-ui',
+      storage: safeJSONStorage(),
       // EXACTLY the two explorer fields (plan C3 / R1). This store was not
       // persisted at all before, and persisting it naively would carry
       // currentView and cloudGateOpen across restarts: the app would reopen on

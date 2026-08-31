@@ -24,7 +24,7 @@ import { detectLocalBackends, type DetectedBackend } from '../../lib/backend-det
 import { whenRunsIdle } from '../../lib/run-idle'
 import { backendCall, isTauri } from '../../api/backend'
 import { idbStorage } from '../../lib/idbStorage'
-import { STORE_KEYS, IDB_STORE_KEYS, collectStoreSnapshot } from '../../lib/store-backup'
+import { STORE_KEYS, IDB_STORE_KEYS, backupStoresIfChanged, flushSyncStoreBackup } from '../../lib/store-backup'
 import { idbKeysToRestore, mayReloadForIdbRestore } from '../../lib/idb-restore'
 import { log } from '../../lib/logger'
 import { pickForMode } from '../../lib/active-model-mode'
@@ -393,23 +393,16 @@ export function AppShell() {
       if (disposed) return
 
       let backupInflight = false
-      // In-memory mirror of the IDB-backed values, refreshed by every doBackup
-      // run. beforeunload can't await IndexedDB (the page is tearing down), so
-      // the sync flush below reads from this cache instead — at most one
-      // debounce-cycle stale, same freshness the old sync handler had.
-      const idbCache: Record<string, string> = {}
       const doBackup = async () => {
         // Inflight guard: the 1 s debounce and the 5 s interval can overlap
         // now that the snapshot awaits IndexedDB reads.
         if (backupInflight) return
         backupInflight = true
-        try {
-          const snapshot = await collectStoreSnapshot(idbCache)
-          // Always fire — we want backup even if snapshot is mostly empty, and the
-          // sentinel tells the restore-flow this is a valid backup.
-          localStorage.setItem('lu-restore-complete', '1')
-          backendCall('backup_stores', { data: JSON.stringify(snapshot) }).catch(() => {})
-        } catch { /* best-effort */ }
+        // Writes only when a store actually changed. This used to serialise and
+        // re-write the whole history every five seconds no matter what, which is
+        // the SSD churn and the GC pressure coalescedStorage exists to prevent —
+        // and it ran on an idle app, on battery, for as long as it was open.
+        try { await backupStoresIfChanged() } catch { /* best-effort */ }
         backupInflight = false
       }
 
@@ -469,30 +462,12 @@ export function AppShell() {
       }
       const unsubChat = useChatStore.subscribe(scheduleBackup)
 
-      // Synchronous "last write" flush for beforeunload: doBackup awaits
-      // IndexedDB reads, and an await during page teardown means the trailing
-      // backup_stores invoke may never fire. Build the snapshot synchronously
-      // from localStorage + the idbCache mirror instead — no await before the
-      // invoke, restoring the pre-async guarantee.
-      const flushSyncBackup = () => {
-        try {
-          const snapshot: Record<string, string> = { __ts: new Date().toISOString() }
-          for (const key of STORE_KEYS) {
-            const val = IDB_STORE_KEYS.has(key)
-              ? (idbCache[key] ?? null)
-              : localStorage.getItem(key)
-            if (val) snapshot[key] = val
-          }
-          localStorage.setItem('lu-restore-complete', '1')
-          backendCall('backup_stores', { data: JSON.stringify(snapshot) }).catch(() => {})
-        } catch { /* best-effort */ }
-      }
-
       const onBeforeUnload = () => {
         // The 5 s / 30 s intervals cover the common case; this is the "last
         // write" insurance for changes since the previous interval. Must stay
-        // synchronous — see flushSyncBackup.
-        flushSyncBackup()
+        // synchronous: an await during page teardown means the trailing
+        // backup_stores invoke may never fire.
+        flushSyncStoreBackup()
         void doRagBackup()
       }
       window.addEventListener('beforeunload', onBeforeUnload)

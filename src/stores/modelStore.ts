@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
+import { safeJSONStorage } from '../lib/storage-quota'
 import type { AIModel, PullProgress, ModelCategory } from '../types/models'
 import { unloadModel } from '../api/ollama'
 import { unloadLmStudioModel } from '../api/lmstudio'
@@ -8,6 +9,27 @@ import { isLmStudioProvider } from '../lib/hf-to-provider'
 import { isTauri, backendCall } from '../api/backend'
 import { useChatStore } from './chatStore'
 import { log } from '../lib/logger'
+
+/**
+ * Which provider slot a model name routes to.
+ *
+ * LU prefixes every non-Ollama model with the id of the provider that serves
+ * it ("openai::qwen3-8b"); a bare name goes to Ollama. Pure, because the point
+ * of it is to be assertable without a store.
+ *
+ * `null` means "no slot in this build owns that name" — an unknown prefix is
+ * not silently treated as Ollama's, which is how a checkpoint name ends up
+ * being sent to a backend that has never heard of it.
+ */
+export function providerIdForModel(name: string | null | undefined): ProviderId | null {
+  if (!name) return null
+  const sep = name.indexOf('::')
+  if (sep < 0) return 'ollama'
+  const prefix = name.slice(0, sep)
+  return PROVIDER_IDS.includes(prefix as ProviderId) ? (prefix as ProviderId) : null
+}
+
+const PROVIDER_IDS: readonly ProviderId[] = ['ollama', 'openai', 'anthropic', 'lu-cloud']
 
 export interface PullState {
   progress: PullProgress
@@ -52,6 +74,13 @@ interface ModelState {
   dismissPull: (name: string) => void
   setIsModelLoading: (loading: boolean) => void
   setCategoryFilter: (category: ModelCategory) => void
+  /** Nothing across these two stores enforced that the picked model belongs to
+   *  a backend that is still switched on. `setModels` only re-checks the pick
+   *  against the next NON-EMPTY inventory, so between switching a provider off
+   *  and the next successful refresh the composer showed a model whose backend
+   *  was gone and every send failed with model-not-found. providerStore calls
+   *  this the moment a slot goes dark. */
+  dropActiveModelIfServedBy: (providerId: ProviderId) => void
 }
 
 export const useModelStore = create<ModelState>()(
@@ -258,9 +287,21 @@ export const useModelStore = create<ModelState>()(
 
       setIsModelLoading: (loading) => set({ isModelLoading: loading }),
       setCategoryFilter: (category) => set({ categoryFilter: category }),
+
+      dropActiveModelIfServedBy: (providerId) => {
+        const active = get().activeModel
+        if (!active || providerIdForModel(active) !== providerId) return
+        log.warn('[modelStore] the picked model\'s backend was switched off, clearing the pick', {
+          model: active, provider: providerId,
+        })
+        // Through setActiveModel, not a bare set(): the model that is going
+        // away is also the one holding VRAM, and that release lives there.
+        get().setActiveModel(null)
+      },
     }),
     {
       name: 'chat-models',
+      storage: safeJSONStorage(),
       partialize: (state) => ({ activeModel: state.activeModel, categoryFilter: state.categoryFilter }),
     }
   )

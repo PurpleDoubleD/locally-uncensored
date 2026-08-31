@@ -8,6 +8,11 @@ import { coalescedJSONStorage } from '../lib/coalescedStorage'
 import { migrateBlockInPlace } from '../api/agents/block-helpers'
 import { useGenerationStore } from './generationStore'
 import { useRemoteStore } from './remoteStore'
+import { useRAGStore } from './ragStore'
+import { useTodoStore } from './todoStore'
+import { usePermissionStore } from './permissionStore'
+import { useStagedChangesStore } from './stagedChangesStore'
+import { log } from '../lib/logger'
 
 /**
  * Rehydration migration for Phase 1 (v2.4.0) — wraps legacy
@@ -27,6 +32,35 @@ export function migratePersistedChat(state: any): any {
     }
   }
   return state
+}
+
+/**
+ * Everything OUTSIDE this store that is keyed by conversation id.
+ *
+ * Deleting a chat used to remove exactly one row — the one in `conversations` —
+ * and leave five other stores holding that id forever. Nothing ever collects
+ * them, because the id is the only thing that could prove they are orphans and
+ * the id is what was just thrown away. The RAG side is the expensive one: its
+ * 768-float embedding vectors stay in IndexedDB AND keep being exported to
+ * rag_chunks_backup.json every 30 s for the lifetime of the installation.
+ *
+ * Each store is its own try/catch: one of them failing must not leave the other
+ * four uncleaned, and none of them may stop the chat from being deleted.
+ *
+ * Exported so a test can assert the sweep without going through the store.
+ */
+export function dropConversationSideState(id: string): void {
+  const steps: [string, () => void][] = [
+    ['rag', () => useRAGStore.getState().removeConversation(id)],
+    ['todos', () => useTodoStore.getState().clearTodos(id)],
+    ['permissions', () => usePermissionStore.getState().clearConversationOverrides(id)],
+    ['staged-changes', () => useStagedChangesStore.getState().clear(id)],
+  ]
+  for (const [what, run] of steps) {
+    try { run() } catch (err) {
+      log.warn('[chatStore] could not clear side state for a deleted chat', { store: what, err: String(err) })
+    }
+  }
 }
 
 interface ChatState {
@@ -169,6 +203,7 @@ export const useChatStore = create<ChatState>()(
             void remote.undispatch()
           }
         } catch { /* best-effort */ }
+        dropConversationSideState(id)
         set((state) => ({
           conversations: state.conversations.filter((c) => c.id !== id),
           activeConversationId:
@@ -429,6 +464,20 @@ export const useChatStore = create<ChatState>()(
       // Phase 1 (v2.4.0) — rehydrate legacy singular `toolCall` into `toolCalls[]`.
       // Persisted shape is whatever was last written; migration runs on every load
       // and is idempotent, so version bumps are not required.
+      //
+      // Deliberately still NO `version` here, and the 2.6.8 audit's argument for
+      // adding one does not survive contact with zustand 5.0.12. It assumed an
+      // unversioned store writes no version, so a later `version: 1` would find
+      // `undefined` and skip migrate for every existing user. It writes 0 —
+      // `version: 0` is persistImpl's own default and it goes into the blob — and
+      // a v0 blob DOES reach a migrate declared at 1. See persist-version.ts for
+      // the executable proof.
+      //
+      // Adding a number is not free either: an older build declaring no version
+      // reads its own 0, sees a blob at 1, has no migrate, and throws the entire
+      // chat history away. That is the R1 DOWNGRADE-KONTRAKT (see codexStore) —
+      // 2.6.x builds share one WebView profile — so stamping a number here would
+      // buy nothing and cost a reset on every downgrade.
       merge: (persistedState: any, currentState: ChatState) => {
         const migrated = migratePersistedChat(persistedState)
         return { ...currentState, ...(migrated || {}) }

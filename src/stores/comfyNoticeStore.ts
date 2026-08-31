@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
+import { safeJSONStorage } from '../lib/storage-quota'
 import { PENDING_SIGNATURE } from '../lib/comfy-cors-notice'
 
 /**
@@ -50,6 +51,9 @@ export const useComfyNoticeStore = create<ComfyNoticeState>()(
             : s,
         ),
     }),
-    { name: 'lu_comfy_notice' },
+    {
+      name: 'lu_comfy_notice',
+      storage: safeJSONStorage(),
+    },
   ),
 )

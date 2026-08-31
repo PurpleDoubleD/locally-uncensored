@@ -44,9 +44,11 @@ describe('AppShell backup triad (Bug #7)', () => {
   it('beforeunload flush is synchronous — never awaits IndexedDB during teardown', () => {
     // doBackup awaits idbStorage reads; an await inside beforeunload means the
     // trailing backup_stores invoke may never fire. The handler must call the
-    // sync snapshot (localStorage + idbCache mirror) instead of doBackup.
-    expect(src).toContain('flushSyncBackup()')
-    expect(src).toMatch(/const onBeforeUnload = \(\) => \{[^}]*flushSyncBackup\(\)/s)
+    // sync snapshot (localStorage + the idb write mirror) instead of doBackup.
+    // The snapshot builder moved into lib/store-backup in 2.6.8 so the update
+    // path could reach it; the guarantee is unchanged, only its name is.
+    expect(src).toContain('flushSyncStoreBackup()')
+    expect(src).toMatch(/const onBeforeUnload = \(\) => \{[^}]*flushSyncStoreBackup\(\)/s)
     expect(src).not.toMatch(/const onBeforeUnload = \(\) => \{[^}]*void doBackup\(\)/s)
   })
 
@@ -66,13 +68,20 @@ describe('AppShell backup triad (Bug #7)', () => {
     expect(src).toContain('clearTimeout(debounceTimer)')
   })
 
-  it('includes a __ts timestamp marker so backup fires even if localStorage is empty', () => {
-    // We intentionally write unconditionally — a fresh install with empty
-    // localStorage should still write an (empty) backup file so the mtime
-    // reflects last-run-time, making triage easier. The `__ts` marker is
-    // what makes snapshot non-empty even when no store has persisted yet.
-    expect(src).toContain('__ts')
-    expect(src).toContain('new Date().toISOString()')
+  it('includes a __ts timestamp marker so a fresh install still writes a backup', () => {
+    // The `__ts` marker is what makes the snapshot non-empty when no store has
+    // persisted yet, so a fresh install still writes a file whose mtime says
+    // when the app last ran.
+    //
+    // The original claim here was "we intentionally write UNCONDITIONALLY".
+    // That claim is retired: writing every 5 s regardless of whether anything
+    // changed was multi-megabyte SSD churn and GC pressure on an idle app. The
+    // triad now writes only on a change (backupStoresIfChanged), and the first
+    // write of a session always happens because nothing is on disk to compare
+    // against — see store-backup-dirty.test.ts.
+    const backup = readFileSync(join(__dirname, '../../../lib/store-backup.ts'), 'utf8')
+    expect(backup).toContain('__ts')
+    expect(backup).toContain('new Date().toISOString()')
   })
 
   it('onboarding-marker migration does NOT re-write the marker when user clicked Settings -> Re-run onboarding', () => {

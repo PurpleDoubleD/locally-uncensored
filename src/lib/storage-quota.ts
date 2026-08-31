@@ -3,7 +3,8 @@
  * corrupting Zustand persisted stores.
  */
 
-import type { StateStorage } from 'zustand/middleware'
+import type { PersistStorage, StateStorage } from 'zustand/middleware'
+import { createJSONStorage } from 'zustand/middleware'
 import { log } from './logger'
 
 const MAX_CONVERSATIONS = 100
@@ -34,7 +35,17 @@ export function getStorageUsage(): { usedBytes: number; percentFull: number } {
   return { usedBytes, percentFull: usedBytes / estimatedLimit }
 }
 
-/** Prune oldest conversations from chat store to free space. */
+/**
+ * Prune oldest conversations from chat store to free space.
+ *
+ * WHEN THIS CAN BITE. Since 2.5.0 `chat-conversations` normally lives in
+ * IndexedDB and idbStorage deletes the localStorage copy, so on a healthy
+ * profile there is nothing here to prune. The tier is for the degraded case
+ * idbStorage falls back to: no IndexedDB (a broken WebView2 profile, the node
+ * test env), where the history goes back into localStorage and is by far the
+ * biggest thing in it — which is exactly when some OTHER store's small write is
+ * the one that hits the 5 MB wall.
+ */
 function pruneOldConversations(): boolean {
   const ls = getLS()
   if (!ls) return false
@@ -169,4 +180,21 @@ export function createSafeStorage(): StateStorage {
       if (ls) ls.removeItem(name)
     },
   }
+}
+
+/**
+ * The persist backend every localStorage-backed store uses.
+ *
+ * WHY IT IS NOT OPTIONAL. zustand's default is `createJSONStorage(() =>
+ * localStorage)`, and its setItem runs SYNCHRONOUSLY inside `api.setState`. A
+ * QuotaExceededError there does not fail a save, it throws out of the store
+ * action and out of the React event handler that called it — a click that
+ * silently takes the screen down. Until 2.6.8 nothing used createSafeStorage,
+ * so both prune tiers and StorageQuotaToast were code that could not run.
+ *
+ * Generic so each store keeps its own partialized type; the returned object is
+ * stateless, so sharing the shape across stores costs nothing.
+ */
+export function safeJSONStorage<S>(): PersistStorage<S> | undefined {
+  return createJSONStorage<S>(() => createSafeStorage())
 }

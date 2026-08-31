@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
+import { safeJSONStorage } from '../lib/storage-quota'
 import type { PermissionMap, PermissionLevel, ToolCategory } from '../api/mcp/types'
 import { DEFAULT_PERMISSIONS } from '../api/mcp/types'
 
@@ -117,6 +118,7 @@ export const usePermissionStore = create<PermissionState>()(
     }),
     {
       name: 'locally-uncensored-permissions',
+      storage: safeJSONStorage(),
       version: 3,
       migrate: migratePermissionState,
     }

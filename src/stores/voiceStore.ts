@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
+import { safeJSONStorage } from "../lib/storage-quota"
 
 interface VoiceState {
   // Transient state (not persisted)
@@ -155,6 +156,7 @@ export const useVoiceStore = create<VoiceState>()(
     }),
     {
       name: "locally-uncensored-voice",
+      storage: safeJSONStorage(),
       partialize: (state) => ({
         sttEnabled: state.sttEnabled,
         ttsEnabled: state.ttsEnabled,

@@ -7,6 +7,8 @@
 
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
+import { keepPersistedState } from '../lib/persist-version'
+import { safeJSONStorage } from '../lib/storage-quota'
 import type { ProviderId, ProviderConfig } from '../api/providers/types'
 import { clearProviderCache } from '../api/providers/registry'
 import { onLocalSlotChanged } from '../lib/builtin-slot-eviction'
@@ -145,6 +147,17 @@ export const useProviderStore = create<ProviderState>()(
           },
         }))
         clearProviderCache() // invalidate cached clients
+        // A slot going dark makes the picked model unservable, and nothing used
+        // to notice: the pick is only re-validated against the next NON-EMPTY
+        // model list, so until a refresh lands the composer offers a model whose
+        // backend is off. Imported lazily on purpose — modelStore reaches back
+        // here through chatStore/remoteStore, and a static edge would close that
+        // circle at module-init time.
+        if (before?.enabled && get().providers[id]?.enabled === false) {
+          void import('./modelStore')
+            .then((m) => m.useModelStore.getState().dropActiveModelIfServedBy(id))
+            .catch(() => { /* best-effort: the next inventory refresh re-checks */ })
+        }
         // Every route that moves the shared local slot comes through here (Add
         // Provider, Enable on the standby card, Remove, Disable, onboarding), so
         // the memory question is asked here, once. R12/R13 measured the answer
@@ -275,7 +288,13 @@ export const useProviderStore = create<ProviderState>()(
     }),
     {
       name: 'lu-providers',
+      storage: safeJSONStorage(),
       version: 1,
+      // A version WITHOUT a migrate is the one combination that loses data:
+      // zustand logs "couldn't be migrated" and hydrates from defaults, i.e. it
+      // throws every configured backend away. Harmless today (no blob carries a
+      // numeric version yet), fatal the day this store goes to 2.
+      migrate: keepPersistedState,
       // Blobs persisted before the lu-cloud provider existed lack its entry —
       // backfill every missing provider from defaults so getProvider() can't
       // hit an undefined config after an update.

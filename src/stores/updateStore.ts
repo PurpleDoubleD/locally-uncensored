@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { withDetail } from '../lib/error-text'
 import { log } from '../lib/logger'
 import { persist } from 'zustand/middleware'
+import { safeJSONStorage } from '../lib/storage-quota'
 import { version as currentVersion } from '../../package.json'
 import { isTauri, backendCall, openExternal } from '../api/backend'
 import { stopBundledEngine, stopBundledEmbed } from '../api/engine'
@@ -367,6 +368,7 @@ export const useUpdateStore = create<UpdateState>()(
     }),
     {
       name: 'lu-update-checker-v2',
+      storage: safeJSONStorage(),
       // downloadStatus is deliberately NOT persisted: the Update handle lives
       // in module-level `_pendingUpdate`, which dies with the process — a
       // rehydrated 'downloaded'/'downloading'/'error' state would render badge

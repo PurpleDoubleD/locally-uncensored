@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
+import { safeJSONStorage } from '../lib/storage-quota'
 import type { Settings, Persona } from '../types/settings'
 import { DEFAULT_SETTINGS, BUILT_IN_PERSONAS } from '../lib/constants'
 
@@ -152,6 +153,7 @@ export const useSettingsStore = create<SettingsState>()(
     }),
     {
       name: 'chat-settings',
+      storage: safeJSONStorage(),
       version: STORE_VERSION,
       migrate: (persisted: any, version: number) => {
         if (version < STORE_VERSION) {

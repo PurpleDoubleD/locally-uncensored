@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
+import { safeJSONStorage } from '../lib/storage-quota'
 import { v4 as uuid } from 'uuid'
 import type { AgentWorkflow, WorkflowExecution, StepResult } from '../types/agent-workflows'
 import { BUILT_IN_WORKFLOWS } from '../lib/built-in-workflows'
@@ -143,6 +144,7 @@ export const useAgentWorkflowStore = create<AgentWorkflowState>()(
     }),
     {
       name: 'locally-uncensored-agent-workflows',
+      storage: safeJSONStorage(),
       version: 1,
       migrate: (persistedState, version) => {
         const state = persistedState as any

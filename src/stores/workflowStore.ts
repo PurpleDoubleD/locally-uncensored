@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
+import { safeJSONStorage } from '../lib/storage-quota'
 import { v4 as uuid } from 'uuid'
 import { isVideoModelType, type ModelType, } from '../api/comfyui'
 import type { WorkflowTag, WorkflowTemplate } from '../types/workflows'
@@ -438,6 +439,7 @@ export const useWorkflowStore = create<WorkflowState>()(
     }),
     {
       name: 'workflow-store',
+      storage: safeJSONStorage(),
     },
   ),
 )
