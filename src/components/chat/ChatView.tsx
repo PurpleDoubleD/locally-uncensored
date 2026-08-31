@@ -36,7 +36,17 @@ import { useRemoteStore } from '../../stores/remoteStore'
 export function ChatView() {
   const { sendMessage, stopGeneration, isGenerating, isLoadingModel, regenerateMessage, editAndResend, pendingApproval, approveToolCall, rejectToolCall } = useChat()
   const activeConversationId = useChatStore((s) => s.activeConversationId)
-  const conversations = useChatStore((s) => s.conversations)
+  // NOT `s.conversations`. That array is replaced on every streaming flush, so
+  // subscribing to it re-reconciled the entire chat chrome — composer, plan
+  // bar, header controls, none of them memoised — once per frame for the whole
+  // duration of an answer, which is why typing during a run felt broken. The
+  // only thing this component needs from the conversation while it renders is
+  // its mode; a string stands still while tokens arrive. Everything else
+  // (model, system prompt, the export payload) is read at click time from
+  // getState(), where a fresh value is what you want anyway.
+  const activeConvMode = useChatStore(
+    (s) => s.conversations.find((c) => c.id === s.activeConversationId)?.mode,
+  )
   const activeModel = useModelStore((s) => s.activeModel)
   const models = useModelStore((s) => s.models)
   const [ragPanelOpen, setRagPanelOpen] = useState(false)
@@ -79,8 +89,7 @@ export function ChatView() {
   const remoteClearError = useRemoteStore((s) => s.clearError)
   const connectedDevices = useRemoteStore((s) => s.connectedDevices)
   const refreshDevices = useRemoteStore((s) => s.refreshDevices)
-  const activeConv = conversations.find((c) => c.id === activeConversationId)
-  const isRemoteChat = activeConv?.mode === 'remote'
+  const isRemoteChat = activeConvMode === 'remote'
   const isThisRemoteActive = isRemoteChat && remoteEnabled && dispatchedConversationId === activeConversationId
   const isThisRemoteStopped = isRemoteChat && !isThisRemoteActive
   const mobileConnectedCount = connectedDevices.length
@@ -127,7 +136,10 @@ export function ChatView() {
   }, [pendingApproval, approveToolCall, rejectToolCall])
 
   const handleRemoteReactivate = async () => {
-    if (!activeConv || !activeConversationId) return
+    if (!activeConversationId) return
+    const activeConv = useChatStore.getState().conversations
+      .find((c) => c.id === activeConversationId)
+    if (!activeConv) return
     try {
       await remoteRestart(activeConv.model, activeConv.systemPrompt)
       useRemoteStore.setState({ dispatchedConversationId: activeConversationId })
@@ -226,7 +238,8 @@ export function ChatView() {
                               <button
                                 key={fmt}
                                 onClick={async () => {
-                                  const conv = conversations.find(c => c.id === activeConversationId)
+                                  const conv = useChatStore.getState().conversations
+                                    .find(c => c.id === activeConversationId)
                                   setExportOpen(false)
                                   if (!conv) return
                                   const result = await exportConversation(conv, fmt)

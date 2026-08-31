@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Plus, Search, Trash2, Edit3, Check, X, MessageSquare, Code, Radio, Copy, RefreshCw, Square, Wifi, Globe, QrCode } from 'lucide-react'
 import { useChatStore } from '../../stores/chatStore'
@@ -8,23 +8,59 @@ import { useSettingsStore } from '../../stores/settingsStore'
 import { useCodexStore } from '../../stores/codexStore'
 import { useRemoteStore, REMOTE_DEV_MODE_ERROR } from '../../stores/remoteStore'
 import { backendCall, isTauri } from '../../api/backend'
-import { formatDate, truncate } from '../../lib/formatters'
+import { truncate } from '../../lib/formatters'
+import {
+  conversationMatches, sameSidebarRows, toSidebarRow, type SidebarRow,
+} from './sidebar-rows'
 
 export function Sidebar() {
-  const { conversations, activeConversationId, createConversation, deleteConversation, renameConversation, setActiveConversation } = useChatStore()
-  const { sidebarOpen, setView } = useUIStore()
-  const { activeModel } = useModelStore()
-  const { getActivePersona } = useSettingsStore()
+  // Targeted selectors throughout. A whole-store subscription here re-rendered
+  // the entire sidebar once per animation frame for the full duration of every
+  // streamed answer — and it did so even while another view was on screen,
+  // because AppShell mounts the sidebar unconditionally.
+  const activeConversationId = useChatStore((s) => s.activeConversationId)
+  const createConversation = useChatStore((s) => s.createConversation)
+  const deleteConversation = useChatStore((s) => s.deleteConversation)
+  const renameConversation = useChatStore((s) => s.renameConversation)
+  const setActiveConversation = useChatStore((s) => s.setActiveConversation)
+  const sidebarOpen = useUIStore((s) => s.sidebarOpen)
+  const setView = useUIStore((s) => s.setView)
+  const activeModel = useModelStore((s) => s.activeModel)
+  const getActivePersona = useSettingsStore((s) => s.getActivePersona)
   const personasEnabled = useSettingsStore((s) => s.settings.personasEnabled)
   const chatMode = useCodexStore((s) => s.chatMode)
   const setChatMode = useCodexStore((s) => s.setChatMode)
-  const {
-    enabled: remoteEnabled, passcode, passcodeExpiresAt, lanUrl, mobileUrl,
-    qrPngBase64, loading: remoteLoading, error: remoteError,
-    tunnelActive, tunnelUrl, tunnelLoading, awaitingTunnel,
-    qrVisible, hideQr, refreshDevices,
-    dispatchedConversationId, dispatch, undispatch, regenerateToken, restart,
-  } = useRemoteStore()
+  const remoteEnabled = useRemoteStore((s) => s.enabled)
+  const passcode = useRemoteStore((s) => s.passcode)
+  const passcodeExpiresAt = useRemoteStore((s) => s.passcodeExpiresAt)
+  const lanUrl = useRemoteStore((s) => s.lanUrl)
+  const mobileUrl = useRemoteStore((s) => s.mobileUrl)
+  const qrPngBase64 = useRemoteStore((s) => s.qrPngBase64)
+  const remoteLoading = useRemoteStore((s) => s.loading)
+  const remoteError = useRemoteStore((s) => s.error)
+  const tunnelActive = useRemoteStore((s) => s.tunnelActive)
+  const tunnelUrl = useRemoteStore((s) => s.tunnelUrl)
+  const tunnelLoading = useRemoteStore((s) => s.tunnelLoading)
+  const awaitingTunnel = useRemoteStore((s) => s.awaitingTunnel)
+  const qrVisible = useRemoteStore((s) => s.qrVisible)
+  const hideQr = useRemoteStore((s) => s.hideQr)
+  const refreshDevices = useRemoteStore((s) => s.refreshDevices)
+  const dispatchedConversationId = useRemoteStore((s) => s.dispatchedConversationId)
+  const dispatch = useRemoteStore((s) => s.dispatch)
+  const undispatch = useRemoteStore((s) => s.undispatch)
+  const regenerateToken = useRemoteStore((s) => s.regenerateToken)
+  const restart = useRemoteStore((s) => s.restart)
+
+  // The list subscribes to the PROJECTION, not to `conversations`. The array
+  // itself is replaced on every streaming flush; the projected rows are not,
+  // so the selector hands back the very same array and React skips the render.
+  const rowCache = useRef<SidebarRow[]>([])
+  const rows = useChatStore((s) => {
+    const next = s.conversations.map(toSidebarRow)
+    if (sameSidebarRows(rowCache.current, next)) return rowCache.current
+    rowCache.current = next
+    return next
+  })
   const [search, setSearch] = useState('')
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editTitle, setEditTitle] = useState('')
@@ -41,15 +77,35 @@ export function Sidebar() {
   const isRemoteMode = chatMode === 'remote'
 
   // Filter conversations by current mode
-  const modeConversations = conversations.filter(c => (c.mode || 'lu') === chatMode)
+  const modeConversations = useMemo(
+    () => rows.filter((r) => r.mode === chatMode),
+    [rows, chatMode],
+  )
 
-  const filtered = search
-    ? modeConversations.filter(
-        (c) =>
-          c.title.toLowerCase().includes(search.toLowerCase()) ||
-          c.messages.some((m) => m.content.toLowerCase().includes(search.toLowerCase()))
-      )
-    : modeConversations
+  // The corpus scan used to run inside the render body against the RAW query,
+  // so every streaming frame re-lowercased every message of every chat while
+  // the search box had focus. It now runs in a memo keyed on the projected
+  // rows (which stand still during streaming) and on a deferred query, and it
+  // reads the message bodies through getState() — the bodies must not be part
+  // of this component's subscription, or the projection above would be moot.
+  const deferredSearch = useDeferredValue(search)
+  const needle = deferredSearch.trim().toLowerCase()
+  const matches = useMemo(() => {
+    if (!needle) return null
+    // `rows` is both the freshness signal and the id allowlist: a chat that is
+    // not in the projection cannot be in the result list either.
+    const known = new Set(rows.map((r) => r.id))
+    const hits = new Set<string>()
+    for (const c of useChatStore.getState().conversations) {
+      if (known.has(c.id) && conversationMatches(c, needle)) hits.add(c.id)
+    }
+    return hits
+  }, [needle, rows])
+
+  const filtered = useMemo(
+    () => (matches ? modeConversations.filter((r) => matches.has(r.id)) : modeConversations),
+    [matches, modeConversations],
+  )
 
   const handleNewChat = () => {
     if (!activeModel) {
@@ -180,10 +236,14 @@ export function Sidebar() {
   // receives its first message, OR (b) as soon as a mobile has authenticated.
   // refreshDevices() itself sets qrVisible=false when devices.length > 0,
   // so here we only need to keep the polling alive.
-  const dispatchedConv = dispatchedConversationId
-    ? conversations.find((c) => c.id === dispatchedConversationId)
-    : null
-  const dispatchedMessageCount = dispatchedConv?.messages.length ?? 0
+  // Just the COUNT, straight out of the store: a number changes when a message
+  // lands, not on every token of it, so the QR panel's auto-hide no longer
+  // drags the whole sidebar along for the ride.
+  const dispatchedMessageCount = useChatStore((s) =>
+    dispatchedConversationId
+      ? s.conversations.find((c) => c.id === dispatchedConversationId)?.messages.length ?? 0
+      : 0,
+  )
   useEffect(() => {
     if (qrVisible && dispatchedMessageCount > 0) hideQr()
   }, [qrVisible, dispatchedMessageCount, hideQr])
@@ -308,7 +368,10 @@ export function Sidebar() {
                   </button>
                   <button
                     onClick={() => {
-                      const conv = conversations.find((c) => c.id === dispatchedConversationId)
+                      // Read at click time: the row projection carries what a
+                      // row paints, not the model/system prompt.
+                      const conv = useChatStore.getState().conversations
+                        .find((c) => c.id === dispatchedConversationId)
                       restart(conv?.model, conv?.systemPrompt)
                     }}
                     disabled={remoteLoading}
@@ -454,7 +517,8 @@ export function Sidebar() {
                         <span className="w-1.5 h-1.5 rounded-full bg-green-400 shrink-0" />
                       )}
                       <p className="text-[0.66rem] truncate flex-1 min-w-0">{truncate(conv.title, 30)}</p>
-                      <span className="text-[0.5rem] text-gray-600 shrink-0">{formatDate(conv.updatedAt)}</span>
+                      {/* Already formatted in the projection — see SidebarRow. */}
+                      <span className="text-[0.5rem] text-gray-600 shrink-0">{conv.date}</span>
                     </div>
                   )}
                 </div>
@@ -602,7 +666,7 @@ export function Sidebar() {
             <button
               role="menuitem"
               onClick={() => {
-                const conv = conversations.find((c) => c.id === rowMenu.id)
+                const conv = rows.find((r) => r.id === rowMenu.id)
                 setEditingId(rowMenu.id)
                 setEditTitle(conv?.title ?? '')
                 setRowMenu(null)

@@ -44,6 +44,13 @@ export function SpecialControls({ intent }: { intent: CreateIntent }) {
 
 // ── shared chip: a small labeled file slot (audio/video/image) ──────────────
 
+/** A staged file plus a `blob:` preview URL for it.
+ *
+ *  The URL's lifetime is closed in createStore's `setAudioInput` /
+ *  `setVideoInput` (see `releaseReplacedMediaRef`): those two setters are the
+ *  only way a slot is written, so replacing or clearing a pick always frees
+ *  the file the previous pick pinned. Do NOT revoke here — the ref outlives
+ *  this component, it lives in the store. */
 function mediaRefFrom(file: File): MediaRef {
   return { name: file.name, url: URL.createObjectURL(file), blob: file }
 }

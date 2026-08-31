@@ -132,19 +132,89 @@ export async function cancelVideo(): Promise<{ ok: boolean }> {
   return invokeMedia<{ ok: boolean }>('video_cancel')
 }
 
+// ── blob: URL ownership ────────────────────────────────────────────────────
+//
+// A `blob:` URL pins its Blob in the renderer until someone revokes it, and an
+// MLX clip is tens to hundreds of megabytes. The old contract here was "caller
+// owns the returned URL's lifetime (revoke it when the gallery item is
+// dropped, if ever)" — and "if ever" is what actually happened: nothing
+// revoked, so every render of a session stayed resident and a long Create
+// session grew until the WebView died. This module owns the URLs it mints
+// instead, and `createStore` calls `releaseVideoBlobUrl` when an item leaves
+// the gallery.
+//
+// Keyed by source path so re-reading the same file (a restored tile, a retry)
+// replaces its predecessor rather than stacking a second copy of the clip.
+const blobUrlByPath = new Map<string, string>()
+
+/** 4 MiB of base64 ≈ 3 MiB of video per slice. Big enough that the loop
+ *  overhead is irrelevant, small enough that the renderer gets a frame in
+ *  between — a 200 MB clip used to hold the main thread for the whole decode
+ *  in one go, which is a visibly frozen app, not a slow one. */
+const DECODE_CHUNK = 4 * 1024 * 1024
+
+/** Give the event loop a real turn (a microtask would not let anything paint). */
+const yieldToRenderer = () => new Promise<void>((resolve) => setTimeout(resolve, 0))
+
+async function decodeBase64(b64: string): Promise<Uint8Array> {
+  const binary = atob(b64)
+  const bytes = new Uint8Array(binary.length)
+  for (let start = 0; start < binary.length; start += DECODE_CHUNK) {
+    const end = Math.min(start + DECODE_CHUNK, binary.length)
+    for (let i = start; i < end; i++) bytes[i] = binary.charCodeAt(i)
+    if (end < binary.length) await yieldToRenderer()
+  }
+  return bytes
+}
+
 /** Read a finished MLX video's bytes (via the `read_media_file` Rust command,
  *  guarded to the app's own video output dir) and turn them into a `blob:`
  *  URL — the CSP's `media-src` allows `blob:` but not `data:`, so this is
  *  the only way to get `<video>` playback + Download working now that the
- *  old lu-bridge (:47711/videos/<file>) is gone. Caller owns the returned
- *  URL's lifetime (revoke it when the gallery item is dropped, if ever). */
+ *  old lu-bridge (:47711/videos/<file>) is gone.
+ *
+ *  The returned URL is owned by this module: it is revoked when the same path
+ *  is read again, and when `releaseVideoBlobUrl` is called for it. */
 export async function readVideoAsBlobUrl(path: string): Promise<string> {
   const b64 = await backendCall<string>('read_media_file', { path })
-  const binary = atob(b64)
-  const bytes = new Uint8Array(binary.length)
-  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
+  const bytes = await decodeBase64(b64)
   const blob = new Blob([bytes], { type: 'video/mp4' })
-  return URL.createObjectURL(blob)
+  const url = URL.createObjectURL(blob)
+  const previous = blobUrlByPath.get(path)
+  if (previous) URL.revokeObjectURL(previous)
+  blobUrlByPath.set(path, url)
+  return url
+}
+
+/**
+ * Drop a URL this module minted. Safe to call with anything: a non-blob URL, a
+ * URL from another source, `undefined` — only a `blob:` string is revoked, and
+ * only entries this module is still tracking are forgotten.
+ *
+ * Revoking is idempotent, so a double call (item removed, then the gallery
+ * cleared) costs nothing.
+ */
+export function releaseVideoBlobUrl(url: string | null | undefined): void {
+  if (!url || !url.startsWith('blob:')) return
+  for (const [path, held] of blobUrlByPath) {
+    if (held === url) {
+      blobUrlByPath.delete(path)
+      break
+    }
+  }
+  URL.revokeObjectURL(url)
+}
+
+/** Revoke everything still held. For a full gallery clear, and for tests. */
+export function releaseAllVideoBlobUrls(): void {
+  for (const url of blobUrlByPath.values()) URL.revokeObjectURL(url)
+  blobUrlByPath.clear()
+}
+
+/** How many URLs this module is still holding. Test-facing; a leak is a
+ *  number that only ever goes up. */
+export function heldVideoBlobUrlCount(): number {
+  return blobUrlByPath.size
 }
 
 // ── Create-tab wiring (mirrors mlx-image.ts's synthetic-model pattern) ──

@@ -3,6 +3,7 @@ import { persist } from 'zustand/middleware'
 import type { ModelType, ClassifiedModel } from '../api/comfyui'
 import { classifyModel } from '../api/comfyui'
 import type { HiresUpscaleMethod } from '../api/hires-fix'
+import { releaseVideoBlobUrl } from '../api/mlx-video'
 // ModelType includes: flux, flux2, zimage, sdxl, sd15, wan, hunyuan, unknown
 
 export type ProgressPhase = 'idle' | 'queued' | 'loading-model' | 'loading-clip' | 'loading-vae' | 'sampling' | 'decoding' | 'complete'
@@ -395,6 +396,43 @@ interface CreateState {
   setComfyRunning: (running: boolean) => void
 }
 
+/** The gallery keeps the newest N renders. */
+const GALLERY_CAP = 200
+
+/**
+ * Hand a gallery item's in-memory media back to the renderer.
+ *
+ * `dataUrl` is a `blob:` URL for everything produced locally — MLX video via
+ * `readVideoAsBlobUrl`, images restored from disk via `galleryUrl.ts` — and a
+ * blob: URL pins its bytes for the lifetime of the document unless somebody
+ * revokes it. Nothing ever did, so a long Create session grew monotonically
+ * until the WebView ran out of memory. Every path that drops an item from the
+ * gallery goes through here.
+ *
+ * `releaseVideoBlobUrl` ignores anything that is not a `blob:` string, so
+ * cloud `https://` results and legacy `data:` previews pass through untouched.
+ */
+function releaseItemMedia(item: GalleryItem): void {
+  releaseVideoBlobUrl(item.dataUrl)
+}
+
+/**
+ * Replacing a staged input file must free the one it replaces.
+ *
+ * `mediaRefFrom` in SpecialIntentControls mints a fresh `blob:` URL for every
+ * pick, so re-choosing a driving video or a voice clip five times used to pin
+ * five files in the renderer with only the last one reachable. The lifetime is
+ * closed HERE rather than at the call site because these two setters are the
+ * only way a slot is ever written — a future caller cannot forget.
+ *
+ * Only the preview URL is dropped; every consumer (local + cloud upload) reads
+ * `MediaRef.blob`, which is unaffected by revoking the URL.
+ */
+function releaseReplacedMediaRef(previous: MediaRef | null, next: MediaRef | null): void {
+  if (!previous || previous.url === next?.url) return
+  if (previous.url.startsWith('blob:')) URL.revokeObjectURL(previous.url)
+}
+
 export const useCreateStore = create<CreateState>()(
   persist(
     // Explicit param/return types: LU compiles with `strict: true` (the web
@@ -658,9 +696,15 @@ export const useCreateStore = create<CreateState>()(
       setTrainSteps: (n) => set({ trainSteps: Math.max(100, Math.min(4000, Math.floor(n))) }),
       setSelectedCharacter: (selectedCharacter) => set({ selectedCharacter }),
       // Upload and voice-pick are mutually exclusive speech sources.
-      setAudioInput: (audioInput) => set({ audioInput, ...(audioInput ? { voiceFromJob: null } : {}) }),
+      setAudioInput: (audioInput) => {
+        releaseReplacedMediaRef(get().audioInput, audioInput)
+        set({ audioInput, ...(audioInput ? { voiceFromJob: null } : {}) })
+      },
       setVoiceFromJob: (voiceFromJob) => set({ voiceFromJob, ...(voiceFromJob ? { audioInput: null } : {}) }),
-      setVideoInput: (videoInput) => set({ videoInput }),
+      setVideoInput: (videoInput) => {
+        releaseReplacedMediaRef(get().videoInput, videoInput)
+        set({ videoInput })
+      },
       bumpCharactersVersion: () => set((s) => ({ charactersVersion: s.charactersVersion + 1 })),
       setCloudOpModel: (cloudOpModel) => set({ cloudOpModel }),
       // Picking a lane model adopts its architecture defaults (like
@@ -740,11 +784,29 @@ export const useCreateStore = create<CreateState>()(
       setVhsInstallPrompt: (resolver) => set({ vhsInstallPrompt: resolver }),
       setError: (error) => set({ error }),
       setLastGenTime: (time) => set({ lastGenTime: time }),
-      addToGallery: (item) => set((s) => ({ gallery: [item, ...s.gallery].slice(0, 200) })),
+      addToGallery: (item) => set((s) => {
+        const next = [item, ...s.gallery]
+        // The cap used to drop the oldest renders silently, taking the only
+        // reference to their blob: URLs with them — the bytes stayed pinned
+        // for the rest of the session with nothing left to revoke them by.
+        for (const dropped of next.slice(GALLERY_CAP)) releaseItemMedia(dropped)
+        return { gallery: next.slice(0, GALLERY_CAP) }
+      }),
       updateGalleryItem: (id, patch) =>
+        // NOT revoking a replaced dataUrl here on purpose: a patch lands while
+        // the tile is on screen (a lazy re-sign, a restore-from-disk), and
+        // revoking a URL an <img>/<video> may still be loading would break the
+        // very media this patch exists to fix.
         set((s) => ({ gallery: s.gallery.map((g) => (g.id === id ? { ...g, ...patch } : g)) })),
-      removeFromGallery: (id) => set((s) => ({ gallery: s.gallery.filter((g) => g.id !== id) })),
-      clearGallery: () => set({ gallery: [] }),
+      removeFromGallery: (id) => set((s) => {
+        const gone = s.gallery.find((g) => g.id === id)
+        if (gone) releaseItemMedia(gone)
+        return { gallery: s.gallery.filter((g) => g.id !== id) }
+      }),
+      clearGallery: () => set((s) => {
+        for (const g of s.gallery) releaseItemMedia(g)
+        return { gallery: [] }
+      }),
       addToPromptHistory: (prompt) => set((s) => {
         const filtered = s.promptHistory.filter(p => p !== prompt)
         return { promptHistory: [prompt, ...filtered].slice(0, 50) }

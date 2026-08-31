@@ -48,8 +48,14 @@ let resolveRestoreDecided: () => void = () => {}
 const restoreDecided = new Promise<void>((resolve) => { resolveRestoreDecided = resolve })
 
 export function AppShell() {
-  const { currentView } = useUIStore()
-  const { settings, updateSettings } = useSettingsStore()
+  // Targeted, NOT `useUIStore()`. A whole-store subscription here put the
+  // entire app tree behind every uiStore write — and the explorer's resize
+  // handle writes `explorerWidth` on every pointermove, so dragging the
+  // divider re-rendered Titlebar, Header, Sidebar and the whole active view at
+  // pointer-event frequency. Only `currentView` matters to this component.
+  const currentView = useUIStore((s) => s.currentView)
+  const settings = useSettingsStore((s) => s.settings)
+  const updateSettings = useSettingsStore((s) => s.updateSettings)
   // A/B Compare takes over the chat area; hide the left chat sidebar entirely
   // while comparing (David 2026-06-06) so the two model columns get full width.
   const isComparing = useCompareStore((s) => s.isComparing)

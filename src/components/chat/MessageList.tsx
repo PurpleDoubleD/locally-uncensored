@@ -1,8 +1,46 @@
-import { useCallback, useRef } from 'react'
+import { useCallback, useRef, useState } from 'react'
+import type { CSSProperties } from 'react'
 import { useChatStore } from '../../stores/chatStore'
 import { useAutoScroll } from '../../hooks/useAutoScroll'
 import { MessageBubble } from './MessageBubble'
 import { WorkingAnchor } from './WorkingAnchor'
+
+/**
+ * Above this many visible messages the transcript stops paying full layout +
+ * paint for the part of itself nobody is looking at.
+ *
+ * Why `content-visibility` and NOT a windowed slice: the list has exactly one
+ * scroll mechanism (useAutoScroll pins to `scrollHeight` and re-pins from a
+ * ResizeObserver on the content wrapper), and a slice would have to reproduce
+ * that pin, the streaming follow, and the "sending jumps to the bottom" resume
+ * on top of a moving set of mounted nodes. `content-visibility: auto` keeps
+ * every message mounted and every id in the DOM — the pin, the observer, the
+ * resume key, Cmd+F and the measure column are all untouched — and lets the
+ * engine skip layout/paint for off-screen subtrees instead.
+ *
+ * The gate is deliberately NOT the audit's plain `length >= 200` check on
+ * every render: flipping the property on mid-conversation would collapse every
+ * off-screen bubble above the fold to its intrinsic-size estimate in one frame
+ * and yank a reader who is scrolled up. It is decided once, when a
+ * conversation becomes the active one, so the property is either on from the
+ * first paint or off for that visit — never a switch under a live thread.
+ */
+const CONTENT_VISIBILITY_THRESHOLD = 200
+
+/**
+ * The tail stays fully rendered no matter what. The streaming bubble is
+ * on-screen (so `auto` would render it anyway), but an exact height at the
+ * bottom edge is what the auto-scroll pin measures against, and an estimate
+ * there is the one place a wrong guess is visible.
+ */
+const ALWAYS_RENDERED_TAIL = 3
+
+/** `auto` = keep the real height once a bubble has been rendered; the 8rem is
+ *  only the never-yet-seen guess. */
+const SKIPPABLE: CSSProperties = {
+  contentVisibility: 'auto',
+  containIntrinsicSize: 'auto 8rem',
+}
 
 interface Props {
   /** GLOBAL generating flag — guards regenerate/edit so a second concurrent
@@ -60,10 +98,25 @@ export function MessageList({ isGenerating, isThisChatGenerating, isLoadingModel
     if (c && cb) cb(c.id, messageId, content)
   }, [])
 
+  // Decided once per visited conversation, see CONTENT_VISIBILITY_THRESHOLD.
+  // React's documented "adjust state when a prop changes" shape: the branch
+  // below re-runs this component immediately and only this component, so the
+  // gate is settled before anything paints.
+  const [skipGate, setSkipGate] = useState<{ id: string | null; on: boolean }>({ id: null, on: false })
+
   if (!conversation) return null
 
   const visibleMessages = conversation.messages.filter((m) => m.role !== 'system' && !m.hidden)
   const lastVisibleId = visibleMessages[visibleMessages.length - 1]?.id
+
+  if (skipGate.id !== conversation.id) {
+    setSkipGate({
+      id: conversation.id,
+      on: visibleMessages.length >= CONTENT_VISIBILITY_THRESHOLD,
+    })
+  }
+  const skipOffscreen = skipGate.id === conversation.id && skipGate.on
+  const tailStart = visibleMessages.length - ALWAYS_RENDERED_TAIL
 
   return (
     <div
@@ -79,24 +132,31 @@ export function MessageList({ isGenerating, isThisChatGenerating, isLoadingModel
           anchor included (G33). */}
       <div ref={contentRef} className="mx-auto w-full max-w-[var(--lu-measure)]">
         {visibleMessages
-          .map((message) => (
-            <MessageBubble
+          .map((message, index) => (
+            // The wrapper carries the skip hint so MessageBubble keeps owning
+            // its own root class. It is a plain block inside a plain block, so
+            // it adds no layout of its own.
+            <div
               key={message.id}
-              message={message}
-              isLast={message.id === lastVisibleId}
-              // The live generating flag, not `message.usage`: a backend that
-              // never reports usage would lose the action bar for good.
-              isStreaming={showTyping && message.id === lastVisibleId && message.role === 'assistant'}
-              onRegenerate={message.role === 'assistant' && onRegenerate && !isGenerating
-                ? handleRegenerate
-                : undefined}
-              onEdit={message.role === 'user' && onEdit && !isGenerating
-                ? handleEdit
-                : undefined}
-              pendingApprovalId={pendingApprovalId}
-              onApprove={onApprove}
-              onReject={onReject}
-            />
+              style={skipOffscreen && index < tailStart ? SKIPPABLE : undefined}
+            >
+              <MessageBubble
+                message={message}
+                isLast={message.id === lastVisibleId}
+                // The live generating flag, not `message.usage`: a backend that
+                // never reports usage would lose the action bar for good.
+                isStreaming={showTyping && message.id === lastVisibleId && message.role === 'assistant'}
+                onRegenerate={message.role === 'assistant' && onRegenerate && !isGenerating
+                  ? handleRegenerate
+                  : undefined}
+                onEdit={message.role === 'user' && onEdit && !isGenerating
+                  ? handleEdit
+                  : undefined}
+                pendingApprovalId={pendingApprovalId}
+                onApprove={onApprove}
+                onReject={onReject}
+              />
+            </div>
           ))}
         {/* The run anchor stays visible the entire time the agent is still
             working, including between tool calls and while the final answer
