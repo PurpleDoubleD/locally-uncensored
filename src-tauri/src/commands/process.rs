@@ -410,87 +410,179 @@ fn scan_for_comfyui(dir: &Path, depth: u32) -> Option<PathBuf> {
 /// Heuristic: does this ComfyUI directory look like a *complete* install,
 /// i.e. one that will actually start when we run `python main.py`?
 ///
-/// "Complete" here means: torch is reachable. Two paths qualify:
+/// "Complete" here means: torch is reachable. Three environments qualify,
+/// and the order below is the order LU itself creates them in:
 ///
-/// 1. Portable variants ship a `python_embeded/` directory with the
-///    matching torch wheel pre-baked. We just check that
-///    `python_embeded/Lib/site-packages/torch/` exists — fast and avoids
-///    spawning a Python process for every dir we scan.
-/// 2. From-source installs depend on the system Python having torch.
-///    `python_embeded/` won't exist; we sniff the system Python's
-///    `Lib/site-packages/torch/` instead. (Best-effort: we only check the
-///    canonical "next to python.exe" layout — virtualenvs aren't covered,
-///    but those users wouldn't be using LU's auto-install path anyway.)
+/// 1. ComfyUI's OWN venv — `ComfyUI/venv` (what LU's PEP 668 installer and
+///    `repair_comfyui_env` build) or `ComfyUI/.venv` (uv, modern
+///    `python -m venv .venv`). This is where torch lives for every install
+///    LU has made since Bug E, and for every install that has ever been
+///    through a repair.
+/// 2. Portable variants ship a `python_embeded/` directory with the
+///    matching torch wheel pre-baked.
+/// 3. From-source installs that predate the venv path depend on the system
+///    Python having torch, so the system interpreters' prefixes are read.
 ///
-/// Returning `false` for a `main.py`-only carcass is the whole point of
+/// All three are directory probes, never `python -c "import torch"`: the
+/// scan runs over every candidate directory on the box and importing torch
+/// costs seconds each.
+///
+/// OI-1 (2.6.7 audit): case 1 did not exist and case 3 could not fire on
+/// Unix, so on Linux the answer was `false` for every from-source install and
+/// for every install on any platform that had been repaired. The user was
+/// told a working ComfyUI was broken, permanently — the onboarding step was
+/// passable only via "Skip for now" and Settings offered only "Re-install"
+/// (another 2 GB of PyTorch). See `python_prefix_has_torch` for the exact
+/// mechanism that made the Unix branch dead code.
+///
+/// Returning `false` for a `main.py`-only carcass is still the point of
 /// P14: a half-cloned ComfyUI dir from a previous abort (Python missing,
 /// pip 403, network drop) used to be detected as "installed", which left
 /// the user staring at "ComfyUI not responding" forever. Reporting it as
 /// incomplete instead lets the install flow retry cleanly.
 fn is_comfyui_install_complete(comfy_path: &Path) -> bool {
+    is_comfyui_install_complete_with(comfy_path, &collect_candidate_pythons())
+}
+
+/// Testable core of [`is_comfyui_install_complete`]. The interpreter list is
+/// injected because the probe's platform branches cannot otherwise be checked:
+/// the box running the tests has exactly one of the two prefix layouts, and
+/// the layout that broke (Unix) is not the one CI happens to be on. With the
+/// list injected, both layouts are exercised from fixture directories.
+fn is_comfyui_install_complete_with(comfy_path: &Path, candidate_pythons: &[String]) -> bool {
     if !comfy_path.join("main.py").exists() {
         return false;
     }
 
-    // Path 1: portable layouts (next-to or inside the ComfyUI dir).
-    let portable_candidates = [
-        comfy_path
-            .parent()
-            .map(|p| p.join("python_embeded").join("Lib").join("site-packages").join("torch")),
-        Some(comfy_path.join("python_embeded").join("Lib").join("site-packages").join("torch")),
-    ];
-    for c in portable_candidates.into_iter().flatten() {
-        if c.exists() {
+    // 1. ComfyUI's own venv — the environment LU builds itself.
+    for venv_name in ["venv", ".venv"] {
+        if prefix_has_torch(&comfy_path.join(venv_name)) {
             return true;
         }
     }
 
-    // Path 2: system Python — derive its prefix from the resolved path
-    // and look for torch in the standard sysconfig location. This catches
-    // the from-source case where pip dropped torch into the system
-    // Python's site-packages.
-    let candidate_pythons = collect_candidate_pythons();
-    for py in candidate_pythons {
-        if let Some(prefix) = Path::new(&py).parent() {
-            // Windows layout: <prefix>/Lib/site-packages
-            let win_torch = prefix.join("Lib").join("site-packages").join("torch");
-            if win_torch.exists() {
-                return true;
-            }
-            // Unix layout: <prefix>/../lib/python3.X/site-packages — be
-            // permissive, just look for any torch under <prefix>/../lib.
-            if let Some(parent) = prefix.parent() {
-                let lib = parent.join("lib");
-                if lib.exists() {
-                    if let Ok(entries) = std::fs::read_dir(&lib) {
-                        for e in entries.flatten() {
-                            if e.path().join("site-packages").join("torch").exists() {
-                                return true;
-                            }
-                        }
-                    }
+    // 2. Portable layouts (next-to or inside the ComfyUI dir).
+    let portable_candidates = [
+        comfy_path.parent().map(|p| p.join("python_embeded")),
+        Some(comfy_path.join("python_embeded")),
+    ];
+    for c in portable_candidates.into_iter().flatten() {
+        if prefix_has_torch(&c) {
+            return true;
+        }
+    }
+
+    // 3. System Python — derive each interpreter's prefix and look for torch
+    // in the standard sysconfig locations. Catches the pre-venv from-source
+    // case where pip dropped torch into the system Python's site-packages.
+    candidate_pythons
+        .iter()
+        .any(|py| python_prefix_has_torch(Path::new(py)))
+}
+
+/// Does the environment rooted at `prefix` hold a `torch` package?
+///
+/// `prefix` is a Python *prefix*: a venv root, a `python_embeded` dir, or the
+/// `sys.prefix` of a system install. Both layouts are probed because LU has
+/// to answer for boxes it is not running on:
+///
+/// * Windows: `<prefix>/Lib/site-packages/torch`
+/// * Unix:    `<prefix>/lib/python3.X/site-packages/torch` (and `lib64`),
+///   with the minor version unknown, so the version dirs are enumerated.
+///
+/// An empty prefix is refused up front. That is not defensive noise: it is
+/// exactly the OI-1 bug. `Path::new("python3").parent()` is `Some("")`, and
+/// joining onto `""` yields a RELATIVE path — `Lib/site-packages/torch` —
+/// which `exists()` resolves against LU's working directory. So the Windows
+/// probe silently asked about a path on the user's desktop, and the Unix
+/// probe below it was never reached at all, because `Path::new("").parent()`
+/// is `None`.
+fn prefix_has_torch(prefix: &Path) -> bool {
+    if prefix.as_os_str().is_empty() {
+        return false;
+    }
+    if prefix.join("Lib").join("site-packages").join("torch").exists() {
+        return true;
+    }
+    // A venv's own `pyvenv.cfg`-less sibling layout: some tools drop
+    // site-packages directly under the prefix.
+    if prefix.join("site-packages").join("torch").exists() {
+        return true;
+    }
+    for lib_name in ["lib", "lib64"] {
+        let lib = prefix.join(lib_name);
+        if lib.join("site-packages").join("torch").exists() {
+            return true;
+        }
+        // <prefix>/lib/python3.X/site-packages/torch — the minor version is
+        // whatever built the env, so enumerate rather than guess.
+        if let Ok(entries) = std::fs::read_dir(&lib) {
+            for e in entries.flatten() {
+                if e.path().join("site-packages").join("torch").exists() {
+                    return true;
                 }
             }
         }
     }
-
     false
+}
+
+/// Does the interpreter at `interpreter` have torch on its prefix?
+///
+/// The interpreter sits one or two levels below its prefix depending on the
+/// platform — `<prefix>/python.exe` on Windows, `<prefix>/bin/python3` on
+/// Unix — so both the containing directory and its parent are tried. A
+/// relative interpreter name (no directory component at all) yields no
+/// prefix and is refused rather than silently probed against the cwd.
+fn python_prefix_has_torch(interpreter: &Path) -> bool {
+    let Some(bin_dir) = interpreter.parent() else {
+        return false;
+    };
+    if bin_dir.as_os_str().is_empty() {
+        return false;
+    }
+    if prefix_has_torch(bin_dir) {
+        return true;
+    }
+    match bin_dir.parent() {
+        Some(p) if !p.as_os_str().is_empty() => prefix_has_torch(p),
+        _ => false,
+    }
 }
 
 /// Collect the system Python paths we might want to probe. Mirrors the
 /// search order in `python::get_python_bin` but returns *all* hits, not
 /// just the first — so the carcass check works even when the user has
 /// torch installed in a non-default Python.
+///
+/// Every entry is an ABSOLUTE interpreter path. That is a hard requirement of
+/// the callers, not a nicety: they read the interpreter's prefix off the path,
+/// and a bare name has none (OI-1). The old Unix branch pushed the literal
+/// strings `"python3"` and `"python"`.
 fn collect_candidate_pythons() -> Vec<String> {
-    let mut out: Vec<String> = Vec::new();
-
-    if !cfg!(target_os = "windows") {
-        for bin in &["python3", "python"] {
-            out.push(bin.to_string());
+    // Same two-block shape as `os_paths::find_python`: exactly one is
+    // compiled, and it is the function's tail.
+    #[cfg(not(target_os = "windows"))]
+    {
+        // Same ordered candidate list the installer resolves through
+        // (BUG-008: a bare `python3` can be a 3.14 with no ML wheels), so the
+        // probe and the install path cannot disagree about which interpreter
+        // "the system Python" is. `which` turns each name into a real path.
+        let mut out: Vec<String> = Vec::new();
+        for name in crate::os_paths::unix_python_candidates() {
+            if let Ok(p) = which::which(name) {
+                let s = p.to_string_lossy().to_string();
+                if !out.contains(&s) {
+                    out.push(s);
+                }
+            }
         }
-        return out;
+        out
     }
 
+    #[cfg(target_os = "windows")]
+    {
+    let mut out: Vec<String> = Vec::new();
     // `where python` candidates (excluding WindowsApps stub).
     let mut where_cmd = Command::new("where");
     where_cmd.arg("python");
@@ -533,6 +625,7 @@ fn collect_candidate_pythons() -> Vec<String> {
     }
 
     out
+    }
 }
 
 /// Probe order for the ComfyUI Desktop App's Working Directory when the
@@ -2254,6 +2347,158 @@ pub fn auto_start_comfyui(state: &AppState) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── OI-1: "your working ComfyUI is a broken torso" ───────────────────
+    //
+    // The probe answered `false` for every from-source Linux install and for
+    // every install on any platform that had been through `repair_comfyui_env`,
+    // because (a) it never looked inside ComfyUI's own venv, which is where
+    // both of those put torch, and (b) its system-Python branch was dead code:
+    // the candidate list held the bare string "python3",
+    // `Path::new("python3").parent()` is `Some("")`, and `"".parent()` is
+    // `None`, so the Unix arm could not be reached and the Windows arm
+    // degenerated to the relative path `Lib/site-packages/torch`.
+    //
+    // Both prefix layouts are built as fixture directories and the interpreter
+    // list is injected, so the Windows layout is checked on Unix and vice
+    // versa. What is NOT checked here: that a real ComfyUI with a real torch
+    // starts — that needs an actual 2 GB install.
+
+    /// Lay out `<root>/<rel>/torch` as a directory, creating parents.
+    fn touch_torch(root: &Path, rel: &str) {
+        let dir = root.join(rel).join("torch");
+        std::fs::create_dir_all(&dir).unwrap();
+    }
+
+    fn comfy_fixture() -> (tempfile::TempDir, PathBuf) {
+        let tmp = tempfile::tempdir().unwrap();
+        let comfy = tmp.path().join("ComfyUI");
+        std::fs::create_dir_all(&comfy).unwrap();
+        std::fs::write(comfy.join("main.py"), b"# comfy").unwrap();
+        (tmp, comfy)
+    }
+
+    #[test]
+    fn a_main_py_only_carcass_is_still_incomplete() {
+        // P14's guarantee must survive the OI-1 fix: a half-cloned dir with
+        // nothing but main.py has no torch anywhere and stays incomplete.
+        let (_tmp, comfy) = comfy_fixture();
+        assert!(!is_comfyui_install_complete_with(&comfy, &[]));
+    }
+
+    #[test]
+    fn a_directory_without_main_py_is_not_a_comfyui_at_all() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("NotComfy");
+        // Even with a fully populated venv: no main.py, nothing to start.
+        touch_torch(&dir, "venv/lib/python3.12/site-packages");
+        assert!(!is_comfyui_install_complete_with(&dir, &[]));
+    }
+
+    #[test]
+    fn torch_in_comfyuis_own_venv_unix_layout_is_complete() {
+        // The Linux from-source install and EVERY repaired install. This is
+        // the case that reported "broken torso" to every affected user.
+        let (_tmp, comfy) = comfy_fixture();
+        touch_torch(&comfy, "venv/lib/python3.12/site-packages");
+        assert!(is_comfyui_install_complete_with(&comfy, &[]));
+    }
+
+    #[test]
+    fn torch_in_comfyuis_own_venv_windows_layout_is_complete() {
+        let (_tmp, comfy) = comfy_fixture();
+        touch_torch(&comfy, "venv/Lib/site-packages");
+        assert!(is_comfyui_install_complete_with(&comfy, &[]));
+    }
+
+    #[test]
+    fn a_dot_venv_counts_like_a_venv() {
+        // `uv` and a modern `python -m venv .venv` — same install, other name
+        // (issue #51, adhney; `resolve_comfyui_venv_python` already knows it).
+        let (_tmp, comfy) = comfy_fixture();
+        touch_torch(&comfy, ".venv/lib/python3.11/site-packages");
+        assert!(is_comfyui_install_complete_with(&comfy, &[]));
+    }
+
+    #[test]
+    fn a_venv_without_torch_is_not_complete() {
+        // Negative control: the venv exists (a repair that died during the
+        // PyTorch download) but holds no torch, so it cannot start.
+        let (_tmp, comfy) = comfy_fixture();
+        std::fs::create_dir_all(comfy.join("venv").join("lib").join("python3.12").join("site-packages")).unwrap();
+        assert!(!is_comfyui_install_complete_with(&comfy, &[]));
+    }
+
+    #[test]
+    fn a_portable_python_embeded_still_counts_inside_or_beside() {
+        let (_tmp, comfy) = comfy_fixture();
+        touch_torch(&comfy, "python_embeded/Lib/site-packages");
+        assert!(is_comfyui_install_complete_with(&comfy, &[]));
+
+        // The other portable shape: python_embeded is a SIBLING of ComfyUI.
+        let (_tmp2, comfy2) = comfy_fixture();
+        let beside = comfy2.parent().unwrap().to_path_buf();
+        touch_torch(&beside, "python_embeded/Lib/site-packages");
+        assert!(is_comfyui_install_complete_with(&comfy2, &[]));
+    }
+
+    #[test]
+    fn a_unix_system_python_prefix_is_read_through_bin() {
+        // /usr/bin/python3 → prefix /usr → /usr/lib/python3.12/site-packages.
+        // The interpreter is one level BELOW its prefix on Unix, which is why
+        // the probe has to try the parent too.
+        let (_tmp, comfy) = comfy_fixture();
+        let root = comfy.parent().unwrap().join("usr");
+        std::fs::create_dir_all(root.join("bin")).unwrap();
+        let py = root.join("bin").join("python3");
+        std::fs::write(&py, b"stub").unwrap();
+        touch_torch(&root, "lib/python3.12/site-packages");
+        assert!(is_comfyui_install_complete_with(
+            &comfy,
+            &[py.to_string_lossy().to_string()]
+        ));
+    }
+
+    #[test]
+    fn a_windows_system_python_prefix_is_read_next_to_the_exe() {
+        // C:\Python312\python.exe → C:\Python312\Lib\site-packages. Here the
+        // interpreter sits IN its prefix, not one below it.
+        let (_tmp, comfy) = comfy_fixture();
+        let root = comfy.parent().unwrap().join("Python312");
+        std::fs::create_dir_all(&root).unwrap();
+        let py = root.join("python.exe");
+        std::fs::write(&py, b"stub").unwrap();
+        touch_torch(&root, "Lib/site-packages");
+        assert!(is_comfyui_install_complete_with(
+            &comfy,
+            &[py.to_string_lossy().to_string()]
+        ));
+    }
+
+    #[test]
+    fn a_bare_interpreter_name_can_never_answer_yes() {
+        // The mechanism of the bug, pinned. `Path::new("python3").parent()`
+        // is `Some("")`; joining onto it makes a RELATIVE path that resolves
+        // against LU's working directory, and `"".parent()` is `None`, which
+        // is what made the Unix arm unreachable.
+        assert_eq!(Path::new("python3").parent(), Some(Path::new("")));
+        assert_eq!(Path::new("").parent(), None);
+        assert!(!python_prefix_has_torch(Path::new("python3")));
+        assert!(!python_prefix_has_torch(Path::new("python")));
+        assert!(!prefix_has_torch(Path::new("")));
+    }
+
+    #[test]
+    fn every_candidate_python_is_an_absolute_path() {
+        // The callers derive a prefix from these strings, so a bare name is
+        // not a weaker answer, it is a wrong one.
+        for p in collect_candidate_pythons() {
+            assert!(
+                Path::new(&p).is_absolute(),
+                "candidate python is not absolute: {p}"
+            );
+        }
+    }
 
     // ── E16: a start that fails has to say so ────────────────────────────
     //

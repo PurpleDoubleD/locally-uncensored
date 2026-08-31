@@ -160,11 +160,16 @@ pub struct AppState {
     /// Child handle for an Ollama daemon LU spawned itself (kj103x bug, Discord
     /// 2026-05-23 #help-chat). The Drop impl below kills the tree on shutdown
     /// so `ollama.exe` doesn't linger eating ~200 MB after the tray quit.
-    /// IMPORTANT: only populated when `start_ollama` / `auto_start_ollama`
-    /// actually spawned — if a user-managed `ollama serve` was already
-    /// running on the box (detected via tasklist before spawn), we leave it
-    /// alone, so closing LU never kills someone else's Ollama.
-    pub ollama_process: Mutex<Option<Child>>,
+    /// IMPORTANT: only populated when `start_ollama` / `auto_start_ollama` /
+    /// the Ollama installer actually spawned — if a user-managed
+    /// `ollama serve` was already running on the box (detected via tasklist
+    /// before spawn), we leave it alone, so closing LU never kills someone
+    /// else's Ollama.
+    ///
+    /// `Arc` because `install_ollama` spawns its serve from a worker thread
+    /// that outlives the command's `State` borrow, and the installer's Ollama
+    /// is just as much ours to reap as the one `start_ollama` spawns (OI-4).
+    pub ollama_process: Arc<Mutex<Option<Child>>>,
     /// Built-in inference engine (bundled llama-server, P1). `None` until the
     /// onboarding / provider layer starts it via `start_bundled_engine`. The
     /// managed lifecycle (start/stop/swap) lives in `commands::engine`; this
@@ -348,7 +353,7 @@ impl AppState {
 
         Self {
             comfy_process: Mutex::new(None),
-            ollama_process: Mutex::new(None),
+            ollama_process: Arc::new(Mutex::new(None)),
             bundled_engine: Mutex::new(None),
             bundled_embed: Mutex::new(None),
             comfy_path: Arc::new(Mutex::new(None)),
@@ -551,6 +556,17 @@ impl AppState {
                 crate::commands::trainer::kill_trainer_tree(pid);
                 println!("[Trainer] Training stopped (explicit shutdown)");
             }
+        }
+
+        // Installer children (git clone, pip and everything pip forks). Unlike
+        // every slot above, these live in a registry inside `commands::install`
+        // rather than in AppState — the installers run on detached worker
+        // threads that outlive the command's State borrow. Quitting mid-install
+        // used to leave the whole pip tree resident with no UI left to stop it
+        // (OI-7).
+        let killed = crate::commands::install::kill_installer_children();
+        if killed > 0 {
+            println!("[Install] {killed} installer child tree(s) stopped (explicit shutdown)");
         }
 
         if let Ok(mut whisper) = self.whisper.lock() {

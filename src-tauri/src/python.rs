@@ -108,14 +108,40 @@ pub fn resolve_comfyui_venv_python(comfyui_dir: &Path) -> Option<String> {
 /// "Python not installed". Falling back to the bare `"python"` string the way
 /// older versions did re-introduces the Store-stub trap on a fresh Windows
 /// box, which is exactly the bug P14 fixes.
-/// Non-Windows: prefer python3, then python.
+/// Non-Windows: walk `os_paths::unix_python_candidates()` and return the first
+/// interpreter that resolves on PATH *and* answers `--version`.
+///
+/// Two constraints decide the shape of this function.
+///
+/// 1. BUG-008. Grabbing a bare `python3` is wrong on any box whose `python3`
+///    is ahead of the ML wheels (3.14 today): ComfyUI, faster-whisper and
+///    Piper all die at the first `pip install` with "no matching distribution",
+///    and the user has no way to see why. The ordered candidate list that
+///    prefers 3.12/3.11 already existed in `os_paths` — it was simply never
+///    on the install path, because `find_python` (which uses it) is called by
+///    the media lanes and `get_python_bin` (which did not) is called by
+///    `AppState::new`, i.e. by everything that installs. This is the wiring.
+/// 2. The result must be an ABSOLUTE path. Everything downstream derives
+///    facts from it — `commands::process` reads the interpreter's prefix to
+///    find torch, error messages quote it — and a bare name has no prefix:
+///    `Path::new("python3").parent()` is `Some("")`, which silently turns
+///    every derived path into a relative one.
+///
+/// `which` resolves the name; the `--version` run stays because a dangling
+/// symlink or a shim that exits non-zero must be skipped, not cached.
+/// Returns the empty string when nothing usable exists — callers treat `""`
+/// as "no Python on this box" (see `is_real_python`).
 #[cfg(not(target_os = "windows"))]
 pub fn get_python_bin() -> String {
-    for bin in &["python3", "python"] {
-        if let Ok(output) = Command::new(bin).arg("--version").output() {
-            if output.status.success() {
-                return bin.to_string();
+    for name in crate::os_paths::unix_python_candidates() {
+        let Ok(path) = which::which(name) else { continue };
+        let mut cmd = Command::new(&path);
+        cmd.arg("--version");
+        match cmd.output() {
+            Ok(output) if output.status.success() => {
+                return path.to_string_lossy().to_string();
             }
+            _ => continue,
         }
     }
     String::new()
@@ -441,6 +467,51 @@ mod tests {
     fn real_python_accepts_real_path() {
         assert!(is_real_python("/usr/bin/python3"));
         assert!(is_real_python("C:\\Python312\\python.exe"));
+    }
+
+    // ── get_python_bin wiring (OI-6: BUG-008 resolver was never called) ─────
+
+    /// The install path must never hand out a bare `python3`. Two things break
+    /// on it: BUG-008 (a 3.14 with no ML wheels wins over an installed 3.12),
+    /// and every consumer that derives a path from the interpreter, because
+    /// `Path::new("python3").parent()` is `Some("")` and not a real prefix.
+    #[cfg(not(target_os = "windows"))]
+    #[test]
+    fn get_python_bin_returns_an_absolute_interpreter_or_the_empty_sentinel() {
+        let bin = get_python_bin();
+        if bin.is_empty() {
+            // No Python on this box — the documented sentinel, not a failure.
+            return;
+        }
+        let p = Path::new(&bin);
+        assert!(p.is_absolute(), "get_python_bin returned a bare name: {bin}");
+        assert!(p.exists(), "get_python_bin returned a path that does not exist: {bin}");
+        // The regression in one line: a bare name has no usable parent.
+        let parent = p.parent().expect("an absolute interpreter has a parent");
+        assert!(
+            !parent.as_os_str().is_empty(),
+            "interpreter prefix is empty, derived paths would be relative: {bin}"
+        );
+    }
+
+    /// It has to come from the ordered list, not from a fresh probe of its
+    /// own — that list IS the BUG-008 fix.
+    #[cfg(not(target_os = "windows"))]
+    #[test]
+    fn get_python_bin_picks_a_candidate_from_the_bug_008_order() {
+        let bin = get_python_bin();
+        if bin.is_empty() {
+            return;
+        }
+        let resolved: Vec<String> = crate::os_paths::unix_python_candidates()
+            .iter()
+            .filter_map(|n| which::which(n).ok())
+            .map(|p| p.to_string_lossy().to_string())
+            .collect();
+        assert!(
+            resolved.contains(&bin),
+            "{bin} is not one of the BUG-008 candidates {resolved:?}"
+        );
     }
 
     // ── Windows resolver helpers (Bug B — aldrich "python not installed") ────

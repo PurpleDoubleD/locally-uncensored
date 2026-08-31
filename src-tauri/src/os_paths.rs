@@ -193,8 +193,14 @@ fn scan_python_subdirs(base: &std::path::Path) -> Option<PathBuf> {
 /// (3.12 / 3.11 — they have torch/mlx/diffusers wheels) beats a bare `python3`,
 /// which on some machines is 3.14, too new for ML wheels (BUG-008). Keeps the
 /// video + RAG path on the same interpreter the MLX image install picks.
+///
+/// `pub(crate)` because the ORDER is the fix, and until 2.6.8 it was reachable
+/// only through `find_python`, which returns a single hit. The installer's
+/// `python::get_python_bin` and the carcass probe in `commands::process` both
+/// need to walk the same list themselves — one to apply its own `--version`
+/// gate, the other to collect every interpreter, not just the first.
 #[cfg(not(target_os = "windows"))]
-fn unix_python_candidates() -> [&'static str; 5] {
+pub(crate) fn unix_python_candidates() -> [&'static str; 5] {
     ["python3.12", "python3.11", "python3.13", "python3", "python"]
 }
 

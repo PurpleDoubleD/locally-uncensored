@@ -77,6 +77,15 @@ pub async fn cancel_comfyui_install(app: tauri::AppHandle) -> Result<serde_json:
 }
 
 fn cancel_comfyui_install_blocking(state: &AppState) -> Result<serde_json::Value, String> {
+    // OI-7: the flag is still what cancel uses, deliberately. It is scoped to
+    // the ComfyUI install — the poll loops that watch it now take the child's
+    // whole TREE down (see `pip_install_streaming_with_retry_cancellable` and
+    // the clone loop), which is what was missing, and they notice within
+    // ~200 ms. `kill_installer_children` is NOT called here: the registry it
+    // walks also holds the pip runs of the whisper, Piper, custom-node and
+    // trainer installers, and "Cancel ComfyUI install" must not take those
+    // with it. That registry's kill belongs to shutdown, where killing
+    // everything is the correct answer.
     state.comfyui_install_cancel.store(true, Ordering::SeqCst);
     if let Ok(mut s) = state.install_status.lock() {
         // Mark as cancelling immediately so the UI can switch to a
@@ -462,6 +471,10 @@ pub fn pip_install_streaming_with_retry_cancellable(
             Ok(c) => c,
             Err(e) => return Err(format!("Could not start pip ({}). Is Python on PATH?", e)),
         };
+        // OI-7: registered for the whole run, so Cancel and Quit can reach
+        // pip's build subprocesses and not just pip. Dropped on every exit
+        // path below, including the `?`-free early returns and a panic.
+        let _tracked = TrackedInstallerChild::register(child.id());
 
         let stdout = child.stdout.take();
         let stderr = child.stderr.take();
@@ -518,7 +531,10 @@ pub fn pip_install_streaming_with_retry_cancellable(
         let mut tick: u32 = 0;
         let exit_status = loop {
             if cancel.as_ref().map(|c| c.load(Ordering::SeqCst)).unwrap_or(false) {
-                // Kill the child so pip doesn't keep saturating disk.
+                // Kill the child so pip doesn't keep saturating disk — the
+                // TREE, not just pip: a source wheel that is mid-compile has
+                // its own descendants, and `Child::kill` never reached them.
+                crate::commands::shell::kill_tree(pid);
                 let _ = child.kill();
                 let _ = child.wait();
                 let _ = stdout_handle.join();
@@ -719,6 +735,341 @@ pub(crate) fn plan_pytorch_install() -> (Vec<String>, String) {
     (pytorch_pip_args(index, packages), gpu_info)
 }
 
+// ── OI-7: installer children are tracked, and killed as a tree ──────────────
+
+/// The pids of every subprocess the installers currently have running: the
+/// git clone, and each pip run.
+///
+/// Two things were missing without it.
+///
+/// Cancel killed only the process LU itself spawned. `Child::kill()` signals
+/// `pip` and nothing else, so the tree pip forks — `setup.py`, `ninja`, a full
+/// compiler run for a source wheel — kept the disk and the CPU busy long after
+/// the panel said "cancelled", which on the 100%-utilisation drives from Bug
+/// #1 is precisely the machine that cannot afford it.
+///
+/// Quit killed nothing at all. ComfyUI, Ollama, the bundled engine, the MLX
+/// sidecar and the trainer each have a slot that `shutdown_subprocesses`
+/// walks; installer children had none, so closing the app mid-install left pip
+/// and its descendants resident with no UI left that could stop them.
+///
+/// The kill goes through `shell::kill_tree` — the same pid-based recursive
+/// kill the trainer and the agent shell already use.
+static INSTALLER_CHILDREN: once_cell::sync::Lazy<Mutex<std::collections::HashSet<u32>>> =
+    once_cell::sync::Lazy::new(|| Mutex::new(std::collections::HashSet::new()));
+
+/// Keeps a pid in [`INSTALLER_CHILDREN`] for as long as the value lives.
+///
+/// RAII rather than a register/unregister pair: a pip run has half a dozen
+/// early returns plus a panic path, and a pid left behind after the process
+/// exits is a kill aimed at whatever the OS recycles that number into.
+pub(crate) struct TrackedInstallerChild(u32);
+
+impl TrackedInstallerChild {
+    pub(crate) fn register(pid: u32) -> Self {
+        if let Ok(mut set) = INSTALLER_CHILDREN.lock() {
+            set.insert(pid);
+        }
+        TrackedInstallerChild(pid)
+    }
+}
+
+impl Drop for TrackedInstallerChild {
+    fn drop(&mut self) {
+        if let Ok(mut set) = INSTALLER_CHILDREN.lock() {
+            set.remove(&self.0);
+        }
+    }
+}
+
+/// Kill every installer child still running, each one tree and all. Returns
+/// the number of roots signalled.
+///
+/// Called from the app's shutdown path only. Cancel does NOT use it: the
+/// registry is process-wide and holds the whisper, Piper, custom-node and
+/// trainer pip runs as well, and "Cancel ComfyUI install" must not take those
+/// with it. Cancel goes through the per-install cancel flag, whose poll loops
+/// now do the same recursive kill on the one child they own.
+pub fn kill_installer_children() -> usize {
+    let pids: Vec<u32> = match INSTALLER_CHILDREN.lock() {
+        Ok(set) => set.iter().copied().collect(),
+        Err(e) => e.into_inner().iter().copied().collect(),
+    };
+    for pid in &pids {
+        crate::commands::shell::kill_tree(*pid);
+    }
+    if !pids.is_empty() {
+        info!(count = pids.len(), "killed installer child process trees");
+    }
+    pids.len()
+}
+
+/// How many installer children are registered right now. Test-facing: the
+/// registry's contract is that it is empty again once a run is over.
+#[allow(dead_code)]
+pub(crate) fn tracked_installer_children() -> usize {
+    match INSTALLER_CHILDREN.lock() {
+        Ok(set) => set.len(),
+        Err(e) => e.into_inner().len(),
+    }
+}
+
+// ── OI-5: one job per runtime, held by a lock and not by a string ───────────
+
+/// The three commands that own ComfyUI's install directory: `install_comfyui`,
+/// `repair_comfyui_env`, `update_comfyui`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ComfyJob {
+    Install,
+    Repair,
+    Update,
+}
+
+impl ComfyJob {
+    /// What to call this job in a sentence aimed at the user.
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            ComfyJob::Install => "a ComfyUI installation",
+            ComfyJob::Repair => "a ComfyUI environment repair",
+            ComfyJob::Update => "a ComfyUI update",
+        }
+    }
+}
+
+/// Mutual exclusion for those three commands.
+///
+/// They all narrate into ONE `install_status` slot and all write the same
+/// directory, and until 2.6.8 each guarded itself by comparing that slot's
+/// status string — inconsistently: install and repair refused only on
+/// `"installing"`, update refused on `"installing"` or `"downloading"`. The
+/// installer sets `"downloading"` for the whole git clone, so during a clone
+/// the repair's guard was open: it would delete the venv out from under a
+/// running install, both would report success over a half-built environment,
+/// and their log lines would interleave in the one panel the user is watching.
+///
+/// A status string cannot express "busy" because the status is also the UI's
+/// progress channel — it changes for reasons that have nothing to do with
+/// ownership. So ownership gets its own slot and a real lock: `Some(job)`
+/// means that job owns the runtime until its guard drops, which happens when
+/// its worker thread ends, however it ends, including a panic.
+#[derive(Clone, Default)]
+pub(crate) struct ComfyJobSlot {
+    current: Arc<Mutex<Option<ComfyJob>>>,
+}
+
+/// Ownership of the ComfyUI runtime. Dropping it releases the runtime, so it
+/// is moved into the worker thread and lives exactly as long as the job.
+#[derive(Debug)]
+pub(crate) struct ComfyJobGuard {
+    current: Arc<Mutex<Option<ComfyJob>>>,
+}
+
+impl Drop for ComfyJobGuard {
+    fn drop(&mut self) {
+        // A poisoned mutex must not wedge the runtime for the rest of the
+        // session, and a panic inside Drop during an unwind aborts the
+        // process — so recover the guard rather than unwrapping it.
+        let mut g = self.current.lock().unwrap_or_else(|e| e.into_inner());
+        *g = None;
+    }
+}
+
+impl ComfyJobSlot {
+    /// Take the runtime for `job`, or report which job already holds it.
+    pub(crate) fn try_acquire(&self, job: ComfyJob) -> Result<ComfyJobGuard, ComfyJob> {
+        let mut g = self.current.lock().unwrap_or_else(|e| e.into_inner());
+        match *g {
+            Some(running) => Err(running),
+            None => {
+                *g = Some(job);
+                Ok(ComfyJobGuard { current: self.current.clone() })
+            }
+        }
+    }
+
+    /// Which job owns the runtime right now, if any. Used by the tests to
+    /// assert the guard releases; production code only ever needs `try_acquire`.
+    #[allow(dead_code)]
+    pub(crate) fn current(&self) -> Option<ComfyJob> {
+        *self.current.lock().unwrap_or_else(|e| e.into_inner())
+    }
+}
+
+/// The process-wide slot. There is exactly one ComfyUI runtime per running
+/// app, so there is exactly one of these; the type stays instantiable so the
+/// tests exercise their own instead of racing on this one.
+static COMFY_JOB: once_cell::sync::Lazy<ComfyJobSlot> =
+    once_cell::sync::Lazy::new(ComfyJobSlot::default);
+
+/// Refusal text for a job that arrived while another one owns the runtime.
+///
+/// Returned as an `Err`, which matters for the self-healing path: the Create
+/// tab fires `repair_comfyui_env` and then polls `install_comfyui_status`
+/// until it reads `"complete"`. An `Ok` here would let it read the OTHER
+/// job's completion as "environment repaired" and hand the user a repair that
+/// never happened.
+pub(crate) fn comfy_job_busy_message(wanted: ComfyJob, running: ComfyJob) -> String {
+    format!(
+        "Cannot start {} while {} is running — they share one ComfyUI folder and would \
+         corrupt each other's environment. Wait for the running job to finish (its \
+         progress is in the same panel), then retry.",
+        wanted.label(),
+        running.label()
+    )
+}
+
+// ── OI-3: the repair must not silently uninstall Voice ──────────────────────
+
+/// A package LU installs into the ComfyUI venv that is NOT ComfyUI's.
+///
+/// `resolve_lu_python` sends faster-whisper (STT) and Piper (TTS) into
+/// `ComfyUI/venv` whenever one exists, because that is "LU's Python". The
+/// repair then deletes that venv wholesale and rebuilds it with PyTorch and
+/// ComfyUI's requirements — and nothing else. Two features the user paid
+/// bandwidth for disappear as a side effect of a repair they did not ask for
+/// (the Create tab fires `repair_comfyui_env` automatically after a ComfyUI
+/// startup crash), with not one log line connecting the two. What the user
+/// experiences is "Voice just stopped".
+///
+/// Keeping them out of the venv was the other option and it is worse: LU
+/// would have to maintain a second interpreter, and the TTS synthesizer and
+/// whisper server both start with whatever `resolve_lu_python` returns, so
+/// they would then be started from an env they were not installed into. The
+/// venv stays the one Python; the repair takes responsibility for refilling it.
+pub(crate) struct VenvPassenger {
+    /// The import-name directory as it appears inside `site-packages`.
+    pub marker: &'static str,
+    /// What to hand pip.
+    pub pip_name: &'static str,
+    /// What the user calls the feature.
+    pub label: &'static str,
+}
+
+pub(crate) const VENV_PASSENGERS: [VenvPassenger; 2] = [
+    VenvPassenger { marker: "faster_whisper", pip_name: "faster-whisper", label: "Voice input (faster-whisper)" },
+    VenvPassenger { marker: "piper", pip_name: "piper-tts", label: "Neural voice output (Piper TTS)" },
+];
+
+/// Every `site-packages` a venv can have, across both platform layouts.
+/// Pure path math — enumerated rather than guessed, because the Unix minor
+/// version (`lib/python3.12`) is whatever built the env.
+pub(crate) fn venv_site_packages(venv_dir: &Path) -> Vec<PathBuf> {
+    let mut candidates: Vec<PathBuf> = Vec::new();
+    // Windows: <venv>/Lib/site-packages
+    candidates.push(venv_dir.join("Lib").join("site-packages"));
+    // Unix: <venv>/lib/python3.X/site-packages (and lib64 on some distros)
+    for lib_name in ["lib", "lib64"] {
+        let lib = venv_dir.join(lib_name);
+        candidates.push(lib.join("site-packages"));
+        if let Ok(entries) = std::fs::read_dir(&lib) {
+            for e in entries.flatten() {
+                candidates.push(e.path().join("site-packages"));
+            }
+        }
+    }
+
+    // Both probes hit the same directory on a case-insensitive filesystem
+    // (macOS, Windows), where `Lib` and `lib` are one directory. Dedupe by
+    // canonical path so a caller counting the result gets the number of real
+    // site-packages, not the number of spellings that reached them.
+    let mut out: Vec<PathBuf> = Vec::new();
+    let mut seen: Vec<PathBuf> = Vec::new();
+    for c in candidates {
+        if !c.is_dir() {
+            continue;
+        }
+        let key = std::fs::canonicalize(&c).unwrap_or_else(|_| c.clone());
+        if seen.contains(&key) {
+            continue;
+        }
+        seen.push(key);
+        out.push(c);
+    }
+    out
+}
+
+/// Which LU-owned passengers are in this venv right now. Read BEFORE the venv
+/// is deleted; the result is what the repair has to put back.
+pub(crate) fn detect_venv_passengers(venv_dir: &Path) -> Vec<&'static VenvPassenger> {
+    let site_dirs = venv_site_packages(venv_dir);
+    VENV_PASSENGERS
+        .iter()
+        .filter(|p| site_dirs.iter().any(|d| d.join(p.marker).exists()))
+        .collect()
+}
+
+// ── OI-2: what git actually means by "already exists" ───────────────────────
+
+/// What a clone target that git refused with `already exists` really is.
+///
+/// `git clone` prints "destination path '…' already exists and is not an empty
+/// directory" for ANY non-empty directory — a Downloads folder, a half-cloned
+/// ComfyUI, someone else's repo. The installer read that one string as "a
+/// ComfyUI is already there, pull it", ran a `git pull` whose exit status it
+/// threw away, and then walked the whole PyTorch + requirements path against a
+/// directory that may never have held ComfyUI. Two GB later it reported
+/// "ComfyUI installed successfully!" and persisted `comfyui_path` to that
+/// directory, which then poisoned `find_comfyui_path` for every future call.
+///
+/// That is the P14 torso, re-entered through the back door. This type is the
+/// gate: the branch has to know what it is looking at before it spends the
+/// user's bandwidth.
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+pub(crate) enum ExistingTarget {
+    /// `.git` + `main.py`: a real ComfyUI checkout. Pull and carry on.
+    ComfyCheckout,
+    /// `.git` but no `main.py`: a git repo that is not ComfyUI, or a clone
+    /// that died before checkout. Never install into it, never overwrite it.
+    ForeignOrIncompleteRepo,
+    /// Not a git repo at all. Whatever the user has in there, it is not
+    /// something a `git pull` can turn into ComfyUI.
+    NotARepo,
+}
+
+/// Classify a clone target. Pure path logic so the branch is testable without
+/// git, a network, or a 2 GB download.
+pub(crate) fn classify_existing_target(dir: &Path) -> ExistingTarget {
+    if !dir.join(".git").exists() {
+        return ExistingTarget::NotARepo;
+    }
+    if dir.join("main.py").exists() {
+        ExistingTarget::ComfyCheckout
+    } else {
+        ExistingTarget::ForeignOrIncompleteRepo
+    }
+}
+
+/// The message the user gets when the install refuses a target it cannot
+/// safely use. Says which directory, what is wrong with it, and what to do —
+/// a bare "install failed" on a path the user picked themselves is the same
+/// dead end as the silent success it replaces.
+pub(crate) fn existing_target_refusal(dir: &Path, verdict: ExistingTarget) -> String {
+    match verdict {
+        ExistingTarget::ComfyCheckout => String::new(),
+        ExistingTarget::ForeignOrIncompleteRepo => format!(
+            "{} is a git repository, but it is not a ComfyUI checkout (no main.py). \
+             LU will not install into it — pick an empty folder, or delete this one \
+             first if it is a failed download.",
+            dir.display()
+        ),
+        ExistingTarget::NotARepo => format!(
+            "{} already exists and is not a ComfyUI checkout. git refuses to clone \
+             into a non-empty folder, and LU will not install on top of files it did \
+             not put there. Pick an empty folder, or move this one aside and retry.",
+            dir.display()
+        ),
+    }
+}
+
+/// The end-of-install gate: a finished ComfyUI has `main.py`. Checked before
+/// success is reported AND before `comfyui_path` is persisted, because the
+/// persisted path is what `find_comfyui_path` hands to every later call — a
+/// wrong value there outlives the failed install by the whole lifetime of the
+/// config file.
+pub(crate) fn comfy_install_looks_finished(dir: &Path) -> bool {
+    dir.join("main.py").exists()
+}
+
 #[tauri::command]
 pub fn install_comfyui(
     install_path: Option<String>,
@@ -732,11 +1083,16 @@ pub fn install_comfyui(
         return Err(crate::commands::process::MACOS_COMFY_REFUSAL.to_string());
     }
 
-    let mut install = state.install_status.lock().unwrap();
-    if install.status == "installing" {
-        return Ok(serde_json::json!({"status": "already_installing"}));
-    }
+    // OI-5: take the runtime before touching the shared status slot. A second
+    // click on Install is idempotent; a repair or update arriving mid-install
+    // is refused loudly rather than allowed to delete the venv underneath us.
+    let job_guard = match COMFY_JOB.try_acquire(ComfyJob::Install) {
+        Ok(g) => g,
+        Err(ComfyJob::Install) => return Ok(serde_json::json!({"status": "already_installing"})),
+        Err(running) => return Err(comfy_job_busy_message(ComfyJob::Install, running)),
+    };
 
+    let mut install = state.install_status.lock().unwrap();
     install.status = "installing".to_string();
     install.logs.clear();
     install.logs.push("Starting ComfyUI installation...".to_string());
@@ -797,6 +1153,10 @@ pub fn install_comfyui(
     let comfy_path_slot = state.comfy_path.clone();
 
     std::thread::spawn(move || {
+        // Held for the whole job: dropping it hands the runtime back, and it
+        // drops on every exit path from this closure, panics included.
+        let _job_guard = job_guard;
+
         // Helper to update install status + logs
         let update = |status: &str, msg: &str| {
             if let Ok(mut s) = install_status.lock() {
@@ -850,8 +1210,13 @@ pub fn install_comfyui(
                 return;
             }
         };
+        // OI-7: same registration as the pip runs. `git clone` spawns its own
+        // fetch/index-pack helpers, which a plain kill leaves writing.
+        let clone_pid = clone_child.id();
+        let _tracked_clone = TrackedInstallerChild::register(clone_pid);
         let clone_exit = loop {
             if cancelled() {
+                crate::commands::shell::kill_tree(clone_pid);
                 let _ = clone_child.kill();
                 let _ = clone_child.wait();
                 update("cancelled", "Install cancelled during git clone.");
@@ -876,6 +1241,17 @@ pub fn install_comfyui(
                 let _ = e.read_to_string(&mut stderr);
             }
             if stderr.contains("already exists") {
+                // OI-2: "already exists" is git's answer for ANY non-empty
+                // directory. Find out what is actually in there before
+                // spending 2 GB of the user's bandwidth on it.
+                let verdict = classify_existing_target(&target_dir);
+                if verdict != ExistingTarget::ComfyCheckout {
+                    let err = existing_target_refusal(&target_dir, verdict);
+                    println!("[Install] {}", err);
+                    error!(target = %target_dir.display(), ?verdict, "comfyui install refused an unusable clone target");
+                    update("error", &err);
+                    return;
+                }
                 println!("[Install] ComfyUI directory already exists, updating...");
                 update("installing", "ComfyUI already exists, pulling latest...");
                 if cancelled() {
@@ -887,7 +1263,37 @@ pub fn install_comfyui(
                     .stdout(Stdio::piped()).stderr(Stdio::piped());
                 #[cfg(target_os = "windows")]
                 pull.creation_flags(CREATE_NO_WINDOW);
-                let _ = pull.output();
+                // The pull's result was discarded outright before. It is not
+                // fatal — the checkout is already a ComfyUI, so an offline box
+                // or a diverged branch should still get its dependencies —
+                // but it must be SAID, or the user reads "installed
+                // successfully" over a core that never moved.
+                match pull.output() {
+                    Ok(o) if o.status.success() => {
+                        update("installing", "Repository updated to the latest ComfyUI.");
+                    }
+                    Ok(o) => {
+                        let detail = String::from_utf8_lossy(&o.stderr).trim().to_string();
+                        update(
+                            "installing",
+                            &format!(
+                                "git pull did not succeed, continuing with the ComfyUI already \
+                                 on disk. If nodes are missing afterwards, update it manually.\n{}",
+                                detail.chars().take(400).collect::<String>()
+                            ),
+                        );
+                    }
+                    Err(e) => {
+                        update(
+                            "installing",
+                            &format!(
+                                "Could not run git pull ({}), continuing with the ComfyUI \
+                                 already on disk.",
+                                e
+                            ),
+                        );
+                    }
+                }
             } else {
                 let err = format!("Git clone failed: {}", stderr);
                 println!("[Install] {}", err);
@@ -1002,6 +1408,25 @@ pub fn install_comfyui(
             }
         }
 
+        // OI-2: the last gate before this run is allowed to call itself a
+        // success. Everything above can have gone through — clone reported
+        // fine, pip reported fine — and still leave a directory with no
+        // ComfyUI in it, and the persist step below writes that directory
+        // into config.json where `find_comfyui_path` will keep handing it out
+        // long after the install is forgotten.
+        if !comfy_install_looks_finished(&target_dir) {
+            let err = format!(
+                "The install finished but {} has no main.py, so there is no ComfyUI to \
+                 start. Nothing was saved as your ComfyUI path. Check the log above for \
+                 the step that failed, then retry into an empty folder.",
+                target_dir.display()
+            );
+            println!("[Install] {}", err);
+            error!(target = %target_dir.display(), "comfyui install produced no main.py");
+            update("error", &err);
+            return;
+        }
+
         println!("[Install] ComfyUI installation complete");
 
         // andy_38747 (Discord): the install target is user-configurable now.
@@ -1053,6 +1478,14 @@ pub fn repair_comfyui_env(state: State<'_, AppState>) -> Result<serde_json::Valu
     if !crate::commands::process::comfy_supported_here() {
         return Err(crate::commands::process::MACOS_COMFY_REFUSAL.to_string());
     }
+    // OI-5: acquired before any of the checks below, because every one of them
+    // reads state a concurrent install is actively changing. Dropped again on
+    // each early return.
+    let job_guard = match COMFY_JOB.try_acquire(ComfyJob::Repair) {
+        Ok(g) => g,
+        Err(ComfyJob::Repair) => return Ok(serde_json::json!({"status": "already_installing"})),
+        Err(running) => return Err(comfy_job_busy_message(ComfyJob::Repair, running)),
+    };
     let comfy_dir = {
         let p = state.comfy_path.lock().unwrap().clone();
         p.or_else(crate::commands::process::find_comfyui_path)
@@ -1087,9 +1520,6 @@ pub fn repair_comfyui_env(state: State<'_, AppState>) -> Result<serde_json::Valu
     }
     {
         let mut install = state.install_status.lock().unwrap();
-        if install.status == "installing" {
-            return Ok(serde_json::json!({"status": "already_installing"}));
-        }
         install.status = "installing".to_string();
         install.logs.clear();
         install.logs.push("Repairing the ComfyUI environment...".to_string());
@@ -1107,8 +1537,16 @@ pub fn repair_comfyui_env(state: State<'_, AppState>) -> Result<serde_json::Valu
     state.comfyui_install_cancel.store(false, Ordering::SeqCst);
     let cancel_flag = state.comfyui_install_cancel.clone();
     let install_status = state.install_status.clone();
+    // OI-3: the whisper server runs FROM this venv's Python. On Windows a
+    // running interpreter holds its own files open, so leaving it up makes
+    // `remove_dir_all` fail and the repair dies at step one with "close
+    // anything using it and retry" — naming nothing the user can close.
+    // Stopping it is also free: `ensure_whisper_running` brings it back on
+    // the next voice input, then against the rebuilt venv.
+    let whisper = state.whisper.clone();
 
     std::thread::spawn(move || {
+        let _job_guard = job_guard;
         let update = |status: &str, msg: &str| {
             if let Ok(mut s) = install_status.lock() {
                 s.status = status.to_string();
@@ -1120,7 +1558,39 @@ pub fn repair_comfyui_env(state: State<'_, AppState>) -> Result<serde_json::Valu
         // damaged packages as already satisfied, which is the exact dead end
         // this command exists to break.
         let venv_dir = comfy_dir.join("venv");
+        // OI-3: faster-whisper and Piper live in this venv too. Take stock
+        // BEFORE the delete, because afterwards there is nothing left to read.
+        let passengers = detect_venv_passengers(&venv_dir);
+        if !passengers.is_empty() {
+            let names: Vec<&str> = passengers.iter().map(|p| p.label).collect();
+            // The connection has to be in the log the user is looking at. Its
+            // absence is what turned this into "Voice just stopped": two
+            // unrelated-looking features died during a ComfyUI repair the
+            // Create tab started on its own.
+            info!(passengers = ?names, "comfyui repair will rebuild venv passengers");
+            update(
+                "installing",
+                &format!(
+                    "This venv also holds {}. Rebuilding it removes them, so LU will \
+                     reinstall them at the end of the repair — do not close the app until \
+                     that step is done.",
+                    names.join(" and ")
+                ),
+            );
+        }
         if venv_dir.exists() {
+            // Before the delete: nothing of ours may still be running out of
+            // this venv (see the `whisper` clone above).
+            if let Ok(mut w) = whisper.lock() {
+                if w.is_running() {
+                    update(
+                        "installing",
+                        "Stopping the voice-input server, which runs from this venv. It \
+                         restarts by itself the next time you use voice input.",
+                    );
+                    w.stop();
+                }
+            }
             update(
                 "installing",
                 "Removing the old venv (models, outputs and custom nodes stay untouched)...",
@@ -1199,10 +1669,60 @@ pub fn repair_comfyui_env(state: State<'_, AppState>) -> Result<serde_json::Valu
             }
         }
 
-        update(
-            "complete",
-            "Environment repaired. ComfyUI now runs from its own venv; start it again.",
-        );
+        // OI-3: put the passengers back. Failures here are reported but do not
+        // fail the repair — ComfyUI itself is rebuilt at this point, and
+        // burying a working ComfyUI under a Piper wheel error would trade one
+        // silent loss for another. What must never happen again is the repair
+        // finishing without saying what happened to Voice.
+        let mut lost: Vec<&str> = Vec::new();
+        for p in &passengers {
+            update(
+                "installing",
+                &format!("Reinstalling {} into the fresh venv...", p.label),
+            );
+            let args = vec![
+                "-m", "pip", "install",
+                "--progress-bar", "off",
+                "--no-input",
+                p.pip_name,
+            ];
+            match pip_install_streaming_with_retry_cancellable(&args, &venv_py, 3, &install_status, Some(&cancel_flag)) {
+                Ok(()) => update("installing", &format!("{} is back.", p.label)),
+                Err(d) if d == "cancelled" => {
+                    update(
+                        "cancelled",
+                        &format!(
+                            "Repair cancelled while reinstalling {}. It is NOT installed — \
+                             reinstall it from Settings.",
+                            p.label
+                        ),
+                    );
+                    return;
+                }
+                Err(d) => {
+                    error!(package = p.pip_name, error = %d, "venv passenger reinstall failed after comfyui repair");
+                    lost.push(p.label);
+                    update(
+                        "installing",
+                        &format!("Could not reinstall {}: {}", p.label, d),
+                    );
+                }
+            }
+        }
+
+        let closing = if lost.is_empty() {
+            "Environment repaired. ComfyUI now runs from its own venv; start it again.".to_string()
+        } else {
+            format!(
+                "ComfyUI's environment is repaired and can be started again, but {} could not \
+                 be reinstalled into the new venv and {} not available until you install {} \
+                 again from Settings.",
+                lost.join(" and "),
+                if lost.len() == 1 { "is" } else { "are" },
+                if lost.len() == 1 { "it" } else { "them" },
+            )
+        };
+        update("complete", &closing);
     });
 
     Ok(serde_json::json!({"status": "installing"}))
@@ -1229,11 +1749,17 @@ pub fn install_comfyui_status(state: State<'_, AppState>) -> Result<serde_json::
 /// uses, so the existing `install_comfyui_status` polling UI works unchanged.
 #[tauri::command]
 pub fn update_comfyui(state: State<'_, AppState>) -> Result<serde_json::Value, String> {
+    // OI-5: same lock as install and repair. This command's old guard was the
+    // strictest of the three ("installing" OR "downloading"), which is exactly
+    // why the inconsistency was invisible from here — it was the other two
+    // that let a job in mid-clone.
+    let job_guard = match COMFY_JOB.try_acquire(ComfyJob::Update) {
+        Ok(g) => g,
+        Err(ComfyJob::Update) => return Ok(serde_json::json!({"status": "already_installing"})),
+        Err(running) => return Err(comfy_job_busy_message(ComfyJob::Update, running)),
+    };
     {
         let mut install = state.install_status.lock().unwrap();
-        if install.status == "installing" || install.status == "downloading" {
-            return Ok(serde_json::json!({"status": "already_installing"}));
-        }
         install.status = "installing".to_string();
         install.logs.clear();
         install.logs.push("Updating ComfyUI...".to_string());
@@ -1279,6 +1805,7 @@ pub fn update_comfyui(state: State<'_, AppState>) -> Result<serde_json::Value, S
 
     let install_status = state.install_status.clone();
     std::thread::spawn(move || {
+        let _job_guard = job_guard;
         let update = |status: &str, msg: &str| {
             if let Ok(mut s) = install_status.lock() {
                 s.status = status.to_string();
@@ -1462,6 +1989,9 @@ pub fn install_ollama(state: State<'_, AppState>) -> Result<serde_json::Value, S
     info!("ollama install start");
 
     let ollama_state = state.ollama_install.clone();
+    // OI-4: the serve we are about to spawn belongs to LU, so its handle goes
+    // into the same slot `start_ollama` uses and gets reaped on quit.
+    let serve_slot = state.ollama_process.clone();
 
     std::thread::spawn(move || {
         let update = |status: &str, msg: &str| {
@@ -1479,15 +2009,15 @@ pub fn install_ollama(state: State<'_, AppState>) -> Result<serde_json::Value, S
         // install failure with no path forward. Dispatch by platform.
         #[cfg(target_os = "windows")]
         {
-            install_ollama_windows_impl(&ollama_state, update);
+            install_ollama_windows_impl(&ollama_state, &serve_slot, update);
         }
         #[cfg(target_os = "linux")]
         {
-            install_ollama_linux_impl(&ollama_state, update);
+            install_ollama_linux_impl(&ollama_state, &serve_slot, update);
         }
         #[cfg(target_os = "macos")]
         {
-            install_ollama_macos_impl(&ollama_state, update);
+            install_ollama_macos_impl(&ollama_state, &serve_slot, update);
         }
     });
 
@@ -1720,6 +2250,244 @@ fn check_git_installed_blocking() -> GitStatus {
     }
 }
 
+// ── OI-8: nothing we downloaded gets executed unverified ────────────────────
+
+/// Smallest plausible size for a Windows installer LU downloads. Anything
+/// under it is not an installer: it is an error page, a captive-portal login,
+/// or a truncated transfer — and `download_file_blocking` writes all three to
+/// disk without complaint, because all three arrive as HTTP 200.
+const MIN_INSTALLER_BYTES: u64 = 1_000_000;
+
+/// SHA-256 of the LM Studio installer at [`LMSTUDIO_INSTALLER_URL`].
+///
+/// That URL is version-pinned and immutable (`0.3.16-6`), so its bytes never
+/// change and a digest here would be a free integrity guarantee for a ~570 MB
+/// executable LU runs with `/S`.
+///
+/// It is `None`, and it has to stay `None` until somebody fills it with a
+/// digest they measured from that exact file. A guessed or mistyped value does
+/// not weaken the check — it breaks every Windows LM Studio install outright.
+/// This was written on a machine that could not fetch the file to measure it,
+/// so the honest state is "not pinned yet". Measuring it is one command on a
+/// box that has the installer:
+///
+/// ```text
+/// certutil -hashfile LM-Studio-0.3.16-6-x64.exe SHA256
+/// ```
+///
+/// Until then the size and Authenticode checks below are what stands between
+/// the user and an unverified executable.
+///
+/// Ollama's installer gets no pin at all and cannot: its URL
+/// (`ollama.com/download/OllamaSetup.exe`) always serves the current release,
+/// so its bytes change with every version. Signature + size is the whole
+/// answer available there.
+const LMSTUDIO_INSTALLER_SHA256: Option<&str> = None;
+
+/// Hex SHA-256 of a file, streamed in chunks — a 570 MB installer must not
+/// need 570 MB of memory to be checked.
+pub(crate) fn sha256_file(path: &Path) -> Result<String, String> {
+    use sha2::{Digest, Sha256};
+    let mut file = fs::File::open(path)
+        .map_err(|e| format!("Could not open {} to hash it: {}", path.display(), os_error::english(&e)))?;
+    let mut hasher = Sha256::new();
+    let mut buf = vec![0u8; 1 << 20];
+    loop {
+        let n = file
+            .read(&mut buf)
+            .map_err(|e| format!("Could not read {} while hashing: {}", path.display(), os_error::english(&e)))?;
+        if n == 0 {
+            break;
+        }
+        hasher.update(&buf[..n]);
+    }
+    Ok(hasher.finalize().iter().map(|b| format!("{b:02x}")).collect())
+}
+
+/// Digest comparison that tolerates the shapes people paste: upper or lower
+/// case, and `certutil`'s space-separated groups.
+pub(crate) fn digest_matches(expected: &str, actual: &str) -> bool {
+    let norm = |s: &str| -> String {
+        s.chars()
+            .filter(|c| !c.is_whitespace())
+            .flat_map(|c| c.to_lowercase())
+            .collect()
+    };
+    let (e, a) = (norm(expected), norm(actual));
+    !e.is_empty() && e == a
+}
+
+/// What `Get-AuthenticodeSignature` said about a file.
+///
+/// Compiled everywhere so the status mapping stays under test on the machines
+/// LU is developed on; only Windows has a signature to read.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+pub(crate) enum SignatureVerdict {
+    /// Signed by a trusted publisher and the file matches its signature.
+    Valid,
+    /// Signed, but the signature does not hold — tampered, or the publisher
+    /// is not trusted on this machine.
+    Invalid,
+    /// No signature at all.
+    Unsigned,
+    /// The check itself did not produce an answer we can read.
+    Unknown,
+}
+
+/// Read the `.Status` line PowerShell prints for a signature check.
+///
+/// Kept separate from the process spawn so the mapping is testable on a Mac,
+/// where `Get-AuthenticodeSignature` does not exist. The status names come
+/// from `System.Management.Automation.SignatureStatus`.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+pub(crate) fn parse_authenticode_status(stdout: &str) -> SignatureVerdict {
+    let line = stdout
+        .lines()
+        .map(str::trim)
+        .find(|l| !l.is_empty())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    match line.as_str() {
+        "valid" => SignatureVerdict::Valid,
+        "notsigned" => SignatureVerdict::Unsigned,
+        "hashmismatch" | "nottrusted" | "unknownerror" | "notsupportedfileformat"
+        | "incompatible" => SignatureVerdict::Invalid,
+        _ => SignatureVerdict::Unknown,
+    }
+}
+
+/// Is this file big enough to be an installer at all?
+///
+/// Pulled out as its own rule because it is the check that catches the case
+/// nobody thinks about: a proxy or captive portal answering the download with
+/// a 2 KB HTML login page, saved as `OllamaSetup.exe` and then executed.
+pub(crate) fn installer_size_verdict(bytes: u64) -> Result<(), String> {
+    if bytes >= MIN_INSTALLER_BYTES {
+        return Ok(());
+    }
+    Err(format!(
+        "The downloaded installer is only {} bytes, far too small to be one — the \
+         download was probably intercepted by a proxy or captive portal, or cut short. \
+         LU will not run it. Download the installer yourself from the vendor's site \
+         instead.",
+        bytes
+    ))
+}
+
+/// Ask Windows whether an executable's Authenticode signature is valid.
+///
+/// Windows PowerShell 5.1 ships with every Windows 10/11, so the check is
+/// always available on the only platform that runs these installers. A file
+/// that is not `Valid` is not executed: the point of the check is that LU
+/// refuses, not that it warns and proceeds anyway.
+#[cfg(target_os = "windows")]
+fn authenticode_verdict(path: &Path) -> SignatureVerdict {
+    // -LiteralPath so a path with brackets is not read as a wildcard; single
+    // quotes doubled so a quote in the path cannot end the string early.
+    let escaped = path.to_string_lossy().replace('\'', "''");
+    let mut cmd = Command::new("powershell");
+    cmd.args([
+        "-NoProfile",
+        "-NonInteractive",
+        "-Command",
+        &format!("(Get-AuthenticodeSignature -LiteralPath '{escaped}').Status"),
+    ])
+    .stdout(Stdio::piped())
+    .stderr(Stdio::piped());
+    cmd.creation_flags(CREATE_NO_WINDOW);
+    match cmd.output() {
+        Ok(o) if o.status.success() => {
+            parse_authenticode_status(&String::from_utf8_lossy(&o.stdout))
+        }
+        _ => SignatureVerdict::Unknown,
+    }
+}
+
+/// Everything that has to be true before LU executes a file it downloaded:
+/// it is big enough to be an installer, it matches its pinned digest if one
+/// exists, and on Windows it carries a valid Authenticode signature.
+///
+/// `label` names the product in the error text — the user has to know which
+/// download to fetch by hand when LU refuses.
+fn verify_downloaded_installer(
+    path: &Path,
+    expected_sha256: Option<&str>,
+    label: &str,
+) -> Result<(), String> {
+    let size = fs::metadata(path)
+        .map_err(|e| format!("Could not stat the downloaded {label} installer: {}", os_error::english(&e)))?
+        .len();
+    installer_size_verdict(size)?;
+
+    if let Some(pin) = expected_sha256 {
+        let actual = sha256_file(path)?;
+        if !digest_matches(pin, &actual) {
+            return Err(format!(
+                "The downloaded {label} installer does not match its pinned SHA-256, so LU \
+                 will not run it.\nexpected: {pin}\ngot:      {actual}\nDownload {label} \
+                 from the vendor's site by hand instead."
+            ));
+        }
+        info!(label, "installer matched its pinned sha-256");
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        match authenticode_verdict(path) {
+            SignatureVerdict::Valid => {}
+            verdict => {
+                return Err(format!(
+                    "The downloaded {label} installer has no valid code signature \
+                     ({verdict:?}), so LU will not run it. Download {label} from the \
+                     vendor's own site and install it yourself."
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Start `ollama serve` so that it SURVIVES the installer, and hand the child
+/// to the slot that reaps it on quit.
+///
+/// OI-4: all three install paths used to do this by hand as
+/// `Command::new("ollama").arg("serve").stdout(piped).stderr(piped).spawn()`
+/// with the returned `Child` dropped on the next line. Dropping a `Child`
+/// closes the read ends of both pipes, so the very first line Ollama logs
+/// gets EPIPE / SIGPIPE and the daemon dies seconds after we started it. The
+/// install then waited 30 s, reported "installed but not responding" and told
+/// the user to go run `ollama serve` in a terminal themselves — for a daemon
+/// that had been alive and was killed by us.
+///
+/// `Stdio::null()` on all three handles is the fix and it is also what the
+/// rest of the repo already does: `process::start_ollama` and
+/// `auto_start_ollama` have spawned it this way since kj103x's orphan report.
+/// Following that pattern to the end means keeping the `Child` (so a quit
+/// reaps it instead of orphaning a daemon we started) and registering the pid
+/// with the kill-on-close job on Windows.
+fn spawn_ollama_serve(slot: &Arc<Mutex<Option<std::process::Child>>>) -> std::io::Result<()> {
+    let mut cmd = Command::new("ollama");
+    cmd.arg("serve")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    #[cfg(target_os = "windows")]
+    cmd.creation_flags(CREATE_NO_WINDOW);
+    let child = cmd.spawn()?;
+    crate::commands::process::tie_child_to_app_lifetime(child.id());
+    if let Ok(mut g) = slot.lock() {
+        // Whatever was in the slot is a handle to a process we no longer
+        // manage; replacing it would leak the old one, so reap it first.
+        if let Some(mut old) = g.take() {
+            let _ = old.kill();
+            let _ = old.wait();
+        }
+        *g = Some(child);
+    }
+    Ok(())
+}
+
 /// Wait for Ollama HTTP API to respond on the default port (best-effort
 /// shared startup probe used after every platform-specific install path).
 fn wait_for_ollama_ready() -> bool {
@@ -1740,6 +2508,7 @@ fn wait_for_ollama_ready() -> bool {
 #[cfg(target_os = "windows")]
 fn install_ollama_windows_impl<F: Fn(&str, &str)>(
     ollama_state: &Arc<Mutex<InstallState>>,
+    serve_slot: &Arc<Mutex<Option<std::process::Child>>>,
     update: F,
 ) {
     let temp_dir = std::env::temp_dir();
@@ -1751,6 +2520,15 @@ fn install_ollama_windows_impl<F: Fn(&str, &str)>(
         ollama_state,
     ) {
         update("error", &format!("Download failed: {}", e));
+        return;
+    }
+    // OI-8: verified before it is executed. Ollama's URL always serves the
+    // current release, so there is no immutable digest to pin here — the size
+    // and Authenticode checks are the whole answer available.
+    if let Err(e) = verify_downloaded_installer(&installer_path, None, "Ollama") {
+        let _ = fs::remove_file(&installer_path);
+        error!(error = %e, "refused to execute an unverified Ollama installer");
+        update("error", &e);
         return;
     }
     update("installing", "Download complete. Installing Ollama...");
@@ -1768,10 +2546,17 @@ fn install_ollama_windows_impl<F: Fn(&str, &str)>(
         }
     }
     let _ = fs::remove_file(&installer_path);
-    let mut serve = Command::new("ollama");
-    serve.arg("serve").stdout(Stdio::piped()).stderr(Stdio::piped());
-    serve.creation_flags(CREATE_NO_WINDOW);
-    let _ = serve.spawn();
+    if let Err(e) = spawn_ollama_serve(serve_slot) {
+        update(
+            "error",
+            &format!(
+                "Ollama installed, but `ollama serve` could not be started: {}. Open a \
+                 terminal and run `ollama serve` to see what it says.",
+                e
+            ),
+        );
+        return;
+    }
     update("starting", "Waiting for Ollama to start...");
     if wait_for_ollama_ready() {
         update("complete", "Ollama is ready!");
@@ -1783,6 +2568,7 @@ fn install_ollama_windows_impl<F: Fn(&str, &str)>(
 #[cfg(target_os = "linux")]
 fn install_ollama_linux_impl<F: Fn(&str, &str)>(
     _ollama_state: &Arc<Mutex<InstallState>>,
+    serve_slot: &Arc<Mutex<Option<std::process::Child>>>,
     update: F,
 ) {
     // If `ollama` is already on PATH (pacman -S ollama, manual install, etc.),
@@ -1821,9 +2607,13 @@ fn install_ollama_linux_impl<F: Fn(&str, &str)>(
 
     // ollama is already on PATH — spawn it and poll the API.
     update("starting", "Ollama is already installed — starting service...");
-    let mut serve = Command::new("ollama");
-    serve.arg("serve").stdout(Stdio::piped()).stderr(Stdio::piped());
-    let _ = serve.spawn();
+    if let Err(e) = spawn_ollama_serve(serve_slot) {
+        update(
+            "error",
+            &format!("Could not start `ollama serve`: {}. Try running it in a terminal.", e),
+        );
+        return;
+    }
 
     update("starting", "Waiting for Ollama to start...");
     if wait_for_ollama_ready() {
@@ -1876,13 +2666,18 @@ pub fn linux_ollama_install_hint(os_release: &str) -> String {
 #[cfg(target_os = "macos")]
 fn install_ollama_macos_impl<F: Fn(&str, &str)>(
     _ollama_state: &Arc<Mutex<InstallState>>,
+    serve_slot: &Arc<Mutex<Option<std::process::Child>>>,
     update: F,
 ) {
     if Command::new("which").arg("ollama").output().map(|o| o.status.success()).unwrap_or(false) {
         update("starting", "Ollama already installed — starting service...");
-        let mut serve = Command::new("ollama");
-        serve.arg("serve").stdout(Stdio::piped()).stderr(Stdio::piped());
-        let _ = serve.spawn();
+        if let Err(e) = spawn_ollama_serve(serve_slot) {
+            update(
+                "error",
+                &format!("Could not start `ollama serve`: {}. Try running it in a terminal.", e),
+            );
+            return;
+        }
         if wait_for_ollama_ready() {
             update("complete", "Ollama is ready!");
         } else {
@@ -2271,6 +3066,20 @@ pub fn install_lmstudio(state: State<'_, AppState>) -> Result<serde_json::Value,
                 );
                 println!("[LMStudio] {}", err);
                 update("error", &err);
+                return;
+            }
+
+            // OI-8: verified before it is executed. See
+            // LMSTUDIO_INSTALLER_SHA256 for why the digest pin is not filled
+            // in yet and what filling it in takes.
+            if let Err(e) = verify_downloaded_installer(
+                &installer_path,
+                LMSTUDIO_INSTALLER_SHA256,
+                "LM Studio",
+            ) {
+                let _ = fs::remove_file(&installer_path);
+                println!("[LMStudio] {}", e);
+                update("error", &e);
                 return;
             }
 
@@ -3607,6 +4416,365 @@ fn is_permission_denied_pip_error(output: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── OI-2: "ComfyUI installed successfully!" for an empty directory ────
+    //
+    // git says "already exists" for ANY non-empty target. The installer read
+    // that as "a ComfyUI is there", threw the following pull's exit status
+    // away, never checked for `.git`, never checked for main.py, and 2 GB
+    // later persisted the directory as `comfyui_path` — which then poisoned
+    // `find_comfyui_path` for the rest of the config file's life.
+    //
+    // These tests cover the classification and the final gate. NOT covered:
+    // that git actually prints "already exists" for the cases below — that is
+    // git's documented behaviour, not ours, and reproducing it needs a real
+    // clone into a real directory.
+
+    fn dir_with(entries: &[&str]) -> tempfile::TempDir {
+        let tmp = tempfile::tempdir().unwrap();
+        for e in entries {
+            if e.ends_with('/') {
+                std::fs::create_dir_all(tmp.path().join(e.trim_end_matches('/'))).unwrap();
+            } else {
+                std::fs::write(tmp.path().join(e), b"x").unwrap();
+            }
+        }
+        tmp
+    }
+
+    #[test]
+    fn a_real_comfyui_checkout_is_the_only_target_worth_pulling() {
+        let d = dir_with(&[".git/", "main.py"]);
+        assert_eq!(classify_existing_target(d.path()), ExistingTarget::ComfyCheckout);
+        // And the refusal text for it is empty — there is nothing to refuse.
+        assert!(existing_target_refusal(d.path(), ExistingTarget::ComfyCheckout).is_empty());
+    }
+
+    #[test]
+    fn a_plain_non_empty_folder_is_refused_not_installed_into() {
+        // The user pointed the installer at their Downloads folder, or at a
+        // directory a previous run left half-populated. git refuses to clone
+        // into it and says "already exists" — which is NOT permission to
+        // spend 2 GB and call it a ComfyUI.
+        let d = dir_with(&["some-file.txt", "notes/"]);
+        assert_eq!(classify_existing_target(d.path()), ExistingTarget::NotARepo);
+        let msg = existing_target_refusal(d.path(), ExistingTarget::NotARepo);
+        assert!(msg.contains(&d.path().display().to_string()), "{msg}");
+        assert!(msg.to_lowercase().contains("empty folder"), "{msg}");
+    }
+
+    #[test]
+    fn a_git_repo_that_is_not_comfyui_is_refused() {
+        // Someone else's checkout, or a clone that died before checkout. A
+        // `git pull` in there succeeds and still leaves no ComfyUI.
+        let d = dir_with(&[".git/", "README.md"]);
+        assert_eq!(
+            classify_existing_target(d.path()),
+            ExistingTarget::ForeignOrIncompleteRepo
+        );
+        let msg = existing_target_refusal(d.path(), ExistingTarget::ForeignOrIncompleteRepo);
+        assert!(msg.contains("main.py"), "{msg}");
+    }
+
+    #[test]
+    fn an_empty_or_missing_directory_is_not_a_repo() {
+        let d = dir_with(&[]);
+        assert_eq!(classify_existing_target(d.path()), ExistingTarget::NotARepo);
+        assert_eq!(
+            classify_existing_target(&d.path().join("does-not-exist")),
+            ExistingTarget::NotARepo
+        );
+    }
+
+    #[test]
+    fn the_final_gate_is_main_py_and_nothing_else_counts() {
+        // The gate that has to hold before "installed successfully!" is said
+        // and before the path is written into config.json. A directory with a
+        // venv, a .git and requirements.txt but no main.py is the P14 torso.
+        let torso = dir_with(&[".git/", "requirements.txt", "venv/"]);
+        assert!(!comfy_install_looks_finished(torso.path()));
+        let real = dir_with(&[".git/", "main.py"]);
+        assert!(comfy_install_looks_finished(real.path()));
+    }
+
+    // ── OI-3: the repair must not silently uninstall Voice ────────────────
+    //
+    // `resolve_lu_python` puts faster-whisper and Piper into ComfyUI's venv,
+    // and `repair_comfyui_env` deletes that venv — automatically, after a
+    // ComfyUI startup crash the user did not connect to Voice at all.
+    // Detection is pure path work, so it is fully testable; the reinstall
+    // itself is a pip run and needs a real network.
+
+    fn venv_with_packages(names: &[&str], layout: &str) -> tempfile::TempDir {
+        let tmp = tempfile::tempdir().unwrap();
+        let site = match layout {
+            "windows" => tmp.path().join("venv").join("Lib").join("site-packages"),
+            _ => tmp
+                .path()
+                .join("venv")
+                .join("lib")
+                .join("python3.12")
+                .join("site-packages"),
+        };
+        std::fs::create_dir_all(&site).unwrap();
+        for n in names {
+            std::fs::create_dir_all(site.join(n)).unwrap();
+        }
+        tmp
+    }
+
+    #[test]
+    fn both_voice_packages_are_seen_in_a_unix_venv() {
+        let tmp = venv_with_packages(&["faster_whisper", "piper", "torch"], "unix");
+        let found = detect_venv_passengers(&tmp.path().join("venv"));
+        let names: Vec<&str> = found.iter().map(|p| p.pip_name).collect();
+        assert_eq!(names, vec!["faster-whisper", "piper-tts"]);
+    }
+
+    #[test]
+    fn both_voice_packages_are_seen_in_a_windows_venv() {
+        // The layout LU's own Windows installs use, checked from a Unix box.
+        let tmp = venv_with_packages(&["faster_whisper", "piper"], "windows");
+        let found = detect_venv_passengers(&tmp.path().join("venv"));
+        assert_eq!(found.len(), 2);
+    }
+
+    #[test]
+    fn a_venv_without_voice_has_nothing_to_reinstall() {
+        // Negative control: a plain ComfyUI venv must not trigger the extra
+        // pip runs, or every repair would install Piper on machines that
+        // never had it.
+        let tmp = venv_with_packages(&["torch", "torchvision"], "unix");
+        assert!(detect_venv_passengers(&tmp.path().join("venv")).is_empty());
+        // And a venv that does not exist at all reads as empty, not an error:
+        // the repair runs on installs that never had one.
+        let missing = tempfile::tempdir().unwrap();
+        assert!(detect_venv_passengers(&missing.path().join("venv")).is_empty());
+    }
+
+    #[test]
+    fn only_the_whisper_half_is_detected_when_only_it_is_installed() {
+        let tmp = venv_with_packages(&["faster_whisper"], "unix");
+        let found = detect_venv_passengers(&tmp.path().join("venv"));
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].pip_name, "faster-whisper");
+        assert!(found[0].label.to_lowercase().contains("voice"));
+    }
+
+    #[test]
+    fn site_packages_are_found_in_both_layouts_and_nowhere_else() {
+        let unix = venv_with_packages(&[], "unix");
+        assert_eq!(venv_site_packages(&unix.path().join("venv")).len(), 1);
+        let win = venv_with_packages(&[], "windows");
+        assert_eq!(venv_site_packages(&win.path().join("venv")).len(), 1);
+        // A directory that is not a venv has none.
+        let plain = tempfile::tempdir().unwrap();
+        assert!(venv_site_packages(plain.path()).is_empty());
+    }
+
+    // ── OI-5: install / repair / update share one runtime ─────────────────
+    //
+    // They guarded themselves by comparing the shared status string, and
+    // inconsistently: install and repair refused only on "installing", update
+    // also on "downloading". The installer sets "downloading" for the whole
+    // git clone, so a repair started during a clone walked straight past the
+    // guard and deleted the venv under a running install.
+    //
+    // The tests drive the lock itself. NOT covered: that a real concurrent
+    // install and repair now interleave correctly — that needs two real
+    // 2 GB installs.
+
+    #[test]
+    fn a_second_job_cannot_take_a_runtime_that_is_already_owned() {
+        let slot = ComfyJobSlot::default();
+        let held = slot.try_acquire(ComfyJob::Install).expect("free runtime");
+        assert_eq!(slot.current(), Some(ComfyJob::Install));
+        // This is the exact sequence that used to corrupt the venv: a repair
+        // arriving while the installer is cloning.
+        assert_eq!(slot.try_acquire(ComfyJob::Repair).err(), Some(ComfyJob::Install));
+        assert_eq!(slot.try_acquire(ComfyJob::Update).err(), Some(ComfyJob::Install));
+        drop(held);
+        assert_eq!(slot.current(), None);
+        assert!(slot.try_acquire(ComfyJob::Repair).is_ok());
+    }
+
+    #[test]
+    fn the_runtime_comes_back_when_the_job_thread_panics() {
+        // Guards are moved into worker threads. A thread that dies must not
+        // leave ComfyUI locked for the rest of the session.
+        let slot = ComfyJobSlot::default();
+        let guard = slot.try_acquire(ComfyJob::Install).unwrap();
+        let handle = std::thread::spawn(move || {
+            let _g = guard;
+            panic!("pip exploded");
+        });
+        assert!(handle.join().is_err());
+        assert_eq!(slot.current(), None, "a panicking job left the runtime locked");
+    }
+
+    #[test]
+    fn the_same_job_twice_is_told_it_is_already_running() {
+        // Double-clicking Install is idempotent, not an error.
+        let slot = ComfyJobSlot::default();
+        let _held = slot.try_acquire(ComfyJob::Install).unwrap();
+        assert_eq!(slot.try_acquire(ComfyJob::Install).err(), Some(ComfyJob::Install));
+    }
+
+    #[test]
+    fn the_busy_message_names_both_jobs_and_says_why() {
+        // This text is what the self-healing path surfaces instead of
+        // silently reporting a repair that never ran.
+        let msg = comfy_job_busy_message(ComfyJob::Repair, ComfyJob::Install);
+        assert!(msg.contains("repair"), "{msg}");
+        assert!(msg.contains("installation"), "{msg}");
+        assert!(msg.to_lowercase().contains("corrupt"), "{msg}");
+    }
+
+    // ── OI-7: installer children are tracked ─────────────────────────────
+
+    #[test]
+    fn the_child_registry_empties_itself_when_a_run_ends() {
+        // Every entry is a pid that will be handed to a recursive kill, so a
+        // stale one is a kill aimed at whatever the OS recycled that number
+        // into. The RAII guard is what keeps that from happening across pip's
+        // many early returns.
+        let before = tracked_installer_children();
+        {
+            let _a = TrackedInstallerChild::register(999_001);
+            let _b = TrackedInstallerChild::register(999_002);
+            assert!(tracked_installer_children() >= before + 2);
+        }
+        assert_eq!(tracked_installer_children(), before);
+    }
+
+    // ── OI-8: nothing downloaded is executed unverified ───────────────────
+    //
+    // Runnable here: the digest, the comparison, the size rule and the
+    // signature-status mapping. NOT runnable here: the Authenticode check
+    // itself — `Get-AuthenticodeSignature` is Windows-only, and this was
+    // written on macOS, so the spawn is verified by review only.
+
+    #[test]
+    fn sha256_matches_the_published_vector_for_abc() {
+        let tmp = tempfile::tempdir().unwrap();
+        let f = tmp.path().join("abc.bin");
+        std::fs::write(&f, b"abc").unwrap();
+        assert_eq!(
+            sha256_file(&f).unwrap(),
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
+    }
+
+    #[test]
+    fn sha256_of_an_empty_file_is_the_known_empty_digest() {
+        let tmp = tempfile::tempdir().unwrap();
+        let f = tmp.path().join("empty.bin");
+        std::fs::write(&f, b"").unwrap();
+        assert_eq!(
+            sha256_file(&f).unwrap(),
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        );
+    }
+
+    #[test]
+    fn sha256_streams_a_file_larger_than_its_buffer() {
+        // The buffer is 1 MiB; a 570 MB installer must not be read in one go,
+        // so the chunk loop has to be right across a boundary.
+        let tmp = tempfile::tempdir().unwrap();
+        let f = tmp.path().join("big.bin");
+        std::fs::write(&f, vec![0x5au8; (1 << 20) + 12345]).unwrap();
+        let digest = sha256_file(&f).unwrap();
+        assert_eq!(digest.len(), 64);
+        assert!(digest.chars().all(|c| c.is_ascii_hexdigit()));
+    }
+
+    #[test]
+    fn sha256_of_a_missing_file_is_an_error_not_a_panic() {
+        assert!(sha256_file(Path::new("/definitely/not/here.exe")).is_err());
+    }
+
+    #[test]
+    fn digests_compare_across_the_shapes_people_paste() {
+        let lower = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
+        assert!(digest_matches(lower, lower));
+        assert!(digest_matches(&lower.to_uppercase(), lower));
+        // certutil prints space-separated groups.
+        assert!(digest_matches("ba78 16bf 8f01 cfea", "ba7816bf8f01cfea"));
+        // Negative controls: a different digest, and an empty pin, which must
+        // never read as "matches everything".
+        assert!(!digest_matches(lower, &lower.replace("ba78", "ba79")));
+        assert!(!digest_matches("", lower));
+        assert!(!digest_matches("   ", lower));
+    }
+
+    #[test]
+    fn a_captive_portal_login_page_is_not_an_installer() {
+        // The case the size rule exists for: HTTP 200, 2 KB of HTML, saved as
+        // OllamaSetup.exe and then executed.
+        let err = installer_size_verdict(2_048).unwrap_err();
+        assert!(err.contains("2048"), "{err}");
+        assert!(err.to_lowercase().contains("will not run it"), "{err}");
+        assert!(installer_size_verdict(0).is_err());
+        // A real installer passes.
+        assert!(installer_size_verdict(570_000_000).is_ok());
+        assert!(installer_size_verdict(MIN_INSTALLER_BYTES).is_ok());
+    }
+
+    #[test]
+    fn only_a_valid_authenticode_status_reads_as_valid() {
+        assert_eq!(parse_authenticode_status("Valid\n"), SignatureVerdict::Valid);
+        assert_eq!(parse_authenticode_status("  valid  "), SignatureVerdict::Valid);
+        assert_eq!(parse_authenticode_status("NotSigned"), SignatureVerdict::Unsigned);
+        for bad in ["HashMismatch", "NotTrusted", "UnknownError", "NotSupportedFileFormat"] {
+            assert_eq!(
+                parse_authenticode_status(bad),
+                SignatureVerdict::Invalid,
+                "{bad} must not pass"
+            );
+        }
+        // Anything unreadable is Unknown, and Unknown is not Valid — the
+        // caller refuses on everything that is not Valid.
+        assert_eq!(parse_authenticode_status(""), SignatureVerdict::Unknown);
+        assert_eq!(parse_authenticode_status("\n\n"), SignatureVerdict::Unknown);
+        assert_eq!(
+            parse_authenticode_status("The term 'Get-AuthenticodeSignature' is not recognized"),
+            SignatureVerdict::Unknown
+        );
+    }
+
+    #[test]
+    fn a_truncated_download_is_refused_before_it_is_executed() {
+        // End to end over the parts that run off-Windows: a file that is too
+        // small never gets as far as the digest or the signature.
+        let tmp = tempfile::tempdir().unwrap();
+        let f = tmp.path().join("Setup.exe");
+        std::fs::write(&f, b"<html>captive portal</html>").unwrap();
+        let err = verify_downloaded_installer(&f, None, "LM Studio").unwrap_err();
+        assert!(err.to_lowercase().contains("too small"), "{err}");
+    }
+
+    #[test]
+    fn a_wrong_pinned_digest_refuses_and_shows_both_hashes() {
+        let tmp = tempfile::tempdir().unwrap();
+        let f = tmp.path().join("Setup.exe");
+        std::fs::write(&f, vec![0u8; MIN_INSTALLER_BYTES as usize + 1]).unwrap();
+        let err = verify_downloaded_installer(&f, Some("deadbeef"), "LM Studio").unwrap_err();
+        assert!(err.contains("deadbeef"), "{err}");
+        assert!(err.contains("expected") && err.contains("got"), "{err}");
+        assert!(err.contains("LM Studio"), "{err}");
+    }
+
+    #[test]
+    fn the_lmstudio_pin_is_either_absent_or_a_real_sha256() {
+        // Guard rail for whoever fills LMSTUDIO_INSTALLER_SHA256 in: a
+        // half-typed or truncated value there breaks every Windows install,
+        // and the failure would only ever show up on Windows.
+        if let Some(pin) = LMSTUDIO_INSTALLER_SHA256 {
+            let clean: String = pin.chars().filter(|c| !c.is_whitespace()).collect();
+            assert_eq!(clean.len(), 64, "pinned digest is not 64 hex chars: {pin}");
+            assert!(clean.chars().all(|c| c.is_ascii_hexdigit()), "not hex: {pin}");
+        }
+    }
 
     // ── PyTorch-Kanalwahl (W2-Befund 16.08., comfy_kitchen braucht 2.6+) ─
 
