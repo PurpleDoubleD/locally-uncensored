@@ -55,8 +55,15 @@ import tsx from 'react-syntax-highlighter/dist/esm/languages/prism/tsx'
 import typescript from 'react-syntax-highlighter/dist/esm/languages/prism/typescript'
 import yaml from 'react-syntax-highlighter/dist/esm/languages/prism/yaml'
 
-/** The grammars registered above, keyed by the name refractor knows them as. */
-const GRAMMARS: Record<string, unknown> = {
+/**
+ * The grammars registered above, keyed by the name refractor knows them as.
+ *
+ * Left unannotated on purpose: the imports above carry refractor's own `Syntax`
+ * type (see `src/types/react-syntax-highlighter.d.ts`), so inference hands
+ * `registerLanguage` a checked grammar. Widening this to `Record<string,
+ * unknown>` would only put the cast back.
+ */
+const GRAMMARS = {
   bash, batch, c, cpp, csharp, css, dart, diff, docker, go, graphql, groovy,
   hcl, ini, java, javascript, json, jsx, kotlin, less, lua, makefile, markdown,
   markup, php, powershell, python, r, ruby, rust, scss, sql, swift, toml, tsx,
