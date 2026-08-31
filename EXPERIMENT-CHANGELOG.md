@@ -161,3 +161,35 @@ Fünf Umsetzer, fünf Angreifer mit dem umgekehrten Auftrag. Ergebnis: **kein Pa
   IndexedDB") war **unbelegt** — `emitWrite` aus beiden Zweigen entfernt, alle Tests blieben grün.
 - **Cloud-Timeout:** bewacht alles *nach* dem Token, aber `getAccessToken()` läuft **davor** —
   ein hängender Tokenabruf verkeilt weiterhin.
+
+## Was das reparierte Typecheck-Gate freigelegt hat (Commit 44a0692a)
+
+Nachdem `npm run typecheck` (`tsc -b --force`) das erste Mal wirklich Dateien
+prüft, sank die repo-weite Fehlerzahl von **118 auf 2**. Entscheidend ist nicht
+die Zahl, sondern was in ihr steckte: die Meldungen waren **keine Typkosmetik,
+sondern echtes Fehlverhalten**, das seit Monaten unbemerkt lief.
+
+| # | Fundstelle | Ist (kaputt) | Soll |
+|---|---|---|---|
+| 1 | `src/hooks/useABCompare.ts:40` | liest `persona?.prompt` — Feld existiert nicht | A/B-Vergleich lief mit **leerem System-Prompt** |
+| 2 | `src/hooks/useKeyboardShortcuts.ts:35` | dasselbe tote Feld | Ctrl+N öffnete jeden Chat **ohne Persona** |
+| 3 | `src/api/ollama.ts:107,132` | `AbortSignal` entgegengenommen, nie an `localFetchStream` gereicht | **Stop brach die HTTP-Anfrage nicht ab**; Ollama generierte weiter (Audit-Muster M1) |
+| 4 | `src/components/ParticleField.tsx` | liest `PARTICLE_COUNTS` + `settings.particleDensity` — beide nicht vorhanden | **TypeError beim ersten Render** |
+| 5 | `src/stores/memoryStore.ts:765` | `maxChars` wurde vollständig ignoriert | Grenze greift |
+| 6 | `vite.config.ts:876` | `provider` verworfen | im Dev-Modus bekam **jedes Backend das Verzeichnis von LM Studio**; rekursive Listings kamen still einstufig zurück |
+| 7 | `src/stores/__tests__/stores.test.ts:233` | setzte tote Keys zurück | modelStore-Pull-State wurde zwischen Tests **nie** zurückgesetzt |
+
+Befund 3 ist der wichtigste: das Technik-Audit beschreibt unter M1 ein
+„Stop-Konzept, das nur die UI anhält". Hier ist der Beweis dafür im Code — die
+Funktion nahm das Signal an und warf es weg. Der Fix ist zweizeilig; gefunden
+hat ihn erst der reparierte Compiler, kein Test und kein Review.
+
+**Sauberkeitsnachweis des Pakets:** 0 neue `any`, 0 `as any`, 0 `@ts-ignore`,
+netto **ein `any` weniger**. Kein Testfall gelöscht — jede berührte Testdatei
+hält ihre Fallzahl oder gewinnt welche (netto **+17**). Verifikation: 21
+betroffene Testdateien, **726 Tests grün**.
+
+**Lehre für dieses Repo:** ein grünes Gate ist erst dann ein Gate, wenn belegt
+ist, dass es überhaupt etwas anschaut. Der Beweis lief hier über eine
+Sonde (`export const kaputt: number = "string"`), die `tsc --noEmit` mit Exit 0
+passierte. Solche Sonden gehören vor jedes neue Gate, nicht dahinter.
