@@ -18,12 +18,6 @@ use tokio::sync::Mutex as TokioMutex;
 use tauri::{AppHandle, Emitter};
 use tracing::{error, info, warn};
 
-#[cfg(target_os = "windows")]
-use std::os::windows::process::CommandExt;
-
-#[cfg(target_os = "windows")]
-const CREATE_NO_WINDOW: u32 = 0x08000000;
-
 // ─── Constants ───
 
 // 15 minutes. The pairing code the user types on the phone. Was 5 min, but it
@@ -69,13 +63,13 @@ pub struct RemotePermissions {
 ///
 /// Two halves fix that and both are needed: this conservative default (the
 /// server can no longer be more permissive than the panel claims) and the
-/// read-back — `start_remote_server` / `remote_server_status` now report the
-/// effective permissions so the panel can never drift from the server again
-/// (a paired phone may raise the three non-RCE scopes from the mobile
-/// permissions panel; the desktop now sees that).
+/// read-back — `start_remote_server` / `remote_server_status` report the
+/// effective permissions so the panel can never drift from the server again.
 ///
-/// `shell` stays off for the separate, stronger reason documented on the
-/// field: it is RCE-equivalent and desktop-controlled only.
+/// All four scopes are set on the desktop and nowhere else. `shell` always
+/// was, for the RCE-equivalent reason documented on the field; the other three
+/// joined it once it was clear that a paired device could POST them back on
+/// itself (see `merge_remote_permissions`).
 impl Default for RemotePermissions {
     fn default() -> Self {
         Self {
@@ -159,6 +153,32 @@ fn generate_passcode() -> String {
     format!("{:06}", rng.gen_range(0..1000000))
 }
 
+/// Compare a supplied pairing code against the live one without leaking how
+/// much of it was right.
+///
+/// `String`'s `==` stops at the first differing byte, so the reply time grows
+/// with the length of the correct prefix. On a LAN that difference is
+/// measurable, and it turns a 10^6 search into six 10-way searches. The
+/// lockout above makes that slow rather than impossible, which is a reason to
+/// close the oracle, not a substitute for closing it.
+///
+/// An empty stored code is never a match: it would otherwise pair anyone who
+/// sends an empty string to a server whose passcode has not been set yet.
+fn passcode_matches(supplied: &str, expected: &str) -> bool {
+    if expected.is_empty() {
+        return false;
+    }
+    let a = supplied.as_bytes();
+    let b = expected.as_bytes();
+    // Lengths are compared without branching on content; a wrong length is
+    // folded into the same accumulator as a wrong byte.
+    let mut diff: u8 = if a.len() == b.len() { 0 } else { 1 };
+    for i in 0..a.len().max(b.len()) {
+        diff |= a.get(i).copied().unwrap_or(0) ^ b.get(i).copied().unwrap_or(0);
+    }
+    diff == 0
+}
+
 fn generate_jwt(secret: &str, ip: &str, sub: &str, iat: u64) -> Result<String, String> {
     use jsonwebtoken::{encode, Header, EncodingKey};
     let exp = chrono_now_secs() + JWT_TTL_SECS;
@@ -189,39 +209,75 @@ fn chrono_now_secs() -> u64 {
         .as_secs()
 }
 
-/// Extract the best-guess client IP: prefer reverse-proxy headers (Cloudflare
-/// Tunnel sets these), fall back to the direct connection address on LAN.
+/// The client IP this server is willing to believe.
 ///
 /// Bug #3: on LAN there is no reverse proxy, so both XFF and X-Real-IP are
 /// empty and every client collapsed into the "unknown" bucket — sharing one
 /// rate-limit window and appearing as the same row in Connected Devices.
+///
+/// The exactly ONE reverse proxy that can ever sit in front of this server is
+/// cloudflared, and it runs on this machine and reaches us over loopback.
+/// Every other peer is talking to us directly, so a forwarding header from a
+/// non-loopback peer is a value the client typed itself. Trusting it there was
+/// not cosmetic: `handle_auth` deduplicates Connected Devices on this string,
+/// and a device row IS a session (auth_middleware only honours a token whose
+/// device is still listed). A second paired device that claimed the first
+/// one's address therefore took over its row — hiding itself from the desktop
+/// list AND ending the legitimate device's session in one request.
+///
+/// Even behind the tunnel the header is only half trusted: Cloudflare APPENDS
+/// the visitor to any `X-Forwarded-For` the visitor already sent, so the first
+/// hop is attacker-written and the LAST one is the proxy's. `CF-Connecting-IP`
+/// is a single value the edge overwrites, so it is preferred.
+///
+/// No peer address at all means we cannot tell whether a proxy is in front of
+/// us, so nothing is trusted.
 fn client_ip(headers: &HeaderMap, socket: Option<SocketAddr>) -> String {
-    if let Some(ip) = headers.get("x-forwarded-for")
-        .and_then(|v| v.to_str().ok())
-        .and_then(|s| s.split(',').next())
-        .map(|s| s.trim())
-        .filter(|s| !s.is_empty())
-    {
-        return ip.to_string()
+    let Some(addr) = socket else {
+        return "unknown".to_string();
+    };
+    if addr.ip().is_loopback() {
+        if let Some(ip) = headers.get("cf-connecting-ip")
+            .and_then(|v| v.to_str().ok())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
+            return ip.to_string()
+        }
+        if let Some(ip) = headers.get("x-forwarded-for")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|s| s.rsplit(',').next())
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+        {
+            return ip.to_string()
+        }
+        if let Some(ip) = headers.get("x-real-ip")
+            .and_then(|v| v.to_str().ok())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
+            return ip.to_string()
+        }
     }
-    if let Some(ip) = headers.get("x-real-ip")
-        .and_then(|v| v.to_str().ok())
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-    {
-        return ip.to_string()
-    }
-    if let Some(addr) = socket {
-        return addr.ip().to_string()
-    }
-    "unknown".to_string()
+    addr.ip().to_string()
 }
 
 // ─── Auth middleware ───
 
+/// Which paired device is making this request — the `sub` of its JWT, attached
+/// to the request by `auth_middleware`.
+///
+/// "Authenticated" used to be the only thing a handler could know, so every
+/// paired device looked alike and `/remote-api/disconnect` accepted the id of
+/// ANY row in the list. Handlers that act on a specific device read this
+/// instead of the id in the body.
+#[derive(Clone)]
+struct CallerDevice(String);
+
 async fn auth_middleware(
     AxumState(state): AxumState<RemoteState>,
-    req: Request,
+    mut req: Request,
     next: Next,
 ) -> Response {
     let path = req.uri().path().to_string();
@@ -322,6 +378,10 @@ async fn auth_middleware(
                 None
             };
             drop(jwt_secret);
+            // Identity for the handlers below. Set only on the path where the
+            // token validated AND its device is still listed, so a handler
+            // that finds it can act on it without re-checking either.
+            req.extensions_mut().insert(CallerDevice(claims.sub.clone()));
             let mut response = next.run(req).await;
             if let Some(fresh) = refreshed {
                 let cookie = format!(
@@ -370,6 +430,35 @@ struct AuthResponse {
     token: String,
 }
 
+/// Register (or refresh) the row for a device that just paired.
+///
+/// Dedup by IP: if this IP is already registered (reauth, refresh, regenerated
+/// passcode), update the existing entry in place instead of stacking a second
+/// ghost device. Also auto-prune entries that have been silent for more than
+/// the JWT TTL — the client's token would be invalid anyway.
+///
+/// The key this collapses on has to be an address the CLIENT cannot choose;
+/// see `client_ip`. Taking over another device's row is not a display glitch,
+/// it ends that device's session.
+///
+/// Split out of `handle_auth` so the dedup can be exercised without a server.
+fn upsert_device(
+    devices: &mut Vec<ConnectedDevice>,
+    device_id: String,
+    ip: String,
+    user_agent: String,
+    now: u64,
+) {
+    devices.retain(|d| now.saturating_sub(d.last_seen) < JWT_TTL_SECS);
+    if let Some(existing) = devices.iter_mut().find(|d| d.ip == ip) {
+        existing.id = device_id;
+        existing.user_agent = user_agent;
+        existing.last_seen = now;
+    } else {
+        devices.push(ConnectedDevice { id: device_id, ip, user_agent, last_seen: now });
+    }
+}
+
 async fn handle_auth(
     AxumState(state): AxumState<RemoteState>,
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
@@ -414,7 +503,7 @@ async fn handle_auth(
         }
 
         // Verify passcode
-        if body.passcode != pc.code {
+        if !passcode_matches(&body.passcode, &pc.code) {
             let entry = pc.failed_attempts.entry(rate_key.clone()).or_insert((0, 0));
             entry.0 += 1;
             if entry.0 >= MAX_FAILED_ATTEMPTS {
@@ -444,26 +533,9 @@ async fn handle_auth(
     match generate_jwt(&jwt_secret, &ip, &device_id, now) {
         Ok(token) => {
             drop(jwt_secret);
-            // Dedup by IP: if this IP is already registered (reauth, refresh,
-            // regenerated passcode), update the existing entry in place
-            // instead of stacking a second ghost device. Also auto-prune
-            // entries that have been silent for more than the JWT TTL
-            // (the client's token would be invalid anyway).
             let now = chrono_now_secs();
             let mut devices = state.connected_devices.lock().await;
-            devices.retain(|d| now.saturating_sub(d.last_seen) < JWT_TTL_SECS);
-            if let Some(existing) = devices.iter_mut().find(|d| d.ip == ip) {
-                existing.id = device_id.clone();
-                existing.user_agent = user_agent.clone();
-                existing.last_seen = now;
-            } else {
-                devices.push(ConnectedDevice {
-                    id: device_id,
-                    ip: ip.clone(),
-                    user_agent,
-                    last_seen: now,
-                });
-            }
+            upsert_device(&mut devices, device_id, ip.clone(), user_agent, now);
             drop(devices);
 
             // Bug #13: cookie lifetime must match the JWT TTL. Otherwise the
@@ -2237,9 +2309,10 @@ button{-webkit-appearance:none;appearance:none}
   };
 
   // Cached copy of the desktop's RemotePermissions (filesystem / downloads /
-  // process_control). Loaded from /remote-api/permissions on demand and
-  // updated via POST when the user toggles. Sampling knobs (temperature etc.)
-  // are NOT exposed here — user explicitly asked for permissions only.
+  // process_control). Read-only: loaded from /remote-api/permissions on
+  // demand and displayed. The server ignores a permissions POST from a paired
+  // device, so there is nothing to write back. Sampling knobs (temperature
+  // etc.) are NOT exposed here — user explicitly asked for permissions only.
   var remotePerms = { filesystem: false, downloads: false, process_control: false };
 
   // ── Codex prompt (agentic on mobile) ──
@@ -3840,8 +3913,11 @@ button{-webkit-appearance:none;appearance:none}
 
   // ── Settings sheet — Remote Permissions only ──
   // Mirrors the desktop's Settings → Remote Access → Permissions section.
-  // Reads/writes /remote-api/permissions. Each toggle gates a category of
-  // endpoints server-side (see proxy_ollama / proxy_comfyui in remote.rs).
+  // READS /remote-api/permissions; it cannot write. Each row gates a category
+  // of endpoints server-side (see proxy_ollama / proxy_comfyui in remote.rs),
+  // and the server ignores a permissions POST from a paired device — a scope a
+  // phone can grant itself is not a scope. The rows are shown anyway because
+  // this is the only place the phone can see what it is allowed to do.
   var PERMISSION_META = [
     {key:'filesystem',      label:'Filesystem',       desc:'Agent can read/write files + run code on the desktop.'},
     {key:'downloads',       label:'Downloads',        desc:'Agent can trigger model pulls / installs (Ollama + ComfyUI).'},
@@ -3864,13 +3940,6 @@ button{-webkit-appearance:none;appearance:none}
       return remotePerms;
     });
   }
-  function saveRemotePerms(){
-    return fetch('/remote-api/permissions',{
-      method:'POST',
-      headers:{'Content-Type':'application/json','Authorization':'Bearer '+TOKEN},
-      body: JSON.stringify(remotePerms)
-    });
-  }
 
   window._openSettingsSheet = function(){
     var overlay = document.createElement('div');
@@ -3886,13 +3955,13 @@ button{-webkit-appearance:none;appearance:none}
                    '<div class="perm-desc">'+H(m.desc)+'</div>' +
                  '</div>' +
                  '<span class="plug-switch">' +
-                   '<input type="checkbox" data-pk="'+m.key+'"'+(on?' checked':'')+'>' +
+                   '<input type="checkbox" data-pk="'+m.key+'" disabled'+(on?' checked':'')+'>' +
                    '<span class="plug-switch-track"></span>' +
                  '</span>' +
                '</label>';
       }).join('');
       return '<div class="settings-section-label">Remote Permissions</div>' +
-             '<div class="perm-note">These control what <em>any</em> mobile connected to this session is allowed to do on the desktop.</div>' +
+             '<div class="perm-note">What this session is allowed to do on the desktop. Set on the desktop, in Settings &rarr; Remote Access &mdash; a phone cannot grant itself access.</div>' +
              rows;
     }
 
@@ -3911,20 +3980,6 @@ button{-webkit-appearance:none;appearance:none}
       var body = overlay.querySelector('#settings-body');
       if(!body) return;
       body.innerHTML = renderBody();
-      var boxes = body.querySelectorAll('input[type=checkbox][data-pk]');
-      for(var i=0;i<boxes.length;i++){
-        (function(cb){
-          cb.addEventListener('change', function(){
-            var key = cb.getAttribute('data-pk');
-            remotePerms[key] = cb.checked;
-            saveRemotePerms().catch(function(e){
-              cb.checked = !cb.checked;
-              remotePerms[key] = cb.checked;
-              alert('Could not save: '+(e && e.message || e));
-            });
-          });
-        })(boxes[i]);
-      }
     }).catch(function(e){
       var body = overlay.querySelector('#settings-body');
       if(body) body.innerHTML = '<div class="perm-loading" style="color:var(--error)">Failed to load: '+H(String(e && e.message || e))+'</div>';
@@ -4784,11 +4839,18 @@ button{-webkit-appearance:none;appearance:none}
 
 // ─── QR Code generation ───
 
+/// Deliberately carries NO passcode.
+///
+/// The desktop's `remote_qr_code` command still returns one — that side is the
+/// person standing at the machine. Over HTTP the caller is by definition a
+/// device that already paired, and handing it the code that pairs the NEXT
+/// device makes Disconnect meaningless: a device removed from the list could
+/// re-pair itself with a code it had already read. The QR image and the URL
+/// are things the caller necessarily knows; the code is not.
 #[derive(Serialize)]
 struct QrResponse {
     qr_png_base64: String,
     url: String,
-    passcode: String,
 }
 
 async fn handle_qr(AxumState(state): AxumState<RemoteState>) -> Json<QrResponse> {
@@ -4808,7 +4870,7 @@ async fn handle_qr(AxumState(state): AxumState<RemoteState>) -> Json<QrResponse>
     // image if the QR encoder rejects the URL.
     let qr = match qrcode::QrCode::new(url.as_bytes()) {
         Ok(q) => q,
-        Err(_) => return Json(QrResponse { qr_png_base64: String::new(), url, passcode: String::new() }),
+        Err(_) => return Json(QrResponse { qr_png_base64: String::new(), url }),
     };
     let qr_image = qr.render::<image::Luma<u8>>()
         .quiet_zone(true)
@@ -4820,12 +4882,7 @@ async fn handle_qr(AxumState(state): AxumState<RemoteState>) -> Json<QrResponse>
 
     let qr_base64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &png_bytes);
 
-    let pc = state.passcode.lock().await;
-    Json(QrResponse {
-        qr_png_base64: qr_base64,
-        url,
-        passcode: pc.code.clone(),
-    })
+    Json(QrResponse { qr_png_base64: qr_base64, url })
 }
 
 // ─── Devices ───
@@ -4840,13 +4897,42 @@ struct DisconnectRequest {
     id: String,
 }
 
+/// Remove the CALLER's own row, and only that one.
+///
+/// The endpoint used to remove whatever id the body named. Because a device
+/// row is a session — `auth_middleware` rejects a token whose device is no
+/// longer listed — that made "disconnect" a weapon rather than a revocation:
+/// any paired phone could end every other phone's session, including the one
+/// the desktop owner was using, and the desktop's own list showed nothing
+/// unusual afterwards. Removing SOMEONE ELSE is a desktop-side decision and
+/// stays with the `disconnect_remote_device` command.
+///
+/// Split out so the rule can be tested without a server.
+fn remove_own_device(
+    devices: &mut Vec<ConnectedDevice>,
+    caller_id: &str,
+    requested_id: &str,
+) -> StatusCode {
+    if requested_id != caller_id {
+        return StatusCode::FORBIDDEN;
+    }
+    devices.retain(|d| d.id != caller_id);
+    StatusCode::OK
+}
+
 async fn handle_disconnect(
     AxumState(state): AxumState<RemoteState>,
+    caller: Option<axum::Extension<CallerDevice>>,
     Json(body): Json<DisconnectRequest>,
 ) -> StatusCode {
+    // The extension is set by auth_middleware on every request that got past
+    // it, and this route is behind it — so a missing one means the caller was
+    // never identified and must not act on the list at all.
+    let Some(axum::Extension(CallerDevice(caller_id))) = caller else {
+        return StatusCode::UNAUTHORIZED;
+    };
     let mut devices = state.connected_devices.lock().await;
-    devices.retain(|d| d.id != body.id);
-    StatusCode::OK
+    remove_own_device(&mut devices, &caller_id, &body.id)
 }
 
 // ─── Dispatch config (model + system prompt for mobile) ───
@@ -4903,39 +4989,56 @@ async fn handle_get_permissions(AxumState(state): AxumState<RemoteState>) -> Jso
     Json(perms.clone())
 }
 
-/// Merge a remote-supplied permissions update over the current state. The
-/// `shell` (RCE-equivalent) permission is NEVER raised here — only the trusted
-/// desktop `set_remote_permissions` command may grant it — so an authenticated
-/// client can't `POST {"shell":true}` and self-escalate to arbitrary command
-/// execution, which would defeat the desktop's OFF-by-default toggle.
+/// What a remote-supplied permissions update is allowed to change: nothing.
+///
+/// `shell` was already desktop-controlled, for the RCE-equivalent reason
+/// documented on the field. The other three were not, and "authenticated" is
+/// the only rung on this ladder — so any paired phone could
+/// `POST {"filesystem":true,"downloads":true,"process_control":true}` and hand
+/// ITSELF the workspace read/write, the screenshots, the model pull/delete and
+/// the engine start/stop that the desktop panel had deliberately left off. A
+/// permission a device can grant itself is not a permission.
+///
+/// The endpoint survives so a phone can READ back what it may do (the desktop
+/// is where it is decided); the body is data the server does not act on.
 fn merge_remote_permissions(current: &RemotePermissions, body: RemotePermissions) -> RemotePermissions {
-    RemotePermissions {
-        filesystem: body.filesystem,
-        downloads: body.downloads,
-        process_control: body.process_control,
-        shell: current.shell, // desktop-controlled only — ignore whatever the client sent
-    }
+    let _ = body;
+    current.clone()
 }
 
 async fn handle_set_permissions(
     AxumState(state): AxumState<RemoteState>,
     Json(body): Json<RemotePermissions>,
-) -> StatusCode {
+) -> Json<RemotePermissions> {
     let mut perms = state.permissions.lock().await;
     let merged = merge_remote_permissions(&perms, body);
     *perms = merged;
-    StatusCode::OK
+    // Answer with what is actually in force, so a client that toggled
+    // something can show the truth instead of its own optimistic guess.
+    Json(perms.clone())
 }
 
 // ─── Server lifecycle (Tauri commands) ───
 
 use tokio::task::JoinHandle;
 
-/// Create a TCP listener with SO_REUSEADDR set, so the port can be re-bound
-/// immediately after a previous process was hard-killed (Windows otherwise
-/// leaves the socket in a zombie state until the OS reclaims it, which
-/// breaks Dispatch → Stop → Dispatch cycles and any second run after a
-/// crash).
+/// Create the listener for the pairing port, with the address-reuse flag each
+/// OS actually needs.
+///
+/// The two flags share a name and mean opposite things:
+///
+/// * Unix `SO_REUSEADDR` only skips the TIME_WAIT wait on a port whose old
+///   connections are still draining. It cannot take a live listener away from
+///   another process, so it is safe and it is what keeps
+///   Dispatch → Stop → Dispatch working after a hard kill.
+/// * Windows `SO_REUSEADDR` is a hijack primitive: any process running as this
+///   user may bind the same address and the LAST binder receives the incoming
+///   connections. On 0.0.0.0:11435 that is the pairing socket, so a local
+///   process could sit in front of the phone and collect passcode attempts.
+///   The comment that used to stand here claimed the opposite. Windows gets
+///   `SO_EXCLUSIVEADDRUSE` instead, which is the flag that keeps the address
+///   ours; the port is still released as soon as this process dies, so the
+///   rebind-after-crash case the reuse flag was added for is unaffected.
 fn build_reusable_listener(addr: SocketAddr) -> std::io::Result<tokio::net::TcpListener> {
     use socket2::{Domain, Protocol, Socket, Type};
     let domain = match addr {
@@ -4943,13 +5046,51 @@ fn build_reusable_listener(addr: SocketAddr) -> std::io::Result<tokio::net::TcpL
         SocketAddr::V6(_) => Domain::IPV6,
     };
     let socket = Socket::new(domain, Type::STREAM, Some(Protocol::TCP))?;
+    #[cfg(not(windows))]
     socket.set_reuse_address(true)?;
+    #[cfg(windows)]
+    set_exclusive_addr_use(&socket)?;
     socket.set_nonblocking(true)?;
-    // Windows SO_EXCLUSIVEADDRUSE defaults to ON for privileged ports but
-    // is off for our port. REUSEADDR is enough here.
     socket.bind(&addr.into())?;
     socket.listen(1024)?;
     tokio::net::TcpListener::from_std(socket.into())
+}
+
+/// `setsockopt(SOL_SOCKET, SO_EXCLUSIVEADDRUSE, 1)` — no other process may
+/// bind this address while we hold it, whatever flags it passes.
+///
+/// socket2 0.5 has no wrapper for it and the winsock feature of `windows-sys`
+/// is not enabled for this crate, so the one call is declared here. Same
+/// approach `process_util` takes for `kill`/`setpgid`: a two-line binding
+/// rather than a dependency. `ws2_32` is already linked into every Windows
+/// build by std.
+#[cfg(windows)]
+fn set_exclusive_addr_use(socket: &socket2::Socket) -> std::io::Result<()> {
+    use std::os::windows::io::AsRawSocket;
+
+    const SOL_SOCKET: i32 = 0xffff;
+    // winsock2.h defines it as ~SO_REUSEADDR.
+    const SO_EXCLUSIVEADDRUSE: i32 = !0x0004;
+
+    #[link(name = "ws2_32")]
+    extern "system" {
+        fn setsockopt(s: usize, level: i32, optname: i32, optval: *const u8, optlen: i32) -> i32;
+    }
+
+    let on: i32 = 1;
+    let rc = unsafe {
+        setsockopt(
+            socket.as_raw_socket() as usize,
+            SOL_SOCKET,
+            SO_EXCLUSIVEADDRUSE,
+            &on as *const i32 as *const u8,
+            std::mem::size_of::<i32>() as i32,
+        )
+    };
+    if rc != 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    Ok(())
 }
 
 /// Stored in AppState — holds the running remote server handle
@@ -4960,7 +5101,17 @@ pub struct RemoteServer {
     pub passcode: Arc<TokioMutex<PasscodeState>>,
     pub permissions: Arc<TokioMutex<RemotePermissions>>,
     pub connected_devices: Arc<TokioMutex<Vec<ConnectedDevice>>>,
-    pub tunnel_pid: Option<u32>,
+    /// The cloudflared process itself, not just its pid.
+    ///
+    /// It used to be a bare `Option<u32>`, killed only when the user pressed
+    /// Stop. Quitting the app left the quick tunnel running, so a public
+    /// `*.trycloudflare.com` address kept pointing at 127.0.0.1:11435 — and
+    /// the next launch bound that same port, which handed the survivor the NEW
+    /// session while `tunnel_status` reported the tunnel as off. Holding the
+    /// `Child` is what lets `Drop` and every stop path reap it (see
+    /// `kill_tunnel_child`), and `start_remote_server` sweeps the ones that a
+    /// hard kill still manages to orphan.
+    pub tunnel_child: Option<std::process::Child>,
     pub tunnel_url: Arc<TokioMutex<Option<String>>>,
     pub dispatched_model: Arc<TokioMutex<String>>,
     pub dispatched_system_prompt: Arc<TokioMutex<String>>,
@@ -4979,10 +5130,43 @@ impl RemoteServer {
             })),
             permissions: Arc::new(TokioMutex::new(RemotePermissions::default())),
             connected_devices: Arc::new(TokioMutex::new(Vec::new())),
-            tunnel_pid: None,
+            tunnel_child: None,
             tunnel_url: Arc::new(TokioMutex::new(None)),
             dispatched_model: Arc::new(TokioMutex::new(String::new())),
             dispatched_system_prompt: Arc::new(TokioMutex::new(String::new())),
+        }
+    }
+
+    /// The pid for status/logging. `None` means no tunnel process is held.
+    pub fn tunnel_pid(&self) -> Option<u32> {
+        self.tunnel_child.as_ref().map(|c| c.id())
+    }
+}
+
+/// Kill and reap the tunnel process.
+///
+/// `kill_tree` and not `Child::kill`: it walks whatever cloudflared started,
+/// escalates SIGTERM to SIGKILL on its own, and reaps — the old kill-by-pid
+/// path did none of the three, so a stopped tunnel stayed in the process table
+/// as a zombie for the rest of the app's life.
+fn kill_tunnel_child(mut child: std::process::Child) {
+    let pid = child.id();
+    let _ = crate::process_util::kill_tree(&mut child);
+    println!("[Tunnel] Stopped (PID {})", pid);
+}
+
+/// Last line of defence for the public tunnel.
+///
+/// Tauri v2 does not reliably drop managed state on `app.exit(0)`, which is
+/// why `AppState` has an explicit shutdown path — but that path lives outside
+/// this module and does not reach the tunnel. On the quit paths where Drop
+/// DOES run, this closes the tunnel; on Windows the kill-on-close job object
+/// (`tie_child_to_app_lifetime`) covers the rest, and on Unix a hard kill is
+/// caught by the startup sweep in `start_remote_server`.
+impl Drop for RemoteServer {
+    fn drop(&mut self) {
+        if let Some(child) = self.tunnel_child.take() {
+            kill_tunnel_child(child);
         }
     }
 }
@@ -5027,6 +5211,49 @@ fn ensure_lan_firewall_rule(port: u16) {
 
 #[cfg(not(target_os = "windows"))]
 fn ensure_lan_firewall_rule(_port: u16) {}
+
+/// Is this a cloudflared quick tunnel pointed at OUR port?
+///
+/// Narrow on purpose. A user may run cloudflared for their own reasons, and a
+/// tunnel to some other port is none of our business — the only process this
+/// may ever match is one that publishes the port we are about to bind.
+///
+/// Pure so the matching can be tested without a process table.
+fn is_stale_tunnel_process(process_name: &str, cmd: &[String], port: u16) -> bool {
+    let name = process_name.to_ascii_lowercase();
+    if name != "cloudflared" && name != "cloudflared.exe" {
+        return false;
+    }
+    let joined = cmd.join(" ");
+    joined.contains(&format!("127.0.0.1:{port}")) || joined.contains(&format!("localhost:{port}"))
+}
+
+/// Kill cloudflared processes left over from a previous run that still publish
+/// this port, and report how many.
+///
+/// This is the half of the fix that a hard kill cannot defeat. Without it, a
+/// tunnel that survived the last quit keeps its public `*.trycloudflare.com`
+/// address and starts serving the session we are about to start — a server the
+/// user believes is LAN-only, reachable from the internet, with the app's own
+/// tunnel indicator reading OFF because this process never started it.
+fn kill_orphaned_tunnels(port: u16) -> usize {
+    use sysinfo::{ProcessesToUpdate, System};
+    let mut sys = System::new();
+    sys.refresh_processes(ProcessesToUpdate::All, true);
+    let mut killed = 0usize;
+    for process in sys.processes().values() {
+        let name = process.name().to_string_lossy().to_string();
+        let cmd: Vec<String> = process
+            .cmd()
+            .iter()
+            .map(|c| c.to_string_lossy().to_string())
+            .collect();
+        if is_stale_tunnel_process(&name, &cmd, port) && process.kill() {
+            killed += 1;
+        }
+    }
+    killed
+}
 
 #[tauri::command]
 pub async fn start_remote_server(
@@ -5144,11 +5371,24 @@ pub async fn start_remote_server(
     // (Critical: `axum::serve(...).await.unwrap()` previously aborted the
     // whole process on bind failure.)
     //
-    // Robust bind: set SO_REUSEADDR so a zombie socket left over from a
-    // previous hard-killed Tauri process doesn't block subsequent Dispatch
-    // clicks. Without this, a single crash of `locally-uncensored.exe`
-    // leaves port 11435 in a TIME_WAIT-ish state for ~4 minutes on Windows
-    // and every new Dispatch fails with "Server stopped".
+    // Robust bind: a zombie socket left over from a previous hard-killed Tauri
+    // process must not block subsequent Dispatch clicks — without that, a
+    // single crash of `locally-uncensored.exe` left port 11435 unbindable for
+    // ~4 minutes and every new Dispatch failed with "Server stopped". The flag
+    // that buys it differs per OS and one of the two is a hijack primitive;
+    // `build_reusable_listener` documents which is which.
+
+    // Before anything listens on this port again: no tunnel from an earlier
+    // run gets to inherit this session. A quick tunnel that outlived its app
+    // is still publishing 127.0.0.1:11435 to the internet, and the moment we
+    // bind, it is publishing US — silently, with the tunnel indicator off,
+    // because this process never started it.
+    let swept = kill_orphaned_tunnels(port);
+    if swept > 0 {
+        println!("[Tunnel] Killed {swept} orphaned cloudflared tunnel(s) on port {port}");
+        warn!(count = swept, port = port, "orphaned cloudflared tunnel(s) killed before bind");
+    }
+
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
     println!("[Remote] Server starting on {}", addr);
     info!(port = port, "remote server connect");
@@ -5255,25 +5495,14 @@ pub async fn restart_remote_server(
 pub async fn stop_remote_server(
     state: tauri::State<'_, crate::state::AppState>,
 ) -> Result<(), String> {
-    let (handle, tunnel_pid, tunnel_url_arc) = {
+    let (handle, tunnel_child, tunnel_url_arc) = {
         let mut remote = state.remote.lock().map_err(|e| e.to_string())?;
-        (remote.handle.take(), remote.tunnel_pid.take(), remote.tunnel_url.clone())
+        (remote.handle.take(), remote.tunnel_child.take(), remote.tunnel_url.clone())
     };
 
     // Stop tunnel if running
-    if let Some(pid) = tunnel_pid {
-        #[cfg(windows)]
-        {
-            let mut kill_cmd = std::process::Command::new("taskkill");
-            kill_cmd.args(["/pid", &pid.to_string(), "/T", "/F"]);
-            kill_cmd.creation_flags(CREATE_NO_WINDOW);
-            let _ = kill_cmd.output();
-        }
-        #[cfg(not(windows))]
-        {
-            let _ = std::process::Command::new("kill").arg(pid.to_string()).output();
-        }
-        println!("[Tunnel] Stopped");
+    if let Some(child) = tunnel_child {
+        kill_tunnel_child(child);
     }
     {
         let mut turl = tunnel_url_arc.lock().await;
@@ -5300,7 +5529,7 @@ pub async fn remote_server_status(
             remote.port,
             remote.passcode.clone(),
             remote.tunnel_url.clone(),
-            remote.tunnel_pid,
+            remote.tunnel_pid(),
             remote.permissions.clone(),
         )
     };
@@ -5592,26 +5821,33 @@ pub async fn start_tunnel(
         println!("[Tunnel] Downloaded cloudflared to {:?}", cf_path);
     }
 
-    // Start cloudflared tunnel (hidden — no terminal window for end users)
+    // Start cloudflared tunnel (hidden — no terminal window for end users).
+    // `spawn_piped` gives it its own process group on Unix (so `kill_tree`
+    // reaches anything it starts) and suppresses the console window on
+    // Windows, exactly like every other child this app spawns.
     let mut cmd = std::process::Command::new(&cf_path);
     // 127.0.0.1 (not "localhost") avoids a ~2 s IPv6 (::1) connect detour on
     // some Windows boxes before cloudflared falls back to IPv4 (aldrich 2026-06).
-    cmd.args(["tunnel", "--url", &format!("http://127.0.0.1:{}", port)])
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped());
-    #[cfg(target_os = "windows")]
-    cmd.creation_flags(CREATE_NO_WINDOW);
-    let child = cmd.spawn()
+    cmd.args(["tunnel", "--url", &format!("http://127.0.0.1:{}", port)]);
+    let mut child = crate::process_util::spawn_piped(cmd)
         .map_err(|e| {
             error!(error = %e, "cloudflared tunnel spawn failed");
             format!("Failed to start cloudflared: {}", os_error::english(&e))
         })?;
 
     let pid = child.id();
+    // The tunnel is the one child whose survival is a security event and not
+    // just a leak: it publishes this machine on the internet. On Windows this
+    // puts it in the app's kill-on-close job object, so the OS takes it down
+    // even when nothing in this process gets to run a shutdown path.
+    crate::commands::process::tie_child_to_app_lifetime(pid);
     info!(pid = pid, port = port, "tunnel started");
-    let stderr = match child.stderr {
+    let stderr = match child.stderr.take() {
         Some(s) => s,
-        None => return Err("cloudflared had no stderr handle".into()),
+        None => {
+            kill_tunnel_child(child);
+            return Err("cloudflared had no stderr handle".into());
+        }
     };
     println!("[Tunnel] cloudflared started (PID {}), tunneling localhost:{}", pid, port);
 
@@ -5674,18 +5910,6 @@ pub async fn start_tunnel(
         }
     }
 
-    // Store tunnel PID
-    {
-        let mut remote = state.remote.lock().map_err(|e| e.to_string())?;
-        remote.tunnel_pid = Some(pid);
-    }
-
-    // Store tunnel URL in shared state (so axum handlers see it)
-    {
-        let mut turl = tunnel_url_arc.lock().await;
-        *turl = if url.is_empty() { None } else { Some(url.clone()) };
-    }
-
     if url.is_empty() {
         // #29: previously we returned `Ok("Tunnel started but URL not yet
         // available...")` here, which the frontend stored as `tunnelUrl`
@@ -5693,40 +5917,57 @@ pub async fn start_tunnel(
         // sentence instead of a URL. Return Err so `startTunnel()` in the
         // store keeps `tunnelActive=false`, the QR falls back to the LAN
         // URL, and the user sees a real reason in the error chip.
+        //
+        // The process goes with the error. cloudflared may still print its URL
+        // a minute later and go live, and reporting a failure the caller
+        // records as `tunnelActive=false` while leaving a live public tunnel
+        // behind is exactly the state this whole area is being fixed for.
         warn!(pid = pid, "tunnel URL did not appear within 15s");
-        Err(format!(
+        kill_tunnel_child(child);
+        {
+            let mut turl = tunnel_url_arc.lock().await;
+            *turl = None;
+        }
+        return Err(format!(
             "Cloudflare tunnel started but no public URL appeared within 15 s (cloudflared PID {}). \
              This usually means cloudflared can't reach Cloudflare's edge — check firewall / VPN, \
              then click Restart. LAN dispatch still works in the meantime.",
             pid
-        ))
-    } else {
-        Ok(url)
+        ));
     }
+
+    // Store the tunnel process. Held as a `Child`, so every stop path and the
+    // `Drop` on `RemoteServer` can actually reap it. Anything already in the
+    // slot is killed rather than dropped — dropping a `Child` does not kill it,
+    // it just forgets it, which is how the leak this fixes started.
+    let displaced = {
+        let mut remote = state.remote.lock().map_err(|e| e.to_string())?;
+        remote.tunnel_child.replace(child)
+    };
+    if let Some(old) = displaced {
+        kill_tunnel_child(old);
+    }
+
+    // Store tunnel URL in shared state (so axum handlers see it)
+    {
+        let mut turl = tunnel_url_arc.lock().await;
+        *turl = Some(url.clone());
+    }
+
+    Ok(url)
 }
 
 #[tauri::command]
 pub async fn stop_tunnel(
     state: tauri::State<'_, crate::state::AppState>,
 ) -> Result<(), String> {
-    let (pid, tunnel_url_arc) = {
+    let (child, tunnel_url_arc) = {
         let mut remote = state.remote.lock().map_err(|e| e.to_string())?;
-        (remote.tunnel_pid.take(), remote.tunnel_url.clone())
+        (remote.tunnel_child.take(), remote.tunnel_url.clone())
     };
 
-    if let Some(pid) = pid {
-        #[cfg(windows)]
-        {
-            let mut kill_cmd = std::process::Command::new("taskkill");
-            kill_cmd.args(["/pid", &pid.to_string(), "/T", "/F"]);
-            kill_cmd.creation_flags(CREATE_NO_WINDOW);
-            let _ = kill_cmd.output();
-        }
-        #[cfg(not(windows))]
-        {
-            let _ = std::process::Command::new("kill").arg(pid.to_string()).output();
-        }
-        println!("[Tunnel] Stopped (PID {})", pid);
+    if let Some(child) = child {
+        kill_tunnel_child(child);
     }
 
     {
@@ -5743,7 +5984,7 @@ pub async fn tunnel_status(
 ) -> Result<serde_json::Value, String> {
     let (pid, tunnel_url_arc) = {
         let remote = state.remote.lock().map_err(|e| e.to_string())?;
-        (remote.tunnel_pid, remote.tunnel_url.clone())
+        (remote.tunnel_pid(), remote.tunnel_url.clone())
     };
     let turl = tunnel_url_arc.lock().await;
     Ok(serde_json::json!({
@@ -6097,25 +6338,456 @@ mod remote_path_tests {
     }
 
     #[test]
-    fn remote_cannot_raise_shell_via_permissions_endpoint() {
-        // SECURITY: an authenticated client POSTing {"shell":true} must NOT be
-        // able to self-grant the RCE-class shell permission.
+    fn a_paired_device_cannot_raise_any_permission() {
+        // SECURITY: an authenticated client POSTing every scope true must not
+        // move a single one of them. "Authenticated" is the only rung on this
+        // ladder, so a scope a device can set is a scope with no gate at all —
+        // it would hand itself the workspace, the screenshots, the model
+        // pull/delete, the engine start/stop and (once) arbitrary commands.
         let current = super::RemotePermissions { filesystem: false, downloads: false, process_control: false, shell: false };
         let body = super::RemotePermissions { filesystem: true, downloads: true, process_control: true, shell: true };
         let merged = super::merge_remote_permissions(&current, body);
-        assert!(merged.filesystem && merged.downloads && merged.process_control, "non-RCE perms apply");
+        assert!(!merged.filesystem, "remote bridge must NOT be able to grant filesystem");
+        assert!(!merged.downloads, "remote bridge must NOT be able to grant downloads");
+        assert!(!merged.process_control, "remote bridge must NOT be able to grant process_control");
         assert!(!merged.shell, "remote bridge must NOT be able to grant shell");
     }
 
     #[test]
-    fn remote_merge_preserves_desktop_set_shell() {
-        // Desktop enabled shell; a later remote update that omits/clears it must
-        // NOT silently revoke the desktop's choice (shell is desktop-controlled).
-        let current = super::RemotePermissions { filesystem: false, downloads: false, process_control: false, shell: true };
-        let body = super::RemotePermissions { filesystem: true, downloads: false, process_control: false, shell: false };
+    fn remote_merge_preserves_every_desktop_choice() {
+        // The other direction: what the desktop granted stays granted. A phone
+        // clearing the boxes is not a decision the desktop made, and a second
+        // paired phone must not be able to switch the first one's session off
+        // either. All four scopes live on the desktop, in both directions.
+        let current = super::RemotePermissions { filesystem: true, downloads: false, process_control: true, shell: true };
+        let body = super::RemotePermissions { filesystem: false, downloads: true, process_control: false, shell: false };
         let merged = super::merge_remote_permissions(&current, body);
+        assert!(merged.filesystem, "desktop-set filesystem must survive a remote update");
+        assert!(!merged.downloads, "a scope the desktop left off must stay off");
+        assert!(merged.process_control, "desktop-set process_control must survive a remote update");
         assert!(merged.shell, "desktop-set shell must survive a remote update");
-        assert!(merged.filesystem, "non-RCE perms still apply");
+    }
+}
+
+/// The remote bridge's five soft spots, all of them variations on one theme:
+/// something the phone side was allowed to say about itself was believed.
+///
+/// * a forwarding header decided which row in Connected Devices a device owned
+/// * a permissions POST decided what that device was allowed to do
+/// * a disconnect body decided whose session ended
+/// * `/remote-api/qr` handed a paired device the code that pairs the next one
+/// * the code itself was compared with an operator that stops at the first
+///   wrong digit
+///
+/// and the sixth, on the other side of the app: the public tunnel outlived the
+/// process that opened it.
+#[cfg(test)]
+mod remote_hardening_tests {
+    use super::*;
+    use axum::http::HeaderMap;
+    use std::net::SocketAddr;
+
+    fn headers(pairs: &[(&str, &str)]) -> HeaderMap {
+        let mut h = HeaderMap::new();
+        for (k, v) in pairs {
+            h.insert(
+                axum::http::HeaderName::from_bytes(k.as_bytes()).unwrap(),
+                v.parse().unwrap(),
+            );
+        }
+        h
+    }
+
+    fn peer(s: &str) -> Option<SocketAddr> {
+        Some(s.parse().unwrap())
+    }
+
+    // ── client_ip: who the peer says it is vs. who it is ──
+
+    #[test]
+    fn a_lan_client_cannot_choose_its_own_address() {
+        // The attack: a second paired phone sets X-Forwarded-For to the first
+        // phone's address. Devices dedup on this string, so it took over the
+        // first phone's row — which ends that phone's session, because
+        // auth_middleware only honours a token whose device is still listed.
+        let h = headers(&[("x-forwarded-for", "192.168.1.10"), ("x-real-ip", "192.168.1.10")]);
+        assert_eq!(client_ip(&h, peer("192.168.1.77:51000")), "192.168.1.77");
+    }
+
+    #[test]
+    fn the_local_tunnel_is_the_only_trusted_proxy() {
+        // cloudflared runs on this machine and reaches us over loopback. That
+        // is the one peer whose forwarding headers describe someone else.
+        let h = headers(&[("x-forwarded-for", "203.0.113.9")]);
+        assert_eq!(client_ip(&h, peer("127.0.0.1:41234")), "203.0.113.9");
+    }
+
+    #[test]
+    fn a_prepended_forwarded_for_hop_loses_to_the_proxys_own() {
+        // Cloudflare APPENDS the visitor to whatever X-Forwarded-For the
+        // visitor already sent, so the first entry is the one the attacker
+        // wrote and the last is the edge's. Reading the first made the header
+        // forgeable again on the one path where it is trusted at all.
+        let h = headers(&[("x-forwarded-for", "10.0.0.1, 203.0.113.9")]);
+        assert_eq!(client_ip(&h, peer("127.0.0.1:41234")), "203.0.113.9");
+    }
+
+    #[test]
+    fn cf_connecting_ip_beats_a_forged_forwarded_for() {
+        // The edge overwrites CF-Connecting-IP instead of appending to it.
+        let h = headers(&[
+            ("cf-connecting-ip", "203.0.113.9"),
+            ("x-forwarded-for", "10.0.0.1"),
+        ]);
+        assert_eq!(client_ip(&h, peer("127.0.0.1:41234")), "203.0.113.9");
+    }
+
+    #[test]
+    fn without_a_peer_address_nothing_is_trusted() {
+        // No peer means we cannot tell whether a proxy is in front of us.
+        let h = headers(&[("x-forwarded-for", "203.0.113.9")]);
+        assert_eq!(client_ip(&h, None), "unknown");
+    }
+
+    #[test]
+    fn a_lan_client_without_headers_still_gets_its_own_address() {
+        // Bug #3 must stay fixed: no headers on LAN used to collapse every
+        // client into one "unknown" bucket, sharing a rate limit and a row.
+        assert_eq!(client_ip(&HeaderMap::new(), peer("192.168.1.42:52000")), "192.168.1.42");
+    }
+
+    // ── the device list ──
+
+    fn device(id: &str, ip: &str, last_seen: u64) -> ConnectedDevice {
+        ConnectedDevice {
+            id: id.to_string(),
+            ip: ip.to_string(),
+            user_agent: "test".to_string(),
+            last_seen,
+        }
+    }
+
+    #[test]
+    fn two_lan_devices_keep_two_rows() {
+        let now = 1_700_000_000u64;
+        let mut devices = vec![device("dev-a", "192.168.1.10", now)];
+        upsert_device(&mut devices, "dev-b".into(), "192.168.1.77".into(), "phone".into(), now);
+        assert_eq!(devices.len(), 2, "two distinct peers must not share a row");
+        assert!(devices.iter().any(|d| d.id == "dev-a"));
+        assert!(devices.iter().any(|d| d.id == "dev-b"));
+    }
+
+    #[test]
+    fn the_same_device_reauthenticating_keeps_one_row() {
+        // Reauth after a passcode regen must refresh the row, not stack a ghost.
+        let now = 1_700_000_000u64;
+        let mut devices = vec![device("dev-a", "192.168.1.10", now - 5)];
+        upsert_device(&mut devices, "dev-a2".into(), "192.168.1.10".into(), "phone".into(), now);
+        assert_eq!(devices.len(), 1);
+        assert_eq!(devices[0].id, "dev-a2");
+        assert_eq!(devices[0].last_seen, now);
+    }
+
+    #[test]
+    fn a_device_silent_past_the_token_lifetime_is_pruned() {
+        let now = 1_700_000_000u64;
+        let mut devices = vec![device("stale", "192.168.1.10", now - JWT_TTL_SECS - 1)];
+        upsert_device(&mut devices, "fresh".into(), "192.168.1.77".into(), "phone".into(), now);
+        assert_eq!(devices.len(), 1);
+        assert_eq!(devices[0].id, "fresh");
+    }
+
+    // ── disconnect ──
+
+    #[test]
+    fn disconnect_removes_the_caller_and_leaves_the_rest() {
+        let now = 1_700_000_000u64;
+        let mut devices = vec![device("mine", "192.168.1.10", now), device("theirs", "192.168.1.77", now)];
+        assert_eq!(remove_own_device(&mut devices, "mine", "mine"), StatusCode::OK);
+        assert_eq!(devices.len(), 1);
+        assert_eq!(devices[0].id, "theirs");
+    }
+
+    #[test]
+    fn disconnect_cannot_end_another_devices_session() {
+        // The whole point: a device row IS a session, so naming someone else's
+        // id was a way to log the desktop owner's phone out from another phone.
+        let now = 1_700_000_000u64;
+        let mut devices = vec![device("mine", "192.168.1.10", now), device("theirs", "192.168.1.77", now)];
+        assert_eq!(remove_own_device(&mut devices, "mine", "theirs"), StatusCode::FORBIDDEN);
+        assert_eq!(devices.len(), 2, "a refused disconnect must change nothing");
+    }
+
+    // ── the pairing code ──
+
+    #[test]
+    fn the_passcode_compare_answers_correctly() {
+        assert!(passcode_matches("123456", "123456"));
+        assert!(!passcode_matches("123457", "123456"));
+        assert!(!passcode_matches("023456", "123456"), "a wrong first digit is still wrong");
+        assert!(!passcode_matches("12345", "123456"), "a short guess is not a prefix match");
+        assert!(!passcode_matches("1234567", "123456"), "a long guess is not a match either");
+    }
+
+    #[test]
+    fn an_unset_passcode_matches_nothing() {
+        // A server whose code has not been generated yet must not pair anyone
+        // who sends an empty string.
+        assert!(!passcode_matches("", ""));
+        assert!(!passcode_matches("000000", ""));
+    }
+
+    // ── source guards ──
+    //
+    // Three of these fixes are properties of a code path that cannot be
+    // exercised here: a Windows kernel flag, a process the OS kills for us,
+    // and the absence of a short-circuiting comparison. A grep is a blunt
+    // instrument, but it fails when the next edit undoes the fix rather than
+    // after the next incident.
+
+    const REMOTE_RS: &str = include_str!("remote.rs");
+
+    /// remote.rs up to its first test module. The assertions below quote the
+    /// code they are guarding, and matching themselves would make them free.
+    fn production_code() -> &'static str {
+        REMOTE_RS
+            .split_once("#[cfg(test)]\nmod jwt_refresh_tests {")
+            .map(|(head, _)| head)
+            .expect("remote.rs starts its tests with jwt_refresh_tests")
+    }
+
+    #[test]
+    fn the_source_guard_really_reads_the_production_half() {
+        // A guard on the guards: if the split silently returned everything, or
+        // nothing, every assertion below would pass for free.
+        let head = production_code();
+        assert!(head.len() < REMOTE_RS.len(), "the split kept the test modules");
+        assert!(head.contains("async fn handle_auth("), "the split dropped production code");
+        assert!(!head.contains("mod remote_hardening_tests"), "the split kept this module");
+    }
+
+    /// The body of a top-level `fn` in the production half, from its signature
+    /// to the closing brace in column 0.
+    fn fn_body(name: &str) -> &'static str {
+        let head = production_code();
+        let at = head
+            .find(&format!("fn {name}("))
+            .unwrap_or_else(|| panic!("fn {name} is gone"));
+        let end = head[at..].find("\n}\n").expect("unterminated fn") + at;
+        &head[at..end]
+    }
+
+    #[test]
+    fn the_function_slicer_reads_one_function() {
+        // A guard on the guard below: a slicer that returned the whole file
+        // would make every assertion on a function body meaningless.
+        let body = fn_body("passcode_matches");
+        assert!(body.contains("fn passcode_matches("));
+        assert!(!body.contains("fn generate_jwt("), "the slice ran past its function");
+    }
+
+    #[test]
+    fn the_passcode_is_never_compared_with_a_short_circuiting_operator() {
+        // Nothing observable distinguishes a constant-time compare from a fast
+        // one on a machine under load, so what is pinned is the shape: every
+        // byte folded into one accumulator, and no `==`/`!=` on the two codes
+        // anywhere. Timing was the whole point — a `==` that returns the right
+        // answer is still the bug.
+        let head = production_code();
+        assert!(
+            head.contains("if !passcode_matches(&body.passcode, &pc.code)"),
+            "handle_auth no longer routes the code through the constant-time compare"
+        );
+        assert!(
+            !head.contains("body.passcode != pc.code"),
+            "the short-circuiting compare is back"
+        );
+        let body = fn_body("passcode_matches");
+        assert!(
+            body.contains("diff |="),
+            "the compare no longer folds the bytes into one accumulator"
+        );
+        for shortcut in ["a == b", "a != b", "supplied == expected", "supplied != expected"] {
+            assert!(
+                !body.contains(shortcut),
+                "passcode_matches short-circuits again on `{shortcut}`"
+            );
+        }
+    }
+
+    #[test]
+    fn windows_never_asks_for_a_reusable_address() {
+        // On Unix SO_REUSEADDR only skips TIME_WAIT. On Windows it lets any
+        // process running as this user bind 0.0.0.0:11435 too and take the
+        // incoming pairing connections.
+        let head = production_code();
+        assert!(
+            head.contains("#[cfg(not(windows))]\n    socket.set_reuse_address(true)?;"),
+            "the reuse flag is not gated off Windows any more"
+        );
+        assert!(
+            head.contains("#[cfg(windows)]\n    set_exclusive_addr_use(&socket)?;"),
+            "Windows must bind the address exclusively"
+        );
+        assert_eq!(
+            head.matches("set_reuse_address(").count(),
+            1,
+            "there is exactly one place that sets the reuse flag"
+        );
+    }
+
+    #[test]
+    fn the_tunnel_is_tied_to_the_app_lifetime() {
+        // The repo's own mechanism for "this child dies with the app": on
+        // Windows the kill-on-close job object, which survives a hard kill.
+        let head = production_code();
+        assert!(
+            head.contains("crate::commands::process::tie_child_to_app_lifetime(pid);"),
+            "the cloudflared spawn no longer joins the app's lifetime"
+        );
+        assert!(
+            head.contains("crate::process_util::spawn_piped(cmd)"),
+            "the tunnel must be spawned through process_util (own process group)"
+        );
+    }
+
+    // ── the tunnel process ──
+
+    #[test]
+    fn only_a_cloudflared_pointed_at_our_port_is_swept() {
+        let cmd = |s: &str| s.split(' ').map(String::from).collect::<Vec<_>>();
+        assert!(is_stale_tunnel_process(
+            "cloudflared",
+            &cmd("cloudflared tunnel --url http://127.0.0.1:11435"),
+            11435
+        ));
+        assert!(is_stale_tunnel_process(
+            "cloudflared.exe",
+            &cmd("cloudflared.exe tunnel --url http://localhost:11435"),
+            11435
+        ));
+        // A tunnel the user runs for their own reasons is none of our business.
+        assert!(!is_stale_tunnel_process(
+            "cloudflared",
+            &cmd("cloudflared tunnel --url http://127.0.0.1:8080"),
+            11435
+        ));
+        // Neither is anything else that happens to mention the port.
+        assert!(!is_stale_tunnel_process(
+            "ngrok",
+            &cmd("ngrok http 127.0.0.1:11435"),
+            11435
+        ));
+        assert!(!is_stale_tunnel_process("cloudflared", &cmd("cloudflared --version"), 11435));
+    }
+
+    /// A live child that outlives the test unless something kills it, spawned
+    /// the way the tunnel is.
+    #[cfg(unix)]
+    fn sleeper() -> std::process::Child {
+        let mut cmd = std::process::Command::new("sleep");
+        cmd.arg("30");
+        crate::process_util::spawn_piped(cmd).expect("spawn a sleeper")
+    }
+
+    /// A killed-but-unreaped child is a ZOMBIE — `ps -p` still lists it, so
+    /// the process STATE has to be read, not its mere existence.
+    #[cfg(unix)]
+    fn alive(pid: u32) -> bool {
+        let out = std::process::Command::new("ps")
+            .args(["-o", "state=", "-p", &pid.to_string()])
+            .output();
+        match out {
+            Ok(o) => {
+                let st = String::from_utf8_lossy(&o.stdout).trim().to_string();
+                !st.is_empty() && !st.starts_with('Z')
+            }
+            Err(_) => false,
+        }
+    }
+
+    /// `kill_tree` signals now and escalates on a detached thread, so death is
+    /// not observable on the calling line. Poll rather than sample once —
+    /// asserting immediately would be a race dressed up as a test.
+    #[cfg(unix)]
+    fn dies_within(pid: u32, budget: std::time::Duration) -> bool {
+        let deadline = std::time::Instant::now() + budget;
+        while std::time::Instant::now() < deadline {
+            if !alive(pid) {
+                return true;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        !alive(pid)
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn the_tunnel_dies_with_the_server_state() {
+        // The finding: quitting the app left the quick tunnel running, so a
+        // public *.trycloudflare.com address kept pointing at 127.0.0.1:11435
+        // and the next launch silently published its session on it while the
+        // UI reported the tunnel as off.
+        let mut server = RemoteServer::new();
+        let child = sleeper();
+        let pid = child.id();
+        server.tunnel_child = Some(child);
+        assert!(alive(pid), "the stand-in tunnel did not start");
+
+        drop(server);
+
+        assert!(
+            dies_within(pid, std::time::Duration::from_secs(5)),
+            "the tunnel survived the server state it belongs to"
+        );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn a_stopped_tunnel_is_reaped_and_not_left_as_a_zombie() {
+        // The old kill-by-pid path never waited, so every stop left a zombie
+        // for the rest of the app's life.
+        let child = sleeper();
+        let pid = child.id();
+        kill_tunnel_child(child);
+        assert!(
+            dies_within(pid, std::time::Duration::from_secs(5)),
+            "the stopped tunnel is still running or left behind as a zombie"
+        );
+    }
+
+    #[test]
+    fn dropping_a_server_without_a_tunnel_is_a_no_op() {
+        drop(RemoteServer::new());
+        let mut server = RemoteServer::new();
+        assert!(server.tunnel_pid().is_none());
+        server.tunnel_child = None;
+        drop(server);
+    }
+
+    // ── the QR endpoint ──
+
+    #[test]
+    fn the_qr_payload_carries_no_passcode() {
+        // /remote-api/qr is reachable by anything that already paired. Handing
+        // it the live code makes Disconnect undoable by the disconnected.
+        let json = serde_json::to_value(QrResponse {
+            qr_png_base64: "AAA".into(),
+            url: "http://192.168.1.10:11435/mobile".into(),
+        })
+        .unwrap();
+        assert!(json.get("passcode").is_none(), "the QR payload leaks the pairing code");
+        assert!(json.get("url").is_some(), "the payload lost the field the caller needs");
+    }
+
+    #[test]
+    fn the_listener_still_binds() {
+        // Whichever flag the platform gets, the socket has to work.
+        let addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let _guard = rt.enter();
+        let listener = build_reusable_listener(addr).expect("bind an ephemeral port");
+        assert!(listener.local_addr().unwrap().port() != 0);
     }
 }
 
