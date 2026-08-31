@@ -38,9 +38,16 @@ pub(crate) const ROCM_CHANNELS: &[&str] = &[
 /// above still holds for it. What changed is the conclusion drawn from that:
 /// AMD publishes win_amd64 ROCm wheels from its own indexes, and this is the
 /// one ComfyUI Desktop ships against, which is the closest thing to a field
-/// proof this path has. Read 2026-08-30: it serves win_amd64 torch up to
-/// 2.13.0+rocm7.14.0 and is described in Comfy-Desktop's own
+/// proof this path has. It is described in Comfy-Desktop's own
 /// `torch-index-stacks.md` as the only mechanism serving Windows ROCm wheels.
+///
+/// MEASURED 2026-08-31, against the index listing itself: the highest
+/// win_amd64 torch it serves is 2.12.0+rocm7.14.0 (114,085,058 bytes, dated
+/// 2026-07-15), for cp310 through cp314. The earlier note here said
+/// 2.13.0+rocm7.14.0, which is wrong: that build exists in the index as
+/// linux_x86_64 cp312 only. Nothing breaks either way, because pip takes the
+/// highest wheel that fits the interpreter and platform, but the number was
+/// not what the index holds.
 ///
 /// We own no AMD card. Nobody here has watched this install finish, let alone
 /// render. That is why the plan built from it falls back to the processor
@@ -166,6 +173,15 @@ pub(crate) enum AmdCoverage {
 /// "Advanced Micro Devices, Inc. [AMD/ATI] Navi 22 [Radeon RX 6700 XT]", and
 /// rocm-smi gives the product name. All three contain "RX <four digits>", so
 /// that is what is read, and nothing else is inferred.
+///
+/// Known gap, written down rather than guessed away: AMD's workstation cards
+/// carry no "RX ####" at all. A Radeon AI PRO R9700 is gfx1201 and a PRO W7900
+/// is gfx1100, both fully carried by the wheels, and both come back as `None`
+/// here, so `amd_coverage` calls them `Unknown`. On Linux that costs nothing
+/// because `Unknown` keeps the ROCm wheels. On Windows it costs them the ROCm
+/// path, because only `Supported` reaches AMD's index. Closing it means
+/// reading PRO model names too, which changes which cards the plan sends to
+/// that index, so it is a decision and not a cleanup.
 fn radeon_rx_model(name: &str) -> Option<u32> {
     let lower = name.to_lowercase();
     let bytes = lower.as_bytes();
@@ -194,12 +210,30 @@ fn radeon_rx_model(name: &str) -> Option<u32> {
 
 /// What one AMD card can expect from the wheels this OS has.
 ///
-/// Measured wheel contents, 2026-08-30. Linux, torch 2.10 and up: gfx1030,
-/// 1100, 1101, 1102, 1200, 1201, 950, 1150, 1151 are in, and gfx1010, 1012,
-/// 1031, 1032, 1033 to 1036 and 90c are in NO official wheel. Windows: AMD's
-/// support promise covers RDNA 3, 3.5 and 4 and stops there. RDNA 2 wheels are
-/// built for Windows but with hipBLASLt, composable_kernel and rocWMMA
-/// excluded from every gfx103X target, and AMD promises nothing for them.
+/// Measured wheel contents, counted file by file inside
+/// `torch-2.13.0+rocm7.2-cp312-cp312-manylinux_2_28_x86_64.whl` on 2026-08-31.
+/// A gfx target is only usable when the compute layers carry it, and they do
+/// not all carry the same list, so the layers are named here instead of one
+/// flat "is in" that hides the difference:
+///
+/// - rocBLAS and hipBLASLt and aotriton all three: gfx1100, 1101, 1102, 1150,
+///   1151, 1200, 1201, 90a, 942, 950. These are the targets the wheel really
+///   serves.
+/// - hipBLASLt only, no rocBLAS: gfx1103. That is the Ryzen Phoenix APU, and
+///   the half-coverage is exactly why it is worth naming.
+/// - rocBLAS only, no hipBLASLt: gfx1030.
+/// - MIOpen only, in neither BLAS layer: gfx900, gfx906.
+/// - In no layer at all: gfx1010, 1012, 1031, 1032, 1033 to 1036, 90c. That is
+///   the byte-level ground for the Linux brake below.
+///
+/// Windows: AMD names RX 9070 and 9070 XT, AI PRO R9700, RX 9060 XT,
+/// RX 7900 XTX and PRO W7900 in its own support promise, and publishes device
+/// wheels more widely than that promise reaches. An RX 7600 (gfx1102) has a
+/// 48.4 MiB device package in the index (MEASURED 2026-08-31) without being on
+/// AMD's named list, so the range below is wider than the promise on purpose:
+/// it follows the published wheels. RDNA 2 wheels are built for Windows but
+/// with hipBLASLt, composable_kernel and rocWMMA excluded from every gfx103X
+/// target, and AMD promises nothing for them.
 pub(crate) fn amd_coverage(name: &str, os: &str) -> AmdCoverage {
     let Some(model) = radeon_rx_model(name) else {
         return AmdCoverage::Unknown;
@@ -372,14 +406,20 @@ fn nvidia_plan(cap: Option<(u32, u32)>) -> WheelPlan {
 /// The install itself would succeed, which is the trap: pip is happy, the venv
 /// looks right, and the first kernel dies with "HIP error: invalid device
 /// function" or a rocBLAS complaint about a missing TensileLibrary. For these
-/// cards the ROCm wheels are 3 GB of download that ends worse than the
+/// cards the ROCm wheels are 6.2 GB of download that ends worse than the
 /// processor build they would replace.
+///
+/// The size was "about 3 GB" here until 2026-08-31, when the wheel was
+/// measured instead of estimated: `torch-2.13.0+rocm7.2-cp312` alone is
+/// 6,227,849,000 bytes, and torchvision and torchaudio still come on top. The
+/// old number was less than half of what the customer would have waited for.
 pub(crate) const AMD_UNCOVERED_GFX_FACT: &str =
     "AMD GPU detected, but no official ROCm wheel carries kernels for this card \
-     (checked 2026-08-30 against the code object lists inside the published wheels: \
+     (checked 2026-08-31 against the code object lists inside the published wheels: \
      gfx1010, gfx1012, gfx1031, gfx1032 and gfx1034 appear in none of them). \
-     Installing the ROCm build would download about 3 GB and then fail at the first \
-     kernel with \"HIP error: invalid device function\".";
+     Installing the ROCm build would download over 6 GB (the ROCm PyTorch wheel \
+     alone is 6.2 GB, measured 2026-08-31, with torchvision and torchaudio on top) \
+     and then fail at the first kernel with \"HIP error: invalid device function\".";
 
 /// The one workaround that exists, offered only where it can work.
 ///
@@ -432,7 +472,7 @@ pub(crate) fn amd_without_rocm_note(os: &str) -> String {
         // exist costs us the whole answer.
         format!(
             "{head} AMD publishes its own Windows ROCm wheels, and LU installs those for \
-             the RDNA 3, 3.5 and 4 cards AMD supports there, but not for this card. \
+             the RDNA 3, 3.5 and 4 cards AMD publishes them for, but not for this card. \
              To drive it anyway you need a ComfyUI of your own on ZLUDA or DirectML, \
              then point LU at it and set Settings > Hardware > ComfyUI GPU to force GPU. \
              ZLUDA stands in for the CUDA runtime, it is not a CUDA PyTorch build, so it \
@@ -718,8 +758,10 @@ mod tests {
         // RDNA1 and the RX 6400 to 6750 range are in no official wheel at all,
         // and RDNA2 above them is built for Windows but with hipBLASLt,
         // composable_kernel and rocWMMA stripped out and no promise attached.
-        // Sending any of them to the AMD index would be a guess with a 3 GB
-        // download and a broken environment at the end.
+        // Sending any of them to the AMD index would be a guess with a 2.5 GiB
+        // download (MEASURED 2026-08-31: 1.72 GiB of device packages plus torch,
+        // plus 723.6 MiB rocm_sdk_core and 110.5 MiB rocm_sdk_libraries) and a
+        // broken environment at the end.
         for name in [RX_6700, RX_6800, RX_5700, APU] {
             match comfy_wheel_plan(false, None, true, &[name], "windows") {
                 WheelPlan::Cpu { note } => {
@@ -823,6 +865,47 @@ mod tests {
         assert!(note.find("ZLUDA") < note.find("DirectML"), "{note}");
         assert!(note.contains("frozen"), "{note}");
         assert!(!amd_without_rocm_note("linux").contains("DirectML"));
+    }
+
+    // ── Runde 20: the numbers in the texts are the measured ones ──────────
+    //
+    // The AMD deep-dive of 2026-08-31 weighed the wheels byte by byte and the
+    // texts disagreed with the scale in two places. Both are customer-facing,
+    // so both get a guard: what the number is now, and what it may never say
+    // again.
+    #[test]
+    fn the_uncovered_card_text_carries_the_measured_download_size() {
+        let note = amd_uncovered_linux_note(&[RX_6700]);
+        // The measurement: torch-2.13.0+rocm7.2-cp312 is 6,227,849,000 bytes on
+        // its own, before torchvision and torchaudio.
+        assert!(note.contains("over 6 GB"), "no measured size in the text: {note}");
+        assert!(note.contains("6.2 GB"), "no measured size in the text: {note}");
+        // House rule: a number a customer reads needs the thing it refers to
+        // right next to it, or it gets quoted somewhere else as our claim.
+        assert!(
+            note.contains("the ROCm PyTorch wheel alone is 6.2 GB"),
+            "the size has no reference point: {note}",
+        );
+        assert!(note.contains("measured 2026-08-31"), "no date on the number: {note}");
+        // NEGATIVE CONTROL, backwards: the estimate this replaced was less than
+        // half the real download. It may not come back through either caller.
+        assert!(!note.contains("about 3 GB"), "the old estimate is back: {note}");
+        assert!(!AMD_UNCOVERED_GFX_FACT.contains("about 3 GB"), "{AMD_UNCOVERED_GFX_FACT}");
+        assert!(!AMD_UNCOVERED_GFX_FACT.contains("3 GB"), "{AMD_UNCOVERED_GFX_FACT}");
+    }
+
+    #[test]
+    fn the_windows_text_promises_published_wheels_and_not_amds_support_list() {
+        // AMD's named Windows promise is RX 9070/XT, AI PRO R9700, RX 9060 XT,
+        // RX 7900 XTX and PRO W7900. Our range is wider than that on purpose:
+        // it follows the published device wheels, and an RX 7600 really has one
+        // (48.4 MiB, MEASURED 2026-08-31). So the text may claim the wheels,
+        // never AMD's support.
+        let note = amd_without_rocm_note("windows");
+        assert!(note.contains("AMD publishes them for"), "{note}");
+        // NEGATIVE CONTROL, backwards: the sentence used to hand AMD's support
+        // promise to every card in the range, which is more than AMD says.
+        assert!(!note.contains("AMD supports there"), "the wider promise is back: {note}");
     }
 
     #[test]

@@ -253,8 +253,10 @@ pub(crate) fn trainer_torch_plan(
     if os == "linux" {
         // The same brake 3570ce53 put on the ComfyUI path, from the same
         // source: the families measured as carried by no wheel install fine
-        // and die at the first kernel, so the ROCm channels are 3 GB spent on
-        // an environment that cannot finish a step. ComfyUI can fall back to
+        // and die at the first kernel, so the ROCm channels are 6.2 GB spent on
+        // an environment that cannot finish a step (MEASURED 2026-08-31:
+        // torch-2.13.0+rocm7.2-cp312 is 6,227,849,000 bytes on its own, and
+        // torchvision and torchaudio come on top; the old note said 3 GB). ComfyUI can fall back to
         // the processor there; the trainer cannot, so its honest answer is the
         // one it already gives on Windows, which is to refuse before anything
         // is downloaded. Only cards we can NAME are held back, exactly as on
@@ -324,7 +326,7 @@ fn amd_no_trainer_wheels_note(os: &str) -> String {
     if os == "windows" {
         format!(
             "{head} AMD publishes its own Windows ROCm wheels, and LU installs those for \
-             ComfyUI on the RDNA 3, 3.5 and 4 cards AMD supports there, but the trainer \
+             ComfyUI on the RDNA 3, 3.5 and 4 cards AMD publishes them for, but the trainer \
              does not use them: the training step runs an 8 bit optimizer that exists as a \
              CUDA build only, so the environment would install and then stop at exactly \
              that step. {tail}"
