@@ -80,4 +80,18 @@ wirklich kompiliert und getestet.
 |---|---|
 | `npm ci` | exit 0, 449 Pakete |
 | `npx tsc --noEmit` | **0 Fehler** |
+| `npm run build` | exit 0 |
+| `cargo check --all-targets` | **exit 0** — die 224 Windows-only-Zweige kompilieren erstmals wirklich, inkl. aller E1-Fixes (sanitize_chat_slug, Remote-Permissions, tracing-appender) |
+| `npx vitest run` | 6.282 ✓ / **8 ✗** — alle acht durch CRLF-Checkout, Ursache gefixt (siehe unten) |
+
+**Windows-Befund, den nur die echte Maschine zeigt: kein `.gitattributes`.**
+`core.autocrlf` steht auf Windows per Default auf `true`, das Repo hatte keine
+Gegenregel. Folgen: (1) `setup.sh` und `scripts/build-llama.sh` kommen mit
+`#!/usr/bin/env bash\r` an und sterben unter WSL/Git Bash mit „bad interpreter" —
+das ist der dokumentierte From-Source-Weg auf Windows; (2) die fünf Tests, die
+Quelltext byteweise festnageln (`build-llama-script`, `prompt-tool-roster`,
+`codex-mode-wiring`, `chat-budget-wiring`, `displaced-engine-frees-its-memory`),
+sind auf jedem frischen Windows-Clone rot — der erste `npm test` eines Windows-
+Mitwirkenden war 8× rot. Fix: `.gitattributes` mit `* text=auto eol=lf`,
+CRLF nur für `.bat/.cmd/.ps1`, Binärlisten explizit. Commit `44d3de14`.
 
