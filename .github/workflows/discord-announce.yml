@@ -100,11 +100,11 @@ jobs:
           footer = f"\n\nFull release notes + installers: {url}"
           budget = 2000 - len(header) - len(footer) - 20
           if len(body) > budget:
-              body = body[:budget].rsplit("\n", 1)[0] + "\n\n*(truncated — see full notes link below)*"
+              body = body[:budget].rsplit("\n", 1)[0] + "\n\n*(truncated, see full notes link below)*"
           content = header + body + footer
           req = urllib.request.Request(
               webhook,
-              data=json.dumps({"content": content, "flags": 4096}).encode("utf-8"),  # 4096 = SUPPRESS_EMBEDS
+              data=json.dumps({"content": content, "flags": 4}).encode("utf-8"),  # 4 = SUPPRESS_EMBEDS (4096 is SUPPRESS_NOTIFICATIONS and silenced the 2.6.0 post)
               headers={"Content-Type": "application/json", "User-Agent": "LocallyUncensored/release-announce"},
               method="POST",
           )
@@ -142,13 +142,13 @@ jobs:
               break
           teaser = re.sub(r"\*\*([^*]+)\*\*", r"**\1**", teaser)[:400]
           msg = (
-              f"Hey everyone — **{tag} is out**. Auto-update rolls on next launch.\n\n"
+              f"Hey everyone, **{tag} is out**. Auto-update rolls on next launch.\n\n"
               + (f"> {teaser}\n\n" if teaser else "")
               + f"Full notes: {url}"
           )
           req = urllib.request.Request(
               webhook,
-              data=json.dumps({"content": msg, "flags": 4096}).encode("utf-8"),
+              data=json.dumps({"content": msg, "flags": 4}).encode("utf-8"),
               headers={"Content-Type": "application/json", "User-Agent": "LocallyUncensored/release-announce"},
               method="POST",
           )
