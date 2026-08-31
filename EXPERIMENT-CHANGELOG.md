@@ -57,3 +57,27 @@ Harness entlässt es nie. Vorbestehend, nicht durch Design-W1 verursacht. Kein T
 `'w-full px-2 pt-1'` der PlanBar. Klassifikation: *Test hing an altem Wert*. Die dokumentierte
 Invariante (panel darf keinen schmalen Composer-Wrapper erben) wurde beibehalten und verschärft.
 
+
+## Windows-Strang (echte Maschine, kein Cross-Compile-Ersatz)
+
+Der Windows-Rechner `lu-box` ist über Tailscale erreichbar und wird ab E2 als
+zweite echte Zielplattform mitgeprüft. Damit fällt die ursprüngliche Verifikationsgrenze
+„Windows nur per Review" weg — die 224 Windows-only-Zweige im Rust-Code werden dort
+wirklich kompiliert und getestet.
+
+| | |
+|---|---|
+| Host | `lu-box` (Tailscale 100.105.153.30), Windows 10 Home |
+| Toolchain | VS Build Tools 2022, WebView2-Runtime 151.0.4129.107, MSVC-Target x86_64, Node 24.13.1, npm 11.8.0, Rust/Cargo 1.92.0, Git 2.41 |
+| Platz | 78 GB frei auf C: |
+| Sandkasten dort | `C:\Users\ddrob\lu-experiment`, per Git-Bündel aus dem Mac-Sandkasten geklont, **ohne Remote** (Push auch dort unmöglich). Bestehende Verzeichnisse des Nutzers werden nicht angefasst. |
+| Sidecar | echter `lu-llama-server-x86_64-pc-windows-msvc.exe` aus `Desktop\lu-263-win` übernommen — **2.6.3-Build, nicht der in `scripts/build-llama.sh` gepinnte Tag b9949**. Funktional für Test und Showcase; ein Release müsste ihn neu bauen. |
+| Modelle vor Ort | LM-Studio-Bestand, u. a. Qwen2.5-0.5B-Instruct Q4 (0,37 GB) und gemma-3-4b-it-abliterated Q4 (2,32 GB) — echte Antwort-Tests ohne Download möglich. Ollama ist dort **nicht** installiert. |
+
+**Windows-Gates (fortlaufend ergänzt):**
+
+| Gate | Ergebnis |
+|---|---|
+| `npm ci` | exit 0, 449 Pakete |
+| `npx tsc --noEmit` | **0 Fehler** |
+
