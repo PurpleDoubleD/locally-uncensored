@@ -1,12 +1,12 @@
 {
   "$schema": "https://raw.githubusercontent.com/tauri-apps/tauri/dev/crates/tauri-cli/schema.json",
-  "productName": "LU",
+  "productName": "LU Experiment",
   "version": "2.6.7",
-  "identifier": "com.purpledoubled.locally-uncensored",
+  "identifier": "com.purpledoubled.locally-uncensored.experiment",
   "build": {
     "beforeBuildCommand": "npm run build",
     "beforeDevCommand": "npm run dev",
-    "devUrl": "http://localhost:5173",
+    "devUrl": "http://localhost:5273",
     "frontendDist": "../dist"
   },
   "app": {
@@ -21,7 +21,7 @@
         "visible": false,
         "decorations": false,
         "transparent": true,
-      "dragDropEnabled": false
+        "dragDropEnabled": false
       }
     ],
     "security": {
@@ -30,9 +30,7 @@
   },
   "plugins": {
     "updater": {
-      "endpoints": [
-        "https://github.com/purpledoubled/locally-uncensored/releases/latest/download/latest.json"
-      ],
+      "endpoints": [],
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDZDNkRFNzJFRjhFNkIxNDcKUldSSHNlYjRMdWR0YklwQlJhTUR4TXBTTE1xKzFUcWVVTEpTL0hZMi9ldmlOcW5BWFZWeUdzRGMK"
     }
   },

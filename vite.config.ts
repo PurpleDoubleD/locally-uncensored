@@ -395,7 +395,7 @@ function comfyLauncher(): Plugin {
         const origin = req.headers.origin;
         if (origin) {
             // Allow any loopback origin on any port — Vite may bind 5174+ when
-            // 5173 is busy, which previously 403'd ComfyUI-path setup (issue
+            // 5273 is busy, which previously 403'd ComfyUI-path setup (issue
             // #51, adhney). Also accept the request's own host header.
             const host = req.headers.host;
             const allowedOrigins = ['tauri://localhost', 'http://tauri.localhost'];
@@ -2429,7 +2429,7 @@ export default defineConfig({
     // The Rust build tree churns thousands of files per `cargo build`; watching
     // it starves the dev server on a `tauri:dev` run.
     watch: { ignored: ['**/src-tauri/target/**'] },
-    port: 5173,
+    port: 5273,
     cors: true,
     allowedHosts: true,
     proxy: {
