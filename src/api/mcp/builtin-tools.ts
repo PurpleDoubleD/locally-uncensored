@@ -1299,7 +1299,12 @@ async function executeRunWorkflow(args: Record<string, any>): Promise<string> {
     onError: (error: string) => { finalOutput = `Workflow error: ${error}` },
   }
 
-  const initialVars = args.input ? { user_input: args.input, last_output: args.input } : {}
+  // The engine interpolates these variables into prompts as text. The schema
+  // says `input` is a string, but the value comes from a model, so a number or
+  // object reaching this line has to become text here rather than deeper in.
+  const initialVars: Record<string, string> = args.input
+    ? { user_input: String(args.input), last_output: String(args.input) }
+    : {}
   _workflowDepth++
   try {
     const engine = new WorkflowEngine(workflow, 'tool-execution', callbacks, initialVars, _workflowDepth)

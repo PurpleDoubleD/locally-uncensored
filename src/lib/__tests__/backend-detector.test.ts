@@ -15,7 +15,6 @@ vi.mock('../../api/backend', () => ({
 }))
 
 import { detectLocalBackends } from '../backend-detector'
-import type { DetectedBackend } from '../backend-detector'
 import { isTauri, localFetch } from '../../api/backend'
 import { PROVIDER_PRESETS } from '../../api/providers/types'
 

@@ -32,7 +32,9 @@ export function useKeyboardShortcuts() {
       const model = useModelStore.getState().activeModel
       const persona = useSettingsStore.getState().getActivePersona()
       if (model) {
-        useChatStore.getState().createConversation(model, persona?.prompt || '')
+        // Same field mix-up as useABCompare had: `Persona.systemPrompt`.
+        // Ctrl+N used to open every chat with an empty system prompt.
+        useChatStore.getState().createConversation(model, persona?.systemPrompt || '')
       }
       useUIStore.getState().setView('chat')
     }

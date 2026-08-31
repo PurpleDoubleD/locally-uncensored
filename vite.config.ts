@@ -2,8 +2,8 @@ import { defineConfig, parseAst, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import { spawn, execSync, type ChildProcess } from 'child_process'
-import { existsSync, readdirSync, createWriteStream, mkdirSync, statSync } from 'fs'
-import { resolve, join, basename } from 'path'
+import { existsSync, readdirSync, createWriteStream, mkdirSync, statSync, type Dirent } from 'fs'
+import { resolve, join, basename, isAbsolute } from 'path'
 import https from 'https'
 import http from 'http'
 import { config } from 'dotenv'
@@ -874,22 +874,35 @@ function comfyLauncher(): Plugin {
         req.on('end', () => {
           try {
             const { provider } = JSON.parse(body)
-            // Try common paths for LM Studio / other providers
-            const { existsSync } = require('fs')
-            const { join } = require('path')
-            const home = require('os').homedir()
-            const candidates = [
-              join(home, '.cache', 'lm-studio', 'models'),
-              join(home, 'AppData', 'Local', 'LM Studio', 'models'),
-              join(home, '.local', 'share', 'lm-studio', 'models'),
-            ]
-            const found = candidates.find(p => existsSync(p))
+            const home = os.homedir()
+            // Which backend was asked about used to be read and then thrown
+            // away: every provider got LM Studio's directory back, including
+            // Ollama and the built-in engine. Mirrors the dispatch in the Rust
+            // command (src-tauri/src/commands/download.rs detect_model_path)
+            // for the backends with a conventional managed dir; everything
+            // else falls through to the LU fallback dir below, as there.
+            const asked = String(provider ?? '').toLowerCase()
+            const candidates =
+              asked === 'ollama'
+                ? [join(home, '.ollama', 'models')]
+                : asked === 'lm studio' || asked === 'lmstudio'
+                  ? [
+                      join(home, '.lmstudio', 'models'),
+                      join(home, '.cache', 'lm-studio', 'models'),
+                      join(home, 'AppData', 'Local', 'LM Studio', 'models'),
+                      join(home, '.local', 'share', 'lm-studio', 'models'),
+                    ]
+                  : asked === 'jan'
+                    ? [join(home, '.jan', 'models'), join(home, 'jan', 'models')]
+                    : asked === 'gpt4all'
+                      ? [join(home, '.cache', 'gpt4all')]
+                      : []
+            const found = candidates.find((p) => existsSync(p))
             if (found) {
               res.writeHead(200, { 'Content-Type': 'application/json' })
               res.end(JSON.stringify(found))
             } else {
               // Fallback: create LU models directory (same as Rust backend)
-              const { mkdirSync } = require('fs')
               const fallback = join(home, 'locally-uncensored', 'models')
               try { mkdirSync(fallback, { recursive: true }) } catch {}
               res.writeHead(200, { 'Content-Type': 'application/json' })
@@ -1335,7 +1348,8 @@ function comfyLauncher(): Plugin {
             const pythonBin = (() => {
               if (process.platform !== 'win32') return 'python3'
               try {
-                const { execSync } = require('child_process')
+                // The typed execSync is already imported at the top of this
+                // file; the inline require shadowed it with an untyped one.
                 const paths = execSync('where python', { encoding: 'utf8' }).trim().split('\n')
                 const real = paths.find((p) => !p.includes('WindowsApps'))
                 return real ? '"' + real.trim() + '"' : 'python'
@@ -1617,18 +1631,32 @@ function comfyLauncher(): Plugin {
         req.on('end', () => {
           try {
             const { path: dirPath, recursive } = JSON.parse(body)
-            const os = require('os')
-            const fs = require('fs')
-            const resolved = require('path').isAbsolute(dirPath) ? dirPath : join(os.homedir(), 'agent-workspace', dirPath)
-            const entries: any[] = []
-            const items = fs.readdirSync(resolved, { withFileTypes: true })
-            for (const item of items.slice(0, 500)) {
-              const fullPath = join(resolved, item.name)
+            const resolved = isAbsolute(dirPath) ? dirPath : join(os.homedir(), 'agent-workspace', dirPath)
+            const entries: Array<{ name: string; path: string; size: number; isDir: boolean; modified: number }> = []
+            // `recursive` arrived from the caller (file_list passes the model's
+            // flag straight through) and was then ignored, so in dev mode a
+            // recursive listing silently came back one level deep. Same limits
+            // as the Rust command: depth 5, 500 entries.
+            const MAX_ENTRIES = 500
+            const MAX_DEPTH = 5
+            const walk = (dir: string, depth: number): void => {
+              let items: Dirent[]
               try {
-                const stat = fs.statSync(fullPath)
-                entries.push({ name: item.name, path: fullPath, size: stat.size, isDir: item.isDirectory(), modified: Math.floor(stat.mtimeMs / 1000) })
-              } catch { /* skip */ }
+                items = readdirSync(dir, { withFileTypes: true })
+              } catch {
+                return
+              }
+              for (const item of items) {
+                if (entries.length >= MAX_ENTRIES) return
+                const fullPath = join(dir, item.name)
+                try {
+                  const stat = statSync(fullPath)
+                  entries.push({ name: item.name, path: fullPath, size: stat.size, isDir: item.isDirectory(), modified: Math.floor(stat.mtimeMs / 1000) })
+                } catch { continue }
+                if (recursive && item.isDirectory() && depth < MAX_DEPTH) walk(fullPath, depth + 1)
+              }
             }
+            walk(resolved, 1)
             res.writeHead(200, { 'Content-Type': 'application/json' })
             res.end(JSON.stringify({ entries, count: entries.length }))
           } catch (err) {

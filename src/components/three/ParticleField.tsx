@@ -1,16 +1,23 @@
 import { useRef, useMemo } from 'react'
 import { useFrame, useThree } from '@react-three/fiber'
 import * as THREE from 'three'
-import { useSettingsStore } from '../../stores/settingsStore'
-import { PARTICLE_COUNTS } from '../../lib/constants'
+
+/**
+ * The field used to read a `particleDensity` setting and index a
+ * `PARTICLE_COUNTS` table with it. Neither exists any more: `Settings` has no
+ * density key and `lib/constants` exports no such table, so the lookup was
+ * `undefined[undefined]` — a TypeError on the first render of this component,
+ * masked only by the fact that nothing mounts ParticleBackground today.
+ * The count is the value the old `|| 3000` fallback would have produced.
+ */
+const PARTICLE_COUNT = 3000
 
 export function ParticleField() {
   const pointsRef = useRef<THREE.Points>(null)
   const mouseRef = useRef(new THREE.Vector2(0, 0))
   const { viewport } = useThree()
 
-  const particleDensity = useSettingsStore((s) => s.settings.particleDensity)
-  const count = PARTICLE_COUNTS[particleDensity] || 3000
+  const count = PARTICLE_COUNT
 
   const { positions, colors, sizes } = useMemo(() => {
     const positions = new Float32Array(count * 3)

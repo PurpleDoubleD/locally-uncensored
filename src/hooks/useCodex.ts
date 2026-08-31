@@ -504,7 +504,9 @@ export function useCodex() {
       name: activeModel,
       supportsTools: pickerMeta && pickerMeta.type === 'text' ? pickerMeta.supportsTools : undefined,
     })
-    const modelToUse = activeModel.includes('::') ? activeModel.split('::')[1] : activeModel
+    // The registry already stripped the `provider::` prefix when it resolved
+    // the client; re-splitting the name here was a second copy of that rule.
+    const modelToUse = modelId
     // G37b (R21d wire proof, 2026-08-08): the picker row is silent for the
     // managed built-in engine (useModels synthesizes its rows without ever
     // running listModels), so ask the server itself before the first request.

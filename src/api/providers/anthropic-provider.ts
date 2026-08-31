@@ -134,7 +134,11 @@ function applyCacheControl(body: MessagesBody): void {
 export class AnthropicProvider implements ProviderClient {
   readonly id = 'anthropic' as const
 
-  constructor(private config: ProviderConfig) {}
+  private readonly config: ProviderConfig
+
+  constructor(config: ProviderConfig) {
+    this.config = config
+  }
 
   private get baseUrl(): string {
     return this.config.baseUrl.replace(/\/+$/, '')

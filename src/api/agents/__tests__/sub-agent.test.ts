@@ -10,7 +10,18 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 
 const chatWithTools = vi.fn()
 const toolExecute = vi.fn(async () => 'tool output')
-const auditRecord = vi.fn(() => 'audit-1')
+// Typed like the real useToolAuditStore.record, so the assertions below can
+// read what the runner passed; a bare `vi.fn(() => ...)` has an empty args
+// tuple and `calls[0][0]` does not exist on it.
+const auditRecord = vi.fn((_input: {
+  id?: string
+  convId: string
+  toolCallId: string
+  toolName: string
+  args: Record<string, unknown>
+  parentToolCallId?: string
+  startedAt?: number
+}) => 'audit-1')
 const auditComplete = vi.fn()
 let permLevel: 'auto' | 'confirm' | 'blocked' = 'auto'
 

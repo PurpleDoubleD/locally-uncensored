@@ -78,7 +78,7 @@ describe('Memory CRUD E2E', () => {
     const id1 = addMem('user', 'Speaks German', 'User primarily communicates in German')
     const id2 = addMem('feedback', 'No emojis', 'User wants no emojis in UI')
     const id3 = addMem('project', 'v2.0 launch', 'Currently working on v2.0 launch')
-    const id4 = addMem('reference', 'GitHub repo', 'Main repo at github.com/test/app')
+    addMem('reference', 'GitHub repo', 'Main repo at github.com/test/app')
 
     expect(useMemoryStore.getState().entries).toHaveLength(4)
     expect(id1).toBeTruthy()

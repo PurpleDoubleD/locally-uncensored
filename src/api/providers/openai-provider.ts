@@ -240,7 +240,11 @@ export function __clearContextCatalogForTests(): void {
 export class OpenAIProvider implements ProviderClient {
   readonly id = 'openai' as const
 
-  constructor(private config: ProviderConfig) {}
+  private readonly config: ProviderConfig
+
+  constructor(config: ProviderConfig) {
+    this.config = config
+  }
 
   private catalogKey(model: string): string {
     return `${this.baseUrl}|${model}`

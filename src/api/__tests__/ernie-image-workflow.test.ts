@@ -10,7 +10,7 @@
  */
 import { describe, it, expect } from 'vitest'
 import { classifyModel, MODEL_TYPE_DEFAULTS as COMFYUI_DEFAULTS, COMPONENT_REGISTRY, isImageModelType, type ModelType } from '../comfyui'
-import { determineStrategy, type WorkflowStrategy } from '../dynamic-workflow'
+import { determineStrategy } from '../dynamic-workflow'
 import { getImageBundles } from '../discover'
 import type { CategorizedNodes, AvailableModels } from '../comfyui-nodes'
 
@@ -31,7 +31,7 @@ function allNodes(): CategorizedNodes {
 const defaultModels: AvailableModels = {
   checkpoints: [], unets: ['ernie-image-turbo.safetensors'],
   vaes: ['flux2-vae.safetensors'], clips: ['ministral-3-3b.safetensors'],
-  loras: [], controlnets: [], ipadapters: [],
+  motionModels: [],
 }
 
 // ── Classification ──────────────────────────────────────────────────────

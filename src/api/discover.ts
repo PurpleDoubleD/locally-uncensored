@@ -757,7 +757,10 @@ export interface ComponentSpec {
 }
 
 export interface ComponentRequirements {
-  loader: 'UNETLoader' | 'CheckpointLoaderSimple'
+  // SVD loads through ComfyUI's ImageOnlyCheckpointLoader — the registry
+  // below has always said so, only this union (a stale copy of the one in
+  // comfyui.ts, which lists all three) had not caught up.
+  loader: 'UNETLoader' | 'CheckpointLoaderSimple' | 'ImageOnlyCheckpointLoader'
   vae?: ComponentSpec
   clip?: ComponentSpec
   clipSecondary?: ComponentSpec

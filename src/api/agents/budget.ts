@@ -39,7 +39,11 @@ export class AgentBudget {
   private toolCalls = 0
   private iterations = 0
 
-  constructor(private caps: BudgetCaps) {}
+  private readonly caps: BudgetCaps
+
+  constructor(caps: BudgetCaps) {
+    this.caps = caps
+  }
 
   /** Record N new tool calls (accepts batch). */
   addToolCalls(n: number): void {

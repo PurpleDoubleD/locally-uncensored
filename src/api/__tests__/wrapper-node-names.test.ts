@@ -167,7 +167,7 @@ describe('lanes whose builders were removed stay closed', () => {
   const models: AvailableModels = {
     checkpoints: ['test.safetensors'], unets: ['test_unet.safetensors'],
     vaes: ['test_vae.safetensors'], clips: ['test_clip.safetensors'],
-    loras: [], controlnets: [], ipadapters: [], motionModels: [],
+    motionModels: [],
   }
 
   for (const type of ['cogvideo', 'pyramidflow', 'allegro'] as ModelType[]) {

@@ -4,8 +4,8 @@
  * WITHOUT requiring any real ComfyUI instance or model downloads.
  */
 
-import { getVideoBundles, getImageBundles, CUSTOM_NODE_REGISTRY, type ModelBundle } from '../discover'
-import { classifyModel, MODEL_TYPE_DEFAULTS, COMPONENT_REGISTRY as COMFYUI_REGISTRY, isVideoModelType } from '../comfyui'
+import { getVideoBundles, getImageBundles, CUSTOM_NODE_REGISTRY } from '../discover'
+import { classifyModel, MODEL_TYPE_DEFAULTS, COMPONENT_REGISTRY as COMFYUI_REGISTRY } from '../comfyui'
 import { determineStrategy } from '../dynamic-workflow'
 import type { CategorizedNodes, AvailableModels } from '../comfyui-nodes'
 

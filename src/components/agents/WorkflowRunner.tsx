@@ -25,7 +25,6 @@ interface WorkflowRunnerProps {
   executionId: string
   workflowSteps: Array<{ id: string; label: string; type: string }>
   waitingForInput: string | null
-  currentStepLabel: string
   onProvideInput: (input: string) => void
   onCancel: () => void
 }
@@ -34,7 +33,6 @@ export function WorkflowRunner({
   executionId,
   workflowSteps,
   waitingForInput,
-  currentStepLabel,
   onProvideInput,
   onCancel,
 }: WorkflowRunnerProps) {

@@ -6,7 +6,7 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { ProviderError } from '../providers/types'
-import type { ProviderConfig } from '../providers/types'
+import type { ProviderConfig, ToolDefinition } from '../providers/types'
 
 // Mock the backend module — Ollama uses localFetch / localFetchStream instead of bare fetch.
 // Issue #31: apiUrl() now delegates to ollamaUrl() from backend.ts for a single
@@ -19,10 +19,9 @@ vi.mock('../backend', () => ({
 }))
 
 import { OllamaProvider } from '../providers/ollama-provider'
-import { localFetch, localFetchStream } from '../backend'
+import { localFetch } from '../backend'
 
 const mockLocalFetch = localFetch as ReturnType<typeof vi.fn>
-const mockLocalFetchStream = localFetchStream as ReturnType<typeof vi.fn>
 
 function makeConfig(overrides: Partial<ProviderConfig> = {}): ProviderConfig {
   return {
@@ -30,6 +29,8 @@ function makeConfig(overrides: Partial<ProviderConfig> = {}): ProviderConfig {
     name: 'Ollama',
     enabled: true,
     baseUrl: 'http://localhost:11434',
+    // Required by ProviderConfig; empty is what a local backend stores.
+    apiKey: '',
     isLocal: true,
     ...overrides,
   }
@@ -405,8 +406,8 @@ describe('OllamaProvider', () => {
         }), { status: 200 })
       )
 
-      const tools = [{
-        type: 'function' as const,
+      const tools: ToolDefinition[] = [{
+        type: 'function',
         function: {
           name: 'calculator',
           description: 'Do math',

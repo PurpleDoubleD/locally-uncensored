@@ -61,7 +61,10 @@ export class MCPExternalClient {
    */
   private onExit?: (serverId: string) => void
 
-  constructor(private config: MCPServerConfig, opts?: { onExit?: (serverId: string) => void }) {
+  private readonly config: MCPServerConfig
+
+  constructor(config: MCPServerConfig, opts?: { onExit?: (serverId: string) => void }) {
+    this.config = config
     this.onExit = opts?.onExit
   }
 

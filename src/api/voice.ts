@@ -510,7 +510,10 @@ let webAudioPlayback: { source: AudioBufferSourceNode; done: () => void } | null
  *  playNeuralAudio). Returns null for anything that isn't such a wav. */
 export function parseWavPcm(
   bytes: ArrayBuffer,
-): { sampleRate: number; channels: Float32Array[] } | null {
+  // `Float32Array<ArrayBuffer>`, not the default `ArrayBufferLike`: the
+  // channels are allocated here, so they are never SharedArrayBuffer-backed,
+  // and only this precise form may be handed to AudioBuffer.copyToChannel.
+): { sampleRate: number; channels: Float32Array<ArrayBuffer>[] } | null {
   const view = new DataView(bytes);
   if (bytes.byteLength < 44) return null;
   if (view.getUint32(0, false) !== 0x52494646) return null; // 'RIFF'

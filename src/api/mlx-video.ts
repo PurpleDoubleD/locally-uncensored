@@ -156,7 +156,7 @@ const DECODE_CHUNK = 4 * 1024 * 1024
 /** Give the event loop a real turn (a microtask would not let anything paint). */
 const yieldToRenderer = () => new Promise<void>((resolve) => setTimeout(resolve, 0))
 
-async function decodeBase64(b64: string): Promise<Uint8Array> {
+async function decodeBase64(b64: string): Promise<Uint8Array<ArrayBuffer>> {
   const binary = atob(b64)
   const bytes = new Uint8Array(binary.length)
   for (let start = 0; start < binary.length; start += DECODE_CHUNK) {

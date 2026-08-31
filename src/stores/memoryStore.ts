@@ -763,8 +763,12 @@ export const useMemoryStore = create<MemoryState>()(
       },
 
       getMemoryForPrompt: (query, maxChars = 2000) => {
-        // Legacy: assume 8K context for backward compat
-        return get().getMemoriesForPrompt(query, 8192)
+        // Legacy: the current API budgets in context TOKENS, so the 8K
+        // assumption stays. The caller's character cap used to be accepted and
+        // then silently dropped, which is the one thing this signature
+        // promises; it is honoured on the rendered block instead.
+        const block = get().getMemoriesForPrompt(query, 8192)
+        return block.length > maxChars ? block.slice(0, maxChars) : block
       },
     }),
     {

@@ -18,8 +18,6 @@ import { describe, it, expect } from 'vitest'
 import {
   classifyModel,
   COMPONENT_REGISTRY,
-  isImageModelType,
-  isVideoModelType,
   type ModelType,
 } from '../comfyui'
 import { MODEL_TYPE_DEFAULTS } from '../../stores/createStore'
@@ -61,7 +59,7 @@ function fullNodes(): CategorizedNodes {
 const defaultModels: AvailableModels = {
   checkpoints: ['test.safetensors'], unets: ['test_unet.safetensors'],
   vaes: ['test_vae.safetensors'], clips: ['test_clip.safetensors'],
-  loras: [], controlnets: [], ipadapters: [], motionModels: ['mm_sd_v15_v2.ckpt'],
+  motionModels: ['mm_sd_v15_v2.ckpt'],
 }
 
 // ── MODEL_TYPE_DEFAULTS completeness ────────────────────────────────────

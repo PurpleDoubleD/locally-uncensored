@@ -781,7 +781,7 @@ export async function fetchExternalBytes(url: string): Promise<ArrayBuffer> {
  * Tauri the browser can't fetch localhost directly (CORS) so we route through
  * the Rust byte proxy; in dev a plain fetch works.
  */
-export async function fetchLocalhostBytes(url: string): Promise<Uint8Array> {
+export async function fetchLocalhostBytes(url: string): Promise<Uint8Array<ArrayBuffer>> {
   if (isTauri()) {
     const invoke = await getInvoke()
     const bytes = (await invoke('proxy_localhost_stream', { url, method: 'GET', body: null })) as number[]

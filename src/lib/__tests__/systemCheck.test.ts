@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 
 // Provide minimal DOM mocks for node environment before importing
 // systemCheck.ts needs `document.createElement('canvas')` and `navigator.deviceMemory`

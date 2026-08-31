@@ -9,7 +9,7 @@
  */
 import { describe, it, expect } from 'vitest'
 import { chunkText, searchVectors } from '../rag'
-import type { TextChunk, VectorSearchResult } from '../../types/rag'
+import type { TextChunk } from '../../types/rag'
 
 // ── Helpers ──────────────────────────────────────────────────────
 

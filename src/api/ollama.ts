@@ -115,9 +115,13 @@ export async function chatStream(
   // and is a no-op on cards with headroom (Ollama already maxes layers
   // when it can fit them).
   const opts = { ...options }
+  // The caller's AbortSignal used to stop at this function: it was accepted
+  // and then never handed to the transport, so Stop left the HTTP request
+  // (and Ollama's generation behind it) running to completion.
   const res = await localFetchStream(ollamaUrl("/chat"), {
     method: "POST",
     body: JSON.stringify({ model, messages, options: opts, stream: true }),
+    signal,
   })
   if (!res.ok) throw new Error("Failed to start chat")
   return res
@@ -133,9 +137,11 @@ export async function chatStreamWithTools(
 ): Promise<Response> {
   // v2.4.6 Bug L: see chatStream() above — same num_gpu:99 removal.
   const opts = { ...options }
+  // Same dropped AbortSignal as chatStream() above.
   const res = await localFetchStream(ollamaUrl("/chat"), {
     method: "POST",
     body: JSON.stringify({ model, messages, tools, options: opts, stream: true }),
+    signal,
   })
   if (!res.ok) {
     // Try to extract Ollama's error message

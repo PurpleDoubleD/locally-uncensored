@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 
 // backend.ts reads (window as any).__TAURI__ at call time, so we need to
 // provide a `window` global in node environment and then import the module.

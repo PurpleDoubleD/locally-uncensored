@@ -57,7 +57,13 @@ interface OllamaModelEntry {
 export class OllamaProvider implements ProviderClient {
   readonly id = 'ollama' as const
 
-  constructor(private config: ProviderConfig) {}
+  /**
+   * The config is accepted for a uniform provider constructor signature but
+   * deliberately not stored: every URL goes through `ollamaUrl()` (see
+   * `apiUrl()` below, Issue #31), so a stored `config.baseUrl` would only be
+   * a second, silently diverging source of truth.
+   */
+  constructor(_config: ProviderConfig) {}
 
   /**
    * Build a full Ollama API URL. Delegates to `ollamaUrl()` from backend.ts
@@ -239,7 +245,7 @@ export class OllamaProvider implements ProviderClient {
     messages: ChatMessage[],
     tools: ToolDefinition[],
     options?: ChatOptions,
-  ): Promise<{ content: string; toolCalls: ToolCall[] }> {
+  ): Promise<{ content: string; toolCalls: ToolCall[]; promptEvalCount?: number; evalCount?: number; thinking?: string }> {
     // Bug B3: same contract as chatStream. A turn that really carries a
     // `tools` payload keeps the native tool channel. The strategy resolution
     // only sends one after Ollama itself reported the `tools` capability for
@@ -319,6 +325,11 @@ export class OllamaProvider implements ProviderClient {
       content: data.message?.content || '',
       thinking: data.message?.thinking || '',
       toolCalls,
+      // Real token usage from the non-streaming response, same fields
+      // chatStream() already forwards — without them the agent TokenCounter
+      // falls back to a char/4 estimate for every Ollama tool turn.
+      promptEvalCount: data.prompt_eval_count,
+      evalCount: data.eval_count,
     }
   }
 

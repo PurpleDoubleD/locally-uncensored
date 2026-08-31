@@ -42,8 +42,11 @@ describe('chatStore — conversation CRUD', () => {
 
   it('creates Codex conversation with correct title', () => {
     const id = useChatStore.getState().createConversation('qwen3-coder:30b', '', 'codex')
-    expect(useChatStore.getState().conversations[0].title).toBe('Coding Agent')
-    expect(useChatStore.getState().conversations[0].mode).toBe('codex')
+    // Assert on the conversation the call actually returned, not on whatever
+    // happens to sit at index 0.
+    const conv = useChatStore.getState().conversations.find((c) => c.id === id)!
+    expect(conv.title).toBe('Coding Agent')
+    expect(conv.mode).toBe('codex')
   })
 
   it('auto-numbers remote conversations', () => {

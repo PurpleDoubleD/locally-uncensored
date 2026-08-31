@@ -13,7 +13,7 @@
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'fs'
 import { fileURLToPath } from 'url'
-import { dirname, join, resolve } from 'path'
+import { dirname, resolve } from 'path'
 
 function readSource(relativePath: string): string {
   const __filename = fileURLToPath(import.meta.url)

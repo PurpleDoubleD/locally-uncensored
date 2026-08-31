@@ -7,7 +7,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { OpenAIProvider } from '../providers/openai-provider'
 import { ProviderError } from '../providers/types'
-import type { ProviderConfig } from '../providers/types'
+import type { ProviderConfig, ToolDefinition } from '../providers/types'
 
 function makeConfig(overrides: Partial<ProviderConfig> = {}): ProviderConfig {
   return {
@@ -749,9 +749,13 @@ describe('OpenAIProvider', () => {
   // tool/function message). parseError must tag that 'tools_unsupported' so the
   // chat layer shows a clean note instead of a raw status error / AbortError.
   describe('tools_unsupported (model without function calling)', () => {
-    const toolDef = [{
-      type: 'function' as const,
-      function: { name: 'web_search', description: 'x', parameters: { type: 'object', properties: {} } },
+    const toolDef: ToolDefinition[] = [{
+      type: 'function',
+      function: {
+        name: 'web_search',
+        description: 'x',
+        parameters: { type: 'object', properties: {}, required: [] },
+      },
     }]
 
     it('tags a 405 on a tool request as tools_unsupported', async () => {

@@ -1,6 +1,8 @@
 // Agent Mode — Type Definitions
 // Part of the Agent Mode feature (coding-orch branch)
 
+import type { JSONSchemaProp } from '../api/mcp/types'
+
 // Permission tiers (auto-approve reads, confirm writes)
 export type ToolPermission = 'auto' | 'confirm'
 
@@ -8,14 +10,19 @@ export type ToolPermission = 'auto' | 'confirm'
 export interface AgentToolDef {
   name: string
   description: string
+  /**
+   * The same schema the MCP registry hands out (`MCPToolDefinition.inputSchema`),
+   * because that is literally where these come from (tool-registry.ts maps
+   * `inputSchema` onto this field). The local copy of the shape had drifted:
+   * it forced `type: string` and a mandatory `description`, so a tool with a
+   * union type (`['string','array']`, the multi-LoRA param) or a bare property
+   * could not be described here at all.
+   */
   parameters: {
     type: 'object'
-    properties: Record<string, {
-      type: string
-      description: string
-      enum?: string[]
-    }>
+    properties: Record<string, JSONSchemaProp>
     required: string[]
+    additionalProperties?: boolean
   }
   permission: ToolPermission
 }

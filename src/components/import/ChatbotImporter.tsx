@@ -23,7 +23,9 @@ const PLATFORM_LABEL: Record<ChatbotPlatform, string> = {
 
 export function ChatbotImporter() {
   const conversationId = useChatStore(s => s.activeConversationId)
-  const rag = useRAG(conversationId || undefined)
+  // useRAG takes `string | null` and already handles the null case; the old
+  // `|| undefined` handed it a value its own signature does not admit.
+  const rag = useRAG(conversationId)
   const uploadDocument = rag.uploadDocument
 
   const [conversations, setConversations] = useState<NormalisedConversation[]>([])

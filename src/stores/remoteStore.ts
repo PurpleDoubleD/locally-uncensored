@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { backendCall, isTauri } from '../api/backend'
 import { useMemoryStore } from './memoryStore'
 import { useProviderStore } from './providerStore'
+import type { ProviderId } from '../api/providers/types'
 
 /**
  * #87: derive the backend the mobile proxy should reach for a dispatched
@@ -23,7 +24,10 @@ import { useProviderStore } from './providerStore'
 export function remoteBackendArgs(
   model: string | undefined,
   providers: Record<string, { baseUrl?: string } | undefined>,
-  getKey: (id: string) => string,
+  // `ProviderId`, not `string`: the store's own getProviderApiKey is keyed by
+  // the provider union, so a plain `string` here forced every caller to hand
+  // it an id its lookup does not accept.
+  getKey: (id: ProviderId) => string,
 ): { model?: string; backendKind: string; backendBase?: string; backendKey?: string } {
   if (!model) return { model, backendKind: 'ollama' }
   const hasPrefix = model.includes('::')

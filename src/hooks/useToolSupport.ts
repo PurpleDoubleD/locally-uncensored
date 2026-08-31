@@ -22,9 +22,13 @@ export interface ActiveToolSupport {
 
 export function useToolSupport(): ActiveToolSupport {
   const activeModel = useModelStore((s) => s.activeModel)
-  const supportsTools = useModelStore(
-    (s) => s.models.find((m) => m.name === s.activeModel)?.supportsTools,
-  )
+  // Only the text variants of the AIModel union carry `supportsTools`; the
+  // image/video rows have no such field, so the picker row is narrowed the
+  // same way useCodex narrows it before asking toolStrategyFor.
+  const supportsTools = useModelStore((s) => {
+    const row = s.models.find((m) => m.name === s.activeModel)
+    return row && row.type === 'text' ? row.supportsTools : undefined
+  })
 
   if (!activeModel) {
     return { support: 'none', canUseTools: false, reason: 'Pick a model first.', modelName: null }
