@@ -114,7 +114,6 @@ assert_pinned_commit() {
 
 ensure_src() {
   command -v git >/dev/null 2>&1 || die "git not found"
-  command -v cmake >/dev/null 2>&1 || die "cmake not found — install it (macOS: brew install cmake)"
   assert_pinned_commit
   mkdir -p "$CACHE_DIR"
   if [ ! -d "$SRC_DIR/.git" ]; then
@@ -168,14 +167,49 @@ $dirty"
 # sha256 of a file, or "" where no hasher is on PATH. macOS ships `shasum`,
 # Linux and Git-Bash ship `sha256sum`; neither is guaranteed on the other.
 sha256_of() {
+  local line hash
   if command -v shasum >/dev/null 2>&1; then
-    shasum -a 256 "$1" | awk '{print $1}'
+    line="$(shasum -a 256 "$1")"
   elif command -v sha256sum >/dev/null 2>&1; then
-    sha256sum "$1" | awk '{print $1}'
+    line="$(sha256sum "$1")"
+  else
+    return 0
   fi
+  # The leading backslash is not noise and not a fluke: GNU coreutils prefixes
+  # the WHOLE line with `\` whenever it had to escape the file name (`\` → `\\`,
+  # newline → `\n`), which under Git Bash on Windows is every single call,
+  # because the paths there contain backslashes. Taking $1 verbatim then yields
+  # `\5ec30eef…` — and this digest is the record of the binary that ships
+  # signed with the app, so one foreign character makes it compare unequal
+  # forever. Strip that one marker byte, then cut at the separator: whatever
+  # escaping GNU applied lives in the NAME, behind the separator, and is never
+  # part of the hash — so only the hash field needs looking at.
+  hash="${line#\\}"
+  hash="${hash%% *}"
+  # Anything that is not exactly 64 lowercase hex is not a digest. Report
+  # nothing rather than something wrong — the caller prints "unavailable".
+  case "$hash" in
+    *[!0-9a-f]* | "") return 0 ;;
+  esac
+  [ "${#hash}" -eq 64 ] || return 0
+  printf '%s\n' "$hash"
+}
+
+# cmake is checked HERE, at the compiler, and deliberately NOT in ensure_src.
+# ensure_src does git work only — clone, check out the pinned commit, verify
+# that HEAD and the working tree really are that commit — and it never invokes
+# a compiler. Guarding it with a cmake check made the supply-chain
+# VERIFICATION unrunnable on every machine without cmake (a stock Windows box,
+# a reviewer who only wants to re-check the pin), for a tool it does not use.
+# Every path that reaches `cmake` below goes through this function, so the
+# build still stops with the same message and nothing gets built without it.
+require_cmake() {
+  command -v cmake >/dev/null 2>&1 \
+    || die "cmake not found — install it (macOS: brew install cmake, Windows: winget install Kitware.CMake)"
 }
 
 build_triple() {
+  require_cmake
   local triple="$1"
   local build_dir="$CACHE_DIR/build-$triple"
   local flags; flags="$(cmake_flags_for "$triple")"
@@ -232,6 +266,10 @@ main() {
   if [ "${1:-}" = "--check" ]; then check_binary; exit 0; fi
   local targets=("$@")
   if [ "${#targets[@]}" -eq 0 ]; then targets=("$(host_triple)"); fi
+  # Fail fast, exactly as before: a build without cmake aborts here, before the
+  # clone/fetch, instead of after it. build_triple re-checks for any other
+  # caller — this line is about the ordering, not about the guarantee.
+  require_cmake
   ensure_src
   for t in "${targets[@]}"; do build_triple "$t"; done
   log "done: ${targets[*]}"
