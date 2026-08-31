@@ -30,9 +30,10 @@ set -euo pipefail
 # point b9949 at different code tomorrow. This script builds the binary that
 # ships inside the installer and is code-signed with the app, so "whatever the
 # tag names on the day CI runs" is not a supply chain we can stand behind.
-# LLAMA_TAG stays as the readable name and as the cross-check: the checkout is
-# verified against LLAMA_COMMIT on every run, cache hit included, and the build
-# stops if the two ever disagree.
+# LLAMA_TAG stays as the readable name and as the cross-check: on every run,
+# cache hit included, ensure_src asserts BOTH that HEAD is LLAMA_COMMIT and
+# that the working tree carries no change against it, and the build stops if
+# either fails.
 #
 # To bump, resolve the tag yourself and paste BOTH — llama.cpp tags are build
 # numbers and upstream SKIPS numbers whose CI failed, so the tag must exist:
@@ -138,6 +139,30 @@ ensure_src() {
   have="$(git -C "$SRC_DIR" rev-parse HEAD)"
   [ "$have" = "$LLAMA_COMMIT" ] \
     || die "llama.cpp checkout is at $have, expected $LLAMA_COMMIT ($LLAMA_TAG) — upstream tag moved, or the build cache is stale"
+  assert_clean_tree
+}
+
+# rev-parse only proves where HEAD POINTS. cmake does not compile HEAD, it
+# compiles the WORKING TREE under $SRC_DIR — and a restored cache is a tarball
+# somebody else produced, in which the files can say anything while .git/HEAD
+# still names the pinned SHA. Verifying the pointer and calling that a verified
+# source tree was the whole gap.
+#
+# `git status` closes it: the index is force-refreshed so nothing rides on a
+# stale stat cache, and then any tracked file whose CONTENT differs from the
+# pinned commit, and any untracked file that is not covered by llama.cpp's own
+# .gitignore, makes the build stop. Together with the SHA check above that is
+# the statement the comment always claimed: what gets compiled is the tree the
+# pinned commit names.
+#
+# Ignored paths are deliberately not in scope — the cmake build directory lives
+# outside $SRC_DIR, so nothing in the ignore set reaches the compiler.
+assert_clean_tree() {
+  git -C "$SRC_DIR" update-index -q --really-refresh >/dev/null 2>&1 || true
+  local dirty
+  dirty="$(git -C "$SRC_DIR" status --porcelain --untracked-files=all 2>/dev/null || true)"
+  [ -z "$dirty" ] || die "llama.cpp source tree does not match $LLAMA_COMMIT ($LLAMA_TAG) — the checkout carries local changes, so the build would not be the pinned source:
+$dirty"
 }
 
 # sha256 of a file, or "" where no hasher is on PATH. macOS ships `shasum`,

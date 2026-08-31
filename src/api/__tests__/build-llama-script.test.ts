@@ -3,11 +3,15 @@ import { execFileSync } from 'node:child_process'
 import { resolve, join } from 'node:path'
 import { existsSync, statSync, mkdtempSync, rmSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
+import { bashInterpreter } from './bash-interpreter'
 
 // P0: unit-test the pure functions of scripts/build-llama.sh by sourcing it
 // (main() is guarded so sourcing does not build anything) and invoking helpers.
 const SCRIPT = resolve(__dirname, '../../../scripts/build-llama.sh')
 const REPO_ROOT = resolve(__dirname, '../../..')
+// Not the bare name 'bash': on Windows that resolves to the WSL alias stub in
+// WindowsApps and never reaches a shell. See bash-interpreter.ts.
+const BASH = bashInterpreter()
 
 /** Run a snippet with the script sourced. Returns stdout+stderr, both wanted:
  *  the pin guards report through die(), which writes to stderr. */
@@ -16,7 +20,7 @@ function runScript(
   env: NodeJS.ProcessEnv = {},
 ): { code: number; out: string } {
   try {
-    const out = execFileSync('bash', ['-c', `source '${SCRIPT}'; ${snippet}`], {
+    const out = execFileSync(BASH, ['-c', `source '${SCRIPT}'; ${snippet}`], {
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'pipe'],
       env: { ...process.env, ...env },
@@ -32,7 +36,7 @@ function callFn(fn: string, ...args: string[]): { code: number; out: string } {
   const argv = args.map((a) => `'${a}'`).join(' ')
   try {
     const out = execFileSync(
-      'bash',
+      BASH,
       ['-c', `source '${SCRIPT}'; ${fn} ${argv}`],
       { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] },
     )
@@ -219,6 +223,51 @@ describe('build-llama.sh — the llama.cpp revision is pinned to a commit', () =
     })
     expect(second.code).not.toBe(0)
     expect(second.out).toContain(`checkout is at ${up.sha}`)
+  })
+
+  it('refuses a checkout whose FILES changed under the pinned SHA', () => {
+    // The gap the SHA check alone leaves: `git rev-parse HEAD` proves where
+    // HEAD POINTS. cmake does not compile HEAD, it compiles the working tree —
+    // and a restored CI cache is an archive produced by an earlier run, in
+    // which the sources can say anything while .git/HEAD still names the pin.
+    const up = fakeUpstream()
+    const cache = tmp('llama-cache-tampered-')
+    const env = {
+      LLAMA_BUILD_CACHE: cache,
+      LLAMA_REPO: up.path,
+      LLAMA_TAG: up.tag,
+      LLAMA_COMMIT: up.sha,
+    }
+    expect(runScript('ensure_src', env).code).toBe(0)
+
+    writeFileSync(
+      join(cache, 'llama.cpp', 'CMakeLists.txt'),
+      'project(fake)\nadd_definitions(-DBACKDOOR)\n',
+    )
+    const tampered = runScript('ensure_src', env)
+    expect(tampered.code, 'a modified source tree was accepted').not.toBe(0)
+    expect(tampered.out).toContain('does not match')
+    // HEAD is still exactly the pin, so the SHA check cannot be what caught it.
+    expect(git(join(cache, 'llama.cpp'), 'rev-parse', 'HEAD')).toBe(up.sha)
+  })
+
+  it('refuses an extra file smuggled into the checkout', () => {
+    // A tampered cache does not have to EDIT anything: llama.cpp pulls in
+    // whatever its CMake glob finds, so dropping a new file in is enough.
+    const up = fakeUpstream()
+    const cache = tmp('llama-cache-extra-')
+    const env = {
+      LLAMA_BUILD_CACHE: cache,
+      LLAMA_REPO: up.path,
+      LLAMA_TAG: up.tag,
+      LLAMA_COMMIT: up.sha,
+    }
+    expect(runScript('ensure_src', env).code).toBe(0)
+
+    writeFileSync(join(cache, 'llama.cpp', 'extra.cmake'), '# not in the pinned commit\n')
+    const extra = runScript('ensure_src', env)
+    expect(extra.code, 'an untracked file in the source tree was accepted').not.toBe(0)
+    expect(extra.out).toContain('extra.cmake')
   })
 
   it('hashes a digest of the binary it installed', () => {
