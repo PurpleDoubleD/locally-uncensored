@@ -77,13 +77,16 @@ export function MessageList({ isGenerating, isThisChatGenerating, isLoadingModel
     >
       {/* Single wrapper so the hook's ResizeObserver sees ALL content height,
           anchor included (G33). */}
-      <div ref={contentRef}>
+      <div ref={contentRef} className="mx-auto w-full max-w-[var(--lu-measure)]">
         {visibleMessages
           .map((message) => (
             <MessageBubble
               key={message.id}
               message={message}
               isLast={message.id === lastVisibleId}
+              // The live generating flag, not `message.usage`: a backend that
+              // never reports usage would lose the action bar for good.
+              isStreaming={showTyping && message.id === lastVisibleId && message.role === 'assistant'}
               onRegenerate={message.role === 'assistant' && onRegenerate && !isGenerating
                 ? handleRegenerate
                 : undefined}

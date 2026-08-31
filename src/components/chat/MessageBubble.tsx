@@ -36,9 +36,11 @@ interface Props {
   /** True for the last visible message — gates the VRAM hand-off card so it
    *  only renders in the active assistant turn, not in every historical one. */
   isLast?: boolean
+  /** This bubble is the one currently streaming — hides its action bar. */
+  isStreaming?: boolean
 }
 
-function MessageBubbleImpl({ message, onRegenerate, onEdit, pendingApprovalId, onApprove, onReject, isLast }: Props) {
+function MessageBubbleImpl({ message, onRegenerate, onEdit, pendingApprovalId, onApprove, onReject, isLast, isStreaming }: Props) {
   const [copied, setCopied] = useState(false)
   const [isEditing, setIsEditing] = useState(false)
   const [editContent, setEditContent] = useState('')
@@ -454,7 +456,12 @@ function MessageBubbleImpl({ message, onRegenerate, onEdit, pendingApprovalId, o
         {/* Action bar UNDER the message (David 2026-06-06: "eigene Leiste unter
             der Nachricht" instead of cramped hover-icons in the corner). Bigger
             targets, always visible but subtle; assistant left, user right. */}
-        {!isEditing && (
+        {/* Hidden while this very turn still streams: the bar used to hang on
+            !isEditing alone, so Copy/Regenerate/Delete rendered under a
+            half-written answer from the first token on. Gated on the live
+            generating flag rather than on `usage`, because a backend that
+            never reports usage would otherwise lose the bar for good. */}
+        {!isEditing && !isStreaming && (
           <div className={'flex items-center gap-0.5 ' + (isUser ? 'justify-end pr-0.5' : 'justify-start pl-0.5')}>
             {isUser && onEdit && (
               <button onClick={startEdit} className="p-1 rounded-md text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/10 transition-colors" aria-label="Edit message" title="Edit"><Pencil size={12} /></button>

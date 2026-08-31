@@ -247,7 +247,7 @@ export function ChatInput({ onSend, onStop, isGenerating, pendingApproval, onApp
   }, [addFiles])
 
   return (
-    <div className="px-3 pb-2 pt-1 w-full max-w-[70%] mx-auto">
+    <div className="px-3 pb-2 pt-1 w-full max-w-[var(--lu-measure)] mx-auto">
       {/* Approval used to live here as a popup over the chat input.
           Per user feedback ("eventuell in den chat einarbeiten") it now
           renders INSIDE the pending tool-call block in MessageList, so

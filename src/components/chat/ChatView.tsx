@@ -147,289 +147,301 @@ export function ChatView() {
 
   return (
     <div className="h-full flex flex-col min-w-0">
-      <AnimatePresence mode="wait">
-        {!activeConversationId ? (
-          // ── Homepage: just logo, no prompt ──
-          <motion.div
-            key="home"
-            className="flex-1 flex flex-col items-center justify-center"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0, y: -20 }}
-            transition={{ duration: 0.2 }}
-          >
-            <img src="/LU-monogram-bw.png" alt="" width={46} height={46} className="dark:invert-0 invert opacity-20" />
+      {/* One composer, two places. The landing state used to render a logo and
+          nothing else, so the screen you arrive on had no input field at all.
+          sendMessage creates the conversation when none is active (useChat.ts),
+          so the same element serves both branches — and it has to stay OUTSIDE
+          the AnimatePresence as ONE instance: a second copy per branch would
+          drop the draft the moment the first message creates the conversation,
+          which is worse than having no input field at all. */}
+      <div className="flex-1 flex overflow-hidden min-h-0">
+        <div className="flex-1 flex flex-col min-w-0 relative">
+          {chatMode === 'codex' && activeConversationId ? (
+            <CodexView />
+          ) : (<>
+          <AnimatePresence mode="wait">
+            {!activeConversationId ? (
+              // ── Homepage: logo above the shared composer ──
+              <motion.div
+                key="home"
+                className="flex-1 flex flex-col items-center justify-center min-h-0"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0, y: -20 }}
+                transition={{ duration: 0.2 }}
+              >
+                <img src="/LU-monogram-bw.png" alt="" width={46} height={46} className="dark:invert-0 invert opacity-20" />
 
-            {models.length > 0 && !activeModel && (
-              <p className="text-[0.6rem] text-amber-500/60 mt-3">Select a model above.</p>
-            )}
-          </motion.div>
-        ) : (
-          // ── Active chat ──
-          <motion.div
-            key="chat"
-            className="flex-1 flex overflow-hidden"
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.25, ease: 'easeOut' }}
-          >
-            <div className="flex-1 flex flex-col min-w-0 relative">
-              {chatMode === 'codex' ? (
-                <CodexView />
-              ) : (<>
-              {/* Top bar — slim: session/meta controls only. Docs · Plugins ·
-                  Tools + the model picker moved into the composer action bar
-                  (web parity, David 2026-07-11); Memory stands alone top-right. */}
-              <div className="flex items-center gap-1.5 px-2 pt-0.5">
-                <AgentModeToggle />
-                <AgentWorkspaceBadge />
+                {models.length > 0 && !activeModel && (
+                  <p className="text-[0.6rem] text-amber-500/60 mt-3">Select a model above.</p>
+                )}
+              </motion.div>
+            ) : (
+              // ── Active chat ──
+              <motion.div
+                key="chat"
+                className="flex-1 flex flex-col min-w-0 min-h-0"
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.25, ease: 'easeOut' }}
+              >
+                  {/* Top bar — slim: session/meta controls only. Docs · Plugins ·
+                      Tools + the model picker moved into the composer action bar
+                      (web parity, David 2026-07-11); Memory stands alone top-right. */}
+                  <div className="flex items-center gap-1.5 px-2 pt-0.5">
+                    <AgentModeToggle />
+                    <AgentWorkspaceBadge />
 
-                {/* Spacer */}
-                <div className="flex-1" />
+                    {/* Spacer */}
+                    <div className="flex-1" />
 
-                {/* Token Counter */}
-                <TokenCounter />
+                    {/* Token Counter */}
+                    <TokenCounter />
 
-                {/* Context window picker (Ollama num_ctx / LM Studio loaded ctx) */}
-                <ContextDropdown />
+                    {/* Context window picker (Ollama num_ctx / LM Studio loaded ctx) */}
+                    <ContextDropdown />
 
-                {/* Small-Model Mode — only relevant when the agent loop (tools)
-                    is active; plain chat has no tool calls to lean out. */}
-                {isAgentActive && <SmallModelModeToggle />}
+                    {/* Small-Model Mode — only relevant when the agent loop (tools)
+                        is active; plain chat has no tool calls to lean out. */}
+                    {isAgentActive && <SmallModelModeToggle />}
 
-                {/* Memory — standalone, top-right (moved out of the header model
-                    picker; David 2026-07-11). View / add / delete injected context. */}
-                <MemoryDebugToggle />
+                    {/* Memory — standalone, top-right (moved out of the header model
+                        picker; David 2026-07-11). View / add / delete injected context. */}
+                    <MemoryDebugToggle />
 
-                {/* Export */}
-                <div className="relative">
-                  <button
-                    onClick={() => setExportOpen(!exportOpen)}
-                    className="flex items-center gap-1 px-2 py-0.5 rounded border border-gray-200 dark:border-white/[0.06] hover:border-gray-400 dark:hover:border-white/15 text-gray-500 transition-colors text-[0.55rem]"
-                    title="Export chat"
-                  >
-                    <Download size={10} />
-                  </button>
-                  {exportOpen && (
-                    <>
-                      <div className="fixed inset-0 z-40" onClick={() => setExportOpen(false)} />
-                      <div className="absolute right-0 top-full mt-1 z-50 w-32 rounded-lg bg-white dark:bg-[#1a1a1a] border border-gray-200 dark:border-white/10 shadow-xl py-1">
-                        {(['markdown', 'json'] as const).map(fmt => (
-                          <button
-                            key={fmt}
-                            onClick={async () => {
-                              const conv = conversations.find(c => c.id === activeConversationId)
-                              setExportOpen(false)
-                              if (!conv) return
-                              const result = await exportConversation(conv, fmt)
-                              if (result.status === 'saved' && result.path) {
-                                setExportToast(`Saved to ${result.path}`)
-                              } else if (result.status === 'downloaded') {
-                                setExportToast(`Downloaded .${fmt === 'markdown' ? 'md' : 'json'}`)
-                              }
-                              // status === 'cancelled' → no toast, user closed the dialog
-                            }}
-                            className="w-full text-left px-3 py-1 text-[0.55rem] text-gray-400 hover:bg-white/5 hover:text-gray-200 transition-colors"
-                          >
-                            .{fmt === 'markdown' ? 'md' : fmt}
-                          </button>
-                        ))}
-                      </div>
-                    </>
-                  )}
-                </div>
-              </div>
-
-              {/* The plan, for plain chat and for Agent alike. It belongs with
-                  the standing status controls in the header, not at the prompt
-                  box: the Chat surface has no right-hand column to hand it to,
-                  and this row is where everything that is TRUE OF THE SESSION
-                  rather than of the next message already lives (agent toggle,
-                  workspace, token counter, context window, memory). Collapsed
-                  by default so it costs one line above the transcript. */}
-              <PlanBar />
-
-              <MessageList
-                isGenerating={isGenerating}
-                isThisChatGenerating={activeGenerating}
-                isLoadingModel={isLoadingModel}
-                onRegenerate={regenerateMessage}
-                onEdit={editAndResend}
-                pendingApprovalId={pendingApproval?.id ?? null}
-                onApprove={approveToolCall}
-                onReject={rejectToolCall}
-              />
-
-              {/* Remote session banners */}
-              {isThisRemoteActive && (
-                <div className="mx-3 mb-1.5 flex items-center justify-between gap-2 px-2.5 py-1 rounded border border-green-500/25 bg-green-500/5 text-[0.6rem]">
-                  <div className="flex items-center gap-1.5 text-green-400">
-                    <Radio size={10} className="animate-pulse" />
-                    <span className="font-medium">Live</span>
-                    <span className="text-green-500/60">
-                      {mobileConnectedCount > 0
-                        ? `, ${mobileConnectedCount} mobile${mobileConnectedCount === 1 ? '' : 's'} connected`
-                        : ', ready for mobile'}
-                    </span>
-                  </div>
-                  <button
-                    onClick={handleRemoteReactivate}
-                    disabled={remoteLoading}
-                    title="Regenerate passcode, keep this chat"
-                    className="flex items-center gap-1 px-1.5 py-0.5 rounded text-blue-400 hover:bg-blue-500/15 border border-blue-500/20 transition-all disabled:opacity-50"
-                  >
-                    <RefreshCw size={9} className={remoteLoading ? 'animate-spin' : ''} />
-                    Restart
-                  </button>
-                </div>
-              )}
-              {isThisRemoteStopped && (
-                <div
-                  className={
-                    'mx-3 mb-1.5 flex items-start justify-between gap-2 px-2.5 py-1 rounded border text-[0.6rem] ' +
-                    (remoteError
-                      ? 'border-red-500/30 bg-red-500/5'
-                      : 'border-gray-200 dark:border-white/10 bg-gray-50 dark:bg-white/[0.02]')
-                  }
-                >
-                  <div className={'flex flex-col gap-0.5 min-w-0 ' + (remoteError ? 'text-red-400' : 'text-gray-500')}>
-                    <div className="flex items-center gap-1.5">
-                      <Radio size={10} />
-                      <span className="font-medium">Server stopped</span>
-                      <span className={remoteError ? 'text-red-400/70' : 'text-gray-500/70'}>
-                        {remoteError ? ', last attempt failed' : ', restart to reconnect mobile'}
-                      </span>
-                    </div>
-                    {/* #29: surface the actual reason (port in use,
-                        firewall, etc.) so the user knows why Restart is
-                        not coming back, instead of staring at a button
-                        that does nothing. */}
-                    {remoteError && (
-                      <div className="text-[0.55rem] text-red-300/80 break-words pl-4 leading-snug">
-                        {remoteError}
-                      </div>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-1 shrink-0">
-                    {remoteError && (
+                    {/* Export */}
+                    <div className="relative">
                       <button
-                        onClick={remoteClearError}
-                        title="Dismiss error"
-                        className="p-0.5 rounded text-red-400/70 hover:text-red-300 hover:bg-red-500/15 transition-all"
+                        onClick={() => setExportOpen(!exportOpen)}
+                        className="flex items-center gap-1 px-2 py-0.5 rounded border border-gray-200 dark:border-white/[0.06] hover:border-gray-400 dark:hover:border-white/15 text-gray-500 transition-colors text-[0.55rem]"
+                        title="Export chat"
                       >
-                        <X size={9} />
+                        <Download size={10} />
                       </button>
-                    )}
-                    <button
-                      onClick={handleRemoteReactivate}
-                      disabled={remoteLoading}
-                      title="Start a fresh server and reattach this chat"
-                      className={
-                        'flex items-center gap-1 px-2 py-0.5 rounded transition-all disabled:opacity-50 font-medium ' +
-                        (remoteError
-                          ? 'text-red-300 hover:bg-red-500/15 border border-red-500/40'
-                          : 'text-green-400 hover:bg-green-500/15 border border-green-500/30')
-                      }
-                    >
-                      <RefreshCw size={9} className={remoteLoading ? 'animate-spin' : ''} />
-                      {remoteError ? 'Retry' : 'Restart'}
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              <ChatInput
-                onSend={sendMessage}
-                onStop={stopGeneration}
-                isGenerating={isGenerating}
-                pendingApproval={pendingApproval}
-                onApprove={approveToolCall}
-                onReject={rejectToolCall}
-                // Commands need the tool catalog to drive, which only Agent
-                // mode has here. Plain chat leaves "/cmd" as ordinary text.
-                slashCommands={isAgentActive}
-                onAttachDocs={appMode !== 'cloud' ? () => setRagPanelOpen(true) : undefined}
-                composerModel={
-                  <div className="flex items-center gap-1.5">
-                    {/* What this chat's answers were written by, when that is
-                        not what the picker says (Meldung 4, R5 re-measure). */}
-                    <ConversationModelNote />
-                    <ModelSelector openUpward />
-                  </div>
-                }
-                // No plan lives here. The prompt window is the prompt window
-                // (David, 2026-08-22): the plan band sits under the header row
-                // above, next to the other standing status controls.
-                composerAbove={<><LoopBar onStop={stopGeneration} /><GoalBar /><GroupCostHint /></>}
-                composerActions={
-                  <>
-                    {/* Documents (RAG) — local-embeddings only, so hide in
-                        Cloud mode (web parity). */}
-                    {appMode !== 'cloud' && (
-                    <button
-                      onClick={() => setRagPanelOpen(!ragPanelOpen)}
-                      className={
-                        'flex items-center gap-1 px-2 py-1.5 rounded-md transition-all shrink-0 text-[0.6rem] font-medium ' +
-                        (ragPanelOpen || ragEnabled
-                          ? 'bg-green-500/15 text-green-400 border border-green-500/30'
-                          : 'text-gray-500 hover:text-gray-300 hover:bg-white/5')
-                      }
-                      title="Document Chat (RAG)"
-                    >
-                      <FileText size={11} />
-                      <span>Docs</span>
-                      {docCount > 0 && (
-                        <span className={
-                          'min-w-[12px] h-[12px] flex items-center justify-center rounded-full text-[0.45rem] font-bold ' +
-                          (ragEnabled ? 'bg-green-500 text-white' : 'bg-white/15 text-gray-300')
-                        }>
-                          {docCount}
-                        </span>
+                      {exportOpen && (
+                        <>
+                          <div className="fixed inset-0 z-40" onClick={() => setExportOpen(false)} />
+                          <div className="absolute right-0 top-full mt-1 z-50 w-32 rounded-lg bg-white dark:bg-[#1a1a1a] border border-gray-200 dark:border-white/10 shadow-xl py-1">
+                            {(['markdown', 'json'] as const).map(fmt => (
+                              <button
+                                key={fmt}
+                                onClick={async () => {
+                                  const conv = conversations.find(c => c.id === activeConversationId)
+                                  setExportOpen(false)
+                                  if (!conv) return
+                                  const result = await exportConversation(conv, fmt)
+                                  if (result.status === 'saved' && result.path) {
+                                    setExportToast(`Saved to ${result.path}`)
+                                  } else if (result.status === 'downloaded') {
+                                    setExportToast(`Downloaded .${fmt === 'markdown' ? 'md' : 'json'}`)
+                                  }
+                                  // status === 'cancelled' → no toast, user closed the dialog
+                                }}
+                                className="w-full text-left px-3 py-1 text-[0.55rem] text-gray-400 hover:bg-white/5 hover:text-gray-200 transition-colors"
+                              >
+                                .{fmt === 'markdown' ? 'md' : fmt}
+                              </button>
+                            ))}
+                          </div>
+                        </>
                       )}
-                    </button>
-                    )}
+                    </div>
+                  </div>
 
-                    {/* Plugins (Chat Tools + Caveman + Personas) */}
-                    <PluginsDropdown openUpward />
+                  {/* The plan, for plain chat and for Agent alike. It belongs with
+                      the standing status controls in the header, not at the prompt
+                      box: the Chat surface has no right-hand column to hand it to,
+                      and this row is where everything that is TRUE OF THE SESSION
+                      rather than of the next message already lives (agent toggle,
+                      workspace, token counter, context window, memory). Collapsed
+                      by default so it costs one line above the transcript. */}
+                  <PlanBar />
 
-                    {/* Tools — agent permission overrides (only when agent active) */}
-                    {isAgentActive && (
-                      <div className="relative">
-                        <button
-                          onClick={() => setToolsDropdownOpen(!toolsDropdownOpen)}
-                          className="flex items-center gap-1 px-2 py-1.5 rounded-md text-gray-500 hover:text-gray-300 hover:bg-white/5 transition-all shrink-0 text-[0.6rem] font-medium"
-                        >
-                          <Wrench size={11} className="text-green-400" />
-                          <span>Tools</span>
-                          <ChevronDown size={9} className={`transition-transform ${toolsDropdownOpen ? 'rotate-180' : ''}`} />
-                        </button>
-                        {toolsDropdownOpen && (
-                          <>
-                            <div className="fixed inset-0 z-40" onClick={() => setToolsDropdownOpen(false)} />
-                            <div className="absolute left-0 bottom-full mb-0.5 z-50 w-28 rounded-md bg-white dark:bg-[#1a1a1a] border border-gray-200 dark:border-white/10 shadow-xl py-0.5 px-0.5">
-                              <PermissionOverrideBar />
-                            </div>
-                          </>
+                  <MessageList
+                    isGenerating={isGenerating}
+                    isThisChatGenerating={activeGenerating}
+                    isLoadingModel={isLoadingModel}
+                    onRegenerate={regenerateMessage}
+                    onEdit={editAndResend}
+                    pendingApprovalId={pendingApproval?.id ?? null}
+                    onApprove={approveToolCall}
+                    onReject={rejectToolCall}
+                  />
+
+                  {/* Remote session banners */}
+                  {isThisRemoteActive && (
+                    <div className="mx-3 mb-1.5 flex items-center justify-between gap-2 px-2.5 py-1 rounded border border-green-500/25 bg-green-500/5 text-[0.6rem]">
+                      <div className="flex items-center gap-1.5 text-green-400">
+                        <Radio size={10} className="animate-pulse" />
+                        <span className="font-medium">Live</span>
+                        <span className="text-green-500/60">
+                          {mobileConnectedCount > 0
+                            ? `, ${mobileConnectedCount} mobile${mobileConnectedCount === 1 ? '' : 's'} connected`
+                            : ', ready for mobile'}
+                        </span>
+                      </div>
+                      <button
+                        onClick={handleRemoteReactivate}
+                        disabled={remoteLoading}
+                        title="Regenerate passcode, keep this chat"
+                        className="flex items-center gap-1 px-1.5 py-0.5 rounded text-blue-400 hover:bg-blue-500/15 border border-blue-500/20 transition-all disabled:opacity-50"
+                      >
+                        <RefreshCw size={9} className={remoteLoading ? 'animate-spin' : ''} />
+                        Restart
+                      </button>
+                    </div>
+                  )}
+                  {isThisRemoteStopped && (
+                    <div
+                      className={
+                        'mx-3 mb-1.5 flex items-start justify-between gap-2 px-2.5 py-1 rounded border text-[0.6rem] ' +
+                        (remoteError
+                          ? 'border-red-500/30 bg-red-500/5'
+                          : 'border-gray-200 dark:border-white/10 bg-gray-50 dark:bg-white/[0.02]')
+                      }
+                    >
+                      <div className={'flex flex-col gap-0.5 min-w-0 ' + (remoteError ? 'text-red-400' : 'text-gray-500')}>
+                        <div className="flex items-center gap-1.5">
+                          <Radio size={10} />
+                          <span className="font-medium">Server stopped</span>
+                          <span className={remoteError ? 'text-red-400/70' : 'text-gray-500/70'}>
+                            {remoteError ? ', last attempt failed' : ', restart to reconnect mobile'}
+                          </span>
+                        </div>
+                        {/* #29: surface the actual reason (port in use,
+                            firewall, etc.) so the user knows why Restart is
+                            not coming back, instead of staring at a button
+                            that does nothing. */}
+                        {remoteError && (
+                          <div className="text-[0.55rem] text-red-300/80 break-words pl-4 leading-snug">
+                            {remoteError}
+                          </div>
                         )}
                       </div>
-                    )}
-                  </>
-                }
-              />
-            </>)}
-            </div>
+                      <div className="flex items-center gap-1 shrink-0">
+                        {remoteError && (
+                          <button
+                            onClick={remoteClearError}
+                            title="Dismiss error"
+                            className="p-0.5 rounded text-red-400/70 hover:text-red-300 hover:bg-red-500/15 transition-all"
+                          >
+                            <X size={9} />
+                          </button>
+                        )}
+                        <button
+                          onClick={handleRemoteReactivate}
+                          disabled={remoteLoading}
+                          title="Start a fresh server and reattach this chat"
+                          className={
+                            'flex items-center gap-1 px-2 py-0.5 rounded transition-all disabled:opacity-50 font-medium ' +
+                            (remoteError
+                              ? 'text-red-300 hover:bg-red-500/15 border border-red-500/40'
+                              : 'text-green-400 hover:bg-green-500/15 border border-green-500/30')
+                          }
+                        >
+                          <RefreshCw size={9} className={remoteLoading ? 'animate-spin' : ''} />
+                          {remoteError ? 'Retry' : 'Restart'}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+              </motion.div>
+            )}
+          </AnimatePresence>
 
-            {/* RAG Panel */}
-            <AnimatePresence>
-              {ragPanelOpen && (
-                <ErrorBoundary fallbackClassName="w-[280px] shrink-0 h-full border-l border-white/5 bg-[#363636] flex flex-col items-center justify-center p-6 gap-3">
-                  <RAGPanel conversationId={activeConversationId} onClose={() => setRagPanelOpen(false)} />
-                </ErrorBoundary>
-              )}
-            </AnimatePresence>
-          </motion.div>
-        )}
-      </AnimatePresence>
+          {/* Code mode brings its own composer, so it stays out of this one. */}
+          {chatMode !== 'codex' && (
+            <ChatInput
+              onSend={sendMessage}
+              onStop={stopGeneration}
+              isGenerating={isGenerating}
+              pendingApproval={pendingApproval}
+              onApprove={approveToolCall}
+              onReject={rejectToolCall}
+              // Commands need the tool catalog to drive, which only Agent
+              // mode has here. Plain chat leaves "/cmd" as ordinary text.
+              slashCommands={isAgentActive}
+              onAttachDocs={appMode !== 'cloud' ? () => setRagPanelOpen(true) : undefined}
+              composerModel={
+                <div className="flex items-center gap-1.5">
+                  {/* What this chat's answers were written by, when that is
+                      not what the picker says (Meldung 4, R5 re-measure). */}
+                  <ConversationModelNote />
+                  <ModelSelector openUpward />
+                </div>
+              }
+              // No plan lives here. The prompt window is the prompt window
+              // (David, 2026-08-22): the plan band sits under the header row
+              // above, next to the other standing status controls.
+              composerAbove={<><LoopBar onStop={stopGeneration} /><GoalBar /><GroupCostHint /></>}
+              composerActions={
+                <>
+                  {/* Documents (RAG) — local-embeddings only, so hide in
+                      Cloud mode (web parity). */}
+                  {appMode !== 'cloud' && (
+                  <button
+                    onClick={() => setRagPanelOpen(!ragPanelOpen)}
+                    className={
+                      'flex items-center gap-1 px-2 py-1.5 rounded-md transition-all shrink-0 text-[0.6rem] font-medium ' +
+                      (ragPanelOpen || ragEnabled
+                        ? 'bg-green-500/15 text-green-400 border border-green-500/30'
+                        : 'text-gray-500 hover:text-gray-300 hover:bg-white/5')
+                    }
+                    title="Document Chat (RAG)"
+                  >
+                    <FileText size={11} />
+                    <span>Docs</span>
+                    {docCount > 0 && (
+                      <span className={
+                        'min-w-[12px] h-[12px] flex items-center justify-center rounded-full text-[0.45rem] font-bold ' +
+                        (ragEnabled ? 'bg-green-500 text-white' : 'bg-white/15 text-gray-300')
+                      }>
+                        {docCount}
+                      </span>
+                    )}
+                  </button>
+                  )}
+
+                  {/* Plugins (Chat Tools + Caveman + Personas) */}
+                  <PluginsDropdown openUpward />
+
+                  {/* Tools — agent permission overrides (only when agent active) */}
+                  {isAgentActive && (
+                    <div className="relative">
+                      <button
+                        onClick={() => setToolsDropdownOpen(!toolsDropdownOpen)}
+                        className="flex items-center gap-1 px-2 py-1.5 rounded-md text-gray-500 hover:text-gray-300 hover:bg-white/5 transition-all shrink-0 text-[0.6rem] font-medium"
+                      >
+                        <Wrench size={11} className="text-green-400" />
+                        <span>Tools</span>
+                        <ChevronDown size={9} className={`transition-transform ${toolsDropdownOpen ? 'rotate-180' : ''}`} />
+                      </button>
+                      {toolsDropdownOpen && (
+                        <>
+                          <div className="fixed inset-0 z-40" onClick={() => setToolsDropdownOpen(false)} />
+                          <div className="absolute left-0 bottom-full mb-0.5 z-50 w-28 rounded-md bg-white dark:bg-[#1a1a1a] border border-gray-200 dark:border-white/10 shadow-xl py-0.5 px-0.5">
+                            <PermissionOverrideBar />
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  )}
+                </>
+              }
+            />
+          )}
+          </>)}
+        </div>
+
+        {/* RAG Panel */}
+        <AnimatePresence>
+          {ragPanelOpen && activeConversationId && (
+            <ErrorBoundary fallbackClassName="w-[280px] shrink-0 h-full border-l border-white/5 bg-[#363636] flex flex-col items-center justify-center p-6 gap-3">
+              <RAGPanel conversationId={activeConversationId} onClose={() => setRagPanelOpen(false)} />
+            </ErrorBoundary>
+          )}
+        </AnimatePresence>
+      </div>
 
       {/* Export toast */}
       <AnimatePresence>

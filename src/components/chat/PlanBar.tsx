@@ -65,7 +65,12 @@ export function PlanBar({ variant = 'header' }: Props) {
 
   return (
     <div
-      className={panel ? 'w-full p-1.5' : 'w-full px-2 pt-1'}
+      // 'header' sits directly above the transcript, so it rides the SAME
+      // measure column and the same px-3 gutter the bubbles use — a band that
+      // ran the full window width while the answers below it stopped at 760px
+      // read as a second, wider layout stacked on the first. 'panel' is the
+      // Code Explorer column and owns its own width, so it keeps out of this.
+      className={panel ? 'w-full p-1.5' : 'mx-auto w-full max-w-[var(--lu-measure)] px-3 pt-1'}
       data-testid={panel ? 'plan-panel' : 'plan-header'}
     >
       <div className="w-full rounded-md border border-blue-500/20 bg-blue-500/[0.04]">

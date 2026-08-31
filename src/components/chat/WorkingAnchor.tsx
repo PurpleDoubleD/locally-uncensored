@@ -34,7 +34,7 @@ export function WorkingAnchor({ isRunning, label }: Props) {
   if (!isRunning) return null
 
   return (
-    <div className="flex items-center gap-2 px-3 py-1.5" data-testid="working-anchor">
+    <div className="flex items-center gap-2 pl-11 pr-3 py-1.5" data-testid="working-anchor">
       <span className="lu-tool-shimmer text-[0.7rem] font-medium">{label ?? 'Working'}</span>
       {elapsed >= 1 && (
         <span className="text-[0.6rem] text-gray-500 dark:text-gray-500 font-mono tabular-nums">

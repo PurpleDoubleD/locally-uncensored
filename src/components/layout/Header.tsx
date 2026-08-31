@@ -138,16 +138,25 @@ export function Header() {
     updateSettings({ theme: settings.theme === 'dark' ? 'light' : 'dark' })
   }
 
+  // ONE recipe for every nav item, in the bar and in the overflow menu alike:
+  // h-7 so each one is a real click target instead of a 9px word, a filled
+  // rounded-md for the active view so "where am I" survives a glance, and the
+  // idle/hover pair as the only other state. Bare colour-only labels gave the
+  // active tab no hit area and no boundary, which is why the row read as
+  // running text rather than as navigation.
+  const NAV_BASE = 'flex items-center h-7 px-2 rounded-md text-[0.68rem] font-medium transition-colors'
+  const NAV_ACTIVE = 'bg-gray-100 dark:bg-white/[0.08] text-gray-900 dark:text-white'
+  const NAV_IDLE = 'text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-white/[0.05]'
+  const navClass = (active: boolean, full = false) =>
+    `${full ? 'w-full text-left ' : ''}${NAV_BASE} ${active ? NAV_ACTIVE : NAV_IDLE}`
+
   const textNav = (view: string, label: string) => (
     <button
       onClick={() => {
         useCompareStore.getState().setComparing(false)
         setView(view as any)
       }}
-      className={`text-[0.6rem] font-medium transition-colors ${currentView === view && !isComparing
-        ? 'text-gray-900 dark:text-white'
-        : 'text-gray-500 dark:text-gray-500 hover:text-gray-900 dark:hover:text-white'
-        }`}
+      className={navClass(currentView === view && !isComparing)}
     >
       {label}
     </button>
@@ -160,10 +169,7 @@ export function Header() {
         setView(view as any)
         setShowMoreMenu(false)
       }}
-      className={`text-left text-[0.6rem] font-medium transition-colors ${currentView === view && !isComparing
-        ? 'text-gray-900 dark:text-white'
-        : 'text-gray-500 dark:text-gray-500 hover:text-gray-900 dark:hover:text-white'
-        }`}
+      className={navClass(currentView === view && !isComparing, true)}
     >
       {label}
     </button>
@@ -213,7 +219,12 @@ export function Header() {
           and the utilities (right). The per-row Lichtschalter that used to
           live here has moved INTO the dropdown — each model row in
           `ModelSelector` has its own load/unload toggle next to the name. */}
-      <div className="lg:absolute lg:left-1/2 lg:-translate-x-1/2 flex items-center justify-center gap-2 min-w-0 ">
+      {/* In flow, not absolutely centered. The model picker that this slot was
+          centred for has moved into the composer, so the only thing left here
+          is the stale chip — and an out-of-flow box cannot reserve its own
+          width, so it spanned the whole bar and swallowed clicks meant for the
+          nav and the utilities beside it. */}
+      <div className="flex items-center justify-center gap-2 min-w-0 shrink">
         {/* Model picker + Memory moved out of the header into the composer /
             top-right (web parity, David 2026-07-11). Only the stale-manifest
             warning still surfaces here — chat/code only, never Create. */}
@@ -270,8 +281,8 @@ export function Header() {
         {/* Desktop navigation */}
         <div className={
           isCreateView
-            ? "hidden xl:flex items-center gap-2.5"
-            : "hidden lg:flex items-center gap-2.5"
+            ? "hidden xl:flex items-center gap-0.5"
+            : "hidden lg:flex items-center gap-0.5"
         }>
           {textNav('chat', 'Chat')}
           {textNav('create', 'Create')}
@@ -281,10 +292,7 @@ export function Header() {
               useCompareStore.getState().setComparing(true)
               setView('chat')
             }}
-            className={`text-[0.6rem] font-medium transition-colors ${isComparing
-              ? 'text-gray-900 dark:text-white'
-              : 'text-gray-500 dark:text-gray-500 hover:text-gray-900 dark:hover:text-white'
-              }`}
+            className={navClass(isComparing)}
           >
             Compare
           </button>
@@ -312,7 +320,7 @@ export function Header() {
 
           {showMoreMenu && (
             <div onPointerDown={(e) => e.stopPropagation()} className="absolute right-0 top-full mt-2 w-40 rounded-lg border border-gray-200 dark:border-white/10 bg-white dark:bg-[#1a1a1a] shadow-xl z-50">
-              <div className="flex flex-col gap-2 p-3">
+              <div className="flex flex-col gap-0.5 p-1.5">
 
                 {dropdownNav('chat', 'Chat')}
                 {dropdownNav('create', 'Create')}
@@ -323,10 +331,7 @@ export function Header() {
                     setView('chat')
                     setShowMoreMenu(false)
                   }}
-                  className={`text-left text-[0.6rem] font-medium transition-colors ${isComparing
-                    ? 'text-gray-900 dark:text-white'
-                    : 'text-gray-500 dark:text-gray-500 hover:text-gray-900 dark:hover:text-white'
-                    }`}
+                  className={navClass(isComparing, true)}
                 >
                   Compare
                 </button>

@@ -17,7 +17,7 @@ export function GoalBar() {
   if (!activeConversationId || !goal?.text) return null
 
   return (
-    <div className="w-full max-w-[70%] mx-auto px-3 pb-1 flex justify-center">
+    <div className="w-full max-w-[var(--lu-measure)] mx-auto px-3 pb-1 flex justify-center">
       <div className="w-full flex items-center gap-1.5 px-2 py-1 rounded-md border border-purple-500/20 bg-purple-500/[0.04]">
         <Target size={9} className="text-purple-400 shrink-0" />
         <span className="text-[0.55rem] uppercase tracking-wider text-gray-500 shrink-0">goal</span>

@@ -69,6 +69,12 @@
   --control-h-md: 32px;   /* default control height */
   --control-h-lg: 40px;   /* primary Create button */
 
+  /* Chat measure — ONE column for transcript, composer and status anchor.
+     They used to be two independent formulas (max-w-[70%] on the composer,
+     no max-width at all on the message list), which put the answer text and
+     the input box 157px apart at 1600px and let a line run to ~130 chars. */
+  --lu-measure: 760px;
+
   /* Radii */
   --radius-control: 8px;
   --radius-panel: 12px;
