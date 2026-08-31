@@ -66,6 +66,9 @@ describe('the notes table', () => {
     // order for strict templates, the AMD/ROCm and cu130 channels, the Debian
     // file collision and the hosted history trim, and each anchor below names
     // one of them, so a note that forgets them fails here.
+    // The late rounds added three more that the early entry could not know:
+    // the honest render phases (sampling), the ComfyUI that restarts itself,
+    // and the AMD detection on Windows after Microsoft removed wmic.
     const shipping = JSON.parse(
       readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), '../../../package.json'), 'utf8'),
     ).version as string
@@ -80,6 +83,7 @@ describe('the notes table', () => {
     for (const anchor of [
       'installed', 'built-in engine', 'backups', 'system prompt',
       'rocm', 'cu130', 'microphone', 'debian', 'trimmed',
+      'sampling', 'restarts itself', 'wmic',
     ]) {
       expect(prose, `${shipping}: nothing about "${anchor}"`).toContain(anchor)
     }
