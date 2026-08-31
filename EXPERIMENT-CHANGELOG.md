@@ -95,3 +95,23 @@ sind auf jedem frischen Windows-Clone rot — der erste `npm test` eines Windows
 Mitwirkenden war 8× rot. Fix: `.gitattributes` mit `* text=auto eol=lf`,
 CRLF nur für `.bat/.cmd/.ps1`, Binärlisten explizit. Commit `44d3de14`.
 
+
+## Etappe E2 — Fundament (Technik-Welle 2 + Muster M1/M3/M5/M7)
+
+| Audit-ID | Kern | Commit | Verifikation |
+|---|---|---|---|
+| M3 (SSRF, hoch ×2 + Cancel-EOF) | Gate prüft die aufgelöste **Adresse** statt den Hostnamen und pinnt die Verbindung daran (Rebinding-Fenster zu); Redirects pro Hop geprüft, max 3 statt 10 blind; EOF-Marker hinter jedem Rückkehrpfad; Idle-Wächter; 3× JSON-Injection auf serde_json | `86e9dd17` | 41 Proxy-Tests, keiner berührt das Netz; Agent hat in isolierter Kopie bewiesen, dass 2 rote Tests fremd waren |
+| M7 (RP-1 kritisch + 6) | Boot-Chunk **2,61 → 2,11 MB** (−19,3 %, gzip −23,5 %); **301 → 1** Re-Render pro 300 Streaming-Token; content-visibility ab 200 Nachrichten, pro Konversation eingerastet; MLX-Blob-URLs bekommen einen Besitzer | `402ec7e3`, `705102c7` | Am echten Store gemessen, nicht behauptet; Blob-Tests mutationsgeprüft; **0 Testanpassungen** |
+| M5 (OI-1/OI-2 kritisch + 6) | Linux-ComfyUI galt immer als kaputt (toter Unix-Zweig); „installed successfully" für nie befüllte Verzeichnisse; Repair deinstallierte still Voice; `ollama serve` starb am ersten Log-Write; Install/Repair/Update teilten einen Statusslot | `c0cc5639` | 620 Rust-Tests, 38 neu; Windows-/Linux-Zweige auf `lu-box` echt kompiliert |
+| Streaming (Zeitbombe 4 + 6) | Ein Idle-Wächter für alle Pfade (60 s zwischen Chunks, **300 s bis zum ersten** — sonst stirbt der legitime Kaltstart); Ollama endet terminal statt mit leerer Blase; **Anthropic Extended Thinking hat nie funktioniert** (konnte nur 400 erzeugen, verbrannte pro Turn einen Zusatz-Request) | `9c7243a1` | 6.469 grün; CRLF-Kern in sse.ts byte-identisch und mit 4 Tests eingezäunt; 3 Anpassungen, alle „hing an altem Wert" |
+| DD-1 (kritisch) + Zeitbombe 3 | „Wiederholen" löschte die Teildatei, ab der es fortsetzen wollte — bei 40 GB Totalverlust durch die von der UI empfohlene Aktion; 90-%-Schwelle → byte-genau; SHA256 streamend, beim Resume aus der Teildatei geseedet; Zustand überlebt Neustart; Waisen werden adoptiert | `a9b64245` | 32 Rust- + 110 TS-Tests; exakte Größe vom Server, nie aus dem gerundeten Katalog |
+| M1 (5) + M2 (3) | **Ein** Abbruchsignal pro Run bis in den Tool-Aufruf; Stop-Zustand pro Conversation statt pro Hook-Instanz (ein `/loop` nach Tab-Wechsel war vorher unstoppbar); ComfyUI-Stop auf **einer** promptId statt Queue leeren; Freigabedialog zeigt `stdin`; Allow-Liste an der Ausführungsstelle; MCP kann keinen Builtin kapern | `6aa99201` | 6.506 grün, 9 neue Testdateien; 6 Anpassungen, davon **2 echte Regressionen**: zwei Negativkontrollen zementierten den M1-Befund als Soll |
+
+**Windows-Gates nach E1+CRLF-Fix (auf `lu-box` gemessen):**
+
+| Gate | Ergebnis |
+|---|---|
+| `cargo check --all-targets` | **exit 0** — 224 Windows-Zweige kompilieren |
+| `cargo test` | 553 ✓ / 3 ✗ (die 3 sind CRLF-Quelltextvergleiche, Fix greift erst nach Re-Sync) |
+| `npx vitest run` | 6.394 ✓ / **8 → 4 ✗** nach `.gitattributes` |
+| verbleibende 4 | alle in `build-llama-script.test.ts`: `execFileSync('bash')` trifft auf Windows den **WSL-Startstub** `WindowsApps\bash.exe` statt des vorhandenen Git-Bash. Offen, Fix nach dem Deps-Paket (das dieselbe Datei anfasst). |
