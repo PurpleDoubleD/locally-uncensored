@@ -1,12 +1,73 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
+
+// ── Doubles for the modules defaultSubAgentRunner pulls in lazily ─────
+//
+// The runner resolves provider, registry, permissions and audit store at call
+// time, so the whole delegated ReAct loop is drivable from here: the provider
+// double decides what tool calls the sub-agent emits, the registry double
+// decides what the executor may run, and the permission double decides which
+// gate the call has to pass.
+
+const chatWithTools = vi.fn()
+const toolExecute = vi.fn(async () => 'tool output')
+const auditRecord = vi.fn(() => 'audit-1')
+const auditComplete = vi.fn()
+let permLevel: 'auto' | 'confirm' | 'blocked' = 'auto'
+
+const SHELL_DEF = {
+  name: 'shell_execute',
+  description: 'run a command',
+  inputSchema: {
+    type: 'object',
+    properties: { command: { type: 'string' } },
+    required: ['command'],
+  },
+  category: 'system',
+  source: 'builtin',
+}
+
+vi.mock('../../../stores/modelStore', () => ({
+  useModelStore: { getState: () => ({ activeModel: 'ollama::qwen' }) },
+}))
+
+vi.mock('../../providers', () => ({
+  getProviderForModel: (name: string) => ({
+    provider: { chatWithTools },
+    modelId: name.includes('::') ? name.split('::')[1] : name,
+  }),
+}))
+
+vi.mock('../../mcp', () => ({
+  toolRegistry: {
+    getAll: () => [SHELL_DEF],
+    resolveExecutable: (name: string) => (name === 'shell_execute' ? SHELL_DEF : undefined),
+    execute: (...args: any[]) => toolExecute(...(args as [])),
+    getPermissionLevelWithOverrides: () => permLevel,
+  },
+}))
+
+vi.mock('../../../stores/permissionStore', () => ({
+  usePermissionStore: {
+    getState: () => ({ getEffectivePermissions: () => ({}), perToolOverrides: {} }),
+  },
+}))
+
+vi.mock('../../../stores/toolAuditStore', () => ({
+  useToolAuditStore: { getState: () => ({ record: auditRecord, complete: auditComplete }) },
+}))
+
 import {
   DELEGATE_TASK_TOOL_DEF,
   SUB_AGENT_MAX_PARALLEL,
   SUB_AGENT_BUDGET,
   buildDelegateExecutor,
+  defaultSubAgentRunner,
   _getDepth,
   _setDepth,
 } from '../sub-agent'
+import { AgentBudget } from '../budget'
+import type { AgentRunContext } from '../../agent-context'
+import { dequeueApproval, headApproval, resetApprovals } from '../../../lib/approval-queue'
 
 describe('sub-agent — tool definition', () => {
   it('has the expected shape', () => {
@@ -144,5 +205,185 @@ describe('sub-agent — buildDelegateExecutor', () => {
     expect(await exec({ goal: 'x' })).toMatch(/Maximum sub-agent concurrency/)
     _setDepth(0)
     expect(await exec({ goal: 'x' })).toBe('ok')
+  })
+})
+
+// ── AGT-1: the delegated loop inherits the parent run's gates ──────────
+//
+// Before 2.6.7 defaultSubAgentRunner called executeParallel with getTool +
+// execute + explainError and nothing else, so a sub-agent ran the whole
+// registry — shell_execute, file_write, file_edit, all 'confirm' by default —
+// with no approval prompt, no audit entry and no way to stop it. These pin the
+// three gates it now has to pass.
+
+const makeRun = (over: Partial<AgentRunContext> = {}): AgentRunContext => ({
+  token: 'run-test',
+  chatId: null,
+  conversationId: 'conv-1',
+  workspace: null,
+  artifactMode: false,
+  readOnlyShellTurn: false,
+  mode: null,
+  artifacts: [],
+  ...over,
+})
+
+/** Script the provider: one tool-calling turn, then a plain final answer. */
+function scriptOneToolCall(): void {
+  chatWithTools
+    .mockResolvedValueOnce({
+      content: '',
+      toolCalls: [{ id: 'tc1', function: { name: 'shell_execute', arguments: { command: 'ls' } } }],
+    })
+    .mockResolvedValueOnce({ content: 'done', toolCalls: [] })
+}
+
+/** The message array the sub-agent sent on its Nth provider turn (0-based). */
+const messagesOfTurn = (n: number): any[] => chatWithTools.mock.calls[n][1] as any[]
+const lastToolMessage = (n: number): string => {
+  const msgs = messagesOfTurn(n)
+  return String(msgs[msgs.length - 1]?.content ?? '')
+}
+
+const tick = () => new Promise((r) => setTimeout(r, 0))
+
+async function waitForPrompt(convId: string) {
+  for (let i = 0; i < 100; i++) {
+    const head = headApproval(convId)
+    if (head) return head
+    await tick()
+  }
+  throw new Error('no approval was raised')
+}
+
+const runSub = (run?: AgentRunContext) =>
+  defaultSubAgentRunner('do it', '', { budget: new AgentBudget({ ...SUB_AGENT_BUDGET }), run })
+
+describe('sub-agent — approval gate (AGT-1)', () => {
+  beforeEach(() => {
+    _setDepth(0)
+    permLevel = 'auto'
+    chatWithTools.mockReset()
+    toolExecute.mockReset()
+    toolExecute.mockResolvedValue('tool output')
+    auditRecord.mockClear()
+    auditComplete.mockClear()
+    resetApprovals()
+  })
+
+  it('a confirm-level tool call raises an approval instead of dispatching', async () => {
+    permLevel = 'confirm'
+    scriptOneToolCall()
+    const p = runSub(makeRun())
+
+    const head = await waitForPrompt('conv-1')
+    expect(head.toolName).toBe('shell_execute')
+    expect(head.args).toEqual({ command: 'ls' })
+    // Still waiting on the user — nothing has run.
+    expect(toolExecute).not.toHaveBeenCalled()
+
+    dequeueApproval('conv-1')!.resolve(false)
+    await p
+    expect(toolExecute).not.toHaveBeenCalled()
+    expect(lastToolMessage(1)).toMatch(/rejected/i)
+  })
+
+  it('an approved confirm-level call dispatches once the user says yes', async () => {
+    permLevel = 'confirm'
+    scriptOneToolCall()
+    const p = runSub(makeRun())
+
+    await waitForPrompt('conv-1')
+    dequeueApproval('conv-1')!.resolve(true)
+    expect(await p).toBe('done')
+    expect(toolExecute).toHaveBeenCalledOnce()
+    expect(lastToolMessage(1)).toBe('tool output')
+  })
+
+  it('auto-level tools run unprompted (the gate is a gate, not a wall)', async () => {
+    permLevel = 'auto'
+    scriptOneToolCall()
+    expect(await runSub(makeRun())).toBe('done')
+    expect(headApproval('conv-1')).toBeNull()
+    expect(toolExecute).toHaveBeenCalledOnce()
+  })
+
+  it('blocked tools are refused without asking anyone', async () => {
+    permLevel = 'blocked'
+    scriptOneToolCall()
+    await runSub(makeRun())
+    expect(headApproval('conv-1')).toBeNull()
+    expect(toolExecute).not.toHaveBeenCalled()
+    expect(lastToolMessage(1)).toMatch(/Blocked: shell_execute is not permitted/)
+  })
+
+  it('fails closed when the delegation has no conversation to ask in', async () => {
+    permLevel = 'confirm'
+    scriptOneToolCall()
+    await runSub(undefined)
+    expect(toolExecute).not.toHaveBeenCalled()
+    expect(lastToolMessage(1)).toMatch(/no conversation to ask in/)
+  })
+
+  it('records every delegated call in the parent conversation audit trail', async () => {
+    permLevel = 'auto'
+    scriptOneToolCall()
+    await runSub(makeRun())
+    expect(auditRecord).toHaveBeenCalledOnce()
+    expect(auditRecord.mock.calls[0][0]).toMatchObject({
+      convId: 'conv-1',
+      toolName: 'shell_execute',
+      parentToolCallId: 'sub-agent',
+    })
+    expect(auditComplete).toHaveBeenCalledOnce()
+  })
+})
+
+describe('sub-agent — abort signal (AGT-1)', () => {
+  beforeEach(() => {
+    _setDepth(0)
+    permLevel = 'auto'
+    chatWithTools.mockReset()
+    toolExecute.mockReset()
+    toolExecute.mockResolvedValue('tool output')
+    resetApprovals()
+  })
+
+  it('Stop during the model turn keeps the batch from dispatching', async () => {
+    const ctrl = new AbortController()
+    chatWithTools.mockImplementationOnce(async () => {
+      ctrl.abort() // user hits Stop while the sub-agent is thinking
+      return {
+        content: '',
+        toolCalls: [{ id: 'tc1', function: { name: 'shell_execute', arguments: { command: 'ls' } } }],
+      }
+    })
+    const out = await runSub(makeRun({ abortSignal: ctrl.signal }))
+    expect(toolExecute).not.toHaveBeenCalled()
+    expect(out).toMatch(/stopped by the user/)
+    // And it did not start another ReAct iteration after the abort.
+    expect(chatWithTools).toHaveBeenCalledOnce()
+  })
+
+  it('Stop answers a tool call that is waiting for approval', async () => {
+    permLevel = 'confirm'
+    const ctrl = new AbortController()
+    scriptOneToolCall()
+    const p = runSub(makeRun({ abortSignal: ctrl.signal }))
+
+    await waitForPrompt('conv-1')
+    ctrl.abort()
+    const out = await p
+    expect(toolExecute).not.toHaveBeenCalled()
+    expect(headApproval('conv-1')).toBeNull()
+    expect(out).toMatch(/stopped by the user/)
+  })
+
+  it('an already-aborted run never reaches the provider at all', async () => {
+    const ctrl = new AbortController()
+    ctrl.abort()
+    const out = await runSub(makeRun({ abortSignal: ctrl.signal }))
+    expect(chatWithTools).not.toHaveBeenCalled()
+    expect(out).toMatch(/stopped by the user/)
   })
 })

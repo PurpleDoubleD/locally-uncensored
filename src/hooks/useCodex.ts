@@ -41,7 +41,7 @@ import { log } from '../lib/logger'
 import type { AgentBlock, AgentToolCall } from '../types/agent-mode'
 import { isThinkingCompatible, isPlainTextPlanner } from '../lib/model-compatibility'
 import type { ChatMessage, ToolCall, ToolDefinition } from '../api/providers/types'
-import { executeParallel, applyResultToToolCall, type ExecutionRequest } from '../api/agents/tool-executor'
+import { executeParallel, applyResultToToolCall, APPROVE_ALL, type ExecutionRequest } from '../api/agents/tool-executor'
 import { useToolAuditStore } from '../stores/toolAuditStore'
 import { makeInTurnCacheLookup } from '../api/agents/in-turn-cache'
 import { explainError as explainToolError } from '../api/agents/error-hints'
@@ -731,6 +731,10 @@ export function useCodex() {
     // Setup
     const abort = new AbortController()
     abortRef.current = abort
+    // Hand Stop to everything this run starts, including the nested ReAct loop
+    // a delegate_task sub-agent runs (audit AGT-1). Assigned here rather than
+    // in beginAgentRun because the controller does not exist that early.
+    run.abortSignal = abort.signal
     runningRef.current = true
     setIsRunning(true)
     codexStore.setThreadStatus(convId, 'running')
@@ -2061,7 +2065,10 @@ export function useCodex() {
                   cloudReason: !settings.codexConfirmShell && codexMode !== 'ask' && providerId === 'lu-cloud',
                 }, abort.signal)
               }
-            : undefined,
+            // Unattended by choice, stated in writing: awaitApproval is a
+            // required field now (audit AGT-1), so "no prompt here" is a
+            // decision a reader can see instead of a field nobody filled in.
+            : APPROVE_ALL,
           recordAudit: (entry) => {
             if (!convId) return
             if (entry.kind === 'start') {

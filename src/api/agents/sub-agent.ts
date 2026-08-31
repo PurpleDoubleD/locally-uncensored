@@ -13,7 +13,14 @@
 
 import { settleThinking } from '../../lib/thinking-stripper'
 import type { MCPToolDefinition } from '../mcp/types'
-import { executeParallel, type ExecutionRequest } from './tool-executor'
+import type { AgentToolCall } from '../../types/agent-mode'
+import type { ApprovalEntry } from '../../lib/approval-queue'
+import {
+  executeParallel,
+  type ExecutionRequest,
+  type ApprovalGate,
+  type AuditRecorder,
+} from './tool-executor'
 import type { AgentRunContext } from '../agent-context'
 import { AgentBudget } from './budget'
 import { explainError as explainToolError } from './error-hints'
@@ -126,6 +133,143 @@ export function buildSubAgentSystemPrompt(
 }
 
 /**
+ * The gates a delegated tool call has to pass. Same three the parent loop
+ * installs on its own executeParallel call, resolved for the sub-run.
+ */
+export interface SubAgentGates {
+  awaitApproval: ApprovalGate
+  recordAudit?: AuditRecorder
+  abortSignal?: AbortSignal
+  /**
+   * id → why the gate said no, for refusals that are NOT a user clicking
+   * reject. The executor's generic 'User rejected tool call' would otherwise
+   * tell the sub-agent's model a story that never happened.
+   */
+  refusals: Map<string, string>
+}
+
+/**
+ * Build the gates for one delegated run (audit AGT-1).
+ *
+ * A sub-agent runs a full ReAct loop over the whole tool registry minus
+ * delegate_task — shell_execute, file_write and file_edit included, all three
+ * 'confirm' by default. Until 2.6.7 it called executeParallel with getTool +
+ * execute + explainError and NOTHING else: no approval gate (the executor's
+ * was optional and therefore skipped), no audit trail, no abort signal. One
+ * approved delegate_task bought an unattended, unlogged, uninterruptible
+ * shell. Threading `run` (plan 2.6.6 C1) did not fix that: the run context
+ * carries the conversation, workspace, artifact and read-only flags, so it
+ * scopes WHERE a tool writes and whether shell_execute is read-only — it never
+ * asked the user anything.
+ *
+ * The gates are resolved here rather than handed down from the hook on
+ * purpose. All three live in module-scoped, conversation-keyed state (the
+ * approval FIFO, the audit store, the permission store), so the run's
+ * conversation id is enough to reach the SAME queue the parent loop uses —
+ * the pending approval surfaces in the same UI, the tool call lands in the
+ * same audit list. The parent's own awaitApproval closure could not be reused:
+ * it resolves a request id against the batch it was built for and answers
+ * "true" for anything it does not recognise, so a sub-agent's id would sail
+ * straight through it.
+ *
+ * Fail closed: with no conversation to ask in, a 'confirm' tool is refused
+ * rather than run.
+ */
+export async function buildSubAgentGates(run?: AgentRunContext): Promise<SubAgentGates> {
+  const convId = run?.conversationId ?? null
+  const abortSignal = run?.abortSignal
+  const refusals = new Map<string, string>()
+
+  const [{ toolRegistry }, { usePermissionStore }, approvals] = await Promise.all([
+    import('../mcp'),
+    import('../../stores/permissionStore'),
+    import('../../lib/approval-queue'),
+  ])
+
+  const awaitApproval: ApprovalGate = async (req) => {
+    if (abortSignal?.aborted) {
+      refusals.set(req.id, 'Aborted: the user stopped the run before this delegated tool call ran.')
+      return false
+    }
+    const perm = usePermissionStore.getState()
+    const level = toolRegistry.getPermissionLevelWithOverrides(
+      req.toolName,
+      perm.getEffectivePermissions(convId ?? undefined),
+      perm.perToolOverrides,
+    )
+    if (level === 'blocked') {
+      refusals.set(req.id, `Blocked: ${req.toolName} is not permitted in this conversation.`)
+      return false
+    }
+    if (level === 'auto') return true
+    // 'confirm' — the user decides, in the conversation that owns this run.
+    if (!convId) {
+      refusals.set(
+        req.id,
+        `Blocked: ${req.toolName} needs confirmation and this delegated run has no conversation to ask in.`,
+      )
+      return false
+    }
+    return new Promise<boolean>((resolve) => {
+      const toolCall: AgentToolCall = {
+        id: req.id,
+        toolName: req.toolName,
+        args: req.args,
+        status: 'pending_approval',
+        timestamp: Date.now(),
+      }
+      const entry: ApprovalEntry = { toolCall, resolve }
+      approvals.enqueueApproval(convId, entry)
+      // Stop has to answer a question nobody clicked, or the delegation (and
+      // with it the parent turn) waits forever — same lesson as audit A4.
+      abortSignal?.addEventListener(
+        'abort',
+        () => {
+          if (approvals.removeApproval(convId, entry)) {
+            refusals.set(req.id, 'Aborted: the user stopped the run while this tool call awaited approval.')
+            resolve(false)
+          }
+        },
+        { once: true },
+      )
+    })
+  }
+
+  if (!convId) return { awaitApproval, abortSignal, refusals }
+
+  const { useToolAuditStore } = await import('../../stores/toolAuditStore')
+  const auditIds = new Map<string, string>()
+  const recordAudit: AuditRecorder = (entry) => {
+    if (entry.kind === 'start') {
+      auditIds.set(
+        entry.id,
+        useToolAuditStore.getState().record({
+          convId,
+          toolCallId: entry.id,
+          toolName: entry.toolName,
+          args: entry.args,
+          startedAt: entry.startedAt,
+          parentToolCallId: entry.parentToolCallId,
+        }),
+      )
+      return
+    }
+    const aid = auditIds.get(entry.id)
+    if (!aid) return
+    useToolAuditStore.getState().complete(aid, {
+      status: entry.status,
+      completedAt: entry.completedAt,
+      resultPreview: entry.resultPreview,
+      error: entry.error,
+      errorHint: entry.errorHint,
+      cacheHit: entry.cacheHit,
+    })
+  }
+
+  return { awaitApproval, recordAudit, abortSignal, refusals }
+}
+
+/**
  * Default sub-agent runner. Pulls in the active provider + model via
  * dynamic import to keep this module standalone and testable with a
  * stub runner. The real hook wiring lives in buildDelegateExecutor().
@@ -162,8 +306,14 @@ export async function defaultSubAgentRunner(
     },
   ]
 
+  // Approval + audit + Stop for every tool this sub-run fires (AGT-1).
+  const gates = await buildSubAgentGates(options.run)
+
   let finalContent = ''
   for (let i = 0; i < SUB_AGENT_BUDGET.maxIterations; i++) {
+    if (gates.abortSignal?.aborted) {
+      return finalContent || '(sub-agent stopped by the user)'
+    }
     options.budget.addIteration()
     const ex = options.budget.exceeded()
     if (ex.kind !== 'none') {
@@ -189,12 +339,19 @@ export async function defaultSubAgentRunner(
       run: options.run,
     }))
     const registry = toolRegistry
-    const results = await executeParallel(requests, {
-      getTool: (name) => registry.resolveExecutable(name),
-      execute: (name: string, args: Record<string, any>, callRun?: AgentRunContext) =>
-        registry.execute(name, args, 1, callRun),
-      explainError: (toolName, err) => explainToolError(toolName, err),
-    })
+    const results = await executeParallel(
+      requests,
+      {
+        getTool: (name) => registry.resolveExecutable(name),
+        execute: (name: string, args: Record<string, any>, callRun?: AgentRunContext) =>
+          registry.execute(name, args, 1, callRun),
+        explainError: (toolName, err) => explainToolError(toolName, err),
+        // The three gates the nested loop used to run without.
+        awaitApproval: gates.awaitApproval,
+        recordAudit: gates.recordAudit,
+      },
+      { abortSignal: gates.abortSignal },
+    )
 
     messages.push({ role: 'assistant', content: turn.content || '', tool_calls: turn.toolCalls })
     // Map each result back to its ORIGINATING call by index. executeParallel
@@ -208,7 +365,9 @@ export async function defaultSubAgentRunner(
     results.forEach((r, i) => {
       messages.push({
         role: 'tool',
-        content: r.result ?? r.error ?? '(no output)',
+        // A gate refusal explains itself; only a real user rejection falls
+        // through to the executor's own wording.
+        content: r.result ?? gates.refusals.get(r.id) ?? r.error ?? '(no output)',
         tool_call_id: turn.toolCalls[i]?.id,
       })
     })

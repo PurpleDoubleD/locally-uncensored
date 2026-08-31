@@ -73,6 +73,17 @@ export interface AgentRunContext {
    */
   mode: string | null
   artifacts: CapturedArtifact[]
+  /**
+   * Stop button of the run that owns this context (audit AGT-1).
+   *
+   * The hook creates its AbortController after beginAgentRun, so it assigns
+   * this afterwards. Everything a NESTED loop starts — today that is
+   * delegate_task's sub-agent — reads it from here, because a sub-agent that
+   * keeps running tools after the user pressed Stop is the same bug as a tool
+   * batch that keeps dispatching after Stop. Undefined on surfaces that do not
+   * thread yet; those simply cannot be interrupted mid-delegation.
+   */
+  abortSignal?: AbortSignal
 }
 
 interface AgentCtxState {

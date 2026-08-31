@@ -80,20 +80,46 @@ export type ExecutorFn = (
   run?: AgentRunContext,
 ) => Promise<string>
 
+/**
+ * Pre-dispatch approval gate. Resolves true to let the call run, false to
+ * mark it 'rejected' without ever reaching the executor.
+ */
+export type ApprovalGate = (req: ExecutionRequest, tool: ExecutorToolDef) => Promise<boolean>
+
+/** Audit sink (Phase 2). Called once at dispatch and once at completion. */
+export type AuditRecorder = (entry: AuditHook) => void
+
+/**
+ * The one gate that is NOT optional: every caller must say, in writing, what
+ * happens before a tool runs.
+ *
+ * It used to be optional, and the omission was invisible — a runtime that
+ * simply left the field out ran shell_execute / file_write / file_edit
+ * unattended even though all three default to 'confirm'. That is exactly how
+ * the sub-agent's nested ReAct loop ended up with no approval prompt at all
+ * (audit AGT-1): nobody wrote `awaitApproval`, so nobody saw it missing.
+ * Making it required turns that silent hole into a compile error. A surface
+ * that genuinely runs unattended passes APPROVE_ALL and thereby says so.
+ */
+export const APPROVE_ALL: ApprovalGate = async () => true
+
 export interface ExecutorRuntime {
   /** Resolve a tool by name — returns undefined for unknown tools. */
   getTool: (name: string) => ExecutorToolDef | undefined
   /** Execute a registered tool against args; returns string result. */
   execute: ExecutorFn
-  /** Optional — called before dispatch to gate on user approval. */
-  awaitApproval?: (req: ExecutionRequest, tool: ExecutorToolDef) => Promise<boolean>
+  /**
+   * REQUIRED — called before dispatch to gate on user approval. Pass
+   * APPROVE_ALL to opt out explicitly; there is no implicit opt-out.
+   */
+  awaitApproval: ApprovalGate
   /** Optional — cache lookup pre-dispatch (Phase 6). Returns a cached result or undefined. */
   lookupCache?: (
     req: ExecutionRequest,
     argsHash: string
   ) => string | undefined
   /** Optional — audit recorder (Phase 2). Called at dispatch + completion. */
-  recordAudit?: (entry: AuditHook) => void
+  recordAudit?: AuditRecorder
   /** Optional — error hint mapper (Phase 7). */
   explainError?: (toolName: string, error: string) => string | undefined
 }
@@ -310,23 +336,22 @@ async function runSingle(
     })
   }
 
-  // User approval (desktop only; mobile runtime has no approval gate).
-  if (runtime.awaitApproval) {
-    const approved = await runtime.awaitApproval(req, tool)
-    if (!approved) {
-      return finalize({
-        id: req.id,
-        toolName: req.toolName,
-        status: 'rejected',
-        error: 'User rejected tool call',
-        dispatchedArgs,
-        argsHash,
-        sideEffectKey,
-        startedAt,
-        cacheHit: false,
-        schemaValidated,
-      })
-    }
+  // User approval. Unconditional: a runtime that does not want a prompt says
+  // so with APPROVE_ALL, it does not get there by forgetting the field.
+  const approved = await runtime.awaitApproval(req, tool)
+  if (!approved) {
+    return finalize({
+      id: req.id,
+      toolName: req.toolName,
+      status: 'rejected',
+      error: 'User rejected tool call',
+      dispatchedArgs,
+      argsHash,
+      sideEffectKey,
+      startedAt,
+      cacheHit: false,
+      schemaValidated,
+    })
   }
 
   // Dispatch.

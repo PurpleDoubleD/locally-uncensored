@@ -140,6 +140,9 @@ describe('retired names survive the step executor (executeParallel)', () => {
   const runtime = {
     getTool: (name: string) => registry.resolveExecutable(name),
     execute: ((name: string, args: Record<string, any>) => registry.execute(name, args)) as any,
+    // awaitApproval is required (audit AGT-1); this fixture exercises the
+    // redirect path, not the gate.
+    awaitApproval: async () => true,
   }
 
   it('resolveExecutable: registered def, retired stub, unknown undefined', () => {

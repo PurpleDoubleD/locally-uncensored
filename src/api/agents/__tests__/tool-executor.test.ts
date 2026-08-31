@@ -5,6 +5,7 @@ import {
   type ExecutionRequest,
   type AuditHook,
   applyResultToToolCall,
+  APPROVE_ALL,
 } from '../tool-executor'
 import type { AgentToolCall } from '../../../types/agent-mode'
 
@@ -24,7 +25,9 @@ const makeRuntime = (
         if (!(name in tools)) throw new Error(`no executor for ${name}`)
         return tools[name].executor(args)
       }),
-    awaitApproval: overrides.awaitApproval,
+    // Required field now (audit AGT-1) — a runtime cannot get an unattended
+    // dispatch by leaving it out, so the default has to be explicit.
+    awaitApproval: overrides.awaitApproval ?? APPROVE_ALL,
     lookupCache: overrides.lookupCache,
     recordAudit: overrides.recordAudit,
     explainError: overrides.explainError,
@@ -224,6 +227,34 @@ describe('tool-executor — cache + approval', () => {
     expect(out[0].result).toBe('from-cache')
     expect(out[0].cacheHit).toBe(true)
     expect(exec).not.toHaveBeenCalled()
+  })
+
+  // AGT-1: the gate used to be optional, so a runtime that simply omitted it
+  // dispatched everything unattended — which is how the sub-agent ended up
+  // running shell_execute with no prompt. It is consulted on every call now,
+  // and a caller that wants no prompt has to say APPROVE_ALL out loud.
+  it('consults the gate for every call, including pure reads', async () => {
+    const seen: string[] = []
+    const runtime = makeRuntime({
+      tools: { a: { executor: async () => 'ra' }, b: { executor: async () => 'rb' } },
+      awaitApproval: async (r) => {
+        seen.push(r.toolName)
+        return true
+      },
+    })
+    const out = await executeParallel([req('1', 'a'), req('2', 'b')], runtime)
+    expect(out.map((r) => r.status)).toEqual(['completed', 'completed'])
+    expect(seen.sort()).toEqual(['a', 'b'])
+  })
+
+  it('APPROVE_ALL is a real gate that lets everything through', async () => {
+    const exec = vi.fn(async () => 'ran')
+    const out = await executeParallel([req('1', 't')], makeRuntime({
+      tools: { t: { executor: exec } },
+      awaitApproval: APPROVE_ALL,
+    }))
+    expect(out[0].status).toBe('completed')
+    expect(exec).toHaveBeenCalledOnce()
   })
 
   it('rejected approval marks call rejected, skips dispatch', async () => {

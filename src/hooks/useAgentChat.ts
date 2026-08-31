@@ -577,6 +577,10 @@ export function useAgentChat() {
     // Setup
     const abort = new AbortController()
     abortRef.current = abort
+    // Hand Stop to everything this run starts, including the nested ReAct loop
+    // a delegate_task sub-agent runs (audit AGT-1). Assigned here rather than
+    // in beginAgentRun because the controller does not exist that early.
+    run.abortSignal = abort.signal
     runningRef.current = true
     setIsAgentRunning(true)
     // Bind the generating flag to THIS conversation so the typing indicator
