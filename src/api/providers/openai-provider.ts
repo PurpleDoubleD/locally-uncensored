@@ -15,6 +15,8 @@ import type {
 } from './types'
 import { ProviderError } from './types'
 import { parseSSEStream } from '../sse'
+import { idleAbortGuard, isStreamIdleTimeout } from '../stream-idle'
+import { sendWithTransientRetry } from './retry'
 import { repairJson } from '../../lib/tool-call-repair'
 import { signalCreditsExhausted } from '../../lib/credits-exhausted'
 import { parseRetryAfter } from '../../lib/http-status'
@@ -152,6 +154,9 @@ function guessContextFromName(model: string): number {
 // matters. listModels fills it through one delegate; chatStream's
 // applyMaxTokens and getContextLength read it through another.
 const catalogContext = new Map<string, number>()
+
+/** Ceiling for the optional metadata probes — see `probeInit`. */
+const CONTEXT_PROBE_TIMEOUT_MS = 2500
 
 /**
  * Which accumulator slot a tool-call delta without an `index` belongs to. The
@@ -398,12 +403,19 @@ export class OpenAIProvider implements ProviderClient {
     signal: AbortSignal | undefined,
     fetcher: (url: string, init: any) => Promise<Response>,
   ): Promise<Response> {
-    const post = () => fetcher(`${this.baseUrl}/chat/completions`, {
-      method: 'POST',
-      headers: this.headers,
-      body: JSON.stringify(body),
-      signal,
-    })
+    // Sanierungspfad: a throttle or a gateway hiccup is not the request's
+    // fault, and the user used to read the raw status line for it. The retry
+    // sits HERE, around the request, so it can never replay a stream that has
+    // already started — see providers/retry.ts for the rules.
+    const post = () => sendWithTransientRetry(
+      () => fetcher(`${this.baseUrl}/chat/completions`, {
+        method: 'POST',
+        headers: this.headers,
+        body: JSON.stringify(body),
+        signal,
+      }),
+      { signal },
+    )
     const refused = (res: Response) => !res.ok && (res.status === 400 || res.status === 422)
 
     const asked = body.reasoning_effort as string | undefined
@@ -467,6 +479,21 @@ export class OpenAIProvider implements ProviderClient {
   }
 
   /**
+   * Request init for the optional side probes (context window, tool
+   * capabilities). Every one of them is an OPTIMISATION — a failure just means
+   * the cascade falls back to a heuristic — but they ran with neither a signal
+   * nor a timeout, so a LAN backend that accepts the TCP connection and then
+   * says nothing blocked the user's message for the proxy's full default
+   * (300 s, and applyMaxTokens can hit two of them) with Stop unable to cut in.
+   * A few seconds is already generous for a local metadata endpoint.
+   */
+  private probeInit(signal?: AbortSignal): {
+    headers: Record<string, string>; timeoutMs: number; signal?: AbortSignal
+  } {
+    return { headers: this.headers, timeoutMs: CONTEXT_PROBE_TIMEOUT_MS, signal }
+  }
+
+  /**
    * Bound `max_tokens` so prompt + completion can never exceed the model's real
    * context window. Some cloud backends (DeepInfra) otherwise default the
    * completion budget to nearly the whole window and then 400 the moment the
@@ -483,7 +510,12 @@ export class OpenAIProvider implements ProviderClient {
   ): Promise<void> {
     const requested = options?.maxTokens && options.maxTokens > 0 ? options.maxTokens : 0
     let ctxLen = 0
-    try { ctxLen = await this.getContextLength(model) } catch { ctxLen = 0 }
+    // Audit: the probe behind this runs on the SEND path. Without the signal a
+    // Stop could not interrupt it, and without a timeout a hung LAN backend
+    // held the message hostage for the proxy's full 300 s (twice). Both are
+    // threaded through probeInit(); on a timeout the cascade just falls back to
+    // the heuristic, which is what an optional optimisation should do.
+    try { ctxLen = await this.getContextLength(model, options?.signal) } catch { ctxLen = 0 }
     if (ctxLen <= 0) {
       // No context info at all — honor an explicit request, else a safe default.
       body.max_tokens = requested || 4096
@@ -557,10 +589,20 @@ export class OpenAIProvider implements ProviderClient {
 
     if (this.useLocalProxy) await ensureProxyAllowsHost(this.baseUrl)
     const fetcher = this.useLocalProxy ? localFetchStream : fetch
-    const res = await this.sendChat(model, body, options?.signal, fetcher as any)
-
-    if (!res.ok) {
-      throw await this.parseError(res)
+    // Zeitbombe 4 — the idle watchdog needs a controller to abort, and a
+    // provider only ever receives a signal. This chains one onto the caller's:
+    // Stop still propagates inward, and a stream that goes silent can cancel
+    // its own request instead of leaving reader.read() pending forever.
+    const guard = idleAbortGuard(options?.signal)
+    let res: Response
+    try {
+      res = await this.sendChat(model, body, guard.signal, fetcher as any)
+      if (!res.ok) throw await this.parseError(res)
+    } catch (err) {
+      // Nothing to watch — drop the listener on the caller's signal here, the
+      // stream loop's `finally` below is never reached on this path.
+      guard.release()
+      throw err
     }
 
     // Accumulate tool call arguments across chunks (OpenAI streams them in pieces)
@@ -580,95 +622,108 @@ export class OpenAIProvider implements ProviderClient {
       }
     }
 
-    for await (const event of parseSSEStream(res)) {
-      if (event.data === '[DONE]') {
-        yield doneChunk('stop')
-        return
-      }
+    try {
+      for await (const event of parseSSEStream(res, { onIdle: guard.abort })) {
+        if (event.data === '[DONE]') {
+          yield doneChunk('stop')
+          return
+        }
 
-      let chunk: OpenAIStreamChunk
-      try {
-        chunk = JSON.parse(event.data)
-      } catch {
-        continue
-      }
+        let chunk: OpenAIStreamChunk
+        try {
+          chunk = JSON.parse(event.data)
+        } catch {
+          continue
+        }
 
-      // LM Studio (and some OpenAI-compat servers) report a mid-stream failure
-      // as a 200 response carrying an SSE error chunk ({ error: { message } } or
-      // a bare { error: "..." }) instead of a non-2xx status, so the !res.ok
-      // guard above never fires. Such a chunk has no `choices`, so the old loop
-      // just skipped it → the user got a SILENT EMPTY reply. Surface it as a
-      // thrown error so the chat layer can map it to a friendly message (e.g.
-      // the #67 image-on-text-model case). Verified live: LM Studio + image on a
-      // text-only model returns `event: error` with HTTP 200 (2026-06-21).
-      const streamErr = (chunk as { error?: { message?: string } | string }).error
-      if (streamErr) {
-        throw new Error(typeof streamErr === 'string' ? streamErr : (streamErr.message || 'Streaming error'))
-      }
+        // LM Studio (and some OpenAI-compat servers) report a mid-stream failure
+        // as a 200 response carrying an SSE error chunk ({ error: { message } } or
+        // a bare { error: "..." }) instead of a non-2xx status, so the !res.ok
+        // guard above never fires. Such a chunk has no `choices`, so the old loop
+        // just skipped it → the user got a SILENT EMPTY reply. Surface it as a
+        // thrown error so the chat layer can map it to a friendly message (e.g.
+        // the #67 image-on-text-model case). Verified live: LM Studio + image on a
+        // text-only model returns `event: error` with HTTP 200 (2026-06-21).
+        const streamErr = (chunk as { error?: { message?: string } | string }).error
+        if (streamErr) {
+          throw new Error(typeof streamErr === 'string' ? streamErr : (streamErr.message || 'Streaming error'))
+        }
 
-      // Real token usage — the include_usage final chunk carries `usage` with
-      // an empty choices[], so capture it BEFORE the choice guard below.
-      const u = (chunk as { usage?: { prompt_tokens?: number; completion_tokens?: number } }).usage
-      if (u) {
-        promptTokens = u.prompt_tokens || promptTokens
-        completionTokens = u.completion_tokens || completionTokens
-      }
+        // Real token usage — the include_usage final chunk carries `usage` with
+        // an empty choices[], so capture it BEFORE the choice guard below.
+        const u = (chunk as { usage?: { prompt_tokens?: number; completion_tokens?: number } }).usage
+        if (u) {
+          promptTokens = u.prompt_tokens || promptTokens
+          completionTokens = u.completion_tokens || completionTokens
+        }
 
-      const choice = chunk.choices?.[0]
-      if (!choice) continue
+        const choice = chunk.choices?.[0]
+        if (!choice) continue
 
-      // Capture WHY the model stopped ('stop', 'length', 'content_filter').
-      // 'length' with zero content is the reasoning-loop failure mode: the
-      // whole token budget went into thinking and no answer was ever written
-      // (David, cloud Qwen3.6, 2026-07-12) — the chat layer needs the reason
-      // to explain the empty bubble.
-      if (choice.finish_reason) finishReason = choice.finish_reason
+        // Capture WHY the model stopped ('stop', 'length', 'content_filter').
+        // 'length' with zero content is the reasoning-loop failure mode: the
+        // whole token budget went into thinking and no answer was ever written
+        // (David, cloud Qwen3.6, 2026-07-12) — the chat layer needs the reason
+        // to explain the empty bubble.
+        if (choice.finish_reason) finishReason = choice.finish_reason
 
-      const content = choice.delta?.content || ''
+        const content = choice.delta?.content || ''
 
-      // Yield native reasoning as `thinking` so the panel fills live —
-      // without this the entire reasoning phase of a cloud reasoner is
-      // silently dropped and the chat sits in dead air (uselu fc55c91).
-      const reasoning = choice.delta?.reasoning_content ?? choice.delta?.reasoning ?? ''
-      if (reasoning) {
-        yield { content: '', thinking: reasoning, done: false }
-      }
+        // Yield native reasoning as `thinking` so the panel fills live —
+        // without this the entire reasoning phase of a cloud reasoner is
+        // silently dropped and the chat sits in dead air (uselu fc55c91).
+        const reasoning = choice.delta?.reasoning_content ?? choice.delta?.reasoning ?? ''
+        if (reasoning) {
+          yield { content: '', thinking: reasoning, done: false }
+        }
 
-      // Accumulate streamed tool calls
-      if (choice.delta?.tool_calls) {
-        for (const tc of choice.delta.tool_calls) {
-          const key = tc.index ?? keyForUnindexedDelta(toolCallAccum, tc.id)
-          const existing = toolCallAccum.get(key)
-          if (existing) {
-            // id and name do NOT always arrive in the first delta — several
-            // OpenAI-compat servers send the id one chunk later, or open with a
-            // bare index. Ignoring them left a call with an empty name (dispatch
-            // fails on "") or an empty tool_call_id, which 422s the follow-up
-            // turn — the exact break the server-side normalizer had to heal.
-            // Set-if-empty, not append: servers that repeat the full name in
-            // every delta are far more common than ones that stream it in parts.
-            if (tc.id && !existing.id) existing.id = tc.id
-            if (tc.function?.name && !existing.name) existing.name = tc.function.name
-            if (tc.function?.arguments) existing.args += tc.function.arguments
-          } else {
-            toolCallAccum.set(key, {
-              id: tc.id || '',
-              name: tc.function?.name || '',
-              args: tc.function?.arguments || '',
-            })
+        // Accumulate streamed tool calls
+        if (choice.delta?.tool_calls) {
+          for (const tc of choice.delta.tool_calls) {
+            const key = tc.index ?? keyForUnindexedDelta(toolCallAccum, tc.id)
+            const existing = toolCallAccum.get(key)
+            if (existing) {
+              // id and name do NOT always arrive in the first delta — several
+              // OpenAI-compat servers send the id one chunk later, or open with a
+              // bare index. Ignoring them left a call with an empty name (dispatch
+              // fails on "") or an empty tool_call_id, which 422s the follow-up
+              // turn — the exact break the server-side normalizer had to heal.
+              // Set-if-empty, not append: servers that repeat the full name in
+              // every delta are far more common than ones that stream it in parts.
+              if (tc.id && !existing.id) existing.id = tc.id
+              if (tc.function?.name && !existing.name) existing.name = tc.function.name
+              if (tc.function?.arguments) existing.args += tc.function.arguments
+            } else {
+              toolCallAccum.set(key, {
+                id: tc.id || '',
+                name: tc.function?.name || '',
+                args: tc.function?.arguments || '',
+              })
+            }
           }
         }
-      }
 
-      if (content) {
-        yield { content, done: false }
-      }
+        if (content) {
+          yield { content, done: false }
+        }
 
-      // NB: we intentionally do NOT early-return on finish_reason. With
-      // stream_options.include_usage the server sends the usage chunk AFTER
-      // the finish_reason chunk — returning early would discard it. The [DONE]
-      // sentinel (or the end-of-stream fallback below) emits the single done
-      // chunk, which now carries the captured usage.
+        // NB: we intentionally do NOT early-return on finish_reason. With
+        // stream_options.include_usage the server sends the usage chunk AFTER
+        // the finish_reason chunk — returning early would discard it. The [DONE]
+        // sentinel (or the end-of-stream fallback below) emits the single done
+        // chunk, which now carries the captured usage.
+      }
+    } catch (err) {
+      // The watchdog fired: the stream did not fail, it went quiet. Same
+      // terminal chunk as a clean cut, so the chat layer explains it the same
+      // way instead of throwing a raw error at the user.
+      if (isStreamIdleTimeout(err)) {
+        yield doneChunk('disconnect')
+        return
+      }
+      throw err
+    } finally {
+      guard.release()
     }
 
     // Stream ended without an explicit [DONE] sentinel. If the server also
@@ -836,7 +891,7 @@ export class OpenAIProvider implements ProviderClient {
    *
    * Returnt `null` wenn nichts gefunden, damit Callers cascaden koennen.
    */
-  private async probeContextFromServer(model: string): Promise<number | null> {
+  private async probeContextFromServer(model: string, signal?: AbortSignal): Promise<number | null> {
     if (!this.isLanBackend) return null
 
     // Probe cache (audit E5): applyMaxTokens calls getContextLength on EVERY
@@ -861,7 +916,7 @@ export class OpenAIProvider implements ProviderClient {
       const lmStudioBase = this.baseUrl.replace(/\/v1\/?$/, '/api/v0')
       const lmsRes = await localFetch(
         `${lmStudioBase}/models/${encodeURIComponent(model)}`,
-        { headers: this.headers } as any,
+        this.probeInit(signal),
       )
       if (lmsRes.ok) {
         const data = await lmsRes.json()
@@ -875,7 +930,7 @@ export class OpenAIProvider implements ProviderClient {
     try {
       const res = await localFetch(
         `${this.baseUrl}/models/${encodeURIComponent(model)}`,
-        { headers: this.headers } as any,
+        this.probeInit(signal),
       )
       if (res.ok) {
         const data = await res.json()
@@ -904,7 +959,7 @@ export class OpenAIProvider implements ProviderClient {
     const enhancedBase = this.baseUrl.replace(/\/v1\/?$/, '/api/v0')
     if (enhancedBase === this.baseUrl) return map
     try {
-      const res = await localFetch(`${enhancedBase}/models`, { headers: this.headers } as any)
+      const res = await localFetch(`${enhancedBase}/models`, this.probeInit())
       if (!res.ok) return map
       const data = await res.json()
       for (const m of (data?.data ?? [])) {
@@ -927,7 +982,7 @@ export class OpenAIProvider implements ProviderClient {
   private async fetchServerToolCaps(): Promise<boolean | undefined> {
     const propsUrl = this.baseUrl.replace(/\/v1\/?$/, '') + '/props'
     try {
-      const res = await localFetch(propsUrl, { headers: this.headers } as any)
+      const res = await localFetch(propsUrl, this.probeInit())
       if (!res.ok) return undefined
       const data = await res.json()
       const flag = data?.chat_template_caps?.supports_tools
@@ -1041,7 +1096,7 @@ export class OpenAIProvider implements ProviderClient {
     try {
       const res = await localFetch(
         `${lmStudioBase}/models/${encodeURIComponent(model)}`,
-        { headers: this.headers } as any,
+        this.probeInit(),
       )
       if (!res.ok) return remember(null)
       const data = await res.json()
@@ -1051,7 +1106,7 @@ export class OpenAIProvider implements ProviderClient {
     return remember(null)
   }
 
-  async getContextLength(model: string): Promise<number> {
+  async getContextLength(model: string, signal?: AbortSignal): Promise<number> {
     // Cascade:
     //   1. Server-declared context_length from the /models catalogue (LU
     //      Cloud) — authoritative for the deployment, beats every heuristic
@@ -1062,7 +1117,7 @@ export class OpenAIProvider implements ProviderClient {
     const catalog = catalogContext.get(this.catalogKey(model))
     if (catalog && catalog > 0) return catalog
     if (KNOWN_CONTEXT[model]) return KNOWN_CONTEXT[model]
-    const probed = await this.probeContextFromServer(model)
+    const probed = await this.probeContextFromServer(model, signal)
     if (probed) return probed
     return guessContextFromName(model)
   }

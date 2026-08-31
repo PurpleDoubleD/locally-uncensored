@@ -208,8 +208,12 @@ describe('AnthropicProvider', () => {
 
     it('429 → rate_limit error', async () => {
       const provider = new AnthropicProvider(makeConfig())
-      vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
-        new Response('', { status: 429 })
+      // Every attempt, not just the first: a throttle is now retried with
+      // backoff (providers/retry.ts), so a single mocked answer would let the
+      // second attempt escape to the real network. The assertion is on what
+      // the user finally sees once the retries are spent.
+      vi.spyOn(globalThis, 'fetch').mockImplementation(
+        async () => new Response('', { status: 429 })
       )
       try {
         await provider.chatWithTools('claude-sonnet-4-20250514', [{ role: 'user', content: 'hi' }], [])

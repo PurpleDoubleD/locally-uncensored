@@ -16,7 +16,11 @@ vi.mock('../backend', () => ({
   localFetch: vi.fn(),
   localFetchStream: (...a: any[]) => localFetchStream(...(a as [])),
   ollamaUrl: (path: string) => `http://localhost:11434/api${path}`,
-  isPrivateOrLanHost: () => true,
+  // Honest transport answers: api.anthropic.com is a public host the CSP
+  // allows, so the Anthropic provider takes its direct fetch and the stubbed
+  // global fetch below is what it hits. Blanket-true `isPrivateOrLanHost` used
+  // to be harmless because the provider never asked; now it does.
+  isPrivateOrLanHost: () => false,
   isDirectFetchAllowed: () => true,
   hostnameOf: (u: string) => { try { return new URL(u).hostname } catch { return '' } },
   ensureProxyAllowsHost: async () => {},

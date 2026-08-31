@@ -5,7 +5,9 @@
  * Run: npx vitest run src/api/__tests__/sse-parser.test.ts
  */
 import { describe, it, expect } from 'vitest'
-import { parseSSEStream, parseSSEJsonStream, parseSSEWithEvents } from '../sse'
+import {
+  parseSSEStream, parseSSEJsonStream, parseSSEWithEvents, SSEMalformedDataError,
+} from '../sse'
 
 // Helper: create a Response from a string
 function mockResponse(text: string): Response {
@@ -127,6 +129,57 @@ describe('parseSSEStream', () => {
     expect(events[0].data).toBe('{"a":1}')
   })
 
+  // Regression fence for the idle-watchdog rework: the byte reader moved into
+  // stream-idle.ts, and the terminator handling — CRLF, lone CR, a terminator
+  // torn across two reads — has to come through it unchanged. Most SSE clients
+  // get this wrong; this is the part that must not be lost.
+  describe('line terminators survive the byte reader', () => {
+    it('holds a lone CR that turns out to be a separator in the next read', async () => {
+      const res = mockChunkedResponse(['data: {"a":1}\r', '\rdata: {"a":2}\r\r'])
+      const events = []
+      for await (const event of parseSSEStream(res)) {
+        events.push(event)
+      }
+      expect(events.map(e => e.data)).toEqual(['{"a":1}', '{"a":2}'])
+    })
+
+    it('parses a CRLF stream delivered one byte at a time', async () => {
+      const wire = 'data: {"a":1}\r\n\r\ndata: {"a":2}\r\n\r\n'
+      const res = mockChunkedResponse(wire.split(''))
+      const events = []
+      for await (const event of parseSSEStream(res)) {
+        events.push(event)
+      }
+      expect(events.map(e => e.data)).toEqual(['{"a":1}', '{"a":2}'])
+    })
+
+    it('keeps a multi-byte character whole across a read boundary', async () => {
+      // '€' is three bytes; the decoder must still be streaming.
+      const bytes = new TextEncoder().encode('data: {"t":"€"}\r\n\r\n')
+      const res = new Response(new ReadableStream<Uint8Array>({
+        start(c) {
+          c.enqueue(bytes.slice(0, 12))
+          c.enqueue(bytes.slice(12))
+          c.close()
+        },
+      }))
+      const events = []
+      for await (const event of parseSSEStream(res)) {
+        events.push(event)
+      }
+      expect(events.map(e => e.data)).toEqual(['{"t":"€"}'])
+    })
+
+    it('still flushes a trailing event that never got its terminator', async () => {
+      const res = mockResponse('data: {"a":1}\r\n\r\ndata: {"a":2}')
+      const events = []
+      for await (const event of parseSSEStream(res)) {
+        events.push(event)
+      }
+      expect(events.map(e => e.data)).toEqual(['{"a":1}', '{"a":2}'])
+    })
+  })
+
   it('ignores comment lines', async () => {
     const res = mockResponse(': this is a comment\ndata: {"a":1}\n\n')
     const events = []
@@ -150,15 +203,40 @@ describe('parseSSEJsonStream', () => {
     expect(items[1].id).toBe(2)
   })
 
-  it('skips malformed JSON', async () => {
+  // Was "skips malformed JSON". The skip WAS the bug: the payload that lands
+  // here is a provider error object in an unexpected shape (a relay's HTML
+  // error page, a gateway's bare string), and swallowing it left the user an
+  // empty bubble with nothing to look at. Everything valid before it is still
+  // delivered; the junk itself is now named.
+  it('surfaces malformed JSON instead of swallowing it', async () => {
     const res = mockResponse('data: {"valid":true}\n\ndata: not-json\n\ndata: {"also":true}\n\n')
-    const items = []
-    for await (const item of parseSSEJsonStream<any>(res)) {
-      items.push(item)
+    const items: any[] = []
+    let caught: any
+    try {
+      for await (const item of parseSSEJsonStream<any>(res)) {
+        items.push(item)
+      }
+    } catch (e) {
+      caught = e
     }
-    expect(items).toHaveLength(2)
+    expect(items).toHaveLength(1)
     expect(items[0].valid).toBe(true)
-    expect(items[1].also).toBe(true)
+    expect(caught).toBeInstanceOf(SSEMalformedDataError)
+    expect(caught.raw).toBe('not-json')
+    expect(caught.message).toContain('not-json')
+  })
+
+  it('names the event a malformed payload arrived under', async () => {
+    const res = mockResponse('event: error\ndata: <html>502 Bad Gateway</html>\n\n')
+    let caught: any
+    try {
+      for await (const _ of parseSSEJsonStream<any>(res)) { /* drain */ }
+    } catch (e) {
+      caught = e
+    }
+    expect(caught).toBeInstanceOf(SSEMalformedDataError)
+    expect(caught.event).toBe('error')
+    expect(caught.code).toBe('sse_malformed_data')
   })
 
   it('stops at [DONE]', async () => {
