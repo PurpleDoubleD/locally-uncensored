@@ -440,6 +440,113 @@ describe('OpenAIProvider', () => {
       vi.restoreAllMocks()
     })
 
+    // ── Audit CS-1: a base64 attachment must not eat the completion budget ──
+    //
+    // applyMaxTokens estimated the prompt with
+    // `JSON.stringify(body.messages).length / 4`, and body.messages carries the
+    // full `data:<mime>;base64,...` URL by then. A 100 KB screenshot is ~137 KB
+    // of base64 → ~34 000 phantom tokens, which is more than the whole window of
+    // every model at or below 32k (built-in engine, LM Studio, llama.cpp, vLLM,
+    // KoboldCpp). ctxLen - promptTokens - RESERVE went negative, the 256 floor
+    // won, and every answer with an image attached was cut off at 256 tokens.
+    //
+    // Base64 chars for a `kb`-KB source image: 4 chars per 3 bytes.
+    const base64Payload = (kb: number) => 'A'.repeat(Math.round((kb * 1024 * 4) / 3))
+
+    async function maxTokensFor(
+      model: string,
+      messages: any[],
+      options?: any,
+    ): Promise<number> {
+      const provider = new OpenAIProvider(makeConfig())
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+        new Response(JSON.stringify({
+          choices: [{ message: { content: 'ok' }, finish_reason: 'stop' }],
+        }), { status: 200 })
+      )
+      await provider.chatWithTools(model, messages, [], options)
+      const sent = JSON.parse((fetchSpy.mock.calls[0][1] as any).body)
+      vi.restoreAllMocks()
+      return sent.max_tokens
+    }
+
+    it('does not starve max_tokens to the 256 floor because of an image (CS-1)', async () => {
+      // mixtral-8x7b-32768 → 32768 ctx, the exact class of model that broke.
+      const maxTokens = await maxTokensFor('mixtral-8x7b-32768', [{
+        role: 'user',
+        content: 'what is in this screenshot?',
+        images: [{ data: base64Payload(100), mimeType: 'image/png' }],
+      }])
+      // Before the fix this was exactly 256.
+      expect(maxTokens).toBeGreaterThan(25000)
+      expect(maxTokens).toBeLessThanOrEqual(32768)
+    })
+
+    it('charges the flat image rate once per image (CS-1)', async () => {
+      const one = await maxTokensFor('mixtral-8x7b-32768', [{
+        role: 'user',
+        content: 'compare these',
+        images: [{ data: base64Payload(80), mimeType: 'image/png' }],
+      }])
+      const three = await maxTokensFor('mixtral-8x7b-32768', [{
+        role: 'user',
+        content: 'compare these',
+        images: [
+          { data: base64Payload(80), mimeType: 'image/png' },
+          { data: base64Payload(120), mimeType: 'image/jpeg' },
+          { data: base64Payload(40), mimeType: 'image/webp' },
+        ],
+      }])
+      // Two extra images = two extra flat allowances (1500 each), plus a few
+      // tokens for the placeholder parts themselves — NOT a size-driven blowup.
+      const delta = one - three
+      expect(delta).toBeGreaterThanOrEqual(3000)
+      expect(delta).toBeLessThan(3100)
+    })
+
+    it('counts images that ride along in the history, not just the last turn (CS-1)', async () => {
+      const maxTokens = await maxTokensFor('mixtral-8x7b-32768', [
+        { role: 'user', content: 'turn 1', images: [{ data: base64Payload(150), mimeType: 'image/png' }] },
+        { role: 'assistant', content: 'a screenshot' },
+        { role: 'user', content: 'turn 2', images: [{ data: base64Payload(150), mimeType: 'image/png' }] },
+        { role: 'assistant', content: 'another one' },
+        { role: 'user', content: 'and now?' },
+      ])
+      expect(maxTokens).toBeGreaterThan(25000)
+      expect(maxTokens).toBeLessThanOrEqual(32768)
+    })
+
+    it('still sends the full base64 image on the wire and does not mutate the messages (CS-1)', async () => {
+      const provider = new OpenAIProvider(makeConfig())
+      const data = base64Payload(20)
+      const messages: any[] = [{
+        role: 'user',
+        content: 'look',
+        images: [{ data, mimeType: 'image/png' }],
+      }]
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+        new Response(JSON.stringify({
+          choices: [{ message: { content: 'ok' }, finish_reason: 'stop' }],
+        }), { status: 200 })
+      )
+      await provider.chatWithTools('mixtral-8x7b-32768', messages, [])
+      const sent = JSON.parse((fetchSpy.mock.calls[0][1] as any).body)
+      const part = sent.messages.at(-1).content.find((p: any) => p.type === 'image_url')
+      expect(part.image_url.url).toBe(`data:image/png;base64,${data}`)
+      // The estimator must be read-only.
+      expect(messages[0].images[0].data).toBe(data)
+      vi.restoreAllMocks()
+    })
+
+    it('leaves the text-only clamp untouched — a huge TEXT prompt still hits the floor (CS-1)', async () => {
+      // Same character count as the 100 KB image above, but real text. Text
+      // costs tokens, so the guard must still starve the budget here.
+      const maxTokens = await maxTokensFor('mixtral-8x7b-32768', [
+        { role: 'user', content: 'x'.repeat(Math.round((100 * 1024 * 4) / 3)) },
+      ])
+      expect(maxTokens).toBe(256)
+    })
+
     it('handles response with no tool calls', async () => {
       const provider = new OpenAIProvider(makeConfig())
       vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(

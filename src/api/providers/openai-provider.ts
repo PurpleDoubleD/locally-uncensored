@@ -172,6 +172,59 @@ function keyForUnindexedDelta(
   return Math.max(0, accum.size - 1)
 }
 
+/**
+ * Flat token cost charged for one inline image during prompt estimation.
+ *
+ * Audit CS-1: a base64 data URL is ~1.37 characters per byte of source image,
+ * so a single 100 KB screenshot adds ~137 000 characters to `body.messages` —
+ * ~34 000 phantom "tokens" under the chars/4 rule, which is more than the ENTIRE
+ * window of every model at or below 32k (the built-in engine, LM Studio,
+ * llama.cpp, vLLM, KoboldCpp). The headroom subtraction then went negative and
+ * the 256 floor won, capping every answer with an attachment at 256 tokens —
+ * and getting worse each turn, because images ride along in the history.
+ *
+ * Images do not cost characters, they cost tiles. OpenAI bills a 1024x1024
+ * image at ~1100 tokens; Qwen2-VL / llava-style mmproj projectors on local
+ * servers land in the same order of magnitude, and vision backends generally
+ * cap a single image near 1.5k. 1500 is the conservative end of that range:
+ * over-estimating only shortens the completion cap a little, under-estimating
+ * risks the server rejecting the request outright.
+ */
+const IMAGE_TOKEN_ESTIMATE = 1500
+
+/**
+ * Serialized size of a request payload with every inline image replaced by a
+ * placeholder, plus how many images were found.
+ *
+ * Pure: the value is walked through JSON.stringify's replacer, so `messages`
+ * is never mutated and the body that goes on the wire keeps its full images.
+ * Recognises the OpenAI part shape (`{ type: 'image_url', image_url: {...} }`),
+ * the Anthropic-style `{ type: 'image', source: {...} }`, and any bare base64
+ * data URL string, wherever they sit in the history.
+ */
+function measurePayload(value: unknown): { chars: number; images: number } {
+  let images = 0
+  const json = JSON.stringify(value, (_key, val) => {
+    if (typeof val === 'string' && val.startsWith('data:') && val.includes(';base64,')) {
+      images++
+      return ''
+    }
+    if (val && typeof val === 'object' && !Array.isArray(val)) {
+      const part = val as Record<string, any>
+      if (part.type === 'image_url') {
+        images++
+        return { type: 'image_url' }
+      }
+      if (part.type === 'image' && part.source) {
+        images++
+        return { type: 'image' }
+      }
+    }
+    return val
+  })
+  return { chars: json ? json.length : 0, images }
+}
+
 /** Test-only: reset the endpoint catalogue between test cases. */
 export function __clearContextCatalogForTests(): void {
   catalogContext.clear()
@@ -437,9 +490,15 @@ export class OpenAIProvider implements ProviderClient {
       return
     }
     const RESERVE = 512
-    const promptChars =
-      JSON.stringify(body.messages || '').length + JSON.stringify(body.tools || '').length
-    const promptTokens = Math.ceil(promptChars / 4)
+    // Audit CS-1: count characters WITHOUT the base64 image payloads and charge
+    // a flat per-image rate instead — see IMAGE_TOKEN_ESTIMATE. Counting the
+    // data URLs as text made one screenshot look like ~34k tokens and starved
+    // max_tokens down to the 256 floor on every model with a small window.
+    const msgPayload = measurePayload(body.messages || '')
+    const toolPayload = measurePayload(body.tools || '')
+    const promptChars = msgPayload.chars + toolPayload.chars
+    const promptTokens =
+      Math.ceil(promptChars / 4) + (msgPayload.images + toolPayload.images) * IMAGE_TOKEN_ESTIMATE
     const headroom = Math.max(256, ctxLen - promptTokens - RESERVE)
     // Audit E6: an UNSET budget used to send the whole remaining window as
     // max_tokens — six figures on a 128k model. Servers that validate
