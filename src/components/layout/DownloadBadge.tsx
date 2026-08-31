@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { ArrowDownToLine, Pause, Play, X, CheckCircle, RotateCcw } from 'lucide-react'
 import { useModels } from '../../hooks/useModels'
 import { useDownloadStore } from '../../stores/downloadStore'
+import { isPermanentDownloadError } from '../../api/discover'
 import { useMlxInstallStore } from '../../stores/mlxInstallStore'
 import { isMlxImageHost } from '../../api/mlx-image'
 import { formatBytes } from '../../lib/formatters'
@@ -200,6 +201,18 @@ export function DownloadBadge() {
                 const bundleProg = totalBytes > 0 ? (doneBytes / totalBytes) * 100 : 0
                 const bundleSpeed = files.reduce((s, f) => s + (f.d.status === 'downloading' ? (f.d.speed || 0) : 0), 0)
                 const isBundle = files.length > 1
+                // A renamed, gated or deleted repository answers the same way
+                // every time, so Retry is not a way out of it — offering the
+                // button anyway is a loop with no exit. Only the failures that
+                // could plausibly go differently get one; the rest get the
+                // reason, which says what to do instead.
+                const retryable = files.filter(f => f.d.status === 'error' && !isPermanentDownloadError(f.d.error))
+                const dead = files.filter(f => f.d.status === 'error' && isPermanentDownloadError(f.d.error))
+                // Bytes on disk waiting for the rest — a paused transfer, or a
+                // partial this session adopted from an earlier run. Without a
+                // Resume here those files had no way forward at all.
+                const resumable = files.filter(f => f.d.status === 'paused')
+                const anyActive = files.some(f => f.d.status === 'downloading' || f.d.status === 'connecting' || f.d.status === 'pausing')
 
                 return (
                   <div key={bundleName} className="px-3 py-2 border-t border-gray-100 dark:border-white/[0.04] first:border-t-0">
@@ -207,8 +220,11 @@ export function DownloadBadge() {
                     <div className="flex items-center justify-between gap-2 mb-1">
                       <p className={`${isBundle ? 'text-[0.7rem] font-medium' : 'text-[0.7rem] font-mono'} text-gray-700 dark:text-gray-300 truncate`}>{bundleName}</p>
                       <div className="flex items-center gap-0.5 shrink-0">
-                        {files.some(f => f.d.status === 'error') && (
-                          <button onClick={() => files.filter(f => f.d.status === 'error').forEach(f => useDownloadStore.getState().retry(f.id))} className="p-0.5 rounded hover:bg-red-500/20 text-red-400 hover:text-red-300 transition-colors" title="Retry failed"><RotateCcw size={11} /></button>
+                        {resumable.length > 0 && !anyActive && (
+                          <button onClick={() => resumable.forEach(f => useDownloadStore.getState().resume(f.id))} className="p-0.5 rounded hover:bg-white/10 text-gray-500 hover:text-gray-300 transition-colors" title="Resume"><Play size={11} /></button>
+                        )}
+                        {retryable.length > 0 && (
+                          <button onClick={() => retryable.forEach(f => useDownloadStore.getState().retry(f.id))} className="p-0.5 rounded hover:bg-red-500/20 text-red-400 hover:text-red-300 transition-colors" title="Retry failed"><RotateCcw size={11} /></button>
                         )}
                         {allComplete ? (
                           <button onClick={() => files.forEach(f => useDownloadStore.getState().dismiss(f.id))} className="p-0.5 rounded hover:bg-white/10 text-gray-500 hover:text-gray-300 transition-colors" title="Dismiss"><X size={11} /></button>
@@ -230,9 +246,9 @@ export function DownloadBadge() {
                             {bundleSpeed > 0 && <span className="ml-1.5 text-gray-400">{formatBytes(bundleSpeed)}/s</span>}
                           </p>
                           {/* Retry all failed files in bundle */}
-                          {files.some(f => f.d.status === 'error') && (
+                          {retryable.length > 0 && (
                             <button
-                              onClick={() => files.filter(f => f.d.status === 'error').forEach(f => useDownloadStore.getState().retry(f.id))}
+                              onClick={() => retryable.forEach(f => useDownloadStore.getState().retry(f.id))}
                               className="flex items-center gap-1 text-[0.55rem] text-red-400 hover:text-red-300 transition-colors"
                               title="Retry failed downloads"
                             >
@@ -241,6 +257,11 @@ export function DownloadBadge() {
                             </button>
                           )}
                         </div>
+                        {/* A dead address has no button, so it has to have the
+                            reason: what happened and what to do instead. */}
+                        {dead.map(f => (
+                          <p key={f.id} className="mt-1 text-[0.55rem] text-red-400 break-words whitespace-pre-line">{f.d.error}</p>
+                        ))}
                         {/* Individual file rows */}
                         {isBundle && (
                           <div className="mt-1.5 space-y-0.5">
@@ -249,6 +270,9 @@ export function DownloadBadge() {
                                 <span className="truncate flex-1 font-mono">{d.filename || id}</span>
                                 <span className="shrink-0 ml-2 flex items-center gap-1">
                                   {d.status === 'complete' ? <span className="text-green-400">Done</span>
+                                    : d.status === 'error' && isPermanentDownloadError(d.error) ? (
+                                      <span className="text-red-400" title={d.error}>Unavailable</span>
+                                    )
                                     : d.status === 'error' ? (
                                       <button
                                         onClick={() => useDownloadStore.getState().retry(id)}
@@ -259,7 +283,16 @@ export function DownloadBadge() {
                                         <span>Retry</span>
                                       </button>
                                     )
-                                    : d.status === 'paused' ? <span className="text-yellow-400">Paused</span>
+                                    : d.status === 'paused' ? (
+                                      <button
+                                        onClick={() => useDownloadStore.getState().resume(id)}
+                                        className="flex items-center gap-0.5 text-yellow-400 hover:text-yellow-300 transition-colors"
+                                        title="Resume this download"
+                                      >
+                                        <Play size={8} />
+                                        <span>Resume</span>
+                                      </button>
+                                    )
                                     : d.total > 0 ? <>{Math.round((d.progress / d.total) * 100)}%{d.speed > 0 && <span className="ml-1 text-gray-400">{formatBytes(d.speed)}/s</span>}</>
                                     : d.status === 'connecting' ? 'Connecting' : '...'}
                                 </span>

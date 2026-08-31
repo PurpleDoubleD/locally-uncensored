@@ -45,6 +45,21 @@ export interface DiscoverModel {
   // Optional hand-written one-liner for the card. When absent the card derives
   // a short line from `description` (text after the first "·", first sentence).
   blurb?: string
+  /**
+   * SHA256 of the file at `downloadUrl`, 64 hex characters.
+   *
+   * The only thing that can tell a complete multi-gigabyte model from a
+   * plausible-looking truncated one. `sizeGB` cannot: it is a rounded human
+   * number ("9.2"), which is why the old completeness check ran on a 10 %
+   * tolerance and accepted a download that died at 91 %.
+   *
+   * Optional on purpose. HuggingFace states this digest for every LFS file
+   * (`lfs.oid` in the tree API, which `resolveHfGgufFiles` now reads), but the
+   * hand-written catalog entries below carry none yet. When it is absent the
+   * download is checked against the server's exact byte count and the Rust side
+   * logs, per file, that the CONTENT went unverified.
+   */
+  sha256?: string
 }
 
 export interface DownloadProgress {
@@ -58,8 +73,8 @@ export interface DownloadProgress {
 
 // ─── Download API ───
 
-export async function startModelDownload(url: string, subfolder: string, filename: string, expectedBytes?: number): Promise<{ status: string; id: string; error?: string }> {
-  return backendCall("download_model", { url, subfolder, filename, expectedBytes: expectedBytes ?? null })
+export async function startModelDownload(url: string, subfolder: string, filename: string, expectedBytes?: number, sha256?: string): Promise<{ status: string; id: string; error?: string }> {
+  return backendCall("download_model", { url, subfolder, filename, expectedBytes: expectedBytes ?? null, expectedSha256: sha256 ?? null })
 }
 
 export async function getDownloadProgress(): Promise<Record<string, DownloadProgress>> {
@@ -74,12 +89,140 @@ export async function pauseDownload(id: string): Promise<void> {
   await backendCall("pause_download", { id })
 }
 
+/**
+ * The user aborting a transfer: stops it AND deletes the partial file.
+ *
+ * Not the same thing as `clearDownloadEntry`, and the two must never be swapped
+ * again. `retry()` used to come through here, so a short outage on a 40 GB
+ * bundle cost the whole download: the error text said "start it again to
+ * resume", the UI offered Retry, and Retry deleted the bytes it was about to
+ * resume from.
+ */
 export async function cancelDownload(id: string): Promise<void> {
   await backendCall("cancel_download", { id })
 }
 
-export async function resumeDownload(id: string, url: string, subfolder: string): Promise<void> {
-  await backendCall("resume_download", { id, url, subfolder })
+/**
+ * Drop a settled row (error / paused / complete) from the Rust progress map and
+ * LEAVE THE PARTIAL FILE ALONE.
+ *
+ * Clearing the Rust side is not optional before a retry: `download_model`
+ * short-circuits on a file that is already on disk without ever touching the
+ * map, so the next poll would resurrect the error row the user just retried
+ * (the_mr_pickles). That bookkeeping is all this does — it is not a decision
+ * about the user's bytes.
+ */
+export async function clearDownloadEntry(id: string): Promise<void> {
+  await backendCall("clear_download_entry", { id })
+}
+
+/** Statuses that mean the address itself is dead, so Retry cannot work. */
+const PERMANENT_HTTP = /\(HTTP (401|403|404|410)\)/
+
+/**
+ * Would pressing Retry on this error ever succeed?
+ *
+ * The catalog hard-codes 106 HuggingFace addresses. When one of those repos is
+ * renamed, gated or taken down, every attempt answers the same 404/403 forever,
+ * and the old UI answered with a bare "HTTP 404" and a Retry button — a loop
+ * with no exit. The status code inside the message is the contract; it is put
+ * there by `http_error_message` in src-tauri/src/commands/download.rs.
+ *
+ * A transport error, a rate limit and a 5xx are all temporary and stay
+ * retryable: only an address that is gone is permanent.
+ */
+export function isPermanentDownloadError(error?: string | null): boolean {
+  return !!error && PERMANENT_HTTP.test(error)
+}
+
+export async function resumeDownload(id: string, url: string, subfolder: string, expectedBytes?: number, sha256?: string): Promise<void> {
+  await backendCall("resume_download", { id, url, subfolder, expectedBytes: expectedBytes ?? null, expectedSha256: sha256 ?? null })
+}
+
+/** A `.download` partial from an earlier run of the app, with no row watching it. */
+export interface OrphanDownload {
+  /** Basename minus its extension — NOT the download id. See `orphanFilename`. */
+  stem: string
+  /** Absolute path of the partial. */
+  path: string
+  /** Directory it sits in; a GGUF outside the ComfyUI tree resumes into this. */
+  dir: string
+  bytes: number
+}
+
+/**
+ * Partial downloads a previous run of the app left behind.
+ *
+ * Both halves of the download kept their state purely in RAM, so quitting
+ * during a multi-gigabyte transfer left the `.download` file on disk with no
+ * row, no button and no way to finish or delete it. `extraDirs` carries the
+ * provider model folders only the frontend knows (LM Studio, a custom path),
+ * taken from the download meta the store now persists.
+ */
+export async function findOrphanDownloads(extraDirs: string[] = []): Promise<OrphanDownload[]> {
+  try {
+    return await backendCall("find_orphan_downloads", { extraDirs })
+  } catch (err) {
+    log.warn('[discover] orphan scan failed', { err })
+    return []
+  }
+}
+
+/** Delete one orphaned partial. Jailed to the model folders on the Rust side. */
+export async function deleteOrphanDownload(path: string, extraDirs: string[] = []): Promise<void> {
+  await backendCall("delete_orphan_download", { path, extraDirs })
+}
+
+/**
+ * Recover the download id (the real filename) for an orphaned partial.
+ *
+ * `Path::with_extension("download")` REPLACES the extension, so the partial for
+ * `wan_2.1_vae.safetensors` is `wan_2.1_vae.download`: the original suffix is
+ * not on disk any more. Everything that can name the file lives up here — the
+ * persisted download meta first, because it also knows the destDir, then the
+ * catalog. A stem nothing recognises stays unresolved; it can still be shown
+ * and deleted, just not resumed.
+ */
+export function orphanFilename(stem: string, knownFilenames: Iterable<string>): string | null {
+  for (const name of knownFilenames) {
+    if (name === stem || name.replace(/\.[^.]+$/, '') === stem) return name
+  }
+  return null
+}
+
+/** Verdict of the ONE space check a bundle gets before its first transfer. */
+export interface SpaceVerdict {
+  fits: boolean
+  requiredBytes: number
+  reservedBytes: number
+  availableBytes?: number | null
+  message?: string
+}
+
+/**
+ * Does `requiredBytes` still fit, counting what running transfers still owe?
+ *
+ * Asked once for a whole bundle. The per-file check in `do_download` answers
+ * "does the rest of THIS file fit", which is the wrong question when four files
+ * start at the same moment: all four passed against the same free bytes, all
+ * four started, and the drive filled anyway — on Windows a full system
+ * partition degrades the whole machine, not just the download.
+ */
+export async function checkDownloadSpace(
+  target: { subfolder?: string; destDir?: string },
+  requiredBytes: number,
+): Promise<SpaceVerdict | null> {
+  try {
+    return await backendCall("check_download_space", {
+      subfolder: target.subfolder ?? null,
+      destDir: target.destDir ?? null,
+      requiredBytes: Math.max(0, Math.round(requiredBytes)),
+    })
+  } catch (err) {
+    // A drive we cannot measure must never block a download.
+    log.warn('[discover] space check unavailable', { err })
+    return null
+  }
 }
 
 // ─── Custom Node Installation ───
@@ -429,6 +572,33 @@ async function runVisibilityConfirmation(filename: string): Promise<void> {
   }
 }
 
+/** One gibibyte, the unit the catalog's `sizeGB` and every size message use. */
+const GIB = 1_073_741_824
+
+/**
+ * How many bytes this bundle still has to fetch, and where they land.
+ *
+ * Pure, so the sum can be tested without a drive. Files already on disk are
+ * left out — re-checking space for a file that is not going to be fetched would
+ * refuse installs that fit perfectly well. `totalSizeGB` is the fallback when
+ * the per-file sizes are missing: a rough number is a far better plan than
+ * planning for nothing, and it is only ever used to refuse, never to promise.
+ */
+export function bundleBytesToFetch(
+  bundle: ModelBundle,
+  installed: Set<string>,
+): { bytes: number; subfolder?: string; files: number } {
+  const pending = bundle.files.filter(
+    f => f.downloadUrl && f.filename && f.subfolder && !installed.has(f.filename),
+  )
+  if (pending.length === 0) return { bytes: 0, files: 0 }
+  const known = pending.reduce((sum, f) => sum + (f.sizeGB ? f.sizeGB * GIB : 0), 0)
+  // Not one file states a size: fall back to the bundle total, minus nothing,
+  // because we cannot tell which part of it is already there.
+  const bytes = known > 0 ? known : (bundle.totalSizeGB || 0) * GIB
+  return { bytes: Math.round(bytes), subfolder: pending[0].subfolder, files: pending.length }
+}
+
 export async function installBundleComplete(bundle: ModelBundle): Promise<void> {
   const errors: string[] = []
 
@@ -489,6 +659,21 @@ export async function installBundleComplete(bundle: ModelBundle): Promise<void> 
     return left.length === 0
   }
 
+  // ONE space check for the whole bundle, before the first byte moves.
+  //
+  // Every file starts its own transfer and every transfer checked the free
+  // space on its own, so a four file bundle passed the same free bytes four
+  // times over and then filled the drive between them. The sum is the only
+  // honest question, and it has to be asked before anything starts: refusing
+  // file three after files one and two have written 20 GB helps nobody.
+  const pendingBytes = bundleBytesToFetch(bundle, installedFiles)
+  if (pendingBytes.bytes > 0 && pendingBytes.subfolder) {
+    const verdict = await checkDownloadSpace({ subfolder: pendingBytes.subfolder }, pendingBytes.bytes)
+    if (verdict && !verdict.fits) {
+      throw new Error(verdict.message || `${bundle.name} does not fit on this drive.`)
+    }
+  }
+
   // Step 1: Start downloads only for files NOT already installed
   for (const file of bundle.files) {
     if (!file.downloadUrl || !file.filename || !file.subfolder) continue
@@ -504,7 +689,7 @@ export async function installBundleComplete(bundle: ModelBundle): Promise<void> 
     }
     try {
       const expectedBytes = file.sizeGB ? Math.round(file.sizeGB * 1_073_741_824) : undefined
-      const result = await startModelDownload(file.downloadUrl, file.subfolder, file.filename, expectedBytes)
+      const result = await startModelDownload(file.downloadUrl, file.subfolder, file.filename, expectedBytes, file.sha256)
       if (result.status === 'exists') {
         // File already on disk · emit synthetic 'complete' so UI reflects it
         window.dispatchEvent(new CustomEvent('comfyui-download-exists', { detail: { filename: file.filename } }))
@@ -693,6 +878,8 @@ export interface PlannedDownload {
   url: string
   filename: string
   expectedBytes?: number
+  /** Content digest, when the catalog or the HF tree stated one. */
+  sha256?: string
 }
 
 /**
@@ -705,8 +892,11 @@ export interface PlannedDownload {
  * this model need a second file, and what is it called" decision is unit
  * testable without rendering the Models tab.
  */
-export function planModelDownload(model: DiscoverModel, url: string, filename: string, bytes?: number): PlannedDownload[] {
-  const plan: PlannedDownload[] = [{ url, filename, expectedBytes: bytes }]
+export function planModelDownload(model: DiscoverModel, url: string, filename: string, bytes?: number, sha256?: string): PlannedDownload[] {
+  // The resolved digest wins over the catalog's: `url` may have been corrected
+  // by the HF tree, and a digest that belongs to a different file is worse than
+  // none at all.
+  const plan: PlannedDownload[] = [{ url, filename, expectedBytes: bytes, sha256: sha256 ?? (url === model.downloadUrl ? model.sha256 : undefined) }]
   if (model.mmprojUrl) {
     plan.push({
       url: model.mmprojUrl,
@@ -1123,9 +1313,24 @@ export async function searchHuggingFaceModels(query: string): Promise<DiscoverMo
 //   3. The guessed single-file name simply doesn't exist (404).
 // Resolving against the real tree fixes all three.
 
-export interface HfTreeEntry { type: string; path: string; size?: number }
+/**
+ * One entry of `/api/models/<repo>/tree/main`.
+ *
+ * `lfs.oid` is the SHA256 of the file content — every GGUF and safetensors file
+ * on HuggingFace is stored via LFS, so this is a free, authoritative digest for
+ * exactly the files that are too big to re-download by accident.
+ */
+export interface HfTreeEntry { type: string; path: string; size?: number; lfs?: { oid?: string; size?: number } }
 
-export interface HfGgufFile { url: string; filename: string; sizeBytes: number }
+export interface HfGgufFile { url: string; filename: string; sizeBytes: number; sha256?: string }
+
+/** A 64 hex character digest, or undefined. HF prefixes nothing, but a repo can
+ *  carry a non-LFS pointer whose oid is a git blob hash (40 hex) — that one is
+ *  NOT a content digest and must not be handed on as one. */
+export function lfsSha256(entry: HfTreeEntry): string | undefined {
+  const oid = entry.lfs?.oid?.trim().toLowerCase()
+  return oid && /^[0-9a-f]{64}$/.test(oid) ? oid : undefined
+}
 
 export interface HfGgufResolution {
   sharded: boolean
@@ -1187,6 +1392,7 @@ export function selectGgufFromTree(
     url: `https://huggingface.co/${repoId}/resolve/main/${p.path}`,
     filename: p.path.split('/').pop() as string,
     sizeBytes: p.size || 0,
+    sha256: lfsSha256(p),
   }))
   return {
     sharded: files.length > 1,
@@ -1234,27 +1440,50 @@ export async function detectProviderModelPath(providerName: string): Promise<str
 }
 
 /** Download a GGUF model to a specific directory (for non-Ollama providers) */
-export async function startModelDownloadToPath(url: string, destDir: string, filename: string, expectedBytes?: number): Promise<{ status: string; id: string; error?: string }> {
-  return backendCall('download_model_to_path', { url, destDir, filename, expectedBytes: expectedBytes ?? null })
+export async function startModelDownloadToPath(url: string, destDir: string, filename: string, expectedBytes?: number, sha256?: string): Promise<{ status: string; id: string; error?: string }> {
+  return backendCall('download_model_to_path', { url, destDir, filename, expectedBytes: expectedBytes ?? null, expectedSha256: sha256 ?? null })
+}
+
+/** What the catalog knows about one downloadable file. */
+export interface FileMeta {
+  url: string
+  subfolder: string
+  expectedBytes?: number
+  sha256?: string
+}
+
+/** Every catalog entry that carries a downloadable file, image/video bundles
+ *  and text models alike. One walk, so the lookups below cannot drift apart. */
+function catalogEntries(): DiscoverModel[] {
+  const out: DiscoverModel[] = []
+  for (const bundle of [...getImageBundles(), ...getVideoBundles(), ...getAudioBundles(), ...getLipsyncBundles(), ...getMotionBundles()]) {
+    out.push(...bundle.files)
+  }
+  out.push(...getUncensoredTextModels(), ...getMainstreamTextModels())
+  return out
 }
 
 /** Look up download URL + subfolder for a file by filename · searches all bundles + text models */
-export function lookupFileMeta(filename: string): { url: string; subfolder: string } | null {
-  // Search image + video + 2.5.8 specialized-lane bundles
-  for (const bundle of [...getImageBundles(), ...getVideoBundles(), ...getAudioBundles(), ...getLipsyncBundles(), ...getMotionBundles()]) {
-    for (const f of bundle.files) {
-      if (f.filename === filename && f.downloadUrl && f.subfolder) {
-        return { url: f.downloadUrl, subfolder: f.subfolder }
+export function lookupFileMeta(filename: string): FileMeta | null {
+  for (const m of catalogEntries()) {
+    if (m.filename === filename && m.downloadUrl && m.subfolder) {
+      return {
+        url: m.downloadUrl,
+        subfolder: m.subfolder,
+        expectedBytes: m.sizeGB ? Math.round(m.sizeGB * GIB) : undefined,
+        sha256: m.sha256,
       }
     }
   }
-  // Search text models
-  for (const m of [...getUncensoredTextModels(), ...getMainstreamTextModels()]) {
-    if (m.filename === filename && m.downloadUrl && m.subfolder) {
-      return { url: m.downloadUrl, subfolder: m.subfolder }
-    }
-  }
   return null
+}
+
+/** Every filename the catalog can name. Used to turn an orphaned partial's
+ *  stem back into a real download id — see `orphanFilename`. */
+export function catalogFilenames(): string[] {
+  const names: string[] = []
+  for (const m of catalogEntries()) if (m.filename) names.push(m.filename)
+  return names
 }
 
 // ─── Image Model Bundles ───

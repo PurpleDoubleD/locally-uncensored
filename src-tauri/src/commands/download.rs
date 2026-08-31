@@ -6,6 +6,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use futures_util::StreamExt;
+use sha2::{Digest, Sha256};
 use tauri::State;
 use tokio_util::sync::CancellationToken;
 
@@ -209,6 +210,7 @@ pub async fn download_model(
     subfolder: String,
     filename: String,
     expectedBytes: Option<u64>,
+    expectedSha256: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
     let expected_bytes = expectedBytes;
@@ -226,27 +228,37 @@ pub async fn download_model(
     let dest_dir = models_dir(&comfy_path, &subfolder)?;
     let dest_file = dest_dir.join(sanitize_filename(&filename));
 
-    if dest_file.exists() {
-        // If expected_bytes is provided, verify the file is at least 90% of expected size
-        // to catch partially downloaded files
-        let file_complete = match expected_bytes {
-            Some(expected) if expected > 0 => {
-                let actual = dest_file.metadata().map(|m| m.len()).unwrap_or(0);
-                let threshold = (expected as f64 * 0.9) as u64;
-                let is_complete = actual >= threshold;
-                if !is_complete {
-                    println!("[Download] File {} exists but is incomplete: {} bytes vs {} expected ({}%)",
-                        filename, actual, expected, (actual as f64 / expected as f64 * 100.0) as u32);
-                }
-                is_complete
-            }
-            _ => true, // No expected size — trust existence (backward compat)
-        };
+    let expected_sha256 = match expectedSha256.as_deref() {
+        Some(s) => Some(normalize_sha256(s)?),
+        None => None,
+    };
 
-        if file_complete {
-            return Ok(serde_json::json!({"status": "exists", "path": dest_file.to_string_lossy()}));
+    if dest_file.exists() {
+        let actual = dest_file.metadata().map(|m| m.len()).unwrap_or(0);
+        // Ask the SERVER how big the file is. The catalog's `expectedBytes` is a
+        // rounded GB estimate and may not decide this — see `judge_existing`.
+        match judge_existing(actual, exact_remote_size(&url).await) {
+            Existing::Complete => {
+                return Ok(serde_json::json!({"status": "exists", "path": dest_file.to_string_lossy()}));
+            }
+            Existing::Mismatch { actual, exact } => {
+                println!(
+                    "[Download] {} exists with {} bytes but the host states {} — fetching it again",
+                    filename, actual, exact
+                );
+                // Fall through to a fresh transfer.
+            }
+            Existing::Unverified { actual } => {
+                // Offline, or a host that states no length. Nothing can be
+                // checked, so nothing is claimed: the file stays, and the reason
+                // it was not verified is on the record instead of nowhere.
+                println!(
+                    "[Download] {} exists with {} bytes and the host states no size — accepted UNVERIFIED",
+                    filename, actual
+                );
+                return Ok(serde_json::json!({"status": "exists", "path": dest_file.to_string_lossy()}));
+            }
         }
-        // File is incomplete — fall through to re-download (resume from partial)
     }
 
     // Use filename as ID (matches frontend lookup)
@@ -288,7 +300,7 @@ pub async fn download_model(
     let filename_clone = filename.clone();
 
     tokio::spawn(async move {
-        match do_download(&url, &dest_file, &downloads_arc, &id_clone, token, resume_offset).await {
+        match do_download(&url, &dest_file, &downloads_arc, &id_clone, token, resume_offset, expected_bytes, expected_sha256).await {
             Ok(_) => {
                 if let Ok(mut dl) = downloads_arc.lock() {
                     if let Some(p) = dl.get_mut(&id_clone) {
@@ -398,6 +410,118 @@ fn ended_early(total: u64, downloaded: u64) -> bool {
     total > 0 && downloaded < total
 }
 
+/// The full size of the file being fetched, and whether that number is only the
+/// catalog's estimate rather than something the server stated.
+///
+/// A server that sends no `Content-Length` used to switch BOTH guards off
+/// without a word: `unwrap_or(0)` produced `total == 0`, and 0 is exactly the
+/// value the space check and the truncation check read as "nothing to compare
+/// against". A 40 GB transfer then ran until the drive hit zero and a body that
+/// stopped halfway was renamed into place, with nobody ever having been told
+/// that either safeguard had turned itself off.
+///
+/// The catalog carries a size for these files, so the space guard gets that
+/// estimate to plan with — a rough number is a far better plan than no number.
+/// The flag is what keeps the two uses apart: an estimate may refuse a transfer
+/// that clearly cannot fit, it may NEVER declare one finished.
+fn total_size(declared: Option<u64>, resume_offset: u64, resumed: bool, estimate: Option<u64>) -> (u64, bool) {
+    match declared {
+        Some(n) if n > 0 => (if resumed { n + resume_offset } else { n }, false),
+        _ => (estimate.unwrap_or(0), true),
+    }
+}
+
+/// What a file that is already sitting at the destination is worth.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Existing {
+    /// Byte for byte the size the server states. Nothing left to fetch.
+    Complete,
+    /// The server states a different size than the file has. Fetch it again.
+    Mismatch { actual: u64, exact: u64 },
+    /// Nobody could name an exact size, so nothing here is verified.
+    Unverified { actual: u64 },
+}
+
+/// Decide what to do with a file already at the destination.
+///
+/// The old rule was `actual >= expected as f64 * 0.9`, measured against a
+/// catalog size that is a rounded GB estimate. A download aborted at 91 % was
+/// therefore "complete" and never fetched again: several gigabytes of model
+/// weights accepted on a file length with 10 % of slack, and the failure only
+/// surfaced much later when a backend tried to load the truncated file.
+///
+/// There is no safe threshold here. Either a number is exact — then it has to
+/// match to the byte — or it is not, and then it may not decide anything. The
+/// exact number comes from the server (`exact_remote_size`), never from the
+/// catalog.
+pub fn judge_existing(actual: u64, exact: Option<u64>) -> Existing {
+    match exact {
+        Some(e) if e > 0 => {
+            if actual == e {
+                Existing::Complete
+            } else {
+                Existing::Mismatch { actual, exact: e }
+            }
+        }
+        _ => Existing::Unverified { actual },
+    }
+}
+
+/// Total size out of a `Content-Range: bytes 0-0/12345` header. A `*` for the
+/// whole means the server knows the range but not the length, which is no
+/// number to judge with.
+fn total_from_content_range(v: &str) -> Option<u64> {
+    v.rsplit('/').next()?.trim().parse::<u64>().ok()
+}
+
+/// A 64 character hex SHA256, lowercased.
+///
+/// Anything else is refused rather than quietly ignored: a mistyped digest that
+/// silently disables the check is worse than no digest at all, because it looks
+/// like the file was verified.
+fn normalize_sha256(v: &str) -> Result<String, String> {
+    let t = v.trim();
+    if t.len() == 64 && t.chars().all(|c| c.is_ascii_hexdigit()) {
+        Ok(t.to_ascii_lowercase())
+    } else {
+        Err(format!(
+            "Expected sha256 must be 64 hex characters, got {} character(s)",
+            t.chars().count()
+        ))
+    }
+}
+
+/// Turn a refused HTTP status into something the user can act on, and say in
+/// the same breath whether pressing Retry could ever help.
+///
+/// The catalog hard-codes 106 HuggingFace addresses. The moment a repo is
+/// renamed, made private, or gated behind a licence click, every one of them
+/// answers 404 or 401/403 for good — and all the user got was the bare string
+/// "HTTP 404" next to a Retry button that could not possibly work, which is a
+/// loop with no exit.
+///
+/// The status code stays inside the text on purpose: it is the contract the
+/// frontend reads to decide whether to offer Retry at all — see
+/// `isPermanentDownloadError` in src/api/discover.ts. Changing the "(HTTP nnn)"
+/// shape here breaks that decision there.
+pub fn http_error_message(status: u16, filename: &str) -> String {
+    match status {
+        404 | 410 => format!(
+            "{filename} is not at this address any more (HTTP {status}). The repository was renamed, moved or taken down, so trying again cannot help. Look for a newer version of this model in the Model Manager, or update Locally Uncensored — the address is part of the app's catalog."
+        ),
+        401 | 403 => format!(
+            "{filename} cannot be downloaded without a HuggingFace login (HTTP {status}). This repository is gated or private: open its page in a browser, accept the licence with your HuggingFace account, and put the file into the model folder by hand. Trying again here cannot help."
+        ),
+        429 => format!(
+            "The host is rate limiting this download (HTTP {status}). Wait a few minutes, then start {filename} again."
+        ),
+        500..=599 => format!(
+            "The host could not serve {filename} right now (HTTP {status}). That is a problem on their side — start it again in a few minutes."
+        ),
+        _ => format!("HTTP {status} while downloading {filename}."),
+    }
+}
+
 /// Headroom left free on the drive, on top of the bytes the download needs.
 /// Windows starts failing in ways that have nothing to do with us once the
 /// system drive runs dry, so the last gigabyte is never ours to take.
@@ -442,6 +566,86 @@ fn gib(bytes: u64) -> String {
     format!("{:.1} GB", bytes as f64 / (1024.0 * 1024.0 * 1024.0))
 }
 
+/// One reqwest client, built the same way for every request this module makes.
+///
+/// The SSRF guard is not optional and not a per-call decision: model downloads
+/// come from public catalogs, and a crafted catalog or model URL must not be
+/// able to reach an internal service or 169.254.169.254 — on the first hop or
+/// on any redirect.
+fn download_client(connect_secs: u64, read_secs: u64) -> Result<reqwest::Client, String> {
+    reqwest::Client::builder()
+        .user_agent("LocallyUncensored/1.5")
+        .redirect(crate::commands::proxy::ssrf_safe_redirect_policy(10))
+        .connect_timeout(std::time::Duration::from_secs(connect_secs))
+        .read_timeout(std::time::Duration::from_secs(read_secs))
+        .build()
+        .map_err(|e| os_error::english(&e))
+}
+
+/// The exact byte count the SERVER states for `url`, or None when it will not
+/// state one (offline, HEAD refused, chunked transfer, a probe that errors).
+///
+/// This is the only trustworthy size in the whole download path. The catalog's
+/// `sizeGB` is a rounded human number — "9.2" for a file of 9 874 331 648 bytes
+/// — so it can size a progress bar or refuse a full drive, but it can never
+/// certify that a file on disk is the whole file.
+/// Short timeouts, because this runs INSIDE the install click. A machine with
+/// no network must cost the user a moment, not half a minute — the answer for
+/// an unreachable host is "cannot tell", and arriving at it slowly helps
+/// nobody.
+async fn exact_remote_size(url: &str) -> Option<u64> {
+    crate::commands::proxy::validate_public_url(url).ok()?;
+    let client = download_client(8, 15).ok()?;
+
+    // A transport error means offline or a black-holed host. Retrying the same
+    // unreachable address with a second request only doubles the wait.
+    let head = client.head(url).send().await.ok()?;
+    if head.status().is_success() {
+        if let Some(n) = head.content_length() {
+            if n > 0 {
+                return Some(n);
+            }
+        }
+    }
+
+    // The host answered, just not usefully: some CDNs reply 405 to HEAD, or drop
+    // the length from it. A one byte ranged GET costs one more round trip and
+    // carries the whole size in Content-Range.
+    let r = client.get(url).header("Range", "bytes=0-0").send().await.ok()?;
+    let v = r.headers().get(reqwest::header::CONTENT_RANGE)?.to_str().ok()?;
+    total_from_content_range(v)
+}
+
+/// SHA256 of the first `len` bytes of `path`.
+///
+/// Only needed when a transfer RESUMES with a digest to check: the bytes
+/// already on disk never passed through the hasher, so without replaying them
+/// the final digest would be the hash of the tail alone and every resumed
+/// download would look corrupt. Reading a large partial back costs seconds;
+/// throwing the partial away costs hours.
+async fn digest_of_prefix(path: &Path, len: u64) -> Result<Sha256, String> {
+    use tokio::io::AsyncReadExt;
+    let mut f = tokio::fs::File::open(path)
+        .await
+        .map_err(|e| format!("Open partial file for hashing: {}", os_error::english(&e)))?;
+    let mut hasher = Sha256::new();
+    let mut buf = vec![0u8; 1 << 20];
+    let mut done: u64 = 0;
+    while done < len {
+        let want = std::cmp::min(buf.len() as u64, len - done) as usize;
+        let n = f
+            .read(&mut buf[..want])
+            .await
+            .map_err(|e| format!("Read partial file for hashing: {}", os_error::english(&e)))?;
+        if n == 0 {
+            break;
+        }
+        hasher.update(&buf[..n]);
+        done += n as u64;
+    }
+    Ok(hasher)
+}
+
 async fn do_download(
     url: &str,
     dest: &PathBuf,
@@ -449,6 +653,12 @@ async fn do_download(
     id: &str,
     token: CancellationToken,
     resume_offset: u64,
+    // Catalog estimate. Plans the space guard when the server states no length;
+    // never decides that a transfer is finished.
+    expected_bytes: Option<u64>,
+    // Digest from the catalog entry, already normalised. `None` means the
+    // content of this file cannot be verified at all.
+    expected_sha256: Option<String>,
 ) -> Result<(), String> {
     // SSRF guard: model downloads come from public catalogs (HuggingFace,
     // civitai, ollama). Block private/loopback/metadata hosts and re-validate
@@ -456,22 +666,16 @@ async fn do_download(
     // internal service or 169.254.169.254.
     crate::commands::proxy::validate_public_url(url)?;
 
-    let client = reqwest::Client::builder()
-        .user_agent("LocallyUncensored/1.5")
-        .redirect(crate::commands::proxy::ssrf_safe_redirect_policy(10))
-        // A deadline on the whole request punishes people for having a slow
-        // line rather than a broken one: the 2 hour cap this replaces killed
-        // any download that legitimately took longer, and the catalog offers
-        // single files of 40 GB and sets of 155 GB. bob80817-dev, Discord
-        // 2026-07-29, after giving up: "all of your downloads have a habit of
-        // timing out". What we actually want to catch is a stalled transfer,
-        // so the limits are per-connect and per-read. A dead socket now fails
-        // in two minutes and resumes from the partial on the next attempt;
-        // a slow one is left to finish.
-        .connect_timeout(std::time::Duration::from_secs(30))
-        .read_timeout(std::time::Duration::from_secs(120))
-        .build()
-        .map_err(|e| os_error::english(&e))?;
+    // A deadline on the whole request punishes people for having a slow line
+    // rather than a broken one: the 2 hour cap this replaces killed any
+    // download that legitimately took longer, and the catalog offers single
+    // files of 40 GB and sets of 155 GB. bob80817-dev, Discord 2026-07-29,
+    // after giving up: "all of your downloads have a habit of timing out".
+    // What we actually want to catch is a stalled transfer, so the limits are
+    // per-connect and per-read. A dead socket now fails in two minutes and
+    // resumes from the partial on the next attempt; a slow one is left to
+    // finish.
+    let client = download_client(30, 120)?;
 
     let mut request = client.get(url);
 
@@ -488,19 +692,27 @@ async fn do_download(
 
     let status = response.status();
     if !status.is_success() && status.as_u16() != 206 {
-        return Err(format!("HTTP {}", status));
+        let name = dest
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| "this file".to_string());
+        return Err(http_error_message(status.as_u16(), &name));
     }
 
     let already_on_disk = resumed_bytes(resume_offset, status.as_u16());
     let resumed = already_on_disk > 0;
 
-    // For resumed downloads, total = content_length + offset
-    let content_length = response.content_length().unwrap_or(0);
-    let total = if resumed {
-        content_length + resume_offset
-    } else {
-        content_length
-    };
+    // For resumed downloads, total = content_length + offset. When the server
+    // states no length at all the catalog estimate steps in for the space
+    // guard, and `estimated` records that it must not be trusted with anything
+    // else — see `total_size`.
+    let (total, estimated) = total_size(response.content_length(), resume_offset, resumed, expected_bytes);
+    if estimated {
+        println!(
+            "[Download] {} — the host states no Content-Length. Truncation cannot be detected by size; the space check falls back to the catalog estimate ({} bytes).",
+            id, total
+        );
+    }
 
     // Stop before the first byte if the drive cannot hold the rest. Saying it
     // now costs nothing; finding out at the end costs the whole transfer and
@@ -535,6 +747,24 @@ async fn do_download(
         tokio::fs::File::create(&tmp_path)
             .await
             .map_err(|e| format!("Create file: {}", os_error::english(&e)))?
+    };
+
+    // The digest is only computed when there is something to compare it
+    // against. Hashing 155 GB to write the result into a log line nobody reads
+    // costs the user real minutes of CPU, so an entry without a `sha256` says
+    // so once, loudly, and skips the work.
+    let mut hasher = match (&expected_sha256, resumed) {
+        (None, _) => {
+            println!(
+                "[Download] {} — no sha256 in the catalog entry, content will NOT be verified (size only)",
+                id
+            );
+            None
+        }
+        (Some(_), false) => Some(Sha256::new()),
+        // Resuming: the bytes already on disk never passed through the hasher,
+        // so replay them or the final digest is the hash of the tail alone.
+        (Some(_), true) => Some(digest_of_prefix(&tmp_path, already_on_disk).await?),
     };
 
     let mut stream = response.bytes_stream();
@@ -573,6 +803,7 @@ async fn do_download(
                 match chunk {
                     Some(Ok(bytes)) => {
                         file.write_all(&bytes).await.map_err(|e| format!("Write: {}", os_error::english(&e)))?;
+                        if let Some(h) = hasher.as_mut() { h.update(&bytes); }
                         downloaded += bytes.len() as u64;
 
                         // Update progress every 500ms
@@ -614,11 +845,40 @@ async fn do_download(
     // catalog sizes (50%), so the truncated model would read as "Installed" and
     // only blow up much later, when the backend tries to load it. Keep the
     // .download part instead — the next attempt resumes from there.
-    if ended_early(total, downloaded) {
+    //
+    // `estimated` means the number in `total` is the catalog's guess, not the
+    // server's statement. A guess may not fail a transfer that is in fact
+    // complete, so the size check is skipped and the digest — if there is one —
+    // is what stands between the user and a truncated model.
+    if !estimated && ended_early(total, downloaded) {
         return Err(format!(
             "Download ended early: {} of {} bytes received. Start it again to resume.",
             downloaded, total
         ));
+    }
+    if estimated {
+        println!(
+            "[Download] {} finished at {} bytes with no size stated by the host — completeness unchecked",
+            id, downloaded
+        );
+    }
+
+    // Content check, when the catalog gave us something to check against. A
+    // wrong file is worse than a missing one: it installs, it is listed, and it
+    // blows up hours later inside a backend. So the partial goes and the error
+    // names the cause instead of leaving a plausible looking model behind.
+    if let (Some(expected), Some(h)) = (expected_sha256.as_deref(), hasher) {
+        let actual = format!("{:x}", h.finalize());
+        if actual != expected {
+            let _ = tokio::fs::remove_file(&tmp_path).await;
+            return Err(format!(
+                "{} does not match the checksum the catalog lists for it (expected sha256 {}, got {}). The file was discarded — the download was corrupted in transit or the host is serving different content. Start it again.",
+                dest.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| "The file".to_string()),
+                expected,
+                actual,
+            ));
+        }
+        println!("[Download] {} verified against sha256 {}", id, expected);
     }
 
     tokio::fs::rename(&tmp_path, dest)
@@ -659,6 +919,18 @@ pub fn pause_download(id: String, state: State<'_, AppState>) -> Result<serde_js
     Ok(serde_json::json!({"status": "pausing"}))
 }
 
+/// The user aborting a transfer. Stops it AND removes the partial file.
+///
+/// This is one of two ways an entry leaves the progress map, and the two must
+/// never be confused. Cancel is a decision: the user does not want this file,
+/// so the bytes on disk go with it. `clear_download_entry` is bookkeeping: the
+/// row is removed, the partial stays, and the next attempt resumes from it.
+///
+/// Retrying a failed download used to come through HERE, which is how a short
+/// network outage on a 40 GB bundle turned into a full re-download: the error
+/// text promised "start it again to resume", the user pressed the button the UI
+/// offered, and the button deleted the 36 GB it was about to resume from. On a
+/// bad line that never converges.
 #[tauri::command]
 pub fn cancel_download(id: String, state: State<'_, AppState>) -> Result<serde_json::Value, String> {
     // Cancel the token
@@ -691,7 +963,7 @@ pub fn cancel_download(id: String, state: State<'_, AppState>) -> Result<serde_j
 
     if let Some(dest) = dest {
         if !dest.is_empty() {
-            let _ = std::fs::remove_file(PathBuf::from(&dest).with_extension("download"));
+            remove_partial(&dest);
         } else if let Ok(comfy_path) = state.comfy_path.lock() {
             // Entry from before `dest` existed — fall back to the old guess.
             if let Some(ref path) = *comfy_path {
@@ -706,13 +978,307 @@ pub fn cancel_download(id: String, state: State<'_, AppState>) -> Result<serde_j
     Ok(serde_json::json!({"status": "cancelled"}))
 }
 
+/// Take a SETTLED entry out of the progress map and leave the disk alone.
+///
+/// The counterpart to `cancel_download`. The frontend has to clear the Rust
+/// entry before a retry, or `download_model` short-circuits on the file that is
+/// already there, never touches the map, and the next poll resurrects the error
+/// row the user just retried (the_mr_pickles). Doing that through cancel meant
+/// paying for the bookkeeping with the partial file — several gigabytes for a
+/// map key.
+///
+/// Refuses to touch a transfer that is still live: "connecting", "downloading"
+/// and "pausing" own their entry, and dropping it under them would leave a
+/// running tokio task writing into a file nothing knows about.
+#[tauri::command]
+pub fn clear_download_entry(id: String, state: State<'_, AppState>) -> Result<serde_json::Value, String> {
+    let mut dl = state
+        .downloads
+        .lock()
+        .map_err(|_| "Download state is poisoned".to_string())?;
+    match dl.get(&id) {
+        Some(p) if !clearable(&p.status) => Ok(serde_json::json!({"status": "still_active"})),
+        Some(_) => {
+            dl.remove(&id);
+            Ok(serde_json::json!({"status": "cleared"}))
+        }
+        None => Ok(serde_json::json!({"status": "not_found"})),
+    }
+}
+
+/// May this entry be dropped from the map without stopping anything?
+///
+/// A live transfer owns its entry: the tokio task writes progress into it and
+/// the cancel token is looked up by the same id, so removing it under a running
+/// download would leave a writer nothing can reach.
+pub fn clearable(status: &str) -> bool {
+    !matches!(status, "connecting" | "downloading" | "pausing")
+}
+
+/// Remove the partial belonging to `dest`. Reports whether a file went.
+///
+/// Deliberately its own function with exactly ONE caller, `cancel_download`.
+/// Deleting a partial is a user decision, never a side effect of tidying up
+/// state — see the note on `cancel_download`.
+fn remove_partial(dest: &str) -> bool {
+    if dest.is_empty() {
+        return false;
+    }
+    std::fs::remove_file(PathBuf::from(dest).with_extension("download")).is_ok()
+}
+
+/// Bytes that transfers already in flight still have to write.
+///
+/// The per-download space check answers "does the rest of THIS file fit", which
+/// is the wrong question when a bundle starts four files at once: each of the
+/// four passed against the same free bytes, all four started, and the drive
+/// filled anyway. Whatever is still owed counts as taken.
+pub fn reserved_bytes(downloads: &HashMap<String, DownloadProgress>) -> u64 {
+    downloads
+        .values()
+        .filter(|p| matches!(p.status.as_str(), "connecting" | "downloading" | "pausing"))
+        .map(|p| p.total.saturating_sub(p.progress))
+        .sum()
+}
+
+/// Does `requiredBytes` still fit next to everything already in flight?
+///
+/// Asked ONCE for a whole bundle before the first transfer starts, which is the
+/// only place the question can be answered honestly — see `reserved_bytes`.
+/// Returns the numbers as well as the verdict so the caller can put real
+/// gigabytes in front of the user instead of "not enough space".
+#[allow(non_snake_case)]
+#[tauri::command]
+pub fn check_download_space(
+    subfolder: Option<String>,
+    destDir: Option<String>,
+    requiredBytes: u64,
+    state: State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let dir = match (subfolder, destDir) {
+        (_, Some(d)) if !d.is_empty() => PathBuf::from(d),
+        (Some(sub), _) => {
+            let comfy_path = state.comfy_path.lock().unwrap().clone();
+            models_dir(&comfy_path, &sub)?
+        }
+        _ => return Err("check_download_space needs a subfolder or a destDir".to_string()),
+    };
+
+    let reserved = state
+        .downloads
+        .lock()
+        .map(|dl| reserved_bytes(&dl))
+        .unwrap_or(0);
+    let available = available_space_for(&dir);
+    let shortfall = space_shortfall(requiredBytes.saturating_add(reserved), 0, available);
+
+    Ok(match shortfall {
+        None => serde_json::json!({
+            "fits": true,
+            "requiredBytes": requiredBytes,
+            "reservedBytes": reserved,
+            "availableBytes": available,
+        }),
+        Some((needed, free)) => serde_json::json!({
+            "fits": false,
+            "requiredBytes": requiredBytes,
+            "reservedBytes": reserved,
+            "availableBytes": available,
+            "message": format!(
+                "Not enough free space. This needs {} and the drive has {} free.{} Free up some space and start it again.",
+                gib(needed),
+                gib(free),
+                if reserved > 0 {
+                    format!(" {} of that is already promised to downloads that are still running.", gib(reserved))
+                } else {
+                    String::new()
+                },
+            ),
+        }),
+    })
+}
+
+/// A `.download` temp file with nobody watching it.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OrphanDownload {
+    /// Basename without the `.download` suffix.
+    ///
+    /// NOT the download id. `Path::with_extension` REPLACES the extension, so
+    /// the partial for `wan_2.1_vae.safetensors` is `wan_2.1_vae.download` and
+    /// the original suffix is simply gone. The real filename is recovered on the
+    /// frontend by matching this stem against the download meta it persisted and
+    /// against the catalog — see `orphanFilename` in src/api/discover.ts.
+    pub stem: String,
+    /// Absolute path OF THE PARTIAL.
+    pub path: String,
+    /// Directory it sits in — the `destDir` a resume needs for a GGUF that does
+    /// not live under the ComfyUI tree.
+    pub dir: String,
+    pub bytes: u64,
+}
+
+/// Basename minus its extension. The one place the `.download` naming rule is
+/// read, so the orphan scan and the id matching cannot drift apart.
+fn file_stem_of(name: &str) -> String {
+    match name.rsplit_once('.') {
+        Some((stem, _)) if !stem.is_empty() => stem.to_string(),
+        _ => name.to_string(),
+    }
+}
+
+/// Every root a `.download` file may legitimately live under.
+///
+/// Also the jail for `delete_orphan_download`: a path handed back to us is only
+/// deleted when it still sits under one of these, so a crafted argument cannot
+/// turn the sweeper into a "delete any file" command.
+fn orphan_roots(state: &State<'_, AppState>, extra: &[String]) -> Vec<PathBuf> {
+    let mut roots: Vec<PathBuf> = Vec::new();
+    if let Ok(p) = state.comfy_path.lock() {
+        if let Some(ref path) = *p {
+            roots.push(PathBuf::from(path).join("models"));
+            roots.push(PathBuf::from(path).join("custom_nodes"));
+        }
+    }
+    if let Ok(p) = crate::commands::engine::builtin_models_dir() {
+        roots.push(p);
+    }
+    // Provider model dirs (LM Studio, Ollama, a custom path) are only known to
+    // the frontend, which persists the destDir of every download it started.
+    for d in extra {
+        if d.is_empty() {
+            continue;
+        }
+        let p = PathBuf::from(d);
+        if p.is_absolute() {
+            roots.push(p);
+        }
+    }
+    roots
+}
+
+/// Partial downloads left behind by a previous run of the app.
+///
+/// Both sides of the download kept their state purely in RAM, so closing the
+/// app during a multi-gigabyte transfer left the `.download` file on disk with
+/// no row, no button and no way to finish or remove it — the bytes were simply
+/// unreachable. This is the missing half: the disk still knows what was in
+/// flight, so ask it.
+///
+/// Entries the running app is already working on are left out: those are not
+/// orphans, they have a row.
+#[allow(non_snake_case)]
+#[tauri::command]
+pub async fn find_orphan_downloads(
+    extraDirs: Option<Vec<String>>,
+    state: State<'_, AppState>,
+) -> Result<Vec<OrphanDownload>, String> {
+    let extra = extraDirs.unwrap_or_default();
+    let roots = orphan_roots(&state, &extra);
+    // The map is keyed by full filename, the partial keeps only the stem, so the
+    // comparison happens on stems.
+    let live: Vec<String> = state
+        .downloads
+        .lock()
+        .map(|dl| dl.keys().map(|k| file_stem_of(k)).collect())
+        .unwrap_or_default();
+
+    // Off the main thread: this runs at startup and a ComfyUI install with a
+    // few dozen node packs is tens of thousands of directory entries. Freezing
+    // the window to look for leftovers would be its own bug.
+    tokio::task::spawn_blocking(move || scan_for_partials(roots, live))
+        .await
+        .map_err(|e| format!("Orphan scan failed: {}", e))
+}
+
+/// Directories that never hold a model and always hold thousands of files.
+/// Skipping them is what keeps the startup scan off the user's clock.
+const SCAN_SKIP: &[&str] = &[".git", "__pycache__", "node_modules", ".venv", "venv", ".cache"];
+
+fn scan_for_partials(roots: Vec<PathBuf>, live: Vec<String>) -> Vec<OrphanDownload> {
+    let mut out: Vec<OrphanDownload> = Vec::new();
+    let mut seen: std::collections::HashSet<PathBuf> = std::collections::HashSet::new();
+    for root in roots {
+        if !root.is_dir() {
+            continue;
+        }
+        // Depth 4 covers models/<subfolder>/<nested enum dir>/<file> and the
+        // AnimateDiff pack's models dir under custom_nodes, without descending
+        // into a whole ComfyUI checkout.
+        let walk = walkdir::WalkDir::new(&root).max_depth(4).into_iter().filter_entry(|e| {
+            !e.file_type().is_dir()
+                || e.depth() == 0
+                || !e.file_name().to_str().is_some_and(|n| SCAN_SKIP.contains(&n))
+        });
+        for entry in walk.filter_map(|e| e.ok()) {
+            let p = entry.path();
+            if !entry.file_type().is_file() || p.extension().and_then(|e| e.to_str()) != Some("download") {
+                continue;
+            }
+            if !seen.insert(p.to_path_buf()) {
+                continue;
+            }
+            let stem = match p.file_stem().and_then(|s| s.to_str()) {
+                Some(s) => s.to_string(),
+                None => continue,
+            };
+            if live.contains(&stem) {
+                continue;
+            }
+            out.push(OrphanDownload {
+                stem,
+                path: p.to_string_lossy().to_string(),
+                dir: p.parent().map(|d| d.to_string_lossy().to_string()).unwrap_or_default(),
+                bytes: entry.metadata().map(|m| m.len()).unwrap_or(0),
+            });
+        }
+    }
+    // Biggest first: that is the one whose loss would hurt most.
+    out.sort_by(|a, b| b.bytes.cmp(&a.bytes));
+    out
+}
+
+/// Delete one orphaned partial, on the user's explicit say-so.
+///
+/// Jailed to `orphan_roots` and to the `.download` suffix, because the argument
+/// travels through the frontend and back: without both checks this would be a
+/// command that deletes any path the webview asks for.
+#[allow(non_snake_case)]
+#[tauri::command]
+pub fn delete_orphan_download(
+    path: String,
+    extraDirs: Option<Vec<String>>,
+    state: State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let p = PathBuf::from(&path);
+    if p.extension().and_then(|e| e.to_str()) != Some("download") {
+        return Err("Only .download partials can be removed here".to_string());
+    }
+    let extra = extraDirs.unwrap_or_default();
+    if !orphan_roots(&state, &extra).iter().any(|r| p.starts_with(r)) {
+        return Err("That path is not inside a model folder this app downloads into".to_string());
+    }
+    let bytes = fs::metadata(&p).map(|m| m.len()).unwrap_or(0);
+    fs::remove_file(&p).map_err(|e| format!("Delete failed: {}", os_error::english(&e)))?;
+    println!("[Download] Removed orphaned partial {} ({} bytes)", p.display(), bytes);
+    Ok(serde_json::json!({"status": "deleted", "bytes": bytes}))
+}
+
+#[allow(non_snake_case)]
 #[tauri::command]
 pub async fn resume_download(
     id: String,
     url: String,
     subfolder: String,
+    expectedBytes: Option<u64>,
+    expectedSha256: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
+    let expected_bytes = expectedBytes;
+    let expected_sha256 = match expectedSha256.as_deref() {
+        Some(s) => Some(normalize_sha256(s)?),
+        None => None,
+    };
     let comfy_path = {
         let p = state.comfy_path.lock().unwrap();
         p.clone()
@@ -758,7 +1324,7 @@ pub async fn resume_download(
     let id_clone = id.clone();
 
     tokio::spawn(async move {
-        match do_download(&url, &dest_file, &downloads_arc, &id_clone, token, resume_offset).await {
+        match do_download(&url, &dest_file, &downloads_arc, &id_clone, token, resume_offset, expected_bytes, expected_sha256).await {
             Ok(_) => {
                 if let Ok(mut dl) = downloads_arc.lock() {
                     if let Some(p) = dl.get_mut(&id_clone) {
@@ -926,25 +1492,41 @@ pub async fn download_model_to_path(
     destDir: String,
     filename: String,
     expectedBytes: Option<u64>,
+    expectedSha256: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
     let dest_dir = destDir;
     let expected_bytes = expectedBytes;
+    let expected_sha256 = match expectedSha256.as_deref() {
+        Some(s) => Some(normalize_sha256(s)?),
+        None => None,
+    };
     let dir = PathBuf::from(&dest_dir);
     fs::create_dir_all(&dir).map_err(|e| format!("Create dest dir: {}", os_error::english(&e)))?;
     let dest_file = dir.join(sanitize_filename(&filename));
 
     if dest_file.exists() {
-        let file_complete = match expected_bytes {
-            Some(expected) if expected > 0 => {
-                let actual = dest_file.metadata().map(|m| m.len()).unwrap_or(0);
-                let threshold = (expected as f64 * 0.9) as u64;
-                actual >= threshold
+        // Same rule as download_model: only a size the SERVER states may call a
+        // file complete. The catalog estimate with 10 % of slack used to accept
+        // a transfer that died at 91 %.
+        let actual = dest_file.metadata().map(|m| m.len()).unwrap_or(0);
+        match judge_existing(actual, exact_remote_size(&url).await) {
+            Existing::Complete => {
+                return Ok(serde_json::json!({"status": "exists", "path": dest_file.to_string_lossy()}));
             }
-            _ => true,
-        };
-        if file_complete {
-            return Ok(serde_json::json!({"status": "exists", "path": dest_file.to_string_lossy()}));
+            Existing::Mismatch { actual, exact } => {
+                println!(
+                    "[Download] {} exists with {} bytes but the host states {} — fetching it again",
+                    filename, actual, exact
+                );
+            }
+            Existing::Unverified { actual } => {
+                println!(
+                    "[Download] {} exists with {} bytes and the host states no size — accepted UNVERIFIED",
+                    filename, actual
+                );
+                return Ok(serde_json::json!({"status": "exists", "path": dest_file.to_string_lossy()}));
+            }
         }
     }
 
@@ -981,7 +1563,7 @@ pub async fn download_model_to_path(
     let filename_clone = filename.clone();
 
     tokio::spawn(async move {
-        match do_download(&url, &dest_file, &downloads_arc, &id_clone, token, resume_offset).await {
+        match do_download(&url, &dest_file, &downloads_arc, &id_clone, token, resume_offset, expected_bytes, expected_sha256).await {
             Ok(_) => {
                 if let Ok(mut dl) = downloads_arc.lock() {
                     if let Some(p) = dl.get_mut(&id_clone) {
@@ -1106,8 +1688,15 @@ pub async fn check_model_sizes(
         if dest_file.exists() {
             let actual = dest_file.metadata().map(|m| m.len()).unwrap_or(0);
             // Use 50% threshold for install checks — sizeGB values are rough estimates
-            // (e.g. sizeGB: 0.9 for an 800 MB file). The 90% check in download_model
-            // handles partial downloads; this check just validates the file isn't empty/tiny.
+            // (e.g. sizeGB: 0.9 for an 800 MB file), so no tighter bound is possible
+            // from a catalog number alone. This answers "is there a plausible file
+            // here" for the card, NOT "is this the whole file".
+            //
+            // The exact question is settled where it can be: download_model asks the
+            // host for the byte count and compares to the byte (`judge_existing`), and
+            // do_download verifies the digest when the entry carries one. The 90 %
+            // rule that used to live there is gone — a threshold may size a card, it
+            // may never certify a model.
             let threshold = if file.expected_bytes > 0 {
                 (file.expected_bytes as f64 * 0.5) as u64
             } else {
@@ -1181,6 +1770,229 @@ mod tests {
         // Range ignored — the whole body arrives and the part file is restarted.
         assert_eq!(resumed_bytes(4096, 200), 0);
         assert_eq!(resumed_bytes(0, 206), 0);
+    }
+
+    /// Der Kern von Zeitbombe 3: `actual >= expected * 0.9` hat einen bei 91 %
+    /// abgebrochenen Download als fertig durchgewinkt.
+    #[test]
+    fn an_existing_file_counts_only_at_the_exact_byte() {
+        let exact = 6_000_000_000u64;
+        assert_eq!(judge_existing(exact, Some(exact)), Existing::Complete);
+
+        // 91 % — unter der alten Regel "fertig", hier genau das, was es ist.
+        let at_91 = 5_460_000_000u64;
+        assert_eq!(
+            judge_existing(at_91, Some(exact)),
+            Existing::Mismatch { actual: at_91, exact }
+        );
+        // Ein einziges fehlendes Byte reicht.
+        assert_eq!(
+            judge_existing(exact - 1, Some(exact)),
+            Existing::Mismatch { actual: exact - 1, exact }
+        );
+        // Zu gross ist genauso falsch wie zu klein.
+        assert_eq!(
+            judge_existing(exact + 1, Some(exact)),
+            Existing::Mismatch { actual: exact + 1, exact }
+        );
+        // Ohne exakte Zahl wird nichts behauptet — weder fertig noch kaputt.
+        assert_eq!(judge_existing(at_91, None), Existing::Unverified { actual: at_91 });
+        assert_eq!(judge_existing(at_91, Some(0)), Existing::Unverified { actual: at_91 });
+    }
+
+    #[test]
+    fn a_missing_content_length_does_not_silently_disable_the_space_guard() {
+        let estimate = Some(16_000_000_000u64);
+        // Server nennt eine Laenge: die gilt, und sie ist keine Schaetzung.
+        assert_eq!(total_size(Some(16_331_849_976), 0, false, estimate), (16_331_849_976, false));
+        // Fortsetzung: der Rest plus das, was schon liegt.
+        assert_eq!(total_size(Some(4_000_000_000), 12_000_000_000, true, estimate), (16_000_000_000, false));
+        // Keine Laenge: der Katalogwert plant den Platz, markiert als Schaetzung.
+        assert_eq!(total_size(None, 0, false, estimate), (16_000_000_000, true));
+        assert_eq!(total_size(Some(0), 0, false, estimate), (16_000_000_000, true));
+        // Weder Laenge noch Katalogwert: 0, und beide Guards wissen das.
+        assert_eq!(total_size(None, 0, false, None), (0, true));
+
+        // Die Schaetzung darf einen Abbruch niemals als Abbruch melden — sie
+        // wuerde jeden Download bei abweichender Rundung fehlschlagen lassen.
+        let (total, estimated) = total_size(None, 0, false, estimate);
+        assert!(estimated);
+        assert!(ended_early(total, 15_900_000_000), "die Zahl allein wuerde greifen");
+        // do_download prueft deshalb `!estimated && ended_early(..)`.
+    }
+
+    #[test]
+    fn the_whole_size_comes_out_of_content_range() {
+        assert_eq!(total_from_content_range("bytes 0-0/12345"), Some(12345));
+        assert_eq!(total_from_content_range("bytes 0-0/*"), None);
+        assert_eq!(total_from_content_range("nonsense"), None);
+    }
+
+    #[test]
+    fn only_a_real_digest_is_accepted() {
+        // sha256 der leeren Datei, 64 Hexzeichen.
+        let full = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+        assert_eq!(full.len(), 64);
+        assert_eq!(normalize_sha256(full).unwrap(), full);
+        // Grossschreibung ist erlaubt, das Ergebnis ist normalisiert.
+        assert_eq!(normalize_sha256(&full.to_uppercase()).unwrap(), full);
+        assert_eq!(normalize_sha256(&format!("  {}  ", full)).unwrap(), full);
+        // Ein Tippfehler schaltet die Pruefung nicht still ab, er faellt auf.
+        assert!(normalize_sha256(&full[..63]).is_err(), "63 Zeichen sind kein sha256");
+        assert!(normalize_sha256(&format!("{}ab", full)).is_err());
+        assert!(normalize_sha256(&format!("sha256:{}", full)).is_err());
+        assert!(normalize_sha256(&full.replace('e', "z")).is_err(), "kein Hex");
+        assert!(normalize_sha256("").is_err());
+    }
+
+    /// `with_extension` ERSETZT die Endung: die Teildatei zu
+    /// `wan_2.1_vae.safetensors` heisst `wan_2.1_vae.download`. Wer aus dem
+    /// Fundstueck den Download-Namen zurueckrechnen will, muss das wissen.
+    #[test]
+    fn a_partial_keeps_only_the_stem_of_its_target() {
+        let dest = PathBuf::from("/models/vae/wan_2.1_vae.safetensors");
+        let part = dest.with_extension("download");
+        assert_eq!(part.file_name().unwrap(), "wan_2.1_vae.download");
+        assert_eq!(part.file_stem().unwrap(), "wan_2.1_vae");
+        assert_eq!(file_stem_of("wan_2.1_vae.safetensors"), "wan_2.1_vae");
+        assert_eq!(file_stem_of("wan_2.1_vae.download"), "wan_2.1_vae");
+        // Ein Name ohne Endung bleibt, wie er ist.
+        assert_eq!(file_stem_of("model"), "model");
+    }
+
+    /// Der Digest muss ueber Fortsetzungen hinweg derselbe sein, sonst waere
+    /// jeder wiederaufgenommene Download "korrupt".
+    #[tokio::test]
+    async fn a_resumed_transfer_hashes_the_bytes_that_already_lie_there() {
+        let dir = tempfile::tempdir().unwrap();
+        let part = dir.path().join("m.safetensors.download");
+        let head = b"the first half of a model file";
+        let tail = b" and the second half";
+        std::fs::write(&part, head).unwrap();
+
+        let mut resumed = digest_of_prefix(&part, head.len() as u64).await.unwrap();
+        resumed.update(tail);
+
+        let mut in_one_go = Sha256::new();
+        in_one_go.update(head);
+        in_one_go.update(tail);
+
+        assert_eq!(
+            format!("{:x}", resumed.finalize()),
+            format!("{:x}", in_one_go.finalize()),
+        );
+    }
+
+    /// 106 fest verdrahtete HuggingFace-Adressen: wird ein Repo umbenannt oder
+    /// gated, ist "HTTP 404" plus Retry-Button eine Sackgasse.
+    #[test]
+    fn a_dead_address_says_what_happened_and_carries_its_status() {
+        let gone = http_error_message(404, "wan_2.1_vae.safetensors");
+        assert!(gone.contains("(HTTP 404)"), "Frontend liest genau diese Form");
+        assert!(gone.contains("wan_2.1_vae.safetensors"));
+        assert!(gone.to_lowercase().contains("cannot help"), "Retry darf nicht angeboten werden");
+
+        let gated = http_error_message(403, "flux1-dev.safetensors");
+        assert!(gated.contains("(HTTP 403)"));
+        assert!(gated.to_lowercase().contains("login"));
+        assert!(gated.to_lowercase().contains("cannot help"));
+
+        // Voruebergehendes darf weiterhin zum Wiederholen einladen.
+        let busy = http_error_message(429, "m.gguf");
+        assert!(busy.contains("(HTTP 429)"));
+        assert!(!busy.to_lowercase().contains("cannot help"));
+        let server = http_error_message(503, "m.gguf");
+        assert!(server.contains("(HTTP 503)"));
+        assert!(!server.to_lowercase().contains("cannot help"));
+    }
+
+    /// Der Bundle-Fall: vier Dateien starten gleichzeitig und pruefen jede fuer
+    /// sich gegen dieselben freien Bytes.
+    #[test]
+    fn what_is_still_owed_counts_as_taken() {
+        let mut map: HashMap<String, DownloadProgress> = HashMap::new();
+        let mut add = |id: &str, status: &str, progress: u64, total: u64| {
+            map.insert(
+                id.to_string(),
+                DownloadProgress {
+                    progress,
+                    total,
+                    speed: 0.0,
+                    filename: id.into(),
+                    status: status.into(),
+                    error: None,
+                    dest: format!("/models/{id}"),
+                },
+            );
+        };
+        add("a.safetensors", "downloading", 1_000_000_000, 6_000_000_000);
+        add("b.safetensors", "connecting", 0, 4_000_000_000);
+        // Erledigtes und Fehlgeschlagenes schuldet nichts mehr.
+        add("c.safetensors", "complete", 2_000_000_000, 2_000_000_000);
+        add("d.safetensors", "error", 500_000_000, 3_000_000_000);
+
+        assert_eq!(reserved_bytes(&map), 5_000_000_000 + 4_000_000_000);
+
+        // Und daraus folgt die Absage, die die Einzelpruefung nie gegeben haette:
+        // 12 GB frei, 9 GB schon versprochen, 8 GB neu angefragt.
+        assert!(space_shortfall(8_000_000_000 + reserved_bytes(&map), 0, Some(12_000_000_000)).is_some());
+        // Ohne Anrechnung des Laufenden waere derselbe Start durchgegangen.
+        assert!(space_shortfall(8_000_000_000, 0, Some(12_000_000_000)).is_none());
+    }
+
+    /// Nach einem Neustart weiss nur noch die Platte, was unterwegs war.
+    #[test]
+    fn the_disk_still_knows_what_was_in_flight() {
+        let root = tempfile::tempdir().unwrap();
+        let vae = root.path().join("models").join("vae");
+        std::fs::create_dir_all(&vae).unwrap();
+        std::fs::write(vae.join("wan_2.1_vae.download"), vec![0u8; 4096]).unwrap();
+        // Fertige Dateien und Rauschen gehen niemanden etwas an.
+        std::fs::write(vae.join("done.safetensors"), b"x").unwrap();
+        let noise = root.path().join("models").join("__pycache__");
+        std::fs::create_dir_all(&noise).unwrap();
+        std::fs::write(noise.join("cached.download"), b"x").unwrap();
+        // Ein laufender Transfer ist kein Waisenkind.
+        let unet = root.path().join("models").join("diffusion_models");
+        std::fs::create_dir_all(&unet).unwrap();
+        std::fs::write(unet.join("running.download"), vec![0u8; 8192]).unwrap();
+
+        let found = scan_for_partials(
+            vec![root.path().join("models")],
+            vec![file_stem_of("running.gguf")],
+        );
+
+        assert_eq!(found.len(), 1, "gefunden: {:?}", found.iter().map(|o| &o.path).collect::<Vec<_>>());
+        assert_eq!(found[0].stem, "wan_2.1_vae");
+        assert_eq!(found[0].bytes, 4096);
+        assert!(found[0].dir.ends_with("vae"), "der destDir muss mitkommen");
+    }
+
+    /// Wiederholen und Abbrechen sind zwei Wege, und nur einer raeumt auf.
+    #[test]
+    fn only_the_cancel_path_touches_the_partial_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let dest = dir.path().join("m.safetensors");
+        // Wie in do_download: with_extension ersetzt die Endung.
+        let part = dest.with_extension("download");
+        std::fs::write(&part, b"36 GB, sozusagen").unwrap();
+
+        // Ein fehlgeschlagener oder pausierter Eintrag darf aus der Map — das
+        // ist alles, was der Retry braucht, und es fasst die Datei nicht an.
+        assert!(clearable("error"));
+        assert!(clearable("paused"));
+        assert!(clearable("complete"));
+        assert!(part.exists(), "Buchhaltung loescht keine Nutzdaten");
+
+        // Ein laufender Transfer besitzt seinen Eintrag.
+        assert!(!clearable("downloading"));
+        assert!(!clearable("connecting"));
+        assert!(!clearable("pausing"));
+
+        // Nur der Abbruch raeumt, und dann wirklich.
+        assert!(remove_partial(&dest.to_string_lossy()));
+        assert!(!part.exists());
+        assert!(!remove_partial(""), "ohne Ziel gibt es nichts zu loeschen");
     }
 }
 
