@@ -202,6 +202,39 @@ describe('the localStorage fallback is not a plaintext token dump', () => {
     await expect(store.getItem(SESSION)).resolves.toBe(REFRESH_TOKEN)
   })
 
+  it('has no silent way back to writing the token in the clear', async () => {
+    // The encoder used to be `try { btoa(...) } catch { return value }` — one
+    // throw and the raw refresh token went to localStorage, unmarked, with
+    // nothing logged and nothing to find it by afterwards. That is precisely
+    // the state this whole encoding exists to remove, so there is no fallback
+    // to it: without btoa the value is encoded here instead.
+    const store = await freshAdapter()
+    secretSet.mockRejectedValue(new Error('keychain unsupported on this platform'))
+    secretGet.mockRejectedValue(new Error('keychain unsupported on this platform'))
+    const realBtoa = globalThis.btoa
+    const realAtob = globalThis.atob
+    vi.stubGlobal('btoa', () => { throw new Error('btoa is not available here') })
+    vi.stubGlobal('atob', () => { throw new Error('atob is not available here') })
+    try {
+      await store.setItem(SESSION, REFRESH_TOKEN)
+
+      const onDisk = localStorage.getItem(SESSION)!
+      expect(onDisk).not.toContain('v1.MRefr3sh')
+      expect(onDisk).not.toContain('refresh_token')
+      expect(onDisk).not.toContain('eyJ')
+      expect(onDisk.startsWith('lu.obf.1:')).toBe(true)
+      // Round-trips without the platform on either side of it...
+      await expect(store.getItem(SESSION)).resolves.toBe(REFRESH_TOKEN)
+    } finally {
+      vi.stubGlobal('btoa', realBtoa)
+      vi.stubGlobal('atob', realAtob)
+    }
+    // ...and what it wrote is byte-identical to what btoa would have written,
+    // so a session saved on one path still opens on the other.
+    expect(localStorage.getItem(SESSION)).toBe('lu.obf.1:' + realBtoa(encodeURIComponent(REFRESH_TOKEN)))
+    await expect(store.getItem(SESSION)).resolves.toBe(REFRESH_TOKEN)
+  })
+
   it('sign-out still empties the fallback', async () => {
     const store = await freshAdapter()
     secretSet.mockRejectedValue(new Error('keychain unsupported on this platform'))

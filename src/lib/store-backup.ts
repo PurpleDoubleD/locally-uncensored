@@ -51,8 +51,6 @@ export const STORE_KEYS = [
   'lu_release_notes', 'locally-uncensored-downloads',
 ]
 
-const STORE_KEY_SET = new Set(STORE_KEYS)
-
 /** These persist through idbStorage (IndexedDB) since 2.5.0, because the
  *  5 MB localStorage cap could not hold a real history. The snapshot has to
  *  read them from there: the one-time migration deleted their localStorage
@@ -78,40 +76,64 @@ let lastWritten: Record<string, string> | null = null
  * strictly better than re-reading: same string, no allocation, and the identity
  * of the reference makes the "did anything change" comparison a pointer test.
  */
-const idbMirror: Record<string, string> = {}
+const idbMirror: Record<string, string | null> = {}
 
 onIdbWrite((key, value) => {
   if (!IDB_STORE_KEYS.has(key)) return
-  if (value == null) delete idbMirror[key]
-  else idbMirror[key] = value
+  // `null` is knowledge, not absence of it: a removeItem says this key holds
+  // nothing now. Deleting the entry instead would put the key back on the
+  // re-read treadmill below.
+  idbMirror[key] = value
 })
 
 /**
  * Read an IndexedDB-backed value for the snapshot. Costs one read per key per
  * session: after that the write listener above keeps the mirror current.
+ *
+ * The answer is cached in BOTH directions. It used to cache only a non-null
+ * one, which meant a store that legitimately holds nothing was pulled out of
+ * IndexedDB again on every five-second tick, forever — and 'staged-changes'
+ * holds nothing for every user who has never approved a code edit. That is a
+ * read per tick that can only ever return null, and every one of them is
+ * another chance for a transient failure to arm the read-failure latch.
+ *
+ * A read that FAILED is never cached: the latch has to stay the thing that
+ * decides, and the next tick has to try again — that retry is what releases it.
  */
 async function idbValueForBackup(key: string): Promise<string | null> {
   const mirrored = idbMirror[key]
   if (mirrored !== undefined) return mirrored
-  const read = await Promise.resolve(idbStorage.getItem(key)).catch(() => null)
-  if (read != null) idbMirror[key] = read
+  const read = await Promise.resolve(idbStorage.getItem(key)).catch(() => undefined)
+  if (read === undefined || hasFailedRead(key)) return null
+  idbMirror[key] = read
   return read
 }
 
 /**
- * Whether the IndexedDB side can be trusted right now.
+ * Which IndexedDB-backed stores could not be read, so the snapshot below has
+ * to leave them out.
  *
- * `backup_stores` REPLACES the file. A key whose read failed looks exactly like
- * a key holding nothing, so a snapshot built during a read failure omits the
- * chats and then overwrites the one copy of them that was left. Refusing to
- * write keeps yesterday's backup, which is worth incomparably more than a
- * current one with the history missing.
+ * WHAT `backup_stores` ACTUALLY DOES. It does not replace the file. It reads
+ * the backup that is already on disk and carries over every key that held a
+ * non-empty value and is missing (or empty) in the incoming snapshot —
+ * commands/system.rs, `keys_lost` + `merged_backup`, with the untouched
+ * previous file set aside once as store_backup.prev.json. A snapshot that lost
+ * a key is therefore INCOMPLETE, and the file that lands still has the key.
+ *
+ * The old rule was built on the opposite belief and refused the whole write
+ * while any one of the three IndexedDB stores was unreadable. That cost the
+ * other twenty-three stores their backup for as long as it lasted, and it
+ * lasted for the rest of the session: the refusal happened before the snapshot
+ * was built, so nothing re-read the key, and only a read can clear the latch
+ * (see hasFailedRead). One unlucky read of an empty 'staged-changes' and the
+ * chats stopped being backed up until the app was restarted.
+ *
+ * What survives of the rule is the part that is true: a key that could not be
+ * read must be OMITTED, never written out as empty. Omitted is precisely the
+ * shape the Rust side knows how to repair.
  */
-function idbReadsAreTrustworthy(): boolean {
-  for (const key of IDB_STORE_KEYS) {
-    if (hasFailedRead(key)) return false
-  }
-  return true
+function unreadableIdbKeys(): string[] {
+  return [...IDB_STORE_KEYS].filter((key) => hasFailedRead(key))
 }
 
 /** True when `next` differs from what is already on disk. Keys whose value is
@@ -132,22 +154,16 @@ function differsFromDisk(next: Record<string, string>): boolean {
 /**
  * Read every store into one flat object.
  *
- * @param idbCache when given, every IndexedDB value read is mirrored into it,
- *        so a caller that later has to build a snapshot without awaiting
- *        anything (beforeunload) has something to read from.
+ * A key that cannot be read is left out — never recorded as empty — so the
+ * Rust side's merge keeps whatever the previous backup had for it.
  */
-export async function collectStoreSnapshot(
-  idbCache?: Record<string, string>,
-): Promise<Record<string, string>> {
+export async function collectStoreSnapshot(): Promise<Record<string, string>> {
   const snapshot: Record<string, string> = { __ts: new Date().toISOString() }
   for (const key of STORE_KEYS) {
     const val = IDB_STORE_KEYS.has(key)
-      ? await Promise.resolve(idbStorage.getItem(key))
+      ? await idbValueForBackup(key)
       : localStorage.getItem(key)
-    if (val) {
-      snapshot[key] = val
-      if (idbCache && IDB_STORE_KEYS.has(key)) idbCache[key] = val
-    }
+    if (val) snapshot[key] = val
   }
   return snapshot
 }
@@ -187,16 +203,18 @@ function writeSnapshot(body: Record<string, string>): void {
  * a written one.
  */
 export async function backupStoresIfChanged(): Promise<'written' | 'unchanged' | 'held-back'> {
-  if (!idbReadsAreTrustworthy()) {
-    log.warn('[store-backup] skipping the snapshot: an IndexedDB store is unreadable right now')
-    return 'held-back'
-  }
   const body = await collectComparableSnapshot()
-  // Asked again: the reads happen between the two checks, and a key that failed
-  // during them is missing from `body` while looking exactly like an empty one.
-  if (!idbReadsAreTrustworthy()) {
-    log.warn('[store-backup] a store became unreadable while the snapshot was being built')
-    return 'held-back'
+  const blind = unreadableIdbKeys()
+  if (blind.length > 0) {
+    // The keys are already absent from `body` (idbValueForBackup refuses to
+    // cache or return a value it could not read), so the write below is an
+    // incomplete snapshot and the Rust merge keeps the previous values for
+    // them. Writing it anyway is the point: the other stores changed too, and
+    // this call is also the retry that clears the latch once IndexedDB
+    // recovers.
+    log.warn('[store-backup] snapshot is incomplete — these stores are unreadable right now', {
+      keys: blind,
+    })
   }
   if (!differsFromDisk(body)) return 'unchanged'
   writeSnapshot(body)
@@ -210,16 +228,15 @@ export async function backupStoresIfChanged(): Promise<'written' | 'unchanged' |
  */
 export function flushSyncStoreBackup(): 'written' | 'unchanged' | 'held-back' {
   try {
-    if (!idbReadsAreTrustworthy()) return 'held-back'
-    // The mirror is the only IndexedDB value reachable without awaiting, and a
-    // snapshot built without a key REPLACES a file that had it. Before the
-    // first async backup has filled the mirror there is no way to tell "this
-    // store is empty" from "nobody has looked yet" — and closing the window in
-    // those first seconds would have written the chats out of the backup.
-    for (const key of IDB_STORE_KEYS) {
-      if (idbMirror[key] !== undefined) continue
-      if (lastWritten === null || lastWritten[key] !== undefined) return 'held-back'
-    }
+    // The mirror is the only IndexedDB value reachable without awaiting, and
+    // before the first async backup has filled it there is no way to tell
+    // "this store is empty" from "nobody has looked yet". Both come out of
+    // this function the same way: the key is simply not in the body. That is
+    // survivable because `backup_stores` merges a missing key back from the
+    // file already on disk (see unreadableIdbKeys) — the previous version of
+    // this guard believed the file was replaced wholesale and refused the
+    // flush entirely, which threw away the localStorage stores' last five
+    // seconds for nothing.
     const body: Record<string, string> = {}
     for (const key of STORE_KEYS) {
       const val = IDB_STORE_KEYS.has(key) ? (idbMirror[key] ?? null) : localStorage.getItem(key)
@@ -246,14 +263,17 @@ export function flushSyncStoreBackup(): 'written' | 'unchanged' | 'held-back' {
  */
 export async function backupStoresNow(): Promise<boolean> {
   try {
-    if (!idbReadsAreTrustworthy()) {
-      log.error('[store-backup] refusing to replace the backup: an IndexedDB store is unreadable')
-      return false
-    }
     const snapshot = await collectStoreSnapshot()
-    if (!idbReadsAreTrustworthy()) {
-      log.error('[store-backup] a store became unreadable mid-snapshot, keeping the previous backup')
-      return false
+    const blind = unreadableIdbKeys()
+    if (blind.length > 0) {
+      // Incomplete, not destructive — the Rust merge keeps the previous value
+      // for every key this snapshot lost. Refusing here used to look careful
+      // and was the opposite: this is the last write before the installer
+      // takes the process down, so refusing it threw away the newest todos,
+      // staged edits and settings to protect chats that were never at risk.
+      log.error('[store-backup] update-time snapshot is incomplete — unreadable stores keep their previous backup', {
+        keys: blind,
+      })
     }
     localStorage.setItem('lu-restore-complete', '1')
     await backendCall('backup_stores', { data: JSON.stringify(snapshot) })
@@ -268,15 +288,3 @@ export async function backupStoresNow(): Promise<boolean> {
   }
 }
 
-/** Test seam. `lastWritten` and the mirror are module state, and a test that
- *  wants to observe the FIRST write of a session has to be able to get one. */
-export function resetStoreBackupState(): void {
-  lastWritten = null
-  for (const key of Object.keys(idbMirror)) delete idbMirror[key]
-}
-
-/** Exported for the coverage test, which has to know which keys the snapshot
- *  is allowed to contain. */
-export function isBackedUpKey(key: string): boolean {
-  return STORE_KEY_SET.has(key)
-}

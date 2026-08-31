@@ -92,16 +92,97 @@ describe('cloudFetch', () => {
     vi.useRealTimers()
   })
 
+  it('gives up when the TOKEN never arrives, not only when the request does not', async () => {
+    // getAccessToken() is not a local lookup: supabase-js refreshes an expired
+    // access token there, over the network, with no deadline of its own. The
+    // guard used to be armed AFTER that await, so a refresh whose peer
+    // disappeared mid-flight wedged Create exactly the way a hanging fetch did
+    // — one step earlier, and past every clock this file installs.
+    vi.useFakeTimers()
+    getAccessToken.mockImplementation(() => new Promise(() => {}))
+    const settled = cloudFetch('/api/jobs', { method: 'POST', body: '{"x":1}' }).catch(
+      (e: unknown) => e,
+    )
+    await vi.advanceTimersByTimeAsync(120_000)
+    const err = await settled
+    expect(err).toBeInstanceOf(CloudJobError)
+    expect((err as CloudJobError).status).toBe(408)
+    expect(fetchMock).not.toHaveBeenCalled()
+    vi.useRealTimers()
+  })
+
+  it("the caller's cancel also ends a token refresh that is hanging", async () => {
+    getAccessToken.mockImplementation(() => new Promise(() => {}))
+    const ac = new AbortController()
+    const settled = cloudFetch('/api/me', { signal: ac.signal }).catch((e: unknown) => e)
+    ac.abort()
+    const err = await settled
+    // A cancelled run is not a timeout, here just as much as at the fetch.
+    expect(err).not.toBeInstanceOf(CloudJobError)
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('a 401 raised inside the window keeps its own status', async () => {
+    // The deadline wraps the token now, so "not signed in" travels the same
+    // catch as a timeout and must not come out relabelled 408.
+    getAccessToken.mockResolvedValue(null)
+    await expect(cloudFetch('/api/me')).rejects.toMatchObject({ status: 401 })
+  })
+
+  it('measures a FormData body instead of counting it as zero bytes', async () => {
+    // deadlineFor only knew ArrayBuffer, views, Blob and string. FormData,
+    // URLSearchParams and a stream all measured 0 and silently took the flat
+    // ceiling, while the comment above it promised a size-derived deadline.
+    vi.useFakeTimers()
+    let aborted = false
+    fetchMock.mockImplementation(hangingFetch(() => { aborted = true }))
+    const fd = new FormData()
+    fd.append('clip', new Blob(['x'.repeat(1024 * 1024)]))
+    const settled = cloudFetch('/api/jobs/upload?role=video', { method: 'POST', body: fd }).catch(
+      (e: unknown) => e,
+    )
+    // 1 MiB at the 64 B/ms floor buys ~16 s on top of the 60 s ceiling.
+    await vi.advanceTimersByTimeAsync(65_000)
+    expect(aborted).toBe(false)
+    await vi.advanceTimersByTimeAsync(20_000)
+    expect(await settled).toBeInstanceOf(CloudJobError)
+    vi.useRealTimers()
+  })
+
+  it('measures a URLSearchParams body too', async () => {
+    vi.useFakeTimers()
+    let aborted = false
+    fetchMock.mockImplementation(hangingFetch(() => { aborted = true }))
+    const params = new URLSearchParams()
+    params.set('payload', 'x'.repeat(1024 * 1024))
+    const settled = cloudFetch('/api/jobs', { method: 'POST', body: params }).catch(
+      (e: unknown) => e,
+    )
+    await vi.advanceTimersByTimeAsync(65_000)
+    expect(aborted).toBe(false)
+    await vi.advanceTimersByTimeAsync(20_000)
+    expect(await settled).toBeInstanceOf(CloudJobError)
+    vi.useRealTimers()
+  })
+
   it("hands the caller's abort signal through to the request", async () => {
     // pollJob and generate() both hold an AbortController for the run; before
     // this, cancelling could not reach a request already in flight.
     const ac = new AbortController()
     let seen: AbortSignal | undefined
+    let inFlight!: () => void
+    const started = new Promise<void>((resolve) => { inFlight = resolve })
     fetchMock.mockImplementation((url: string, init: RequestInit) => {
       seen = init.signal ?? undefined
+      inFlight()
       return hangingFetch()(url, init)
     })
     const settled = cloudFetch('/api/me', { signal: ac.signal }).catch((e: unknown) => e)
+    // Wait for the request to be genuinely in flight before cancelling. The
+    // deadline now also covers the token step, so aborting before fetch is
+    // reached (correctly) means no request is ever issued — which is the
+    // adjacent test, not this one.
+    await started
     ac.abort()
     const err = await settled
     expect(seen?.aborted).toBe(true)

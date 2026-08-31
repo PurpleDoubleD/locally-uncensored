@@ -63,13 +63,58 @@ const TOMBSTONE = '__lu_signed_out__'
 // change, not one this adapter can make.
 const FALLBACK_MARKER = 'lu.obf.1:'
 
+const B64_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
+
+// btoa/atob without the platform. `encodeURIComponent` already reduced the
+// value to ASCII, so this is base64 over char codes 0..127 and produces byte
+// for byte what btoa produces — the stored format does not change, and a
+// session written on one path still reads back on the other.
+//
+// It exists so packFallback has somewhere to go when btoa does not: the old
+// catch wrote the RAW value to localStorage, i.e. the plaintext refresh token
+// this encoding was added to remove, silently and with no marker to find it by
+// afterwards. There is no failure mode left that needs that.
+function b64Encode(ascii: string): string {
+  let out = ''
+  for (let i = 0; i < ascii.length; i += 3) {
+    const a = ascii.charCodeAt(i)
+    const b = i + 1 < ascii.length ? ascii.charCodeAt(i + 1) : -1
+    const c = i + 2 < ascii.length ? ascii.charCodeAt(i + 2) : -1
+    out += B64_ALPHABET[a >> 2]
+    out += B64_ALPHABET[((a & 3) << 4) | (b < 0 ? 0 : b >> 4)]
+    out += b < 0 ? '=' : B64_ALPHABET[((b & 15) << 2) | (c < 0 ? 0 : c >> 6)]
+    out += c < 0 ? '=' : B64_ALPHABET[c & 63]
+  }
+  return out
+}
+
+function b64Decode(encoded: string): string {
+  const clean = encoded.replace(/=+$/, '')
+  let bits = 0
+  let acc = 0
+  let out = ''
+  for (const ch of clean) {
+    const v = B64_ALPHABET.indexOf(ch)
+    if (v < 0) throw new Error('not base64')
+    acc = (acc << 6) | v
+    bits += 6
+    if (bits >= 8) {
+      bits -= 8
+      out += String.fromCharCode((acc >> bits) & 0xff)
+    }
+  }
+  return out
+}
+
 function packFallback(value: string): string {
+  const ascii = encodeURIComponent(value)
   try {
-    return FALLBACK_MARKER + btoa(encodeURIComponent(value))
+    return FALLBACK_MARKER + btoa(ascii)
   } catch {
-    // Dropping the session here would sign the user out on the next launch for
-    // no reason at all, which is the worse failure of the two.
-    return value
+    // No btoa on this engine (or it refused). Encode it here instead — writing
+    // the plaintext token was never an acceptable third option: it is exactly
+    // the state this whole block exists to remove, and it left no trace.
+    return FALLBACK_MARKER + b64Encode(ascii)
   }
 }
 
@@ -77,10 +122,18 @@ function unpackFallback(stored: string): string {
   // No marker = written by a build before this encoding existed. Those must
   // keep working, or an update signs every Linux user out.
   if (!stored.startsWith(FALLBACK_MARKER)) return stored
+  const payload = stored.slice(FALLBACK_MARKER.length)
   try {
-    return decodeURIComponent(atob(stored.slice(FALLBACK_MARKER.length)))
+    return decodeURIComponent(atob(payload))
   } catch {
-    return stored
+    try {
+      return decodeURIComponent(b64Decode(payload))
+    } catch {
+      // Marked but undecodable: damaged on disk. Hand the marked string back
+      // rather than a token — supabase-js fails to parse it and treats the
+      // session as absent, which is the honest outcome. It is NOT plaintext.
+      return stored
+    }
   }
 }
 
@@ -198,14 +251,36 @@ export async function getAccessToken(): Promise<string | null> {
 export type OAuthProvider = 'google' | 'github'
 
 /** The loopback callback is the one place in sign-in where text from outside
- *  the app reaches the UI. commands/oauth.rs now only serves a genuine
- *  top-level callback navigation, so this text comes from the provider — but
- *  `error_description` is still free-form remote input, and an error line is
- *  no place for a screenful of it. Control characters out, 200 chars max. */
+ *  the app reaches the UI, and it is NOT the provider's text by construction.
+ *
+ *  commands/oauth.rs narrows the sender to "a top-level browser navigation"
+ *  (GET /callback, right Host, no Origin, Sec-Fetch-Mode: navigate). Its own
+ *  comment used to argue that what remains needs a user gesture and therefore
+ *  a visible window. That is not true: `location.href = …`, a
+ *  `<meta http-equiv="refresh">` and a server-side 302 are all top-level
+ *  navigations that any page the user already has open can perform silently,
+ *  and they send exactly those headers. So while a sign-in is pending, any
+ *  open tab can end the wait and choose this string. The real fix is a
+ *  per-attempt `state` nonce, which needs the Rust listener AND a redirect
+ *  allow-list entry that tolerates a query parameter — neither is reachable
+ *  from here.
+ *
+ *  What IS reachable from here: never let that string pose as LU's own words.
+ *  It is quoted and attributed, control characters are stripped so it cannot
+ *  lay itself out as a second paragraph, the quote characters it could use to
+ *  close the attribution are stripped, and it is cut to 200 characters. */
+const REPORTED_MAX_CHARS = 200
+
 function providerErrorText(params: URLSearchParams): string {
   const raw = params.get('error_description') || params.get('error') || ''
-  const clean = raw.replace(/\p{C}/gu, ' ').replace(/\s+/g, ' ').trim().slice(0, 200)
-  return clean || 'Sign-in was cancelled in the browser.'
+  const clean = raw
+    .replace(/\p{C}/gu, ' ')
+    .replace(/["'‘’“”]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, REPORTED_MAX_CHARS)
+  if (!clean) return 'Sign-in was cancelled in the browser.'
+  return `The sign-in page reported: "${clean}"`
 }
 
 /** Google/GitHub sign-in, same identities as lu-labs.ai. Flow: bind a

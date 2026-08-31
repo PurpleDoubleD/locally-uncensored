@@ -11,6 +11,9 @@
  * Run: npx vitest run src/lib/__tests__/idbStorage-read-failure.test.ts
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+import { dirname, resolve } from 'node:path'
 
 /**
  * Fake IndexedDB whose reads fail while `failReads` is on. Writes always work,
@@ -27,6 +30,20 @@ function fakeIndexedDB(data: Record<string, string>) {
           const r: Record<string, unknown> = {
             onsuccess: null, onerror: null,
             result: data[k], error: new DOMException('store is not readable', 'NotReadableError'),
+          }
+          queueMicrotask(() => {
+            if (state.failReads) (r.onerror as (() => void) | null)?.()
+            else (r.onsuccess as (() => void) | null)?.()
+          })
+          return r
+        },
+        // holdBackWrite asks "does this key hold anything" with count(), not
+        // get(): the answer is one bit and get() materialised megabytes for it.
+        count: (k: string) => {
+          const r: Record<string, unknown> = {
+            onsuccess: null, onerror: null,
+            result: k in data ? 1 : 0,
+            error: new DOMException('store is not readable', 'NotReadableError'),
           }
           queueMicrotask(() => {
             if (state.failReads) (r.onerror as (() => void) | null)?.()
@@ -152,8 +169,13 @@ describe('idbStorage tells a failed read apart from an empty one', () => {
   })
 })
 
-describe('the appData snapshot is not replaced while a store is unreadable', () => {
+describe('the appData snapshot omits an unreadable store instead of emptying it', () => {
   const backendCall = vi.fn()
+
+  const snapshots = () =>
+    backendCall.mock.calls
+      .filter((c) => c[0] === 'backup_stores')
+      .map((c) => JSON.parse((c[1] as { data: string }).data) as Record<string, string>)
 
   beforeEach(() => {
     vi.resetModules()
@@ -163,27 +185,94 @@ describe('the appData snapshot is not replaced while a store is unreadable', () 
   })
   afterEach(() => { vi.unstubAllGlobals(); vi.doUnmock('../idbStorage') })
 
-  it('skips the write instead of saving a snapshot with the chats missing', async () => {
-    // backup_stores REPLACES the file. A snapshot built while the chat key is
-    // unreadable simply has no chats in it, and writing it destroys the last
-    // copy that did.
-    const failed = new Set<string>(['chat-conversations'])
+  /** An idbStorage whose chat key is latched unreadable, counting the reads. */
+  function mockUnreadable(failed: Set<string>, reads: string[]) {
     vi.doMock('../idbStorage', () => ({
-      idbStorage: { getItem: () => null, setItem: () => {}, removeItem: () => {} },
+      idbStorage: {
+        getItem: (k: string) => { reads.push(k); return failed.has(k) ? null : (localStorage.getItem(k) ?? null) },
+        setItem: () => {},
+        removeItem: () => {},
+      },
       hasFailedRead: (k: string) => failed.has(k),
       onIdbWrite: () => () => {},
     }))
     vi.doMock('../../api/backend', () => ({ backendCall: (...a: unknown[]) => backendCall(...a) }))
+  }
+
+  it('still backs up the other stores, with the unreadable key absent', async () => {
+    // `backup_stores` does NOT replace the file: commands/system.rs reads the
+    // backup already on disk and carries over every key the incoming snapshot
+    // lost (keys_lost + merged_backup). So a snapshot built while the chat key
+    // is unreadable is INCOMPLETE, not destructive — the chats keep the value
+    // they had. What must never happen is the key turning up EMPTY, which is
+    // what the merge cannot tell from a real deletion.
+    //
+    // The old rule refused the whole write instead, which cost the other 23
+    // stores their backup for as long as it lasted.
+    const failed = new Set<string>(['chat-conversations'])
+    const reads: string[] = []
+    mockUnreadable(failed, reads)
 
     const { backupStoresIfChanged, backupStoresNow, flushSyncStoreBackup } = await import('../store-backup')
+    localStorage.setItem('chat-settings', '{"state":{"theme":"dark"}}')
 
-    expect(await backupStoresIfChanged()).toBe('held-back')
-    expect(flushSyncStoreBackup()).toBe('held-back')
-    expect(await backupStoresNow()).toBe(false)
-    expect(backendCall).not.toHaveBeenCalled()
-
-    failed.clear()
     expect(await backupStoresIfChanged()).toBe('written')
-    expect(backendCall).toHaveBeenCalledWith('backup_stores', expect.anything())
+    const snap = snapshots().at(-1)!
+    expect('chat-conversations' in snap).toBe(false)
+    expect(snap['chat-settings']).toContain('dark')
+
+    localStorage.setItem('workflow-store', '{"state":{}}')
+    expect(flushSyncStoreBackup()).toBe('written')
+    expect('chat-conversations' in snapshots().at(-1)!).toBe(false)
+
+    expect(await backupStoresNow()).toBe(true)
+    expect('chat-conversations' in snapshots().at(-1)!).toBe(false)
+  })
+
+  it('keeps re-reading the latched key, so the latch is not a dead end', async () => {
+    // Only a later READ can clear the read-failure latch (idbStorage's getItem
+    // and holdBackWrite are the only two places that delete from it). The old
+    // guard checked the latch and returned BEFORE building the snapshot, so
+    // nothing ever read the key again and one transient failure stopped the
+    // backup for the rest of the session.
+    const failed = new Set<string>(['chat-conversations'])
+    const reads: string[] = []
+    mockUnreadable(failed, reads)
+
+    const { backupStoresIfChanged } = await import('../store-backup')
+    await backupStoresIfChanged()
+
+    reads.length = 0
+    localStorage.setItem('chat-settings', '{"state":{"theme":"light"}}')
+    await backupStoresIfChanged()
+    expect(reads).toContain('chat-conversations')
+
+    // ...and once IndexedDB comes back, the key is in the snapshot again.
+    failed.clear()
+    localStorage.setItem('chat-conversations', '{"state":{"conversations":[1]}}')
+    expect(await backupStoresIfChanged()).toBe('written')
+    expect(snapshots().at(-1)!['chat-conversations']).toContain('conversations')
+  })
+})
+
+/**
+ * The rule above is only safe because of what the Rust command does, so that
+ * is pinned here rather than assumed. If commands/system.rs ever stops merging
+ * a lost key back in, "omit and write" becomes "delete", and this test is the
+ * thing that says so.
+ */
+describe('backup_stores merges a lost key instead of replacing the file', () => {
+  it('is wired into the command, not just defined next to it', () => {
+    const rust = readFileSync(
+      resolve(dirname(fileURLToPath(import.meta.url)), '../../../src-tauri/src/commands/system.rs'),
+      'utf8',
+    )
+    const command = rust.slice(rust.indexOf('pub fn backup_stores('))
+    const body = command.slice(0, command.indexOf('\n}\n'))
+    expect(body).toContain('keys_lost(')
+    expect(body).toContain('merged_backup(')
+    // The previous file has to be READ before the new one is written, or there
+    // is nothing to merge from.
+    expect(body).toMatch(/read_to_string\(&target\)[\s\S]*keys_lost\(/)
   })
 })

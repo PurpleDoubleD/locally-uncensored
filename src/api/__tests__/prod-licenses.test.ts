@@ -22,8 +22,19 @@ const lock = JSON.parse(
   readFileSync(resolve(__dirname, '../../../package-lock.json'), 'utf8'),
 ) as { packages: Record<string, LockEntry> }
 
-/** Everything that can reach a user's machine: the root and devDependencies
- *  are out, optional platform builds stay in — one of them ships per OS. */
+/** Everything that can reach a user's machine.
+ *
+ *  `path &&` drops the root entry (npm keys it ""), which is this app itself.
+ *
+ *  `!entry.dev` is npm's own reachability answer, and it is narrower than
+ *  "devDependencies are out": npm marks `dev: true` only on packages reachable
+ *  EXCLUSIVELY through the dev tree. A package that both a dependency and a
+ *  devDependency pull in carries no flag and stays in this list — correctly,
+ *  because it does install for a consumer of the production tree. So the
+ *  filter is "everything npm cannot prove is dev-only", which is the inclusive
+ *  side to err on for a licence check.
+ *
+ *  Optional platform builds stay in — one of them ships per OS. */
 const production = Object.entries(lock.packages).filter(([path, entry]) => path && !entry.dev)
 
 /**

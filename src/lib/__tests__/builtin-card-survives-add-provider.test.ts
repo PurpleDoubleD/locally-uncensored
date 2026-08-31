@@ -113,6 +113,17 @@ describe('THE FIX: Add Provider no longer makes the built-in card disappear', ()
     expect(back.displaced).toEqual({ ...JAN, managed: false })
   })
 
+  it('a second takeover remembers the backend it actually pushed out', () => {
+    // Jan holds the slot, LM Studio takes it: the standby card has to name
+    // Jan, not the built-in engine Jan itself had displaced one step earlier.
+    // Only one backend can stand by, so the memory has to move with the slot.
+    const withJan = { ...SHIPPED, ...slotTakeoverUpdate(SHIPPED, JAN) } as HandoverSlot
+    const withLmStudio = { ...withJan, ...slotTakeoverUpdate(withJan, LMSTUDIO) } as HandoverSlot
+    expect(withLmStudio.name).toBe('LM Studio')
+    expect(standbyOccupant(withLmStudio)?.name).toBe('Jan')
+    expect(slotHandbackUpdate(withLmStudio)!.name).toBe('Jan')
+  })
+
   it('a cloud preset takes the same slot and is remembered the same way', () => {
     // Every OpenAI-protocol backend shares this one slot, so Add Provider,
     // OpenRouter loses the built-in card exactly as Jan did.

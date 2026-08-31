@@ -105,11 +105,18 @@ describe('store backup only writes on a change', () => {
     expect(await backupStoresIfChanged()).toBe('written')
   })
 
-  it('the beforeunload flush never writes a snapshot with the chats missing', async () => {
+  it('the beforeunload flush leaves an unseen chat key OUT rather than writing it empty', async () => {
     // The sync path cannot await IndexedDB, so it reads the write mirror. Until
     // the first async backup has filled it, "no chats" and "nobody has looked"
-    // are the same thing — and writing REPLACES the file that has them.
-    const { backupStoresIfChanged, flushSyncStoreBackup } = await import('../store-backup')
+    // are the same thing here.
+    //
+    // The answer is NOT to refuse the flush. `backup_stores` does not replace
+    // the file — commands/system.rs carries every key the incoming snapshot
+    // lost over from the backup already on disk (keys_lost + merged_backup) —
+    // so an ABSENT key is repaired and only a key written out as EMPTY would
+    // finish a loss. Refusing meant the localStorage stores lost their last
+    // few seconds to protect chats that were never at risk.
+    const { backupStoresIfChanged } = await import('../store-backup')
     const { idbStorage } = await import('../idbStorage')
     await Promise.resolve(idbStorage.setItem('chat-conversations', '{"state":{"conversations":[1]}}'))
     await backupStoresIfChanged()
@@ -119,12 +126,19 @@ describe('store backup only writes on a change', () => {
     vi.resetModules()
     backendCall.mockClear()
     const fresh = await import('../store-backup')
-    expect(fresh.flushSyncStoreBackup()).toBe('held-back')
-    expect(backendCall).not.toHaveBeenCalled()
-
-    // Once the async path has read the chats once, the sync flush is safe.
-    await fresh.backupStoresIfChanged()
     localStorage.setItem('workflow-store', '{"state":{}}')
+    expect(fresh.flushSyncStoreBackup()).toBe('written')
+
+    const cold = writtenSnapshots().at(-1)!
+    // Absent, so the merge can repair it. Present-but-empty is the thing that
+    // must never appear here.
+    expect('chat-conversations' in cold).toBe(false)
+    // ...and the stores the sync path CAN read still reached disk.
+    expect(cold['workflow-store']).toContain('state')
+
+    // Once the async path has read the chats once, the flush carries them.
+    await fresh.backupStoresIfChanged()
+    localStorage.setItem('workflow-store', '{"state":{"seen":1}}')
     expect(fresh.flushSyncStoreBackup()).toBe('written')
     expect(writtenSnapshots().at(-1)!['chat-conversations']).toContain('conversations')
   })

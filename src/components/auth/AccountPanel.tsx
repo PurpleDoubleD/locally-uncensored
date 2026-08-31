@@ -12,6 +12,31 @@ import { loginWithProvider } from '../../api/cloud/supabase'
 import { CLOUD_BASE } from '../../api/cloud/config'
 import { openExternal } from '../../api/backend'
 
+/**
+ * Run a sign-out and report what happened, in that order.
+ *
+ * `signOutAccount` throws when the saved session survived the delete — and it
+ * deliberately leaves the store SIGNED IN, because the account really is still
+ * usable on this machine. That is the safe half. The visible half was missing:
+ * the throw was dropped by `void logout()`, so the panel simply kept showing
+ * the account and the click looked like it had done nothing. The user walks
+ * away from a shared machine believing they are signed out.
+ *
+ * Exported so the contract can be asserted without a DOM — the panel itself is
+ * a React tree and the suite runs in the `node` environment.
+ */
+export async function runSignOut(
+  logout: () => Promise<void>,
+  report: (message: string | null) => void,
+): Promise<void> {
+  report(null)
+  try {
+    await logout()
+  } catch (err) {
+    report(err instanceof Error ? err.message : String(err))
+  }
+}
+
 function Meter({ label, used, limit }: { label: string; used: number; limit: number }) {
   const pct = limit > 0 ? Math.min(100, Math.round((used / limit) * 100)) : 0
   return (
@@ -109,6 +134,18 @@ export function AccountPanel() {
   const [mode, setMode] = useState<'signin' | 'signup'>('signin')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [signOutError, setSignOutError] = useState<string | null>(null)
+  const [signingOut, setSigningOut] = useState(false)
+
+  const onSignOut = async () => {
+    if (signingOut) return
+    setSigningOut(true)
+    try {
+      await runSignOut(logout, setSignOutError)
+    } finally {
+      setSigningOut(false)
+    }
+  }
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -205,12 +242,23 @@ export function AccountPanel() {
           </div>
         </div>
         <button
-          onClick={() => void logout()}
-          className="flex items-center gap-1 px-2 py-1 rounded text-[0.65rem] text-gray-500 hover:text-gray-800 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/5 transition-colors"
+          onClick={() => void onSignOut()}
+          disabled={signingOut}
+          className="flex items-center gap-1 px-2 py-1 rounded text-[0.65rem] text-gray-500 hover:text-gray-800 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/5 transition-colors disabled:opacity-40"
         >
-          <LogOut size={10} /> Sign out
+          {signingOut ? <Loader2 size={10} className="animate-spin" /> : <LogOut size={10} />} Sign out
         </button>
       </div>
+
+      {/* A sign-out that did not happen has to say so HERE. The account is
+          still shown above (the store stays signed-in on purpose), so without
+          this line the failure is invisible and the panel reads like a
+          sign-out that simply took no effect. */}
+      {signOutError && (
+        <p role="alert" className="text-[0.65rem] text-red-500 dark:text-red-400">
+          {signOutError}
+        </p>
+      )}
 
       {licenseActive && quota ? (
         <div className="space-y-2">

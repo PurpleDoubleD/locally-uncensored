@@ -71,18 +71,50 @@ const REQUEST_TIMEOUT_MS = 60_000
  *  ~64 KB/s is far below any connection that could ever finish the upload. */
 const UPLOAD_BYTES_PER_MS = 64
 
+/** Size of a request body in bytes, or `null` when this body shape cannot be
+ *  measured without consuming it.
+ *
+ *  Measured: ArrayBuffer, any view over one, Blob/File, string, URLSearchParams
+ *  (its serialised form is what goes on the wire) and FormData (the sum of its
+ *  parts — the multipart boundaries add a few hundred bytes per field, which
+ *  is noise next to a file and does not change the deadline).
+ *
+ *  NOT measurable: a ReadableStream body has no length until it has been read,
+ *  and reading it here would consume the only copy. `null` says so rather than
+ *  reporting 0 bytes — FormData, URLSearchParams and a stream all counted as
+ *  zero before, so all three quietly got the flat ceiling while this comment
+ *  block claimed the deadline grew with the body. */
+function bodyBytes(body: RequestInit['body']): number | null {
+  if (body == null) return 0
+  if (typeof body === 'string') return body.length
+  if (body instanceof ArrayBuffer) return body.byteLength
+  if (ArrayBuffer.isView(body)) return body.byteLength
+  if (typeof Blob !== 'undefined' && body instanceof Blob) return body.size
+  if (typeof URLSearchParams !== 'undefined' && body instanceof URLSearchParams) {
+    return body.toString().length
+  }
+  if (typeof FormData !== 'undefined' && body instanceof FormData) {
+    let total = 0
+    for (const [name, value] of body) {
+      total += name.length
+      total += typeof value === 'string' ? value.length : value.size
+    }
+    return total
+  }
+  return null // ReadableStream, or something this engine does not know
+}
+
+/** The deadline for one request.
+ *
+ *  A body whose size cannot be known falls back to the flat ceiling, because
+ *  there is nothing to derive anything else from — and that is a real limit,
+ *  not a rounding: a streamed 40 MB upload would be cut off at 60 s. Nothing
+ *  in this app sends a stream body today (uploadInput reads the Blob into an
+ *  ArrayBuffer first, everything else is JSON or a Blob), and the day one does
+ *  it has to pass `timeoutMs` itself rather than assume this function guessed. */
 function deadlineFor(init: RequestInit): number {
-  const body = init.body
-  const bytes =
-    body instanceof ArrayBuffer
-      ? body.byteLength
-      : ArrayBuffer.isView(body)
-        ? body.byteLength
-        : typeof Blob !== 'undefined' && body instanceof Blob
-          ? body.size
-          : typeof body === 'string'
-            ? body.length
-            : 0
+  const bytes = bodyBytes(init.body)
+  if (bytes === null) return REQUEST_TIMEOUT_MS
   return REQUEST_TIMEOUT_MS + Math.ceil(bytes / UPLOAD_BYTES_PER_MS)
 }
 
@@ -91,14 +123,36 @@ export interface CloudFetchInit extends RequestInit {
   timeoutMs?: number
 }
 
-export async function cloudFetch(path: string, init: CloudFetchInit = {}): Promise<Response> {
-  const token = await getAccessToken()
-  if (!token) throw new CloudJobError('not signed in', 401)
-  const headers = new Headers(init.headers)
-  headers.set('authorization', `Bearer ${token}`)
+/** Settle `work` as soon as it settles, or reject the moment `signal` aborts.
+ *
+ *  For the steps of a request that take no AbortSignal of their own. The
+ *  abandoned promise keeps running — it just no longer decides anything, and
+ *  its rejection is still handled here, so it cannot surface as an unhandled
+ *  one later. */
+function untilAborted<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
+  const abortError = (): unknown => signal.reason ?? new Error('aborted')
+  if (signal.aborted) return Promise.reject(abortError())
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(abortError())
+    signal.addEventListener('abort', onAbort, { once: true })
+    const stopListening = () => signal.removeEventListener('abort', onAbort)
+    work.then(
+      (value) => { stopListening(); resolve(value) },
+      (err: unknown) => { stopListening(); reject(err) },
+    )
+  })
+}
 
+export async function cloudFetch(path: string, init: CloudFetchInit = {}): Promise<Response> {
   const { timeoutMs, signal, ...rest } = init
-  // Two things must be able to end this request — the caller's signal (a
+  // The clock starts BEFORE the token, not after it. getAccessToken() goes to
+  // the network whenever the access token has expired (supabase-js refreshes
+  // it there), and that refresh has no deadline of its own — so awaiting it
+  // outside this guard left exactly the wedge the guard exists to remove, one
+  // step earlier: Create awaits these calls one after another, and a refresh
+  // whose peer disappeared mid-flight never settles on its own.
+  //
+  // Two things must be able to end all of it — the caller's signal (a
   // cancelled run) and the deadline — and fetch takes one. AbortSignal.any
   // would merge them, but it is newer than the WKWebView LU runs inside on
   // older macOS, so the relay is wired by hand.
@@ -114,18 +168,26 @@ export async function cloudFetch(path: string, init: CloudFetchInit = {}): Promi
     ac.abort()
   }, timeoutMs ?? deadlineFor(init))
   try {
+    const token = await untilAborted(getAccessToken(), ac.signal)
+    if (!token) throw new CloudJobError('not signed in', 401)
+    const headers = new Headers(init.headers)
+    headers.set('authorization', `Bearer ${token}`)
     return await fetch(`${CLOUD_BASE}${path}`, { ...rest, headers, signal: ac.signal })
   } catch (err) {
     // Engines disagree on whether a fetch rejects with the abort *reason*, so
     // the deadline is remembered here instead of read back off the signal.
     // 408 keeps pollJob's policy intact — a timeout is worth another try.
-    if (timedOut) throw new CloudJobError('the cloud did not answer in time', 408)
+    // A 401 raised above is not a timeout and must keep its own status.
+    if (timedOut && !(err instanceof CloudJobError)) {
+      throw new CloudJobError('the cloud did not answer in time', 408)
+    }
     throw err
   } finally {
-    // The deadline covers what this function owns: connect, request body,
-    // response headers — which is where the observed wedge lived (an upload
-    // or a submit that never came back). Reading the response body is the
-    // caller's half; jsonOrError reports a torn read rather than hanging.
+    // The deadline covers what this function owns: the token (refresh
+    // included), connect, request body, response headers — which is where the
+    // observed wedge lived (an upload or a submit that never came back).
+    // Reading the response body is the caller's half; jsonOrError reports a
+    // torn read rather than hanging.
     clearTimeout(timer)
     signal?.removeEventListener('abort', relay)
   }

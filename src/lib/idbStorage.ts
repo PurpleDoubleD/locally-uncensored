@@ -101,6 +101,27 @@ function idbSet(key: string, value: string): Promise<void> {
     tx.onabort = () => reject(tx.error)
   }))
 }
+/**
+ * Whether `key` holds anything at all, WITHOUT materialising the value.
+ *
+ * `get` used to be used for this, and the only question ever asked of the
+ * result was `!= null`: for 'chat-conversations' that is several megabytes
+ * pulled out of the store, deserialised into a string and dropped again, on
+ * every write the read-failure latch refuses — which, while a store is
+ * unreadable, is every write zustand makes.
+ *
+ * `count(key)` is IndexedDB 1.0, so it is available everywhere `get` is. It
+ * answers 1 for a row holding a non-string value too, where `get` answered
+ * null; refusing to overwrite something unexpected is the safe direction.
+ */
+function idbHas(key: string): Promise<boolean> {
+  return getDB().then((db) => new Promise<boolean>((resolve, reject) => {
+    const tx = db.transaction(STORE, 'readonly')
+    const r = tx.objectStore(STORE).count(key)
+    r.onsuccess = () => resolve((r.result ?? 0) > 0)
+    r.onerror = () => reject(r.error ?? new Error(`indexedDB probe failed for ${key}`))
+  }))
+}
 function idbDel(key: string): Promise<void> {
   return getDB().then((db) => new Promise<void>((resolve) => {
     const tx = db.transaction(STORE, 'readwrite')
@@ -124,16 +145,16 @@ function idbDel(key: string): Promise<void> {
 const readFailed = new Set<string>()
 
 /** True while the last read of `name` failed — i.e. while "empty" cannot be
- *  trusted. Callers that REPLACE a whole persisted blob (the appData snapshot)
- *  must ask before writing. */
+ *  trusted. Callers that build a snapshot out of these values ask so they can
+ *  leave the key OUT rather than record it as empty.
+ *
+ *  Every way out of the latch runs through a later READ of the same key:
+ *  getItem clears it when a read comes back, and holdBackWrite clears it when
+ *  the row turns out to be genuinely absent. Anything that consults this flag
+ *  must therefore keep reading the key afterwards — a caller that sees `true`
+ *  and stops asking pins the latch for the rest of the session. */
 export function hasFailedRead(name: string): boolean {
   return readFailed.has(name)
-}
-
-/** Test seam: the latch is module state, and a test that provokes a read
- *  failure must be able to hand the next test a clean module. */
-export function resetIdbFailureLatch(): void {
-  readFailed.clear()
 }
 
 type IdbWriteListener = (key: string, value: string | null) => void
@@ -147,6 +168,10 @@ const writeListeners = new Set<IdbWriteListener>()
  *
  * Fires only for writes that are actually attempted: a write refused by the
  * read-failure latch must not be mistaken for the new truth.
+ *
+ * Load-bearing, and provably so: src/lib/__tests__/store-backup-mirror.test.ts
+ * counts the IndexedDB reads the backup tick performs and fails if `emitWrite`
+ * stops firing from either branch of setItem (or from removeItem).
  */
 export function onIdbWrite(fn: IdbWriteListener): () => void {
   writeListeners.add(fn)
@@ -243,17 +268,21 @@ export const idbStorage: StateStorage = {
  *
  * One read decides. It is the only thing that can tell the two survivable cases
  * apart, and it is cheap next to what it protects:
- *   - reads back a value  → the row is intact and this state is not derived
- *                           from it. Refuse, keep the latch, say so loudly.
- *   - reads back nothing  → the key really is empty (a first run behind a
+ *   - the row exists      → it is intact and this state is not derived from
+ *                           it. Refuse, keep the latch, say so loudly.
+ *   - the row is absent   → the key really is empty (a first run behind a
  *                           transient failure). Release the latch and write.
  *   - fails again         → still blind. Refuse, keep the latch.
+ *
+ * The question is existence, so it is asked with `count`, not `get` — see
+ * idbHas. Reading a multi-megabyte value to compare it against null was the
+ * most expensive way available to answer a yes/no.
  */
 function holdBackWrite(name: string, value: string): Promise<void> {
   return (async () => {
-    let existing: string | null
+    let occupied: boolean
     try {
-      existing = await idbGet(name)
+      occupied = await idbHas(name)
     } catch (err) {
       log.error('[idbStorage] write held back: the key is still unreadable, refusing to overwrite it', {
         key: name,
@@ -261,10 +290,9 @@ function holdBackWrite(name: string, value: string): Promise<void> {
       })
       return
     }
-    if (existing != null) {
+    if (occupied) {
       log.error('[idbStorage] write held back: this key HAS data that a failed read hid from hydration', {
         key: name,
-        storedBytes: existing.length,
         offeredBytes: value.length,
       })
       return

@@ -101,6 +101,40 @@ const DEFAULT_PROVIDERS: Record<ProviderId, ProviderConfig> = {
   },
 }
 
+/**
+ * The model/provider invariant, asked on EVERY path that can switch a slot off.
+ *
+ * A slot going dark makes the picked model unservable, and nothing used to
+ * notice: the pick is only re-validated against the next NON-EMPTY model list,
+ * so until a refresh lands the composer offers a model whose backend is off and
+ * every send fails with model-not-found.
+ *
+ * It hung off `setProviderConfig` alone, which is only the explicit toggle.
+ * `resetProvidersToDefaults` ("Reset AI Backends", a button in Settings) writes
+ * DEFAULT_PROVIDERS over the whole map — Ollama and Anthropic default to
+ * `enabled: false` — so a user whose pick was an Ollama model reached exactly
+ * the same broken state through a supported, one-click, non-exotic path.
+ * `resetProvider` does the same for one slot.
+ *
+ * Imported lazily on purpose: modelStore reaches back here through
+ * chatStore/remoteStore, and a static edge would close that circle at
+ * module-init time.
+ */
+function dropPicksForDarkenedSlots(
+  before: Partial<Record<ProviderId, ProviderConfig>>,
+  after: Partial<Record<ProviderId, ProviderConfig>>,
+): void {
+  const darkened = (Object.keys(after) as ProviderId[]).filter(
+    (id) => before[id]?.enabled === true && after[id]?.enabled === false,
+  )
+  if (darkened.length === 0) return
+  void import('./modelStore')
+    .then((m) => {
+      for (const id of darkened) m.useModelStore.getState().dropActiveModelIfServedBy(id)
+    })
+    .catch(() => { /* best-effort: the next inventory refresh re-checks */ })
+}
+
 // ── Store Interface ────────────────────────────────────────────
 
 interface ProviderState {
@@ -147,17 +181,7 @@ export const useProviderStore = create<ProviderState>()(
           },
         }))
         clearProviderCache() // invalidate cached clients
-        // A slot going dark makes the picked model unservable, and nothing used
-        // to notice: the pick is only re-validated against the next NON-EMPTY
-        // model list, so until a refresh lands the composer offers a model whose
-        // backend is off. Imported lazily on purpose — modelStore reaches back
-        // here through chatStore/remoteStore, and a static edge would close that
-        // circle at module-init time.
-        if (before?.enabled && get().providers[id]?.enabled === false) {
-          void import('./modelStore')
-            .then((m) => m.useModelStore.getState().dropActiveModelIfServedBy(id))
-            .catch(() => { /* best-effort: the next inventory refresh re-checks */ })
-        }
+        dropPicksForDarkenedSlots({ [id]: before }, { [id]: get().providers[id] })
         // Every route that moves the shared local slot comes through here (Add
         // Provider, Enable on the standby card, Remove, Disable, onboarding), so
         // the memory question is asked here, once. R12/R13 measured the answer
@@ -215,10 +239,13 @@ export const useProviderStore = create<ProviderState>()(
           void secretDelete(id).catch(() => { /* vault delete best-effort */ })
         }
         clearProviderCache()
+        // A single-slot reset can switch that slot off too (ollama and
+        // anthropic both default to enabled: false).
+        dropPicksForDarkenedSlots({ [id]: before }, { [id]: get().providers[id] })
       },
 
       resetProvidersToDefaults: () => {
-        const before = get().providers.openai
+        const before = get().providers
         set((state) => {
           const next = {} as Record<ProviderId, ProviderConfig>
           for (const id of Object.keys(DEFAULT_PROVIDERS) as ProviderId[]) {
@@ -233,7 +260,10 @@ export const useProviderStore = create<ProviderState>()(
         clearProviderCache()
         // Reset hands the slot back to the app's own engine, which voids a
         // pending unload rather than causing one.
-        onLocalSlotChanged(before, get().providers.openai)
+        onLocalSlotChanged(before.openai, get().providers.openai)
+        // ...but it switches every OTHER slot the user had enabled back off,
+        // and a pick served by one of them is unservable from this moment on.
+        dropPicksForDarkenedSlots(before, get().providers)
       },
 
       hydrateProviderKeys: async () => {

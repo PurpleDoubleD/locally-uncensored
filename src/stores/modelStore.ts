@@ -9,27 +9,15 @@ import { isLmStudioProvider } from '../lib/hf-to-provider'
 import { isTauri, backendCall } from '../api/backend'
 import { useChatStore } from './chatStore'
 import { log } from '../lib/logger'
-
-/**
- * Which provider slot a model name routes to.
- *
- * LU prefixes every non-Ollama model with the id of the provider that serves
- * it ("openai::qwen3-8b"); a bare name goes to Ollama. Pure, because the point
- * of it is to be assertable without a store.
- *
- * `null` means "no slot in this build owns that name" — an unknown prefix is
- * not silently treated as Ollama's, which is how a checkpoint name ends up
- * being sent to a backend that has never heard of it.
- */
-export function providerIdForModel(name: string | null | undefined): ProviderId | null {
-  if (!name) return null
-  const sep = name.indexOf('::')
-  if (sep < 0) return 'ollama'
-  const prefix = name.slice(0, sep)
-  return PROVIDER_IDS.includes(prefix as ProviderId) ? (prefix as ProviderId) : null
-}
-
-const PROVIDER_IDS: readonly ProviderId[] = ['ollama', 'openai', 'anthropic', 'lu-cloud']
+// Which provider slot a model name routes to. There is exactly one answer to
+// that question in this app and it lives in api/providers/registry — the same
+// function getProviderForModel uses to pick the client that actually sends the
+// turn. A second implementation here disagreed with it on real names
+// ('sdxl::x.safetensors' → null vs 'sdxl', 'a::b::c' → null vs 'ollama'), which
+// is the worst possible place for two answers: the guard below would decline to
+// clear a pick that the send path would then route to a dead backend.
+import { getProviderIdFromModel } from '../api/providers'
+import type { ProviderId } from '../api/providers/types'
 
 export interface PullState {
   progress: PullProgress
@@ -290,7 +278,7 @@ export const useModelStore = create<ModelState>()(
 
       dropActiveModelIfServedBy: (providerId) => {
         const active = get().activeModel
-        if (!active || providerIdForModel(active) !== providerId) return
+        if (!active || getProviderIdFromModel(active) !== providerId) return
         log.warn('[modelStore] the picked model\'s backend was switched off, clearing the pick', {
           model: active, provider: providerId,
         })

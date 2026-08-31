@@ -85,7 +85,11 @@ describe('the appData backup covers every persisted store', () => {
     const wrong: string[] = []
     for (const [file, names] of byFile) {
       const src = readFileSync(join(STORES_DIR, file), 'utf8')
-      const backedByIdb = /from '\.\.\/lib\/idbStorage'/.test(src)
+      // Both quote styles, and both spellings of the path — a store that
+      // imported idbStorage with double quotes was invisible to this check and
+      // could go on being backed up out of a localStorage key the 2.5.0
+      // migration had already deleted.
+      const backedByIdb = /from\s+["']\.\.\/lib\/idbStorage(\.js)?["']/.test(src)
       for (const name of names) {
         if (backedByIdb && !IDB_STORE_KEYS.has(name)) wrong.push(`${file}: ${name} is on IndexedDB but not in IDB_STORE_KEYS`)
         if (!backedByIdb && IDB_STORE_KEYS.has(name)) wrong.push(`${file}: ${name} is in IDB_STORE_KEYS but not on IndexedDB`)
