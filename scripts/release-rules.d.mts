@@ -20,7 +20,14 @@ export declare function shouldCarryBanner(
   latest: GitHubRelease | null | undefined,
 ): boolean
 
+export interface ForcePrereleaseContext {
+  /** True when this run's own `release: published` event named this release —
+   *  it was published seconds ago, so it cannot have been verified yet. */
+  publishedByThisRun?: boolean
+}
+
 export declare function shouldForcePrerelease(
   rel: GitHubRelease | null | undefined,
   latest: GitHubRelease | null | undefined,
+  ctx?: ForcePrereleaseContext,
 ): boolean

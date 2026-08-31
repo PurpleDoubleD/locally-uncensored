@@ -60,13 +60,33 @@ export function shouldCarryBanner(rel, latest) {
  * Latest with the download routes and every updater following within minutes.
  * That is the 2026-08-10 incident the comment says was fixed.
  *
- * The rule is the same one the banner uses, from the other side: a release
- * that is not the flagged Latest has not been verified yet, so it belongs in
- * prerelease. The deliberate flip to Latest is what takes it out, and this
- * must never undo that flip.
+ * The question this answers is "has a human verified this release?", NOT "is it
+ * already Latest". Those look the same and are not: GitHub moves the Latest
+ * pointer to any published full release BY ITSELF, immediately, with nobody
+ * deciding anything. So the first version of this rule — `rel.id === latest.id
+ * -> leave it alone` — was a guaranteed no-op in exactly the case it was
+ * written for: a release published as a full release IS already Latest by the
+ * time this job runs, the guard fired, and the release nobody had opened kept
+ * the Latest flag and the updater traffic that comes with it.
+ *
+ * Verification happens on a real machine AFTER this build produced installers,
+ * so nothing this run publishes can be verified yet: `publishedByThisRun` (the
+ * `release: published` event that started this run names this same release)
+ * means force it back, whatever the Latest pointer says.
+ *
+ * The deliberate flip stays safe: on a manual re-run over some older tag no
+ * release event named it, `publishedByThisRun` is false, and a release that is
+ * the flagged Latest is left alone — that flag is then a human's verdict.
+ *
+ * @param {object|null|undefined} rel    the release this build belongs to
+ * @param {object|null|undefined} latest `/releases/latest`, or null if none
+ * @param {{publishedByThisRun?: boolean}} [ctx] run context, see above
  */
-export function shouldForcePrerelease(rel, latest) {
+export function shouldForcePrerelease(rel, latest, ctx = {}) {
   if (!rel || rel.prerelease === true || rel.draft === true) return false
+  // Published by the event that started this run: not verified, by definition.
+  if (ctx.publishedByThisRun === true) return true
+  // Otherwise the Latest flag is somebody's deliberate choice — never undo it.
   if (latest && rel.id === latest.id) return false
   return true
 }

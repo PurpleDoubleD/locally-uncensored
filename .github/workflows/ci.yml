@@ -5,6 +5,19 @@ on:
     branches: [master]
   pull_request:
     branches: [master]
+  # release.yml calls this same workflow as its gate, so the release is held to
+  # exactly the checks master is held to — one definition, no drift between
+  # "what CI runs" and "what a release had to pass".
+  workflow_call:
+    inputs:
+      ref:
+        description: >-
+          Commit-ish to check out. Empty (push/pull_request) keeps actions/checkout's
+          default, which is the commit that triggered the run. release.yml passes the
+          release tag, so the gate reads the same bytes the installer is built from.
+        required: false
+        type: string
+        default: ''
 
 # Third-party actions are pinned to a full commit SHA (not a moving tag) so a
 # compromised or retagged upstream release can't silently run in our CI with
@@ -17,6 +30,10 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          # Empty on push/pull_request (checkout falls back to the triggering
+          # commit); the release tag when release.yml calls this workflow.
+          ref: ${{ inputs.ref }}
 
       - name: Setup Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
@@ -50,6 +67,10 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          # Empty on push/pull_request (checkout falls back to the triggering
+          # commit); the release tag when release.yml calls this workflow.
+          ref: ${{ inputs.ref }}
 
       - name: Setup Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
@@ -77,9 +98,15 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          # Empty on push/pull_request (checkout falls back to the triggering
+          # commit); the release tag when release.yml calls this workflow.
+          ref: ${{ inputs.ref }}
 
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        with:
+          components: clippy
 
       - name: Rust cache
         uses: swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
@@ -109,6 +136,11 @@ jobs:
       # externalBin file is missing — cargo check needs the sidecar file to
       # EXIST, not to work. Stub it so the check doesn't pay a 20-min llama
       # build; the real binaries are built in release.yml + sidecar-windows.yml.
+      #
+      # The same empty file is enough for `cargo test` and `cargo clippy`: they
+      # run the identical build.rs, and no test executes the sidecar. The few
+      # tests that need a live inference server are already #[ignore]d for
+      # exactly that reason (see commands/remote.rs, commands/install.rs).
       - name: Stub llama-server sidecar for cargo check
         shell: bash
         run: |
@@ -123,3 +155,24 @@ jobs:
       - name: Cargo check
         working-directory: src-tauri
         run: cargo check
+
+      # 539 Rust tests lived in the tree while CI only ever type-checked them.
+      # They are unit tests over pure logic and short-lived child processes —
+      # the whole suite runs in seconds once the crate is built, so there is no
+      # cost argument for leaving them out.
+      - name: Cargo test
+        working-directory: src-tauri
+        run: cargo test
+
+      # Non-gating for now, on purpose. Today's baseline (stable 1.95) is ~65
+      # warnings plus ONE deny-by-default error: `absurd_extreme_comparisons`
+      # at src/commands/secret.rs:108, where MAX_UNITS is usize::MAX on every
+      # non-Windows target, so `count() <= MAX_UNITS` is always true. That
+      # single line makes `cargo clippy` exit non-zero on the ubuntu lane even
+      # WITHOUT -D warnings, so gating it here would turn CI red on arrival for
+      # a debt this job did not create. Keep the list visible, pay it down, then
+      # drop continue-on-error and add `-- -D warnings`.
+      - name: Clippy (non-gating — pre-existing debt)
+        working-directory: src-tauri
+        run: cargo clippy --all-targets
+        continue-on-error: true

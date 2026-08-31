@@ -33,24 +33,63 @@ jobs:
     # matches our normal build time (~11 min for Windows + Linux parallel).
     runs-on: ubuntu-latest
     steps:
-      - name: Wait for tauri artifacts
+      - name: Wait for tauri artifacts from THIS run
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
           TAG: ${{ github.event.release.tag_name || inputs.tag }}
+          EVENT_NAME: ${{ github.event_name }}
         run: |
           set -euo pipefail
-          echo "Waiting for $TAG installers to appear on the release…"
+          # Counting asset FILENAMES was never a check that the binaries exist —
+          # only that four files with the right suffixes are attached, no matter
+          # who put them there or when. On 2026-08-15 the Linux lane hung for six
+          # hours and was killed, so that run attached Windows assets only; the
+          # AppImage/.deb from the previous run were still hanging on the release,
+          # the count reached 4, and the announcement went out for installers that
+          # did not contain the code it was announcing. Assets therefore have to
+          # be tied to THIS run: only ones uploaded after the cutoff below count.
+          #
+          # Read through the REST API rather than `gh release view`: the asset
+          # objects there are documented to carry created_at/updated_at, which is
+          # the whole basis of the check.
+          if [ "$EVENT_NAME" = "release" ]; then
+            # The release publish is what started this run, so the installers are
+            # still being built — everything already attached predates this run.
+            CUTOFF=$(date -u +%s)
+          else
+            # Manual announce of a release that is already built: nothing new will
+            # be uploaded, so the bar is "uploaded for this release at all", which
+            # still rejects files carried over from an earlier release.
+            published=$(gh api "repos/$GH_REPO/releases/tags/$TAG" --jq '.published_at // .created_at')
+            CUTOFF=$(date -u -d "$published" +%s)
+          fi
+          echo "Counting only installers uploaded at/after $(date -u -d "@$CUTOFF" +%Y-%m-%dT%H:%M:%SZ)."
+
+          rel_json="$RUNNER_TEMP/release.json"
           for i in $(seq 1 72); do
-            count=$(gh release view "$TAG" --json assets --jq '[.assets[] | select(.name | test("setup\\.exe$|\\.msi$|\\.AppImage$|\\.deb$|\\.rpm$"))] | length')
-            if [ "$count" -ge 4 ]; then
-              echo "Found $count installer artifacts — proceeding."
+            gh api "repos/$GH_REPO/releases/tags/$TAG" > "$rel_json"
+            fresh=$(jq --argjson cutoff "$CUTOFF" '
+              [ .assets[]
+                | select(.name | test("setup\\.exe$|\\.msi$|\\.AppImage$|\\.deb$|\\.rpm$"))
+                | select(.state == "uploaded")
+                | select(((.created_at // .updated_at // "1970-01-01T00:00:00Z") | fromdateiso8601) >= $cutoff)
+              ] | length' "$rel_json")
+            if [ "$fresh" -ge 4 ]; then
+              echo "Found $fresh installer assets from this run — proceeding."
               exit 0
             fi
-            echo "  ($i/72) only $count so far, sleeping 10s…"
+            echo "  ($i/72) $fresh installers from this run so far, sleeping 10s…"
             sleep 10
           done
-          echo "Timeout waiting for artifacts — announcing anyway."
+
+          # Deliberately NOT "announcing anyway": announcing regardless is what
+          # turned a half-failed build into a public post about binaries nobody
+          # had built. A late announcement costs nothing; a wrong one is shipped.
+          echo "Assets currently on $TAG:"
+          jq -r '.assets[] | "  \(.name)  state=\(.state)  created_at=\(.created_at)"' "$rel_json" || true
+          echo "::error::$TAG has no 4 installers from this run after 12 minutes — refusing to announce."
+          exit 1
 
   announce:
     needs: wait-for-build
