@@ -15,6 +15,12 @@ import net from 'node:net'
 import { devResolveWithinJail, effectiveByteCap, JailEscapeError } from './src/lib/dev-fs-jail'
 import { postContentTypeAllowed, postContentTypeError } from './src/lib/local-api-guard'
 
+// The port the dev server binds and the only port the /local-api origin check
+// treats as canonical. Kept next to the guard it feeds so the two can't drift
+// apart — an origin allowlist that names a port the server no longer listens
+// on silently degrades to "loopback regex only".
+const DEV_PORT = 5273
+
 // ── Dev-server SSRF guard ───────────────────────────────────────
 // The dev proxies that fetch a *user-supplied* ?url= (proxy-image,
 // proxy-download) are an SSRF sink: a markdown image / download link could
@@ -394,12 +400,25 @@ function comfyLauncher(): Plugin {
         // 3. Strict Origin Validation (Defense in Depth)
         const origin = req.headers.origin;
         if (origin) {
-            // Allow any loopback origin on any port — Vite may bind 5174+ when
-            // 5273 is busy, which previously 403'd ComfyUI-path setup (issue
-            // #51, adhney). Also accept the request's own host header.
-            const host = req.headers.host;
-            const allowedOrigins = ['tauri://localhost', 'http://tauri.localhost'];
-            if (host) allowedOrigins.push(`http://${host}`, `https://${host}`);
+            // The allowlist is built from constants only. It used to append
+            // `http(s)://${req.headers.host}` so a request always matched its
+            // own host — but the Host header is attacker-chosen under DNS
+            // rebinding: a page on evil.com whose DNS flips to 127.0.0.1 sends
+            // Origin *and* Host of evil.com, the two agree, and the check waved
+            // the request through to /shell-execute and /execute-code with no
+            // authentication at all. A value the caller supplies can never be
+            // the thing that authorises the caller.
+            // Loopback on any port stays allowed: Vite binds 5274+ when 5273 is
+            // busy and the page it serves then legitimately carries that origin
+            // (issue #51, adhney). That stays safe where the host header did
+            // not, because rebinding hands the attacker a *name* — the browser
+            // only stamps a literal 127.0.0.1/localhost origin on a page it
+            // really loaded from loopback, and `evil.localhost` (which Vite's
+            // own host check tolerates) does not match this pattern.
+            const allowedOrigins = [
+                'tauri://localhost', 'http://tauri.localhost',
+                `http://localhost:${DEV_PORT}`, `http://127.0.0.1:${DEV_PORT}`,
+            ];
             const isLoopback = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin);
             if (!allowedOrigins.includes(origin) && !isLoopback) {
                 res.writeHead(403, { 'Content-Type': 'text/plain' });
@@ -2429,9 +2448,17 @@ export default defineConfig({
     // The Rust build tree churns thousands of files per `cargo build`; watching
     // it starves the dev server on a `tauri:dev` run.
     watch: { ignored: ['**/src-tauri/target/**'] },
-    port: 5273,
+    port: DEV_PORT,
     cors: true,
-    allowedHosts: true,
+    // `true` switched Vite's host-header check off completely. This dev server
+    // is not a developer convenience here — setup.sh / start.bat ship it as the
+    // user's runtime, with /local-api/shell-execute and /local-api/execute-code
+    // mounted on it, so any web page the user happened to have open could point
+    // its own domain at 127.0.0.1 and talk to those endpoints as if it were the
+    // app. Vite waves through bare IP literals and localhost regardless, so the
+    // job of this list is only to withhold arbitrary DNS names; reaching the
+    // dev server over a LAN hostname is an opt-in that belongs in here by name.
+    allowedHosts: ['localhost', '127.0.0.1'],
     proxy: {
       '/api': {
         // Issue #31: honour OLLAMA_HOST so `OLLAMA_HOST=0.0.0.0:11434 npm run dev`
