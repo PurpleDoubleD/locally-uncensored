@@ -25,10 +25,23 @@
 set -euo pipefail
 
 # --- Pinned, reproducible llama.cpp revision -------------------------------
-# Bump deliberately and re-test; do not float. llama.cpp tags are build numbers
-# and upstream SKIPS numbers whose CI failed — verify the tag exists first:
+# LLAMA_COMMIT is the pin. A git tag is a mutable pointer: upstream can delete
+# and recreate it, and whoever owns that repo (or anyone who takes it over) can
+# point b9949 at different code tomorrow. This script builds the binary that
+# ships inside the installer and is code-signed with the app, so "whatever the
+# tag names on the day CI runs" is not a supply chain we can stand behind.
+# LLAMA_TAG stays as the readable name and as the cross-check: the checkout is
+# verified against LLAMA_COMMIT on every run, cache hit included, and the build
+# stops if the two ever disagree.
+#
+# To bump, resolve the tag yourself and paste BOTH — llama.cpp tags are build
+# numbers and upstream SKIPS numbers whose CI failed, so the tag must exist:
 #   git ls-remote --tags https://github.com/ggml-org/llama.cpp.git 'refs/tags/<tag>'
+# CI reuses a cached checkout keyed on hashFiles('scripts/build-llama.sh')
+# (release.yml, sidecar-windows.yml), so both values below are inside the cache
+# key by construction — bumping one cannot silently reuse the old source tree.
 LLAMA_TAG="${LLAMA_TAG:-b9949}"
+LLAMA_COMMIT="${LLAMA_COMMIT:-049326a00025d00b08cc188ed716b681e984a3f8}"
 LLAMA_REPO="${LLAMA_REPO:-https://github.com/ggml-org/llama.cpp.git}"
 
 # --- Paths -----------------------------------------------------------------
@@ -88,21 +101,52 @@ out_name_for() {
   esac
 }
 
+# A 40-hex commit SHA and nothing else. A short SHA, a tag name or an empty
+# override would all silently reduce the pin back to "whatever origin says".
+assert_pinned_commit() {
+  case "$LLAMA_COMMIT" in
+    *[!0-9a-f]* | "") die "LLAMA_COMMIT must be a full 40-char lowercase commit SHA, got '$LLAMA_COMMIT'" ;;
+  esac
+  [ "${#LLAMA_COMMIT}" -eq 40 ] \
+    || die "LLAMA_COMMIT must be a full 40-char lowercase commit SHA, got '$LLAMA_COMMIT'"
+}
+
 ensure_src() {
   command -v git >/dev/null 2>&1 || die "git not found"
   command -v cmake >/dev/null 2>&1 || die "cmake not found — install it (macOS: brew install cmake)"
+  assert_pinned_commit
   mkdir -p "$CACHE_DIR"
   if [ ! -d "$SRC_DIR/.git" ]; then
-    log "cloning llama.cpp @ $LLAMA_TAG"
-    git clone --depth 1 --branch "$LLAMA_TAG" "$LLAMA_REPO" "$SRC_DIR"
-  else
-    local have
-    have="$(git -C "$SRC_DIR" describe --tags --exact-match 2>/dev/null || true)"
-    if [ "$have" != "$LLAMA_TAG" ]; then
-      log "updating llama.cpp checkout → $LLAMA_TAG"
-      git -C "$SRC_DIR" fetch --depth 1 origin "refs/tags/$LLAMA_TAG:refs/tags/$LLAMA_TAG"
-      git -C "$SRC_DIR" checkout -f "$LLAMA_TAG"
-    fi
+    log "initialising llama.cpp checkout for $LLAMA_TAG ($LLAMA_COMMIT)"
+    git init -q "$SRC_DIR"
+    git -C "$SRC_DIR" remote add origin "$LLAMA_REPO"
+  fi
+  local have
+  have="$(git -C "$SRC_DIR" rev-parse HEAD 2>/dev/null || true)"
+  if [ "$have" != "$LLAMA_COMMIT" ]; then
+    log "fetching llama.cpp $LLAMA_TAG ($LLAMA_COMMIT)"
+    # Fetch the object by SHA — GitHub serves any commit reachable from a ref,
+    # and a request for a SHA cannot be answered with different code. The tag
+    # is only the fallback for a mirror that refuses SHA fetches; the check
+    # below is what decides whether we got the right object either way.
+    git -C "$SRC_DIR" fetch --depth 1 origin "$LLAMA_COMMIT" 2>/dev/null \
+      || git -C "$SRC_DIR" fetch --depth 1 origin "refs/tags/$LLAMA_TAG"
+    git -C "$SRC_DIR" checkout -f --detach FETCH_HEAD
+  fi
+  # Re-asserted on every run, cache hit included: a restored build cache is an
+  # artifact from an earlier run, not evidence about what is in it now.
+  have="$(git -C "$SRC_DIR" rev-parse HEAD)"
+  [ "$have" = "$LLAMA_COMMIT" ] \
+    || die "llama.cpp checkout is at $have, expected $LLAMA_COMMIT ($LLAMA_TAG) — upstream tag moved, or the build cache is stale"
+}
+
+# sha256 of a file, or "" where no hasher is on PATH. macOS ships `shasum`,
+# Linux and Git-Bash ship `sha256sum`; neither is guaranteed on the other.
+sha256_of() {
+  if command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$1" | awk '{print $1}'
+  elif command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" | awk '{print $1}'
   fi
 }
 
@@ -126,7 +170,13 @@ build_triple() {
   local out="$BIN_DIR/$(out_name_for "$triple")"
   cp "$built" "$out"
   chmod +x "$out"
-  log "installed → $out"
+  # Record what actually got produced. A from-source build is not bit-for-bit
+  # reproducible across machines, so this cannot be pinned to a constant — but
+  # it puts the digest of the binary that ships, next to the source revision it
+  # came from, in the release log, which is what an "which binary was that?"
+  # question after the fact needs.
+  local digest; digest="$(sha256_of "$out")"
+  log "installed → $out  (llama.cpp $LLAMA_TAG @ ${LLAMA_COMMIT:0:12}, sha256 ${digest:-unavailable})"
 }
 
 # Boot the host binary and probe /health on an ephemeral port. Without a
