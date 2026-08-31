@@ -115,3 +115,49 @@ CRLF nur für `.bat/.cmd/.ps1`, Binärlisten explizit. Commit `44d3de14`.
 | `cargo test` | 553 ✓ / 3 ✗ (die 3 sind CRLF-Quelltextvergleiche, Fix greift erst nach Re-Sync) |
 | `npx vitest run` | 6.394 ✓ / **8 → 4 ✗** nach `.gitattributes` |
 | verbleibende 4 | alle in `build-llama-script.test.ts`: `execFileSync('bash')` trifft auf Windows den **WSL-Startstub** `WindowsApps\bash.exe` statt des vorhandenen Git-Bash. Offen, Fix nach dem Deps-Paket (das dieselbe Datei anfasst). |
+
+## Der schwerwiegendste Fund: das Typecheck-Gate hat nie geprüft
+
+Gefunden nicht vom Audit, sondern von einem **Gegenprüfer** in der orchestrierten Welle E4.
+
+`tsconfig.json` im Repo-Root ist ein Solution-File — `"files": []` plus zwei `references`.
+`npx tsc --noEmit` prüft damit **null Dateien** und liefert immer Exit 0. Genau dieser Befehl
+steht in `.github/workflows/ci.yml:56`, und genau dieser Befehl galt im Technik-Audit als Beleg
+(„npx tsc --noEmit → Exit 0. Sauber unter `strict: true`"). Gegenprobe: ein absichtlich
+eingebauter Typfehler in `src/` passiert das alte Gate unbemerkt.
+
+Zweite Ursache: `tsconfig.app.json` führt nur `vite/client` in `types`, schließt aber ganz `src`
+ein — inklusive aller `__tests__`. `describe`/`it`/`expect` sind damit unbekannt: **260 der
+ursprünglich 378 Fehler** waren reine Konfigurationslücke, nicht Code.
+
+| Messung | Wert |
+|---|---|
+| Fehler mit `tsc -b`, Stand v2.6.7 (`10bfa0d7`) | **74** — schon vor dieser Session vorhanden |
+| Fehler nach den 12 Paketen dieser Session | **118** — also **44 selbst eingebaut**, unsichtbar |
+| davon in `CodeBlock.tsx` | 39, alle TS7016 |
+| nach dem ersten Reparaturpaket | 44 |
+
+**Fix:** `"vitest/globals"` in die Typen, `npm run typecheck` = `tsc -b --force`
+(**Exit 1 bei Fehlern verifiziert**), CI ruft das Script; dazu `npm test` als Einstiegspunkt für
+Vitest, den es nie gab. Commit `3b2c520a`.
+
+**Konsequenz für dieses Dokument:** Jede „tsc 0"-Meldung in den Etappen E0 bis E2 war wertlos.
+Die Vitest-, Cargo-, Build- und e2e-Zahlen sind davon unberührt — nur der Typecheck.
+
+**Nebenbefund** (`fix(types)`, Commit folgt): `@types/react-syntax-highlighter` ist installiert,
+wird aber vom `types`-Pin nie geladen. Der Pin ist für `@types/node` beabsichtigt (sonst wären
+`process`/`Buffer` im Browser-Code sichtbar) — die Lösung ist deshalb eine präzise eigene
+Deklaration, die dieselbe Bindung re-exportiert wie das ausgelieferte JS, statt DefinitelyTypes
+`const language: any` (das hätte 39 Fehler gegen 37 ungeprüfte Werte getauscht).
+
+## Gegenprüfung E4 — was sie eingebracht hat
+
+Fünf Umsetzer, fünf Angreifer mit dem umgekehrten Auftrag. Ergebnis: **kein Paket blockierend,
+15 belegte Lücken**, die sonst als „fertig" durchgegangen wären. Die härtesten drei:
+
+- **Remote-Disconnect:** die vom Umsetzer gemeldete Mutationsprobe **hielt nicht** — der
+  Gegenprüfer setzte den Handler auf den verwundbaren Rumpf zurück, und kein Test wurde rot.
+- **Backup-Kern:** die zentrale Behauptung („der 5-s-Tick liest die Blobs nie wieder aus
+  IndexedDB") war **unbelegt** — `emitWrite` aus beiden Zweigen entfernt, alle Tests blieben grün.
+- **Cloud-Timeout:** bewacht alles *nach* dem Token, aber `getAccessToken()` läuft **davor** —
+  ein hängender Tokenabruf verkeilt weiterhin.
