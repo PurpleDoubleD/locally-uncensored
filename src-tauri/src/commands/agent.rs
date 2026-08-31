@@ -25,10 +25,9 @@ fn agent_workspace_root() -> PathBuf {
 /// we fall back to `agent-workspace/default/` so nobody pollutes the
 /// top-level folder with orphan files.
 ///
-/// `chat_id` is sanitised to prevent path traversal — anything outside
-/// `[A-Za-z0-9_\-\.]` is replaced with `_` and the string is capped at
-/// 64 chars. The original id is kept in the chat UI; only the filesystem
-/// form is sanitised.
+/// `chat_id` is sanitised by `sanitize_chat_slug` to prevent path traversal.
+/// The original id is kept in the chat UI; only the filesystem form is
+/// sanitised.
 ///
 /// `state` (when present) is consulted for a per-chat override the user
 /// picked via the Remote dispatch folder picker — when set, the override
@@ -43,14 +42,42 @@ fn agent_workspace(chat_id: Option<&str>, state: Option<&AppState>) -> PathBuf {
         }
     }
     let root = agent_workspace_root();
-    let id = chat_id.unwrap_or("default");
+    root.join(sanitize_chat_slug(chat_id.unwrap_or("default")))
+}
+
+/// Filesystem-safe folder name for a chat id — the ONLY thing standing between
+/// a client-supplied id and the shape of the jail root.
+///
+/// SECURITY (audit IPC-1, critical). `.` used to be in the allow-list, so an id
+/// of `".."` survived sanitisation verbatim. `root.join("..")` then pointed one
+/// level ABOVE `~/agent-workspace`, and `contain_within` normalises `..`
+/// lexically (`ParentDir => out.pop()`), so the JAIL ROOT ITSELF collapsed to
+/// `$HOME` — every containment check afterwards passed for the entire home
+/// directory. The id arrives straight out of client JSON on the remote HTTP
+/// bridge (`remote.rs`, `#[serde(rename = "chatId")]`), so a paired device could
+/// read `~/.ssh` / `~/.aws` and write shell rc files or LaunchAgents, i.e. code
+/// execution at next login without ever holding the `shell` permission.
+///
+/// `.` is therefore treated like every other special character and replaced with
+/// `_`: `".."` becomes `"__"`, an ordinary folder INSIDE the root. Dropping the
+/// dot costs nothing, because no legitimate id has ever contained one — desktop
+/// slugs are `[a-z0-9-]` (`src/api/agent-context.ts::chatWorkspaceSlug`), mobile
+/// ids are `c-<millis>-<base36>` (`remote.rs::uid()`), conversation ids are
+/// UUIDs, and the magic key is `__remote__`.
+///
+/// Everything outside `[A-Za-z0-9_-]` becomes `_`, the result is capped at 64
+/// chars, and an empty id falls back to `default` so nobody writes orphan files
+/// into the top-level workspace folder. Note that the fallback is only for an
+/// EMPTY result: an all-underscore slug like `"__"` is a perfectly good folder
+/// name and must stay distinct from `default`, or two different chats would
+/// share one directory.
+pub(crate) fn sanitize_chat_slug(id: &str) -> String {
     let safe: String = id
         .chars()
         .take(64)
-        .map(|c| if c.is_ascii_alphanumeric() || c == '_' || c == '-' || c == '.' { c } else { '_' })
+        .map(|c| if c.is_ascii_alphanumeric() || c == '_' || c == '-' { c } else { '_' })
         .collect();
-    let slug = if safe.is_empty() { "default".to_string() } else { safe };
-    root.join(slug)
+    if safe.is_empty() { "default".to_string() } else { safe }
 }
 
 /// Public alias used by remote.rs's `/remote-api/agent-tool` route — that
@@ -264,6 +291,101 @@ mod path_tests {
 
         // `..` climbing out of the workspace → rejected.
         assert!(resolve_agent_path("../../../../etc/passwd", Some("__remote__"), Some(&state)).is_err());
+    }
+
+    /// Security, audit IPC-1 (critical): the escape used to be in the chat ID,
+    /// not in the path. `.` was allowed through the slug filter, so a chat id
+    /// of ".." made the JAIL ROOT itself `~/agent-workspace/..` == `$HOME` and
+    /// every path check below it then passed for the whole home directory. The
+    /// id is client-supplied over the remote HTTP bridge, so this was reachable
+    /// from any paired device.
+    #[test]
+    fn chat_id_dotdot_cannot_move_the_jail_root() {
+        // `..` is neutralised into an ordinary folder name, NOT preserved.
+        assert_eq!(sanitize_chat_slug(".."), "__");
+        assert_eq!(sanitize_chat_slug("."), "_");
+        assert_eq!(sanitize_chat_slug("a.b"), "a_b");
+
+        // No traversal character survives, whichever way it is spelled.
+        for evil in ["..", ".", "../..", "../../.ssh", "..\\..", "a.b", "....//"] {
+            let slug = sanitize_chat_slug(evil);
+            assert!(
+                !slug.contains('.') && !slug.contains('/') && !slug.contains('\\'),
+                "{evil:?} sanitised to {slug:?}"
+            );
+        }
+
+        // The workspace for a ".." id stays a child of ~/agent-workspace.
+        let root = agent_workspace_root();
+        let ws = agent_workspace(Some(".."), None);
+        assert_eq!(ws, root.join("__"));
+        assert!(ws.starts_with(&root), "workspace escaped the root: {:?}", ws);
+    }
+
+    /// The end-to-end consequence of the above: with chat id "..", a remote
+    /// client asked for `~/.ssh/id_rsa` and got it, because the jail root had
+    /// become $HOME. It must be rejected now. Also covers the write side of
+    /// the same hole (shell rc / LaunchAgents under $HOME).
+    #[test]
+    fn chat_id_dotdot_cannot_reach_home_dot_files() {
+        let home = dirs::home_dir().unwrap_or_default();
+
+        for evil_id in ["..", "../..", "."] {
+            for target in [home.join(".ssh").join("id_rsa"), home.join(".zshrc")] {
+                let got = resolve_agent_path(&target.to_string_lossy(), Some(evil_id), None);
+                assert!(
+                    got.is_err(),
+                    "id {evil_id:?} still reaches {:?} (resolved to {:?})",
+                    target,
+                    got
+                );
+            }
+        }
+
+        // A relative path under such an id lands inside the sanitised folder,
+        // not one level up.
+        let resolved = resolve_agent_path("notes.md", Some(".."), None).unwrap();
+        assert_eq!(resolved, agent_workspace_root().join("__").join("notes.md"));
+
+        // And a dotted id can no longer address a sibling of the workspace.
+        let resolved = resolve_agent_path("x.txt", Some("a.b"), None).unwrap();
+        assert_eq!(resolved, agent_workspace_root().join("a_b").join("x.txt"));
+    }
+
+    /// Negative control for the fix: ordinary ids are untouched, and the
+    /// existing "default" fallback still catches the empty id. An all-underscore
+    /// slug is a legitimate folder name and must NOT be folded into "default",
+    /// or two different chats would end up sharing one directory.
+    #[test]
+    fn normal_chat_ids_survive_and_empty_falls_back_to_default() {
+        // Real-world shapes: desktop slug, mobile uid, magic remote key, UUID.
+        for id in [
+            "coding-agent-8b0c71",
+            "codex-chat-386d5b",
+            "c-1756612345678-ab12x",
+            "__remote__",
+            "8f7c2a1b-4d5e-6f70-8192-a3b4c5d6e7f8",
+            "default",
+        ] {
+            assert_eq!(sanitize_chat_slug(id), id, "id {id:?} was altered");
+        }
+
+        // Empty (and whitespace-free empty) → the default bucket.
+        assert_eq!(sanitize_chat_slug(""), "default");
+        assert_eq!(agent_workspace(Some(""), None), agent_workspace_root().join("default"));
+        assert_eq!(agent_workspace(None, None), agent_workspace_root().join("default"));
+
+        // Not empty → keeps its own folder, even if it is all underscores.
+        assert_eq!(sanitize_chat_slug("...."), "____");
+        assert_ne!(sanitize_chat_slug(".."), sanitize_chat_slug("default"));
+
+        // A leading '-' is harmless: the slug is always joined onto an absolute
+        // root, so it is never read as a CLI flag. It stays a normal folder.
+        assert_eq!(sanitize_chat_slug("-rf"), "-rf");
+        assert!(agent_workspace(Some("-rf"), None).starts_with(agent_workspace_root()));
+
+        // The 64-char cap survived the rewrite.
+        assert_eq!(sanitize_chat_slug(&"x".repeat(200)).chars().count(), 64);
     }
 }
 
