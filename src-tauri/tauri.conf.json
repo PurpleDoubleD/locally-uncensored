@@ -46,7 +46,7 @@
     "shortDescription": "LU by LU Labs — private, local AI chat, image, and video generation",
     "longDescription": "LU (by LU Labs) is an open-source desktop app that runs AI chat, image generation, and video generation entirely on your own machine. Ships with a built-in inference engine — zero setup, no external software required — so chat and document RAG work the moment you open the app. Also auto-detects 12 optional local backends (Ollama, LM Studio, vLLM, KoboldCpp, llama.cpp, LocalAI, Jan, TabbyAPI, GPT4All, Aphrodite, SGLang, TGI). Includes a coding agent (Codex), an agent mode with 14 tools and MCP support, A/B model comparison, local benchmarking, document chat with RAG, voice chat, and remote access from your phone over LAN or Cloudflare Tunnel. No telemetry, no analytics, no data leaves your device.",
     "homepage": "https://lu-labs.ai",
-    "license": "AGPL-3.0",
+    "license": "AGPL-3.0-only",
     "resources": [
       "resources/whisper_server.py",
       "../dist"

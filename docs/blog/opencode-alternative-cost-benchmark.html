@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>opencode Alternative: We Measured the Cost per Task, and It Is 40 Percent Lower</title>
+<meta name="description" content="Same bugfix task, same model, same API prices, identical prompt. opencode averaged 2157 credits over three runs, Locally Uncensored 2.6.6 needed 1298. The full numbers and why.">
+<meta name="keywords" content="opencode alternative, cheaper alternative to opencode, opencode cost per task, opencode token usage, opencode pricing, ai coding agent cost comparison, coding agent benchmark, opencode vs locally uncensored">
+<meta property="og:title" content="opencode Alternative: We Measured the Cost per Task, and It Is 40 Percent Lower">
+<meta property="og:description" content="A controlled cost benchmark between opencode and the Locally Uncensored coding agent. Same task, same model, same billing. Every number and every limit of the measurement.">
+<meta property="og:image" content="https://raw.githubusercontent.com/PurpleDoubleD/locally-uncensored/master/docs/social-preview.png">
+<meta property="og:url" content="https://locallyuncensored.com/blog/opencode-alternative-cost-benchmark.html">
+<meta property="og:type" content="article">
+<meta property="article:published_time" content="2026-08-23">
+<meta property="article:author" content="PurpleDoubleD">
+<meta property="article:tag" content="AI">
+<meta property="article:tag" content="Coding Agent">
+<meta property="article:tag" content="Comparison">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="opencode Alternative: We Measured the Cost per Task, and It Is 40 Percent Lower">
+<meta name="twitter:description" content="Same task, same model, same prices, identical prompt. opencode 2157 credits on average, Locally Uncensored 2.6.6 at 1298. Here is why.">
+<meta name="twitter:image" content="https://raw.githubusercontent.com/PurpleDoubleD/locally-uncensored/master/docs/social-preview.png">
+<link rel="canonical" href="https://locallyuncensored.com/blog/opencode-alternative-cost-benchmark.html">
+<link rel="alternate" hreflang="en" href="https://locallyuncensored.com/blog/opencode-alternative-cost-benchmark.html">
+<link rel="alternate" hreflang="de" href="https://locallyuncensored.com/blog/opencode-alternative-guenstiger.html">
+<link rel="alternate" hreflang="x-default" href="https://locallyuncensored.com/blog/opencode-alternative-cost-benchmark.html">
+<meta name="robots" content="index, follow">
+<meta name="theme-color" content="#0a0a0a">
+<link rel="icon" href="../favicon.png">
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"BlogPosting","headline":"opencode Alternative: We Measured the Cost per Task, and It Is 40 Percent Lower","description":"A controlled cost benchmark between opencode 1.18.21 and the Locally Uncensored 2.6.6 coding agent: the same bugfix task in the same small npm repository, the same DeepSeek V3.2 model over the same API at the same prices, and a byte identical prompt. opencode averaged 2157 credits across three runs, Locally Uncensored needed 1298, and the difference comes entirely from token volume per request.","image":"https://raw.githubusercontent.com/PurpleDoubleD/locally-uncensored/master/docs/social-preview.png","datePublished":"2026-08-23","dateModified":"2026-08-23","author":{"@type":"Person","name":"PurpleDoubleD","url":"https://github.com/PurpleDoubleD"},"publisher":{"@type":"Organization","name":"Locally Uncensored","url":"https://locallyuncensored.com/"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://locallyuncensored.com/blog/opencode-alternative-cost-benchmark.html"},"keywords":"opencode alternative, cheaper alternative to opencode, opencode cost per task, opencode token usage, coding agent benchmark"}
+</script>
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"FAQPage","mainEntity":[{"@type":"Question","name":"Is there a cheaper alternative to opencode?","acceptedAnswer":{"@type":"Answer","text":"On the task we measured, yes. The Locally Uncensored 2.6.6 coding agent finished the same bugfix for 1298 credits while opencode averaged 2157 credits across three runs, which is about 40 percent less. The cheapest of the three opencode runs still came in 29 percent above the Locally Uncensored figure. This is one scenario on a tiny repository, so treat it as a data point rather than a law."}},{"@type":"Question","name":"Is Locally Uncensored 78 percent cheaper than opencode?","acceptedAnswer":{"@type":"Answer","text":"No, and the two numbers are easy to mix up. The 78.6 percent is a version to version figure for our own agent: Locally Uncensored 2.6.6 against Locally Uncensored 2.6.5, measured over our own set of tool driven runs. It is not the gap to opencode. The gap to opencode on this benchmark is about 40 percent, 1298 credits against an opencode average of 2157 credits across three runs."}},{"@type":"Question","name":"How much does opencode cost per task?","acceptedAnswer":{"@type":"Answer","text":"opencode itself is free software and costs nothing to install. What you pay is the model bill. On our one line bugfix with DeepSeek V3.2, the three runs consumed 1679, 2433 and 2358 credits, or 98789 to 146387 prompt tokens. The spread between the cheapest and the most expensive run was 45 percent, so a single run tells you very little about what a task will cost you."}},{"@type":"Question","name":"Why does opencode use so many tokens?","acceptedAnswer":{"@type":"Answer","text":"Not because it takes more steps. opencode actually needed fewer rounds than we did, 8 to 11 requests against our 16. The cost sits in what every single request carries: 12349 to 13308 prompt tokens per request against 4664 for Locally Uncensored 2.6.6. The tool catalogue alone is 21188 bytes in opencode against 7703 bytes in our agent, and that block is repeated on every call."}},{"@type":"Question","name":"Is the billing rate the same for both agents?","acceptedAnswer":{"@type":"Answer","text":"Yes, and that was the point of the setup. Both agents talked to the same endpoint with the same model and the same account tier. Credits per prompt token landed at 0.01739 for Locally Uncensored and 0.01700, 0.01666 and 0.01611 for the three opencode runs. Those rates are effectively identical, which means the cost gap is a token volume story and nothing else."}},{"@type":"Question","name":"Does a cheaper coding agent do worse work?","acceptedAnswer":{"@type":"Answer","text":"Not here. All four runs passed the same success bar: npm test green, exactly one commit with the required message, only add.js modified, working tree clean. Cost was the only variable that moved. On a harder task the picture could differ, and we did not measure that."}},{"@type":"Question","name":"Can I reproduce this benchmark myself?","acceptedAnswer":{"@type":"Answer","text":"Yes. The repository is a three file npm project with a failing test, the prompt is fixed at sha256 29cec6c3576c46421ed1923d90e5f72ba311c57eb09964dcd39a91b47cf62687, the model is deepseek-ai/DeepSeek-V3.2 and opencode ran at version 1.18.21 with default settings via opencode run. Requests and tokens were counted with a wire proxy in front of the API, credits were read from the account before and after each run."}}]}
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@200;300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/assets/lu.css">
+<script defer src="/assets/lu.js"></script>
+  <script data-goatcounter="https://lu-uncensored.goatcounter.com/count" async src="//gc.zgo.at/count.js"></script>
+</head>
+<body>
+
+<nav class="lu-nav">
+  <a class="lu-nav-brand" href="/" aria-label="Locally Uncensored">
+    <span class="lu-mono" data-mono="nav" data-size="40" aria-hidden="true"></span>
+    <span class="lu-nav-word">Locally <span class="accent">Uncensored</span></span>
+  </a>
+  <div class="lu-nav-links" id="lu-nav-links">
+    <a class="lu-nav-link" href="/">Home</a>
+    <a class="lu-nav-link" href="/blog/">Blog</a>
+    <a class="lu-nav-link" href="/guide/">Guide</a>
+    <a class="lu-nav-link" href="/remote-access/">Remote</a>
+  </div>
+  <div class="lu-nav-right">
+    <a class="lu-nav-icon" href="https://github.com/PurpleDoubleD/locally-uncensored" title="GitHub" aria-label="GitHub"><svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5C5.37.5 0 5.87 0 12.5c0 5.3 3.44 9.8 8.21 11.39.6.11.82-.26.82-.58 0-.29-.01-1.04-.02-2.05-3.34.73-4.04-1.61-4.04-1.61-.55-1.39-1.33-1.76-1.33-1.76-1.09-.75.08-.73.08-.73 1.2.08 1.84 1.24 1.84 1.24 1.07 1.83 2.81 1.3 3.5.99.11-.78.42-1.3.76-1.6-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.13-.3-.54-1.52.11-3.18 0 0 1.01-.32 3.3 1.23a11.5 11.5 0 0 1 6.01 0c2.29-1.55 3.3-1.23 3.3-1.23.65 1.66.24 2.88.12 3.18.77.84 1.23 1.91 1.23 3.22 0 4.61-2.8 5.63-5.48 5.92.43.37.81 1.1.81 2.22 0 1.6-.01 2.9-.01 3.29 0 .32.21.7.82.58A12.01 12.01 0 0 0 24 12.5C24 5.87 18.63.5 12 .5Z"/></svg><span class="lu-nav-badge">1000+&#8202;⭐</span></a>
+    <a class="lu-nav-icon discord" href="https://locallyuncensored.com/discord" target="_blank" rel="noopener" title="Discord" aria-label="Discord"><svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M20.32 4.37A19.8 19.8 0 0 0 15.45 3c-.2.36-.44.85-.6 1.23a18.3 18.3 0 0 0-5.7 0c-.16-.38-.4-.87-.6-1.23a19.7 19.7 0 0 0-4.87 1.37C.55 8.9-.32 13.3.11 17.63a19.9 19.9 0 0 0 6 3.03c.48-.66.9-1.36 1.27-2.1-.7-.26-1.36-.58-1.99-.96.17-.12.33-.25.49-.38a14.2 14.2 0 0 0 12.24 0c.16.13.32.26.49.38-.63.38-1.3.7-2 .96.37.74.8 1.44 1.27 2.1a19.8 19.8 0 0 0 6-3.03c.5-5.03-.85-9.39-3.55-13.26ZM8.02 15c-1.18 0-2.15-1.09-2.15-2.42 0-1.34.95-2.43 2.15-2.43 1.2 0 2.17 1.09 2.15 2.43 0 1.33-.95 2.42-2.15 2.42Zm7.96 0c-1.18 0-2.15-1.09-2.15-2.42 0-1.34.95-2.43 2.15-2.43 1.2 0 2.17 1.09 2.15 2.43 0 1.33-.94 2.42-2.15 2.42Z"/></svg><span class="lu-nav-badge">430+&#8202;<span style="font-size:0.715em">🟢</span></span></a>
+    <span class="lu-nav-sep"></span>
+    <div class="switch" id="theme-switch" role="button" aria-label="Toggle theme"></div>
+    <a class="lu-nav-dl" href="https://github.com/PurpleDoubleD/locally-uncensored/releases/latest"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m0 0 4-4m-4 4-4-4"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>Download</a>
+    <button type="button" class="lu-nav-toggle" aria-label="Menu"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+  </div>
+</nav>
+<div class="container lu-doc">
+  <div class="breadcrumb"><a href="../">Locally Uncensored</a> / <a href="./">Blog</a> / This Post</div>
+
+  <div class="post-meta">
+    <span class="post-tag">Comparison</span>
+    <span>August 23, 2026</span>
+    <span>·</span>
+    <span>8 min read</span>
+  </div>
+
+  <article>
+    <h1>opencode Alternative: We Measured the Cost per Task, and It Is 40 Percent Lower</h1>
+
+    <p>Every coding agent claims to be efficient. Almost nobody publishes the bill. So we ran the experiment that settles it for at least one task: <strong>the same bugfix, the same model, the same API, the same prices, and a byte identical prompt</strong>, once through <a href="https://opencode.ai/" target="_blank" rel="noopener">opencode</a> and once through the coding agent inside Locally Uncensored.</p>
+
+    <p>The short version: opencode averaged <strong>2157 credits</strong> across three runs. Locally Uncensored 2.6.6 finished the identical task for <strong>1298</strong>. That is roughly 40 percent less, and even the cheapest opencode run was 29 percent above our number.</p>
+
+    <p>The longer version, including the reason, the raw counts and everything this measurement does not prove, is below.</p>
+
+    <h2>The Setup</h2>
+
+    <p>A cost comparison is only worth reading if the things that drive cost are held still. Here is what was fixed:</p>
+
+    <table>
+      <thead><tr><th>Held constant</th><th>Value</th></tr></thead>
+      <tbody>
+        <tr><td>Task</td><td>Fix a failing test in a small npm repository, then commit</td></tr>
+        <tr><td>Repository</td><td>Three files, a one line bug in <code>add.js</code>, tests red at the start</td></tr>
+        <tr><td>Prompt</td><td>Byte identical, sha256 <code>29cec6c3...cf62687</code></td></tr>
+        <tr><td>Model</td><td><code>deepseek-ai/DeepSeek-V3.2</code></td></tr>
+        <tr><td>Endpoint</td><td>The same OpenAI compatible API for both agents</td></tr>
+        <tr><td>Prices</td><td>Same account, same tier, same per token rate</td></tr>
+        <tr><td>Counting</td><td>One wire proxy in front of the API, credits read before and after each run</td></tr>
+        <tr><td>opencode version</td><td>1.18.21, installed from npm, default settings</td></tr>
+      </tbody>
+    </table>
+
+    <p>Success was defined before the runs, not after: <code>npm test</code> has to pass, there has to be exactly one commit with the required message, only <code>add.js</code> may change, and the working tree has to be clean at the end. <strong>All four runs met that bar.</strong> Nobody failed and nobody cheated, so cost is the only variable that moved.</p>
+
+    <h2>The Numbers</h2>
+
+    <table>
+      <thead><tr><th>Run</th><th>Credits</th><th>Requests</th><th>Prompt tokens</th><th>Success</th></tr></thead>
+      <tbody>
+        <tr><td>opencode, run 1</td><td>1679</td><td>8</td><td>98,789</td><td>yes</td></tr>
+        <tr><td>opencode, run 2</td><td>2433</td><td>11</td><td>146,058</td><td>yes</td></tr>
+        <tr><td>opencode, run 3</td><td>2358</td><td>11</td><td>146,387</td><td>yes</td></tr>
+        <tr><td><strong>Locally Uncensored 2.6.6</strong></td><td><strong>1298</strong></td><td>16</td><td>74,629</td><td>yes</td></tr>
+        <tr><td>Locally Uncensored 2.6.5</td><td>4395</td><td>30</td><td>257,270</td><td>yes</td></tr>
+      </tbody>
+    </table>
+
+    <p>Read the last row before you read anything else. <strong>Our own agent from one release earlier was the most expensive thing in this table by a wide margin.</strong> We are not printing a chart where we happen to win by design. We are printing a chart that shows what an efficiency pass is worth, and the version of our own software that predates it is the loser.</p>
+
+    <p>Across the three opencode runs the mean is 2157 credits. Against 1298, that makes opencode cost 1.66 times as much for the same finished work.</p>
+
+    <h2>Why the Gap Exists</h2>
+
+    <p>The tempting explanation is that one agent is smarter and needs fewer steps. That is not what happened, and the direction is the opposite of what you would guess.</p>
+
+    <p><strong>opencode took fewer turns than we did.</strong> Eight to eleven requests against our sixteen. If you counted steps, opencode wins. The bill went the other way because of what each individual request carries.</p>
+
+    <table>
+      <thead><tr><th>Per request</th><th>opencode</th><th>Locally Uncensored 2.6.6</th></tr></thead>
+      <tbody>
+        <tr><td>Prompt tokens per request</td><td>12,349 to 13,308</td><td>4,664</td></tr>
+        <tr><td>Tool catalogue size</td><td>21,188 bytes</td><td>7,703 bytes</td></tr>
+        <tr><td>Credits per prompt token</td><td>0.01700 / 0.01666 / 0.01611</td><td>0.01739</td></tr>
+      </tbody>
+    </table>
+
+    <p>That last row is the honest part. <strong>The billing rate is the same.</strong> Nobody is getting a secret discount. Credits per token are within a few percent of each other in every run, and ours is marginally the highest of the four. The entire difference in the final bill is the number of tokens pushed through, not the price of a token.</p>
+
+    <p>Two things drive that volume. The first is the fixed block that rides along on every single call. A tool catalogue of 21,188 bytes against 7,703 bytes is roughly three times the standing overhead, paid again on every request in the loop, whether the model needs those tools or not. The second is context decay: as an agent works, the transcript grows, and old tool output that no longer matters keeps getting resent at full length unless something actively trims it.</p>
+
+    <p>Put together, a fixed block that large pushes every opencode request above 12,000 tokens. Six agent steps at that weight already approach our total consumption for the whole task.</p>
+
+    <h2>What Changed Between Our Own 2.6.5 and 2.6.6</h2>
+
+    <p>The 4395 in the table is not a strawman, it is our shipped agent from the previous release. Between 2.6.5 and 2.6.6 we went after exactly the two things above: the size of the fixed block and the length of what gets resent. Measured across the same set of tool driven runs, Locally Uncensored 2.6.6 spent <strong>78.6 percent fewer credits than Locally Uncensored 2.6.5</strong>, and on the longest run in that set 80.4 percent fewer than 2.6.5. Both figures compare our own agent against our own previous release. Neither of them is the gap to opencode, which is the roughly 40 percent further up this page. The opencode comparison is a separate measurement, and it is what fell out of this work once we pointed it at another agent.</p>
+
+    <h2>Limits of This Benchmark</h2>
+
+    <p>This is where most vendor benchmarks stop talking. We would rather you know exactly how far the number carries.</p>
+
+    <ul>
+      <li><strong>One scenario.</strong> A tiny repository and a one line bug. It says nothing about a large codebase, a multi file refactor or a long running session. We did not run those.</li>
+      <li><strong>Uneven sample.</strong> opencode ran three times, Locally Uncensored once. The spread within opencode alone was 45 percent, from 1679 to 2433, and our own spread is simply unknown. A single run is a data point, not a distribution.</li>
+      <li><strong>Default settings.</strong> opencode ran as it ships. It is configurable, and a tuned configuration with a trimmed tool set would land somewhere else. We did not tune it, in either direction.</li>
+      <li><strong>opencode is free software.</strong> The tool itself costs nothing. Everything measured here is the model bill, which you would pay to whichever provider you point it at. This is a comparison of token efficiency, not of licence fees.</li>
+      <li><strong>Cost is not quality.</strong> Every run in the table produced correct, committed work. On a harder problem the ranking could look different, and cheapest is not automatically best.</li>
+    </ul>
+
+    <p>What the measurement does support is a narrower claim than the headline suggests: on short, well scoped agent tasks, opencode can hardly land below us, because the fixed per request overhead sets a floor. Even its best run, with only eight requests, still needed 98,789 tokens.</p>
+
+    <h2>Credit Where It Is Due</h2>
+
+    <p>opencode finished the job three times out of three, took fewer turns than we did, and produced clean diffs with the right commit message each time. It is a genuinely good agent and it is open source. The numbers here are about token accounting inside the loop, not about whether it works. If you use it and you are happy, this article is not an argument that you should stop.</p>
+
+    <p>It is an argument that you should measure. Agent bills are made of tokens you never see, and the difference between two tools that both look fast can be a factor of 1.66 on the invoice.</p>
+
+    <h2>Where This Fits</h2>
+
+    <p>The coding agent is one lane inside <a href="https://locallyuncensored.com/">Locally Uncensored</a>, a desktop AI studio that also runs chat, image and video locally. You can point the agent at a hosted model like the DeepSeek V3.2 we benchmarked here, or at a model on your own GPU with no API bill at all. If you want the local route, the <a href="how-to-run-qwen-3-8-27b-locally.html">Qwen 3.8 27B guide</a> covers the size that fits a 24 GB card, and the <a href="best-uncensored-ai-models-2026.html">2026 model roundup</a> covers what else is worth your VRAM. The <a href="https://locallyuncensored.com/guide/">setup guide</a> walks the install from zero.</p>
+
+    <h2>FAQ</h2>
+
+    <h3>Is there a cheaper alternative to opencode?</h3>
+    <p>On the task we measured, yes. Locally Uncensored 2.6.6 finished for 1298 credits against an opencode average of 2157, about 40 percent less, and the cheapest opencode run still sat 29 percent above us. One scenario, so treat it as a data point rather than a law.</p>
+
+    <h3>Is Locally Uncensored 78 percent cheaper than opencode?</h3>
+    <p>No, and the two numbers are easy to mix up. The 78.6 percent is a version to version figure for our own agent, Locally Uncensored 2.6.6 against Locally Uncensored 2.6.5, measured over our own set of tool driven runs. The gap to opencode on this benchmark is about 40 percent, 1298 credits against an opencode average of 2157 credits across three runs.</p>
+
+    <h3>How much does opencode cost per task?</h3>
+    <p>opencode is free software. The bill is the model. On this one line bugfix with DeepSeek V3.2 the three runs cost 1679, 2433 and 2358 credits, a spread of 45 percent between cheapest and dearest.</p>
+
+    <h3>Why does opencode use so many tokens?</h3>
+    <p>Not through extra steps, it used fewer than we did. Each request carries more: 12,349 to 13,308 prompt tokens against our 4,664, with a tool catalogue of 21,188 bytes against 7,703 resent on every call.</p>
+
+    <h3>Is the billing rate the same for both agents?</h3>
+    <p>Yes, which is the point. Credits per prompt token came out at 0.01739 for us and 0.01700, 0.01666 and 0.01611 for opencode. Effectively identical, so the gap is volume, not price.</p>
+
+    <h3>Does a cheaper coding agent do worse work?</h3>
+    <p>Not here. All four runs passed the same bar: test green, one correct commit, only the intended file touched, clean tree. On a harder task the picture could differ, and we did not measure that.</p>
+
+    <h3>Can I reproduce this benchmark myself?</h3>
+    <p>Yes. Three file npm repo with a red test, prompt pinned at sha256 <code>29cec6c3...cf62687</code>, model <code>deepseek-ai/DeepSeek-V3.2</code>, opencode 1.18.21 at defaults, requests counted through a wire proxy and credits read before and after each run.</p>
+
+    <h2>Getting Started</h2>
+
+    <p>The agent ships inside the app, and the app is free and open source. Point it at a hosted model or at one running on your own card:</p>
+
+    <pre><code>git clone https://github.com/PurpleDoubleD/locally-uncensored.git
+cd locally-uncensored
+# Windows: setup.bat | Linux: ./setup.sh</code></pre>
+
+    <p>Or take the installer from the <a href="https://github.com/PurpleDoubleD/locally-uncensored/releases/latest">releases page</a>. No account is required for the local path, and nothing leaves your machine.</p>
+
+    <hr>
+
+    <p><em>Locally Uncensored is AGPL-3.0 licensed and free to use. Built by <a href="https://github.com/PurpleDoubleD">PurpleDoubleD</a>.</em></p>
+  </article>
+
+  <div class="post-footer">
+    <p>An agent that reads your codebase without reading your wallet.</p>
+    <a href="https://github.com/PurpleDoubleD/locally-uncensored" class="cta-btn" target="_blank">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z"/></svg>
+      Get Started on GitHub
+    </a>
+  </div>
+</div>
+
+<footer>
+  <div class="footer-row footer-meta"><span>&copy; 2026 &middot; Locally Uncensored &middot; AGPL-3.0</span></div>
+  <div class="footer-row footer-links">
+    <a href="https://locallyuncensored.com/blog/">Blog</a>
+    <a href="https://locallyuncensored.com/guide/">Guide</a>
+    <a href="https://locallyuncensored.com/remote-access/">Remote access</a>
+    <a href="https://locallyuncensored.com/discord" target="_blank" rel="noopener">Discord</a>
+    <a href="https://github.com/PurpleDoubleD/locally-uncensored">GitHub</a>
+    <a href="https://github.com/PurpleDoubleD/locally-uncensored/discussions">Discussions</a>
+    <a href="https://github.com/PurpleDoubleD/locally-uncensored/issues">Issues</a>
+    <a href="https://reddit.com/user/GroundbreakingMall54">Reddit</a>
+    <a href="https://www.linkedin.com/in/david-drobnitza-locallyuncensored/" rel="me noopener" target="_blank">LinkedIn</a>
+  </div>
+</footer>
+</body>
+</html>

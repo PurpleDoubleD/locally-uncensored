@@ -4,6 +4,7 @@ version = "2.6.7"
 description = "Private, local AI chat & image/video generation"
 authors = ["purpledoubled"]
 edition = "2021"
+license = "AGPL-3.0-only"
 
 [features]
 # Test-only: let LU_NO_KEYCHAIN / ~/.lu-no-keychain bypass the OS keychain during

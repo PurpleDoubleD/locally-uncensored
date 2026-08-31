@@ -3,7 +3,7 @@
   "version": "2.6.7",
   "private": false,
   "description": "Generate anything — text, images, video. Locally. Uncensored.",
-  "license": "AGPL-3.0",
+  "license": "AGPL-3.0-only",
   "author": "purpledoubled",
   "repository": {
     "type": "git",
