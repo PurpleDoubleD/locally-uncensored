@@ -15,10 +15,24 @@
  *     gezaehlt, nicht behauptet, und sie sind eine Sperrklinke: sie duerfen
  *     sinken, nicht steigen.
  *
+ * ── Warum hier jetzt ein ORDNER gezaehlt wird und nicht eine Datei ────────
+ *
+ * Der Assistent ist mit W-T3 aus `Onboarding.tsx` in mehrere Module
+ * zerfallen. Wuerde die Sperrklinke weiter nur `Onboarding.tsx` zaehlen,
+ * waere sie ab diesem Tag wertlos: sie ginge von 25 auf 2 und liesse sich
+ * kuenftig durch jedes Verschieben unterlaufen. Gezaehlt wird deshalb der
+ * ganze Assistent — und damit die Zahl nicht still weglaufen kann, wenn
+ * jemand eine Datei dazulegt, prueft ein eigener Fall, dass die Liste unten
+ * WIRKLICH alle Dateien des Ordners abdeckt.
+ *
+ * `BackendSelector.tsx` liegt im selben Ordner und gehoert nicht dazu: es ist
+ * die Backend-Auswahl der EINSTELLUNGEN, nicht ein Schritt des Assistenten.
+ * Es stand nie in den 58 und steht auch jetzt nicht in den 25.
+ *
  * Lauf: npx vitest run src/components/onboarding/__tests__/installer-state.test.ts
  */
 import { describe, it, expect } from 'vitest'
-import { readFileSync } from 'node:fs'
+import { readFileSync, readdirSync } from 'node:fs'
 import { resolve } from 'node:path'
 import {
   installerReducer,
@@ -39,7 +53,33 @@ import {
 const codeOnly = (src: string) =>
   src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1')
 
-const SRC = codeOnly(readFileSync(resolve(__dirname, '..', 'Onboarding.tsx'), 'utf8'))
+const DIR = resolve(__dirname, '..')
+const lies = (name: string) => codeOnly(readFileSync(resolve(DIR, name), 'utf8'))
+
+/** Die Dateien, aus denen der Assistent nach der Zerlegung besteht. */
+const ASSISTENT = [
+  'Onboarding.tsx',
+  'BackendsStep.tsx',
+  'ComfyStep.tsx',
+  'ModelsStep.tsx',
+  'EmbeddingsStep.tsx',
+  'use-backend-scan.ts',
+  'use-installer-fleet.ts',
+  'onboarding-skin.ts',
+  'onboarding-host.ts',
+  'wait-for-download.ts',
+  'installer-state.ts',
+  'wizard-steps.ts',
+]
+
+/** Liegt im selben Ordner, ist aber kein Schritt des Assistenten. */
+const NICHT_DER_ASSISTENT = ['BackendSelector.tsx']
+
+/** Der ganze Assistent als ein Text — die Sperrklinke zaehlt darauf. */
+const SRC = ASSISTENT.map(lies).join('\n')
+
+/** Die Flotte allein: dort, wo die vier Installer verdrahtet sind. */
+const FLOTTE = lies('use-installer-fleet.ts')
 
 /** Kurzschreibweise: eine Folge von Aktionen auf den Ruhezustand anwenden. */
 const run = (...actions: Parameters<typeof installerReducer>[1][]): InstallerState =>
@@ -167,19 +207,37 @@ describe('AS-09: die Zerlegung ist eine, keine Verschiebung', () => {
   const useStates = (SRC.match(/=\s*useState[<(]/g) ?? []).length
   const useReducers = (SRC.match(/=\s*useReducer\(/g) ?? []).length
 
-  it('Onboarding.tsx haelt hoechstens 25 `useState` — vorher 58', () => {
+  it('der ganze Assistent haelt hoechstens 25 `useState` — vorher 58 in EINER Datei', () => {
     // Sperrklinke: die Zahl darf sinken, nicht steigen. 58 ist der Stand am
     // HEAD (`ed9d6e52`), den AUDIT-COVERAGE unter AS-09 mit „59" fuehrt —
     // der Audit zaehlt die Import-Zeile mit.
+    //
+    // Nach W-T3 zaehlt diese Zeile den ORDNER, nicht mehr die eine Datei.
+    // Genau das ist der Punkt: die Zerlegung durfte die 25 verteilen, nicht
+    // vermehren. Sie hat sie verteilt — 25 vorher, 25 nachher.
     expect(useStates).toBeLessThanOrEqual(25)
   })
 
-  it('die vier Installer sind vier Reducer auf EINER Maschine', () => {
+  it('die Liste oben deckt den Ordner wirklich ab — sonst zaehlt die Sperrklinke ins Leere', () => {
+    // Ohne diesen Fall waere die Zerlegung selbst das Schlupfloch: eine
+    // sechste Schrittdatei, in der Liste vergessen, brächte beliebig viele
+    // `useState` mit, ohne dass oben die Zahl steigt.
+    const imOrdner = readdirSync(DIR).filter((n) => /\.tsx?$/.test(n)).sort()
+    expect(imOrdner).toEqual([...ASSISTENT, ...NICHT_DER_ASSISTENT].sort())
+  })
+
+  it('die vier Installer sind vier Reducer auf EINER Maschine — und in EINER Datei', () => {
     expect(useReducers).toBe(4)
     for (const name of ['comfyInstall', 'pythonInstall', 'ollama', 'lmstudio']) {
       expect(SRC).toContain(`useReducer(installerReducer, IDLE_INSTALLER)`)
       expect(SRC, name).toContain(name)
     }
+    // Schaerfer als vorher, und das ist der Ertrag der Zerlegung: alle vier
+    // stehen zusammen in `use-installer-fleet.ts`. Waeren sie auf die
+    // Schritte verteilt, teilten sie sich zwangslaeufig auch keinen Takt
+    // mehr — Ollama/LM Studio zeichnet der Backend-Schritt, ComfyUI/Python
+    // der ComfyUI-Schritt, und keiner sieht die Startzeit des anderen.
+    expect((FLOTTE.match(/=\s*useReducer\(/g) ?? []).length).toBe(4)
   })
 
   it('und die Maschine steht genau einmal, in einer eigenen Datei', () => {

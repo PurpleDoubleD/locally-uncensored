@@ -61,10 +61,22 @@ describe('the surfaces that used to set foreign text as the whole message', () =
     // Onboarding is the highest visibility surface in the app and it had four
     // of these, one per installer. A bare log tail there is the first thing a
     // new user ever reads from us.
-    const src = read('components/onboarding/Onboarding.tsx')
+    //
+    // PATH ONLY (W-T3, 2026-09-01): the four installers used to sit in one
+    // 1909-line Onboarding.tsx. Two of them (Ollama, LM Studio) now live in
+    // BackendsStep.tsx and two (ComfyUI, Python) in ComfyStep.tsx. Both files
+    // are read here, so the claim still covers all four — reading only the
+    // shell would have made this test green by looking at a file that no
+    // longer contains a single installer.
+    const src = [
+      read('components/onboarding/BackendsStep.tsx'),
+      read('components/onboarding/ComfyStep.tsx'),
+    ].join('\n')
     expect(src).toContain('withInstallerOutput')
     expect(src).not.toMatch(/set\w*Error\(lastLog\)/)
     expect(src).not.toMatch(/setPythonInstallError\(lastLog\)/)
+    // And the shell really is out of the installer business now.
+    expect(read('components/onboarding/Onboarding.tsx')).not.toContain('lastLog')
   })
 
   it('Settings frames its installer log tails too', () => {

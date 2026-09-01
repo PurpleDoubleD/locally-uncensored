@@ -32,7 +32,32 @@ import { STEP_ORDER, WORK_STEPS, workStepsFor, wizardProgress } from '../wizard-
 const codeOnly = (src: string) =>
   src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1')
 
-const SRC = codeOnly(readFileSync(resolve(__dirname, '..', 'Onboarding.tsx'), 'utf8'))
+/**
+ * Zwei Heuhaufen, und der Unterschied ist die halbe Aussage dieses Tests.
+ *
+ * Seit W-T3 ist der Assistent kein Einzelstueck mehr: die SCHALE haelt den
+ * Rahmen (Fensterbalken, Fortschrittsanzeiger, Willkommen, Fertig), die vier
+ * Arbeitsschritte liegen daneben, und die gemeinsame Formsprache steht in
+ * `onboarding-skin.ts`.
+ *
+ *   SRC  — nur die Schale. Alles, was der RAHMEN behauptet, muss dort stehen
+ *          und nirgends sonst: D-S37 (die H1), D-S38 (eine Spalte, ein fester
+ *          Anzeiger, genau ein `fixed`), D-S35 (die Schrittrechnung).
+ *   ALL  — der ganze Assistent. Alles, was eine VOKABEL ist, gilt ueberall:
+ *          das Primaerrezept, die Negativkontrollen, das Icon aus D-S39.
+ *
+ * Waere alles gegen ALL geprueft, koennte der Fensterbalken in einen Schritt
+ * wandern und der Test bliebe gruen. Waere alles gegen SRC geprueft, waere
+ * er seit der Zerlegung fast leer.
+ */
+const DIR = resolve(__dirname, '..')
+const SRC = codeOnly(readFileSync(resolve(DIR, 'Onboarding.tsx'), 'utf8'))
+const ALL = [
+  'Onboarding.tsx', 'BackendsStep.tsx', 'ComfyStep.tsx', 'ModelsStep.tsx',
+  'EmbeddingsStep.tsx', 'onboarding-skin.ts', 'use-backend-scan.ts',
+  'use-installer-fleet.ts', 'onboarding-host.ts', 'wait-for-download.ts',
+  'wizard-steps.ts', 'installer-state.ts',
+].map((n) => codeOnly(readFileSync(resolve(DIR, n), 'utf8'))).join('\n')
 const CSS = readFileSync(resolve(__dirname, '..', '..', '..', 'index.css'), 'utf8')
 
 const MAC = true
@@ -91,8 +116,8 @@ describe('D-S35: der Anzeiger zaehlt Arbeitsschritte, nicht Bildschirme', () => 
     expect(SRC).toContain('{progressNow.caption}')
     // Die alte Zaehlung ist weg: `visibleStepOrder` und `stepIndex` gab es
     // nur, um sechs Bildschirme als sechs Schritte zu zeichnen.
-    expect(SRC).not.toContain('visibleStepOrder')
-    expect(SRC).not.toContain('const stepIndex')
+    expect(ALL).not.toContain('visibleStepOrder')
+    expect(ALL).not.toContain('const stepIndex')
   })
 })
 
@@ -100,16 +125,16 @@ describe('D-S35: der Anzeiger zaehlt Arbeitsschritte, nicht Bildschirme', () => 
 
 describe('D-S36: der Hover macht den Primaerknopf heller, nicht dunkler', () => {
   it('das Onboarding benutzt das vorhandene Rezept statt eines eigenen', () => {
-    expect(SRC).toContain("const primaryBtn = 'lu-primary")
+    expect(ALL).toContain("const primaryBtn = 'lu-primary")
     // Und die vier weiteren Primaerknoepfe, die ihr Grau inline abgeschrieben
     // hatten, ebenfalls: Ollama, LM Studio (Server starten), ComfyUI,
     // „Install N models".
-    expect((SRC.match(/lu-primary/g) ?? []).length).toBeGreaterThanOrEqual(5)
+    expect((ALL.match(/lu-primary/g) ?? []).length).toBeGreaterThanOrEqual(5)
   })
 
   it('das Graphit-Rezept steht nirgends mehr in dieser Datei', () => {
-    expect(SRC).not.toContain('bg-white text-black hover:bg-gray-200')
-    expect(SRC).not.toContain('bg-gray-900 text-white hover:bg-gray-800')
+    expect(ALL).not.toContain('bg-white text-black hover:bg-gray-200')
+    expect(ALL).not.toContain('bg-gray-900 text-white hover:bg-gray-800')
   })
 
   it('das Rezept liegt weiterhin an EINER Stelle, in index.css', () => {
@@ -138,8 +163,8 @@ describe('D-S36: der Hover macht den Primaerknopf heller, nicht dunkler', () => 
   })
 
   it('die Sekundaerknoepfe bleiben sekundaer — sonst waere nur alles laut', () => {
-    expect(SRC).toContain("const secondaryBtn = ")
-    expect(SRC).not.toContain("const secondaryBtn = 'lu-primary")
+    expect(ALL).toContain("const secondaryBtn = ")
+    expect(ALL).not.toContain("const secondaryBtn = 'lu-primary")
   })
 })
 
@@ -190,7 +215,7 @@ describe('D-S37: die H1 ist eine Ueberschrift, kein Label', () => {
 
 describe('D-S38: die Punkte gehoeren zum Assistenten, nicht zur Titelleiste', () => {
   it('die Ursache aus dem Audit ist weg: kein `fixed top-10` mehr', () => {
-    expect(SRC).not.toContain('fixed top-10')
+    expect(ALL).not.toContain('fixed top-10')
   })
 
   it('Anzeiger und Karte stehen in EINER Spalte mit einem benannten Abstand', () => {
@@ -206,7 +231,7 @@ describe('D-S38: die Punkte gehoeren zum Assistenten, nicht zur Titelleiste', ()
   it('der Fensterrahmen bleibt festgenagelt — nur er', () => {
     // `data-tauri-drag-region` MUSS fixed bleiben, das ist der Fensterbalken.
     expect(SRC).toContain('data-tauri-drag-region className="fixed top-0 left-0 right-0 h-8')
-    expect((SRC.match(/className="fixed /g) ?? []).length).toBe(1)
+    expect((ALL.match(/className="fixed /g) ?? []).length).toBe(1)
   })
 })
 
@@ -214,22 +239,136 @@ describe('D-S38: die Punkte gehoeren zum Assistenten, nicht zur Titelleiste', ()
 
 describe('D-S39: Schritt 3 zeigt ein Zeichen statt eines Punktes', () => {
   it('der nackte Punkt ist weg', () => {
-    expect(SRC).not.toContain('w-3 h-3 rounded-full bg-purple-400')
+    expect(ALL).not.toContain('w-3 h-3 rounded-full bg-purple-400')
   })
 
   it('an seiner Stelle steht das Icon des Schrittes, auf einer Leiterstufe', () => {
-    expect(SRC).toMatch(/<ImageIcon size=\{ICON_LG\} className="text-lu-accent" \/>/)
-    expect(SRC).toContain("Image as ImageIcon")
+    expect(ALL).toMatch(/<ImageIcon size=\{ICON_LG\} className="text-lu-accent" \/>/)
+    expect(ALL).toContain("Image as ImageIcon")
     // Keine neue Icon-Groesse: ICON_LG ist die vorhandene 20er-Stufe. Die
     // Sperrklinke in src/components/__tests__/icon-leiter.test.ts zaehlt
     // distinkte numerische `size={n}` und darf nicht steigen.
-    expect(SRC).not.toMatch(/<ImageIcon size=\{\d+\}/)
+    expect(ALL).not.toMatch(/<ImageIcon size=\{\d+\}/)
   })
 
   it('die Flaeche darunter ist dieselbe, die der Akzent sonst traegt', () => {
-    expect(SRC).toContain('rounded-full bg-lu-accent-soft flex items-center justify-center')
+    expect(ALL).toContain('rounded-full bg-lu-accent-soft flex items-center justify-center')
     // Und der Akzent steht auf dem dunklen Grund des Onboardings fuer sich:
     // #a094f8 auf #202020 = 6.27:1.
     expect(contrast('#a094f8', '#202020')).toBeCloseTo(6.27, 2)
+  })
+})
+
+// ── D-S39, zweite Haelfte — „vier Buttons in vier Behandlungen" ───────────
+//
+// Der Audit-Bullet hatte zwei Teile. Der erste (das Icon oben) war erledigt,
+// der zweite nicht: auf DEM Bildschirm, den D-S39 benennt, standen vier
+// Knoepfe in vier Behandlungen. Zwei liefen bereits ueber `.lu-primary`
+// (`Install ComfyUI`, `Connect`), zwei nicht:
+//
+//   „I already have ComfyUI"  Sekundaerrezept fuer die Farbe, aber Breite und
+//                             Ausrichtung aus einem INLINE-STIL — die Form kam
+//                             aus einer zweiten Quelle.
+//   „Cancel"                  ein Einzelstueck: 8,8px Schrift, 1px senkrechtes
+//                             Polster, eigener Radius, rote Kante.
+//
+// Beide sind jetzt auf vorhandenen Rezepten, ohne eine neue Farbe und ohne
+// eine neue Klasse: der eine auf der Sekundaerbehandlung dieser Datei, der
+// andere auf `.lu-control` aus index.css.
+
+describe('D-S39 (2): die vier Knoepfe des ComfyUI-Schrittes tragen zwei Rezepte', () => {
+  const COMFY = codeOnly(readFileSync(resolve(DIR, 'ComfyStep.tsx'), 'utf8'))
+
+  /** Die className-Kette jedes `<button>` im Abschnitt, in Reihenfolge. */
+  function buttonClassNames(region: string): string[] {
+    const out: string[] = []
+    for (const m of region.matchAll(/<button\b/g)) {
+      const tagStart = m.index
+      const at = region.indexOf('className=', tagStart)
+      if (at < 0) continue
+      let i = at + 'className='.length
+      if (region[i] === '"' || region[i] === "'") {
+        const quote = region[i]
+        out.push(region.slice(i + 1, region.indexOf(quote, i + 1)))
+      } else if (region[i] === '{') {
+        let depth = 0
+        const start = i
+        for (; i < region.length; i++) {
+          if (region[i] === '{') depth++
+          else if (region[i] === '}' && --depth === 0) break
+        }
+        out.push(region.slice(start + 1, i))
+      }
+    }
+    return out
+  }
+
+  const KNOEPFE = buttonClassNames(COMFY)
+
+  it('der Abschnitt wird wirklich gelesen — sonst prueft alles unten nichts', () => {
+    expect(COMFY.length).toBeGreaterThan(2000)
+    // Neun `<button>`: die beiden Listenformen (Install-Auswahl, „None of
+    // these"), die vier aus dem Audit-Bullet und die drei der Fusszeile
+    // (Re-Scan, Skip for now, Continue).
+    expect(KNOEPFE).toHaveLength(9)
+  })
+
+  it('die zwei, die schon auf dem Rezept liefen, laufen weiter darauf', () => {
+    expect(COMFY).toContain('className="lu-primary w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-[0.7rem] transition-all"')
+    expect(COMFY).toMatch(/className=\{primaryBtn\}\s*>\s*\n\s*Connect/)
+  })
+
+  it('„I already have ComfyUI" holt seine Form nicht mehr aus einem Inline-Stil', () => {
+    expect(COMFY).toContain('className={`${secondaryBtn} w-full justify-center`}')
+    // Die zweite Quelle ist weg — nicht nur hier, im ganzen Assistenten.
+    expect(ALL).not.toContain("style={{ width: '100%', justifyContent: 'center' }}")
+    // Und die Vokabel ist die seines Nachbarn, keine neue: derselbe
+    // Install-Knopf darueber sagt Breite und Ausrichtung genauso.
+    expect(COMFY).toContain('lu-primary w-full flex items-center justify-center')
+  })
+
+  it('„Cancel" traegt das neutrale Hausrezept, nicht mehr sein eigenes', () => {
+    expect(COMFY).toContain('data-active="true"')
+    expect(COMFY).toContain('className="lu-control"')
+    // Das Einzelstueck ist fort: eigene Schriftgroesse, eigenes Polster,
+    // eigener Radius, eigene Kante.
+    expect(ALL).not.toContain('text-[0.55rem] px-1.5 py-[1px] rounded border transition-colors')
+    expect(ALL).not.toContain('border-red-500/40 text-red-300 hover:bg-red-500/10')
+    expect(ALL).not.toContain('border-red-300 text-red-600 hover:bg-red-50')
+  })
+
+  it('`.lu-control` ist nicht hier erfunden, sondern das Rezept aus index.css', () => {
+    expect((CSS.match(/^\.lu-control\s*\{/gm) ?? [])).toHaveLength(1)
+    // `data-active` ist dort ein echter Zustand, keine Dekoration.
+    expect(CSS).toMatch(/\.lu-control:not\(\.lu-primary\)\[data-active='true'\]/)
+  })
+
+  it('DIE BEGRUENDUNG, nachgerechnet: neutral ist hier nicht die leisere Wahl', () => {
+    // index.css schreibt fuer Stop auf, warum ein Ausstieg aus einem
+    // LAUFENDEN Vorgang neutral bleibt und nicht rot wird — „Rot heisst in
+    // dieser App kaputt oder wird geloescht". Abbrechen einer Installation
+    // ist dieselbe Rolle. Die Zahlen sagen dazu, dass die Umstellung nichts
+    // an Lesbarkeit kostet:
+    //   dunkel  #9ca3af auf der Karte #202020
+    //   hell    #4b5563 auf der Karte #f9fafb
+    expect(contrast('#9ca3af', '#202020')).toBeCloseTo(6.42, 2)
+    expect(contrast('#4b5563', '#f9fafb')).toBeCloseTo(7.23, 2)
+    // Der hellere der beiden alten Zustaende lag bei 4.62:1, also knapp
+    // ueber AA — die neutrale Fassung ist in beiden Modi deutlicher.
+    expect(contrast('#dc2626', '#f9fafb')).toBeCloseTo(4.62, 2)
+    expect(contrast('#4b5563', '#f9fafb')).toBeGreaterThan(contrast('#dc2626', '#f9fafb'))
+  })
+
+  it('NEGATIVKONTROLLE: der Schritt hat dadurch keine dritte Behandlung bekommen', () => {
+    // Jeder Knopf traegt eins der vier bekannten Rezepte — ausser den zwei,
+    // die keine Knoepfe im Sinne der Formsprache sind und deshalb hier
+    // namentlich stehen: die Zeilen der Install-Auswahl (eine Liste) und
+    // „None of these…" (ein Textlink).
+    const fremd = KNOEPFE.filter((c) =>
+      !/primaryBtn|secondaryBtn|lu-primary|lu-control/.test(c),
+    )
+    expect(fremd).toHaveLength(2)
+    expect(fremd[0]).toContain('w-full text-left px-3 py-2 rounded-lg border')
+    expect(fremd[1]).toContain('underline')
   })
 })
