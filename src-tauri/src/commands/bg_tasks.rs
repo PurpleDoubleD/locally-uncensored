@@ -1128,10 +1128,15 @@ mod foreground_parity_tests {
 
     /// A directory both runs can start in, so neither path has to fall back to
     /// the per-chat workspace and touch the user's home.
-    fn a_directory() -> std::path::PathBuf {
-        let d = std::env::temp_dir().join(format!("lu-parity-{}", std::process::id()));
-        std::fs::create_dir_all(&d).expect("temp dir");
-        d
+    ///
+    /// `os_paths::test_dir` statt eines selbstgebauten `temp_dir().join(…)`:
+    /// das Aufräumen hängt dort am `Drop` und läuft deshalb auch dann, wenn
+    /// eine der Assertions dazwischen scheitert — die letzte Zeile des Tests
+    /// tat das nicht, und genau im Fehlerfall blieb der Ordner liegen. Der
+    /// Name trägt zusätzlich die ThreadId, und unter Windows liegt er unter
+    /// `target/`, wo ein `cargo clean` ihn erwischt.
+    fn a_directory() -> crate::os_paths::TestDir {
+        crate::os_paths::test_dir("parity")
     }
 
     async fn what_the_foreground_printed(dir: &std::path::Path) -> (String, i64) {
@@ -1215,8 +1220,8 @@ mod foreground_parity_tests {
             "the same command in the same shell came out differently on the two paths",
         );
         assert_eq!((fg_code, bg_code), (0, 0), "one of the two paths failed");
-
-        let _ = std::fs::remove_dir_all(&dir);
+        // Kein `remove_dir_all` mehr: `dir` ist ein `TestDir` und räumt beim
+        // Verlassen selbst auf, auch wenn eine Assertion oben vorher panickt.
     }
 
     /// The structural half: this file must not grow a second copy of the

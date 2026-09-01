@@ -131,3 +131,64 @@ describe('useCodex path-resolution drift detection', () => {
     expect(src).not.toContain("!p.startsWith('C:') && !p.startsWith('\\\\\\\\')")
   })
 })
+
+// ────────────────────────────────────────────────────────────────────────
+// `toolArgs.path` ist Modell-Ausgabe, keine Zusage (0e740f60).
+//
+// Derselbe Block wie oben, eine Zeile hoeher: `const p: string =
+// toolArgs.path` war eine BEHAUPTUNG ueber das, was das Modell geschickt hat.
+// Ein Tool-Call `{"path": 42}` — bei kleinen Modellen keine Seltenheit — ging
+// ungeprueft in `p.startsWith(…)` und warf einen TypeError aus der
+// Tool-SCHLEIFE heraus, also nicht am Tool vorbei, sondern am ganzen Turn.
+// Der Fix ist der `typeof`-Guard an der oeffnenden Bedingung; die Zahl
+// erreicht damit das Tool, das sie mit seiner eigenen Meldung ablehnt.
+//
+// Was dieser Test ist und was nicht: er liest die QUELLE, so wie die
+// Drift-Erkennung darueber. Ein Test, der den echten Tool-Loop faehrt, gibt
+// es hier nicht — useCodex ist ein React-Hook, die vitest-Umgebung ist `node`
+// (keine DOM), und weder @testing-library/react noch react-test-renderer sind
+// Abhaengigkeiten dieses Projekts. Keine der 25 Dateien in diesem Verzeichnis
+// rendert einen Hook; alle pruefen entweder ausgelagerte Logik oder den
+// Quelltext. Diese Sonde ist damit ein Pin gegen das Zuruecknehmen des
+// Guards, kein Verhaltensbeweis — und sie ist als solcher benannt.
+// ────────────────────────────────────────────────────────────────────────
+
+/**
+ * Die Bedingung, unter der useCodex `toolArgs.path` als Zeichenkette liest —
+ * aus der Quelle GEHOLT, nicht abgeschrieben. Verschwindet die gelesene Zeile,
+ * scheitert der Test hier laut, statt still auf einer leeren Zeichenkette
+ * weiterzulaufen.
+ */
+function theConditionGuardingThePathRead(source: string): string {
+  const lines = source.split('\n')
+  // Verankert am Zeilenanfang: der Kommentar direkt darueber ZITIERT die alte
+  // Fassung derselben Zeile, und ein `includes` fände ihn zuerst.
+  const at = lines.findIndex(l => /^\s*const p: string = toolArgs\.path\b/.test(l))
+  if (at < 0) {
+    throw new Error(
+      'useCodex.ts liest `toolArgs.path` nicht mehr ueber `const p: string` — ' +
+      'dieser Test muss mit dem Umbau mitziehen statt stumm gruen zu bleiben',
+    )
+  }
+  for (let i = at - 1; i >= 0 && at - i <= 5; i--) {
+    if (/^\s*if \(/.test(lines[i])) return lines[i]
+  }
+  throw new Error('ueber dem Pfad-Zugriff steht keine `if`-Zeile mehr')
+}
+
+describe('useCodex treats a model-supplied path as a string only when it is one', () => {
+  const src = readFileSync(
+    join(dirname(fileURLToPath(import.meta.url)), '../useCodex.ts'),
+    'utf8',
+  )
+
+  it('opens the path-rewrite branch behind a typeof check, not behind an annotation', () => {
+    expect(theConditionGuardingThePathRead(src)).toContain("typeof toolArgs.path === 'string'")
+  })
+
+  it('keeps the empty-string skip the old truthiness guard already had', () => {
+    // `''` ist ein String und wuerde den typeof-Test passieren; ohne die
+    // Truthiness daneben haenge workDir sich an einen leeren Pfad.
+    expect(theConditionGuardingThePathRead(src)).toMatch(/typeof toolArgs\.path === 'string' && toolArgs\.path/)
+  })
+})
