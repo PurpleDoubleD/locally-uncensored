@@ -47,6 +47,12 @@ scripts/*.py
 # Test artifacts
 codex-api/
 test-codex.txt
+# vitest schreibt sein Deckungsprotokoll hierhin: ein HTML-Bericht voller .js.
+# Es stand bis KF-11 nur in eslint.config.js' globalIgnores und nirgends sonst —
+# damit war das der einzige Eintrag dort, den der Waechter in
+# src/lib/__tests__/das-gate-bleibt-scharf.test.ts NICHT nachpruefen konnte
+# (er fragt git, und git kannte das Verzeichnis nicht).
+coverage/
 
 # OS
 Thumbs.db

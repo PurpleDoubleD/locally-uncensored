@@ -218,9 +218,25 @@ describe('eslint begeht nichts, was gebaut wurde', () => {
       return
     }
 
-    const begangen: string[] = []
+    // NACH ORDNERN, NICHT NACH DATEIEN. Unter Windows stehen hier 877
+    // Kandidaten (16 193 ignorierte Dateien insgesamt); jede einzeln zu fragen
+    // kostete so viel Zeit, dass der eslint-Test NEBENAN im selben Worker in
+    // sein 5s-Zeitlimit lief. Ignoriert wird praktisch immer ein Verzeichnis,
+    // also wird auch danach gefragt — und nur dort, wo der Ordner NICHT
+    // ausgeschlossen ist, zaehlt der Test seine Dateien einzeln durch.
+    const nachOrdner = new Map<string, string[]>()
     for (const p of ignoriert) {
-      if (!(await eslint.isPathIgnored(resolve(ROOT, p)))) begangen.push(p)
+      const dir = p.slice(0, p.lastIndexOf('/') + 1)
+      const liste = nachOrdner.get(dir)
+      if (liste) liste.push(p)
+      else nachOrdner.set(dir, [p])
+    }
+    const begangen: string[] = []
+    for (const [dir, dateien] of nachOrdner) {
+      if (await eslint.isPathIgnored(resolve(ROOT, dir, '__sonde.js'))) continue
+      for (const p of dateien) {
+        if (!(await eslint.isPathIgnored(resolve(ROOT, p)))) begangen.push(p)
+      }
     }
     expect(
       begangen.slice(0, 20),
