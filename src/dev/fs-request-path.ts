@@ -32,7 +32,7 @@
  * setzen kann, ohne das echte Heimatverzeichnis zu treffen.
  */
 
-import { devResolveWithinJail } from '../lib/dev-fs-jail'
+import { devResolveWithinJail, type DevJailOptions } from '../lib/dev-fs-jail'
 import { bodyString } from './http-body'
 
 /**
@@ -44,12 +44,22 @@ import { bodyString } from './http-body'
  * auf, genau wie `resolve_path("")` auf der Rust-Seite: die Endpunkte haben
  * ihre eigene Meldung für „nichts angegeben", und der Käfig ist nicht der Ort,
  * an dem sie erfunden wird.
+ *
+ * `opts` reicht die beiden Dinge durch, die der reine Käfig nicht selbst haben
+ * darf: den Symlink-Auflöser (`fs.realpathSync`) und `process.env.SystemDrive`.
+ * Ohne den Auflöser prüft der Käfig nur lexikalisch — dass alle fünf Endpunkte
+ * ihn mitgeben, hält dev-server-shape.test.ts fest.
  */
-export function resolveFsRequestPath(body: unknown, homeDir: string): string {
+export function resolveFsRequestPath(
+  body: unknown,
+  homeDir: string,
+  opts?: DevJailOptions,
+): string {
   return devResolveWithinJail({
     path: bodyString(body, 'path') ?? '',
     homeDir,
     chatId: bodyString(body, 'chatId'),
     workingDirectory: bodyString(body, 'workingDirectory'),
+    ...opts,
   })
 }

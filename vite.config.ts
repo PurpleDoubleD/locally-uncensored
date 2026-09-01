@@ -9,6 +9,7 @@ import {
   createWriteStream,
   mkdirSync,
   readFileSync,
+  realpathSync,
   statSync,
   statfsSync,
   writeFileSync,
@@ -24,7 +25,12 @@ import { dirname } from 'path'
 import os from 'os'
 import dns from 'node:dns'
 import net from 'node:net'
-import { devResolveWithinJail, effectiveByteCap, JailEscapeError } from './src/lib/dev-fs-jail'
+import {
+  devResolveWithinJail,
+  effectiveByteCap,
+  JailEscapeError,
+  type DevJailOptions,
+} from './src/lib/dev-fs-jail'
 // Verzeichnisnamen dieses Builds. Dieser Branch schreibt BEWUSST nicht in die
 // Ordner der echten App — siehe src/lib/app-identity.ts und
 // src-tauri/src/app_identity.rs.
@@ -48,6 +54,14 @@ import {
   parseJsonBody,
 } from './src/dev/http-body'
 import { createSsrfPolicy } from './src/dev/ssrf-policy'
+import {
+  checkPublicUrl,
+  createPinnedLookup,
+  SsrfBlockedError,
+  ssrfSafeGet,
+  SSRF_MAX_HOPS,
+  type SsrfFetchDeps,
+} from './src/dev/ssrf-fetch'
 import { resolveFsRequestPath } from './src/dev/fs-request-path'
 import {
   applyConsoleRemovals,
@@ -76,6 +90,27 @@ import { asNumber, asString, errorText, prop } from './src/types/json-guards'
 // on silently degrades to "loopback regex only".
 const DEV_PORT = 5273
 
+// ── Der Pfad-Käfig: was er vom Prozess braucht ──────────────────────────────
+// `src/lib/dev-fs-jail.ts` ist rein (keine node:*-Importe, siehe Dateikopf
+// dort), also kommen die beiden Dinge, die nur der Prozess kennt, von hier:
+//
+//  • `realPath` — der Symlink-Auflöser. OHNE IHN PRÜFT DER KÄFIG NUR
+//    LEXIKALISCH, und ein Symlink im Arbeitsordner, der nach draussen zeigt,
+//    führt hinaus (am laufenden Dev-Server nachgestellt: `ln -s /etc <ws>/out`,
+//    dann `{"path":"out/hosts"}`). Rust löst an derselben Stelle auf:
+//    `resolve_existing_prefix` in filesystem.rs.
+//  • `systemDrive` — `%SystemDrive%`, damit die Windows-Sperrlisten
+//    (`C:\Windows`, `C:\Users`) auf dem richtigen Laufwerk stehen. Rust liest
+//    dieselbe Variable.
+//
+// Alle sechs Türen (fs-read/-write/-list/-search/-info und fs-read-bytes)
+// reichen dieses Objekt durch; dass keine es vergisst, hält
+// src/dev/__tests__/dev-server-shape.test.ts fest.
+const devJail: DevJailOptions = {
+  realPath: (p) => realpathSync(p),
+  systemDrive: process.env.SystemDrive,
+}
+
 // ── Dev-server SSRF guard ───────────────────────────────────────
 // The dev proxies that fetch a *user-supplied* ?url= (proxy-image,
 // proxy-download) are an SSRF sink: a markdown image / download link could
@@ -93,14 +128,34 @@ const DEV_PORT = 5273
 // all" and is handed in rather than reimplemented.
 const ssrf = createSsrfPolicy((value) => net.isIP(value))
 
-async function assertPublicUrl(urlStr: string): Promise<URL> {
-  const verdict = ssrf.checkUrl(urlStr)
-  if (verdict.kind === 'deny') throw new Error(verdict.reason)
-  if (verdict.kind === 'allow') return verdict.url
-  const addrs = await dns.promises.lookup(verdict.host, { all: true })
-  const resolved = ssrf.checkResolved(addrs.map((a) => a.address))
-  if (!resolved.ok) throw new Error(resolved.reason)
-  return verdict.url
+// Die drei Dinge, die der reine Wächter nicht selbst haben darf: das
+// IP-Orakel, der Resolver und die HTTP-Schicht. Alles echt, nichts nachgebaut —
+// derselbe Satz Funktionen, den der Test von src/dev/ssrf-fetch.ts
+// hereinreicht, damit dort NICHT eine zweite HTTP-Welt geprüft wird.
+const ssrfDeps: SsrfFetchDeps<IncomingMessage> = {
+  policy: ssrf,
+  ipFamily: (value) => net.isIP(value),
+  resolveHost: async (host) =>
+    (await dns.promises.lookup(host, { all: true })).map((a) => a.address),
+  getter: (protocol) => {
+    const impl = protocol === 'https:' ? https : http
+    return (url, options, callback) => impl.get(url, options, callback)
+  },
+}
+
+/**
+ * Der Wächter für EINE URL — und seit dem Rebind-Fix gibt er die geprüften
+ * Adressen mit heraus, statt sie wegzuwerfen.
+ *
+ * Vorher endete er mit `return verdict.url`, und der `http.get` daneben löste
+ * den Namen ein zweites Mal auf. Zwischen Prüfung und Verbindung lag damit ein
+ * Fenster, in dem ein Resolver die Antwort wechseln kann (DNS-Rebinding). Wer
+ * dieses Ergebnis benutzt, muss `createPinnedLookup(addresses, …)` an den
+ * `get` weiterreichen — sonst ist das Fenster wieder offen. Rust:
+ * `validate_public_url_addrs` + `pinned_client` (proxy.rs:213 / :290).
+ */
+async function assertPublicUrl(urlStr: string) {
+  return checkPublicUrl(urlStr, ssrfDeps)
 }
 
 // ── Request bodies ──────────────────────────────────────────────
@@ -565,36 +620,26 @@ function comfyLauncher(): Plugin {
         const imgUrl = new URL(req.url || '', 'http://localhost').searchParams.get('url')
         if (!imgUrl) { res.writeHead(400); res.end(); return }
         const deny = () => { res.writeHead(403, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: 'blocked by SSRF guard' })) }
-        // Validate the original URL, then re-validate the redirect target (a
-        // public host can 30x to an internal one).
-        assertPublicUrl(imgUrl).then((u) => {
-          const proto = u.protocol === 'https:' ? https : http
-          proto.get(imgUrl, { headers: { 'User-Agent': 'Mozilla/5.0' } }, (upstream) => {
-            if (upstream.statusCode && upstream.statusCode >= 300 && upstream.statusCode < 400 && upstream.headers.location) {
-              upstream.resume() // drain the redirect body
-              // Resolve relative redirects against the current hop (imgUrl was
-              // already validated) before re-validating + following.
-              let loc: string
-              try { loc = new URL(upstream.headers.location, imgUrl).toString() } catch { deny(); return }
-              assertPublicUrl(loc).then((lu) => {
-                const lproto = lu.protocol === 'https:' ? https : http
-                lproto.get(loc, { headers: { 'User-Agent': 'Mozilla/5.0' } }, (redir) => {
-                  res.writeHead(redir.statusCode || 200, {
-                    'Content-Type': redir.headers['content-type'] || 'image/jpeg',
-                    'Cache-Control': 'public, max-age=86400',
-                  })
-                  redir.pipe(res)
-                }).on('error', () => { res.writeHead(502); res.end() })
-              }).catch(deny)
-              return
-            }
-            res.writeHead(upstream.statusCode || 200, {
-              'Content-Type': upstream.headers['content-type'] || 'image/jpeg',
+        // Wächter auf JEDEM Sprung, Verbindung auf der geprüften Adresse: beides
+        // in `ssrfSafeGet` (src/dev/ssrf-fetch.ts), damit es nicht in drei
+        // Kopien nebeneinander steht. Hier stand vorher eine von Hand
+        // ausgeschriebene Kette, die GENAU EINEN Sprung weit prüfte — der zweite
+        // hätte auf 169.254.169.254 zeigen dürfen.
+        ssrfSafeGet(imgUrl, { headers: { 'User-Agent': 'Mozilla/5.0' } }, ssrfDeps)
+          .then(({ response }) => {
+            res.writeHead(response.statusCode || 200, {
+              'Content-Type': response.headers['content-type'] || 'image/jpeg',
               'Cache-Control': 'public, max-age=86400',
             })
-            upstream.pipe(res)
-          }).on('error', () => { res.writeHead(502); res.end() })
-        }).catch(deny)
+            response.pipe(res)
+          })
+          // 403 nur für eine Sperre, 502 für „nicht erreichbar" — vorher machte
+          // dasselbe `.catch(deny)` aus einem toten Bildserver eine
+          // Sicherheitsmeldung.
+          .catch((err) => {
+            if (err instanceof SsrfBlockedError) { deny(); return }
+            res.writeHead(502); res.end()
+          })
       })
 
       // API: Proxy download (follows redirects server-side, avoids CORS)
@@ -606,41 +651,37 @@ function comfyLauncher(): Plugin {
           return
         }
 
-        const fetchUrl = (targetUrl: string, redirectCount = 0) => {
-          if (redirectCount > 5) {
-            res.writeHead(502, { 'Content-Type': 'application/json' })
-            res.end(JSON.stringify({ error: 'Too many redirects' }))
-            return
-          }
-          // Validate every hop (initial URL + each redirect target) so a public
-          // host can't 30x the server into an internal address.
-          assertPublicUrl(targetUrl).then((u) => {
-            const protocol = u.protocol === 'https:' ? https : http
-            protocol.get(targetUrl, { headers: { 'User-Agent': 'LocallyUncensored/1.0' } }, (upstream) => {
-              if (upstream.statusCode && upstream.statusCode >= 300 && upstream.statusCode < 400 && upstream.headers.location) {
-                upstream.resume()
-                // Resolve relative redirects against the current hop (targetUrl
-                // was already validated) before the next hop re-validates.
-                let nextUrl: string
-                try { nextUrl = new URL(upstream.headers.location, targetUrl).toString() } catch { res.writeHead(502); res.end(); return }
-                fetchUrl(nextUrl, redirectCount + 1)
-                return
-              }
-              res.writeHead(upstream.statusCode || 200, {
-                'Content-Type': upstream.headers['content-type'] || 'application/octet-stream',
-                'Content-Length': upstream.headers['content-length'] || '',
-              })
-              upstream.pipe(res)
-            }).on('error', (err) => {
-              res.writeHead(502, { 'Content-Type': 'application/json' })
-              res.end(JSON.stringify({ error: err.message }))
-            })
-          }).catch(() => {
-            res.writeHead(403, { 'Content-Type': 'application/json' })
-            res.end(JSON.stringify({ error: 'blocked by SSRF guard' }))
+        // Wächter + Pin + Kette: dieselbe Schleife wie bei proxy-image, siehe
+        // src/dev/ssrf-fetch.ts. Die Handschleife, die hier stand, prüfte zwar
+        // jeden Sprung, liess aber den Namen beim Verbinden ein zweites Mal
+        // auflösen — das Rebind-Fenster.
+        ssrfSafeGet(url, { headers: { 'User-Agent': 'LocallyUncensored/1.0' }, maxHops: SSRF_MAX_HOPS }, ssrfDeps)
+          .then(({ response }) => {
+            // BEFUND, ÄLTER ALS DIESER COMMIT: hier stand
+            // `'Content-Length': response.headers['content-length'] || ''`.
+            // Antwortet die Gegenstelle chunked (also ohne Content-Length —
+            // example.com, jedes Cloudflare-Ziel, jeder Stream), ging ein
+            // LEERER Header hinaus, und der Client bricht mit „Parse Error:
+            // Empty Content-Length" ab: der Endpunkt lieferte für solche Ziele
+            // eine kaputte Antwort mit null Bytes. Nachgemessen am laufenden
+            // Dev-Server. Der Header gehört nur gesetzt, wenn es ihn gibt.
+            const headers: Record<string, string> = {
+              'Content-Type': String(response.headers['content-type'] || 'application/octet-stream'),
+            }
+            const len = response.headers['content-length']
+            if (typeof len === 'string' && len !== '') headers['Content-Length'] = len
+            res.writeHead(response.statusCode || 200, headers)
+            response.pipe(res)
           })
-        }
-        fetchUrl(url)
+          .catch((err) => {
+            if (err instanceof SsrfBlockedError) {
+              res.writeHead(403, { 'Content-Type': 'application/json' })
+              res.end(JSON.stringify({ error: 'blocked by SSRF guard' }))
+              return
+            }
+            res.writeHead(502, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ error: errorText(err) || String(err) }))
+          })
       })
 
       // ─── Remote Access stubs (dev mode) ───────────────────────────
@@ -763,8 +804,16 @@ function comfyLauncher(): Plugin {
             // 169.254.169.254 weiterleitet, ist der klassische Bypass. Rust
             // benutzt dafür `ssrf_safe_redirect_policy`; hier läuft jede
             // Weiterleitung ohnehin erneut durch diese Funktion.
+            //
+            // UND AUF DIE GEPRÜFTE ADRESSE, nicht noch einmal auf den Namen:
+            // `assertPublicUrl` gibt die freigegebenen Adressen zurück, und
+            // `pinned` nagelt die Verbindung darauf fest. Ohne das läge zwischen
+            // Prüfung und `proto.get` ein zweites DNS und damit das
+            // Rebind-Fenster (Rust: `pinned_client`, proxy.rs:290).
+            let pinned: ReturnType<typeof createPinnedLookup>
             try {
-              await assertPublicUrl(requestUrl)
+              const target = await assertPublicUrl(requestUrl)
+              pinned = createPinnedLookup(target.addresses, ssrfDeps.ipFamily)
             } catch (err) {
               failDownload(err)
               return
@@ -784,7 +833,7 @@ function comfyLauncher(): Plugin {
             }
 
             const proto = requestUrl.startsWith('https') ? https : http
-            proto.get(requestUrl, { headers }, (response) => {
+            proto.get(requestUrl, { headers, lookup: pinned }, (response) => {
               if (response.statusCode && response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
                 // `Location` darf relativ sein (RFC 7231). Vorher ging der
                 // rohe Wert zurück in `doRequest`, wo `startsWith('https')`
@@ -1542,7 +1591,7 @@ function comfyLauncher(): Plugin {
           // BEWUSST VOR dem try: ein Ausbruch ist kein Lesefehler. Er fliegt
           // durch bis zu withJsonBody, das JailEscapeError als 403 beantwortet
           // — der catch unten würde daraus eine 200 mit `error` machen.
-          const resolved = resolveFsRequestPath(body, os.homedir())
+          const resolved = resolveFsRequestPath(body, os.homedir(), devJail)
           try {
             const fs = require('fs')
             const content = fs.readFileSync(resolved, 'utf8')
@@ -1582,6 +1631,7 @@ function comfyLauncher(): Plugin {
               homeDir: os.homedir(),
               chatId,
               workingDirectory,
+              ...devJail,
             })
             const fs = require('fs')
             if (!existsSync(resolved) || !statSync(resolved).isFile()) {
@@ -1610,7 +1660,7 @@ function comfyLauncher(): Plugin {
           // VOR dem try, und hier zählt es am meisten: dieser Endpunkt schrieb
           // auf jeden Pfad, den der Prozess öffnen darf. Ausbruch → 403, und
           // zwar bevor irgendein Verzeichnis angelegt wird.
-          const resolved = resolveFsRequestPath(body, os.homedir())
+          const resolved = resolveFsRequestPath(body, os.homedir(), devJail)
           try {
             const content = bodyString(body, 'content') ?? ''
             const fs = require('fs')
@@ -1632,7 +1682,7 @@ function comfyLauncher(): Plugin {
         withJsonBody(req, res, (body) => {
           // VOR dem try: der catch unten antwortet mit 200 und leerer Liste,
           // was einen Ausbruchsversuch als „leeres Verzeichnis" tarnen würde.
-          const resolved = resolveFsRequestPath(body, os.homedir())
+          const resolved = resolveFsRequestPath(body, os.homedir(), devJail)
           try {
             const recursive = bodyFlag(body, 'recursive')
             const entries: Array<{ name: string; path: string; size: number; isDir: boolean; modified: number }> = []
@@ -1675,7 +1725,7 @@ function comfyLauncher(): Plugin {
         withJsonBody(req, res, (body) => {
           // VOR dem try, aus demselben Grund wie bei fs-list: der catch unten
           // antwortet mit 200 und leerer Trefferliste.
-          const resolved = resolveFsRequestPath(body, os.homedir())
+          const resolved = resolveFsRequestPath(body, os.homedir(), devJail)
           try {
             const pattern = bodyString(body, 'pattern')
             if (!pattern) {
@@ -1726,7 +1776,7 @@ function comfyLauncher(): Plugin {
       server.middlewares.use('/local-api/fs-info', (req, res) => {
         if (!requirePost(req, res)) return
         withJsonBody(req, res, (body) => {
-          const resolved = resolveFsRequestPath(body, os.homedir())
+          const resolved = resolveFsRequestPath(body, os.homedir(), devJail)
           try {
             const fs = require('fs')
             const stat = fs.statSync(resolved)

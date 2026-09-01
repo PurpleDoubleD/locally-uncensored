@@ -148,6 +148,34 @@ describe('der SSRF-Wächter', () => {
     expect(downloadFile).toMatch(/doRequest\(next, redirectCount \+ 1\)/)
     expect(downloadFile).not.toMatch(/doRequest\(response\.headers\.location/)
   })
+
+  it('verbindet auf die GEPRÜFTE Adresse, nicht noch einmal auf den Namen', () => {
+    // DER BEFUND (Rebind-Fenster): `assertPublicUrl` löste den Namen auf, prüfte
+    // die Adressen und warf sie weg — der `http.get` daneben löste denselben
+    // Namen ERNEUT auf. Ein Resolver, der der Prüfung eine öffentliche Adresse
+    // und dem Verbindungsaufbau 127.0.0.1 gibt, kam durch. Rust pinnt an
+    // derselben Stelle (`pinned_client` / `resolve_to_addrs`, proxy.rs:290).
+    // Das Verhalten steht in ssrf-fetch.test.ts; hier steht nur, dass die drei
+    // Holstellen dieser Datei es auch benutzen.
+    expect(viteConfig).toContain('checkPublicUrl(urlStr, ssrfDeps)')
+    const downloadFile = ausschnitt('function downloadFile(', "server.middlewares.use('/local-api/download-model'")
+    expect(downloadFile).toContain('createPinnedLookup(target.addresses, ssrfDeps.ipFamily)')
+    expect(downloadFile).toContain('proto.get(requestUrl, { headers, lookup: pinned }')
+  })
+
+  it('hat die drei handgeschriebenen Weiterleitungsschleifen auf EINE reduziert', () => {
+    // `proxy-image` folgte GENAU EINEM Sprung (der zweite hätte auf
+    // 169.254.169.254 zeigen dürfen), `proxy-download` und `downloadFile` je
+    // fünf — drei Kopien derselben Sicherheitslogik. Die geprüfte Schleife liegt
+    // jetzt in src/dev/ssrf-fetch.ts, wo ein Test sie gegen echte Server fährt.
+    for (const endpunkt of ['proxy-image', 'proxy-download']) {
+      const handler = ausschnitt(`server.middlewares.use('/local-api/${endpunkt}'`)
+      expect(handler, endpunkt).toContain('ssrfSafeGet(')
+      // Kein von Hand ausgeschriebener Hop mehr in diesen beiden Handlern.
+      expect(handler, endpunkt).not.toMatch(/statusCode >= 300/)
+      expect(handler, endpunkt).not.toContain('headers.location')
+    }
+  })
 })
 
 /**
@@ -231,13 +259,30 @@ describe('die fünf fs-Endpunkte', () => {
   })
 
   it('gehen alle fünf durch den Käfig', () => {
-    const stellen = viteConfig.match(/resolveFsRequestPath\(body, os\.homedir\(\)\)/g) ?? []
+    const stellen = viteConfig.match(/resolveFsRequestPath\(body, os\.homedir\(\), devJail\)/g) ?? []
     expect(stellen.length).toBe(5)
     for (const endpunkt of ['fs-read', 'fs-write', 'fs-list', 'fs-search', 'fs-info']) {
       const bis = endpunkt === 'fs-info' ? "server.middlewares.use('/local-api/system-info'" : null
       const handler = ausschnitt(`server.middlewares.use('/local-api/${endpunkt}'`, bis)
-      expect(handler, endpunkt).toContain('resolveFsRequestPath(body, os.homedir())')
+      expect(handler, endpunkt).toContain('resolveFsRequestPath(body, os.homedir(), devJail)')
     }
+  })
+
+  it('reichen dem Käfig den Symlink-Auflöser mit', () => {
+    // DER BEFUND: der Käfig prüfte rein lexikalisch, also glaubte er dem
+    // Pfad-STRING. `ln -s /etc <ws>/out` und dann `{"path":"out/hosts"}` gab am
+    // laufenden Dev-Server den Inhalt von /etc/hosts zurück. Der Käfig ist rein
+    // (kein node:fs), der Auflöser kommt deshalb von hier — und OHNE IHN fällt
+    // er still auf die lexikalische Prüfung zurück, also auf genau den alten
+    // Zustand. Die sechste Tür (fs-read-bytes) ruft den Käfig direkt auf.
+    expect(viteConfig).toMatch(/const devJail: DevJailOptions = \{/)
+    expect(viteConfig).toContain('realPath: (p) => realpathSync(p)')
+    expect(viteConfig).toContain('systemDrive: process.env.SystemDrive')
+    const bytes = ausschnitt("server.middlewares.use('/local-api/fs-write'", null)
+    expect(bytes).not.toContain('devResolveWithinJail')
+    const leser = ausschnitt("server.middlewares.use('/local-api/fs-read-bytes'", null)
+    expect(leser).toContain('devResolveWithinJail({')
+    expect(leser).toContain('...devJail,')
   })
 
   it('lösen den Pfad VOR dem try auf, damit ein Ausbruch kein 200 wird', () => {
