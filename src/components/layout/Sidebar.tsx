@@ -228,8 +228,29 @@ export function Sidebar() {
     setEditingId(null)
   }
 
-  const copyToClipboard = (text: string) => {
+  /**
+   * Kopieren sagte bisher nichts. Vier Knoepfe in diesem Panel schrieben in
+   * die Zwischenablage und sahen danach aus wie davor — man klickte zweimal,
+   * weil man es nicht wusste (Audit Welle 3).
+   *
+   * Das Rezept ist das aus `chat/CodeBlock.tsx`, nicht ein zweites: ein
+   * `copied`-Zustand, gesetzt beim Kopieren, nach 2000 ms zurueck, und das
+   * Glyph wechselt `Copy` → `Check`. Ein einziger Unterschied, und der ist
+   * erzwungen: CodeBlock hat EINEN Knopf und kommt mit einem Boolean aus,
+   * hier sind es vier, also merkt sich der Zustand WELCHER. Aus demselben
+   * Grund raeumt der Timer funktional auf (`c === was ? null : c`) — sonst
+   * loeschte der Timer des ersten Klicks die Rueckmeldung des zweiten.
+   *
+   * Und weil diese vier Knoepfe im Gegensatz zu CodeBlock keine
+   * Beschriftung haben, wechselt zusaetzlich der zugaengliche Name: dort
+   * traegt das Wort „Copied" die Rueckmeldung, hier muss es das Label tun.
+   */
+  const [copied, setCopied] = useState<string | null>(null)
+
+  const copyToClipboard = (text: string, was: string) => {
     navigator.clipboard.writeText(text)
+    setCopied(was)
+    setTimeout(() => setCopied((c) => (c === was ? null : c)), 2000)
   }
 
   // Auto-hide the QR panel (a) as soon as the dispatched conversation
@@ -420,8 +441,15 @@ export function Sidebar() {
               <div className="flex items-center justify-between">
                 <code className="text-[0.7rem] text-amber-400 font-mono tracking-[3px] font-bold">{passcode}</code>
                 <div className="flex items-center gap-1">
-                  <button onClick={() => copyToClipboard(passcode)} className="p-0.5 hover:bg-white/10 rounded">
-                    <Copy size={9} className="text-gray-500" />
+                  <button
+                    onClick={() => copyToClipboard(passcode, 'panel-passcode')}
+                    className="p-0.5 hover:bg-white/10 rounded"
+                    aria-label={copied === 'panel-passcode' ? 'Passcode copied' : 'Copy passcode'}
+                    title={copied === 'panel-passcode' ? 'Copied' : 'Copy passcode'}
+                  >
+                    {copied === 'panel-passcode'
+                      ? <Check size={9} className="text-gray-500" />
+                      : <Copy size={9} className="text-gray-500" />}
                   </button>
                   <button onClick={regenerateToken} className="p-0.5 hover:bg-white/10 rounded">
                     <RefreshCw size={9} className="text-gray-500" />
@@ -443,8 +471,15 @@ export function Sidebar() {
                     <code className={`text-[0.5rem] truncate flex-1 ${tunnelActive ? 'text-emerald-400' : 'text-blue-400'}`}>
                       {tunnelActive && tunnelUrl ? `${tunnelUrl}/mobile` : (mobileUrl || lanUrl)}
                     </code>
-                    <button onClick={() => copyToClipboard(tunnelActive && tunnelUrl ? `${tunnelUrl}/mobile` : (mobileUrl || lanUrl))} className="p-0.5 hover:bg-white/10 rounded shrink-0">
-                      <Copy size={9} className="text-gray-500" />
+                    <button
+                      onClick={() => copyToClipboard(tunnelActive && tunnelUrl ? `${tunnelUrl}/mobile` : (mobileUrl || lanUrl), 'panel-url')}
+                      className="p-0.5 hover:bg-white/10 rounded shrink-0"
+                      aria-label={copied === 'panel-url' ? 'Address copied' : 'Copy address'}
+                      title={copied === 'panel-url' ? 'Copied' : 'Copy address'}
+                    >
+                      {copied === 'panel-url'
+                        ? <Check size={9} className="text-gray-500" />
+                        : <Copy size={9} className="text-gray-500" />}
                     </button>
                   </>
                 )}
@@ -755,11 +790,12 @@ export function Sidebar() {
             <div className="flex items-center justify-center gap-3 w-full">
               <code className="text-2xl font-mono font-bold text-amber-700 dark:text-amber-400 tracking-[8px]">{passcode}</code>
               <button
-                onClick={() => copyToClipboard(passcode)}
+                onClick={() => copyToClipboard(passcode, 'modal-passcode')}
                 className="p-1.5 rounded hover:bg-white/10 text-gray-400 hover:text-white transition-colors"
-                title="Copy passcode"
+                aria-label={copied === 'modal-passcode' ? 'Passcode copied' : 'Copy passcode'}
+                title={copied === 'modal-passcode' ? 'Copied' : 'Copy passcode'}
               >
-                <Copy size={14} />
+                {copied === 'modal-passcode' ? <Check size={14} /> : <Copy size={14} />}
               </button>
             </div>
             {countdown && (
@@ -773,11 +809,12 @@ export function Sidebar() {
                 {tunnelActive && tunnelUrl ? `${tunnelUrl}/mobile` : (mobileUrl || lanUrl)}
               </code>
               <button
-                onClick={() => copyToClipboard(tunnelActive && tunnelUrl ? `${tunnelUrl}/mobile` : (mobileUrl || lanUrl))}
+                onClick={() => copyToClipboard(tunnelActive && tunnelUrl ? `${tunnelUrl}/mobile` : (mobileUrl || lanUrl), 'modal-url')}
                 className="p-1 rounded hover:bg-white/10 text-gray-400 hover:text-white transition-colors shrink-0"
-                title="Copy URL"
+                aria-label={copied === 'modal-url' ? 'Address copied' : 'Copy address'}
+                title={copied === 'modal-url' ? 'Copied' : 'Copy address'}
               >
-                <Copy size={12} />
+                {copied === 'modal-url' ? <Check size={12} /> : <Copy size={12} />}
               </button>
             </div>
 

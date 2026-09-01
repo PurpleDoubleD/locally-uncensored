@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { computeFit, groupModels, pickDefaultVariant } from '../ModelTiles'
+import { contrast, over } from '../../__tests__/wcag-contrast'
 import type { DiscoverModel, DownloadProgress } from '../../../api/discover'
 
 // The fit hint is a pure function of (model size, DETECTED vram) — these
@@ -90,5 +93,98 @@ describe('groupModels — quant collapsing', () => {
     expect(groups.length).toBe(2)
     expect(groups[0].map(m => m.name)).toEqual(['A Q4', 'A Q8'])
     expect(groups[1].map(m => m.name)).toEqual(['B'])
+  })
+})
+
+/**
+ * Ton-Pass (Audit Welle 3): „Too big for your GPU" → „Laeuft auf CPU,
+ * langsamer".
+ *
+ * Der Anhang des Audits nennt die Fit-Semantik dieses Grids als eine der
+ * fuenf Stellen auf Benchmark-Niveau — mit genau einer Ausnahme: „Genau eine
+ * Zeile ist falsch: `big.dot = 'bg-red-400/80'` — „laeuft langsam" ist kein
+ * Fehler und darf nicht die Fehlerfarbe tragen." Bei der Re-Verifikation
+ * stand sie eine Zeile tiefer als angegeben (:33 statt :32) und unveraendert
+ * da, samt Label.
+ *
+ * WAS SICH HIER PRUEFEN LAESST: dass die Fehlerfarbe weg ist, dass das
+ * Label nicht mehr verbietet, was der Code ausdruecklich erlaubt, und was
+ * die neue Farbe rechnerisch bringt. WAS NICHT: ob Bernstein und Orange auf
+ * einem 6px-Punkt nebeneinander unterscheidbar sind. Das ist der eine
+ * Punkt, der ins laufende Fenster gehoert — hier steht nur die Zahl.
+ *
+ * Gelesen wird der Quelltext, weil FIT_META modulprivat ist und es auch
+ * bleiben soll: es ist eine Darstellungstabelle, kein Vertrag.
+ */
+describe('Ton-Pass: „laeuft langsam" ist kein Fehler', () => {
+  const SRC = readFileSync(resolve(__dirname, '../ModelTiles.tsx'), 'utf-8')
+    .replace(/\/\*[\s\S]*?\*\//g, ' ')
+    .replace(/^\s*\/\/.*$/gm, ' ')
+  const zeile = SRC.match(/^\s*big:\s*\{[^}]*\},$/m)?.[0] ?? ''
+
+  it('die Zeile, um die es geht, existiert noch', () => {
+    expect(zeile).toContain('dot:')
+    expect(zeile).toContain('label:')
+    expect(zeile).toContain('title:')
+  })
+
+  it('der Punkt traegt keine Fehlerfarbe mehr', () => {
+    // `red-300/400/500/600` sind die Toene, mit denen diese App an rund
+    // hundert Stellen „kaputt oder wird geloescht" sagt.
+    expect(zeile).not.toMatch(/red-\d/)
+    expect(zeile).toContain('bg-orange-500/80')
+  })
+
+  it('die Leiter bleibt eine Leiter — drei Zustaende, drei Farben', () => {
+    const punkte = [...SRC.matchAll(/dot: '([^']+)'/g)].map((m) => m[1])
+    expect(punkte).toHaveLength(4)
+    expect(new Set(punkte).size).toBe(4)
+    expect(punkte[0]).toContain('emerald')
+    expect(punkte[1]).toContain('amber')
+    expect(punkte[2]).toContain('orange')
+  })
+
+  it('das Label nennt die Folge und verbietet nichts', () => {
+    // `computeFit` sagt es selbst, eine Bildschirmseite hoeher: „Never used
+    // to BLOCK a download — purely an honest hint." „Too big" las sich als
+    // Sperre, die es nie gab.
+    expect(SRC).not.toContain('Too big')
+    expect(zeile).toMatch(/label: 'Runs on CPU, slower'/)
+    expect(zeile.toLowerCase()).toContain('slower')
+  })
+
+  it('der Tooltip sagt, dass es trotzdem geht', () => {
+    expect(zeile).toMatch(/title: '[^']*works[^']*'/)
+    expect(zeile).not.toMatch(/title: '[^']*slow\.[^']*'/)
+  })
+
+  it('der Farbtausch kostet keinen Kontrast (gerechnet, nicht geschaetzt)', () => {
+    // Kachelflaeche: `bg-gray-50` hell, `bg-white/[0.03]` ueber #1e1e1e
+    // dunkel. Beide Punkte sind zu 80 % deckend.
+    const kachelDunkel = over('#ffffff', '#1e1e1e', 0.03)
+    const vorher = over('#f87171', kachelDunkel, 0.8)   // red-400/80
+    const nachher = over('#f97316', kachelDunkel, 0.8)  // orange-500/80
+    expect(contrast(vorher, kachelDunkel)).toBeCloseTo(4.05, 1)
+    expect(contrast(nachher, kachelDunkel)).toBeCloseTo(3.98, 1)
+    // Im Dunkelmodus erfuellt der Punkt 1.4.11 vorher wie nachher.
+    expect(contrast(nachher, kachelDunkel)).toBeGreaterThanOrEqual(3)
+  })
+
+  it('NEBENBEFUND, ungefixt: im Hellmodus traegt die GANZE Leiter nicht', () => {
+    // Nicht durch diese Aenderung entstanden und nicht auf einen Punkt
+    // allein zu reparieren — hier festgehalten, damit der Befund nicht
+    // wieder verlorengeht. Getragen wird die Aussage im Normalfall vom
+    // Label daneben; nur `<FitHint compact />` blendet es aus und laesst
+    // den Punkt allein stehen.
+    const hell = '#f9fafb'
+    for (const [name, farbe] of [
+      ['emerald-500', '#10b981'],
+      ['amber-500', '#f59e0b'],
+      ['orange-500', '#f97316'],
+    ] as const) {
+      const c = contrast(over(farbe, hell, 0.8), hell)
+      expect(c, `${name} im Hellmodus`).toBeLessThan(3)
+    }
+    expect(SRC).toContain('compact')
   })
 })

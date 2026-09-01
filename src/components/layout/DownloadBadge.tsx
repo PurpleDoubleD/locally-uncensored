@@ -188,7 +188,7 @@ export function DownloadBadge() {
                         {state.progress.total && state.progress.completed !== undefined && (
                           <>
                             <ProgressBar progress={prog} />
-                            <p className="text-[0.55rem] text-gray-500 mt-0.5">
+                            <p className="text-[0.55rem] text-gray-500 mt-0.5 lu-hud-num">
                               {formatBytes(state.progress.completed || 0)} / {formatBytes(state.progress.total)}
                               {prog > 0 && <span className="ml-1.5 text-blue-400">{Math.round(prog)}%</span>}
                             </p>
@@ -247,7 +247,7 @@ export function DownloadBadge() {
                       <>
                         {totalBytes > 0 && <ProgressBar progress={bundleProg} />}
                         <div className="flex items-center justify-between mt-0.5">
-                          <p className="text-[0.55rem] text-gray-500">
+                          <p className="text-[0.55rem] text-gray-500 lu-hud-num">
                             {totalBytes > 0 ? `${formatBytes(doneBytes)} / ${formatBytes(totalBytes)}` : 'Starting...'}
                             {bundleProg > 0 && <span className="ml-1.5 text-blue-400">{Math.round(bundleProg)}%</span>}
                             {bundleSpeed > 0 && <span className="ml-1.5 text-gray-400">{formatBytes(bundleSpeed)}/s</span>}
@@ -275,7 +275,7 @@ export function DownloadBadge() {
                             {files.map(({ id, d }) => (
                               <div key={id} className="flex items-center justify-between text-[0.55rem] text-gray-500">
                                 <span className="truncate flex-1 font-mono">{d.filename || id}</span>
-                                <span className="shrink-0 ml-2 flex items-center gap-1">
+                                <span className="shrink-0 ml-2 flex items-center gap-1 lu-hud-num">
                                   {d.status === 'complete' ? <span className="text-green-400">Done</span>
                                     : d.status === 'error' && isPermanentDownloadError(d.error) ? (
                                       <span className="text-red-400" title={d.error}>Unavailable</span>
@@ -331,7 +331,7 @@ export function DownloadBadge() {
                     ) : e.total > 0 ? (
                       <>
                         <ProgressBar progress={prog} />
-                        <p className="text-[0.55rem] text-gray-500 mt-0.5">
+                        <p className="text-[0.55rem] text-gray-500 mt-0.5 lu-hud-num">
                           {formatBytes(e.progress)} / {formatBytes(e.total)}
                           {prog > 0 && <span className="ml-1.5 text-blue-400">{Math.round(prog)}%</span>}
                           {e.speed > 0 && <span className="ml-1.5 text-gray-400">{formatBytes(e.speed)}/s</span>}

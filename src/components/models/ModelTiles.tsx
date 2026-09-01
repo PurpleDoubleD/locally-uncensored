@@ -27,10 +27,28 @@ export function computeFit(sizeGB: number | undefined, vramGb: number | null): F
 
 // Color lives ONLY in the tiny status dot — labels stay neutral gray so the
 // grid doesn't turn into a traffic-light wall (David, 2026-07-17 design pass).
+//
+// `big` war bis zum Ton-Pass (Audit Welle 3) `bg-red-400/80` mit dem Label
+// "Too big for your GPU" — und beides war eine Falschaussage. Rot heisst in
+// dieser App an rund hundert Stellen „kaputt oder wird geloescht"; ein Modell,
+// das auf CPU und RAM ausweicht, ist keins von beidem, es ist LANGSAMER. Und
+// "too big" liest sich als Verbot, obwohl `computeFit` ausdruecklich nie
+// blockiert (siehe oben: "Never used to BLOCK a download").
+//
+// Die Leiter bleibt eine Leiter — Folge, nicht Fehlergrad: schnell (emerald)
+// → langsamer (amber) → deutlich langsamer (orange). Orange ist die naechste
+// Stufe derselben warmen Reihe und gehoert keinem der roten Fehlertokens
+// (red-300/400/500/600) an, die die App sonst benutzt.
+// Gerechnet auf der Kachelflaeche (`bg-gray-50` hell, `bg-white/[0.03]` ueber
+// #1e1e1e = #252525 dunkel): red-400/80 lag bei 4.05:1 dunkel und 2.20:1 hell,
+// orange-500/80 liegt bei 3.98:1 und 2.24:1 — die Aussage aendert sich, der
+// Kontrast praktisch nicht. (Dass die HELLE Seite fuer die ganze Leiter unter
+// 3:1 liegt, ist ein aelterer, eigener Befund; er betrifft alle vier Punkte
+// gleich und wird hier nicht einseitig fuer einen davon repariert.)
 const FIT_META: Record<Fit, { dot: string; label: string; title: string }> = {
   fits: { dot: 'bg-emerald-500/80', label: 'Runs on your PC', title: 'Fits fully in your GPU memory. Fast.' },
   tight: { dot: 'bg-amber-500/80', label: 'Tight fit', title: 'Barely fits. Parts may spill to RAM and slow it down.' },
-  big: { dot: 'bg-red-400/80', label: 'Too big for your GPU', title: 'Bigger than your GPU memory. Runs mostly on CPU/RAM, slow. You can still try it.' },
+  big: { dot: 'bg-orange-500/80', label: 'Runs on CPU, slower', title: 'Bigger than your GPU memory, so most of it runs on CPU and RAM. It works, just slower.' },
   unknown: { dot: 'bg-gray-400 dark:bg-gray-600', label: '', title: 'Hardware not detected yet.' },
 }
 

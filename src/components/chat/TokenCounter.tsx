@@ -87,7 +87,9 @@ export function TokenCounter() {
           style={{ width: `${Math.min(ratio * 100, 100)}%` }}
         />
       </div>
-      <span className="text-[0.55rem] font-mono tabular-nums">
+      {/* `font-mono tabular-nums` war dasselbe Rezept, nur an der Call-Site
+          buchstabiert. `.lu-hud-num` ist die eine Stelle, an der es steht. */}
+      <span className="text-[0.55rem] lu-hud-num">
         {formatK(usedTokens)}/{formatK(maxTokens)}
       </span>
     </div>

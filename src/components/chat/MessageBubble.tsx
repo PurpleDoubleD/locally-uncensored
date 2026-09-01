@@ -249,7 +249,7 @@ function MessageBubbleImpl({ message, onRegenerate, onEdit, pendingApprovalId, o
                 )
                 .sort((a, b) => a.timestamp - b.timestamp),
             )
-              .map((group) => {
+              .map((group, gruppenIndex, gruppen) => {
                 // Consecutive tool calls render as ONE band that morphs from
                 // tool to tool and collapses to "N steps" when done (David
                 // 2026-07-31) instead of a chip per call.
@@ -290,9 +290,14 @@ function MessageBubbleImpl({ message, onRegenerate, onEdit, pendingApprovalId, o
                   // a stray ool_call>) renders nothing, not an empty bubble.
                   const clean = cleanBlocks.get(block.id) ?? ''
                   if (!clean) return null
+                  // Im Agent-Modus waechst der Text im LETZTEN Block, nicht
+                  // in message.content — der Fallback unten rendert dann gar
+                  // nichts. Also haengt der Balken hier, und nur am Schluss
+                  // der Kette, damit nicht jeder aeltere Block einen bekommt.
+                  const istSchluss = gruppenIndex === gruppen.length - 1
                   return (
                     <div key={block.id} className="px-1 py-0.5">
-                      <div className="text-[0.8rem] leading-relaxed">
+                      <div className={'text-[0.8rem] leading-relaxed' + (isStreaming && istSchluss ? ' lu-caret' : '')}>
                         <MarkdownRenderer content={clean} />
                       </div>
                     </div>
@@ -376,7 +381,12 @@ function MessageBubbleImpl({ message, onRegenerate, onEdit, pendingApprovalId, o
               // fallback, or the turn renders blank.
               if (hasRealAnswerBlocks) return null
               return (
-                <div className="text-[0.78rem] leading-relaxed">
+                // `lu-caret` haengt den blinkenden Balken per CSS an den
+                // LETZTEN Block dieser Antwort (index.css). Die Klasse ist
+                // eine reine Funktion des vorhandenen `isStreaming`-Props —
+                // kein Zustand, kein Timer, keine Subscription, also auch
+                // kein Rerender, den der Stream nicht ohnehin ausloest.
+                <div className={'text-[0.78rem] leading-relaxed' + (isStreaming ? ' lu-caret' : '')}>
                   <MarkdownRenderer content={cleanContent} />
                   {/* Cut-off marker: a turn the model did not finish on its own
                       terms (length budget / dropped connection). The benchmark

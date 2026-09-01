@@ -103,7 +103,7 @@ export function ABCompare() {
           <div className="px-3 py-1.5 border-b border-white/5 flex items-center justify-between">
             <span className="text-[0.6rem] font-medium text-red-400">{modelA || 'Select Model A'}</span>
             {statsA && (
-              <div className="flex items-center gap-2 text-[0.5rem] text-gray-500">
+              <div className="flex items-center gap-2 text-[0.5rem] text-gray-500 lu-hud-num">
                 <span className="flex items-center gap-0.5"><Zap size={8} />{statsA.tokensPerSec.toFixed(1)} t/s</span>
                 <span className="flex items-center gap-0.5"><Clock size={8} />{(statsA.timeMs / 1000).toFixed(1)}s</span>
                 <span className="flex items-center gap-0.5"><Hash size={8} />{statsA.tokens}</span>
@@ -128,7 +128,7 @@ export function ABCompare() {
           <div className="px-3 py-1.5 border-b border-white/5 flex items-center justify-between">
             <span className="text-[0.6rem] font-medium text-blue-400">{modelB || 'Select Model B'}</span>
             {statsB && (
-              <div className="flex items-center gap-2 text-[0.5rem] text-gray-500">
+              <div className="flex items-center gap-2 text-[0.5rem] text-gray-500 lu-hud-num">
                 <span className="flex items-center gap-0.5"><Zap size={8} />{statsB.tokensPerSec.toFixed(1)} t/s</span>
                 <span className="flex items-center gap-0.5"><Clock size={8} />{(statsB.timeMs / 1000).toFixed(1)}s</span>
                 <span className="flex items-center gap-0.5"><Hash size={8} />{statsB.tokens}</span>

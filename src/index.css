@@ -525,6 +525,13 @@ input[type="range"]::-webkit-slider-thumb {
   padding: 0 8px;
   border: 1px solid transparent;
   border-radius: var(--radius-control);
+  /* Bezugsrahmen fuer alles, was das Rezept UEBER das Control legt — heute
+     genau eins: der Aufnahme-Puls des Mikrofons weiter unten. Das ist
+     Geometrie, gilt also fuer beide Rezepte und traegt keine Abgrenzung
+     gegen das betonte. Die beiden Aufklapper der Leiste (Plugins,
+     Modellwaehler) haengen ihre Menues als GESCHWISTER des Knopfes auf,
+     nicht darin — sie bekommen davon nichts ab. */
+  position: relative;
   background-color: transparent;
   color: rgb(156 163 175);
   font-size: 0.6rem;
@@ -556,6 +563,46 @@ input[type="range"]::-webkit-slider-thumb {
   width: var(--control-h-sm);
   padding: 0;
 }
+
+/* Der Aufnahme-Puls. Ein Control, das gerade zuhoert, sagt das lauter als
+   „aktiv" — aber nicht in Rot: das Mikrofon nimmt auf, es ist nicht kaputt,
+   und Rot heisst in dieser App an rund hundert Stellen „kaputt oder wird
+   geloescht" (dieselbe Begruendung, aus der Stop neutral wurde, siehe oben).
+   Getragen wird die Aussage ohnehin nicht von diesem Ring allein:
+   `aria-pressed` setzt den Behaelter, das aria-label wechselt auf „Stop
+   recording", und der Platzhalter im Eingabefeld schreibt „Recording..."
+   aus. Trotzdem ist Aufnahme ein Zustand, den man auf einen Blick sehen
+   koennen muss — deshalb die VOLLE Akzentkante und nicht der halb
+   durchsichtige --color-lu-accent-ring, der hier auf 2.78:1 (dunkel) und
+   1.60:1 (hell) gekommen waere. Die Aufteilung ist die des
+   Primaer-Rezepts weiter unten: Akzent im Dunkelmodus, --accent-edge im
+   Hellmodus, wo die Flaeche selbst zu hell steht.
+   Gerechnet auf der Composer-Flaeche (`bg-white/[0.03]` ueber #1e1e1e =
+   #252525 / `bg-gray-50` = #f9fafb) und auf dem aktiven Behaelter, den
+   `aria-pressed` darunterlegt (#343434 / #edeeee):
+     dunkel  #a094f8  5.90:1 auf der Flaeche, 4.79:1 auf dem Behaelter
+     hell    #8b7cf0  3.22:1 auf der Flaeche, 2.90:1 auf dem Behaelter
+   Der letzte Wert liegt knapp unter den 3:1 aus 1.4.11 — hinnehmbar aus
+   demselben Grund, aus dem es der aria-pressed-Rand daneben ist: der Ring
+   ist Zugabe, nie das einzige Signal. Vorher lag hier ein 2px-Ring in
+   Rot mit 5.54:1 (dunkel) / 3.60:1 (hell); lauter, aber mit der falschen
+   Aussage.
+   Takt 1200 ms = --motion-slow x 4, genau die Dauer, die vorher als
+   framer-motion-Literal im Knopf stand; jetzt CSS, damit
+   „Bewegung reduzieren" ihn ueberhaupt erreichen kann. */
+@keyframes lu-control-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.3; transform: scale(1.12); }
+}
+.lu-control__pulse {
+  position: absolute;
+  inset: 0;
+  border: 1px solid var(--color-lu-accent);
+  border-radius: inherit;
+  pointer-events: none;
+  animation: lu-control-pulse calc(var(--motion-slow) * 4) var(--motion-ease) infinite;
+}
+.light .lu-control__pulse { border-color: var(--color-lu-accent-edge); }
 
 .lu-control:not(.lu-primary):hover:not(:disabled) {
   background-color: rgba(255, 255, 255, 0.07);
@@ -683,6 +730,63 @@ input[type="range"]::-webkit-slider-thumb {
 }
 .lu-band-dot { animation: lu-band-dot 1.2s ease-in-out infinite; }
 
+/* ──────────────────────────────────────────────────────────────────
+   .lu-caret — der Herzschlag des Streams (Audit Welle 3, §4 Befund 7:
+   „Streaming ist kein eigener Zustand ... Das ist der eine Moment, fuer
+   den diese App existiert. Er hat keine Choreografie.").
+
+   Angesetzt wird am LETZTEN Block der gerenderten Antwort, nicht an einem
+   eigenen Element im Baum. Der Grund ist der teuerste Pfad der App: der
+   Balken laeuft waehrend des Streamens, also bei JEDEM Token. Ein
+   `<span>`, das React pro Token neu einhaengt, wuerde die Animation bei
+   jedem Token von vorn starten (ein zuckender statt eines blinkenden
+   Balkens) — ein Pseudoelement gehoert React nicht, es ueberlebt jede
+   Reconciliation des Textknotens darueber und laeuft im Compositor
+   durch. Und das Blinken ist deshalb KEIN JS-Timer: kein setInterval,
+   kein useState, kein requestAnimationFrame, also auch kein Rerender,
+   den es ohne diesen Balken nicht schon gaebe.
+
+   `.markdown-content` ist die Wurzel, die MarkdownRenderer immer setzt;
+   `> :last-child` ist der letzte Block darin, also genau das Ende der
+   zuletzt geschriebenen Zeile. Das ist auch der Grund, warum der Balken
+   beim Absatzwechsel mitspringt, statt am alten Absatz haengen zu
+   bleiben.
+
+   Geometrie: 2px breit (Hairline), `1em` hoch — der Audit nennt 2x14px,
+   und 1em IST 14,35px an der Stelle, an der der Balken steht
+   (`text-[0.78rem]` auf 18,4px Wurzel). In em statt in px, damit er der
+   Schriftgroesse folgt und nicht bei der naechsten Skalenaenderung
+   danebensteht.
+
+   Farbe: `currentColor`, also die Textfarbe des Absatzes, an dem er
+   haengt. Damit fuehrt dieser Balken KEINE neue Farbe ein — er erbt die,
+   die dort schon gemessen ist: #e5e7eb auf #1e1e1e = 13.47:1 (dunkel),
+   #1f2937 auf #ffffff = 14.68:1 (hell). Beides weit ueber den 3:1, die
+   1.4.11 fuer ein Nicht-Text-Signal dieser Groesse verlangt.
+
+   Takt: aus der vorhandenen Motion-Leiter gerechnet, nicht als fuenfte
+   Zahl danebengeschrieben — `--motion-slow` an und `--motion-slow` aus,
+   also 300/300 ms. Der Audit schlaegt 133/133 vor; das waeren 3,8
+   Blitze pro Sekunde, direkt an der Schwelle aus WCAG 2.3.1, und neben
+   laufendem Text liest es sich als Stroboskop. 1,67 Hz sagt dasselbe
+   („hier kommt noch etwas") und flimmert nicht.
+   ────────────────────────────────────────────────────────────────── */
+@keyframes lu-caret-blink {
+  0%, 49.99% { opacity: 1; }
+  50%, 100% { opacity: 0; }
+}
+.lu-caret .markdown-content > :last-child::after {
+  content: '';
+  display: inline-block;
+  width: 2px;
+  height: 1em;
+  margin-left: 2px;
+  vertical-align: -0.15em;
+  border-radius: 1px;
+  background-color: currentColor;
+  animation: lu-caret-blink calc(var(--motion-slow) * 2) linear infinite;
+}
+
 /* ─────────────────────────────────────────────────────────────────────
    „Bewegung reduzieren" respektieren (Audit Welle 2)
 
@@ -732,5 +836,18 @@ input[type="range"]::-webkit-slider-thumb {
   .animate-pulse {
     animation-duration: 3s !important;
     animation-iteration-count: infinite !important;
+  }
+
+  /* GEGENAUSNAHME: der Caret steht STILL, statt kurz zu zucken. Er ist
+     beides zugleich — der Balken selbst ist Auskunft („der Stream laeuft
+     noch"), sein Blinken ist Zierde. Ohne diese Zeile griffe die Regel
+     ganz oben und machte aus 300/300 ms ein einzelnes 120-ms-Zucken beim
+     Erscheinen, danach stuende er ohnehin. Hier faellt nur der
+     Animations-NAME weg; `opacity: 1` aus der Basisregel bleibt, der
+     Balken ist also sichtbar und ruhig. Deshalb kein !important: die
+     Regel oben setzt Dauer, Zaehler und Kurve, nie den Namen. */
+  .lu-caret .markdown-content > :last-child::after,
+  .lu-control__pulse {
+    animation-name: none;
   }
 }

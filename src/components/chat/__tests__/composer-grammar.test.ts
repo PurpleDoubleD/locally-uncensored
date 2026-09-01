@@ -35,10 +35,24 @@
  * `rounded-*`/`bg-*`/`border-*`/`h-[..]`/`px-*` in die Leiste haengt,
  * faellt hier durch (Mutationssonde, siehe Commit-Text).
  *
+ * NACHGEZOGEN (Welle 3, Ton- und Craft-Paket): `chat/VoiceButton.tsx`.
+ * Der Composer-Commit 8198495f hatte das Mikrofon ausdruecklich GEMELDET
+ * statt geaendert — „die einzige verbliebene eigene Formsprache in der
+ * Chat-Leiste", Datei lag ausserhalb des damaligen Auftrags. Bei der
+ * Re-Verifikation stand es noch genau so da: `p-1.5 rounded-lg` (Radius
+ * 9,2 statt 8, Polster 6,9 statt der 26x26-Box), im Aufnahmezustand ein
+ * rotes Pill mit 2px-Ring, im Transkribieren-Zustand ein eigenes BLAUES
+ * Rezept (`bg-blue-500/20 border-blue-500/40 text-blue-400`) — dieselbe
+ * Farbe, die der Fokusring fuehrt. Drei Zustaende, drei Rezepte, in einem
+ * einzigen Knopf.
+ *
+ * Der Test WAECHST deshalb mit, statt umgangen zu werden: VoiceButton ist
+ * jetzt eine gleichberechtigte Region, die Zaehlung geht von neun auf
+ * zwoelf (die drei Zustaende des Mikrofons rendern drei getrennte
+ * `<button>`), und die drei Knoepfe laufen durch dieselbe
+ * Formsprachen-Pruefung wie alle anderen.
+ *
  * Ausdruecklich NICHT geprueft, weil ausserhalb dieser Dateien:
- *   • `chat/VoiceButton.tsx` — das Mikrofon ist die einzige verbliebene
- *     eigene Formsprache in der Chat-Leiste. Datei lag ausserhalb des
- *     Auftrags, gemeldet statt blind geaendert.
  *   • `chat/CodexModeDropdown.tsx` — das einzige Control der CODE-Leiste,
  *     eigene Datei, und `the-code-composer-is-one-quiet-row.test.ts` pinnt
  *     seine Klassen bereits.
@@ -54,12 +68,26 @@ import { contrast, over, rgbToHex } from '../../__tests__/wcag-contrast'
 const here = dirname(fileURLToPath(import.meta.url))
 const read = (rel: string) => readFileSync(resolve(here, rel), 'utf8')
 
+/**
+ * Kommentare raus. Die Begruendungen im Quelltext ZITIEREN die alten
+ * Klassen (`bg-blue-500/20`), damit der naechste Leser weiss, was da
+ * stand — ein Scanner, der Kommentare mitliest, meldet genau diese
+ * Erklaerung als Verstoss. Gleiches Werkzeug wie in
+ * `components/__tests__/hellmodus-restluecken.test.ts`.
+ */
+function ohneKommentare(src: string): string {
+  return src.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/^\s*\/\/.*$/gm, ' ')
+}
+
 const INPUT = read('../ChatInput.tsx')
+const VOICE = read('../VoiceButton.tsx')
 const VIEW = read('../ChatView.tsx')
 const PLUGINS = read('../PluginsDropdown.tsx')
 const SELECTOR = read('../../models/ModelSelector.tsx')
 const SHELL = read('../../layout/AppShell.tsx')
 const CSS = read('../../../index.css')
+/** VoiceButton ohne seine Begruendungen — siehe `ohneKommentare` oben. */
+const MIC = ohneKommentare(VOICE)
 
 // ── Quelltext-Werkzeug ───────────────────────────────────────────────
 
@@ -168,8 +196,15 @@ const SELECTOR_TRIGGER = SELECTOR.slice(
   SELECTOR.indexOf('{/* ── Dropdown ── */}'),
 )
 
+/**
+ * Das Mikrofon haengt als KOMPONENTE in der Leiste (`<VoiceButton />` in
+ * ChatInput), nicht als `<button>` — deshalb hat die Zaehlung ueber
+ * INPUT_BAR es nie gesehen. Die ganze Datei ist die Region: sie enthaelt
+ * nichts ausser diesem einen Control in seinen drei Zustaenden.
+ */
 const REGIONS: Array<[string, string]> = [
   ['ChatInput, Aktionszeile', INPUT_BAR],
+  ['VoiceButton, drei Zustaende', VOICE],
   ['ChatView, composerActions', VIEW_ACTIONS],
   ['PluginsDropdown, Trigger', PLUGINS_TRIGGER],
   ['ModelSelector, Trigger', SELECTOR_TRIGGER],
@@ -189,14 +224,23 @@ describe('die Abschnitte, die dieser Test liest, existieren ueberhaupt', () => {
     }
   })
 
-  it('findet zusammen genau die neun Controls der Leiste', () => {
-    // Paperclip · Think · Stop · Send (ChatInput) · Docs · Tools
-    // (ChatView) · Plugins-Icon · Plugins-Label (PluginsDropdown) ·
-    // Modellwaehler (ModelSelector). Der Dismiss-Knopf im Tools-Menue
-    // liegt ausserhalb von composerActions. Aendert sich die Zahl, ist ein
-    // Control dazugekommen oder verschwunden — beides gehoert angesehen.
+  it('findet zusammen genau die zwoelf Controls der Leiste', () => {
+    // Paperclip · Think · Stop · Send (ChatInput) · Mikrofon nicht
+    // verfuegbar · Mikrofon transkribiert · Mikrofon bereit/aufnehmend
+    // (VoiceButton) · Docs · Tools (ChatView) · Plugins-Icon ·
+    // Plugins-Label (PluginsDropdown) · Modellwaehler (ModelSelector).
+    // Der Dismiss-Knopf im Tools-Menue liegt ausserhalb von
+    // composerActions. Aendert sich die Zahl, ist ein Control
+    // dazugekommen oder verschwunden — beides gehoert angesehen.
     const all = REGIONS.flatMap(([, region]) => controlClassNames(region))
-    expect(all).toHaveLength(9)
+    expect(all).toHaveLength(12)
+  })
+
+  it('das Mikrofon steckt wirklich in dieser Leiste, nicht irgendwo sonst', () => {
+    // Sonst pruefte die Region oben eine Datei, die mit dem Composer
+    // nichts mehr zu tun hat, und niemand merkte es.
+    expect(INPUT_BAR).toContain('<VoiceButton')
+    expect(controlClassNames(VOICE)).toHaveLength(3)
   })
 })
 
@@ -301,7 +345,12 @@ describe('das neutrale Rezept ist genau einmal definiert', () => {
     // Ueberfahren grau. Jede Regel, die Farbe/Flaeche setzt, traegt daher
     // `:not(.lu-primary)`; die Geometrie-Regeln ausdruecklich nicht, die
     // sind ja der gemeinsame Teil.
-    const skinRules = [...CSS.matchAll(/^(\.light )?\.lu-control(?!--)[^{\n]*\{([^}]*)\}/gm)]
+    // `--` (Modifikator, gleiche Form) und `__` (Element IM Control, heute
+    // der Aufnahme-Ring) sind ausgenommen: `:not(.lu-primary)` grenzt das
+    // neutrale Rezept gegen das betonte ab, und beide Fragen stellen sich
+    // nur fuer Regeln, die auf DEM Control selbst landen. Ein Kindelement
+    // erbt die Abgrenzung nicht und kann sie auch nicht tragen.
+    const skinRules = [...CSS.matchAll(/^(\.light )?\.lu-control(?!--|__)[^{\n]*\{([^}]*)\}/gm)]
       .map((m) => ({ selector: m[0].slice(0, m[0].indexOf('{')).trim(), body: m[2] }))
       .filter(({ body }) => /(^|\s)(color|background-color|border-color)\s*:/.test(body))
 
@@ -410,5 +459,100 @@ describe('der Zustand kommt aus ARIA, nicht aus einer zweiten Klassenkette', () 
   it('der Modellwaehler meldet Laden als aria-busy statt als blauem Leuchten', () => {
     expect(SELECTOR_TRIGGER).toMatch(/aria-busy=\{isModelLoading\}/)
     expect(SELECTOR_TRIGGER).not.toContain('shadow-[0_0_6px')
+  })
+
+  it('das Mikrofon meldet Aufnahme als aria-pressed, nicht als rotem Pill', () => {
+    expect(VOICE).toMatch(/aria-pressed=\{isRecording\}/)
+    // Rot heisst in dieser App „kaputt oder wird geloescht". Ein Mikrofon,
+    // das gerade zuhoert, ist keins von beidem — dieselbe Begruendung, aus
+    // der Stop neutral wurde. Geprueft werden die KNOEPFE, nicht die Datei:
+    // die Fehlerblase darunter ist ein echter Fehler und behaelt ihr Rot.
+    expect(controlClassNames(VOICE).join(' ')).not.toMatch(/red-\d/)
+    expect(MIC).not.toContain('bg-red-100')
+    expect(MIC).not.toContain('border-red-500')
+    expect(MIC).toContain('bg-red-600/95')
+  })
+
+  it('das Mikrofon meldet Transkribieren als aria-busy, nicht als blauem Pill', () => {
+    expect(VOICE).toContain('aria-busy="true"')
+    // Das war die einzige Stelle der Leiste, die den Fokusring-Blau noch
+    // als Zustandsfarbe zweitverwendet hat. Ohne `ohneKommentare` faende
+    // dieser Ausdruck die Begruendung im Quelltext, die die alten Klassen
+    // ZITIERT — derselbe Stolperstein wie in hellmodus-restluecken.test.ts.
+    expect(MIC).not.toMatch(/blue-\d/)
+  })
+
+  it('der Aufnahme-Puls ist ein Rezept in index.css, kein Literal am Knopf', () => {
+    // Vorher: eine framer-motion-Schleife am Element
+    // (`animate={{ scale: [1, 1.15, 1] }}`, `repeat: Infinity`), die an
+    // CSS vorbei animiert und deshalb von „Bewegung reduzieren" gar nicht
+    // erreicht werden KONNTE.
+    expect(VOICE).toContain('lu-control__pulse')
+    expect(VOICE).not.toContain('repeat: Infinity')
+    expect(CSS).toMatch(/^\.lu-control__pulse\s*\{/m)
+    expect(CSS).toMatch(/@keyframes lu-control-pulse/)
+    // Dauer aus der Motion-Leiter gerechnet, nicht als fuenfte Zahl
+    // danebengeschrieben.
+    const puls = CSS.match(/^\.lu-control__pulse\s*\{[^}]*\}/m)?.[0] ?? ''
+    expect(puls).toMatch(/animation:\s*lu-control-pulse calc\(var\(--motion-slow\) \* 4\)/)
+    // Und „Bewegung reduzieren" haelt ihn an.
+    const reduce = CSS.slice(CSS.indexOf('@media (prefers-reduced-motion: reduce)'))
+    expect(reduce).toContain('.lu-control__pulse')
+  })
+
+  it('der Puls braucht den Bezugsrahmen, den die Basisregel setzt', () => {
+    // `inset: 0` haengt am naechsten positionierten Vorfahren. Faellt
+    // `position: relative` aus `.lu-control`, legt sich der Ring ueber die
+    // ganze Composer-Zeile statt ueber den 26x26-Knopf.
+    const base = CSS.match(/^\.lu-control\s*\{[^}]*\}/m)?.[0] ?? ''
+    expect(base).toMatch(/position:\s*relative/)
+    const puls = CSS.match(/^\.lu-control__pulse\s*\{[^}]*\}/m)?.[0] ?? ''
+    expect(puls).toMatch(/position:\s*absolute/)
+    expect(puls).toMatch(/inset:\s*0/)
+  })
+})
+
+describe('der Aufnahme-Ring ist gerechnet, nicht geschaetzt', () => {
+  // Der Grund, auf dem der Ring wirklich steht: die Composer-Flaeche, und
+  // darunter der Behaelter, den `aria-pressed` im Aufnahmezustand setzt.
+  const paneDark = SHELL.match(/dark:bg-\[(#[0-9a-fA-F]{6})\][^"]*ring-1/)?.[1] ?? ''
+  const grundDunkel = over('#ffffff', paneDark, 0.03)
+  const grundHell = '#f9fafb'
+  const behaelterDunkel = over('#ffffff', grundDunkel, 0.07)
+  const behaelterHell = over('#000000', grundHell, 0.05)
+
+  /** Ein `--color-*: #rrggbb;`-Token aus dem @theme-Block. */
+  function token(name: string): string {
+    const m = CSS.match(new RegExp(`--${name}:\\s*(#[0-9a-fA-F]{6})\\s*;`))
+    if (!m) throw new Error(`Token fehlt: --${name}`)
+    return m[1]
+  }
+
+  it('er nimmt Tokens, keine Literale', () => {
+    const puls = CSS.match(/^\.lu-control__pulse\s*\{[^}]*\}/m)?.[0] ?? ''
+    expect(puls).toMatch(/border:\s*1px solid var\(--color-lu-accent\)/)
+    expect(CSS).toMatch(/^\.light \.lu-control__pulse \{ border-color: var\(--color-lu-accent-edge\); \}$/m)
+    expect(puls).not.toMatch(/#[0-9a-fA-F]{6}/)
+  })
+
+  it('und beide Modi kommen auf der Flaeche ueber 3:1 (WCAG 1.4.11)', () => {
+    expect(contrast(token('color-lu-accent'), grundDunkel)).toBeGreaterThanOrEqual(3)
+    expect(contrast(token('color-lu-accent-edge'), grundHell)).toBeGreaterThanOrEqual(3)
+  })
+
+  it('der halbdurchsichtige Ring-Token waere hier zu schwach gewesen', () => {
+    // Festgehalten, damit niemand ihn „der Konsistenz halber" zurueckdreht:
+    // --color-lu-accent-ring ist rgba(...,0.55) und faellt auf dieser
+    // Flaeche unter jede Schwelle, die es gibt.
+    const ring = over(token('color-lu-accent'), grundDunkel, 0.55)
+    expect(contrast(ring, grundDunkel)).toBeLessThan(3)
+  })
+
+  it('auf dem aktiven Behaelter bleibt der dunkle Modus drueber', () => {
+    expect(contrast(token('color-lu-accent'), behaelterDunkel)).toBeGreaterThanOrEqual(3)
+    // Der helle liegt knapp darunter (2.90:1) und ist deshalb bewusst nur
+    // Zugabe — genau wie der aria-pressed-Rand, den index.css schon so
+    // begruendet. Der Wert steht hier, damit er nicht unbemerkt weiter faellt.
+    expect(contrast(token('color-lu-accent-edge'), behaelterHell)).toBeGreaterThan(2.8)
   })
 })

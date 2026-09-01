@@ -20,7 +20,7 @@ export function BenchmarkButton({ modelName }: Props) {
   return (
     <div className="flex items-center gap-1.5">
       {latestSpeed !== null && (
-        <span className="text-[0.55rem] text-gray-400 font-mono flex items-center gap-0.5" title={`Latest run: ${latestSpeed} tokens/sec`}>
+        <span className="text-[0.55rem] text-gray-400 lu-hud-num flex items-center gap-0.5" title={`Latest run: ${latestSpeed} tokens/sec`}>
           <Zap size={9} />
           {latestSpeed} t/s
         </span>
@@ -28,7 +28,7 @@ export function BenchmarkButton({ modelName }: Props) {
       {isThisRunning ? (
         <button
           onClick={stopBenchmark}
-          className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-red-500/15 text-red-400 text-[0.55rem] hover:bg-red-500/25 transition-colors"
+          className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-red-500/15 text-red-400 text-[0.55rem] lu-hud-num hover:bg-red-500/25 transition-colors"
           title="Stop benchmark"
         >
           <Square size={9} />
@@ -78,7 +78,7 @@ export function BenchmarkLeaderboard() {
               <div className="flex-1 min-w-0">
                 <div className="flex items-center justify-between mb-0.5">
                   <span className="text-[0.6rem] text-gray-300 truncate">{entry.model}</span>
-                  <span className="text-[0.55rem] text-gray-400 font-mono shrink-0 ml-2">{entry.avgTps} t/s</span>
+                  <span className="text-[0.55rem] text-gray-400 lu-hud-num shrink-0 ml-2">{entry.avgTps} t/s</span>
                 </div>
                 <div className="w-full h-1 rounded-full bg-white/5 overflow-hidden">
                   <div
@@ -86,7 +86,7 @@ export function BenchmarkLeaderboard() {
                     style={{ width: `${barWidth}%` }}
                   />
                 </div>
-                <div className="flex items-center flex-wrap gap-x-2 mt-0.5 text-[0.5rem] font-mono text-gray-600">
+                <div className="flex items-center flex-wrap gap-x-2 mt-0.5 text-[0.5rem] lu-hud-num text-gray-600">
                   {entry.avgTokens !== null && <span>{entry.avgTokens} tok</span>}
                   {entry.accuracy !== null && (
                     <span className={entry.accuracy < 1 ? 'text-amber-400' : 'text-emerald-400'}>
