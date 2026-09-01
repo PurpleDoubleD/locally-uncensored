@@ -62,6 +62,7 @@ import { onboardingSkin } from './onboarding-skin'
 import { useBackendScan } from './use-backend-scan'
 import { useInstallerFleet } from './use-installer-fleet'
 import { isTauri } from './onboarding-host'
+import { hostWindow } from '../../lib/host-window'
 import { BackendsStep } from './BackendsStep'
 import { ComfyStep } from './ComfyStep'
 import { ModelsStep } from './ModelsStep'
@@ -100,7 +101,19 @@ export function Onboarding() {
   const fleet = useInstallerFleet()
   const { selectedBackend, detectedBackends, runDetection } = scan
 
-  const finish = () => {
+  // Läuft der Assistent in seinem eigenen kleinen Fenster (Erststart,
+  // `src-tauri/src/onboarding_window.rs`) oder im Hauptfenster (Browser-
+  // Vorschau, Notweg ohne eigenes Fenster)? Die Antwort kommt aus
+  // `lib/host-window.ts`, nirgends sonst.
+  const ownWindow = hostWindow === 'onboarding'
+  // Die Übergabe im eigenen Fenster: nach dem Marker bootet das Hauptfenster,
+  // und dessen `show_window` schließt dieses hier. Bis dahin sagt der Knopf,
+  // was gerade passiert.
+  // EIN Zustand, nicht zwei: Phase und Fehler gehören zusammen (AS-09 zählt
+  // die `useState` des Ordners und darf nicht steigen).
+  const [handover, setHandover] = useState<{ phase: 'idle' | 'running' } | { phase: 'failed'; error: string }>({ phase: 'idle' })
+
+  const finish = async () => {
     updateSettings({ onboardingDone: true })
     // B4: a brand new install must NOT be greeted by "what is new in 2.6.3"
     // right after setting the app up for the first time. Stamping the current
@@ -108,15 +121,29 @@ export function Onboarding() {
     // an upgrade never runs this wizard, so its flag stays null and it gets the
     // notes. This is the ONLY place that stamps without showing anything.
     useReleaseNotesStore.getState().markNotesSeen(currentVersion)
+    if (!isTauri) return
     // Persist to filesystem so NSIS updates don't reset onboarding.
-    //
-    // Level (a): silent on purpose. updateSettings() above is what actually
-    // ends the wizard, and it is persisted. This only writes the recovery
-    // marker, which AppShell re-writes on any later boot where it is missing
-    // (the migration next to `is_onboarding_done`). So a failure here heals
-    // itself, and reporting it would put an error on the last screen of a
-    // setup that succeeded.
-    if (isTauri) backendCall('set_onboarding_done').catch(() => {})
+    if (!ownWindow) {
+      // Level (a): silent on purpose. updateSettings() above is what actually
+      // ends the wizard, and it is persisted. This only writes the recovery
+      // marker, which AppShell re-writes on any later boot where it is missing
+      // (the migration next to `is_onboarding_done`). So a failure here heals
+      // itself, and reporting it would put an error on the last screen of a
+      // setup that succeeded.
+      backendCall('set_onboarding_done').catch(() => {})
+      return
+    }
+    // Im eigenen Fenster ist der Marker KEIN stiller Fall mehr: Rust
+    // entscheidet die Fenster daraus, und ohne Marker gibt es kein
+    // Hauptfenster. Ein Fehler steht deshalb hier, mit Ursache, und der Knopf
+    // bleibt drückbar — der Store ist schon geschrieben, ein zweiter Versuch
+    // schreibt nur die Datei noch einmal.
+    setHandover({ phase: 'running' })
+    try {
+      await backendCall('set_onboarding_done')
+    } catch (e) {
+      setHandover({ phase: 'failed', error: `LU could not save that setup is complete: ${e instanceof Error ? e.message : String(e)}` })
+    }
   }
 
   // Hard rule: on macOS, local image/video generation is Apple MLX only —
@@ -175,16 +202,34 @@ export function Onboarding() {
     // Teil des Assistenten. Jetzt steht der Anzeiger IM Fluss, direkt ueber
     // der Karte, und der Abstand ist der `gap` einer Spalte statt der Rest
     // einer Zentrierung.
-    <div className={`h-screen w-screen flex flex-col items-center justify-center gap-5 p-4 ${bgClass}`}>
-      {/* Drag region + window controls */}
+    // `overflow-y-auto` plus die Spalte mit `my-auto` darunter: im eigenen
+    // Fenster (640x640, nicht groessenveraenderbar) tragen die gemessenen
+    // Bildschirme ohne Scrollen; was darueber hinausgeht — aufgeklappte
+    // Alternativlisten, Installations-Protokolle — scrollt. Auto-Raender
+    // statt nur `justify-center`, weil ein zentrierter Flex-Inhalt, der
+    // hoeher ist als sein Kasten, oben ABGESCHNITTEN wuerde: die Raender
+    // werden bei Ueberlauf null und der Inhalt beginnt oben, sonst bleiben
+    // sie die Zentrierung, die vorher `justify-center` allein war.
+    <div className={`h-screen w-screen flex flex-col items-center justify-center gap-5 p-4 overflow-y-auto ${bgClass}`}>
+      {/* Drag region + window controls. Im eigenen Fenster folgt der Streifen
+          dem Rezept der Titelleiste (`layout/Titlebar.tsx`): auf dem Mac
+          zeichnet das System die Ampeln links (Overlay-Balken), also keine
+          eigenen Knoepfe; auf Windows/Linux ersetzt die App den Systembalken
+          — Minimieren und Schliessen, KEIN Maximieren, das Fenster ist nicht
+          groessenveraenderbar. Im Hauptfenster bleibt der alte Satz. */}
       {isTauri && (
         <div data-tauri-drag-region className="fixed top-0 left-0 right-0 h-8 z-50 flex items-center justify-end select-none">
-          <button onClick={handleMinimize} className={winBtn} aria-label="Minimize"><Minus size={ICON_SM} /></button>
-          <button onClick={handleMaximize} className={winBtn} aria-label="Maximize"><Square size={ICON_SM} /></button>
-          <button onClick={handleClose} className={`${winBtn} hover:bg-red-500 hover:text-white`} aria-label="Close"><XIcon size={ICON_SM} /></button>
+          {!(ownWindow && isMacOS()) && (<>
+            <button onClick={handleMinimize} className={winBtn} aria-label="Minimize"><Minus size={ICON_SM} /></button>
+            {!ownWindow && (
+              <button onClick={handleMaximize} className={winBtn} aria-label="Maximize"><Square size={ICON_SM} /></button>
+            )}
+            <button onClick={handleClose} className={`${winBtn} hover:bg-red-500 hover:text-white`} aria-label="Close"><XIcon size={ICON_SM} /></button>
+          </>)}
         </div>
       )}
 
+      <div className="w-full flex flex-col items-center gap-5 my-auto">
       {/* Step indicator — Punkte UND Text. Sechs anonyme Punkte konnten die
           Frage „wie viele noch?" nicht beantworten; „Step 2 of 4 · Model"
           kann es. Die Hoehe ist fest, damit ein Schrittwechsel die Karte
@@ -332,12 +377,16 @@ export function Onboarding() {
                 ? `Connected to ${detectedBackends.find(b => b.id === selectedBackend)?.name || detectedBackends[0].name}. You're ready to go.`
                 : 'You can configure backends and install models anytime from Settings and the Models tab.'}
             </p>
-            <button onClick={finish} className={primaryBtn}>
-              Get Started <ArrowRight size={14} />
+            <button onClick={finish} className={primaryBtn} disabled={handover.phase === 'running'}>
+              {handover.phase === 'running' ? 'Opening LU…' : <>Get Started <ArrowRight size={14} /></>}
             </button>
+            {handover.phase === 'failed' && (
+              <p className="t-micro text-red-400">{handover.error}</p>
+            )}
           </motion.div>
         )}
       </AnimatePresence>
+      </div>
     </div>
   )
 }

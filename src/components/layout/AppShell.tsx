@@ -1,5 +1,4 @@
 import { useEffect, useLayoutEffect, useState } from 'react'
-import { LucideProvider } from 'lucide-react'
 import { Header } from './Header'
 import { StaleModelsBanner } from './StaleModelsBanner'
 import { StorageQuotaToast } from './StorageQuotaToast'
@@ -15,7 +14,6 @@ import {
   OnboardingSkeleton,
   SettingsSkeleton,
 } from './ViewSkeletons'
-import { ICON_STROKE_PX } from '../ui/icon-size'
 import { useUIStore } from '../../stores/uiStore'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { useCompareStore } from '../../stores/compareStore'
@@ -111,35 +109,14 @@ const loadCreateExperimental = () => import('../create/experimental/CreateExperi
 const loadOnboarding = () => import('../onboarding/Onboarding').then((m) => ({ default: m.Onboarding }))
 
 /**
- * Die optische Korrektur der Icon-Leiter, einmal fuer die ganze App.
- *
- * lucide skaliert seinen 24er-Strich mit der Groesse: `2 * size / 24`. Bei
- * den 19 Groessen, die diese App heute setzt (siehe `ui/icon-size.ts`),
- * heisst das 0,67px Strich bei size=8 und 1,67px bei size=20 — Faktor 2,5
- * zwischen zwei Icons in derselben Zeile, und keiner der beiden Werte liegt
- * auf einem Geraetepixel. `absoluteStrokeWidth` dreht die Rechnung um
- * (`strokeWidth * 24 / size`) und haelt die GESEHENE Staerke konstant auf
- * ICON_STROKE_PX = 1 CSS-Pixel: ein Geraetepixel bei 1x, zwei bei 2x.
- *
- * Warum hier und nicht an 668 Call-Sites: es ist dieselbe Entscheidung wie
- * bei `.lu-control` und beim Fokusring — ein Rezept an der Wurzel, das die
- * Call-Sites nichts dazuschreiben laesst. Der Provider steht UM die beiden
- * frueheren Rueckgaben herum (Onboarding rendert vor dem App-Rahmen), sonst
- * traege ausgerechnet der erste Bildschirm der App die Korrektur nicht.
- *
- * Kosten: keine. `useLucideContext()` ruft jedes lucide-Icon ohnehin schon
- * auf, der Wert ist in `LucideProvider` memoisiert und haengt hier an zwei
- * Konstanten — es gibt keinen Render, den es vorher nicht auch gab.
+ * Die optische Korrektur der Icon-Leiter (`LucideProvider`) stand bis zum
+ * eigenen Onboarding-Fenster HIER, um die beiden fruehen Rueckgaben unten
+ * herum. Seit `index.html` in zwei Fenstern laedt, gibt es zwei Wurzeln —
+ * `App` im Hauptfenster, `OnboardingWindow` im kleinen — und der Provider
+ * liegt in `main.tsx` ueber beiden, einmal. Die Begruendung (ein Rezept an
+ * der Wurzel statt an 668 Call-Sites) steht dort.
  */
 export function AppShell() {
-  return (
-    <LucideProvider absoluteStrokeWidth strokeWidth={ICON_STROKE_PX}>
-      <AppShellTree />
-    </LucideProvider>
-  )
-}
-
-function AppShellTree() {
   // Targeted, NOT `useUIStore()`. A whole-store subscription here put the
   // entire app tree behind every uiStore write — and the explorer's resize
   // handle writes `explorerWidth` on every pointermove, so dragging the

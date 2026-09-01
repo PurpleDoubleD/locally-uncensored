@@ -59,6 +59,10 @@ const lies = (name: string) => codeOnly(readFileSync(resolve(DIR, name), 'utf8')
 /** Die Dateien, aus denen der Assistent nach der Zerlegung besteht. */
 const ASSISTENT = [
   'Onboarding.tsx',
+  // Der Rahmen fuer das eigene Fenster (Erststart): kein Schritt, aber der
+  // Baum, der die Schale traegt — und damit ein Ort, an dem `useState`
+  // auftauchen koennte. Deshalb zaehlt er mit.
+  'OnboardingWindow.tsx',
   'BackendsStep.tsx',
   'ComfyStep.tsx',
   'ModelsStep.tsx',

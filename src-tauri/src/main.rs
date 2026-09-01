@@ -11,6 +11,7 @@ mod install_state;
 // remote.rs embeds the finished page with include_str!.
 #[cfg(test)]
 mod mobile_page;
+mod onboarding_window;
 mod os_error;
 mod os_paths;
 mod private_tmp;
@@ -251,12 +252,10 @@ fn main() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
-            // 2nd launch → focus existing window instead of spawning another process.
-            if let Some(window) = app.get_webview_window("main") {
-                let _ = window.show();
-                let _ = window.unminimize();
-                let _ = window.set_focus();
-            }
+            // 2nd launch → focus the existing window instead of spawning
+            // another process. "The" window is the onboarding window while
+            // setup runs, the main window afterwards (onboarding_window.rs).
+            onboarding_window::bring_to_front(app);
         }))
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
@@ -470,12 +469,17 @@ fn main() {
             commands::bg_tasks::shell_task_list,
             // Window management
             commands::process::show_window,
+            onboarding_window::onboarding_window_open,
         ])
         .setup(|app| {
-            #[cfg(debug_assertions)]
-            if let Some(window) = app.get_webview_window("main") {
-                window.open_devtools();
-            }
+            // DevTools for debug builds used to open HERE, on the still
+            // hidden main window. Measured on macOS (2026-09-01, debug
+            // bundle): WebKit docks the inspector into the window and
+            // orders that window front — a hidden main window became
+            // visible at launch, next to the onboarding window. The
+            // inspector now opens in `onboarding_window::reveal`, on
+            // whichever window is actually shown, so a debug build behaves
+            // like the shipped one.
 
             // Remove Windows DWM shadow/border (the 1mm border around the window)
             #[cfg(target_os = "windows")]
@@ -483,32 +487,34 @@ fn main() {
                 let _ = window.set_shadow(false);
             }
 
-            // ─── Bug D (surfingbird1010): force-show fallback ───
-            // The window starts hidden (visible:false in tauri.conf.json) and is
-            // normally revealed by the frontend's invoke('show_window') once React
-            // mounts (App.tsx). If the WebView never loads, or a render/hydration
-            // throw happens before that effect runs (corrupt persisted state,
-            // GPU/WebView2 fault), the window would stay hidden forever and the app
-            // looks like it "runs with no window". Reveal it unconditionally after a
-            // timeout so the user always gets a window. The frontend's earlier
-            // show_window is idempotent, so a healthy launch sees no double-show /
-            // flicker. 10 s is comfortably longer than a normal cold React mount
-            // (~1-2 s) yet short enough not to feel broken on a slow i7/8 GB box.
-            {
-                let handle = app.handle().clone();
-                std::thread::spawn(move || {
-                    std::thread::sleep(std::time::Duration::from_secs(10));
-                    if let Some(window) = handle.get_webview_window("main") {
-                        // Treat "unknown" as hidden → show (a redundant show on an
-                        // already-visible window is a harmless no-op).
-                        if !window.is_visible().unwrap_or(false) {
-                            println!("[Window] Force-show fallback fired (frontend never called show_window)");
-                            let _ = window.show();
-                            let _ = window.set_focus();
-                        }
-                    }
-                });
+            // ─── Erststart: Onboarding im eigenen Fenster ───
+            // Decided HERE, before any window is visible, from the marker file
+            // (and the store backup, for installs older than the marker). With
+            // the onboarding pending, a small centred window carries the wizard
+            // and the main window stays hidden until the marker is written —
+            // see onboarding_window.rs for the whole hand-over. A failure to
+            // build that window fails setup: a hidden main window plus no
+            // onboarding window would be an app without a window.
+            if onboarding_window::decide_first_window() == onboarding_window::FirstWindow::Onboarding {
+                onboarding_window::open(app.handle())?;
             }
+
+            // ─── Bug D (surfingbird1010): force-show fallback ───
+            // Every window starts hidden (visible:false in tauri.conf.json, and
+            // the onboarding window is built the same way) and is normally
+            // revealed by the frontend's invoke('show_window') once React
+            // mounts. If the WebView never loads, or a render/hydration throw
+            // happens before that effect runs (corrupt persisted state,
+            // GPU/WebView2 fault), the window would stay hidden forever and the
+            // app looks like it "runs with no window". Reveal the FRONT window
+            // after a timeout so the user always gets one — through the same
+            // rule as show_window, so the fallback can never pop the main
+            // window up over a running onboarding. The frontend's earlier
+            // show_window is idempotent, so a healthy launch sees no
+            // double-show / flicker. 10 s is comfortably longer than a normal
+            // cold React mount (~1-2 s) yet short enough not to feel broken on
+            // a slow i7/8 GB box.
+            onboarding_window::force_show_after(app.handle().clone(), onboarding_window::FORCE_SHOW_DELAY);
 
             // ─── System Tray ───
             let show = MenuItem::with_id(app, "show", "Show", true, None::<&str>)?;
@@ -525,12 +531,7 @@ fn main() {
                 .menu(&menu)
                 .on_menu_event(|app, event| {
                     match event.id().as_ref() {
-                        "show" => {
-                            if let Some(window) = app.get_webview_window("main") {
-                                let _ = window.show();
-                                let _ = window.set_focus();
-                            }
-                        }
+                        "show" => onboarding_window::bring_to_front(app),
                         "quit" => {
                             // Tauri's AppState Drop doesn't fire reliably on
                             // Windows after `app.exit(0)` — run the explicit
@@ -545,11 +546,7 @@ fn main() {
                 })
                 .on_tray_icon_event(|tray, event| {
                     if let tauri::tray::TrayIconEvent::DoubleClick { .. } = event {
-                        let app = tray.app_handle();
-                        if let Some(window) = app.get_webview_window("main") {
-                            let _ = window.show();
-                            let _ = window.set_focus();
-                        }
+                        onboarding_window::bring_to_front(tray.app_handle());
                     }
                 })
                 .build(app)?;

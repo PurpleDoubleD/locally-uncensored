@@ -134,12 +134,16 @@ pub(crate) fn tie_child_to_app_lifetime(pid: u32) {
     let _ = pid;
 }
 
-/// Show the main window (called from frontend after React renders)
+/// Show the CALLING window (called from a frontend once React has rendered).
+///
+/// Every window starts hidden, so this is the one place a window becomes
+/// visible — and whether it may is a question of who else is on screen: the
+/// main window stays hidden while the onboarding runs in its own window, and
+/// once the onboarding is done, showing the main window is what closes the
+/// small one. The rule lives in `onboarding_window::reveal`.
 #[tauri::command]
-pub fn show_window(app: tauri::AppHandle) {
-    if let Some(window) = app.get_webview_window("main") {
-        let _ = window.show();
-    }
+pub fn show_window(window: tauri::WebviewWindow) {
+    crate::onboarding_window::reveal(&window);
 }
 
 /// Bug J: does this system need ComfyUI's --cpu fallback flag?

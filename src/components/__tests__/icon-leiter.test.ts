@@ -106,29 +106,36 @@ describe('die optische Korrektur ist Arithmetik, gegen die echte lucide-Formel',
 })
 
 describe('die Korrektur haengt an der Wurzel, nicht an 668 Call-Sites', () => {
+  // Die Wurzel ist seit dem eigenen Onboarding-Fenster `main.tsx`: dort
+  // verzweigt der Boot nach dem Fensterlabel in ZWEI Baeume (App im
+  // Hauptfenster, OnboardingWindow im kleinen), und der Provider liegt
+  // ueber der Verzweigung. Vorher stand er in AppShell um dessen fruehe
+  // Rueckgaben — das reichte, solange es nur einen Baum gab.
+  const root = read('main.tsx')
   const shell = read('components', 'layout', 'AppShell.tsx')
 
-  it('AppShell haengt den Provider um den Baum und nimmt die Konstante', () => {
-    expect(shell).toMatch(/<LucideProvider absoluteStrokeWidth strokeWidth=\{ICON_STROKE_PX\}>/)
-    expect(shell).toMatch(/import \{ ICON_STROKE_PX \} from '\.\.\/ui\/icon-size'/)
+  it('main.tsx haengt den Provider um den Baum und nimmt die Konstante', () => {
+    expect(root).toMatch(/<LucideProvider absoluteStrokeWidth strokeWidth=\{ICON_STROKE_PX\}>/)
+    expect(root).toMatch(/import \{ ICON_STROKE_PX \} from '\.\/components\/ui\/icon-size'/)
   })
 
-  it('der Provider steht UM die frueheren Rueckgaben, nicht darin', () => {
-    // AppShell kehrt vor dem Rahmen zweimal frueh zurueck (restoring,
-    // Onboarding). Laege der Provider erst im Hauptzweig, traege
-    // ausgerechnet der erste Bildschirm der App die Korrektur nicht.
-    const wrapper = shell.match(/export function AppShell\(\)\s*\{[\s\S]*?\n\}/)?.[0] ?? ''
-    expect(wrapper).toContain('<LucideProvider')
-    expect(wrapper).toContain('<AppShellTree />')
-    // Und der Baum mit den fruehen Rueckgaben ist wirklich das Kind.
-    expect(shell).toMatch(/function AppShellTree\(\)/)
-    const tree = shell.slice(shell.indexOf('function AppShellTree()'))
-    expect(tree).toContain('if (!onboardingDone)')
-    expect(tree).not.toContain('<LucideProvider')
+  it('der Provider steht UEBER der Verzweigung, nicht in einem der Baeume', () => {
+    // Laege er in App oder AppShell, traege ausgerechnet der erste
+    // Bildschirm der App — der Assistent im kleinen Fenster — die Korrektur
+    // nicht; laege er in beiden, waeren es zwei Rezepte.
+    const render = root.slice(root.indexOf('createRoot(rootEl).render('))
+    expect(render).toContain('<LucideProvider')
+    expect(render).toContain('{tree}')
+    expect(root).toContain("hostWindow === 'onboarding'")
+    expect(shell).not.toContain('<LucideProvider')
+    expect(read('App.tsx')).not.toContain('<LucideProvider')
+    expect(read('components', 'onboarding', 'OnboardingWindow.tsx')).not.toContain('<LucideProvider')
+    // Und AppShells fruehe Rueckgaben liegen weiterhin darunter.
+    expect(shell).toContain('if (!onboardingDone)')
   })
 
   it('genau eine Stelle in der App setzt den Provider', () => {
-    expect((ALL.match(/<LucideProvider/g) ?? []).length).toBe(1)
+    expect(((ALL + '\n' + root).match(/<LucideProvider/g) ?? []).length).toBe(1)
   })
 })
 

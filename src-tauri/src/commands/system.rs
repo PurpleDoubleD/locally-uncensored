@@ -575,18 +575,35 @@ pub fn is_onboarding_done() -> bool {
         .unwrap_or(false)
 }
 
-/// Persist onboarding completion to %APPDATA% (outside NSIS install dir).
-/// Pass `done: false` to clear the marker so the first-launch wizard runs again.
-#[tauri::command]
-pub fn set_onboarding_done(done: Option<bool>) -> Result<(), String> {
+/// Write (or clear) the marker file `is_onboarding_done` reads. Plain IO, no
+/// window logic — `set_onboarding_done` and the startup migration in
+/// `onboarding_window::decide_first_window` both come through here.
+pub(crate) fn write_onboarding_marker(done: bool) -> Result<(), String> {
     let dir = persistent_dir()?;
     std::fs::create_dir_all(&dir).map_err(|e| os_error::english(&e))?;
     let path = dir.join("onboarding_done");
-    if done.unwrap_or(true) {
+    if done {
         std::fs::write(&path, "1").map_err(|e| os_error::english(&e))?;
     } else if path.exists() {
         std::fs::remove_file(&path).map_err(|e| os_error::english(&e))?;
     }
+    Ok(())
+}
+
+/// Persist onboarding completion to %APPDATA% (outside NSIS install dir).
+/// Pass `done: false` to clear the marker so the first-launch wizard runs again.
+///
+/// The windows follow the marker (`onboarding_window::follow_marker`): `true`
+/// from the onboarding window hands over to the main window, `false` from
+/// Settings → "Re-run onboarding" brings the small window back. Only after a
+/// successful write — the marker is the one truth the windows are decided
+/// from, and moving them on a marker that is not there would leave the main
+/// window hidden behind a rule it can never satisfy.
+#[tauri::command]
+pub fn set_onboarding_done(app: tauri::AppHandle, done: Option<bool>) -> Result<(), String> {
+    let done = done.unwrap_or(true);
+    write_onboarding_marker(done)?;
+    crate::onboarding_window::follow_marker(&app, done);
     Ok(())
 }
 

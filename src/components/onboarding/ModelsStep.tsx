@@ -63,7 +63,6 @@ export function ModelsStep({ skin, scan, fleet, step, setStep, pulledModels, set
 
   const [selectedModels, setSelectedModels] = useState<string[]>([])
   const [pullingModel, setPullingModel] = useState<string | null>(null)
-  const [hfModelPath, setHfModelPath] = useState<string | null>(null)
   const [downloadError, setDownloadError] = useState<string | null>(null)
   const [systemVRAM, setSystemVRAM] = useState<number | null>(null)
   // Default the active sub-tab to whichever category actually has entries.
@@ -133,12 +132,16 @@ export function ModelsStep({ skin, scan, fleet, step, setStep, pulledModels, set
       }
     } else if (!useOllamaPath) {
       const settingsOverride = useSettingsStore.getState().settings.hfDownloadPathOverride?.trim() || ''
-      destDir = settingsOverride || hfModelPath || (await detectProviderModelPath(providers.openai?.name || 'LM Studio'))
+      // `hfModelPath` stand hier als Zwischenspeicher fuer die Erkennung —
+      // ein `useState`, das nur ein zweiter Klick auf „Install" in derselben
+      // Sitzung je gelesen haette, um sich EINEN Rust-Aufruf zu sparen. Die
+      // Erkennung ist idempotent und billig; der Zustand ist weg (AS-09
+      // zaehlt die `useState` des Ordners).
+      destDir = settingsOverride || (await detectProviderModelPath(providers.openai?.name || 'LM Studio'))
       if (!destDir) {
         setDownloadError('Could not determine model directory. Please check app permissions, or set a custom path in Settings → Models.')
         return
       }
-      setHfModelPath(destDir)
     }
 
     for (const name of selectedModels) {
