@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { withInstallerOutput } from '../../lib/error-text'
+import { withInstallerOutput, withDetail } from '../../lib/error-text'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Minus, Square, X as XIcon, ArrowRight, Download, Check, ChevronRight, Loader2, RefreshCw, ExternalLink, FolderOpen, Cpu } from 'lucide-react'
 import { useSettingsStore } from '../../stores/settingsStore'
@@ -349,7 +349,14 @@ export function Onboarding() {
     // an upgrade never runs this wizard, so its flag stays null and it gets the
     // notes. This is the ONLY place that stamps without showing anything.
     useReleaseNotesStore.getState().markNotesSeen(currentVersion)
-    // Persist to filesystem so NSIS updates don't reset onboarding
+    // Persist to filesystem so NSIS updates don't reset onboarding.
+    //
+    // Level (a): silent on purpose. updateSettings() above is what actually
+    // ends the wizard, and it is persisted. This only writes the recovery
+    // marker, which AppShell re-writes on any later boot where it is missing
+    // (the migration next to `is_onboarding_done`). So a failure here heals
+    // itself, and reporting it would put an error on the last screen of a
+    // setup that succeeded.
     if (isTauri) backendCall('set_onboarding_done').catch(() => {})
   }
 
@@ -425,7 +432,13 @@ export function Onboarding() {
     setDetecting(false)
   }
 
-  // Detect system VRAM for model filtering
+  // Detect system VRAM for model filtering.
+  //
+  // Level (a): silent on purpose. systemVRAM is only ever read as
+  // `if (systemVRAM && m.vramGB > systemVRAM) return false`, so a failed
+  // probe means the recommendation list is not narrowed — the user sees MORE
+  // models, not fewer, and every card still states its own VRAM need. There
+  // is no action to offer, and nothing was lost.
   useEffect(() => { getSystemVRAM().then(v => setSystemVRAM(v)).catch(() => {}) }, [])
 
   // Count CHAT-CAPABLE models the user already has installed. Used to skip
@@ -655,7 +668,20 @@ export function Onboarding() {
             setComfyFound({ found: true, path: only.path, complete: only.complete })
             if (only.complete) setComfyReady(true)
             // Persist the auto-pick so process.rs uses it on start_comfyui.
-            try { await backendCall('set_comfyui_path', { path: only.path }) } catch {}
+            //
+            // Level (b): the user finds out, the wizard carries on. Nobody
+            // clicked anything here — the single install was auto-picked — but
+            // if the path does not stick, the panel above says "found" while
+            // start_comfyui will look somewhere else entirely, and the failure
+            // then surfaces minutes later with no visible cause.
+            try {
+              await backendCall('set_comfyui_path', { path: only.path })
+            } catch (e) {
+              setComfyInstallError(withDetail(
+                `LU found ComfyUI at ${only.path} but could not save that location. Starting it may not work; set the path by hand below.`,
+                e,
+              ))
+            }
             return
           }
           // Zero matches — fall back to legacy find_comfyui (env var, config
@@ -683,7 +709,21 @@ export function Onboarding() {
   // chosen path is persisted via set_comfyui_path so start_comfyui hits it
   // without further user intervention.
   const pickComfyInstall = async (choice: ComfyInstallChoice) => {
-    try { await backendCall('set_comfyui_path', { path: choice.path }) } catch {}
+    // Level (c): the user picked one of several installs and this call is the
+    // whole point of that click — without it the pick is not recorded anywhere
+    // and start_comfyui keeps using the old one. The lines below close the
+    // dialog and report "found", so a swallowed failure here leaves the wizard
+    // confidently showing a choice that was never made.
+    setComfyInstallError('')
+    try {
+      await backendCall('set_comfyui_path', { path: choice.path })
+    } catch (e) {
+      setComfyInstallError(withDetail(
+        `Could not switch ComfyUI to ${choice.path}. LU will keep using the location it had — try the pick again, or enter the path by hand below.`,
+        e,
+      ))
+      return
+    }
     setComfyFound({ found: true, path: choice.path, complete: choice.complete })
     if (choice.complete) setComfyReady(true)
     setComfyChoices([])
@@ -1160,11 +1200,25 @@ export function Onboarding() {
                 )}
 
                 {lmstudioError && (
-                  <p className="text-[0.65rem] text-red-400 whitespace-pre-line">
+                  <p role="alert" className="text-[0.65rem] text-red-400 whitespace-pre-line">
                     {lmstudioError}
                     {lmstudioError.toLowerCase().includes('didn\'t come up') && (
                       <button
-                        onClick={() => { backendCall('start_lmstudio_server').catch(() => {}); setLmstudioError('') }}
+                        // Level (c): this button lives INSIDE the error it is
+                        // meant to clear, and the click wipes that error on the
+                        // spot. Swallowing the failure meant the message
+                        // vanished and nothing replaced it — the one shape of
+                        // dud this file can produce. Put the outcome back into
+                        // the same line the button came from.
+                        onClick={() => {
+                          setLmstudioError('')
+                          backendCall('start_lmstudio_server').catch((e) => {
+                            setLmstudioError(withDetail(
+                              'The LM Studio server did not start. Open LM Studio and start its local server from the Developer tab, then continue here.',
+                              e,
+                            ))
+                          })
+                        }}
                         className={`block mt-1 ${secondaryBtn}`}
                       >
                         Start LM Studio server
@@ -1357,8 +1411,20 @@ export function Onboarding() {
                             setComfyInstalling(false)
                             setComfyReady(true)
                             setInstallStartTime(null)
-                            // Auto-start ComfyUI
-                            try { await backendCall('start_comfyui') } catch {}
+                            // Auto-start ComfyUI.
+                            //
+                            // Level (b): the install DID finish, which is what
+                            // this step was for, so the wizard moves on to its
+                            // ready state either way. But "ready" would then be
+                            // claiming something that is not running, so say so.
+                            try {
+                              await backendCall('start_comfyui')
+                            } catch (e) {
+                              setComfyInstallError(withDetail(
+                                'ComfyUI is installed but did not start. You can start it from Settings → ComfyUI later; the rest of the setup is unaffected.',
+                                e,
+                              ))
+                            }
                           } else if (status.status === 'cancelled') {
                             // Bug #1: install cancelled by user, close the
                             // progress card and surface the install options
@@ -1419,7 +1485,19 @@ export function Onboarding() {
                         try {
                           await backendCall('set_comfyui_path', { path: comfyPathInput.trim() })
                           setComfyReady(true)
-                          try { await backendCall('start_comfyui') } catch {}
+                          // Level (b): the path — the thing the user typed —
+                          // was saved, so this stays out of the outer catch and
+                          // `ready` stands. Only the convenience auto-start
+                          // failed, and that is worth one line rather than
+                          // undoing a save that worked.
+                          try {
+                            await backendCall('start_comfyui')
+                          } catch (e) {
+                            setComfyInstallError(withDetail(
+                              'The path was saved, but ComfyUI did not start from it. Check that the folder holds a complete ComfyUI install, then start it from Settings → ComfyUI.',
+                              e,
+                            ))
+                          }
                         } catch (err) {
                           setComfyInstallError(err instanceof Error ? err.message : 'Invalid path')
                         }
@@ -1488,7 +1566,19 @@ export function Onboarding() {
                     {/* Cancel button (Bug #1 — techx69) */}
                     <button
                       onClick={async () => {
-                        try { await backendCall('cancel_comfyui_install') } catch {}
+                        // Level (c): Cancel is the only way out of a multi-GB
+                        // download. If the call fails the progress bar keeps
+                        // filling and the button looks broken — and the user is
+                        // still paying for the bandwidth.
+                        setComfyInstallError('')
+                        try {
+                          await backendCall('cancel_comfyui_install')
+                        } catch (e) {
+                          setComfyInstallError(withDetail(
+                            'The install could not be cancelled and is still running. Try Cancel once more; if it keeps going, closing LU stops the download.',
+                            e,
+                          ))
+                        }
                       }}
                       className={`text-[0.55rem] px-1.5 py-[1px] rounded border transition-colors ${
                         isDark
@@ -1531,7 +1621,7 @@ export function Onboarding() {
 
             {/* Error */}
             {comfyInstallError && (
-              <p className="text-[0.65rem] text-red-400 whitespace-pre-line">{comfyInstallError}</p>
+              <p role="alert" className="text-[0.65rem] text-red-400 whitespace-pre-line">{comfyInstallError}</p>
             )}
 
             {/* Ready state */}

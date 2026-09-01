@@ -30,6 +30,7 @@ import { idbStorage } from '../../lib/idbStorage'
 import { STORE_KEYS, IDB_STORE_KEYS, backupStoresIfChanged, flushSyncStoreBackup } from '../../lib/store-backup'
 import { idbKeysToRestore, mayReloadForIdbRestore } from '../../lib/idb-restore'
 import { log } from '../../lib/logger'
+import { withDetail } from '../../lib/error-text'
 import { pickForMode } from '../../lib/active-model-mode'
 import { useKeyboardShortcuts } from '../../hooks/useKeyboardShortcuts'
 import { useCloudAuth } from '../../hooks/useCloudAuth'
@@ -93,6 +94,10 @@ export function AppShell() {
   const isComparing = useCompareStore((s) => s.isComparing)
   const onboardingDone = useSettingsStore((s) => s.settings.onboardingDone)
   const [restoring, setRestoring] = useState(false)
+  // The one failure in this file the user has to be told about: a post-update
+  // store restore that threw. Shown as a dismissible line in the shell, next
+  // to the other shell-level notices.
+  const [restoreError, setRestoreError] = useState<string | null>(null)
 
   const [detectedBackends, setDetectedBackends] = useState<DetectedBackend[]>([])
   const [showSelector, setShowSelector] = useState(false)
@@ -193,6 +198,15 @@ export function AppShell() {
   // (switch OR launch-in-cloud); local mode is a no-op.
   useEffect(() => {
     if (!isTauri() || appMode !== 'cloud') return
+    // Level (a): silent on purpose, both of them. These free memory the user
+    // is no longer using; they are not the switch itself, which has already
+    // happened by the time they run. The LM Studio one in particular REJECTS
+    // by design on every machine without LM Studio installed
+    // ("lms CLI not found", install.rs:3511) — reporting that would put an
+    // error in front of the majority of users every time they go to Cloud,
+    // about a program they never installed. If a model really does stay
+    // resident, it shows up where the user can act on it: the backend panel
+    // in Settings.
     backendCall('offload_local_models').catch(() => {})
     backendCall('lmstudio_unload_model', { model: '--all' }).catch(() => {})
   }, [appMode])
@@ -203,6 +217,11 @@ export function AppShell() {
   // re-opened Settings. Desktop-only — the web build has no local ComfyUI.
   useEffect(() => {
     if (!isTauri()) return
+    // Level (a): silent on purpose. This mirrors a stored preference into the
+    // backend on every boot, with no user standing in front of it — and it
+    // runs on machines that have no ComfyUI at all. The setting itself is
+    // safe either way: it is persisted, this effect re-fires on the next
+    // launch, and Settings → ComfyUI shows the mode actually in force.
     backendCall('set_comfy_gpu_mode', { mode: settings.comfyGpuMode || 'auto' }).catch(() => {})
   }, [settings.comfyGpuMode])
 
@@ -369,7 +388,24 @@ export function AppShell() {
               }
             }
           }
-        } catch {}
+        } catch (e) {
+          // Level (b): the user finds out, the app carries on. This is the
+          // post-update restore. Reaching here means the backup could not be
+          // read or was not valid JSON — NOT "there is no backup", which
+          // returns null and lands in step 3 below without throwing. So the
+          // app is about to come up looking empty after an update, and
+          // without this line that reads as "the update ate my chats".
+          //
+          // Not blocking: there is nothing to block. The restore is over, and
+          // holding the app hostage behind a dialog would only add a wall in
+          // front of the chats that DID survive.
+          setRestoreError(
+            withDetail(
+              'Your chats and settings could not be restored after the update. Nothing was deleted — the backup is still in the app data folder. Close LU and reopen it to try again; if it stays empty, keep that folder before reinstalling.',
+              e,
+            ),
+          )
+        }
 
         // 3. No backup available — at least recover onboarding from marker file
         if (markerExists) {
@@ -467,6 +503,11 @@ export function AppShell() {
           if (Object.keys(memVectors).length > 0) {
             ;(snapshot as Record<string, unknown>)[MEMORY_VECTORS_BACKUP_KEY] = memVectors
           }
+          // Level (a): silent on purpose. This is the 30 s background backup
+          // loop; a missed write is retried on the next tick and nothing the
+          // user did just failed. Swallowed HERE rather than in the outer
+          // catch so a failed write still stamps ragLastRun and keeps the
+          // 30 s spacing instead of hot-retrying.
           await backendCall('backup_rag_chunks', { data: JSON.stringify(snapshot) }).catch(() => {})
           ragLastRun = Date.now()
         } catch { /* best-effort */ }
@@ -479,6 +520,11 @@ export function AppShell() {
       // them onboardingDone is false, and the missing marker is intentional.
       backendCall<boolean>('is_onboarding_done').catch(() => false).then((markerExists) => {
         if (!markerExists && useSettingsStore.getState().settings.onboardingDone) {
+          // Level (a): silent on purpose. Nobody asked for this — it is a
+          // one-time migration that writes a recovery marker. It re-runs on
+          // every launch until it succeeds, and the thing it protects (not
+          // re-running onboarding after an NSIS update) is already covered by
+          // the persisted store on this machine.
           backendCall('set_onboarding_done').catch(() => {})
         }
       })
@@ -580,6 +626,13 @@ export function AppShell() {
         const { setOllamaBase } = await import('../../api/backend')
         setOllamaBase(next)
         if (isTauri()) {
+          // Level (a): silent on purpose. setOllamaBase() on the line above has
+          // already applied the new host to everything the user can see; this
+          // only mirrors it into Rust's config.json. The providerStore is
+          // persisted and wins on the next boot anyway (see the comment on the
+          // hydration path below), and this subscription re-fires on the next
+          // edit. Reporting from inside a store subscription would also mean
+          // an error with no control anywhere near it.
           backendCall('set_ollama_host', { host: next }).catch(() => {})
         }
       })
@@ -845,6 +898,19 @@ export function AppShell() {
         <Titlebar />
         <Header />
         <StaleModelsBanner />
+        {restoreError && (
+          <div className="mx-2 mt-2 flex items-start gap-2 rounded-lg border border-red-500/20 bg-red-500/[0.06] px-3 py-2">
+            <p role="alert" className="flex-1 text-[0.65rem] leading-snug text-red-500 dark:text-red-400 whitespace-pre-line">
+              {restoreError}
+            </p>
+            <button
+              onClick={() => setRestoreError(null)}
+              className="shrink-0 text-[0.6rem] text-red-500/70 hover:text-red-400 transition-colors"
+            >
+              Dismiss
+            </button>
+          </div>
+        )}
         <StorageQuotaToast />
         <div className="flex-1 flex overflow-hidden gap-2 p-2">
           {!isComparing && <Sidebar />}

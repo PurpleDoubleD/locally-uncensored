@@ -20,6 +20,7 @@
  * Run: npx vitest run src/lib/__tests__/reset-arming-is-visible.test.ts
  */
 import { describe, it, expect } from 'vitest'
+import { armedScopeFor } from '../reset-arming'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
@@ -63,7 +64,31 @@ describe('an armed button is never lying in wait', () => {
   })
 
   it('and a tab switch disarms it, so General cannot fire on Agent', () => {
-    expect(settingsPage).toMatch(/useEffect\(\(\) => \{ setArmed\(null\) \}, \[tab\]\)/)
+    // This used to pin the effect that did it: useEffect(() => { setArmed(null) }, [tab]).
+    // The effect is gone (it disarmed one render late, and React 19's
+    // set-state-in-effect rule is right about that); the rule now lives in
+    // armedScopeFor(), tested as behaviour just below. What stays pinned here
+    // is that SettingsPage reads `armed` THROUGH that rule and never keeps a
+    // raw armed flag that a tab switch could miss.
+    expect(settingsPage).toMatch(/const armed = armedScopeFor\(arm, tab\)/)
+    expect(settingsPage).not.toMatch(/useState<'section' \| 'all' \| null>/)
+  })
+})
+
+describe('armedScopeFor: an arm is only live on the tab it was made on', () => {
+  it('is armed on the tab the click happened on', () => {
+    expect(armedScopeFor({ scope: 'section', tab: 'general' }, 'general')).toBe('section')
+    expect(armedScopeFor({ scope: 'all', tab: 'general' }, 'general')).toBe('all')
+  })
+
+  it('is NOT armed on any other tab — General cannot fire on Agent', () => {
+    expect(armedScopeFor({ scope: 'section', tab: 'general' }, 'agent')).toBeNull()
+    expect(armedScopeFor({ scope: 'all', tab: 'general' }, 'backends')).toBeNull()
+  })
+
+  it('coming back to the tab does not re-arm a stale click either', () => {
+    // The 4 s timer clears the arm outright; nothing else can resurrect it.
+    expect(armedScopeFor(null, 'general')).toBeNull()
   })
 })
 

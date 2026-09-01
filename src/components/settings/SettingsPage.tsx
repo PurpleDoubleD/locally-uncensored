@@ -1,8 +1,9 @@
-import { useState, useEffect, useRef, type ReactNode, type ChangeEvent } from 'react'
-import { withInstallerOutput } from '../../lib/error-text'
+import { useState, useEffect, useCallback, useRef, type ReactNode, type ChangeEvent } from 'react'
+import { withInstallerOutput, withDetail } from '../../lib/error-text'
 import { ArrowLeft, RotateCcw, Sun, Moon, Volume2, Check, X, Loader2, Shield, ChevronRight, GraduationCap, Lock, Sliders, Plug, Bot, Phone, User, Download, Mic } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { SETTINGS_TAB_RESET_KEYS, type SettingsTab } from '../../lib/settings-reset'
+import { armedScopeFor, type ResetArm, type ResetArmScope } from '../../lib/reset-arming'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { usePermissionStore } from '../../stores/permissionStore'
 import { useUIStore } from '../../stores/uiStore'
@@ -259,13 +260,20 @@ function HfDownloadPathSetting() {
   const override = useSettingsStore(s => s.settings.hfDownloadPathOverride)
   const updateSettings = useSettingsStore(s => s.updateSettings)
   const [draft, setDraft] = useState(override)
+  const [pickError, setPickError] = useState<string | null>(null)
   useEffect(() => { setDraft(override) }, [override])
 
   async function pickFolder() {
+    setPickError(null)
     try {
       const chosen = await backendCall<string | null>('pick_folder')
       if (chosen) { setDraft(chosen); updateSettings({ hfDownloadPathOverride: chosen }) }
-    } catch {}
+    } catch (e) {
+      // Level (c): the click was meant to CHANGE the download path and did
+      // not. Cancelling the dialog returns null and is not an error, so
+      // anything landing here really failed to open the picker.
+      setPickError(withDetail('The folder picker did not open. Type or paste the path into the field instead.', e))
+    }
   }
 
   return (
@@ -297,6 +305,11 @@ function HfDownloadPathSetting() {
           </button>
         )}
       </div>
+      {pickError && (
+        <p role="alert" className="text-[0.55rem] text-red-500 dark:text-red-400 leading-snug whitespace-pre-line">
+          {pickError}
+        </p>
+      )}
     </div>
   )
 }
@@ -403,6 +416,7 @@ function ComfyUISettings() {
   const [pathSuccess, setPathSuccess] = useState(false)
   const [customPort, setCustomPort] = useState('')
   const [portSuccess, setPortSuccess] = useState(false)
+  const [portError, setPortError] = useState('')
   const [customHost, setCustomHost] = useState('')
   const [hostError, setHostError] = useState('')
   const [hostSuccess, setHostSuccess] = useState(false)
@@ -426,7 +440,13 @@ function ComfyUISettings() {
           if (typeof s?.port === 'number' && s.port > 0) setComfyPort(s.port)
           if (typeof s?.host === 'string' && s.host.trim()) setComfyHost(s.host)
         }
-      } catch {}
+      } catch {
+        // Level (a): silent on purpose. This is the 5 s status poll below, and
+        // a failed probe simply means the panel keeps showing the last known
+        // state until the next tick. Every USER action in this panel (start,
+        // stop, install, set port) reports its own failure; a poll that missed
+        // one beat is not something to interrupt anyone about.
+      }
       if (!cancelled) setLoading(false)
     }
     check()
@@ -493,11 +513,17 @@ function ComfyUISettings() {
   }
 
   const handleStop = async () => {
+    setStartError('')
     try {
       const { backendCall } = await import('../../api/backend')
       await backendCall('stop_comfyui')
       setStatus(prev => prev ? { ...prev, running: false } : null)
-    } catch {}
+    } catch (e) {
+      // Level (c): a stop that failed leaves the panel showing "running", which
+      // is the truth — but without this line the button reads as a dud. Same
+      // channel as the start failure, right under the same pair of buttons.
+      setStartError(withDetail('ComfyUI did not stop. It may still be running — try again, or close it in its own window.', e))
+    }
   }
 
   const handleSetPath = async () => {
@@ -536,7 +562,7 @@ function ComfyUISettings() {
       </div>
 
       {startError && (
-        <pre className="whitespace-pre-wrap break-words text-[0.55rem] leading-relaxed text-red-400 bg-red-500/[0.06] border border-red-500/20 rounded p-2 max-h-40 overflow-y-auto">
+        <pre role="alert" className="whitespace-pre-wrap break-words text-[0.55rem] leading-relaxed text-red-400 bg-red-500/[0.06] border border-red-500/20 rounded p-2 max-h-40 overflow-y-auto">
           {startError}
         </pre>
       )}
@@ -627,13 +653,19 @@ function ComfyUISettings() {
             onClick={async () => {
               const port = parseInt(customPort)
               if (!port || port < 1 || port > 65535) return
+              setPortError('')
               try {
                 const { backendCall, setComfyPort } = await import('../../api/backend')
                 await backendCall('set_comfyui_port', { port })
                 setComfyPort(port)
                 setPortSuccess(true)
                 setTimeout(() => setPortSuccess(false), 3000)
-              } catch {}
+              } catch (e) {
+                // Level (c): the port was NOT saved. Without this the button
+                // just fails to produce the green "Port saved" line, which is
+                // indistinguishable from a slow save.
+                setPortError(withDetail('The port was not saved. Pick a free port and try again.', e))
+              }
             }}
             disabled={!customPort || parseInt(customPort) === (status?.port || 8188)}
             className="px-2 py-1 rounded text-[0.6rem] bg-purple-500/10 text-purple-400 hover:bg-purple-500/20 transition-colors disabled:opacity-30"
@@ -642,6 +674,11 @@ function ComfyUISettings() {
           </button>
         </div>
         {portSuccess && <p className="text-[0.55rem] text-green-400">Port saved. Restart ComfyUI to apply.</p>}
+        {portError && (
+          <p role="alert" className="text-[0.55rem] text-red-500 dark:text-red-400 leading-snug whitespace-pre-line">
+            {portError}
+          </p>
+        )}
       </div>
 
       {/* Controls, local host only (can't manage a remote process) */}
@@ -979,16 +1016,21 @@ function ResetSection({ tab }: { tab: SettingsTab }) {
   const resetSettings = useSettingsStore((s) => s.resetSettings)
   const resetVoiceDefaults = useVoiceStore((s) => s.resetVoiceDefaults)
   const resetPermissions = usePermissionStore((s) => s.resetToDefaults)
-  const [armed, setArmed] = useState<'section' | 'all' | null>(null)
+  // The arm records the tab it was made on, so "still armed?" is a question
+  // that can be answered while rendering. Switching tabs while armed must
+  // disarm — otherwise a click armed on General would confirm-fire on Agent —
+  // and armedScopeFor() is that rule (src/lib/reset-arming.ts). It replaces a
+  // `useEffect(..., [tab])` that disarmed one render too late.
+  const [arm, setArm] = useState<ResetArm<SettingsTab>>(null)
+  const armed = armedScopeFor(arm, tab)
+  const setArmed = (which: ResetArmScope | null) =>
+    setArm(which === null ? null : { scope: which, tab })
   const [done, setDone] = useState<string | null>(null)
   const armTimer = useRef<number | null>(null)
   const doneTimer = useRef<number | null>(null)
 
   const tabLabel = SETTINGS_TABS.find((t) => t.id === tab)?.label ?? 'section'
 
-  // Switching tabs while armed must disarm — otherwise a click armed on
-  // General would confirm-fire on Agent.
-  useEffect(() => { setArmed(null) }, [tab])
   useEffect(() => () => {
     if (armTimer.current) window.clearTimeout(armTimer.current)
     if (doneTimer.current) window.clearTimeout(doneTimer.current)
@@ -1094,42 +1136,74 @@ export function SettingsPage() {
   })
   useEffect(() => {
     if (typeof window !== 'undefined') {
-      try { window.localStorage.setItem(SETTINGS_TAB_KEY, tab) } catch {}
+      // Level (a): silent on purpose. This only remembers which tab was open
+      // for the next visit. If storage is full or blocked (private window),
+      // Settings opens on General next time — a convenience lost, not an
+      // action failed, and nothing the user could act on.
+      try { window.localStorage.setItem(SETTINGS_TAB_KEY, tab) } catch { /* see above */ }
     }
   }, [tab])
 
 
-  const refreshWhisper = () => {
+  // The three probes are stabilised with useCallback ON PURPOSE, not for
+  // speed: the mount effect below has to list them as dependencies, and a
+  // function rebuilt on every render would re-run the effect on every render.
+  // `voiceSettings` is `useVoiceStore()` — the WHOLE store, so it changes on
+  // every store write, including the writes these probes make themselves.
+  // Reaching for the actions through selectors instead keeps the closures
+  // pinned to values that never change: zustand defines its actions once in
+  // create(), so setSttAvailable/setTtsAvailable are the same references for
+  // the life of the store.
+  const setSttAvailable = useVoiceStore((s) => s.setSttAvailable)
+  const setTtsAvailable = useVoiceStore((s) => s.setTtsAvailable)
+
+  const refreshWhisper = useCallback(() => {
     setWhisperLoading(true)
     return checkWhisperAvailable()
       .then((s) => {
         setWhisperStatus(s)
         // Drive the mic button's availability from the same probe so it lights
         // up immediately after the in-app install — no restart needed.
-        voiceSettings.setSttAvailable(!!s.available)
+        setSttAvailable(!!s.available)
       })
       .finally(() => setWhisperLoading(false))
-  }
+  }, [setSttAvailable])
 
-  const refreshTts = () => {
+  const refreshTts = useCallback(() => {
     setTtsLoading(true)
-    return checkTtsAvailable(voiceSettings.piperVoice)
+    // Read the voice at call time rather than closing over it. It is what
+    // every caller already means — handlePickVoice sets the new voice and
+    // then asks "is TTS available now?", which is a question about the NEW
+    // voice — and it keeps this callback free of a dependency that changes.
+    return checkTtsAvailable(useVoiceStore.getState().piperVoice)
       .then((s) => {
         setTtsStatus(s)
         // Same as STT: drive the read-aloud button availability from this probe
         // so it lights up right after the in-app install.
-        voiceSettings.setTtsAvailable(!!s.available)
+        setTtsAvailable(!!s.available)
       })
       .finally(() => setTtsLoading(false))
-  }
+  }, [setTtsAvailable])
 
-  const refreshVoices = () => listInstalledPiperVoices().then(setInstalledVoices).catch(() => {})
+  const refreshVoices = useCallback(
+    () =>
+      listInstalledPiperVoices()
+        .then(setInstalledVoices)
+        // Level (a): silent on purpose. This only fills the voice DROPDOWN. If
+        // the list cannot be read the dropdown stays on its last contents and
+        // every real action here — picking a voice, downloading one — reports
+        // its own failure through setVoiceError below. A second message for
+        // "the list did not refresh" would be noise on a screen that already
+        // says what went wrong.
+        .catch(() => {}),
+    [],
+  )
 
   useEffect(() => {
     void refreshWhisper()
     void refreshTts()
     void refreshVoices()
-  }, [])
+  }, [refreshWhisper, refreshTts, refreshVoices])
 
   // §24.9 — kick off the faster-whisper install, poll its status, then
   // re-check availability so the badge flips ✗ → ✓ without a restart.
@@ -1472,8 +1546,19 @@ export function SettingsPage() {
               </div>
               <button
                 onClick={async () => {
+                  // The line above is what actually re-runs the wizard: AppShell
+                  // gates it on settings.onboardingDone, and that store is
+                  // persisted, so it survives the reload below. The backend call
+                  // only clears the marker FILE, which is read in one place —
+                  // the NSIS-update recovery in AppShell, and only when the
+                  // store itself was lost.
+                  //
+                  // Level (a): silent on purpose. The visible action succeeds
+                  // either way, and the reload on the next line would wipe any
+                  // message before it could be read. A stale marker costs
+                  // nothing until a store-loss recovery, which re-writes it.
                   useSettingsStore.getState().updateSettings({ onboardingDone: false })
-                  try { await backendCall('set_onboarding_done', { done: false }) } catch {}
+                  try { await backendCall('set_onboarding_done', { done: false }) } catch { /* see above */ }
                   window.location.reload()
                 }}
                 className="ml-3 shrink-0 px-2.5 py-1 rounded-md text-[0.6rem] font-medium bg-white dark:bg-white/10 text-gray-800 dark:text-white hover:bg-gray-100 dark:hover:bg-white/15 border border-gray-200 dark:border-white/15 transition-colors"
