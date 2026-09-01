@@ -18,6 +18,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest'
 import {
   sendWithTransientRetry, MAX_TRANSIENT_ATTEMPTS, MAX_SILENT_RETRY_WAIT_MS,
 } from '../retry'
+import { asProviderError } from '../../__tests__/provider-test-support'
 import { OpenAIProvider } from '../openai-provider'
 import type { ProviderConfig, ChatStreamChunk } from '../types'
 
@@ -195,9 +196,9 @@ describe('the chat send path retries a throttle', () => {
     vi.stubGlobal('fetch', fetchMock)
 
     const running = drain(new OpenAIProvider(openAIConfig())
-      .chatStream('gpt-4o', [{ role: 'user', content: 'hi' }])).then(() => null, (e: any) => e)
+      .chatStream('gpt-4o', [{ role: 'user', content: 'hi' }])).then(() => null, (e: unknown) => e)
     await vi.advanceTimersByTimeAsync(5000)
-    const err = await running
+    const err = asProviderError(await running)
 
     expect(fetchMock).toHaveBeenCalledTimes(MAX_TRANSIENT_ATTEMPTS)
     expect(err.code).toBe('rate_limit')

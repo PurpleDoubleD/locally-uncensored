@@ -27,22 +27,25 @@ import { describe, it, expect, vi, afterEach } from 'vitest'
 
 const localFetch = vi.fn()
 const localFetchStream = vi.fn()
-const ensureProxyAllowsHost = vi.fn(async () => {})
+const ensureProxyAllowsHost = vi.fn<(baseUrl: string) => Promise<void>>(async () => {})
 
 vi.mock('../../backend', async () => {
   const actual = await vi.importActual<typeof import('../../backend')>('../../backend')
   return {
     ...actual,
     isTauri: () => false,
-    localFetch: (...a: any[]) => localFetch(...a),
-    localFetchStream: (...a: any[]) => localFetchStream(...a),
-    ensureProxyAllowsHost: (...a: any[]) => ensureProxyAllowsHost(...(a as [])),
+    localFetch: (...a: Parameters<typeof actual.localFetch>) => localFetch(...a),
+    localFetchStream: (...a: Parameters<typeof actual.localFetchStream>) => localFetchStream(...a),
+    ensureProxyAllowsHost: (...a: Parameters<typeof actual.ensureProxyAllowsHost>) =>
+      ensureProxyAllowsHost(...a),
   }
 })
 
 import { AnthropicProvider } from '../anthropic-provider'
 import { ProviderError } from '../types'
 import type { ProviderConfig, ChatStreamChunk } from '../types'
+import type { MessagesBody } from '../anthropic-provider'
+import { isRecord } from '../wire'
 
 function config(overrides: Partial<ProviderConfig> = {}): ProviderConfig {
   return {
@@ -60,8 +63,20 @@ function sse(events: string[]): Response {
 
 const STOP = 'event: message_stop\ndata: {"type":"message_stop"}\n\n'
 
-function sentBody(mock: { mock: { calls: any[][] } }, call = 0): any {
-  return JSON.parse(String(mock.mock.calls[call]?.[1]?.body ?? '{}'))
+/**
+ * The request body of a captured call, read as the provider's own request
+ * interface: a rename in MessagesBody breaks the assertions below rather than
+ * turning them into `undefined === undefined`.
+ */
+function thinkingOf(body: MessagesBody): { type: 'enabled'; budget_tokens: number } {
+  if (!body.thinking) throw new Error('request carried no thinking block')
+  return body.thinking
+}
+
+function sentBody(mock: { mock: { calls: readonly (readonly unknown[])[] } }, call = 0): MessagesBody {
+  const init = mock.mock.calls[call]?.[1]
+  const body = isRecord(init) ? init.body : undefined
+  return JSON.parse(typeof body === 'string' ? body : '{}') as MessagesBody
 }
 
 async function drain(gen: AsyncGenerator<ChatStreamChunk>): Promise<ChatStreamChunk[]> {
@@ -87,9 +102,9 @@ describe('Extended Thinking sends a body the API can accept', () => {
 
     const body = sentBody(fetchMock)
     expect(body.thinking).toEqual({ type: 'enabled', budget_tokens: expect.any(Number) })
-    expect(body.max_tokens).toBeGreaterThan(body.thinking.budget_tokens)
+    expect(body.max_tokens).toBeGreaterThan(thinkingOf(body).budget_tokens)
     // The API's own floor for a reasoning budget.
-    expect(body.thinking.budget_tokens).toBeGreaterThanOrEqual(1024)
+    expect(thinkingOf(body).budget_tokens).toBeGreaterThanOrEqual(1024)
   })
 
   it('drops temperature / top_p / top_k, which thinking forbids', async () => {
@@ -146,8 +161,8 @@ describe('Extended Thinking sends a body the API can accept', () => {
 
     const body = sentBody(fetchMock)
     expect(body.max_tokens).toBe(20000)
-    expect(body.thinking.budget_tokens).toBeLessThanOrEqual(10000)
-    expect(body.max_tokens).toBeGreaterThan(body.thinking.budget_tokens)
+    expect(thinkingOf(body).budget_tokens).toBeLessThanOrEqual(10000)
+    expect(body.max_tokens).toBeGreaterThan(thinkingOf(body).budget_tokens)
   })
 
   it('applies to the non-streaming tool path as well', async () => {
@@ -164,7 +179,7 @@ describe('Extended Thinking sends a body the API can accept', () => {
     )
 
     const body = sentBody(fetchMock)
-    expect(body.max_tokens).toBeGreaterThan(body.thinking.budget_tokens)
+    expect(body.max_tokens).toBeGreaterThan(thinkingOf(body).budget_tokens)
     expect(body).not.toHaveProperty('temperature')
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })

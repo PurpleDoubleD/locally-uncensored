@@ -15,11 +15,45 @@ import { parseNDJSONStream } from '../stream'
 import { idleAbortGuard, isStreamIdleTimeout, STREAM_IDLE_TIMEOUT_MS } from '../stream-idle'
 import { repairToolCallArgs, extractToolCallsFromContent } from '../../lib/tool-call-repair'
 import { applyTemplateContract } from './normalize-system'
+import type { OllamaWireToolCall } from './wire'
+import { isRecord, prop, asString, asNumber, asRecordArray } from './wire'
 
 // ── Ollama-specific types ──────────────────────────────────────
 
+/**
+ * What we SEND. Separate from the wire types in `./wire`, which describe what
+ * the server sends back: this payload is ours, so it gets a real shape rather
+ * than a `Record<string, any>` bag that would swallow a typo in a field name.
+ */
+export interface OllamaRequestOptions {
+  temperature?: number
+  top_p?: number
+  top_k?: number
+  num_predict?: number
+  num_ctx?: number
+}
+
+export interface OllamaRequestMessage {
+  role: string
+  content: string
+  /** base64 payloads only — Ollama takes the data, not our {data,mimeType}. */
+  images?: string[]
+  tool_calls?: ToolCall[]
+}
+
+export interface OllamaChatRequest {
+  model: string
+  messages: OllamaRequestMessage[]
+  stream: boolean
+  keep_alive: string
+  tools?: ToolDefinition[]
+  options?: OllamaRequestOptions
+  /** Tri-state; deleted again on the 400-retry, hence optional. */
+  think?: boolean
+}
+
 interface OllamaChatChunk {
-  message?: { content: string; thinking?: string; tool_calls?: { function: { name: string; arguments: Record<string, any> } }[] }
+  message?: { content?: string; thinking?: string; tool_calls?: OllamaWireToolCall[] }
   done?: boolean
   // Why generation ended ('stop' | 'length' | 'load' | …), final chunk only.
   done_reason?: string
@@ -95,12 +129,12 @@ export class OllamaProvider implements ProviderClient {
       toolRole: 'text',
       alternate: true,
     }).map(m => {
-      const msg: Record<string, any> = { role: m.role, content: m.content }
+      const msg: OllamaRequestMessage = { role: m.role, content: m.content }
       if (m.images?.length) msg.images = m.images.map(img => img.data)
       return msg
     })
 
-    const body: Record<string, any> = {
+    const body: OllamaChatRequest = {
       model,
       messages: ollamaMessages,
       stream: true,
@@ -116,7 +150,7 @@ export class OllamaProvider implements ProviderClient {
     // Laptop + gemma3:4b). Letting Ollama do its own VRAM-aware layer
     // placement restores CLI parity on tight cards and is a no-op on
     // cards with headroom.
-    const ollamaOptions: Record<string, any> = {}
+    const ollamaOptions: OllamaRequestOptions = {}
     if (options?.temperature !== undefined) ollamaOptions.temperature = options.temperature
     if (options?.topP !== undefined) ollamaOptions.top_p = options.topP
     if (options?.topK !== undefined) ollamaOptions.top_k = options.topK
@@ -198,8 +232,18 @@ export class OllamaProvider implements ProviderClient {
             throw new Error(`Ollama: ${errLine}`)
           }
 
+          // `arguments` arrives as `unknown` from the wire because Ollama is
+          // not the only thing that answers on this endpoint: llama.cpp-based
+          // and proxied servers send the field as a JSON *string*, and this
+          // path used to hand that string on as `Record<string, any>` — a lie
+          // `any` was covering for. repairToolCallArgs is the same
+          // normalization the non-streaming path below already performs; for a
+          // real object it returns the object untouched.
           const toolCalls: ToolCall[] | undefined = chunk.message?.tool_calls?.map(tc => ({
-            function: { name: tc.function.name, arguments: tc.function.arguments },
+            function: {
+              name: tc.function?.name ?? '',
+              arguments: repairToolCallArgs(tc.function?.arguments),
+            },
           }))
 
           if (chunk.done) sawDone = true
@@ -254,13 +298,13 @@ export class OllamaProvider implements ProviderClient {
       toolRole: tools.length > 0 ? 'native' : 'text',
       alternate: tools.length === 0,
     }).map(m => {
-      const msg: Record<string, any> = { role: m.role, content: m.content }
+      const msg: OllamaRequestMessage = { role: m.role, content: m.content }
       if (m.tool_calls) msg.tool_calls = m.tool_calls
       if (m.images?.length) msg.images = m.images.map(img => img.data)
       return msg
     })
 
-    const body: Record<string, any> = {
+    const body: OllamaChatRequest = {
       model,
       messages: ollamaMessages,
       tools,
@@ -270,7 +314,7 @@ export class OllamaProvider implements ProviderClient {
     }
 
     // v2.4.6 Bug L: see chatStream() above — same num_gpu:99 removal.
-    const ollamaOptions: Record<string, any> = {}
+    const ollamaOptions: OllamaRequestOptions = {}
     if (options?.temperature !== undefined) ollamaOptions.temperature = options.temperature
     if (options?.topP !== undefined) ollamaOptions.top_p = options.topP
     if (options?.topK !== undefined) ollamaOptions.top_k = options.topK
@@ -288,8 +332,9 @@ export class OllamaProvider implements ProviderClient {
     if (options?.thinking === true) body.think = true
     else if (options?.thinking === false) body.think = false
 
-    const fetchOptions = (bodyObj: Record<string, any>): any => {
-      const opts: any = {
+    type LocalFetchInit = NonNullable<Parameters<typeof localFetch>[1]>
+    const fetchOptions = (bodyObj: OllamaChatRequest): LocalFetchInit => {
+      const opts: LocalFetchInit = {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(bodyObj),
@@ -308,28 +353,39 @@ export class OllamaProvider implements ProviderClient {
       throw await this.buildError(res, 'Tool calling failed', model)
     }
 
-    const data = await res.json()
-    let toolCalls: ToolCall[] = (data.message?.tool_calls || []).map((tc: any) => ({
-      function: { name: tc.function.name, arguments: repairToolCallArgs(tc.function.arguments) },
-    }))
+    // Boundary: everything below reads a body we did not produce, so each
+    // field is checked on the way out of `unknown` instead of being asserted
+    // into a shape.
+    const data: unknown = await res.json()
+    const message = prop(data, 'message')
+    const content = asString(prop(message, 'content')) || ''
+    let toolCalls: ToolCall[] = asRecordArray(prop(message, 'tool_calls')).map(tc => {
+      const fn = prop(tc, 'function')
+      return {
+        function: {
+          name: asString(prop(fn, 'name')) ?? '',
+          arguments: repairToolCallArgs(isRecord(fn) ? fn.arguments : undefined),
+        },
+      }
+    })
 
     // If no tool calls found but content looks like a tool call, try to extract
-    if (toolCalls.length === 0 && data.message?.content) {
-      const extracted = extractToolCallsFromContent(data.message.content)
+    if (toolCalls.length === 0 && content) {
+      const extracted = extractToolCallsFromContent(content)
       if (extracted.length > 0) {
         toolCalls = extracted.map(tc => ({ function: tc }))
       }
     }
 
     return {
-      content: data.message?.content || '',
-      thinking: data.message?.thinking || '',
+      content,
+      thinking: asString(prop(message, 'thinking')) || '',
       toolCalls,
       // Real token usage from the non-streaming response, same fields
       // chatStream() already forwards — without them the agent TokenCounter
       // falls back to a char/4 estimate for every Ollama tool turn.
-      promptEvalCount: data.prompt_eval_count,
-      evalCount: data.eval_count,
+      promptEvalCount: asNumber(prop(data, 'prompt_eval_count')),
+      evalCount: asNumber(prop(data, 'eval_count')),
     }
   }
 

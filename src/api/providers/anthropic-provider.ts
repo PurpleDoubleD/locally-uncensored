@@ -21,34 +21,17 @@ import {
   localFetch, localFetchStream, isPrivateOrLanHost, isDirectFetchAllowed,
   hostnameOf, ensureProxyAllowsHost,
 } from '../backend'
+import {
+  parseAnthropicStreamEvent, parseAnthropicMessageResponse, isRecord, prop, asString,
+} from './wire'
 
 // ── Anthropic API Types ────────────────────────────────────────
-
-interface AnthropicStreamEvent {
-  type: string
-  index?: number
-  content_block?: { type: string; id?: string; name?: string; input?: any; text?: string }
-  delta?: { type: string; text?: string; partial_json?: string; thinking?: string }
-  message?: { id: string; usage?: { input_tokens: number; output_tokens: number } }
-  // message_delta events carry cumulative output usage at the event top level.
-  usage?: { input_tokens?: number; output_tokens?: number }
-  // `event: error` on an otherwise healthy HTTP-200 stream. Anthropic sends it
-  // for overloaded_error / api_error when the failure happens AFTER the
-  // response headers are out.
-  error?: { type?: string; message?: string }
-}
-
-interface AnthropicResponse {
-  content: {
-    type: 'text' | 'tool_use'
-    text?: string
-    id?: string
-    name?: string
-    input?: Record<string, any>
-  }[]
-  stop_reason?: string
-  usage?: { input_tokens: number; output_tokens: number }
-}
+//
+// Incoming shapes and their checked parsers live in ./wire. They used to be
+// declared here and asserted onto `parseSSEWithEvents<T>` / `res.json()`,
+// which is how `delta` ended up read through four separate `as any` casts in
+// the stream loop below: the declared `delta` had no `stop_reason`, so the one
+// place that needs it had to lie about the type to get at it.
 
 // ── Known Claude models ────────────────────────────────────────
 
@@ -79,10 +62,72 @@ const CLAUDE_MODELS: ProviderModel[] = [
 // write a fresh entry on every step and never read one back, because A1
 // decay and A3 compaction still rewrite the tail of the history.
 
-/** A /v1/messages body under construction. The wire mixes strings, numbers,
- *  nested objects and content-block arrays, so the value type stays open —
- *  named once here rather than restated on every signature. */
-type MessagesBody = Record<string, any>
+// ── Request shapes (what we SEND) ──────────────────────────────
+
+/** Any request block may carry a cache breakpoint — see applyCacheControl. */
+export interface CacheControlled {
+  cache_control?: { type: 'ephemeral' }
+}
+
+export interface AnthropicTextBlock extends CacheControlled {
+  type: 'text'
+  text: string
+}
+export interface AnthropicImageBlock extends CacheControlled {
+  type: 'image'
+  source: { type: 'base64'; media_type: string; data: string }
+}
+export interface AnthropicToolUseBlock extends CacheControlled {
+  type: 'tool_use'
+  id: string
+  name: string
+  input: Record<string, unknown>
+}
+export interface AnthropicToolResultBlock extends CacheControlled {
+  type: 'tool_result'
+  tool_use_id: string
+  content: string
+}
+
+export type AnthropicRequestBlock =
+  | AnthropicTextBlock
+  | AnthropicImageBlock
+  | AnthropicToolUseBlock
+  | AnthropicToolResultBlock
+
+export interface AnthropicRequestMessage {
+  role: 'user' | 'assistant'
+  content: string | AnthropicRequestBlock[]
+}
+
+export interface AnthropicToolSpec extends CacheControlled {
+  name: string
+  description: string
+  input_schema: ToolDefinition['function']['parameters']
+}
+
+/**
+ * A /v1/messages body under construction.
+ *
+ * Every optional field here is one that some code path adds and another
+ * deletes again (`thinking` on the 400-retry, the three sampling knobs when
+ * thinking turns on). Under the old `Record<string, any>` a misspelt key in
+ * either direction compiled: the field would simply never be added, or never
+ * removed, and the request would go out wrong with nothing to notice it.
+ */
+export interface MessagesBody {
+  model: string
+  messages: AnthropicRequestMessage[]
+  max_tokens: number
+  stream?: boolean
+  /** A plain string until applyCacheControl promotes it to a cached block. */
+  system?: string | AnthropicTextBlock[]
+  temperature?: number
+  top_p?: number
+  top_k?: number
+  tools?: AnthropicToolSpec[]
+  thinking?: { type: 'enabled'; budget_tokens: number }
+}
 
 /** The init every transport in this file accepts: plain `fetch`, and the two
  *  proxy-aware helpers in backend.ts. */
@@ -102,7 +147,7 @@ const DEFAULT_THINKING_BUDGET = 5000
 const MIN_ANSWER_TOKENS = 2048
 
 /** A message content as blocks, so a marker has something to ride on. */
-function asContentBlocks(content: string | Record<string, any>[]): Record<string, any>[] {
+function asContentBlocks(content: string | AnthropicRequestBlock[]): AnthropicRequestBlock[] {
   return typeof content === 'string' ? [{ type: 'text', text: content }] : content
 }
 
@@ -120,11 +165,12 @@ function applyCacheControl(body: MessagesBody): void {
     body.system = [{ type: 'text', text: body.system, cache_control: { ...CACHE_CONTROL } }]
   }
 
-  const messages: Record<string, any>[] = body.messages
+  const messages = body.messages
   if (messages.length >= 2) {
     const stable = messages[messages.length - 2]
-    stable.content = asContentBlocks(stable.content)
-    const lastBlock = stable.content[stable.content.length - 1]
+    const blocks = asContentBlocks(stable.content)
+    stable.content = blocks
+    const lastBlock = blocks[blocks.length - 1]
     if (lastBlock) lastBlock.cache_control = { ...CACHE_CONTROL }
   }
 }
@@ -233,7 +279,7 @@ export class AnthropicProvider implements ProviderClient {
   private applyThinking(body: MessagesBody, options?: ChatOptions): void {
     if (options?.thinking !== true) return
 
-    const ceiling: number = body.max_tokens
+    const ceiling = body.max_tokens
     const budget = Math.max(1024, Math.min(DEFAULT_THINKING_BUDGET, Math.floor(ceiling / 2)))
     body.thinking = { type: 'enabled', budget_tokens: budget }
     // max_tokens covers thinking AND the answer, so it must have room for both.
@@ -315,8 +361,11 @@ export class AnthropicProvider implements ProviderClient {
     let outputTokens = 0
 
     try {
-      for await (const { data } of parseSSEWithEvents<AnthropicStreamEvent>(res, { onIdle: guard.abort })) {
+      // Boundary: the SSE payloads are foreign, so each event is walked with
+      // checked reads instead of being asserted into a declared shape.
+      for await (const { data: raw } of parseSSEWithEvents<unknown>(res, { onIdle: guard.abort })) {
         if (options?.signal?.aborted) break
+        const data = parseAnthropicStreamEvent(raw)
 
         switch (data.type) {
           case 'error': {
@@ -352,8 +401,15 @@ export class AnthropicProvider implements ProviderClient {
           }
 
           case 'content_block_start': {
-            if (data.content_block?.type === 'tool_use') {
-              toolUseBlocks.set(data.index!, {
+            // `index` keys the accumulator that content_block_delta later
+            // appends to. It used to be read through a non-null assertion, so
+            // an event without one silently opened a block under the key
+            // `undefined` — and every delta then looked it up under a real
+            // number and found nothing, dropping the whole tool call. Skipping
+            // the block is the same outcome the lookup already produced, minus
+            // the poisoned map entry.
+            if (data.content_block?.type === 'tool_use' && data.index !== undefined) {
+              toolUseBlocks.set(data.index, {
                 id: data.content_block.id || '',
                 name: data.content_block.name || '',
                 input: '',
@@ -363,16 +419,17 @@ export class AnthropicProvider implements ProviderClient {
           }
 
           case 'content_block_delta': {
-            const dtype = (data.delta as any)?.type
-            if (dtype === 'text_delta' && (data.delta as any).text) {
-              yield { content: (data.delta as any).text, done: false }
-            } else if (dtype === 'thinking_delta' && (data.delta as any).thinking) {
+            const delta = data.delta
+            const dtype = delta?.type
+            if (dtype === 'text_delta' && delta?.text) {
+              yield { content: delta.text, done: false }
+            } else if (dtype === 'thinking_delta' && delta?.thinking) {
               // Claude Extended Thinking stream — route to `thinking` so the
               // ThinkingBlock UI picks it up (same field as Ollama's native).
-              yield { content: '', thinking: (data.delta as any).thinking, done: false }
-            } else if (dtype === 'input_json_delta' && (data.delta as any).partial_json) {
-              const block = toolUseBlocks.get(data.index!)
-              if (block) block.input += (data.delta as any).partial_json
+              yield { content: '', thinking: delta.thinking, done: false }
+            } else if (dtype === 'input_json_delta' && delta?.partial_json && data.index !== undefined) {
+              const block = toolUseBlocks.get(data.index)
+              if (block) block.input += delta.partial_json
             }
             break
           }
@@ -381,7 +438,7 @@ export class AnthropicProvider implements ProviderClient {
             // End of message — flush tool calls. Map Anthropic's stop_reason
             // onto the unified finishReason ('max_tokens' → 'length', the key
             // the chat layer uses to explain thought-only/truncated turns).
-            const stopReason = (data.delta as any)?.stop_reason as string | undefined
+            const stopReason = data.delta?.stop_reason
             if (data.usage?.output_tokens) outputTokens = data.usage.output_tokens
             const toolCalls = this.flushToolUseBlocks(toolUseBlocks)
             yield {
@@ -474,7 +531,11 @@ export class AnthropicProvider implements ProviderClient {
       throw await this.parseError(res)
     }
 
-    const data: AnthropicResponse = await res.json()
+    // Boundary: checked parse, not `as AnthropicResponse`. The old assertion
+    // also declared `content` non-optional and then iterated it — a body
+    // without one (an error shape from a proxy fronting this endpoint) threw
+    // a bare TypeError instead of an empty turn.
+    const data = parseAnthropicMessageResponse(await res.json())
 
     let content = ''
     const toolCalls: ToolCall[] = []
@@ -486,8 +547,11 @@ export class AnthropicProvider implements ProviderClient {
         toolCalls.push({
           id: block.id,
           function: {
-            name: block.name!,
-            arguments: (typeof block.input === 'object' && block.input) ? block.input : {},
+            // `name!` used to assert a field the same interface declared
+            // optional. A tool_use block without one now dispatches on '',
+            // which fails as a lookup instead of as an undefined property.
+            name: block.name ?? '',
+            arguments: isRecord(block.input) ? block.input : {},
           },
         })
       }
@@ -534,10 +598,10 @@ export class AnthropicProvider implements ProviderClient {
 
   private convertMessages(messages: ChatMessage[]): {
     system: string
-    anthropicMessages: Record<string, any>[]
+    anthropicMessages: AnthropicRequestMessage[]
   } {
     let system = ''
-    const anthropicMessages: Record<string, any>[] = []
+    const anthropicMessages: AnthropicRequestMessage[] = []
 
     for (const msg of messages) {
       if (msg.role === 'system') {
@@ -561,7 +625,7 @@ export class AnthropicProvider implements ProviderClient {
 
       if (msg.role === 'assistant' && msg.tool_calls?.length) {
         // Assistant with tool calls → include tool_use content blocks
-        const content: any[] = []
+        const content: AnthropicRequestBlock[] = []
         if (msg.content) content.push({ type: 'text', text: msg.content })
         for (const tc of msg.tool_calls) {
           content.push({
@@ -577,7 +641,7 @@ export class AnthropicProvider implements ProviderClient {
 
       // Regular user/assistant message — with optional images
       if (msg.images?.length && msg.role === 'user') {
-        const content: any[] = []
+        const content: AnthropicRequestBlock[] = []
         for (const img of msg.images) {
           content.push({
             type: 'image',
@@ -598,9 +662,8 @@ export class AnthropicProvider implements ProviderClient {
     // to arrive in ONE user message. The old string-only merge left two
     // parallel tool calls as two consecutive user messages, which the API
     // rejects — so any multi-tool batch broke the whole Anthropic agent path.
-    const asBlocks = (content: string | Record<string, any>[]): Record<string, any>[] =>
-      typeof content === 'string' ? [{ type: 'text', text: content }] : content
-    const merged: Record<string, any>[] = []
+    const asBlocks = asContentBlocks
+    const merged: AnthropicRequestMessage[] = []
     for (const msg of anthropicMessages) {
       const last = merged[merged.length - 1]
       if (!last || last.role !== msg.role) {
@@ -624,8 +687,15 @@ export class AnthropicProvider implements ProviderClient {
 
     const calls: ToolCall[] = []
     for (const [, block] of blocks) {
-      let args: Record<string, any> = {}
-      try { args = JSON.parse(block.input) } catch { /* empty */ }
+      // `input` is JSON text assembled from input_json_delta fragments. It can
+      // decode to a non-object (a truncated stream, or a model that emitted
+      // `null`) — the old annotation promised a Record and would have handed
+      // `null` straight to the tool dispatcher.
+      let args: Record<string, unknown> = {}
+      try {
+        const parsed: unknown = JSON.parse(block.input)
+        if (parsed && typeof parsed === 'object') args = parsed as Record<string, unknown>
+      } catch { /* empty */ }
 
       calls.push({
         id: block.id,
@@ -643,8 +713,9 @@ export class AnthropicProvider implements ProviderClient {
     let code: string = 'network'
 
     try {
-      const data = await res.json()
-      if (data.error?.message) message = data.error.message
+      const data: unknown = await res.json()
+      const serverMessage = asString(prop(prop(data, 'error'), 'message'))
+      if (serverMessage) message = serverMessage
     } catch { /* use default */ }
 
     if (res.status === 401 || res.status === 403) {

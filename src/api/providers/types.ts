@@ -129,7 +129,7 @@ export interface ToolCall {
   id?: string            // OpenAI requires this, Ollama doesn't
   function: {
     name: string
-    arguments: Record<string, any>
+    arguments: Record<string, unknown>
   }
 }
 
@@ -190,7 +190,7 @@ export interface ToolDefinition {
     description: string
     parameters: {
       type: 'object'
-      properties: Record<string, any>
+      properties: Record<string, unknown>
       required: string[]
     }
   }

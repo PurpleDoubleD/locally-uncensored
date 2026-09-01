@@ -1817,7 +1817,14 @@ export function useCodex() {
           //   workDir=D:/Pictures/foo, p=D:/Pictures/foo/bar.html →
           //   D:/Pictures/foo/D:/Pictures/foo/bar.html
           // which then grew further on retry as the model re-emitted the path.
-          if ((toolName === 'file_read' || toolName === 'file_write' || toolName === 'file_edit' || toolName === 'file_list' || toolName === 'file_search') && toolArgs.path) {
+          // `path` is whatever the MODEL put in the tool call, so it is only a
+          // string when the model made it one. The old annotation asserted it
+          // (`const p: string = toolArgs.path` on an `any`), and a call that
+          // sent a number or an object went straight into `p.startsWith` and
+          // threw a TypeError out of the tool loop. Checking it here lets such
+          // a call reach the tool, which rejects it with its own message.
+          // The truthiness of the old guard is kept: '' still skips.
+          if ((toolName === 'file_read' || toolName === 'file_write' || toolName === 'file_edit' || toolName === 'file_list' || toolName === 'file_search') && typeof toolArgs.path === 'string' && toolArgs.path) {
             const p: string = toolArgs.path
             const isAbsolute =
               /^[a-zA-Z]:[/\\]/.test(p) ||  // Windows drive letter: C:/ D:\ etc.

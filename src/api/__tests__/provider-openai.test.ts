@@ -7,7 +7,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { OpenAIProvider } from '../providers/openai-provider'
 import { ProviderError } from '../providers/types'
-import type { ProviderConfig, ToolDefinition } from '../providers/types'
+import type { ProviderConfig, ToolDefinition, ChatMessage, ChatOptions } from '../providers/types'
+import type { OpenAIChatRequest } from '../providers/openai-provider'
+import { sentJson, asProviderError, stubBrowserWindow, type FetchArgs } from './provider-test-support'
 
 function makeConfig(overrides: Partial<ProviderConfig> = {}): ProviderConfig {
   return {
@@ -76,9 +78,7 @@ describe('OpenAIProvider', () => {
   // durchgreifen kann (dann mockable via globalThis.fetch).
   describe('Bug K — probeContextFromServer (LM Studio Enhanced API)', () => {
     beforeEach(() => {
-      if (typeof (globalThis as any).window === 'undefined') {
-        (globalThis as any).window = {}
-      }
+      stubBrowserWindow()
     })
     afterEach(() => {
       vi.restoreAllMocks()
@@ -93,7 +93,7 @@ describe('OpenAIProvider', () => {
       // Modell-Name darf KEIN Match in guessContextFromName ausloesen, damit
       // wir bewiesen kriegen dass der Probe-Pfad lief (sonst koennte 131072
       // auch aus der Heuristik kommen).
-      vi.spyOn(globalThis, 'fetch').mockImplementation(async (url: any) => {
+      vi.spyOn(globalThis, 'fetch').mockImplementation(async (url: FetchArgs[0]) => {
         const u = url.toString()
         if (u.includes('/api/v0/models/custom-undocumented-model')) {
           return new Response(JSON.stringify({
@@ -114,7 +114,7 @@ describe('OpenAIProvider', () => {
         isLocal: true,
       }))
       // vLLM exposes max_model_len, not max_context_length
-      vi.spyOn(globalThis, 'fetch').mockImplementation(async (url: any) => {
+      vi.spyOn(globalThis, 'fetch').mockImplementation(async (url: FetchArgs[0]) => {
         const u = url.toString()
         if (u.includes('/api/v0/models/')) {
           return new Response('', { status: 404 })
@@ -135,7 +135,7 @@ describe('OpenAIProvider', () => {
         baseUrl: 'http://localhost:8080/v1',
         isLocal: true,
       }))
-      vi.spyOn(globalThis, 'fetch').mockImplementation(async (url: any) => {
+      vi.spyOn(globalThis, 'fetch').mockImplementation(async (url: FetchArgs[0]) => {
         const u = url.toString()
         if (u.includes('/api/v0/models/')) return new Response('', { status: 404 })
         if (u.includes('/v1/models/llama-server-model')) {
@@ -175,7 +175,7 @@ describe('OpenAIProvider', () => {
         baseUrl: 'http://localhost:1234/v1',
         isLocal: true,
       }))
-      vi.spyOn(globalThis, 'fetch').mockImplementation(async (url: any) => {
+      vi.spyOn(globalThis, 'fetch').mockImplementation(async (url: FetchArgs[0]) => {
         const u = url.toString()
         if (u.endsWith('/v1/models')) {
           return new Response(JSON.stringify({
@@ -204,7 +204,8 @@ describe('OpenAIProvider', () => {
       try {
         await provider.listModels()
         expect.fail('Should have thrown')
-      } catch (e: any) {
+      } catch (thrown) {
+        const e = asProviderError(thrown)
         expect(e).toBeInstanceOf(ProviderError)
         expect(e.code).toBe('auth')
       }
@@ -219,7 +220,8 @@ describe('OpenAIProvider', () => {
       try {
         await provider.listModels()
         expect.fail('Should have thrown')
-      } catch (e: any) {
+      } catch (thrown) {
+        const e = asProviderError(thrown)
         expect(e).toBeInstanceOf(ProviderError)
         expect(e.code).toBe('rate_limit')
         expect(e.provider).toBe('openai')
@@ -235,7 +237,8 @@ describe('OpenAIProvider', () => {
       try {
         await provider.listModels()
         expect.fail('Should have thrown')
-      } catch (e: any) {
+      } catch (thrown) {
+        const e = asProviderError(thrown)
         expect(e).toBeInstanceOf(ProviderError)
         expect(e.code).toBe('not_found')
       }
@@ -266,7 +269,8 @@ describe('OpenAIProvider', () => {
       try {
         await provider.listModels()
         expect.fail('Should have thrown')
-      } catch (e: any) {
+      } catch (thrown) {
+        const e = asProviderError(thrown)
         expect(e).toBeInstanceOf(ProviderError)
         expect(e.code).toBe('lmstudio_runtime_missing')
         expect(e.message).toMatch(/runtime/i)
@@ -289,7 +293,8 @@ describe('OpenAIProvider', () => {
       try {
         await provider.listModels()
         expect.fail('Should have thrown')
-      } catch (e: any) {
+      } catch (thrown) {
+        const e = asProviderError(thrown)
         expect(e.code).toBe('lmstudio_runtime_missing')
       }
       vi.restoreAllMocks()
@@ -306,7 +311,8 @@ describe('OpenAIProvider', () => {
       try {
         await provider.listModels()
         expect.fail('Should have thrown')
-      } catch (e: any) {
+      } catch (thrown) {
+        const e = asProviderError(thrown)
         expect(e.code).not.toBe('lmstudio_runtime_missing')
         expect(e.message).toBe('Bad request: missing model')
       }
@@ -418,7 +424,7 @@ describe('OpenAIProvider', () => {
       )
       // gpt-4o context = 128000; an absurd budget must be clamped into the window.
       await provider.chatWithTools('gpt-4o', [{ role: 'user', content: 'hi' }], [], { maxTokens: 999999 })
-      const sent = JSON.parse((fetchSpy.mock.calls[0][1] as any).body)
+      const sent = sentJson<OpenAIChatRequest>(fetchSpy.mock.calls)
       expect(sent.max_tokens).toBeGreaterThan(0)
       expect(sent.max_tokens).toBeLessThanOrEqual(128000)
       vi.restoreAllMocks()
@@ -434,7 +440,7 @@ describe('OpenAIProvider', () => {
       // No options → previously omitted max_tokens, so DeepInfra over-defaulted the
       // completion and 400'd. Now it must send a positive, in-window budget.
       await provider.chatWithTools('gpt-4o', [{ role: 'user', content: 'hi' }], [])
-      const sent = JSON.parse((fetchSpy.mock.calls[0][1] as any).body)
+      const sent = sentJson<OpenAIChatRequest>(fetchSpy.mock.calls)
       expect(sent.max_tokens).toBeGreaterThan(0)
       expect(sent.max_tokens).toBeLessThanOrEqual(128000)
       vi.restoreAllMocks()
@@ -455,8 +461,8 @@ describe('OpenAIProvider', () => {
 
     async function maxTokensFor(
       model: string,
-      messages: any[],
-      options?: any,
+      messages: ChatMessage[],
+      options?: ChatOptions,
     ): Promise<number> {
       const provider = new OpenAIProvider(makeConfig())
       const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
@@ -465,9 +471,9 @@ describe('OpenAIProvider', () => {
         }), { status: 200 })
       )
       await provider.chatWithTools(model, messages, [], options)
-      const sent = JSON.parse((fetchSpy.mock.calls[0][1] as any).body)
+      const sent = sentJson<OpenAIChatRequest>(fetchSpy.mock.calls)
       vi.restoreAllMocks()
-      return sent.max_tokens
+      return sent.max_tokens ?? 0
     }
 
     it('does not starve max_tokens to the 256 floor because of an image (CS-1)', async () => {
@@ -519,7 +525,7 @@ describe('OpenAIProvider', () => {
     it('still sends the full base64 image on the wire and does not mutate the messages (CS-1)', async () => {
       const provider = new OpenAIProvider(makeConfig())
       const data = base64Payload(20)
-      const messages: any[] = [{
+      const messages: ChatMessage[] = [{
         role: 'user',
         content: 'look',
         images: [{ data, mimeType: 'image/png' }],
@@ -530,11 +536,15 @@ describe('OpenAIProvider', () => {
         }), { status: 200 })
       )
       await provider.chatWithTools('mixtral-8x7b-32768', messages, [])
-      const sent = JSON.parse((fetchSpy.mock.calls[0][1] as any).body)
-      const part = sent.messages.at(-1).content.find((p: any) => p.type === 'image_url')
-      expect(part.image_url.url).toBe(`data:image/png;base64,${data}`)
+      const sent = sentJson<OpenAIChatRequest>(fetchSpy.mock.calls)
+      const lastContent = sent.messages.at(-1)?.content
+      // A message with images must be sent as a content-part array, never a
+      // bare string — asserting that is the point of the test.
+      if (!Array.isArray(lastContent)) throw new Error('expected content parts')
+      const part = lastContent.find(p => p.type === 'image_url')
+      expect(part?.image_url?.url).toBe(`data:image/png;base64,${data}`)
       // The estimator must be read-only.
-      expect(messages[0].images[0].data).toBe(data)
+      expect(messages[0].images?.[0].data).toBe(data)
       vi.restoreAllMocks()
     })
 
@@ -606,7 +616,8 @@ describe('OpenAIProvider', () => {
       try {
         await provider.listModels()
         expect.fail('Should have thrown')
-      } catch (e: any) {
+      } catch (thrown) {
+        const e = asProviderError(thrown)
         expect(e.code).toBe('auth')
         expect(e.message).toBe('LU Cloud is in closed beta (Max plan only)')
       }
@@ -621,7 +632,8 @@ describe('OpenAIProvider', () => {
       try {
         await provider.listModels()
         expect.fail('Should have thrown')
-      } catch (e: any) {
+      } catch (thrown) {
+        const e = asProviderError(thrown)
         expect(e.code).toBe('rate_limit')
         expect(e.message).toBe('monthly credit budget exhausted')
       }
@@ -634,7 +646,8 @@ describe('OpenAIProvider', () => {
       try {
         await provider.listModels()
         expect.fail('Should have thrown')
-      } catch (e: any) {
+      } catch (thrown) {
+        const e = asProviderError(thrown)
         expect(e.code).toBe('auth')
         expect(e.message).toMatch(/Invalid API key/)
       }
@@ -642,7 +655,8 @@ describe('OpenAIProvider', () => {
       try {
         await provider.listModels()
         expect.fail('Should have thrown')
-      } catch (e: any) {
+      } catch (thrown) {
+        const e = asProviderError(thrown)
         expect(e.code).toBe('rate_limit')
         expect(e.message).toMatch(/Rate limited/)
       }
@@ -764,7 +778,8 @@ describe('OpenAIProvider', () => {
       try {
         await provider.chatWithTools('some-model', [{ role: 'user', content: 'hi' }], toolDef)
         expect.fail('Should have thrown')
-      } catch (e: any) {
+      } catch (thrown) {
+        const e = asProviderError(thrown)
         expect(e).toBeInstanceOf(ProviderError)
         expect(e.code).toBe('tools_unsupported')
         expect(e.message).toMatch(/tool/i)
@@ -780,7 +795,8 @@ describe('OpenAIProvider', () => {
       try {
         await provider.chatWithTools('some-model', [{ role: 'user', content: 'hi' }], toolDef)
         expect.fail('Should have thrown')
-      } catch (e: any) {
+      } catch (thrown) {
+        const e = asProviderError(thrown)
         expect(e.code).toBe('tools_unsupported')
         expect(e.message).toMatch(/Function calling is not supported/)
       }
@@ -793,7 +809,8 @@ describe('OpenAIProvider', () => {
       try {
         await provider.listModels()
         expect.fail('Should have thrown')
-      } catch (e: any) {
+      } catch (thrown) {
+        const e = asProviderError(thrown)
         expect(e.code).not.toBe('tools_unsupported')
       }
       vi.restoreAllMocks()
@@ -807,7 +824,8 @@ describe('OpenAIProvider', () => {
       try {
         await provider.chatWithTools('some-model', [{ role: 'user', content: 'hi' }], toolDef)
         expect.fail('Should have thrown')
-      } catch (e: any) {
+      } catch (thrown) {
+        const e = asProviderError(thrown)
         expect(e.code).not.toBe('tools_unsupported')
       }
       vi.restoreAllMocks()
@@ -829,7 +847,8 @@ describe('OpenAIProvider', () => {
       try {
         await provider.chatWithTools('hermes-3-70b', [{ role: 'user', content: 'hi' }], toolDef)
         expect.fail('Should have thrown')
-      } catch (e: any) {
+      } catch (thrown) {
+        const e = asProviderError(thrown)
         expect(e.code).toBe('tools_unsupported')
         expect(e.message).toMatch(/can't run tools/)
       }
@@ -848,7 +867,8 @@ describe('OpenAIProvider', () => {
       try {
         await provider.chatWithTools('mythomax-l2-13b', [{ role: 'user', content: 'hi' }], toolDef)
         expect.fail('Should have thrown')
-      } catch (e: any) {
+      } catch (thrown) {
+        const e = asProviderError(thrown)
         expect(e.code).toBe('vision_unsupported')
         expect(e.message).toMatch(/can't read images/)
       }

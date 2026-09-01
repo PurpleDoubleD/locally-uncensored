@@ -22,8 +22,8 @@ vi.mock('../../backend', async () => {
   return {
     ...actual,
     isTauri: () => false,
-    localFetch: (...a: any[]) => localFetch(...a),
-    localFetchStream: (...a: any[]) => localFetchStream(...a),
+    localFetch: (...a: Parameters<typeof import('../../backend').localFetch>) => localFetch(...a),
+    localFetchStream: (...a: Parameters<typeof import('../../backend').localFetchStream>) => localFetchStream(...a),
     ensureProxyAllowsHost: async () => {},
   }
 })

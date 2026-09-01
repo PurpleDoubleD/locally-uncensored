@@ -12,6 +12,11 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { AnthropicProvider } from '../anthropic-provider'
 import type { ChatMessage, ChatStreamChunk, ProviderConfig, ToolDefinition } from '../types'
+import type {
+  MessagesBody, AnthropicRequestMessage, AnthropicRequestBlock,
+  AnthropicTextBlock, AnthropicToolSpec,
+} from '../anthropic-provider'
+import type { FetchArgs } from '../../__tests__/provider-test-support'
 
 const EPHEMERAL = { type: 'ephemeral' }
 
@@ -34,7 +39,7 @@ function tool(name: string): ToolDefinition {
 }
 
 /** Every JSON path in the body that carries a cache_control marker. */
-function markerPaths(value: any, path = '$'): string[] {
+function markerPaths(value: unknown, path = '$'): string[] {
   if (Array.isArray(value)) {
     return value.flatMap((v, i) => markerPaths(v, `${path}[${i}]`))
   }
@@ -52,24 +57,68 @@ function markerPaths(value: any, path = '$'): string[] {
 
 /** Non-streaming path (chatWithTools): capture every request body sent. */
 function captureJson() {
-  const bodies: any[] = []
+  // Typed as the provider's own request interface: a renamed field in
+  // MessagesBody breaks the assertions below instead of reading `undefined`.
+  const bodies: MessagesBody[] = []
   const headers: Record<string, string>[] = []
-  vi.stubGlobal('fetch', vi.fn(async (_url: any, init: any) => {
-    bodies.push(JSON.parse(init.body))
-    headers.push(init.headers)
-    return {
-      ok: true,
-      json: async () => ({ content: [{ type: 'text', text: 'ok' }], usage: { input_tokens: 9, output_tokens: 2 } }),
-    } as any
+  vi.stubGlobal('fetch', vi.fn(async (_url: FetchArgs[0], init: FetchArgs[1]) => {
+    bodies.push(capturedBody(init))
+    headers.push(capturedHeaders(init))
+    return new Response(
+      JSON.stringify({ content: [{ type: 'text', text: 'ok' }], usage: { input_tokens: 9, output_tokens: 2 } }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } },
+    )
   }))
   return { bodies, headers }
 }
 
+/** The JSON body of a captured fetch init, as the provider's request type. */
+function capturedBody(init: FetchArgs[1]): MessagesBody {
+  const body = init?.body
+  if (typeof body !== 'string') throw new Error('capture had no JSON body')
+  return JSON.parse(body) as MessagesBody
+}
+
+/**
+ * The block array of a wire message. A cache marker can only ride on a block,
+ * so a message still carrying a bare string means the promotion in
+ * applyCacheControl did not happen — a failure, not something to skip past.
+ */
+function blocksOf(msg: AnthropicRequestMessage): AnthropicRequestBlock[] {
+  if (typeof msg.content === 'string') {
+    throw new Error(`message content was never promoted to blocks: ${msg.content}`)
+  }
+  return msg.content
+}
+
+/** Same for the system parameter, which starts life as a plain string. */
+function systemBlocks(body: MessagesBody): AnthropicTextBlock[] {
+  if (typeof body.system !== 'object') {
+    throw new Error(`system was never promoted to blocks: ${String(body.system)}`)
+  }
+  return body.system
+}
+
+/** The tool specs of a request that is supposed to carry some. */
+function toolsOf(body: MessagesBody): AnthropicToolSpec[] {
+  if (!body.tools) throw new Error('request carried no tools')
+  return body.tools
+}
+
+/** The plain-object headers this provider always sends. */
+function capturedHeaders(init: FetchArgs[1]): Record<string, string> {
+  const h = init?.headers
+  if (!h || typeof h !== 'object' || Array.isArray(h) || h instanceof Headers) {
+    throw new Error('expected a plain headers object')
+  }
+  return h as Record<string, string>
+}
+
 /** Streaming path (chatStream): capture bodies, answer with a minimal SSE turn. */
 function captureSse() {
-  const bodies: any[] = []
-  vi.stubGlobal('fetch', vi.fn(async (_url: any, init: any) => {
-    bodies.push(JSON.parse(init.body))
+  const bodies: MessagesBody[] = []
+  vi.stubGlobal('fetch', vi.fn(async (_url: FetchArgs[0], init: FetchArgs[1]) => {
+    bodies.push(capturedBody(init))
     return new Response(
       [
         'data: {"type":"message_start","message":{"id":"m1","usage":{"input_tokens":9,"output_tokens":1}}}\n\n',
@@ -113,9 +162,10 @@ describe('A8 cache_control placement', () => {
     ])
     // 2. LAST tool definition only
     expect(body.tools).toHaveLength(2)
-    expect(body.tools[0].cache_control).toBeUndefined()
-    expect(body.tools[1].name).toBe('write')
-    expect(body.tools[1].cache_control).toEqual(EPHEMERAL)
+    const tools = toolsOf(body)
+    expect(tools[0].cache_control).toBeUndefined()
+    expect(tools[1].name).toBe('write')
+    expect(tools[1].cache_control).toEqual(EPHEMERAL)
     // 3. last stable message = the previous round's assistant turn
     expect(body.messages).toHaveLength(3)
     expect(body.messages[1].role).toBe('assistant')
@@ -143,9 +193,9 @@ describe('A8 cache_control placement', () => {
     const body = bodies[0]
 
     expect(body.stream).toBe(true)
-    expect(body.system[0].cache_control).toEqual(EPHEMERAL)
-    expect(body.tools[1].cache_control).toEqual(EPHEMERAL)
-    expect(body.messages[1].content[0].cache_control).toEqual(EPHEMERAL)
+    expect(systemBlocks(body)[0].cache_control).toEqual(EPHEMERAL)
+    expect(toolsOf(body)[1].cache_control).toEqual(EPHEMERAL)
+    expect(blocksOf(body.messages[1])[0].cache_control).toEqual(EPHEMERAL)
     expect(markerPaths(body)).toHaveLength(3)
   })
 
@@ -171,9 +221,18 @@ describe('A8 cache_control placement', () => {
       await provider.chatWithTools('claude-haiku-4-5-20251001', conversation(rounds), [tool('read')])
     }
 
-    const marked = bodies.map((b: any) => {
+    const marked = bodies.map(b => {
       const i = b.messages.length - 2
-      return { index: i, total: b.messages.length, text: b.messages[i].content[0].text }
+      const content = b.messages[i].content
+      // The marked history turn must have been promoted to a block array —
+      // that promotion is what gives the marker something to ride on.
+      if (!Array.isArray(content)) throw new Error('history turn was not promoted to blocks')
+      const first = content[0]
+      return {
+        index: i,
+        total: b.messages.length,
+        text: first.type === 'text' ? first.text : undefined,
+      }
     })
 
     // rounds=1 -> 3 wire messages, rounds=2 -> 5, and so on: always index n-2,
@@ -241,12 +300,12 @@ describe('A8 cache_control placement', () => {
     const body = bodies[0]
 
     // The vision turn really is a block array, and no image block was stamped.
-    expect(body.messages[0].content[0].type).toBe('image')
+    expect(blocksOf(body.messages[0])[0].type).toBe('image')
     expect(markerPaths(body)).toHaveLength(3)
     for (const path of markerPaths(body)) {
       expect(path).not.toMatch(/messages\[0\]/)
     }
-    expect(body.messages[1].content[0].cache_control).toEqual(EPHEMERAL)
+    expect(blocksOf(body.messages[1])[0].cache_control).toEqual(EPHEMERAL)
   })
 
   it('the agent tool path marks the settled tool_use turn, not the fresh tool results', async () => {
@@ -273,10 +332,11 @@ describe('A8 cache_control placement', () => {
     expect(body.messages).toHaveLength(3)
     const stable = body.messages[1]
     expect(stable.role).toBe('assistant')
-    expect(stable.content[stable.content.length - 1].type).toBe('tool_use')
-    expect(stable.content[stable.content.length - 1].cache_control).toEqual(EPHEMERAL)
+    const stableBlocks = blocksOf(stable)
+    expect(stableBlocks[stableBlocks.length - 1].type).toBe('tool_use')
+    expect(stableBlocks[stableBlocks.length - 1].cache_control).toEqual(EPHEMERAL)
     // The just-arrived tool results are the volatile tail, so no marker.
-    for (const block of body.messages[2].content) {
+    for (const block of blocksOf(body.messages[2])) {
       expect(block.cache_control).toBeUndefined()
     }
     expect(markerPaths(body)).toHaveLength(3)

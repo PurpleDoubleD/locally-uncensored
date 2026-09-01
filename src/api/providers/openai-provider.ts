@@ -23,6 +23,10 @@ import { parseRetryAfter } from '../../lib/http-status'
 import { localFetch, localFetchStream, isPrivateOrLanHost, isDirectFetchAllowed, hostnameOf, ensureProxyAllowsHost, backendCall } from '../backend'
 import { ensureBuiltinEngineAlive, explainDeadEngine, explainEngineTransportMessage, isManagedBuiltinSlot } from '../builtin-ensure'
 import { applyTemplateContract } from './normalize-system'
+import {
+  parseOpenAIStreamChunk, parseOpenAIChatResponse,
+  prop, asString, asNumber, asBoolean, asRecordArray,
+} from './wire'
 
 // Transport routing lives in the `useLocalProxy` getter (below) plus the shared
 // host helpers in backend.ts. A direct webview fetch only works for hosts the
@@ -32,40 +36,72 @@ import { applyTemplateContract } from './normalize-system'
 // probing), which must not follow the transport decision.
 
 // ── OpenAI API Types ───────────────────────────────────────────
+//
+// What comes BACK lives in ./wire, behind checked parsers. It used to be
+// declared here as two hand-rolled interfaces asserted onto `JSON.parse` and
+// `res.json()`, and both said things the code itself knew to be false: the
+// tool-call delta declared `index: number` as required while the accumulator
+// right below it falls back to `keyForUnindexedDelta` precisely because
+// servers omit it, and `choices` was typed as a one-element tuple.
 
-interface OpenAIStreamChunk {
-  choices?: [{
-    delta?: {
-      content?: string
-      // Native reasoning channel — DeepInfra (LU Cloud) reasoning models
-      // stream thinking as `reasoning_content`, some as `reasoning`.
-      reasoning_content?: string
-      reasoning?: string
-      tool_calls?: {
-        index: number
-        id?: string
-        function?: { name?: string; arguments?: string }
-      }[]
-    }
-    finish_reason?: string | null
-  }]
+/**
+ * What we SEND to `/v1/chat/completions`.
+ *
+ * A real shape, not a `Record<string, any>` bag: the ladder in `sendChat`
+ * reads and deletes four of these fields by name, and under `any` a typo in
+ * one of those names would have compiled into a request that silently kept
+ * the parameter the server just refused.
+ */
+export interface OpenAIContentPart {
+  type: 'text' | 'image_url'
+  text?: string
+  image_url?: { url: string }
 }
 
-interface OpenAIResponse {
-  choices?: [{
-    message?: {
-      content?: string
-      reasoning_content?: string
-      reasoning?: string
-      tool_calls?: {
-        id: string
-        type: 'function'
-        function: { name: string; arguments: string }
-      }[]
-    }
-    finish_reason?: string
-  }]
+export interface OpenAIRequestToolCall {
+  id: string
+  type: 'function'
+  function: { name: string; arguments: string }
 }
+
+export interface OpenAIRequestMessage {
+  role: ChatMessage['role']
+  content: string | OpenAIContentPart[]
+  tool_calls?: OpenAIRequestToolCall[]
+  tool_call_id?: string
+}
+
+export interface OpenAIChatRequest {
+  model: string
+  messages: OpenAIRequestMessage[]
+  stream: boolean
+  temperature?: number
+  top_p?: number
+  max_tokens?: number
+  tools?: ToolDefinition[]
+  tool_choice?: 'auto' | 'none' | 'required'
+  /** 'high' | 'minimal' | 'none' — stepped down, then deleted, by sendChat. */
+  reasoning_effort?: string
+  chat_template_kwargs?: Record<string, unknown>
+  stream_options?: { include_usage: boolean }
+}
+
+/**
+ * The two transports this provider posts through: the browser `fetch` and
+ * `localFetch`/`localFetchStream` (Rust proxy). Both satisfy this narrower
+ * signature, which is what removes the `fetcher as any` casts that used to
+ * bridge them — a cast that would equally have accepted a function taking no
+ * arguments at all.
+ */
+type ChatFetcher = (
+  url: string,
+  init: {
+    method?: string
+    headers?: Record<string, string>
+    body?: string
+    signal?: AbortSignal
+  },
+) => Promise<Response>
 
 interface OpenAIModelEntry {
   id: string
@@ -85,6 +121,32 @@ interface OpenAIModelEntry {
   // it → the mapping falls back to `true` (optimistic, corrected at runtime).
   supports_tools?: boolean
   think?: 'toggle' | 'always' | 'never'
+}
+
+/**
+ * Build a catalogue entry out of one `/v1/models` element, checking every
+ * field on the way. `think` is validated against the three values the rest of
+ * the app switches on — a server sending anything else must not smuggle a
+ * fourth mode into the model picker.
+ */
+function toModelEntry(m: Record<string, unknown>): OpenAIModelEntry {
+  const think = asString(m.think)
+  return {
+    // A catalogue row with no string id is unusable downstream (it keys
+    // KNOWN_CONTEXT and every heuristic); '' keeps the row and keeps
+    // guessContextFromName from being handed a non-string.
+    id: asString(m.id) ?? '',
+    object: asString(m.object) ?? 'model',
+    created: asNumber(m.created),
+    owned_by: asString(m.owned_by),
+    name: asString(m.name),
+    context_length: asNumber(m.context_length),
+    input_modalities: Array.isArray(m.input_modalities)
+      ? m.input_modalities.filter((x): x is string => typeof x === 'string')
+      : undefined,
+    supports_tools: asBoolean(m.supports_tools),
+    think: think === 'toggle' || think === 'always' || think === 'never' ? think : undefined,
+  }
 }
 
 // ── Known context lengths for popular models ───────────────────
@@ -215,7 +277,7 @@ function measurePayload(value: unknown): { chars: number; images: number } {
       return ''
     }
     if (val && typeof val === 'object' && !Array.isArray(val)) {
-      const part = val as Record<string, any>
+      const part = val as Record<string, unknown>
       if (part.type === 'image_url') {
         images++
         return { type: 'image_url' }
@@ -403,9 +465,9 @@ export class OpenAIProvider implements ProviderClient {
    */
   private async sendChat(
     model: string,
-    body: Record<string, any>,
+    body: OpenAIChatRequest,
     signal: AbortSignal | undefined,
-    fetcher: (url: string, init: any) => Promise<Response>,
+    fetcher: ChatFetcher,
   ): Promise<Response> {
     // Sanierungspfad: a throttle or a gateway hiccup is not the request's
     // fault, and the user used to read the raw status line for it. The retry
@@ -422,7 +484,7 @@ export class OpenAIProvider implements ProviderClient {
     )
     const refused = (res: Response) => !res.ok && (res.status === 400 || res.status === 422)
 
-    const asked = body.reasoning_effort as string | undefined
+    const asked = body.reasoning_effort
     const lane: 'on' | 'off' | undefined =
       asked === undefined ? undefined : asked === 'high' ? 'on' : 'off'
 
@@ -459,7 +521,7 @@ export class OpenAIProvider implements ProviderClient {
     }
 
     if (res.ok && lane) {
-      const survived = body.reasoning_effort as string | undefined
+      const survived = body.reasoning_effort
       if (survived === undefined) this.rememberEffort(model, lane, 'omit')
       else if (survived !== asked) this.rememberEffort(model, lane, 'minimal')
     }
@@ -509,7 +571,7 @@ export class OpenAIProvider implements ProviderClient {
    */
   private async applyMaxTokens(
     model: string,
-    body: Record<string, any>,
+    body: OpenAIChatRequest,
     options?: ChatOptions,
   ): Promise<void> {
     const requested = options?.maxTokens && options.maxTokens > 0 ? options.maxTokens : 0
@@ -549,7 +611,7 @@ export class OpenAIProvider implements ProviderClient {
     messages: ChatMessage[],
     options?: ChatOptions,
   ): AsyncGenerator<ChatStreamChunk> {
-    const body: Record<string, any> = {
+    const body: OpenAIChatRequest = {
       model,
       // Bug B3: one system message, first. The built-in engine and LM Studio
       // render the model's own Jinja template, which raises "System message
@@ -600,7 +662,7 @@ export class OpenAIProvider implements ProviderClient {
     const guard = idleAbortGuard(options?.signal)
     let res: Response
     try {
-      res = await this.sendChat(model, body, guard.signal, fetcher as any)
+      res = await this.sendChat(model, body, guard.signal, fetcher)
       if (!res.ok) throw await this.parseError(res)
     } catch (err) {
       // Nothing to watch — drop the listener on the caller's signal here, the
@@ -633,12 +695,14 @@ export class OpenAIProvider implements ProviderClient {
           return
         }
 
-        let chunk: OpenAIStreamChunk
+        let raw: unknown
         try {
-          chunk = JSON.parse(event.data)
+          raw = JSON.parse(event.data)
         } catch {
           continue
         }
+        // Boundary: from here on every field has been checked, not asserted.
+        const chunk = parseOpenAIStreamChunk(raw)
 
         // LM Studio (and some OpenAI-compat servers) report a mid-stream failure
         // as a 200 response carrying an SSE error chunk ({ error: { message } } or
@@ -648,14 +712,18 @@ export class OpenAIProvider implements ProviderClient {
         // thrown error so the chat layer can map it to a friendly message (e.g.
         // the #67 image-on-text-model case). Verified live: LM Studio + image on a
         // text-only model returns `event: error` with HTTP 200 (2026-06-21).
-        const streamErr = (chunk as { error?: { message?: string } | string }).error
+        const streamErr = chunk.error
         if (streamErr) {
-          throw new Error(typeof streamErr === 'string' ? streamErr : (streamErr.message || 'Streaming error'))
+          throw new Error(
+            typeof streamErr === 'string'
+              ? streamErr
+              : (asString(prop(streamErr, 'message')) || 'Streaming error'),
+          )
         }
 
         // Real token usage — the include_usage final chunk carries `usage` with
         // an empty choices[], so capture it BEFORE the choice guard below.
-        const u = (chunk as { usage?: { prompt_tokens?: number; completion_tokens?: number } }).usage
+        const u = chunk.usage
         if (u) {
           promptTokens = u.prompt_tokens || promptTokens
           completionTokens = u.completion_tokens || completionTokens
@@ -745,7 +813,7 @@ export class OpenAIProvider implements ProviderClient {
     tools: ToolDefinition[],
     options?: ChatOptions,
   ): Promise<{ content: string; toolCalls: ToolCall[]; promptEvalCount?: number; evalCount?: number; thinking?: string }> {
-    const body: Record<string, any> = {
+    const body: OpenAIChatRequest = {
       model,
       // Bug B3: same invariant as chatStream, see providers/normalize-system.ts.
       messages: this.templateContract(messages, tools.length > 0).map(m => this.toOpenAIMessage(m)),
@@ -773,31 +841,34 @@ export class OpenAIProvider implements ProviderClient {
 
     if (this.useLocalProxy) await ensureProxyAllowsHost(this.baseUrl)
     const fetcher = this.useLocalProxy ? localFetch : fetch
-    const res = await this.sendChat(model, body, options?.signal, fetcher as any)
+    const res = await this.sendChat(model, body, options?.signal, fetcher)
 
     if (!res.ok) {
       throw await this.parseError(res, tools.length > 0)
     }
 
-    const data: OpenAIResponse = await res.json()
-    const choice = data.choices?.[0]
+    // Boundary: the body is foreign, so it goes through the checked parser
+    // rather than an `as OpenAIResponse` that would break on the first
+    // tool-call the server sends without a `function` object.
+    const data = parseOpenAIChatResponse(await res.json())
+    const message = data.message
 
-    const toolCalls: ToolCall[] = (choice?.message?.tool_calls || []).map(tc => ({
+    const toolCalls: ToolCall[] = (message?.tool_calls || []).map(tc => ({
       id: tc.id,
       function: {
-        name: tc.function.name,
-        arguments: this.safeParseArgs(tc.function.arguments),
+        name: tc.function?.name ?? '',
+        arguments: this.safeParseArgs(tc.function?.arguments ?? ''),
       },
     }))
 
     // Real consumed-context usage (non-streaming response carries it directly).
-    const usage = (data as { usage?: { prompt_tokens?: number; completion_tokens?: number } }).usage
+    const usage = data.usage
     return {
-      content: choice?.message?.content || '',
+      content: message?.content || '',
       toolCalls,
       promptEvalCount: usage?.prompt_tokens,
       evalCount: usage?.completion_tokens,
-      thinking: choice?.message?.reasoning_content || choice?.message?.reasoning || undefined,
+      thinking: message?.reasoning_content || message?.reasoning || undefined,
     }
   }
 
@@ -806,14 +877,18 @@ export class OpenAIProvider implements ProviderClient {
     const fetcher = this.useLocalProxy ? localFetch : fetch
     const res = await fetcher(`${this.baseUrl}/models`, {
       headers: this.headers,
-    } as any)
+    })
 
     if (!res.ok) {
       throw await this.parseError(res)
     }
 
-    const data = await res.json()
-    const models: OpenAIModelEntry[] = data.data || data.models || []
+    const body: unknown = await res.json()
+    // Both spellings are in the wild (`data` in the OpenAI spec, `models` on
+    // some compat servers); anything that is not an array of objects yields
+    // an empty catalogue instead of blowing up the model picker.
+    const rawList = prop(body, 'data') ?? prop(body, 'models')
+    const models: OpenAIModelEntry[] = asRecordArray(rawList).map(toModelEntry)
 
     // Bug K: fuer lokale Backends (LM Studio etc.) probe das wahre
     // Context-Limit vom Server. Sonst zeigen wir 8K obwohl das Modell 32K+
@@ -873,7 +948,7 @@ export class OpenAIProvider implements ProviderClient {
       const fetcher = this.useLocalProxy ? localFetch : fetch
       const res = await fetcher(`${this.baseUrl}/models`, {
         headers: this.headers,
-      } as any)
+      })
       return res.ok
     } catch {
       return false
@@ -1128,18 +1203,18 @@ export class OpenAIProvider implements ProviderClient {
 
   // ── Message conversion ───────────────────────────────────────
 
-  private toOpenAIMessage(msg: ChatMessage): Record<string, any> {
+  private toOpenAIMessage(msg: ChatMessage): OpenAIRequestMessage {
     // If message has images, use content array format
-    let content: any = msg.content
+    let content: string | OpenAIContentPart[] = msg.content
     if (msg.images?.length && msg.role === 'user') {
-      const parts: any[] = []
+      const parts: OpenAIContentPart[] = []
       for (const img of msg.images) {
         parts.push({ type: 'image_url', image_url: { url: `data:${img.mimeType};base64,${img.data}` } })
       }
       parts.push({ type: 'text', text: msg.content })
       content = parts
     }
-    const m: Record<string, any> = { role: msg.role, content }
+    const m: OpenAIRequestMessage = { role: msg.role, content }
 
     if (msg.tool_calls) {
       m.tool_calls = msg.tool_calls.map(tc => ({
@@ -1180,13 +1255,24 @@ export class OpenAIProvider implements ProviderClient {
     return calls
   }
 
-  private safeParseArgs(args: string): Record<string, any> {
+  /**
+   * A tool call's `arguments` is a JSON *string* on the wire and the caller is
+   * a language model, so nothing guarantees it decodes to an object. The
+   * happy path used to return whatever JSON.parse produced under a
+   * `Record<string, any>` annotation — `"null"` therefore handed `null` to
+   * every downstream `args.foo` read, and `"[1,2]"` / `"42"` handed on a
+   * value with none of the promised keys. Both branches now apply the same
+   * object check the repair branch always had.
+   */
+  private safeParseArgs(args: string): Record<string, unknown> {
     try {
-      return JSON.parse(args)
+      const parsed: unknown = JSON.parse(args)
+      if (parsed && typeof parsed === 'object') return parsed as Record<string, unknown>
     } catch {
-      const repaired = repairJson(args)
-      return repaired && typeof repaired === 'object' ? repaired : {}
+      // fall through to the repair path below
     }
+    const repaired: unknown = repairJson(args)
+    return repaired && typeof repaired === 'object' ? repaired as Record<string, unknown> : {}
   }
 
   // ── Error parsing ────────────────────────────────────────────
