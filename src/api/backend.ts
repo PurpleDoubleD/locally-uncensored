@@ -476,8 +476,13 @@ export async function backendCall<T = unknown>(
     install_tts_status: { path: "/local-api/install-tts" },
     transcribe: { path: "/local-api/transcribe", method: "POST" },
     execute_code: { path: "/local-api/execute-code", method: "POST" },
-    file_read: { path: "/local-api/file-read", method: "POST" },
-    file_write: { path: "/local-api/file-write", method: "POST" },
+    // file_read / file_write: ABSICHTLICH NICHT HIER. Die beiden Dev-Endpunkte
+    // sind entfernt (siehe vite.config.ts), weil sie keinen Aufrufer mehr
+    // hatten und eine dritte, von Rust abweichende Pfadregel waren. Ein Eintrag
+    // ohne Endpunkt waere schlimmer als keiner: `backendCall('file_read', …)`
+    // liefe dann im Dev-Modus in einen nackten HTTP 404, statt mit
+    // "Unknown backend command: file_read" zu sagen, was los ist. Der Weg auf
+    // die Platte ist fs_read / fs_write.
     download_model: { path: "/local-api/download-model", method: "POST" },
     download_model_to_path: { path: "/local-api/download-model-to-path", method: "POST" },
     detect_model_path: { path: "/local-api/detect-model-path", method: "POST" },

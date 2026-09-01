@@ -28,7 +28,12 @@ import { devResolveWithinJail, effectiveByteCap, JailEscapeError } from './src/l
 // Verzeichnisnamen dieses Builds. Dieser Branch schreibt BEWUSST nicht in die
 // Ordner der echten App — siehe src/lib/app-identity.ts und
 // src-tauri/src/app_identity.rs.
-import { AGENT_WORKSPACE_DIR, APP_CONFIG_DIR } from './src/lib/app-identity'
+//
+// `AGENT_WORKSPACE_DIR` steht hier nicht mehr: seine letzten beiden
+// Verwendungen waren die entfernten Handler /local-api/file-read und
+// /file-write. Der Name wird weiterhin gebraucht — aber innerhalb des Käfigs
+// (src/lib/dev-fs-jail.ts), nicht mehr von Hand in dieser Datei.
+import { APP_CONFIG_DIR } from './src/lib/app-identity'
 import { postContentTypeAllowed, postContentTypeError } from './src/lib/local-api-guard'
 // Die herausgelösten, getesteten Teile dieses Dev-Servers. Sie liegen unter
 // src/dev/, damit vitest sie sieht; alles dort ist rein (keine node:*-Importe),
@@ -1440,73 +1445,27 @@ function comfyLauncher(): Plugin {
         })
       })
 
-      // API: Read file from agent workspace
-      server.middlewares.use('/local-api/file-read', (req, res) => {
-        if (!requirePost(req, res)) return
-        withJsonBody(req, res, (body) => {
-          try {
-            const filePath = bodyString(body, 'path')
-            if (!filePath || filePath.includes('..')) {
-              res.writeHead(400, { 'Content-Type': 'application/json' })
-              res.end(JSON.stringify({ error: 'Invalid path' }))
-              return
-            }
-
-            const os = require('os')
-            const fs = require('fs')
-            const workspaceDir = join(os.homedir(), AGENT_WORKSPACE_DIR)
-            if (!existsSync(workspaceDir)) mkdirSync(workspaceDir, { recursive: true })
-
-            const resolvedPath = join(workspaceDir, filePath)
-            try {
-              const content = fs.readFileSync(resolvedPath, 'utf8')
-              res.writeHead(200, { 'Content-Type': 'application/json' })
-              res.end(JSON.stringify({ content }))
-            } catch {
-              res.writeHead(200, { 'Content-Type': 'application/json' })
-              res.end(JSON.stringify({ error: 'File not found' }))
-            }
-          } catch (err) {
-            res.writeHead(400, { 'Content-Type': 'application/json' })
-            res.end(JSON.stringify({ error: String(err) }))
-          }
-        })
-      })
-
-      // API: Write file to agent workspace
-      server.middlewares.use('/local-api/file-write', (req, res) => {
-        if (!requirePost(req, res)) return
-        withJsonBody(req, res, (body) => {
-          try {
-            const filePath = bodyString(body, 'path')
-            const content = bodyString(body, 'content')
-            if (!filePath || filePath.includes('..')) {
-              res.writeHead(400, { 'Content-Type': 'application/json' })
-              res.end(JSON.stringify({ error: 'Invalid path' }))
-              return
-            }
-            if (content === undefined) {
-              res.writeHead(400, { 'Content-Type': 'application/json' })
-              res.end(JSON.stringify({ error: 'Missing content parameter' }))
-              return
-            }
-
-            const os = require('os')
-            const fs = require('fs')
-            const workspaceDir = join(os.homedir(), AGENT_WORKSPACE_DIR)
-            const resolvedPath = join(workspaceDir, filePath)
-            const parentDir = resolve(resolvedPath, '..')
-            if (!existsSync(parentDir)) mkdirSync(parentDir, { recursive: true })
-
-            fs.writeFileSync(resolvedPath, content, 'utf8')
-            res.writeHead(200, { 'Content-Type': 'application/json' })
-            res.end(JSON.stringify({ status: 'ok', path: resolvedPath }))
-          } catch (err) {
-            res.writeHead(400, { 'Content-Type': 'application/json' })
-            res.end(JSON.stringify({ error: String(err) }))
-          }
-        })
-      })
+      // ENTFERNT: /local-api/file-read und /local-api/file-write.
+      //
+      // Die beiden Endpunkte bedienten die AELTEREN Befehle `file_read` /
+      // `file_write` und hatten zuletzt keinen Aufrufer mehr: die gleichnamigen
+      // MODELL-WERKZEUGE in src/api/mcp/builtin-tools.ts fuehren ueber
+      // `fs_read` / `fs_write` aus, und `backendCall('file_read', …)` kam in
+      // `src/` nirgends mehr vor — auch nicht ueber einen dynamisch gebildeten
+      // Befehlsnamen.
+      //
+      // Damit blieb nur eine DRITTE Pfadregel neben den beiden anderen: Wurzel
+      // `~/<AGENT_WORKSPACE_DIR>` OHNE Chat-Slug, `filePath.includes('..')`
+      // statt des Kaefigs, absolute Pfade von `join()` stillschweigend
+      // eingefaltet. Die Rust-Befehle gehen an derselben Stelle ueber
+      // `resolve_agent_path` in den PER-CHAT-Sandkasten — der Dev-Server wich
+      // also ab, ohne dass jemand den Unterschied je benutzte.
+      //
+      // Die Rust-Befehle in src-tauri/src/commands/agent.rs BLEIBEN: die
+      // Remote-Bruecke `/remote-api/agent-tool` benutzt sie. Nur diese beiden
+      // Dev-Endpunkte und ihre zwei Registry-Zeilen in src/api/backend.ts sind
+      // weg. Der Weg auf die Platte fuehrt hier ueber /local-api/fs-read und
+      // /local-api/fs-write (Kaefig: src/dev/fs-request-path.ts).
 
       // --- New Agent Tool Endpoints (Phase 1) ---
 

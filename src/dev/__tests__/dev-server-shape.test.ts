@@ -31,7 +31,8 @@ import { resolve } from 'node:path'
  * genau die Erklärung als Verstoss lesen. Nur ganze Kommentarzeilen fallen weg;
  * ein Verstoss im Code steht nie auf einer solchen Zeile.
  */
-const viteConfig = readFileSync(resolve(process.cwd(), 'vite.config.ts'), 'utf8')
+const viteConfigRoh = readFileSync(resolve(process.cwd(), 'vite.config.ts'), 'utf8')
+const viteConfig = viteConfigRoh
   .split('\n')
   .filter((line) => {
     const t = line.trim()
@@ -71,10 +72,13 @@ describe('der Request-Körper', () => {
   })
 
   it('geht durch den einen geprüften Leser', () => {
-    // Zwanzig Handler, ein Einstieg. Sinkt diese Zahl deutlich, wurde wieder
-    // von Hand gepuffert.
+    // Ein Einstieg für alle POST-Handler. Sinkt diese Zahl, wurde entweder
+    // wieder von Hand gepuffert — oder ein Handler ist absichtlich gegangen.
+    // Von zwanzig auf achtzehn: `/local-api/file-read` und `/file-write` sind
+    // entfernt (siehe „die beiden alten file-Endpunkte" weiter unten). Wer die
+    // Zahl das nächste Mal senkt, muss denselben Nachweis mitbringen.
     const stellen = viteConfig.match(/withJsonBody\(req, res, \(body\) =>/g) ?? []
-    expect(stellen.length).toBeGreaterThanOrEqual(20)
+    expect(stellen.length).toBeGreaterThanOrEqual(18)
   })
 })
 
@@ -143,6 +147,71 @@ describe('der SSRF-Wächter', () => {
     // Und die Weiterleitung geht durch dieselbe Funktion.
     expect(downloadFile).toMatch(/doRequest\(next, redirectCount \+ 1\)/)
     expect(downloadFile).not.toMatch(/doRequest\(response\.headers\.location/)
+  })
+})
+
+/**
+ * `src/api/backend.ts` ohne reine Kommentarzeilen — dieselbe Behandlung wie
+ * `viteConfig` oben, aus demselben Grund: die Registry ERKLÄRT in einem
+ * Kommentar, warum `file_read` dort nicht mehr steht, und ein Grep über den
+ * Rohtext läse genau die Erklärung als Verstoss.
+ */
+const backendTs = readFileSync(resolve(process.cwd(), 'src/api/backend.ts'), 'utf8')
+  .split('\n')
+  .filter((line) => {
+    const t = line.trim()
+    return !(t.startsWith('//') || t.startsWith('*') || t.startsWith('/*'))
+  })
+  .join('\n')
+
+/** Der Rohtext derselben Datei, für die Zusicherungen ÜBER die Kommentare. */
+const backendTsRoh = readFileSync(resolve(process.cwd(), 'src/api/backend.ts'), 'utf8')
+
+describe('die beiden alten file-Endpunkte', () => {
+  // DER BEFUND: `/local-api/file-read` und `/local-api/file-write` bedienten die
+  // älteren Befehle `file_read` / `file_write` und hatten keinen Aufrufer mehr —
+  // die gleichnamigen MODELL-WERKZEUGE (builtin-tools.ts) führen über
+  // `fs_read` / `fs_write` aus. Übrig blieb eine DRITTE Pfadregel neben den
+  // beiden anderen: Wurzel ohne Chat-Slug, `includes('..')` statt des Käfigs,
+  // absolute Pfade stillschweigend eingefaltet — und damit eine Abweichung von
+  // `resolve_agent_path` auf der Rust-Seite, die niemand benutzte.
+  //
+  // Diese Zusicherungen halten fest, dass sie WEG BLEIBEN. Wer sie beim
+  // nächsten Aufräumen als „fehlt ja" wieder anlegt, wird hier rot.
+
+  it('sind aus dem Dev-Server verschwunden', () => {
+    expect(viteConfig).not.toContain("server.middlewares.use('/local-api/file-read'")
+    expect(viteConfig).not.toContain("server.middlewares.use('/local-api/file-write'")
+    expect(viteConfig).not.toContain("'/local-api/file-read'")
+    expect(viteConfig).not.toContain("'/local-api/file-write'")
+  })
+
+  it('stehen auch nicht mehr in der Befehls-Registry', () => {
+    // Der Grund, warum die Registry MIT muss und nicht nur der Handler: ein
+    // Eintrag ohne Endpunkt macht aus einem sprechenden
+    // "Unknown backend command: file_read" einen nackten HTTP 404.
+    expect(backendTs).not.toMatch(/\bfile_read:\s*\{/)
+    expect(backendTs).not.toMatch(/\bfile_write:\s*\{/)
+    expect(backendTs).not.toContain('/local-api/file-read')
+    expect(backendTs).not.toContain('/local-api/file-write')
+  })
+
+  it('sagen an beiden Stellen, wohin der Weg stattdessen führt', () => {
+    // Ohne diesen Hinweis ist ein gelöschter Endpunkt nur eine Lücke, und die
+    // nächste Person legt ihn wieder an.
+    expect(viteConfigRoh).toContain('ENTFERNT: /local-api/file-read')
+    expect(viteConfigRoh).toMatch(/fs-read und[\s\S]{0,40}fs-write/)
+    expect(backendTsRoh).toMatch(/file_read \/ file_write: ABSICHTLICH NICHT HIER/)
+    expect(backendTsRoh).toMatch(/fs_read \/ fs_write/)
+  })
+
+  it('haben in fs_read / fs_write einen Nachfolger, der wirklich da ist', () => {
+    // Eine Zusicherung, die nur Abwesenheit prüft, wäre auch grün, wenn der
+    // Ersatzweg mitverschwunden wäre.
+    expect(backendTs).toMatch(/\bfs_read:\s*\{/)
+    expect(backendTs).toMatch(/\bfs_write:\s*\{/)
+    expect(viteConfig).toContain("server.middlewares.use('/local-api/fs-read'")
+    expect(viteConfig).toContain("server.middlewares.use('/local-api/fs-write'")
   })
 })
 
