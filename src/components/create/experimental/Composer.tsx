@@ -198,6 +198,21 @@ export function Composer({ onOpenAdvanced, onOpenWorkflows }: Props) {
             </div>
           )}
 
+          {/* Das Negativfeld sieht aus wie ein Feld.
+              Bis 2.6.7 war es eine randlose Zeile unter einer 1px-Trennlinie,
+              in derselben Schriftgroesse (13px) und auf derselben Kante
+              (x=282,2 gemessen) wie der Prompt darueber — nichts an ihm sagte
+              „hier faengt eine zweite Eingabe an". Der Wert stand zudem in
+              `text-gray-400`, waehrend die globale Platzhalterregel gray-200
+              malte: 6,78:1 fuer das Getippte gegen 13,91:1 fuer den
+              Platzhalter (WCAG 2.1 auf #1b1b1b, gemessen 01.09.2026). Das Feld
+              war leer auffaelliger als gefuellt.
+              Jetzt: eigene Flaeche + eigener Rand (dasselbe Rezept wie das
+              Panel drumherum, eine Stufe schwaecher), und der eingetippte
+              Negativprompt ist ein Wert wie jeder andere — er erbt die
+              Textfarbe des Promptfeldes statt gedimmt zu werden. Wie stark
+              der Platzhalter dagegen zuruecktritt, entscheidet jetzt
+              ausschliesslich die ::placeholder-Regel in index.css. */}
           <AnimatePresence>
             {showNegative && needPrompt && negSupported && (
               <motion.div
@@ -206,12 +221,15 @@ export function Composer({ onOpenAdvanced, onOpenWorkflows }: Props) {
                 exit={{ height: 0, opacity: 0 }}
                 className="overflow-hidden"
               >
-                <div className="mx-3.5 mt-2 pt-2 border-t border-white/[0.06]">
+                <div
+                  id="negative-prompt-field"
+                  className="mx-3.5 mt-2.5 px-2.5 py-2 rounded-[var(--radius-control)] bg-white/[0.03] border border-white/[0.08] focus-within:border-white/20 transition-colors"
+                >
+                  <span className="t-label text-gray-500 block pb-1">Negative prompt</span>
                   <PromptField
                     value={negativePrompt}
                     onChange={setNegativePrompt}
                     placeholder="What to avoid…"
-                    className="text-gray-400"
                   />
                 </div>
               </motion.div>
@@ -226,13 +244,23 @@ export function Composer({ onOpenAdvanced, onOpenWorkflows }: Props) {
 
           {/* Action bar */}
           <div className="flex items-center gap-1.5 px-2.5 py-2 border-t border-white/[0.05]">
+            {/* Ein Schalter, der sagt, dass er einer ist. „Neg" war eine
+                Abkuerzung, deren Aufloesung nur im Hover-`title` stand, und
+                der Knopf meldete seinen Zustand an nichts ausser der
+                Hintergrundfarbe: kein `aria-pressed`, kein `aria-expanded`,
+                also fuer einen Screenreader ein gewoehnlicher Knopf ohne
+                Zustand. Beides steht jetzt da, und `aria-controls` zeigt auf
+                das Feld, das er aufklappt. */}
             {needPrompt && negSupported && (
               <button
                 onClick={toggleNegative}
+                aria-pressed={showNegative}
+                aria-expanded={showNegative}
+                aria-controls="negative-prompt-field"
                 className={cn('t-control px-2 h-[var(--control-h-sm)] rounded-md transition-colors', showNegative ? 'bg-white/10 text-gray-200' : 'text-gray-500 hover:text-gray-300 hover:bg-white/[0.05]')}
-                title="Negative prompt"
+                title="Say what the render should avoid"
               >
-                Neg
+                Negative
               </button>
             )}
             {needPrompt && <PromptHistory onPick={setPrompt} />}
@@ -291,6 +319,29 @@ export function Composer({ onOpenAdvanced, onOpenWorkflows }: Props) {
   )
 }
 
+/**
+ * Die Reglerzeile steht auf DERSELBEN Kante wie der Prompttext darunter.
+ *
+ * Bis 2.6.7 stand auf allen vier Rueckgaben von LaneControls
+ * `justify-center` — die Knoepfe schwebten mittig ueber einem linksbuendigen
+ * Prompt. Gemessen am 01.09.2026 (Chromium 149, 1280x800, gerenderte Pixel):
+ * der Composer-Block beginnt bei x=265,1, der Prompttext bei x=282,2, die
+ * Quality-Gruppe aber bei x=424,7 — 142,5 px weiter rechts, ohne dass
+ * irgendetwas an dieser Kante haengt. Zwei Kanten, wo eine gehoert.
+ *
+ * (Der zweite Teil des alten Befundes, `transform: scale(0.7)` auf derselben
+ * Zeile, ist mit c7076fca weg und wird von ein-massstab.test.ts bewacht —
+ * hier steht nur noch die Ausrichtung.)
+ *
+ * Die 15px sind kein gewaehlter Wert: das Promptfeld sitzt in einem Panel mit
+ * 1px Rand und `px-3.5` = 14px Innenabstand, sein Text beginnt also 15px
+ * hinter der Panelkante. Die Reglerzeile ist ein Geschwister dieses Panels mit
+ * derselben linken Kante, hat aber selbst keinen Rand — 15px linkes Padding
+ * setzt sie exakt auf x=282,2. Beides sind CSS-Pixel unter demselben
+ * `--ui-scale`-zoom, die Kanten koennen also nicht auseinanderlaufen.
+ */
+const LANE_ROW = 'flex items-center flex-wrap justify-start pl-[15px]'
+
 // Quality (proxy over steps) + Aspect (image) + Edit strength (edit).
 // The tuning row above the prompt. It renders exactly the knobs the lane's
 // submit path actually consumes, so nothing on screen is a dead control:
@@ -340,7 +391,7 @@ function LaneControls() {
   // ── Image lanes: quality + aspect (+ edit strength) ──
   if (kind === 'image') {
     return (
-      <div className="flex items-center justify-center gap-3 flex-wrap">
+      <div className={cn(LANE_ROW, 'gap-3')}>
         {/* Bis 2.6.7 stand hier `transform: scale(0.7)` — die vierte
             Skalierungsschicht der App. Sie schrumpfte nur das Bild: die Zeile
             belegte weiter ihre volle Layoutbreite, und die 1px-Kanten der
@@ -398,7 +449,7 @@ function LaneControls() {
   // ── Audio (music) LOCAL: steps only — Length lives in MusicControls. ──
   if (kind === 'audio') {
     return (
-      <div className="flex items-center justify-center">
+      <div className={LANE_ROW}>
         <div className="w-56">
           <Slider label="Quality (steps)" min={1} max={Math.max(60, base)} step={1} value={steps} onChange={setSteps} format={(v) => `${v}`} />
         </div>
@@ -428,7 +479,7 @@ function LaneControls() {
   const showFrames = intent !== 'lipsync' // lipsync frames follow the voice length
 
   return (
-    <div className="flex items-center justify-center gap-4 flex-wrap">
+    <div className={cn(LANE_ROW, 'gap-4')}>
       <div className="w-40">
         <Slider label="Quality (steps)" min={1} max={stepMax} step={1} value={steps} onChange={setSteps} format={(v) => `${v}`} />
       </div>

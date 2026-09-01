@@ -677,9 +677,35 @@ input[type="range"]::-webkit-slider-thumb {
 .dark .text-gray-600 { color: rgb(156 163 175); } /* → gray-400 */
 .dark .text-gray-500 { color: rgb(156 163 175); } /* → gray-400 — same as 600 so weight is consistent */
 
-/* Placeholders — Tailwind doesn't add a `dark:` for these. */
-.light ::placeholder { color: rgb(31 41 55); }     /* gray-800 */
-.dark ::placeholder { color: rgb(229 231 235); }   /* gray-200 */
+/* Placeholders — Tailwind doesn't add a `dark:` for these, also dropped the
+   restlichen `placeholder-*`-Klassen der Komponenten: die beiden Regeln hier
+   sind ungeschichtet und schlagen damit jede Utility aus @layer, egal ob in
+   der v3- (`placeholder-gray-600`) oder v4-Schreibweise
+   (`placeholder:text-gray-600`). Sie sind der EINZIGE Platzhalterwert der App.
+
+   Bis 2.6.7 standen hier gray-800 / gray-200 — also praktisch die Textfarbe
+   selbst. Die Grundrelation eines Eingabefeldes stand damit verkehrt herum:
+   der Platzhalter war so auffaellig wie der Wert oder auffaelliger, ein leeres
+   Feld las sich staerker als ein ausgefuelltes. Nachgerechnet am 01.09.2026
+   im laufenden Fenster (Chromium 149, WCAG 2.1, Farben aus getComputedStyle,
+   nicht aus den Klassennamen):
+
+     hell   Feldtext gray-800 auf #ffffff        14,68:1
+            Platzhalter ALT gray-800             14,68:1  ← derselbe Wert
+            Platzhalter NEU gray-600              7,56:1  (auf #f5f5f5: 6,93:1)
+     dunkel Feldtext gray-100 auf #1b1b1b        15,65:1
+            Platzhalter ALT gray-200             13,91:1  ← 89 % des Textes
+            Platzhalter NEU gray-400              6,78:1  (auf #292929: 5,73:1)
+
+   Die beiden neuen Werte sind keine neu erfundenen Zahlen: gray-600 ist genau
+   das, was die `.light .placeholder-gray-*`-Regel weiter unten fuer die
+   v3-Schreibweise ohnehin setzt, und gray-400 ist der Wert, auf den der
+   Rescue-Layer drei Zeilen weiter oben `.dark .text-gray-500/600` hebt.
+   Untergrenze: kein Platzhalter faellt unter 4,5:1 — auf dem hellsten dunklen
+   Feldgrund der App (#1e1e1e + white/5 = #292929) bleiben 5,73:1, auf dem
+   dunkelsten hellen (#f5f5f5) 6,93:1. */
+.light ::placeholder { color: rgb(75 85 99); }     /* gray-600 */
+.dark ::placeholder { color: rgb(156 163 175); }   /* gray-400 */
 
 /* Light-mode rescue for legacy dark-first components that bake in
    `text-white` / `bg-white/N` / `border-white/N` without a `dark:` variant.

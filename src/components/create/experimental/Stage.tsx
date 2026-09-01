@@ -4,6 +4,7 @@ import { UploadCloud, ImagePlus, Scissors, Wand2, Sparkles, X, Loader2, Download
 import { useCreateStore, type GalleryItem } from '../../../stores/createStore'
 import { useCreateExp } from './CreateContext'
 import { INTENT_MAP } from './intents'
+import { stageShowsSetupCard, laneModelCount } from './stageGate'
 import { GeneratingView, ResultView } from './OutputView'
 import { EmptyState } from '../ui/EmptyState'
 import { ICON_STROKE_MARK } from '../../ui/icon-size'
@@ -17,7 +18,7 @@ import {
 import { galleryItemUrl, fetchGalleryItemBlob, recoverGalleryUrl } from './galleryUrl'
 import { InstallCancelled } from '../../../lib/bundle-install'
 import { isMlxImageHost } from '../../../api/mlx-image'
-import { videoLaneModels, bundleForVideoIntent } from '../../../api/comfyui'
+import { bundleForVideoIntent } from '../../../api/comfyui'
 import { getVideoBundles } from '../../../api/discover'
 
 interface Props {
@@ -56,31 +57,26 @@ export function Stage({ displayed, onOpenMaskEditor, onEditResult, onFullscreen 
   // one-click starter-bundle card. connected === false also gates — the same
   // button installs ComfyUI itself first. connected === null (still probing)
   // gates nothing, so the card never flashes during startup.
-  // "Missing" for the video lane must use the same op-gating as the picker:
-  // SVD and FramePack are i2v-only, so a box whose only video model was SVD
-  // passed a bare length check and never offered the starter bundle, while
-  // the T2V picker showed "No matches" (David 2026-08-01).
-  const videoLaneList = videoLaneModels(videoModelList, intent)
-  const listForKind: Record<NonNullable<typeof meta.requiresModels>, unknown[]> = {
-    image: imageModelList,
-    video: videoLaneList,
-    audio: audioModelList,
-    lipsync: lipsyncModelList,
-    motion: motionModelList,
-  }
+  //
   // macOS answers this from MLX, not from ComfyUI: `connected` is deliberately
-  // pinned to null there (there is nothing to connect to), so the rule below
-  // would never fire and a Mac with no model installed got an empty stage and
-  // no way to fix it — the setup lived in Settings, where nothing pointed.
-  const macMissing =
-    backend === 'local' && !!mlxMissing &&
-    (meta.requiresModels === 'image' ? mlxMissing.image
-      : meta.requiresModels === 'video' ? mlxMissing.video
-        : false)
-  const modelsMissing = macMissing || (mlxMissing === null && backend === 'local' && !!meta.requiresModels && (
-    connected === false ||
-    (connected === true && modelsLoaded && listForKind[meta.requiresModels].length === 0)
-  ))
+  // pinned to null there (there is nothing to connect to), so the rule would
+  // never fire and a Mac with no model installed got an empty stage and no way
+  // to fix it — the setup lived in Settings, where nothing pointed.
+  //
+  // Die Regel selbst steht in ./stageGate, weil die Kopfzeile in
+  // CreateExperimental dieselbe Antwort braucht: sie haelt ihren roten Balken
+  // zurueck, solange diese Karte die Lage schon erklaert.
+  const modelsMissing = stageShowsSetupCard({
+    backend,
+    requiresModels: meta.requiresModels,
+    mlxMissing,
+    connected,
+    modelsLoaded,
+    laneModelCount: laneModelCount(intent, meta.requiresModels, {
+      image: imageModelList, video: videoModelList, audio: audioModelList,
+      lipsync: lipsyncModelList, motion: motionModelList,
+    }),
+  })
 
   // A result counts for the current source only if it was generated after the
   // source was loaded — otherwise an older gallery item would hijack the stage.
