@@ -200,6 +200,27 @@ describe('eslint begeht nichts, was gebaut wurde', () => {
    * dieser Fall und steht deshalb ausdruecklich in `globalIgnores`.
    */
   it('keine von git ignorierte Datei landet im Lauf', async () => {
+    // DIESER WAECHTER BRAUCHT EINE GIT-ARBEITSKOPIE. Er fragt git, welche
+    // Dateien hier generiert sind; ohne `.git` gibt es diese Auskunft nicht.
+    // Das ist keine Plattformausnahme — auf beiden Systemen gilt dasselbe —,
+    // sondern eine fehlende Quelle. Gemessen: in einem `git archive`-Auszug
+    // ohne `.git` warf der Aufruf vorher `fatal: not a git repository` und riss
+    // den Test mit; ein aus dem Quell-Tarball gebauter Baum haette denselben
+    // Abbruch gesehen. Er sagt das jetzt, statt zu stuerzen.
+    const imArbeitsbaum = (() => {
+      try {
+        return execFileSync('git', ['rev-parse', '--is-inside-work-tree'], {
+          cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'],
+        }).trim() === 'true'
+      } catch {
+        return false
+      }
+    })()
+    if (!imArbeitsbaum) {
+      expect(imArbeitsbaum, 'ohne git-Arbeitskopie ist dieser Waechter blind').toBe(false)
+      return
+    }
+
     const ignoriert = execFileSync(
       'git',
       ['ls-files', '--others', '--ignored', '--exclude-standard', '--', ':!node_modules'],
