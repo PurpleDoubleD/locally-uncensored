@@ -82,7 +82,7 @@ fn free_stem(dir: &Path, base: &str, ext: &str, bytes: &[u8]) -> String {
 }
 
 fn config_json_path() -> Option<PathBuf> {
-    dirs::config_dir().map(|d| d.join("locally-uncensored").join("config.json"))
+    dirs::config_dir().map(|_| crate::os_paths::app_config_json())
 }
 
 fn read_config_value(key: &str) -> Option<String> {

@@ -5826,10 +5826,7 @@ pub async fn set_remote_permissions(
 
 /// Download cloudflared binary if not present, return its path
 fn get_cloudflared_path() -> std::path::PathBuf {
-    let dir = dirs::data_local_dir()
-        .unwrap_or_else(|| std::path::PathBuf::from("."))
-        .join("locally-uncensored")
-        .join("bin");
+    let dir = crate::os_paths::tools_bin_dir();
     let exe_name = if cfg!(windows) { "cloudflared.exe" } else { "cloudflared" };
     dir.join(exe_name)
 }
@@ -6309,7 +6306,11 @@ mod remote_path_tests {
         let state = AppState::new();
         let resolved = resolve_remote_path("client/public", Some("__remote__"), &state).unwrap();
         let s = resolved.replace('\\', "/");
-        assert!(s.contains("agent-workspace/__remote__/client/public"), "got: {}", s);
+        let erwartet = format!(
+            "{}/__remote__/client/public",
+            crate::app_identity::AGENT_WORKSPACE_DIR
+        );
+        assert!(s.contains(&erwartet), "got: {}", s);
     }
 
     /// Override set → relative paths land inside it.

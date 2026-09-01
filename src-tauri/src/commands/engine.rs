@@ -440,8 +440,8 @@ fn scan_gguf_dir(
 /// download / scan just works on a fresh box. This is the same path
 /// `detect_model_path("builtin")` returns.
 pub fn builtin_models_dir() -> Result<PathBuf, String> {
-    let base = dirs::data_dir().ok_or("Cannot resolve app data directory")?;
-    let dir = base.join("Locally Uncensored").join("models");
+    dirs::data_dir().ok_or("Cannot resolve app data directory")?;
+    let dir = crate::os_paths::builtin_models_dir();
     std::fs::create_dir_all(&dir)
         .map_err(|e| format!("Create built-in models dir: {}", os_error::english(&e)))?;
     Ok(dir)

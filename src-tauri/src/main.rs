@@ -1,6 +1,7 @@
 // Prevents additional console window on Windows in release, DO NOT REMOVE!!
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod app_identity;
 mod commands;
 mod crash_report;
 mod install_state;
@@ -110,7 +111,7 @@ fn file_log_writer() -> Option<(tracing_appender::non_blocking::NonBlocking, tra
 /// because most desktop users just want a readable terminal.
 ///
 /// `RUST_LOG` is honored as the filter — common values are `info`,
-/// `locally_uncensored=debug`, or a per-module spec.
+/// `lu_experiment=debug` (der Crate-Name, siehe Cargo.toml), or a per-module spec.
 ///
 /// Audit finding #01: until now this was the stdout layer and nothing else,
 /// and a shipped desktop app has no stdout. On Windows the release binary is

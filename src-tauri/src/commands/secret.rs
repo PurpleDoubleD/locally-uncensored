@@ -24,8 +24,14 @@
 
 /// Keychain service name. The "account" is the provider id (ollama / openai /
 /// anthropic). Keep this stable — changing it would orphan stored keys.
+///
+/// Der Name ist KEIN Pfad, gehört aber zur selben Trennung: ohne eigenen
+/// Service-Namen läse der Experiment-Build die echten API-Schlüssel des
+/// Nutzers aus dem Schlüsselbund und überschriebe sie beim nächsten Speichern.
+/// Deshalb kommt er aus `crate::app_identity` und trägt auf diesem Branch
+/// denselben Suffix wie die Verzeichnisse.
 #[cfg(any(target_os = "windows", target_os = "macos"))]
-const SERVICE: &str = "com.locallyuncensored.providerkeys";
+const SERVICE: &str = crate::app_identity::KEYCHAIN_SERVICE;
 
 #[cfg(any(target_os = "windows", target_os = "macos"))]
 mod chunked {

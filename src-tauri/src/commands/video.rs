@@ -5,9 +5,12 @@
 //! with an arch check so Windows/Linux clients hitting these commands by
 //! accident get a clear 400 instead of a hung subprocess.
 //!
-//! Models are downloaded into `~/.cache/lu-labs/mlx-video/<id>/` (the
-//! `--model-dir` argument passed to `mlx_video.<family>.generate`).
-//! Generated videos land in `~/.config/lu-labs/videos/<job_id>.mp4`.
+//! Models are downloaded into `<os_paths::cache_dir()>/mlx-video/<id>/` (the
+//! `--model-dir` argument passed to `mlx_video.<family>.generate`), Linux also
+//! `~/.cache/<APP_DIR>/mlx-video/<id>/`.
+//! Generated videos land in `<os_paths::config_root()>/videos/<job_id>.mp4`.
+//! `<APP_DIR>` kommt aus `app_identity` und trägt auf diesem Branch einen
+//! eigenen Suffix.
 
 use crate::os_error;
 use crate::commands::{bad_request, internal, CmdResult};
@@ -178,18 +181,12 @@ fn catalog_lookup(id: &str) -> Option<&'static CatalogEntry> {
 
 // ── Filesystem layout ─────────────────────────────────────────────────
 
-fn models_root() -> PathBuf {
-    dirs::cache_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("lu-labs")
-        .join("mlx-video")
+pub(crate) fn models_root() -> PathBuf {
+    crate::os_paths::cache_dir().join("mlx-video")
 }
 
 pub(crate) fn outputs_root() -> PathBuf {
-    dirs::config_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("lu-labs")
-        .join("videos")
+    crate::os_paths::config_root().join("videos")
 }
 
 fn model_dir(id: &str) -> PathBuf {

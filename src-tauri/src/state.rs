@@ -78,15 +78,16 @@ impl Default for InstallState {
     }
 }
 
-/// Read persisted ComfyUI port + host from %APPDATA%/locally-uncensored/config.json.
+/// Read persisted ComfyUI port + host from `os_paths::app_config_json()`
+/// (Windows: `%APPDATA%\\<APP_CONFIG_DIR>\\config.json`).
 /// Returns (port, host) with sensible defaults (8188, "localhost") on any error.
 /// Called at startup so user-configured values survive app restarts.
 pub(crate) fn load_comfy_config_values() -> (u16, String) {
     let mut port = 8188u16;
     let mut host = "localhost".to_string();
 
-    if let Some(config_dir) = dirs::config_dir() {
-        let config_file = config_dir.join("locally-uncensored").join("config.json");
+    {
+        let config_file = crate::os_paths::app_config_json();
         if let Ok(raw) = std::fs::read_to_string(&config_file) {
             if let Ok(v) = serde_json::from_str::<serde_json::Value>(&raw) {
                 if let Some(p) = v.get("comfyui_port").and_then(|x| x.as_u64()) {
@@ -128,8 +129,8 @@ pub(crate) fn load_ollama_base() -> String {
     };
 
     // Priority 1: config.json override (GUI takes precedence)
-    if let Some(config_dir) = dirs::config_dir() {
-        let config_file = config_dir.join("locally-uncensored").join("config.json");
+    {
+        let config_file = crate::os_paths::app_config_json();
         if let Ok(raw) = std::fs::read_to_string(&config_file) {
             if let Ok(v) = serde_json::from_str::<serde_json::Value>(&raw) {
                 if let Some(b) = v.get("ollama_base").and_then(|x| x.as_str()) {

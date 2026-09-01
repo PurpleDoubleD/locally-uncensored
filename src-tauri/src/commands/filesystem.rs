@@ -189,7 +189,7 @@ pub(crate) fn workspace_root(chat_id: Option<&str>, working_dir: Option<&str>) -
         return PathBuf::from(wd);
     }
     let slug = crate::commands::agent::sanitize_chat_slug(chat_id.unwrap_or("default"));
-    dirs::home_dir().unwrap_or_default().join("agent-workspace").join(slug)
+    crate::os_paths::agent_workspace_root().join(slug)
 }
 
 /// THE ALLOWLIST: folders the user chose in a native folder dialog.
@@ -285,7 +285,7 @@ pub(crate) fn remember_picked_root(root: &Path) -> Result<(), String> {
 /// app derives them itself (`workspace_root`), so the allowlist has to know
 /// them or a plain sandbox chat could not read its own files.
 fn is_app_work_dir(norm: &Path) -> bool {
-    let base = lexical_normalize(&dirs::home_dir().unwrap_or_default().join("agent-workspace"));
+    let base = lexical_normalize(&crate::os_paths::agent_workspace_root());
     is_within(&base, norm)
 }
 
@@ -1038,14 +1038,18 @@ mod tests {
     fn relative_path_without_working_dir_uses_sandbox() {
         let got = resolve_path("notes.md", Some("chat-1"), None).unwrap();
         let s = got.to_string_lossy().replace('\\', "/");
-        assert!(s.contains("agent-workspace/chat-1/notes.md"), "got: {}", s);
+        // Der Ordnername kommt aus app_identity, damit diese Zusicherung den
+        // Branch-Suffix nicht gegen sich selbst ausspielt.
+        let erwartet = format!("{}/chat-1/notes.md", crate::app_identity::AGENT_WORKSPACE_DIR);
+        assert!(s.contains(&erwartet), "got: {}", s);
     }
 
     #[test]
     fn blank_working_dir_falls_back_to_sandbox() {
         let got = resolve_path("a.txt", Some("c"), Some("   ")).unwrap();
         let s = got.to_string_lossy().replace('\\', "/");
-        assert!(s.contains("agent-workspace/c/a.txt"), "got: {}", s);
+        let erwartet = format!("{}/c/a.txt", crate::app_identity::AGENT_WORKSPACE_DIR);
+        assert!(s.contains(&erwartet), "got: {}", s);
     }
 
     // ── Path-jail (security): absolute paths are allowed only inside the root ──
@@ -1306,7 +1310,7 @@ mod workspace_root_guard_tests {
         let home = dirs::home_dir().unwrap_or_default();
         assert_eq!(
             workspace_root(Some(".."), None),
-            home.join("agent-workspace").join("__"),
+            crate::os_paths::agent_workspace_root().join("__"),
         );
         for id in ["..", ".", "../.."] {
             let target = home.join(".ssh").join("id_rsa");

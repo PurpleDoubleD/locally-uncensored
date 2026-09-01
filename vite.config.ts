@@ -13,6 +13,10 @@ import os from 'os'
 import dns from 'node:dns'
 import net from 'node:net'
 import { devResolveWithinJail, effectiveByteCap, JailEscapeError } from './src/lib/dev-fs-jail'
+// Verzeichnisnamen dieses Builds. Dieser Branch schreibt BEWUSST nicht in die
+// Ordner der echten App — siehe src/lib/app-identity.ts und
+// src-tauri/src/app_identity.rs.
+import { AGENT_WORKSPACE_DIR, APP_CONFIG_DIR } from './src/lib/app-identity'
 import { postContentTypeAllowed, postContentTypeError } from './src/lib/local-api-guard'
 
 // The port the dev server binds and the only port the /local-api origin check
@@ -903,7 +907,7 @@ function comfyLauncher(): Plugin {
               res.end(JSON.stringify(found))
             } else {
               // Fallback: create LU models directory (same as Rust backend)
-              const fallback = join(home, 'locally-uncensored', 'models')
+              const fallback = join(home, APP_CONFIG_DIR, 'models')
               try { mkdirSync(fallback, { recursive: true }) } catch {}
               res.writeHead(200, { 'Content-Type': 'application/json' })
               res.end(JSON.stringify(fallback))
@@ -933,7 +937,7 @@ function comfyLauncher(): Plugin {
             // (konata-session 2026-06-07).
             let comfyPath = ''
             try {
-              const cfgPath = join(process.env.APPDATA || join(home, 'AppData', 'Roaming'), 'locally-uncensored', 'config.json')
+              const cfgPath = join(process.env.APPDATA || join(home, 'AppData', 'Roaming'), APP_CONFIG_DIR, 'config.json')
               if (existsSync(cfgPath)) {
                 const cfg = JSON.parse(require('fs').readFileSync(cfgPath, 'utf8'))
                 if (cfg.comfyui_path && existsSync(cfg.comfyui_path)) comfyPath = cfg.comfyui_path
@@ -1410,7 +1414,7 @@ function comfyLauncher(): Plugin {
 
             const os = require('os')
             const fs = require('fs')
-            const workspaceDir = join(os.homedir(), 'agent-workspace')
+            const workspaceDir = join(os.homedir(), AGENT_WORKSPACE_DIR)
             if (!existsSync(workspaceDir)) mkdirSync(workspaceDir, { recursive: true })
 
             const resolvedPath = join(workspaceDir, filePath)
@@ -1450,7 +1454,7 @@ function comfyLauncher(): Plugin {
 
             const os = require('os')
             const fs = require('fs')
-            const workspaceDir = join(os.homedir(), 'agent-workspace')
+            const workspaceDir = join(os.homedir(), AGENT_WORKSPACE_DIR)
             const resolvedPath = join(workspaceDir, filePath)
             const parentDir = resolve(resolvedPath, '..')
             if (!existsSync(parentDir)) mkdirSync(parentDir, { recursive: true })
@@ -1542,7 +1546,7 @@ function comfyLauncher(): Plugin {
             const { path: filePath } = JSON.parse(body)
             const os = require('os')
             const fs = require('fs')
-            const resolved = require('path').isAbsolute(filePath) ? filePath : join(os.homedir(), 'agent-workspace', filePath)
+            const resolved = require('path').isAbsolute(filePath) ? filePath : join(os.homedir(), AGENT_WORKSPACE_DIR, filePath)
             const content = fs.readFileSync(resolved, 'utf8')
             res.writeHead(200, { 'Content-Type': 'application/json' })
             res.end(JSON.stringify({ content, encoding: 'utf8' }))
@@ -1610,7 +1614,7 @@ function comfyLauncher(): Plugin {
             const { path: filePath, content } = JSON.parse(body)
             const os = require('os')
             const fs = require('fs')
-            const resolved = require('path').isAbsolute(filePath) ? filePath : join(os.homedir(), 'agent-workspace', filePath)
+            const resolved = require('path').isAbsolute(filePath) ? filePath : join(os.homedir(), AGENT_WORKSPACE_DIR, filePath)
             const parentDir = resolve(resolved, '..')
             if (!existsSync(parentDir)) mkdirSync(parentDir, { recursive: true })
             fs.writeFileSync(resolved, content, 'utf8')
@@ -1631,7 +1635,7 @@ function comfyLauncher(): Plugin {
         req.on('end', () => {
           try {
             const { path: dirPath, recursive } = JSON.parse(body)
-            const resolved = isAbsolute(dirPath) ? dirPath : join(os.homedir(), 'agent-workspace', dirPath)
+            const resolved = isAbsolute(dirPath) ? dirPath : join(os.homedir(), AGENT_WORKSPACE_DIR, dirPath)
             const entries: Array<{ name: string; path: string; size: number; isDir: boolean; modified: number }> = []
             // `recursive` arrived from the caller (file_list passes the model's
             // flag straight through) and was then ignored, so in dev mode a
@@ -1676,7 +1680,7 @@ function comfyLauncher(): Plugin {
             const { path: dirPath, pattern, max_results } = JSON.parse(body)
             const os = require('os')
             const fs = require('fs')
-            const resolved = require('path').isAbsolute(dirPath) ? dirPath : join(os.homedir(), 'agent-workspace', dirPath)
+            const resolved = require('path').isAbsolute(dirPath) ? dirPath : join(os.homedir(), AGENT_WORKSPACE_DIR, dirPath)
             const re = new RegExp(pattern)
             const results: any[] = []
             const max = max_results || 50
@@ -1725,7 +1729,7 @@ function comfyLauncher(): Plugin {
             const { path: filePath } = JSON.parse(body)
             const os = require('os')
             const fs = require('fs')
-            const resolved = require('path').isAbsolute(filePath) ? filePath : join(os.homedir(), 'agent-workspace', filePath)
+            const resolved = require('path').isAbsolute(filePath) ? filePath : join(os.homedir(), AGENT_WORKSPACE_DIR, filePath)
             const stat = fs.statSync(resolved)
             res.writeHead(200, { 'Content-Type': 'application/json' })
             res.end(JSON.stringify({

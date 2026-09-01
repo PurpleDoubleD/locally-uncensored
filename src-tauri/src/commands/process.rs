@@ -692,8 +692,8 @@ pub fn find_comfyui_path() -> Option<String> {
     }
 
     // 2. Read from app config
-    if let Some(config_dir) = dirs::config_dir() {
-        let config_file = config_dir.join("locally-uncensored").join("config.json");
+    {
+        let config_file = crate::os_paths::app_config_json();
         if config_file.exists() {
             if let Ok(content) = fs::read_to_string(&config_file) {
                 if let Ok(config) = serde_json::from_str::<serde_json::Value>(&content) {
@@ -875,8 +875,8 @@ fn detect_all_comfyui_installs_sync() -> Vec<ComfyUIInstall> {
     }
 
     // 2. app config.json
-    if let Some(config_dir) = dirs::config_dir() {
-        let config_file = config_dir.join("locally-uncensored").join("config.json");
+    {
+        let config_file = crate::os_paths::app_config_json();
         if let Ok(content) = fs::read_to_string(&config_file) {
             if let Ok(config) = serde_json::from_str::<serde_json::Value>(&content) {
                 if let Some(path) = config.get("comfyui_path").and_then(|v| v.as_str()) {
@@ -1952,8 +1952,8 @@ pub fn set_comfyui_path(path: String, state: State<'_, AppState>) -> Result<serd
     }
 
     // Persist to config file
-    if let Some(config_dir) = dirs::config_dir() {
-        let app_config = config_dir.join("locally-uncensored");
+    {
+        let app_config = crate::os_paths::app_config_dir();
         let _ = fs::create_dir_all(&app_config);
         let config_file = app_config.join("config.json");
 
@@ -2017,8 +2017,8 @@ pub fn set_comfyui_host(host: String, state: State<'_, AppState>) -> Result<serd
     }
 
     // Persist to config file
-    if let Some(config_dir) = dirs::config_dir() {
-        let app_config = config_dir.join("locally-uncensored");
+    {
+        let app_config = crate::os_paths::app_config_dir();
         let _ = fs::create_dir_all(&app_config);
         let config_file = app_config.join("config.json");
 
@@ -2055,8 +2055,8 @@ pub fn set_comfyui_port(port: u16, state: State<'_, AppState>) -> Result<serde_j
     }
 
     // Persist to config file
-    if let Some(config_dir) = dirs::config_dir() {
-        let app_config = config_dir.join("locally-uncensored");
+    {
+        let app_config = crate::os_paths::app_config_dir();
         let _ = fs::create_dir_all(&app_config);
         let config_file = app_config.join("config.json");
 
@@ -2112,8 +2112,8 @@ pub fn set_ollama_host(host: String, state: State<'_, AppState>) -> Result<serde
 
     // Persist to config file under ollama_base — next startup will pick it
     // up via load_ollama_base() before any request fires.
-    if let Some(config_dir) = dirs::config_dir() {
-        let app_config = config_dir.join("locally-uncensored");
+    {
+        let app_config = crate::os_paths::app_config_dir();
         let _ = fs::create_dir_all(&app_config);
         let config_file = app_config.join("config.json");
 

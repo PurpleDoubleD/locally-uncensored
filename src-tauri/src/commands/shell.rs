@@ -23,9 +23,7 @@ use std::path::{Path, PathBuf};
 /// resolved to `~/agent-workspace/..` == `$HOME` and the shell tool ran (and
 /// created directories) straight in the user's home (audit IPC-1).
 fn workspace_cwd(chat_id: Option<&str>) -> PathBuf {
-    dirs::home_dir()
-        .unwrap_or_default()
-        .join("agent-workspace")
+    crate::os_paths::agent_workspace_root()
         .join(crate::commands::agent::sanitize_chat_slug(chat_id.unwrap_or("default")))
 }
 
@@ -488,7 +486,7 @@ mod tests {
     /// from that chat ran there (audit IPC-1, fixed in agent.rs only).
     #[test]
     fn a_dotted_chat_id_cannot_walk_the_cwd_out_of_the_workspace() {
-        let root = dirs::home_dir().unwrap_or_default().join("agent-workspace");
+        let root = crate::os_paths::agent_workspace_root();
         for id in ["..", ".", "../..", "a.b"] {
             let cwd = workspace_cwd(Some(id));
             assert!(cwd.starts_with(&root), "id {id:?} escaped to {cwd:?}");

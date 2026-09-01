@@ -1358,7 +1358,7 @@ mod tests {
     /// Live proof over a real socket against the strict aiohttp parser, the
     /// one that rejected every 2.6.0 Create submit. Start the stub first
     /// (scratchpad/strict-comfy-stub.py, AIOHTTP_NO_EXTENSIONS=1), then:
-    ///   cargo test --bin locally-uncensored live_strict -- --ignored --nocapture
+    ///   cargo test --bin lu-experiment live_strict -- --ignored --nocapture
     #[test]
     #[ignore]
     fn live_strict_aiohttp_takes_the_fixed_request_and_refuses_the_old_one() {

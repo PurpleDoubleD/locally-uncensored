@@ -16,7 +16,7 @@ const CREATE_NO_WINDOW: u32 = 0x08000000;
 /// Base directory for all agent workspaces. Per-chat subfolders are
 /// created lazily by `agent_workspace(chat_id)` on the first write.
 fn agent_workspace_root() -> PathBuf {
-    dirs::home_dir().unwrap_or_default().join("agent-workspace")
+    crate::os_paths::agent_workspace_root()
 }
 
 /// Per-chat workspace directory. Each LU chat / Remote chat / Codex chat

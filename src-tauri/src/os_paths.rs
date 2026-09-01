@@ -1,7 +1,13 @@
 //! Cross-platform path helpers — Python lookup, LM Studio CLI, common
 //! install destinations. Mirrors the path-resolution logic from the old
 //! Locally Uncensored Tauri binary.
+//!
+//! Jeder app-eigene Verzeichnisname kommt aus [`crate::app_identity`] und wird
+//! hier NICHT noch einmal als Literal geschrieben. Auf diesem Branch trägt er
+//! einen Suffix, damit der Experiment-Build die Daten der echten App weder
+//! liest noch überschreibt — die Begründung steht in `app_identity`.
 
+use crate::app_identity::{AGENT_WORKSPACE_DIR, APP_CONFIG_DIR, APP_DIR, APP_DISPLAY_DIR};
 use std::path::PathBuf;
 
 pub fn home() -> PathBuf {
@@ -12,13 +18,61 @@ pub fn data_dir() -> PathBuf {
     dirs::data_local_dir()
         .or_else(dirs::data_dir)
         .unwrap_or_else(|| PathBuf::from("."))
-        .join("lu-labs")
+        .join(APP_DIR)
 }
 
 pub fn cache_dir() -> PathBuf {
     dirs::cache_dir()
         .unwrap_or_else(|| PathBuf::from("."))
-        .join("lu-labs")
+        .join(APP_DIR)
+}
+
+/// `config_dir()`-Zweig desselben Verzeichnisses. Unter macOS/Windows fällt er
+/// mit [`data_dir`] zusammen, unter Linux ist es `~/.config/<APP_DIR>` — dort
+/// liegen die erzeugten Bilder (`commands::mlx`) und Videos
+/// (`commands::video`).
+pub fn config_root() -> PathBuf {
+    dirs::config_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(APP_DIR)
+}
+
+/// Ordner der `config.json` (ComfyUI-Pfad/-Port, Ollama-Basis, Trainer-Root).
+/// Historisch ein anderer Name als [`data_dir`] — deshalb eine eigene
+/// Konstante statt eines zweiten Literals.
+pub fn app_config_dir() -> PathBuf {
+    dirs::config_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(APP_CONFIG_DIR)
+}
+
+/// Die `config.json` selbst.
+pub fn app_config_json() -> PathBuf {
+    app_config_dir().join("config.json")
+}
+
+/// Ablage für Hilfsbinaries, die die App selbst herunterlädt (`cloudflared`).
+pub fn tools_bin_dir() -> PathBuf {
+    dirs::data_local_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(APP_CONFIG_DIR)
+        .join("bin")
+}
+
+/// Modellordner der eingebauten Engine. Bewusst `dirs::data_dir()` (unter
+/// Windows also `%APPDATA%`, nicht `%LOCALAPPDATA%`) — das ist der Pfad, den
+/// `detect_model_path("builtin")` seit jeher zurückgibt.
+pub fn builtin_models_dir() -> PathBuf {
+    dirs::data_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(APP_DISPLAY_DIR)
+        .join("models")
+}
+
+/// Sandkasten-Wurzel der Agenten. Pro Chat entsteht darin ein Unterordner;
+/// `commands::filesystem::contain_within` lässt nichts darüber hinaus.
+pub fn agent_workspace_root() -> PathBuf {
+    home().join(AGENT_WORKSPACE_DIR)
 }
 
 /// Where the rolling application log is written (`init_tracing` in main.rs,
@@ -37,9 +91,12 @@ pub fn cache_dir() -> PathBuf {
 ///    every artefact a support request needs, instead of the panic record and
 ///    the log being two unrelated places on three different operating systems.
 ///
-/// macOS:   ~/Library/Application Support/lu-labs/logs
-/// Windows: %LOCALAPPDATA%\lu-labs\logs
-/// Linux:   ~/.local/share/lu-labs/logs
+/// macOS:   ~/Library/Application Support/<APP_DIR>/logs
+/// Windows: %LOCALAPPDATA%\<APP_DIR>\logs
+/// Linux:   ~/.local/share/<APP_DIR>/logs
+///
+/// `<APP_DIR>` ist `lu-labs` in der echten App und trägt auf diesem Branch
+/// einen Suffix — siehe [`crate::app_identity`].
 pub fn log_dir() -> PathBuf {
     data_dir().join("logs")
 }

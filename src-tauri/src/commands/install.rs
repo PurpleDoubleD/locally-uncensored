@@ -1438,8 +1438,8 @@ pub fn install_comfyui(
             let mut p = comfy_path_slot.lock().unwrap();
             *p = Some(dir_str.clone());
         }
-        if let Some(config_dir) = dirs::config_dir() {
-            let app_config = config_dir.join("locally-uncensored");
+        {
+            let app_config = crate::os_paths::app_config_dir();
             let _ = std::fs::create_dir_all(&app_config);
             let config_file = app_config.join("config.json");
             let mut config: serde_json::Value = std::fs::read_to_string(&config_file)

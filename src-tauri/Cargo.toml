@@ -1,5 +1,28 @@
 [package]
-name = "locally-uncensored"
+# ACHTUNG, Branch `experiment/audits-komplett`: der Paketname ist hier BEWUSST
+# nicht `locally-uncensored`.
+#
+# Unter macOS bestimmt im `tauri dev`-Modus der Name der laufenden Datei das
+# WebKit-Verzeichnis: ein nicht gebündeltes Programm hat keine Bundle-ID
+# (`[[NSBundle mainBundle] bundleIdentifier]` ist nil), also fällt WebKit auf
+# `[[NSProcessInfo processInfo] processName]` zurück — den Dateinamen der
+# ausführbaren Datei — und legt localStorage/IndexedDB unter
+# `~/Library/WebKit/<Dateiname>/` ab. `cargo run` benennt die Datei nach
+# diesem Feld.
+#
+# Mit `locally-uncensored` teilte der Experiment-Build deshalb
+# `~/Library/WebKit/locally-uncensored/` mit JEDEM `npm run tauri dev` aus dem
+# echten Repo — inklusive `chat-conversations` und `lu-providers`. Genau von
+# dort stammt der `lu-cloud: false`-Zustand, der am 2026-08-31 in das
+# Store-Backup der echten App geschrieben wurde.
+#
+# Die `identifier` in `tauri.conf.json` hilft hier nicht: sie landet nur in
+# der Info.plist eines GEBÜNDELTEN Builds. `bundle.mainBinaryName` hilft
+# ebenfalls nicht — laut tauri-utils benennt tauri-cli die Datei erst in
+# `tauri build` um, nicht in `tauri dev`.
+#
+# In der echten App gehört hier `locally-uncensored` hin.
+name = "lu-experiment"
 version = "2.6.7"
 description = "Private, local AI chat & image/video generation"
 authors = ["purpledoubled"]

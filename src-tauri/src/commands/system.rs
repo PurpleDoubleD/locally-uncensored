@@ -267,15 +267,20 @@ pub fn exit_app(app: tauri::AppHandle) {
 }
 
 /// Get the persistent settings dir — outside the (NSIS) install dir so it
-/// survives updates. On Windows this stays `%APPDATA%/Locally Uncensored` (the
+/// survives updates. On Windows this stays `%APPDATA%/<APP_DISPLAY_DIR>` (the
 /// path existing installs already back up to). `APPDATA` is Windows-only, so on
 /// macOS/Linux the whole backup/restore + onboarding-marker cluster used to
 /// hard-error; there we use the shared app data dir instead.
-fn persistent_dir() -> Result<std::path::PathBuf, String> {
+///
+/// `<APP_DISPLAY_DIR>` ist `Locally Uncensored` in der echten App; auf diesem
+/// Branch trägt der Name einen Suffix (`crate::app_identity`). Genau diese
+/// Datei — `store_backup.json` — hat der Experiment-Build am 2026-08-31 im
+/// Verzeichnis der echten App überschrieben.
+pub(crate) fn persistent_dir() -> Result<std::path::PathBuf, String> {
     #[cfg(target_os = "windows")]
     {
         let appdata = std::env::var("APPDATA").map_err(|_| "APPDATA not set".to_string())?;
-        Ok(std::path::PathBuf::from(appdata).join("Locally Uncensored"))
+        Ok(std::path::PathBuf::from(appdata).join(crate::app_identity::APP_DISPLAY_DIR))
     }
     #[cfg(not(target_os = "windows"))]
     {

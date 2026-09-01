@@ -16,6 +16,9 @@
  */
 
 import { argv, exit } from 'node:process'
+// Siehe scripts/app-identity.mjs — der Sandkasten-Name trägt auf diesem Branch
+// einen Suffix, ein festes Literal würde hier nichts mehr fangen.
+import { REMOTE_FALLBACK_DIR } from './app-identity.mjs'
 
 function parseArgs() {
   const out = { base: null, code: null, chatId: 'all-tools-e2e' }
@@ -55,7 +58,7 @@ function check(label, ok, detail) {
   else { console.error(`  ✗ ${label}\n      ${detail}`); fail++ }
 }
 
-const NOT_REMOTE = (s) => !String(s || '').replaceAll('\\', '/').includes('agent-workspace/__remote__')
+const NOT_REMOTE = (s) => !String(s || '').replaceAll('\\', '/').includes(REMOTE_FALLBACK_DIR)
 
 async function step(label, fn) {
   console.log(`\n━━ ${label} ━━`)

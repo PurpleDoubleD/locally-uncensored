@@ -1,7 +1,8 @@
 //! MLX-Stable-Diffusion image provider for macOS (Apple Silicon
 //! recommended image stack).
 //!
-//! Layout under `~/Library/Application Support/lu-labs/mlx/`:
+//! Layout under `<os_paths::data_dir()>/mlx/` (macOS: `~/Library/Application
+//! Support/<APP_DIR>/mlx/`; der Verzeichnisname kommt aus `app_identity`):
 //!   venv/             — dedicated Python venv we own
 //!   server.py         — FastAPI sidecar (embedded via include_str!)
 //!   requirements.txt  — pip dependencies (embedded via include_str!)
@@ -802,10 +803,7 @@ pub async fn mlx_generate(_state: &AppState, args: &Value) -> CmdResult {
 /// Where generated stills live. Sibling of the video lane's outputs root and
 /// covered by the same read_media_file allow-list.
 pub(crate) fn images_root() -> PathBuf {
-    dirs::config_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("lu-labs")
-        .join("images")
+    crate::os_paths::config_root().join("images")
 }
 
 fn write_generated_png(b64: &str) -> Result<PathBuf, String> {

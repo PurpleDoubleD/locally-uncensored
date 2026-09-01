@@ -6,7 +6,7 @@
  * `contain_within` refuses anything that escapes it. `npm run dev` in a browser
  * has no Rust, so each `/local-api/fs-*` middleware is on its own. This module
  * is the port of that boundary: same root rule (a configured workingDirectory
- * wins, otherwise `~/agent-workspace/<chatId>`), same containment rule
+ * wins, otherwise `~/<AGENT_WORKSPACE_DIR>/<chatId>`), same containment rule
  * (relative paths resolve inside the root, absolute paths are accepted only
  * when they already fall inside it), same lexical `..` normalization so a path
  * that does not exist yet can still be judged.
@@ -16,6 +16,8 @@
  * next to its test. Both separators are handled because the dev server also
  * runs on Windows.
  */
+
+import { AGENT_WORKSPACE_DIR } from './app-identity'
 
 /** Read cap for one dev byte-read, mirroring READ_BYTES_CAP in filesystem.rs. */
 export const DEV_READ_BYTES_CAP = 16 * 1024 * 1024
@@ -86,7 +88,7 @@ function compareKey(normalized: string): string {
 /**
  * The jail root for a dev file op — port of `workspace_root`. A non-empty
  * `workingDirectory` (the folder the user picked) wins; otherwise the per-chat
- * sandbox `<homeDir>/agent-workspace/<chatId>`, with the id sanitised to
+ * sandbox `<homeDir>/<AGENT_WORKSPACE_DIR>/<chatId>`, with the id sanitised to
  * `[A-Za-z0-9_.-]` and capped at 64 chars exactly like the Rust side.
  */
 export function devWorkspaceRoot(
@@ -100,7 +102,7 @@ export function devWorkspaceRoot(
   const safe = id
     .slice(0, 64)
     .replace(/[^A-Za-z0-9_.-]/g, '_')
-  return lexicalNormalize(`${homeDir}/agent-workspace/${safe || 'default'}`)
+  return lexicalNormalize(`${homeDir}/${AGENT_WORKSPACE_DIR}/${safe || 'default'}`)
 }
 
 /** Thrown for any path that leaves the workspace root. */
