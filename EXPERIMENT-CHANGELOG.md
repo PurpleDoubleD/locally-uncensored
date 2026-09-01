@@ -664,3 +664,40 @@ Zwei Dinge folgen daraus, und das zweite ist mir das wichtigere:
 Es ist übrigens dasselbe Muster wie überall sonst hier, nur eine Ebene höher:
 zwei Beschreibungen derselben Oberfläche — die Komponente und der Spec — von
 denen nur eine gepflegt wurde.
+
+## Ein verschwundenes `node_modules`, und was es über Messungen sagt
+
+Mitten in dieser Runde war `node_modules` im Hauptrepo vollständig weg. Kein
+`npm install` lief, nichts hatte es angekündigt. Sichtbar wurde es als
+`resource path ../dist doesn't exist` in `cargo test` — Tauri braucht das
+gebaute Frontend als Ressource, und `vite build` konnte es nicht liefern,
+weil ihm `vite` selbst fehlte.
+
+Wiederhergestellt habe ich es **ohne Netz**: der npm-Cache lag mit 4,4 GB
+vollständig da, `npm ci --offline` brachte 422 Pakete zurück, der Build war
+danach in 394 ms wieder grün. Das ist der eigentliche Grund, warum es hier
+steht — die Reparatur war billig, der Schaden an den *Messungen* nicht.
+
+Denn in dem Zeitfenster liefen vier Agenten. Jeder `tsc`, jeder `vitest`,
+jeder Playwright-Lauf daraus ist rot geworden, aus einem Grund, der mit dem
+geprüften Code nichts zu tun hat. Ein Agent, der so ein Rot für sein eigenes
+hält, repariert ein Phantom — und schlimmstenfalls „repariert" er dabei
+etwas, das richtig war. Ich habe deshalb beiden noch laufenden Agenten
+geschrieben, sie sollen die Ergebnisse aus diesem Fenster wegwerfen und
+wiederholen, und dem e2e-Agenten ausdrücklich, dass auch mein eigener
+Verdacht gegen seinen dritten roten Spec dadurch wertlos sein könnte.
+
+Die vermutete Ursache ist ein `rm -rf …/node_modules/` **mit Schrägstrich am
+Ende** auf einen Symlink: unter macOS zeigt das auf das Ziel, nicht auf den
+Link, und löscht dessen Inhalt. Ich habe selbst so einen Link angelegt, für
+den isolierten Worktree der Paketprüfung. Wer es war, weiß ich nicht — ich
+habe beide Agenten gefragt und werde es nachtragen, wenn eine Antwort kommt.
+Die Lehre gilt unabhängig davon: **eine geteilte Abhängigkeit gehört nicht
+in eine Arbeitskopie verlinkt.** Kopieren ist teurer und kann das hier nicht.
+
+Und eine zweite, unangenehmere: mein eigener Messfehler in derselben Minute.
+Ich hatte `cargo test 2>&1 | tail -25 > log; echo "exit=$?"` geschrieben und
+damit den Status von `tail` protokolliert, nicht den von `cargo`. Das Log
+sagte `exit=0`, während der Build in Wahrheit gescheitert war. Ein grünes
+Ergebnis, das gar nichts gemessen hat — genau die Form von Fehler, die ich
+in dieser Sitzung bei anderen dreimal gesucht habe.
