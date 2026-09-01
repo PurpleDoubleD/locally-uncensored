@@ -16,19 +16,18 @@ Zeile für Zeile: welcher Audit-Befund ist im Branch `experiment/audits-komplett
 
 ## 1. Bilanz
 
-Gemessen am HEAD `287903aa`. Die Zählung des Audits („12 kritisch, 34 hoch, 30 mittel, 2 niedrig") meint die **CONFIRMED**-Befunde; die Befundtabelle §4b hat 85 Zeilen, weil 7 als *unbewiesen* markierte dazukommen (1 kritisch, 3 hoch, 3 mittel). Diese Matrix führt alle 85.
+Gemessen am HEAD `613df75b`. Die Zählung des Audits („12 kritisch, 34 hoch, 30 mittel, 2 niedrig") meint die **CONFIRMED**-Befunde; die Befundtabelle §4b hat 85 Zeilen, weil 7 als *unbewiesen* markierte dazukommen (1 kritisch, 3 hoch, 3 mittel). Diese Matrix führt alle 85.
 
 ### Technik-Audit — 85 Befunde
 
 | Status | kritisch (13) | hoch (37) | mittel (33) | niedrig (2) | **gesamt** |
 |---|---|---|---|---|---|
-| umgesetzt | 13 | 37 | 28 | 2 | **80** |
+| umgesetzt | 13 | 37 | 30 | 2 | **82** |
 | teilweise | 0 | 0 | 1 | 0 | **1** |
 | gegenstandslos | 0 | 0 | 1 | 0 | **1** |
-| **OFFEN** | **0** | **0** | **3** | **0** | **3** |
-| unklar | 0 | 0 | 0 | 0 | **0** |
+| **OFFEN** | **0** | **0** | **1** | **0** | **1** |
 
-**Kein kritischer und kein hoher Befund ist offen.** Von den drei verbliebenen liegt einer (T-60) **außerhalb meiner Befugnis** — er verlangt eine serverseitige Änderung an Supabases `uri_allow_list`. Der halbe (T-72) verlangt entweder einen 211-MiB-Download oder einen Windows-Rechner zum Hashen; beides habe ich nicht autorisiert.
+**Es ist noch genau ein Befund offen — und der gehört nicht mir.** `T-60` (OAuth-`state`-Nonce) verlangt eine serverseitige Änderung an Supabases `uri_allow_list`; die steht dem Eigentümer zu. Der eine halbe (`T-72`) verlangt entweder einen 211-MiB-Download oder einen Windows-Rechner zum Hashen — beides habe ich nicht autorisiert. Kritisch und hoch sind vollständig.
 
 **Zusätzlich, außerhalb der 85er-Liste** (9 Positionen): umgesetzt 6 · gegenstandslos 1 · offen 2 (ZB-7, AS-10).
 
@@ -49,7 +48,7 @@ Verifikationsgrad, Design: der Anteil `per Test` ist von 12 auf über 30 gestieg
 
 ### Das Gesamtbild in einem Satz
 
-Der Technik-Audit ist zu **94 %** umgesetzt und in seinen beiden schweren Klassen vollständig (50 von 50); von den drei verbliebenen Positionen sind zwei nicht meine Entscheidung. Der Design-Audit steht bei **67 % ganz, 10 % halb und 3 % begründet abgelehnt** — bei der ersten Aufnahme waren es 25 %. Offen sind noch 14. „Ausnahmslos" stimmt für den Technik-Audit inzwischen fast; beim Design-Audit sage ich lieber die Zahl als ein Wort.
+Der Technik-Audit ist zu **96 %** umgesetzt, in beiden schweren Klassen vollständig (50 von 50), und die einzige verbliebene offene Position ist eine, die ich nicht entscheiden darf. Der Design-Audit steht bei **67 % ganz, 10 % halb und 3 % begründet abgelehnt** — bei der ersten Aufnahme waren es 25 %. „Ausnahmslos" stimmt für den Technik-Audit jetzt bis auf zwei Positionen, die beim Eigentümer liegen; beim Design-Audit sage ich lieber die Zahl als ein Wort.
 
 > **Stand der Messung.** Alles unten ist am committeten HEAD gemessen. Im Arbeitsbaum liegen zum Zeitpunkt dieser Aufnahme uncommittete Änderungen von drei parallel arbeitenden Agenten (Chat/Header-Design, Persistenz-Rennen, Tailwind-Scan); sie sind hier **nicht** eingerechnet.
 
@@ -152,7 +151,7 @@ Hier liegen **alle elf offenen Technik-Befunde**. Der Audit liefert für diese 3
 | T-72 | `.exe`-Installer werden ohne Hash, Signatur oder Größe ausgeführt | `install.rs:1747` | **teilweise** | `c5773322` | per Test (Größe, Signatur) | Größe ist jetzt **exakt** gepinnt (`LMSTUDIO_INSTALLER_BYTES = 221_768_208`, aus der `Content-Length` des Herstellers), dazu `Get-AuthenticodeSignature` mit klassifiziertem Ergebnis. `LMSTUDIO_INSTALLER_SHA256` bleibt bewusst `None`: die echte Prüfsumme verlangt, die 211-MiB-`.exe` herunterzuladen oder sie auf einem Windows-Rechner zu hashen. **Das habe ich nicht autorisiert** — siehe Abschnitt 6. |
 | T-73 | `SO_REUSEADDR` auf `0.0.0.0:11435` erlaubt Hijacking unter Windows | `remote.rs:4809` | umgesetzt | `7de75b95` | im Lauf bewiesen (Windows `cargo test` 715 grün auf `lu-box`; die Sockettests laufen dort wirklich) | `build_reusable_listener` setzt pro Plattform das Flag, das dort das Richtige tut — unter Windows also **nicht** `SO_REUSEADDR`. Der Kommentar, der vorher das Gegenteil behauptete, ist korrigiert. |
 | T-74 | `client_ip` vertraut `X-Forwarded-For`, Geräte werden danach dedupliziert | `remote.rs:181` | umgesetzt | `7de75b95` + `dab30435` | per Test (Rust-Tests) | Deduplizierung und Sitzungsbezug hängen an `ConnectInfo` (`remote.rs:470`), nicht mehr am fälschbaren Header; XFF wird nur noch vom Gate gelesen. |
-| T-75 | Der Mobile-Client ist ein 2.988-Zeilen-Rust-Rohstring | `remote.rs:2019` | **OFFEN** | — | nur Review | Unverändert ein Rohstring, für `tsc`, `eslint` und `vitest` unsichtbar; die „Tests" bleiben handkopierte TypeScript-Nachbauten. `remote.rs` ist dabei von **6.304 auf 7.405 Zeilen** gewachsen. Mit 8 h die teuerste offene Position der Liste. |
+| T-75 | Der Mobile-Client ist ein 2.988-Zeilen-Rust-Rohstring | `remote.rs:2019` | umgesetzt | `613df75b` | **per Byte-Gleichheit** (sha256, von mir unabhängig nachgerechnet) + 12 Sonden + 1 eigene | Meine Zahlen waren daneben: `remote.rs` hatte **7.483** Zeilen, der Rohstring begann bei `:1874` und war 2.964 Zeilen / **182.560 Bytes**. Jetzt `remote.rs` **7.483 → 4.628**; der Client liegt als sechs echte Dateien in `mobile-client/`, drei davon ES-Module mit `export`. Der Schnitt ist der größte geschlossene — mit eslint `no-undef` **ausgemessen**, nicht geschätzt; weiter ging nicht, weil `client.js` die Namen *zuweist* und ein ESM-Import im Importeur schreibgeschützt ist. Kein zweiter Bundler: der Zusammenbau ist Textersetzung in `mobile_page.rs`, von `build.rs` benutzt und von `cargo test` mitgetestet. **Gleichheit:** alt und neu je 182.560 Bytes, sha256 `1f3dc012…89066d7` — ich habe den Rohstring selbst aus `git show 63294828:…` extrahiert und verglichen. Nicht abgedeckt: `/mobile` wurde nie über HTTP geholt, die Gleichheit steht an der Handler-Grenze. **Der Bauschritt kann nicht still veralten:** Ausgabe nur nach `OUT_DIR`, plus drei Buchhaltungstests. Meine eigene Sonde: eine Quelle geändert und `build.rs` auf 2000 zurückdatiert, damit cargo den Schritt *nicht* neu fährt → `mobile_landing_is_what_the_sources_say` wird rot. |
 | T-76 | Create-Dateislots erzeugen pro Datei eine Blob-URL und geben sie nie frei | `SpecialIntentControls.tsx:48` · *unbewiesen* | umgesetzt | `4c7bf748` | per Test (7 Tests, 4 Sonden des Agenten + 1 eigene) + gemessene Blobtabelle | **Der Audit-Zeiger traf die eine bereits geschlossene Stelle.** `SpecialIntentControls.tsx:55` ist kein Leck: `setAudioInput`/`setVideoInput` (`createStore.ts:710/715`) geben die ersetzte Ref über `releaseReplacedMediaRef` zurück — von mir am Basis-Commit nachgeprüft. Das Leck sitzt beim **dritten Slot derselben Familie**, `trainImages`, gemintet in einer wörtlichen Inline-Kopie (`Stage.tsx:596`). Alle drei Wege warfen die Refs ohne Freigabe weg: `addTrainImages` (Namens-Dedupe **und** stiller `.slice(0,30)`), `removeTrainImage` (`:703`), `clearTrainImages` (`:704`, läuft nach jedem abgeschickten Trainingslauf). Gemessen: 60 gemintet, **60 lebendig vorher, 0 nachher**. Fix ist eine Verallgemeinerung der vorhandenen Regel (`releaseDroppedMediaRefs`), Vergleich über die **URL**, nicht den Namen — der Verlierer der Dedupe ist genau die frisch gemintete Ref. |
 | T-77 | `AppShell` abonniert den ganzen `uiStore`, der Resize-Griff schreibt pro Pointermove | `AppShell.tsx:50` | umgesetzt | `402ec7e3` | per Test (`src/components/layout/__tests__/streaming-does-not-repaint-the-app.test.ts`) | Gezielte Selektoren; das Ziehen des Trenners rendert nicht mehr den ganzen Baum. |
 | T-78 | `fs_read`/`fs_search` blockieren synchron den Main-Thread | `filesystem.rs:403` | umgesetzt | `dab30435` | per Test (`filesystem.rs:1547` prüft das Präambel-Paar) | `pub async fn fs_read` reicht an `tauri::async_runtime::spawn_blocking` weiter (`:510-515`), der synchrone Kern bleibt testbar daneben. |
@@ -190,6 +189,7 @@ Zwei Befunde, die in **keinem** der beiden Audits stehen. Ich habe sie beim Nach
 |---|---|---|---|---|
 | KF-1 | Der Beenden-Pfad erreicht jeden Daemon außer dem Tunnel | `state.rs:462` | **OFFEN** | `AppState::shutdown_subprocesses` ist 115 Zeilen lang und erwähnt `remote`, `RemoteServer`, `tunnel` oder `cloudflared` **kein einziges Mal** — am HEAD `63294828` von mir nachgezählt. Ollama, ComfyUI, llama-server, der Embeddings-Server, der Trainer und der MLX-Sidecar stehen dort; der Tunnel hängt allein an `impl Drop for RemoteServer`. Der Kommentar über der Funktion begründet selbst, warum das nicht reicht: Tauri v2 führt `Drop for AppState` nicht zuverlässig aus — genau deshalb existiert der explizite Pfad. Dies ist die zweite Hälfte von T-39, siehe Abschnitt 5. |
 | KF-2 | Prosa erzeugt ausgeliefertes CSS | `AUDIT-COVERAGE.md:301` → `dist/assets/index-*.css` | umgesetzt | `fcce2b54` | per Test (13 Sonden des Agenten + 2 eigene) + A/B/A-Messung an echten Builds | Tailwind 4 scannt das Projektverzeichnis als Text. **30 Klassen ohne jede Call-Site** landeten im Bundle (roh −1.863 B, gzip −339 B; 1426 → 1396 Klassen, keine kommt hinzu) — aus Markdown, aus `docs/`, aus **Rust-Kommentaren** (`gpu.rs:217` → `[vendor:device]`) und aus 20 Testdateien, wo Platzhalter zu Regeln mit buchstäblich `background-color:#...` wurden. Eine davon steht in diesem Dokument in der Beschreibung **ihrer eigenen Entfernung** (`:194` → `max-w-[760px]`). Fix ist positiv formuliert (`source(none)` + zwei `@source` + ein `not`), keine Ausschlussliste nach Endungen — dieselbe Klasse steht in Tabelle *und* Testkommentar, eine Quelle abzuschalten hätte nichts genützt. Eine Zeile wurde gemessen und **verworfen**: `@source not "./index.css"` ergab ein byte-identisches Bundle. **Die eigentliche Kur am Test:** jede Nadel wird gegen *alle* Treffer geprüft, nicht gegen den ersten. |
+| KF-3 | Sechs Befunde, die erst sichtbar wurden, als der Client aufhörte, ein String zu sein | `mobile-client/**` | **teils offen** | Herausgefallen beim T-75-Umbau, in keinem Audit: (1) `repairToolCallArgs` — der Doppel-Dekodier-Zweig ist **unerreichbar**: ein doppelt kodiertes Argument ist gültiges JSON, das erste `JSON.parse` gelingt, `typeof === 'string'`, Rückgabe `{}` — genau der Fehler, den der Kommentar zu beheben behauptet. Verhalten festgenagelt, nicht repariert (Bytes eingefroren). (2) **Codex ignoriert eine eingeschaltete Persona nicht** — der TS-Nachbau hatte ein `else`, der echte Client nicht; neun grüne Zusicherungen betrafen die Kopie. (3) `mobile-parity.test.ts` testete das **Desktop**-`isThinkingCompatible` unter der Überschrift „mobile parity". (4) `useCodex-prompt-contract` prüfte `toContain('AUTONOMY CONTRACT')` gegen die ganze Rust-Datei — grün war es an der Desktop-Kopie nebenan; der Mobil-Prompt sagt „HARD RULES". (5) eslint lief zum ersten Mal überhaupt auf diesem Code: **5 echte Fehler**. (6) `tool-description-parity` prüfte `>= 9` bei 10 Werkzeugen — ein verlorenes hätte der Parser still geschluckt. |
 
 **Wie KF-2 vier Monate unentdeckt bleiben konnte:** `fokusring-und-press.test.ts:248` trägt `describe.skipIf(builtCss === null)` und liest aus `dist/assets`. Wo kein `dist/` steht, schaltet sich der ganze Block **still** ab. Das ist der dritte Fall desselben Musters in diesem Projekt (nach `gguf.rs:264` und `bundle-size-drift.live.test.ts`) — und ich bin selbst einmal darauf hereingefallen: ein Lauf war grün gegen ein `dist/`, das aus einer früheren Sonde stammte und nicht mehr zum Quelltext passte. Seitdem gilt für mich: **vor jedem Testlauf, der gebautes CSS liest, `rm -rf dist && npx vite build`.**
 
@@ -322,17 +322,15 @@ Die Wellen sind Fixes, keine eigenen Befunde; sie stehen hier, weil der Auftrag 
 
 ## 4. Die offene Liste — was noch zu vergeben ist
 
-46 Positionen: 3 Technik-Befunde und 1 halber, 2 aus dem Technik-Nachtrag, 38 Design-Befunde und 3 halbe. Nichts davon ist `unklar` — jede Zeile ist am Code entschieden. Diese Liste ist aus der Haupttabelle **abgeleitet**, nicht von Hand gepflegt; sie ist zweimal veraltet gewesen, weil sie ein zweiter Pflegeweg war.
+18 Positionen: 1 Technik-Befund und 1 halber, 1 eigener Fund, 2 aus dem Technik-Nachtrag, 14 Design-Befunde. Nichts davon ist `unklar` — jede Zeile ist am Code entschieden. Diese Liste ist aus der Haupttabelle **abgeleitet**, nicht von Hand gepflegt; sie stand zweimal veraltet da, weil sie ein zweiter Pflegeweg war.
 
-### 4.1 Technik — 3 offene und 1 halbe Position
+### 4.1 Technik — 1 offene und 1 halbe Position
 
 | ID | Was offen ist | h |
 |---|---|---|
-| T-75 | Der Mobile-Client bleibt ein Rust-Rohstring, unsichtbar für `tsc`/`eslint`/`vitest`. `remote.rs` ist dabei von 6.304 auf 7.405 Zeilen gewachsen. | 8 |
 | T-60 | OAuth-Loopback: `state`-Nonce fehlt. Jede offene Seite kann per Top-Level-Navigation eine laufende Anmeldung beenden und den Fehlertext wählen. **Nur serverseitig zu schließen** — die Änderung an Supabases `uri_allow_list` steht dem Eigentümer zu, nicht mir. | 4 |
-| T-76 | Create-Dateislots geben ihre Blob-URLs nie frei. | 2 |
-| KF-1 | Der Beenden-Pfad (`state.rs:462`) erreicht jeden Daemon außer dem Tunnel — **von mir bei der Kontrolle gefunden**, in keinem Audit. Zweite Hälfte von T-39. | 2 |
 | T-72 | *(halb)* Größe und Authenticode sind gepinnt; der SHA-256 der Installer-URL fehlt. Die echte Prüfsumme verlangt einen Windows-Rechner oder einen 211-MiB-Download — **beides habe ich nicht autorisiert.** | 5 |
+| KF-1 | *(eigener Fund, kein Audit)* Der Beenden-Pfad (`state.rs:462`) erreicht jeden Daemon außer dem Tunnel. Zweite Hälfte von T-39. | 2 |
 
 ### 4.2 Technik-Nachtrag — 2 offene Positionen
 
