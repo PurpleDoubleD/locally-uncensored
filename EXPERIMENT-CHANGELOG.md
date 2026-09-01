@@ -1318,3 +1318,104 @@ benannter Rest", „gehört einem anderen Agenten". Das ist der eigentliche Ertr
 Ein Rest, den ein Commit ehrlich benennt und den kein Register aufnimmt, ist genau
 so verloren wie einer, den niemand gesehen hat — nur teurer, weil ihn schon einmal
 jemand bezahlt hat.
+
+## Das Onboarding bekommt ein eigenes Fenster — und der Marker entscheidet, wer es ist
+
+Ein Wunsch des Eigentümers, kein Audit-Befund: der Assistent soll ein kleines,
+vom Betriebssystem mittig gesetztes Fenster sein, die App bleibt das große.
+Der Entwurf steht in einem Satz: Rust entscheidet beim Start aus der Markerdatei
+— mit dem Store-Backup als zweiter Quelle —, welches Fenster zuerst sichtbar
+wird, und die Fenster **folgen** dem Marker. Damit ist `set_onboarding_done`
+nicht nur eine Notiz, sondern der Auslöser für beides: Übergabe bei `true`,
+Zurücksetzen bei `false`.
+
+`show_window` zeigt deshalb nicht mehr blind das Hauptfenster, sondern das
+rufende nach einer Regel. Solange der Assistent im eigenen Fenster läuft, bleibt
+das Hauptfenster unsichtbar; ist der Marker da, wird **erst** das Hauptfenster
+gezeigt und **danach** das kleine geschlossen. Erst zeigen, dann schließen — nie
+ein Moment ohne Fenster. Die Reihenfolge steht nicht im Kommentar, sondern in
+einem Rust-Test, der den Rumpf der Funktion liest.
+
+Die Maße sind gerechnet, nicht gewählt: der längste Schritt misst 531 px, plus
+Streifen 37 und Rand 18 sind 586, und 640 lässt 54 px Luft. Dass dieselbe 640
+zugleich Tailwinds `sm`-Schwelle ist, ist der zweite Grund und steht als
+Untergrenze in einem Test. Das Fenster ist nicht größenveränderbar, hat kein
+Maximieren und wird per `.center()` vom System gesetzt. Die Dekoration folgt dem
+Hauptfenster der jeweiligen Plattform statt einer eigenen Erfindung: auf mac die
+Overlay-Titelleiste mit nativen Ampeln, auf Windows rahmenlos, transparent, ohne
+Schatten. Schließen vor dem Ende beendet die App, Subprozesse zuerst.
+
+Die Naht, an der es leicht schiefgegangen wäre, liegt nicht im Fenster, sondern
+im `localStorage`. Das Hauptfenster wartet jetzt **vor dem ersten Store-Import**
+auf die Übergabe, und zwar auf das Ereignis *und* eine Marker-Nachfrage, gegen
+das Rennen zwischen beiden. Ohne das hätten seine Stores mit altem Stand
+überschrieben, was der Assistent nebenan gerade geschrieben hatte. Das
+Fensterlabel liest genau eine Stelle, und eine Wache verbietet jedes andere
+Vorkommen — dieselbe Hausregel wie überall hier, diesmal von Anfang an statt
+nach dem dritten Schaden.
+
+Der schönste Fund kam aus dem Lauf und wäre durch kein Lesen gekommen:
+`open_devtools()` im Startpfad auf dem *unsichtbaren* Hauptfenster **macht es
+sichtbar**. WebKit dockt den Inspector an und holt das Fenster nach vorn —
+gemessen, beide Fenster nebeneinander auf dem Schirm. DevTools laufen jetzt erst
+beim Aufdecken, und nur für das Hauptfenster.
+
+Belegt ist das Verhalten mit CoreGraphics-Messungen am echten Debug-Bundle. Ohne
+Marker steht bei t+3, t+8 und t+15 Sekunden genau **ein** Fenster, 640×640 an
+(544,192), Mitte (864,512) — die Bildschirmmitte; kein Hauptfenster, auch nach
+dem 10-Sekunden-Notweg nicht, und ein zweiter Start ergibt einen Prozess und
+dasselbe Fenster. Sagt das Backup „fertig", schreibt Rust den Marker nach und bei
+t+2 s steht **nur** das Hauptfenster, 1280×800, nie ein kleines. Mit Marker, aber
+ohne Store, greift der Notweg: nur das Hauptfenster, Assistent inline.
+
+Zwei Reste sind ausdrücklich benannt und stehen als solche in der Matrix. Der
+**Klick durch den Assistenten bis zur Übergabe wurde nicht ausgeführt** — keine
+Bildschirmsteuerung freigegeben; gedeckt ist die Übergabe durch Rust-Tests und
+Quelltext-Wachen, nicht durch Ausführung, und die Handprüfung steht aus. Und vier
+**Windows-Punkte** sind dort nachzusehen: ob die Fläche das transparente Fenster
+voll deckt, ob `.center()` auf dem Cursor-Monitor zentriert, ob ein Doppelklick
+auf die Ziehfläche nicht doch maximiert, und ob beide Webviews wirklich dasselbe
+`localStorage` sehen — letzteres ist die Annahme, auf der die ganze Übergabe
+ruht.
+
+Gates: tsc 0, eslint 0/0, vitest 553/8203, madge 0, `cargo test` 812 (+21 im
+neuen Modul), clippy 0, Playwright 39/3. Kein `eslint-disable`, kein `any`, kein
+neues `allow`, kein `skip`.
+
+## Ein Mess-Commit statt zwei
+
+Die Befundmatrix ist auf den Stand gebracht, und der Anlass war nicht, dass
+einzelne Zeilen veraltet waren, sondern **warum** sie es konnten: die Datei
+nannte zwei verschiedene Mess-Commits, einen in der Kopfzeile und einen achtzehn
+Zeilen tiefer, vierzig Commits auseinander. Solange beide dastanden, war für
+keine Zeile entscheidbar, gegen welchen Stand sie gilt.
+
+Was dabei zutage kam, ist wörtlich der Befund, den dieselbe Matrix dem Code an
+zwölf Stellen vorhält. Acht Token-Zeilen standen auf „OFFEN", obwohl zwei Pakete
+sie geschlossen hatten. Zwei Nachtragszeilen standen auf „offen", obwohl die
+Commits, die sie schlossen, in derselben Datei zitiert wurden. Zwei
+Wellen-Posten standen auf „OFFEN", obwohl Kommandopalette und Kontextmenüs seit
+Wochen im Baum lagen. Nach dem Nachziehen steht der Technik-Audit bei 83 von 85
+umgesetzt und keiner offenen Position, der Design-Audit bei 66 von 73 und einer
+halben Zeile.
+
+Die Gegenmaßnahme ist keine Sorgfaltsermahnung, sondern dieselbe wie überall
+hier: **die Summen werden aus der Datei gezählt, nicht aus dem Kopf**, und der
+`grep`, der das tut, steht als Kommentar unter jeder Tabelle. Er hat beim ersten
+Lauf sofort etwas gefunden — die Signale-Spalte stand auf 12 und ergab damit 74
+statt der 73, die zwei Zeilen darüber im selben Abschnitt stehen. Und er hat eine
+zweite Lehre erzwungen: über den Fließtext einer Zeile zu zählen ist untauglich,
+weil „die größte offene Tür" und „offengelegt" mitzählen. Gezählt wird die
+Statusspalte.
+
+Vierzehn neue Zeilen sind dazugekommen, zwölf davon **Selbstmeldungen** aus den
+Paketen dieser Runde: „gemessen und nicht hier gefixt", „bleibt als benannter
+Rest", „gehört einem anderen Agenten". Ein Rest, den ein Commit ehrlich benennt
+und den kein Register aufnimmt, ist genau so verloren wie einer, den niemand
+gesehen hat — nur teurer, weil ihn schon einmal jemand bezahlt hat.
+
+Zwei Formfehler sind nebenbei gefallen: zwei Zeilen Werkzeug-Auswurf, die ein
+früherer Lauf mitten in einen Abschnitt geschrieben hatte, und eine
+Tabellenkopfzeile mit fünf Spalten über Zeilen mit sieben. Dazu vier Zellen, in
+denen ein unmaskiertes `|` die Tabelle zerriss — sichtbar erst, als jede Zeile
+maschinell auf ihre Spaltenzahl geprüft wurde.
