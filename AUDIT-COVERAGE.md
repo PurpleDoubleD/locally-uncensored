@@ -296,7 +296,7 @@ Der Design-Audit vergibt keine IDs. Vergeben sind hier: **D-A1…D-A10** (§3, d
 |---|---|---|---|---|---|---|
 | D-T01 | `html font-size` | `18.4px` | umgesetzt | `c7076fca` | per Test (`ein-massstab.test.ts`) | `html { font-size: 16px }`, die Vergrößerung liegt in `--ui-scale: 1.15` — einmal definiert, einmal gelesen. `16 × 1.15 = 18.4` ist im Test als Gleichung festgehalten, damit die Rückrechnung nicht verloren geht. |
 | D-T02 | Schrift UI | Inter deklariert, nie geladen | umgesetzt | `44a76aad` + `bcec642b` | nur Review | `public/fonts/lu-fonts.css`, 39 `@font-face`, 16 woff2, verlinkt in `index.html:20`. |
-| D-T03 | Schrift Display | fehlt | **OFFEN** | — | nur Review | 0 Treffer für „Grotesk“ in `src/`; auch die ausgelieferte `lu-fonts.css` enthält ausschließlich Inter-Faces. Der Display-Slot ist unbesetzt. |
+| D-T03 | Schrift Display | fehlt | umgesetzt | `287903aa`, `c77682a2` | per Test (`kein-gewicht-das-die-datei-nicht-kann.test.ts`, `die-typo-leiter-und-ihre-umgehung.test.ts`) + Live-Messung | **Diese Zeile stand zu lange auf „OFFEN“ — die Messung dahinter war meine, und sie war falsch.** Ich hatte `grep grotesk` auf `public/fonts/` laufen lassen und nichts gefunden; die Dateien liegen aber unter `woff2/` mit Hash-Namen. Tatsächlich liefert `lu-fonts.css` **sechs** Space-Grotesk-Blöcke (Gewicht 500 und 700, je latin / latin-ext / vietnamesisch — eine Variable-Font-Datei pro Unicode-Subset, nicht pro Schnitt). `--font-display: 'Space Grotesk', 'Inter', system-ui, …` steht in `index.css:356`, `.t-display` zieht sie (`:959`), und die Überschrift des leeren Chats trägt sie. Gewicht **500 und nicht 600**: die Datei hat genau diese Schnitte, und ein Gewicht, das die Datei nicht kann, lässt der Browser synthetisieren — dafür steht die eigene Wache. |
 | D-T04 | Type-Scale | 30 effektive px-Werte | **OFFEN** | — | nur Review | Tokens und `.t-*`-Klassen existieren (`index.css:88-93`, `:558-563`), aber die Umgehung ist **gewachsen**: arbitrary `text-[…]` 1007 → **1017**, `.t-*`-Nutzungen unverändert 143. |
 | D-T05 | Akzent | `#a094f8` vs. `#7c3aed` 9× | **OFFEN** | — | nur Review | `index.css:41` weiter `#a094f8`; `#7c3aed` 20 → **22**; das Brand-Kit-Violett `#8b5cf6` kommt in `src/` weiterhin 0× vor. Zwei Violett-Identitäten für eine Marke — unverändert. Das `.lu-primary`-Rezept vereinheitlicht die *Verwendung*, nicht den *Wert*. |
 | D-T06 | Surface | 16 Graustufen, `bg-lu-*` 0× | **OFFEN** (teilweise) | `f336b91e`, `8198495f` | nur Review | `bg-lu-*` 0 → 6 echte Call-Sites, aber die Shell malt weiterhin Literale (`AppShell.tsx:927`, `:948`). |
@@ -366,7 +366,6 @@ Die Wellen sind Fixes, keine eigenen Befunde; sie stehen hier, weil der Auftrag 
 
 | ID | Was offen ist | |
 |---|---|---|
-| D-T03 | Schrift Display |  |
 | D-T04 | Type-Scale |  |
 | D-T05 | Akzent |  |
 | D-T06 | Surface | halb |
