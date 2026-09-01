@@ -103,6 +103,27 @@ import {
   // Expose for inline handlers (rare path, but keeps symmetry with prev API)
   window._svgIcon = svgIcon;
 
+  // ── Das Hauszeichen ──
+  //
+  // Zeigt den <symbol id="lu-monogram"> aus index.html. Bis 01.09.2026 stand
+  // an den vier Stellen darunter je ein <img src="/LU-monogram-white.png"> —
+  // dieselbe 512x512-Bitmap, heruntergerechnet auf 18, 22, 64 und 82 Pixel,
+  // waehrend die Desktop-App laengst public/LU-monogram.svg zeigte (0b9c0f66).
+  //
+  // Warum <use> und kein <img src="/LU-monogram.svg">: der Remote-Server
+  // liefert keine Dateien aus mobile-client/ aus. Er baut EINE Seite
+  // (src-tauri/src/mobile_page.rs) und haelt daneben genau eine Bildroute,
+  // `/LU-monogram-white.png`. Ein SVG-Pfad waere ein 404 gewesen. Inline
+  // gebraucht die Seite gar keine Route mehr.
+  //
+  // `label` leer heisst dekorativ: das Zeichen steht dann neben einer
+  // Textmarke, die dasselbe schon sagt, und wird ausgeblendet statt doppelt
+  // vorgelesen.
+  function monogram(cls, label){
+    var a11y = label ? 'role="img" aria-label="' + label + '"' : 'aria-hidden="true"';
+    return '<svg class="' + cls + '" ' + a11y + ' focusable="false"><use href="#lu-monogram"/></svg>';
+  }
+
   //@@LU_CAVEMAN@@
 
   // Cached copy of the desktop's RemotePermissions (filesystem / downloads /
@@ -469,7 +490,7 @@ import {
   if(!TOKEN){
     el('app').innerHTML =
       '<div class="auth-screen">' +
-        '<img class="auth-mark" src="/LU-monogram-white.png" alt="">' +
+        monogram('auth-mark') +
         '<div class="auth-logo">LU</div>' +
         '<div class="auth-sub">Remote</div>' +
         '<form class="auth-form" id="auth-form">' +
@@ -638,7 +659,7 @@ import {
         '<div class="app-header">' +
           '<button class="icon-btn" onclick="window._toggleDrawer()" aria-label="Menu"><span class="material-symbols-outlined">'+svgIcon('menu')+'</span></button>' +
           '<span class="header-brand" aria-label="LU">' +
-            '<img class="header-mark" src="/LU-monogram-white.png" alt="LU">' +
+            monogram('header-mark', 'LU') +
           '</span>' +
           modeTag +
           '<button class="model-badge" onclick="window._openModelPicker()" aria-label="Select model">' +
@@ -706,7 +727,7 @@ import {
            '<aside class="drawer'+(drawerOpen?' open':'')+'">' +
              '<div class="drawer-header">' +
                '<span class="drawer-brand">' +
-                 '<img class="drawer-mark" src="/LU-monogram-white.png" alt="">' +
+                 monogram('drawer-mark') +
                  '<span class="drawer-logo">LU</span>' +
                '</span>' +
                '<button class="drawer-close" onclick="window._toggleDrawer()" aria-label="Close"><span class="material-symbols-outlined">'+svgIcon('close')+'</span></button>' +
@@ -883,7 +904,7 @@ import {
               : (currentModel ? 'Ready' : 'Select a model');
       p.innerHTML =
         '<div class="chat-welcome">' +
-          '<img class="chat-welcome-mark" src="/LU-monogram-white.png" alt="">' +
+          monogram('chat-welcome-mark') +
           '<div class="chat-welcome-logo">LU</div>' +
           '<div class="chat-welcome-tag">'+H(tag)+'</div>' +
         '</div>';

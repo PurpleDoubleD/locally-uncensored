@@ -149,29 +149,30 @@ describe('Mobile tool-call repair', () => {
   })
 
   /**
-   * FINDING (01.09.2026, first real test of this function): the
-   * double-encoding branch below the first `JSON.parse` is unreachable.
+   * FINDING (01.09.2026): the double-encoding branch below the first
+   * `JSON.parse` was unreachable. FIXED (KF-3/1, same day).
    *
-   * The source reads:
+   * The source read:
    *
    *     try{ var parsed = JSON.parse(trimmed);
    *          return (parsed && typeof parsed === 'object') ? parsed : {}; }catch(_){}
-   *     if(trimmed.charAt(0) === '"' && …)   // ← double-decode lives here
+   *     if(trimmed.charAt(0) === '"' && …)   // ← double-decode lived here
    *
    * A double-encoded argument IS valid JSON — a JSON string — so the first
-   * parse succeeds, `typeof parsed` is 'string', and the function returns `{}`
-   * before it ever reaches the unwrapping it was written for. The branch can
-   * only be entered by input that both fails to parse and is quoted at both
-   * ends, and that input fails the inner parse too.
+   * parse succeeded, `typeof parsed` was 'string', and the function returned
+   * `{}` before it ever reached the unwrapping it was written for. The branch
+   * could only be entered by input that both failed to parse and was quoted at
+   * both ends, and that input failed the inner parse too.
    *
-   * This test pins what the shipped client really does rather than what the
-   * comment above the branch says. It is deliberately NOT fixed here: T-75
-   * moves this code out of a Rust string without changing a byte of it, and
-   * the page this repository serves is proven identical to the one it served
-   * before. The fix is its own change.
+   * The assertion here used to PIN that `{}` — deliberately, because T-75 moved
+   * this code out of a Rust string without changing a byte of it. The move is
+   * done, so the pin is pulled forward and now demands the repair the comment
+   * always claimed. `repairToolCallArgs` peels layers in a loop; the full
+   * range of inputs is played through in
+   * mobile-doppelt-kodierte-werkzeugargumente.test.ts.
    */
-  it('does NOT unwrap a double-encoded string — the repair branch is dead code', () => {
-    expect(repairToolCallArgs(JSON.stringify('{"path":"a.txt"}'))).toEqual({})
+  it('unwraps a double-encoded string — the branch that was dead now runs', () => {
+    expect(repairToolCallArgs(JSON.stringify('{"path":"a.txt"}'))).toEqual({ path: 'a.txt' })
   })
 
   it('answers {} for null, empty and unparseable input rather than throwing', () => {

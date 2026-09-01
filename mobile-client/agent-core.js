@@ -76,14 +76,31 @@ import { stripNonCanonicalTags } from './personas.js'
     if(raw == null) return {};
     if(typeof raw === 'object') return raw;
     if(typeof raw !== 'string') return {};
-    var trimmed = raw.trim();
-    if(!trimmed) return {};
-    try{ var parsed = JSON.parse(trimmed); return (parsed && typeof parsed === 'object') ? parsed : {}; }catch(_){}
-    // Some models double-encode the args (string of a string of JSON)
-    if(trimmed.charAt(0) === '"' && trimmed.charAt(trimmed.length-1) === '"'){
-      try{ var inner = JSON.parse(trimmed); if(typeof inner === 'string'){
-        try{ var parsed2 = JSON.parse(inner); return (parsed2 && typeof parsed2 === 'object') ? parsed2 : {}; }catch(_){}
-      }}catch(_){}
+    var text = raw.trim();
+    // Peel the JSON wrappers one layer at a time.
+    //
+    // The ordinary shape is `'{"path":"a.txt"}'`. The other one models really
+    // send is that string ENCODED AGAIN — `'"{\"path\":\"a.txt\"}"'` — and it
+    // is why this is a loop and not one parse followed by a special case.
+    //
+    // The special case that stood here until 01.09.2026 could never run. A
+    // double-encoded argument IS valid JSON (a JSON string), so the first
+    // `JSON.parse` SUCCEEDED, `typeof parsed` was 'string', and the function
+    // returned `{}` before reaching the unwrapping written below it — exactly
+    // the failure that branch claimed to repair. Feeding the result back
+    // through the parser is the whole fix.
+    //
+    // The bound is belt and braces: each successful parse of a JSON string
+    // yields a strictly shorter string, so the loop terminates on its own.
+    // Four layers is far past anything a model has been seen to emit and
+    // stops adversarial input from buying more than four parses.
+    for(var layer = 0; layer < 4; layer++){
+      if(!text) return {};
+      var parsed;
+      try{ parsed = JSON.parse(text); }catch(_){ return {}; }
+      if(parsed && typeof parsed === 'object') return parsed;
+      if(typeof parsed !== 'string') return {};
+      text = parsed.trim();
     }
     return {};
   }

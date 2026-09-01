@@ -175,10 +175,33 @@ const mobileTools = AGENT_TOOLS
 
 describe('tool-description-parity — extraction sanity', () => {
   it('parses the desktop BUILTIN_TOOLS list', () => {
+    // Still a lower bound, and still earning its keep: this half IS a parser
+    // (the brace scan over builtin-tools.ts above), so the only thing it can
+    // honestly claim is "the scan found the catalogue rather than nothing".
     expect(builtinTools.length).toBeGreaterThanOrEqual(13)
   })
-  it('parses the mobile AGENT_TOOLS list', () => {
-    expect(mobileTools.length).toBeGreaterThanOrEqual(9)
+
+  /**
+   * KF-3 (6). This assertion read `toBeGreaterThanOrEqual(9)` while the array
+   * held TEN tools — todo_write, web_search, web_fetch, file_read, file_write,
+   * file_list, file_search, shell_execute, screenshot, image_generate. A lost
+   * tool would have slipped through the slack, and the number had no way of
+   * noticing that it had gone stale.
+   *
+   * It is not re-pinned to 10 either, because 10 goes stale the same way the
+   * 9 did. The count is DERIVED: the mobile catalogue is by definition the
+   * desktop catalogue minus MOBILE_SKIP, which is the same ledger the name-set
+   * test below reads. Add a desktop tool and wire it to mobile and this stays
+   * green; add one and forget mobile, or drop one from mobile, and it goes red
+   * with both numbers in the message.
+   *
+   * MOBILE_SKIP is declared below this block on purpose — the ledger belongs
+   * next to the set comparison it explains. `it` bodies run after the module
+   * has finished evaluating, so the reference is resolved by then.
+   */
+  it('the mobile AGENT_TOOLS list holds every desktop tool it is meant to', () => {
+    const erwartet = builtinTools.filter((t) => !MOBILE_SKIP.has(t.name)).length
+    expect(mobileTools).toHaveLength(erwartet)
   })
 })
 

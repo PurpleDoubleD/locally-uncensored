@@ -122,3 +122,29 @@ export function loadFromClient<T extends Record<string, unknown>>(
   ) as (...args: unknown[]) => T
   return factory(...depNames.map((k) => deps[k]))
 }
+
+/**
+ * One of the client's source files with its COMMENTS removed.
+ *
+ * Needed because the reasons in this repository name the things they replaced:
+ * the note above `monogram()` in client.js and the one above the sprite in
+ * index.html both spell out `/LU-monogram-white.png`, and a guard that greps
+ * for that string would fire on the explanation of why it is gone.
+ *
+ * The stripping is deliberately LINE-BASED and not the usual pair of regexes.
+ * `src.replace(/\/\*[\s\S]*?\*\//g, '')` was tried first and ate 400 lines of
+ * client.js in one bite: the file contains `/*` inside ordinary JavaScript
+ * strings (a prompt, a regex), so the "block" it found ran from a string to
+ * whatever `*` + `/` came next. Dropping whole comment LINES cannot do that —
+ * a line that begins with `//`, `/*` or a continuation `*` is a comment line
+ * in all four of these files, and nothing else is touched. HTML comments are
+ * the one multi-line form that is removed as a block, because `<!--` cannot
+ * appear inside an HTML attribute or a CSS value.
+ */
+export function codeOnly(source: string): string {
+  return source
+    .replace(/<!--[\s\S]*?-->/g, '')
+    .split('\n')
+    .filter((line) => !/^\s*(?:\/\/|\/\*|\*)/.test(line))
+    .join('\n')
+}

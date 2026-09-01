@@ -22,6 +22,12 @@ body{font-family:system-ui,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-
    target the icon. The SVG inside scales to `font-size` via width:1em. */
 .material-symbols-outlined{display:inline-flex;align-items:center;justify-content:center;vertical-align:middle;user-select:none;line-height:0}
 .material-symbols-outlined svg{width:1em;height:1em;display:block}
+/* Der <symbol>-Traeger fuer das Hauszeichen (index.html, direkt hinter
+   <body>). Er wird nie selbst gezeichnet, nur von <use> referenziert.
+   `display:none` waere die naheliegende Regel und die falsche: in mehreren
+   Engines rendert ein <use> nicht mehr, wenn sein Sprite ausgeblendet ist.
+   Null Groesse, aus dem Fluss genommen, ist die Form, die ueberall haelt. */
+.svg-sprite{position:absolute;width:0;height:0;overflow:hidden}
 button{-webkit-appearance:none;appearance:none}
 
 /* ── Auth ── */

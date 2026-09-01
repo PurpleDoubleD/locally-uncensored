@@ -28,6 +28,7 @@ import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { CAVEMAN_PROMPTS, CAVEMAN_REMINDERS } from '../../../mobile-client/caveman.js'
+import { codeOnly } from './mobile-client-shell'
 import { CODEX_PROMPT, PERSONAS, THINKING_COMPATIBLE } from '../../../mobile-client/personas.js'
 
 const read = (name: string) =>
@@ -109,19 +110,57 @@ describe('mobile page › no third-party requests (Bug #5)', () => {
   })
 })
 
+/**
+ * ── 01.09.2026: der Pin wurde umgedreht ──
+ *
+ * Bis hierher stand an dieser Stelle `expect(JS).toContain(
+ * '/LU-monogram-white.png')` — der Pfad WOERTLICH gefordert. Das war die
+ * Falle: die Desktop-App war mit 0b9c0f66 komplett auf `public/LU-monogram.svg`
+ * umgestellt und durch `kein-raster-als-hauszeichen.test.ts` verriegelt, und
+ * diese Zeile hielt den Mobile-Client als letzte Stelle beim 512px-Raster
+ * fest. Wer ihn umgestellt haette, waere hier rot geworden.
+ *
+ * Jetzt verlangt der Pin die Vektorfassung und VERBIETET das Raster. Der Weg
+ * dorthin ist ein <symbol> in index.html plus vier <use>: der Remote-Server
+ * liefert keine Datei aus mobile-client/ aus (er baut eine Seite und haelt
+ * genau eine Bildroute), ein <img src="/LU-monogram.svg"> waere also ein 404.
+ */
 describe('mobile page › LU branding assets', () => {
-  it('references the white-transparent monogram path', () => {
-    expect(JS).toContain('/LU-monogram-white.png')
+  // Kommentare raus — die Begruendungen NENNEN den alten Rasterpfad.
+  const JS_CODE = codeOnly(JS)
+  const HTML_CODE = codeOnly(HTML)
+
+  it('das Zeichen liegt EINMAL im Dokument, als <symbol>', () => {
+    expect(HTML_CODE).toContain('<symbol id="lu-monogram"')
+    expect(HTML_CODE.match(/<symbol id="lu-monogram"/g)).toHaveLength(1)
+    // Und der Traeger ist wirklich ein Traeger, kein sichtbares Bild.
+    expect(HTML_CODE).toContain('class="svg-sprite"')
+    expect(CSS).toContain('.svg-sprite{')
   })
 
-  it('does NOT reference the old bw monogram (should have been migrated)', () => {
-    expect(JS).not.toContain('/LU-monogram-bw.png')
-    expect(HTML).not.toContain('/LU-monogram-bw.png')
+  it('kein Marken-Rasterbild mehr — weder white noch bw, in keiner der drei Dateien', () => {
+    // Dasselbe Muster wie kein-raster-als-hauszeichen.test.ts: nicht ein Name,
+    // sondern die Form. Ein zweiter Dateiname fuer dieselbe Bitmap faellt hier
+    // genauso durch.
+    const RASTER_MARKE = /[\w@-]*(?:monogram|logo|brand|wordmark)[\w@-]*\.(?:png|jpe?g|webp|gif|bmp|ico|avif)/i
+    for (const [name, code] of [
+      ['index.html', HTML_CODE],
+      ['styles.css', codeOnly(CSS)],
+      ['client.js', JS_CODE],
+    ] as const) {
+      expect(code.match(RASTER_MARKE)?.[0], `${name} zeigt die Marke als Raster`).toBeUndefined()
+    }
   })
 
-  it('uses the monogram in at least 4 places (auth, header, drawer, welcome)', () => {
-    const matches = JS.match(/\/LU-monogram-white\.png/g) || []
-    expect(matches.length).toBeGreaterThanOrEqual(4)
+  it('die vier Stellen (Anmeldung, Kopfzeile, Schublade, Willkommen) zeigen alle den Vektor', () => {
+    const marken = ['auth-mark', 'header-mark', 'drawer-mark', 'chat-welcome-mark']
+    for (const m of marken) {
+      expect(JS_CODE, `${m} zieht das Zeichen nicht ueber monogram()`).toContain(`monogram('${m}'`)
+      // Die Groessenregel bleibt, wo sie war — nur der Traeger ist jetzt <svg>.
+      expect(CSS).toContain(`.${m}{`)
+    }
+    expect(JS_CODE.match(/<use href="#lu-monogram"\/>/g)).toHaveLength(1)
+    expect(JS_CODE.match(/monogram\('/g)).toHaveLength(4)
   })
 
   it('the in-page wordmark is LU', () => {
