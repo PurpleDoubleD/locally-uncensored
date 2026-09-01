@@ -185,3 +185,122 @@ jobs:
         working-directory: src-tauri
         run: cargo clippy --all-targets
         continue-on-error: true
+
+  # ── Is the product still buildable at all? ───────────────────────────────
+  #
+  # Audit M6, and the hole underneath it. Until this job existed, no workflow
+  # ever ran `tauri build`. CI ran `npm run build` (vite), `cargo check` and
+  # `cargo test` — all three pass happily on a configuration that cannot be
+  # bundled — and the single place `tauri build` did run was release.yml, with
+  # TAURI_SIGNING_PRIVATE_KEY supplied from secrets. So the one lane able to
+  # see a bundling failure was the one lane configured never to hit it.
+  #
+  # What that hid, at 10bfa0d7 (v2.6.7), in the shipped product: with
+  # `bundle.createUpdaterArtifacts` set next to `plugins.updater.pubkey`,
+  # `tauri build` wrote the installers to disk and THEN exited 1 with "A public
+  # key has been found, but no private key". Anyone without the release
+  # secret — a contributor, a fork, an AGPL-3.0 §6 recipient — could not build
+  # the product. Measured on Windows and reproduced on macOS; fixed in
+  # a0030ad2 by dropping that one field.
+  #
+  # This job builds with NO signing key, deliberately, and the script unsets
+  # the two signing variables itself. Rationale in scripts/ci-tauri-build.sh:
+  # a gate that consumes a secret goes quietly green in a fork where the secret
+  # is absent, and — measured locally — handing the broken 10bfa0d7 config a
+  # key makes it exit 0, so a key-carrying gate would have been green on the
+  # exact commit it exists to fail. No secret is read here, so a fork is held
+  # to precisely this check with nothing to configure.
+  #
+  # The step has no `continue-on-error` and the script does not pipe the exit
+  # code away (PIPESTATUS[0], not `tee`'s status). A build that leaves
+  # installers on disk and still exits non-zero fails this job — which is the
+  # exact shape of the defect above.
+  tauri-build:
+    runs-on: ${{ matrix.platform }}
+    # A hung bundler must fail loudly rather than burn the 6-hour job ceiling,
+    # the way the Linux lane did on 2026-08-15 (see release.yml).
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        # The platforms this product actually ships, read off release.yml's
+        # build-tauri matrix — there is no macOS lane (dropped in c1644d9a).
+        # release-build-gate.test.ts compares the two lists on every run, so
+        # re-adding a release platform without covering it here fails a test
+        # instead of silently narrowing this gate.
+        platform: [ubuntu-22.04, windows-latest]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          # Empty on push/pull_request (checkout falls back to the triggering
+          # commit); the release tag when release.yml calls this workflow.
+          ref: ${{ inputs.ref }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: '.nvmrc'
+          cache: 'npm'
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          workspaces: './src-tauri -> target'
+
+      - name: Install Linux dependencies
+        if: matrix.platform == 'ubuntu-22.04'
+        timeout-minutes: 20
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libgtk-3-dev \
+            libsoup-3.0-dev \
+            libjavascriptcoregtk-4.1-dev \
+            libxdo-dev \
+            build-essential \
+            curl \
+            wget \
+            file \
+            libssl-dev
+
+      # Same stub as the cargo-check job above, for the same reason:
+      # tauri-build's copy_binaries hard-fails on a missing externalBin, and a
+      # real llama.cpp build costs ~20 min that this gate does not need — it is
+      # asking whether the app bundles, not whether inference works. The real
+      # binaries are built in release.yml and sidecar-windows.yml.
+      #
+      # Measured 2026-09-01 on macOS: a zero-byte stub survives the full
+      # `tauri build`, ad-hoc codesigning of the sidecar included (exit 0, .app
+      # + .dmg produced). macOS is the strictest of the three here — Linux and
+      # Windows do not sign the sidecar at all — but this has NOT been observed
+      # on the two runner platforms, because no Actions run was permitted.
+      - name: Stub llama-server sidecar
+        shell: bash
+        run: |
+          mkdir -p src-tauri/bin
+          triple="$(rustc -vV | awk '/^host:/{print $2}')"
+          case "$triple" in
+            *-windows-*) touch "src-tauri/bin/lu-llama-server-$triple.exe" ;;
+            *)           touch "src-tauri/bin/lu-llama-server-$triple" ;;
+          esac
+          ls -la src-tauri/bin/
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      # No `continue-on-error`, no `|| true`, no `if: secrets…` — see the
+      # header. Deliberately the last word on whether this commit is shippable.
+      - name: Tauri build (unsigned — exit code is the verdict)
+        shell: bash
+        run: bash scripts/ci-tauri-build.sh

@@ -30,6 +30,47 @@ env:
   VULKAN_SDK_VERSION: '1.4.313.2'
 
 jobs:
+  # The Latest flag comes off FIRST, before anything is gated or built.
+  #
+  # `enforce-prerelease` at the bottom of this file is the final word, and it is
+  # correct — but it runs after `gate` and `build-tauri`, so between "someone
+  # clicked Publish release" and "the flag comes off" there is a window in which
+  # GitHub has already pointed `releases/latest` at an unverified build. The
+  # download routes on lu-labs.ai follow that pointer and so does every
+  # installed updater. On 2026-08-10 that window was minutes and 2.6.4 went out
+  # through it. The audit's own first suggestion for M6 was to pull the Latest
+  # check forward rather than only to invert it; 6a472f16 did the inverting.
+  #
+  # Adding the tauri-build lane to ci.yml (Audit M6, the build gate) made that
+  # window materially longer, because `gate` now compiles and bundles the app on
+  # two platforms before `build-tauri` even starts. So the demotion happens here
+  # too, in a job with no `needs:`, which starts within seconds of the trigger.
+  #
+  # Same script, deliberately: it is idempotent and it can never undo a
+  # deliberate flip (see the header of scripts/enforce-prerelease.mjs). Running
+  # it twice in one run is two identical PATCHes tens of minutes apart, not a
+  # race. This does NOT replace enforce-prerelease: that one also has to run
+  # when the build fails, and it is what holds the promise on a re-run.
+  #
+  # Only on the `release` trigger. The window this closes is "GitHub flagged
+  # this Latest by itself, just now", which exists on `release: published` and
+  # nowhere else; on workflow_dispatch the flag is a human's verdict.
+  demote-on-arrival:
+    if: github.event_name == 'release'
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 20
+      - name: Take the Latest flag off before anything is built
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          TAG: ${{ github.event.release.tag_name }}
+          PUBLISHED_TAG: ${{ github.event.release.tag_name }}
+        run: node scripts/enforce-prerelease.mjs
+
   # A build is not a decision — and neither is a green master. Until this job
   # existed, `release.yml` typechecked nothing, ran no test and no lint: any
   # commit that happened to sit on master when someone clicked "Publish release"
