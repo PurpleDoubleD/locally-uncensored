@@ -144,8 +144,15 @@ describe('both agent loops are wired to it, on the prompt transport too', () => 
   })
 
   it('NEGATIVE CONTROL: and still downgrades when the endpoint refuses the knob', () => {
+    // Dieselbe Eigenschaft, zwei Schreibweisen: der Abstieg auf dem
+    // Prompt-Transport haengt in BEIDEN Schleifen an `hermesOpts.thinking`.
+    // useAgentChat.ts fragt an Ort und Stelle; useCodex.ts fragt seit KF-21
+    // ueber die eine zusammengezogene Stelle (hooks/codex/thinking-downgrade.ts),
+    // die die Zusatzbedingung als Parameter traegt — der Pin nennt darum den
+    // vollstaendigen Aufruf samt uebergebener Option und nicht bloss den Namen.
+    expect(agent).toContain('hermesOpts.thinking !== undefined')
+    expect(codex).toContain('shouldDowngradeThinking(hermesOpts.thinking, thinkErr)')
     for (const src of [agent, codex]) {
-      expect(src).toContain("hermesOpts.thinking !== undefined")
       expect(src).toContain('runHermes({ ...hermesOpts, thinking: undefined as unknown as boolean })')
     }
   })

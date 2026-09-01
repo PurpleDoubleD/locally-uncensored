@@ -75,6 +75,39 @@ function argOptString(args: ToolArgs, key: string): string | undefined {
   return typeof v === 'string' && v ? v : undefined
 }
 
+/**
+ * Die fehlende Pflichtangabe — geprüft DA, WO DIE ANFRAGE ENTSTEHT (KF-18).
+ *
+ * `inputSchema.required` ist ein Hinweis in einem Prompt, kein Vertrag: zwischen
+ * Modell und Executor erzwingt ihn nichts. Ein weggelassenes `path` kommt hier
+ * als `undefined` an, fällt bei `JSON.stringify` aus dem Körper — und die Bridge
+ * bekommt eine Anfrage, die ihr Ziel nie genannt hat. Das ist nicht theoretisch:
+ * ein `file_write` ohne `path` hat live `~/agent-workspace-experiment/default`
+ * als 0-Byte-DATEI angelegt, wo eine Arbeitsverzeichnis-WURZEL gemeint war.
+ * Dev-Server (KF-12) und gepackter Bau (KF-15) weisen sie inzwischen ab — das
+ * sind die zweite und die dritte Ebene. Hier ENTSTEHT sie, also fällt sie hier
+ * zuerst auf.
+ *
+ * Die Form folgt den Prüfungen, die diese Datei schon von Hand schreibt
+ * (`shell_execute: \`command\` is required …`, `git_commit: a non-empty
+ * \`message\` is required.`): ein ZURÜCKGEGEBENER Text, kein `throw`. Das
+ * Werkzeugergebnis ist der einzige Rückkanal zum Modell — eine zurückgegebene
+ * Zeile nennt die fehlende Angabe und lässt es sich im nächsten Schritt selbst
+ * korrigieren, ein Wurf käme als unlesbarer Absturz an.
+ *
+ * Gelesen wird über `argString`, also fällt ein `path: 42` genauso durch wie ein
+ * fehlendes: die Bridge bekommt nur Zeichenketten, oder gar keine Anfrage.
+ */
+function missingArgs(tool: string, args: ToolArgs, ...keys: string[]): string | null {
+  const missing = keys.filter((key) => !argString(args, key))
+  if (missing.length === 0) return null
+  const named = missing.map((key) => `\`${key}\``).join(' and ')
+  const verb = missing.length > 1 ? 'are' : 'is'
+  const them = missing.length > 1 ? 'them' : 'it'
+  return `${tool}: ${named} ${verb} required — a non-empty string. `
+    + `Nothing was sent to the backend; call ${tool} again with ${them} set.`
+}
+
 // ── Tool Definitions ────────────────────────────────────────────
 
 /**
@@ -447,10 +480,12 @@ const BUILTIN_TOOLS: MCPToolDefinition[] = [
 // ── Executors ────────────────────────────────────────────────────
 
 async function executeWebSearch(args: ToolArgs): Promise<string> {
+  const bad = missingArgs('web_search', args, 'query')
+  if (bad) return bad
   const { useSettingsStore } = await import('../../stores/settingsStore')
   const searchSettings = useSettingsStore.getState().settings
   const data = await backendCall<WebSearchResult>('web_search', {
-    query: args.query,
+    query: argString(args, 'query'),
     count: args.maxResults || 5,
     provider: searchSettings.searchProvider || 'auto',
     braveApiKey: searchSettings.braveApiKey || '',
@@ -520,7 +555,9 @@ async function executeWebFetch(args: ToolArgs): Promise<string> {
 }
 
 async function executeFileRead(args: ToolArgs, run?: AgentRunContext): Promise<string> {
-  const data = await backendCall<FsReadResult>('fs_read', { path: args.path, ...chatCtx(run) })
+  const bad = missingArgs('file_read', args, 'path')
+  if (bad) return bad
+  const data = await backendCall<FsReadResult>('fs_read', { path: argString(args, 'path'), ...chatCtx(run) })
   // A binary file comes back as a marker with its size, never as content.
   // Handing the model raw bytes-as-text is a corruption trap: it treats them as
   // content and a later file_write persists that string, mangling the file.
@@ -556,17 +593,34 @@ function mimeForName(name: string): string {
 }
 
 async function executeFileWrite(args: ToolArgs, run?: AgentRunContext): Promise<string> {
-  const content = typeof args.content === 'string' ? args.content : String(args.content ?? '')
+  // VOR der Betriebsart-Weiche, und vor jedem Byte: die Anfrage prüft hier ihre
+  // eigenen Argumente. Ohne diese Zeile fiel `path: undefined` bei
+  // `JSON.stringify` aus dem Körper, und die Bridge schrieb in die Wurzel
+  // (`~/agent-workspace-experiment/default`, 0 Bytes, als Datei) — KF-18. Auch
+  // im Artefakt-Modus geprüft: dort erfand `artifactBaseName` sonst still
+  // "file.txt" für eine Datei, die das Modell nie benannt hat.
+  const bad = missingArgs('file_write', args, 'path')
+  if (bad) return bad
+  const path = argString(args, 'path')
+  // `content` getrennt geprüft, weil '' hier ETWAS ANDERES heißt als bei
+  // `path`: eine absichtlich leere Datei ist ein gültiger Auftrag, ein
+  // fehlendes Feld nicht. Vorher wurde beides zu '' zusammengezogen — genau die
+  // Verwechslung, die aus einem vergessenen Argument eine 0-Byte-Datei machte.
+  if (typeof args.content !== 'string') {
+    return 'file_write: `content` is required — the COMPLETE new text of the file, as a string. '
+      + 'Pass "" only if you really mean an empty file. Nothing was written; call file_write again with it set.'
+  }
+  const content = args.content
   // Plain-chat artifact mode (ChatGPT-style, David 2026-06-12): in the NORMAL
   // chat, a "file write" must NOT touch disk — capture it so it renders inline
   // with a preview + Download button. The Coding Agent / full Agent leave
   // artifact mode OFF and fall through to the real fs_write below.
   if (isChatArtifactMode(run)) {
-    const name = artifactBaseName(args.path)
+    const name = artifactBaseName(path)
     captureChatArtifact(name, content, mimeForName(name), run)
     return `Created "${name}" (${formatBytes(content.length)}). It is shown to the user right here in the chat with a preview and a Download button — nothing was written to disk. Do not call file_read on it; just tell the user it's ready.`
   }
-  const data = await backendCall<FsWriteResult>('fs_write', { path: args.path, content, ...chatCtx(run) })
+  const data = await backendCall<FsWriteResult>('fs_write', { path, content, ...chatCtx(run) })
   // Rust returns {status: 'saved'|'unchanged', path: <absolute>, bytes}. Surface
   // the real path so the model (and the file-change event) knows WHERE the write
   // landed — especially important when chatId is None and Rust routes a relative
@@ -585,10 +639,22 @@ async function executeFileEdit(args: ToolArgs, run?: AgentRunContext): Promise<s
   if (isChatArtifactMode(run)) {
     return 'file_edit is not available in plain chat (there are no files on disk here). Use file_write to create or replace a document.'
   }
+  // Alle drei Pflichtangaben VOR dem fs_read: eine unvollständige Anfrage geht
+  // gar nicht erst hinaus (KF-18). Der Text zu `old_string` stand schon in der
+  // Auswertung von `applyUniqueEdit` weiter unten; neu ist nur der Zeitpunkt.
+  const bad = missingArgs('file_edit', args, 'path')
+  if (bad) return bad
   const path = argString(args, 'path')
-  if (!path) return 'Error: file_edit requires a "path".'
   const oldString = argString(args, 'old_string')
-  const newString = argString(args, 'new_string')
+  if (!oldString) return 'Error: file_edit requires a non-empty old_string. To create a new file use file_write.'
+  // `new_string` wie `content` bei file_write: '' ist ein gültiger Auftrag
+  // (Text löschen), ein fehlendes Feld nicht. `argString` zog beides zu ''
+  // zusammen — ein vergessenes Argument löschte damit still den Fundtext.
+  if (typeof args.new_string !== 'string') {
+    return 'file_edit: `new_string` is required — the replacement text. '
+      + 'Pass "" to delete old_string. Nothing was changed; call file_edit again with it set.'
+  }
+  const newString = args.new_string
 
   // Read the CURRENT content (workspace-aware). file_edit only edits an
   // existing text file — for a new file the model must use file_write.
@@ -604,6 +670,9 @@ async function executeFileEdit(args: ToolArgs, run?: AgentRunContext): Promise<s
   const res = applyUniqueEdit(content, oldString, newString)
   if (!res.ok) {
     switch (res.reason) {
+      // Über DIESEN Pfad nicht mehr erreichbar (`old_string` wird oben geprüft,
+      // bevor gelesen wird); der Zweig bleibt, weil `EditFailReason` ein
+      // geteilter Typ ist — staged-writes.ts wertet dieselben vier Gründe aus.
       case 'empty_old':
         return 'Error: file_edit requires a non-empty old_string. To create a new file use file_write.'
       case 'noop':
@@ -624,8 +693,10 @@ async function executeFileEdit(args: ToolArgs, run?: AgentRunContext): Promise<s
 }
 
 async function executeFileList(args: ToolArgs, run?: AgentRunContext): Promise<string> {
+  const bad = missingArgs('file_list', args, 'path')
+  if (bad) return bad
   const data = await backendCall<FsListResult>('fs_list', {
-    path: args.path,
+    path: argString(args, 'path'),
     recursive: args.recursive || false,
     pattern: args.pattern || null,
     // NOTE: the model does NOT get to pick the jail root. `workingDirectory`
@@ -646,9 +717,11 @@ async function executeFileList(args: ToolArgs, run?: AgentRunContext): Promise<s
 }
 
 async function executeFileSearch(args: ToolArgs, run?: AgentRunContext): Promise<string> {
+  const bad = missingArgs('file_search', args, 'path', 'pattern')
+  if (bad) return bad
   const data = await backendCall<FsSearchResult>('fs_search', {
-    path: args.path,
-    pattern: args.pattern,
+    path: argString(args, 'path'),
+    pattern: argString(args, 'pattern'),
     max_results: args.maxResults || 50,
     ...chatCtx(run),
   })
@@ -775,7 +848,11 @@ async function executeCodeExecute(
   if ((signal ?? run?.abortSignal)?.aborted) {
     return 'Cancelled: the user stopped the run before this code ran.'
   }
-  const data = await backendCall<ShellExecResult>('execute_code', { code: args.code, timeout: 30000, ...chatCtx(run) })
+  // Erreichbar nur noch über runRetiredTool, also OHNE die Prüfungen von
+  // executeShellExecute — die eigene braucht es hier trotzdem.
+  const bad = missingArgs('code_execute', args, 'code')
+  if (bad) return bad
+  const data = await backendCall<ShellExecResult>('execute_code', { code: argString(args, 'code'), timeout: 30000, ...chatCtx(run) })
   const output = data.stdout || ''
   const err = data.stderr || ''
   if (data.timedOut) return `Timed out.\n${err}`
@@ -806,6 +883,11 @@ async function executeShellExecuteBg(
 ): Promise<string> {
   const { bgStart, bgKill } = await import('../agents/bg-tasks')
   const command = argString(args, 'command')
+  // Aus demselben Grund wie die `--no-verify`-Sperre darunter doppelt: über den
+  // zurückgezogenen Namen kommt der Aufruf an executeShellExecute vorbei, und
+  // ohne diese Zeile startete er eine Hintergrundaufgabe mit leerem Kommando.
+  const bad = missingArgs('shell_execute', args, 'command')
+  if (bad) return bad
   // ZWEITER Eingang derselben Sperre. executeShellExecute prueft schon vor der
   // Hintergrund-Weiche, aber der zurueckgezogene Name `shell_execute_background`
   // laeuft ueber runRetiredTool DIREKT hierher und sieht executeShellExecute nie
@@ -847,16 +929,21 @@ async function executeShellExecuteBg(
 }
 
 async function executeShellTaskStatus(args: ToolArgs): Promise<string> {
+  const id = argString(args, 'id')
+  // Wortgleich mit der Prüfung in executeShellExecute: über den
+  // zurückgezogenen Namen kommt der Aufruf an jener vorbei.
+  if (!id) return 'shell_execute: task "status" needs a task_id.'
   const { bgStatus, renderBgStatusOneLine } = await import('../agents/bg-tasks')
-  const s = await bgStatus(argString(args, 'id'))
+  const s = await bgStatus(id)
   const head = renderBgStatusOneLine(s)
   const tail = s.output_tail ? `\n---\n${s.output_tail}` : ''
   return `${head}${tail}`
 }
 
 async function executeShellTaskKill(args: ToolArgs): Promise<string> {
-  const { bgKill } = await import('../agents/bg-tasks')
   const id = argString(args, 'id')
+  if (!id) return 'shell_execute: task "kill" needs a task_id.'
+  const { bgKill } = await import('../agents/bg-tasks')
   const r = await bgKill(id)
   return r.cancelled ? `Cancelled ${id}.` : `${id}: already finished.`
 }

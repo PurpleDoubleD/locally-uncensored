@@ -83,7 +83,7 @@ import { codexModeRefusal } from './codex/mode-refusal'
 import { createAgentBlockSink } from './codex/agent-blocks'
 import { createLivePaint } from './codex/live-paint'
 import { seedEstimatedUsage, reportTurnUsage } from './codex/turn-usage'
-import { isThinkingUnsupportedError } from './codex/thinking-downgrade'
+import { shouldDowngradeThinking } from './codex/thinking-downgrade'
 import { recoverToolCallsFromContent } from './codex/tool-call-recovery'
 import { codexStallVerdict } from './codex/stall-verdict'
 import { createStagedWriter } from './codex/staged-writes'
@@ -1176,7 +1176,10 @@ export function useCodex() {
                 messageHead: errorText(thinkErr).slice(0, 400),
                 name: asString(prop(thinkErr, 'name')),
               })
-              if (isThinkingUnsupportedError(thinkErr)) {
+              // Eine Stelle entscheidet, ob der Denkmodus faellt — und sie
+              // fragt fuer jeden Transport dasselbe, die Zusatzbedingung
+              // eingeschlossen (KF-21, siehe codex/thinking-downgrade.ts).
+              if (shouldDowngradeThinking(chatOptions.thinking, thinkErr)) {
                 turn = await streamWithTools(
                   modelToUse, sendMessages, tools,
                   { temperature: 0.1, thinking: undefined, maxTokens: chatOptions.maxTokens, contextWindow: numCtx, signal: abort.signal },
@@ -1230,7 +1233,7 @@ export function useCodex() {
             try {
               turn = await streamProviderTurn(provider, modelToUse, sendMessages, streamOpts, liveContent, liveThinking)
             } catch (thinkErr) {
-              if (isThinkingUnsupportedError(thinkErr)) {
+              if (shouldDowngradeThinking(streamOpts.thinking, thinkErr)) {
                 turn = await streamProviderTurn(provider, modelToUse, sendMessages, { ...streamOpts, thinking: undefined as unknown as boolean }, liveContent, () => {})
               } else {
                 throw thinkErr
@@ -1348,9 +1351,10 @@ export function useCodex() {
             // Same downgrade the native branch carries: an old Ollama build or
             // an endpoint that predates the knob answers 400, and the run must
             // survive that instead of ending on it.
-            // Die Zusatzbedingung bleibt HIER: nur absteigen, wenn ueberhaupt ein
-            // Denk-Schalter gesetzt war. Das ist Verhalten, keine Doppelung.
-            if (hermesOpts.thinking !== undefined && isThinkingUnsupportedError(thinkErr)) {
+            // Die Zusatzbedingung stand frueher NUR hier. Sie ist nicht
+            // weggeraeumt, sondern eingezogen: `shouldDowngradeThinking` traegt
+            // sie jetzt fuer alle drei Transporte (KF-21).
+            if (shouldDowngradeThinking(hermesOpts.thinking, thinkErr)) {
               hermesTurn = await runHermes({ ...hermesOpts, thinking: undefined as unknown as boolean })
             } else {
               throw thinkErr
