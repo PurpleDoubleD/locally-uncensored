@@ -131,6 +131,83 @@ fn sweep_isolation() -> std::sync::MutexGuard<'static, ()> {
     SWEEP_ISOLATION.lock().unwrap_or_else(|e| e.into_inner())
 }
 
+/// Start arguments for a task that keeps a CHILD process of its own alive —
+/// the shape every teardown test needs, because a task with a deep tree is the
+/// reason this module exists (`pnpm install`, `cargo build`).
+///
+/// Unix: `sh` running `sleep 30 & echo $! ; wait`, unchanged.
+///
+/// Windows: no `shell` at all, i.e. the PowerShell this module spawns by
+/// default and therefore the shell a real background task actually runs
+/// there, with `ping` as the child that outlives the test. Git Bash is
+/// deliberately not asked for: `shell_task_start_impl` builds PowerShell's
+/// argument form for whatever program it is given on Windows, so a POSIX
+/// shell would be handed `-NoProfile -NonInteractive -Command` and would never
+/// run the command at all.
+#[cfg(test)]
+fn a_task_that_starts_a_child() -> Value {
+    if cfg!(target_os = "windows") {
+        // -n 60 pings once a second, so the child stays for about a minute.
+        json!({ "command": "ping -n 60 127.0.0.1" })
+    } else {
+        json!({ "command": "sleep 30 & echo $! ; wait", "shell": "sh" })
+    }
+}
+
+/// A one-liner that exits at once, in the dialect of the platform's shell.
+#[cfg(test)]
+fn a_task_that_finishes_at_once() -> Value {
+    if cfg!(target_os = "windows") {
+        json!({ "command": "exit 0" })
+    } else {
+        json!({ "command": "true", "shell": "sh" })
+    }
+}
+
+/// A one-liner that prints the directory the task is running in.
+#[cfg(test)]
+fn a_task_that_prints_its_directory(extra: Value) -> Value {
+    let mut args = if cfg!(target_os = "windows") {
+        json!({ "command": "(Get-Location).Path" })
+    } else {
+        json!({ "command": "pwd", "shell": "sh" })
+    };
+    let map = args.as_object_mut().expect("an object");
+    for (k, v) in extra.as_object().expect("an object") {
+        map.insert(k.clone(), v.clone());
+    }
+    args
+}
+
+/// The pid the registry holds for a task — the only handle the shutdown sweep
+/// has on it, and the root of the tree the cancel path kills.
+#[cfg(test)]
+fn shell_pid_of(id: &str) -> u32 {
+    REGISTRY
+        .get(id)
+        .and_then(|t| t.inner.lock().unwrap().pid)
+        .expect("a running task must carry its pid")
+}
+
+/// Every process the task's shell has started, once there is at least one.
+///
+/// Read out of the process table rather than out of the task's own output:
+/// PowerShell has no `$!`, and Git Bash's `$!` is an MSYS pid that no Windows
+/// API can address. The process table is also the view `kill_tree` walks when
+/// it takes the tree down, so the test and the code under test are looking at
+/// the same processes.
+#[cfg(test)]
+async fn wait_for_children_of(shell_pid: u32) -> Vec<u32> {
+    for _ in 0..50 {
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        let kids = crate::test_support::worker_descendants_of(shell_pid);
+        if !kids.is_empty() {
+            return kids;
+        }
+    }
+    panic!("the task's shell ({shell_pid}) never started a child process");
+}
+
 fn now_secs() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -651,58 +728,40 @@ mod tests {
 #[cfg(test)]
 mod cancel_tests {
     use super::*;
-
-    fn alive(pid: u32) -> bool {
-        let out = std::process::Command::new("ps")
-            .args(["-o", "state=", "-p", &pid.to_string()])
-            .output();
-        match out {
-            Ok(o) => {
-                let st = String::from_utf8_lossy(&o.stdout).trim().to_string();
-                !st.is_empty() && !st.starts_with('Z')
-            }
-            Err(_) => false,
-        }
-    }
+    use crate::test_support::is_alive as alive;
 
     /// A background task is started for the long builds — `pnpm install`,
     /// `cargo build` — so its process tree is deep by definition. Cancelling
     /// used to SIGKILL the shell alone and leave the real worker running
     /// detached, the same defect 743c310 fixed for the foreground shell tool.
+    ///
+    /// Runs on Windows too: the cancel path is `kill_tree` on every platform
+    /// (the Job Object does NOT help here, it fires when LU dies, not on a
+    /// cancel), so this is live production behaviour there and not a Unix
+    /// mechanism in disguise.
     #[tokio::test]
-    #[cfg_attr(target_os = "windows", ignore = "uses sh/ps")]
     async fn cancelling_takes_the_grandchild_with_it() {
         let _isolation = super::sweep_isolation();
-        // The shell prints its grandchild's pid, then waits on it.
-        let start = shell_task_start_impl(&json!({
-            "command": "sleep 30 & echo $! ; wait",
-            "shell": "sh",
-        }))
-        .await
-        .expect("start");
+        let start = shell_task_start_impl(&super::a_task_that_starts_a_child())
+            .await
+            .expect("start");
         let id = start["id"].as_str().expect("id").to_string();
 
-        // Wait for the pid line to land in the tail buffer.
-        let mut grandchild = None;
-        for _ in 0..50 {
-            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-            let st = shell_task_status_impl(&json!({ "id": id })).await.expect("status");
-            let tail = st["output_tail"].as_str().unwrap_or("");
-            if let Some(line) = tail.lines().find(|l| l.trim().parse::<u32>().is_ok()) {
-                grandchild = line.trim().parse::<u32>().ok();
-                break;
-            }
+        let shell_pid = super::shell_pid_of(&id);
+        let grandchildren = super::wait_for_children_of(shell_pid).await;
+        for pid in &grandchildren {
+            assert!(alive(*pid), "grandchild {pid} was not running to begin with");
         }
-        let grandchild = grandchild.expect("grandchild never reported its pid");
-        assert!(alive(grandchild), "grandchild was not running to begin with");
 
         shell_task_kill_impl(&json!({ "id": id })).await.expect("kill");
         tokio::time::sleep(std::time::Duration::from_millis(700)).await;
 
-        assert!(
-            !alive(grandchild),
-            "cancel killed the shell but left the grandchild ({grandchild}) running",
-        );
+        for pid in &grandchildren {
+            assert!(
+                !alive(*pid),
+                "cancel killed the shell but left the grandchild ({pid}) running",
+            );
+        }
     }
 }
 
@@ -713,74 +772,146 @@ mod cancel_tests {
 #[cfg(test)]
 mod shutdown_sweep_tests {
     use super::*;
+    use crate::test_support::is_alive as alive;
 
-    fn alive(pid: u32) -> bool {
-        let out = std::process::Command::new("ps")
-            .args(["-o", "state=", "-p", &pid.to_string()])
-            .output();
-        match out {
-            Ok(o) => {
-                let st = String::from_utf8_lossy(&o.stdout).trim().to_string();
-                !st.is_empty() && !st.starts_with('Z')
-            }
-            Err(_) => false,
-        }
-    }
-
+    /// Unix only, and not because of the commands it runs: `kill_all_background_tasks`
+    /// IS the quit mechanism here — `arm_exit_sweep` hangs it on `atexit` — while on
+    /// Windows nothing in production ever calls it. There the same assurance is
+    /// delivered by the Job Object, and it has its own test right below.
     #[tokio::test]
-    #[cfg_attr(target_os = "windows", ignore = "uses sh/ps; Windows has the Job Object")]
+    #[cfg(unix)]
     async fn quitting_takes_a_running_task_and_its_children_with_it() {
         let _isolation = super::sweep_isolation();
-        let start = shell_task_start_impl(&json!({
-            "command": "sleep 30 & echo $! ; wait",
-            "shell": "sh",
-        }))
-        .await
-        .expect("start");
+        let start = shell_task_start_impl(&super::a_task_that_starts_a_child())
+            .await
+            .expect("start");
         let id = start["id"].as_str().expect("id").to_string();
 
-        let mut grandchild = None;
-        for _ in 0..50 {
-            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-            let st = shell_task_status_impl(&json!({ "id": id })).await.expect("status");
-            let tail = st["output_tail"].as_str().unwrap_or("");
-            if let Some(line) = tail.lines().find(|l| l.trim().parse::<u32>().is_ok()) {
-                grandchild = line.trim().parse::<u32>().ok();
-                break;
-            }
+        let shell_pid = super::shell_pid_of(&id);
+        let grandchildren = super::wait_for_children_of(shell_pid).await;
+        let whole_tree: Vec<u32> = std::iter::once(shell_pid)
+            .chain(grandchildren.iter().copied())
+            .collect();
+        for pid in &whole_tree {
+            assert!(alive(*pid), "test setup is wrong: {pid} is not running");
         }
-        let grandchild = grandchild.expect("grandchild never reported its pid");
-        let shell_pid = REGISTRY
-            .get(&id)
-            .and_then(|t| t.inner.lock().unwrap().pid)
-            .expect("a running task must carry its pid");
-        assert!(alive(shell_pid) && alive(grandchild), "test setup is wrong");
 
         kill_all_background_tasks();
 
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-        while alive(shell_pid) || alive(grandchild) {
+        loop {
+            let survivors: Vec<u32> = whole_tree.iter().copied().filter(|p| alive(*p)).collect();
+            if survivors.is_empty() {
+                break;
+            }
             assert!(
                 std::time::Instant::now() < deadline,
-                "the quit sweep left {shell_pid}/{grandchild} running",
+                "the quit sweep left {survivors:?} running",
             );
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         }
     }
 
-    /// Is this number still a process — zombie included?
+    /// The Windows counterpart: same assurance — nothing a background task
+    /// started survives LU's death — through the mechanism that delivers it
+    /// there.
     ///
-    /// `alive()` above reports a zombie as dead, which is the wrong question
-    /// here: a zombie has NOT been reaped, so its pid is still reserved. What
-    /// matters for the sweep is the moment the kernel is free to hand the
-    /// number out again, and that is the moment `ps` stops listing it at all.
-    #[cfg(unix)]
-    fn in_process_table(pid: u32) -> bool {
-        std::process::Command::new("ps")
-            .args(["-o", "pid=", "-p", &pid.to_string()])
-            .output()
-            .map(|o| !String::from_utf8_lossy(&o.stdout).trim().is_empty())
-            .unwrap_or(false)
+    /// Unix arms an `atexit` sweep. On Windows `arm_exit_sweep` is a no-op and
+    /// `kill_all_background_tasks` is never called in production: the shell is
+    /// handed to the app-wide Job Object with KILL_ON_JOB_CLOSE at spawn, so
+    /// the kernel tears the tree down even for the deaths no handler ever sees
+    /// (Task Manager, a hard kill from a build script). Running the Unix test
+    /// here would prove something about a code path that does not run on this
+    /// platform.
+    ///
+    /// What cannot be done in-process is watch it happen: that job's handle is
+    /// deliberately never closed, and closing it here would disarm the
+    /// mechanism for the rest of the test binary — and take every other test's
+    /// children with it. What CAN be established is everything the kernel
+    /// needs at that moment, and it is exactly what was missing when a
+    /// background build outlived the app: the task's shell AND the process it
+    /// started are both inside that one job, and that job carries
+    /// KILL_ON_JOB_CLOSE. A process created by a process in a job belongs to
+    /// the same job, which is why the second half is a real question and not a
+    /// tautology — a breakaway flag on the job would end that inheritance.
+    #[tokio::test]
+    #[cfg(windows)]
+    async fn quitting_takes_a_running_task_and_its_children_with_it_via_the_job_object() {
+        use windows_sys::Win32::Foundation::CloseHandle;
+        use windows_sys::Win32::System::JobObjects::{
+            IsProcessInJob, JobObjectExtendedLimitInformation, QueryInformationJobObject,
+            JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+        };
+        use windows_sys::Win32::System::Threading::{OpenProcess, PROCESS_QUERY_INFORMATION};
+
+        /// Is this pid inside that job? False when the process cannot even be
+        /// opened, which for a pid the test itself just spawned means the
+        /// process is gone and the question is moot.
+        fn in_job(pid: u32, job: isize) -> bool {
+            unsafe {
+                let handle = OpenProcess(PROCESS_QUERY_INFORMATION, 0, pid);
+                if handle.is_null() {
+                    return false;
+                }
+                let mut member: i32 = 0;
+                let queried = IsProcessInJob(handle, job as _, &mut member);
+                CloseHandle(handle);
+                queried != 0 && member != 0
+            }
+        }
+
+        let _isolation = super::sweep_isolation();
+        let start = shell_task_start_impl(&super::a_task_that_starts_a_child())
+            .await
+            .expect("start");
+        let id = start["id"].as_str().expect("id").to_string();
+
+        let shell_pid = super::shell_pid_of(&id);
+        let grandchildren = super::wait_for_children_of(shell_pid).await;
+        // Membership of a job the kernel will never have to act on proves
+        // nothing, so the tree has to be running when it is asked.
+        for pid in std::iter::once(shell_pid).chain(grandchildren.iter().copied()) {
+            assert!(alive(pid), "test setup is wrong: {pid} is not running");
+        }
+
+        let job = crate::commands::process::kill_on_close_job_for_tests();
+        assert!(job != 0, "the app-wide kill-on-close job was never created");
+
+        // The limit flag is the entire mechanism. Without it the job is a
+        // bookkeeping device and every child outlives the app.
+        let mut info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = unsafe { std::mem::zeroed() };
+        let mut returned: u32 = 0;
+        let queried = unsafe {
+            QueryInformationJobObject(
+                job as _,
+                JobObjectExtendedLimitInformation,
+                &mut info as *mut _ as *mut _,
+                std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+                &mut returned,
+            )
+        };
+        assert!(queried != 0, "the app-wide job object could not be queried");
+        assert!(
+            info.BasicLimitInformation.LimitFlags & JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE != 0,
+            "the job does not kill its processes when the app's handle closes, \
+             so quitting would leave every background task running",
+        );
+
+        assert!(
+            in_job(shell_pid, job),
+            "the task's shell ({shell_pid}) is not in the kill-on-close job, \
+             so LU dying would leave the whole background task behind",
+        );
+        for pid in &grandchildren {
+            assert!(
+                in_job(*pid, job),
+                "the task's shell is in the job but the process it started \
+                 ({pid}) is not, so the actual worker would survive LU",
+            );
+        }
+
+        // Do not leave a minute of ping behind for the rest of the run.
+        let _ = shell_task_kill_impl(&json!({ "id": id })).await;
     }
 
     /// The window the reaping fix closes.
@@ -791,8 +922,15 @@ mod shutdown_sweep_tests {
     /// as it lives. So: shell exits immediately, grandchild holds the pipe, and
     /// for the next three seconds the registry kept handing the sweep a number
     /// that belonged to whatever the kernel gave it to next.
+    ///
+    /// Unix only, and there is nothing to port: the race it guards is the
+    /// reap. Windows recycles a pid only once the LAST handle to the process
+    /// object is closed, and `tokio::process::Child` holds one until it is
+    /// dropped — which happens after this loop, not inside it — so the number
+    /// cannot be handed to a stranger while the registry still names it. The
+    /// registry hygiene itself (a finished task carries no pid) is asserted on
+    /// both platforms by `a_finished_task_is_not_swept` below.
     #[tokio::test]
-    #[cfg_attr(target_os = "windows", ignore = "uses sh/ps")]
     #[cfg(unix)]
     async fn a_reaped_pid_is_gone_from_the_registry_the_instant_it_is_freed() {
         let _isolation = super::sweep_isolation();
@@ -814,9 +952,11 @@ mod shutdown_sweep_tests {
             .pid
             .expect("a running task must carry its pid");
 
-        // Wait for the kernel to release the number — i.e. for the reap.
+        // Wait for the kernel to release the number — i.e. for the reap. A
+        // zombie still holds it, so this asks whether `ps` lists the pid at
+        // all, not whether it is alive.
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-        while in_process_table(shell_pid) {
+        while crate::test_support::pid_is_taken(shell_pid) {
             assert!(
                 std::time::Instant::now() < deadline,
                 "the shell ({shell_pid}) never exited, so there is nothing to prove",
@@ -843,10 +983,9 @@ mod shutdown_sweep_tests {
     /// A finished task's pid may already belong to somebody else — the sweep
     /// must never fire at it. Sweeping an idle registry must also not panic.
     #[tokio::test]
-    #[cfg_attr(target_os = "windows", ignore = "uses sh")]
     async fn a_finished_task_is_not_swept() {
         let _isolation = super::sweep_isolation();
-        let start = shell_task_start_impl(&json!({ "command": "true", "shell": "sh" }))
+        let start = shell_task_start_impl(&super::a_task_that_finishes_at_once())
             .await
             .expect("start");
         let id = start["id"].as_str().unwrap().to_string();
@@ -869,30 +1008,12 @@ mod shutdown_sweep_tests {
 mod cwd_default_tests {
     use super::*;
 
-    /// The tool exists for `pnpm install` / `cargo build`, so the folder it
-    /// runs in IS the point. Without an explicit cwd the child used to inherit
-    /// LU's own process directory — the install folder on Windows — so a task
-    /// the model started "in the project" ran somewhere else.
-    #[tokio::test]
-    #[cfg_attr(target_os = "windows", ignore = "uses sh/pwd")]
-    async fn a_task_without_an_explicit_cwd_lands_in_the_workspace() {
-        let ws = std::env::temp_dir().join(format!("lu-bg-ws-{}", std::process::id()));
-        std::fs::create_dir_all(&ws).unwrap();
-        // macOS hands out /var/... which is a symlink to /private/var; pwd
-        // reports the resolved path, so compare against that.
-        let expected = std::fs::canonicalize(&ws).unwrap();
-
-        let start = shell_task_start_impl(&json!({
-            "command": "pwd",
-            "shell": "sh",
-            "working_directory": ws.to_string_lossy(),
-        }))
-        .await
-        .expect("start");
-        let id = start["id"].as_str().unwrap().to_string();
-
+    /// What the task printed as its own directory, once it has printed
+    /// anything. Five seconds, because a cold PowerShell start on Windows is
+    /// not instant.
+    async fn reported_directory(id: &str) -> String {
         let mut seen = String::new();
-        for _ in 0..40 {
+        for _ in 0..100 {
             tokio::time::sleep(std::time::Duration::from_millis(50)).await;
             let st = shell_task_status_impl(&json!({ "id": id })).await.unwrap();
             seen = st["output_tail"].as_str().unwrap_or("").to_string();
@@ -900,44 +1021,75 @@ mod cwd_default_tests {
                 break;
             }
         }
-        assert_eq!(
-            seen.trim(),
-            expected.to_string_lossy(),
-            "background task did not start in the workspace",
+        seen.trim().to_string()
+    }
+
+    /// Did the task run in `expected`?
+    ///
+    /// Both sides go through `canonicalize`, because the two spellings of one
+    /// directory differ per platform and neither side is wrong: macOS hands
+    /// out `/var/...` which is a symlink to `/private/var` and `pwd` reports
+    /// the resolved path, while on Windows the shell prints a plain `C:\...`
+    /// and `canonicalize` yields the `\\?\C:\...` verbatim form. Resolving
+    /// both is still an exact directory identity — the assertion is not
+    /// loosened, it is asked in a form both kernels can answer.
+    fn same_directory(reported: &str, expected: &std::path::Path) -> bool {
+        match (
+            std::fs::canonicalize(reported),
+            std::fs::canonicalize(expected),
+        ) {
+            (Ok(a), Ok(b)) => a == b,
+            _ => false,
+        }
+    }
+
+    /// The tool exists for `pnpm install` / `cargo build`, so the folder it
+    /// runs in IS the point. Without an explicit cwd the child used to inherit
+    /// LU's own process directory — the install folder on Windows — so a task
+    /// the model started "in the project" ran somewhere else.
+    #[tokio::test]
+    async fn a_task_without_an_explicit_cwd_lands_in_the_workspace() {
+        let ws = std::env::temp_dir().join(format!("lu-bg-ws-{}", std::process::id()));
+        std::fs::create_dir_all(&ws).unwrap();
+
+        let start = shell_task_start_impl(&super::a_task_that_prints_its_directory(json!({
+            "working_directory": ws.to_string_lossy(),
+        })))
+        .await
+        .expect("start");
+        let id = start["id"].as_str().unwrap().to_string();
+
+        let seen = reported_directory(&id).await;
+        assert!(
+            same_directory(&seen, &ws),
+            "background task did not start in the workspace: reported {seen:?}, wanted {ws:?}",
         );
         let _ = std::fs::remove_dir_all(&ws);
     }
 
     /// An explicit cwd from the caller still wins over the derived default.
     #[tokio::test]
-    #[cfg_attr(target_os = "windows", ignore = "uses sh/pwd")]
     async fn an_explicit_cwd_still_wins() {
         let a = std::env::temp_dir().join(format!("lu-bg-a-{}", std::process::id()));
         let b = std::env::temp_dir().join(format!("lu-bg-b-{}", std::process::id()));
         std::fs::create_dir_all(&a).unwrap();
         std::fs::create_dir_all(&b).unwrap();
-        let expected = std::fs::canonicalize(&b).unwrap();
 
-        let start = shell_task_start_impl(&json!({
-            "command": "pwd",
-            "shell": "sh",
+        let start = shell_task_start_impl(&super::a_task_that_prints_its_directory(json!({
             "cwd": b.to_string_lossy(),
             "working_directory": a.to_string_lossy(),
-        }))
+        })))
         .await
         .expect("start");
         let id = start["id"].as_str().unwrap().to_string();
 
-        let mut seen = String::new();
-        for _ in 0..40 {
-            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-            let st = shell_task_status_impl(&json!({ "id": id })).await.unwrap();
-            seen = st["output_tail"].as_str().unwrap_or("").to_string();
-            if !seen.trim().is_empty() {
-                break;
-            }
-        }
-        assert_eq!(seen.trim(), expected.to_string_lossy());
+        let seen = reported_directory(&id).await;
+        assert!(
+            same_directory(&seen, &b),
+            "the explicit cwd lost: reported {seen:?}, wanted {b:?}",
+        );
+        // Negative control: the folder that must NOT have won.
+        assert!(!same_directory(&seen, &a), "the task ran in the fallback {a:?}");
         let _ = std::fs::remove_dir_all(&a);
         let _ = std::fs::remove_dir_all(&b);
     }

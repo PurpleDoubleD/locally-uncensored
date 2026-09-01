@@ -76,6 +76,16 @@ fn kill_on_close_job() -> isize {
     })
 }
 
+/// The app-wide job handle, for the Windows tests that have to prove a child
+/// really joined it — `bg_tasks.rs` asserts that a background task's shell AND
+/// the process it starts are both inside this job, which is what makes LU's
+/// death take them along. Test-only: production never needs the raw handle, it
+/// only ever adds pids to it.
+#[cfg(all(target_os = "windows", test))]
+pub(crate) fn kill_on_close_job_for_tests() -> isize {
+    kill_on_close_job()
+}
+
 /// PID-based variant of [`assign_to_kill_on_close_job`]. Usable from spawn paths
 /// that don't own a `std::process::Child`, notably `tokio::process::Child`
 /// (whose `id()` is `Option<u32>`) in the background-task runner (bg_tasks.rs).

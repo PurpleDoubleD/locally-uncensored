@@ -11,6 +11,11 @@ mod private_tmp;
 mod process_util;
 mod python;
 mod state;
+// Test-only OS helpers (a shell, a sleeper, "is this pid alive"), shared by
+// the process tests in state.rs, commands/engine.rs and commands/bg_tasks.rs
+// so the Windows answers exist once instead of eight times.
+#[cfg(test)]
+mod test_support;
 
 use state::AppState;
 use tauri::{

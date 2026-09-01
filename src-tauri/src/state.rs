@@ -595,10 +595,15 @@ impl Drop for AppState {
 mod shutdown_tests {
     use super::*;
 
+    // `sleep 30` on Unix, `ping` on Windows, and "is this pid a live process"
+    // in the terms of whichever kernel is answering — see `test_support`. The
+    // Unix behaviour is unchanged; before, both were spelled out here in Unix
+    // terms only, which is what switched this test off on Windows.
+    use crate::test_support::{is_alive as alive, sleeper as sleeper_cmd};
+
     /// A live child that outlives the test unless something kills it.
     fn sleeper() -> std::process::Child {
-        std::process::Command::new("sleep")
-            .arg("30")
+        sleeper_cmd(30)
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
@@ -606,28 +611,11 @@ mod shutdown_tests {
             .expect("spawn sleeper")
     }
 
-    /// A killed-but-unreaped child is a ZOMBIE — `ps -p` still lists it, so the
-    /// process STATE has to be read. Z means the kill landed and only the exit
-    /// status is still pending; at quit the parent dies and init reaps it.
-    fn alive(pid: u32) -> bool {
-        let out = std::process::Command::new("ps")
-            .args(["-o", "state=", "-p", &pid.to_string()])
-            .output();
-        match out {
-            Ok(o) => {
-                let st = String::from_utf8_lossy(&o.stdout).trim().to_string();
-                !st.is_empty() && !st.starts_with('Z')
-            }
-            Err(_) => false,
-        }
-    }
-
     /// The quit path is normally only reachable through the Tauri exit (tray
     /// Quit / exit_app), which cannot be triggered from a test or from a shell.
     /// It is a plain method though, so it CAN be exercised with real children —
     /// which is the only runtime proof available for it on this machine.
     #[test]
-    #[cfg_attr(target_os = "windows", ignore = "uses sleep/ps")]
     fn shutdown_kills_the_tracked_children_and_empties_the_slots() {
         let state = AppState::new();
 
@@ -644,6 +632,19 @@ mod shutdown_tests {
         let trainer_pid = trainer.id();
         std::mem::forget(trainer); // only the pid is tracked, as in the real flow
         *state.trainer_process.lock().unwrap() = Some(trainer_pid);
+
+        // The three assertions below only mean something if all three children
+        // were actually running when the shutdown fired. A sleeper that had
+        // died on its own — or a pid that never belonged to the process the
+        // test thinks it does — would make every one of them pass while
+        // nothing was killed at all.
+        for (what, pid) in [
+            ("ollama", ollama_pid),
+            ("comfyui", comfy_pid),
+            ("trainer", trainer_pid),
+        ] {
+            assert!(alive(pid), "the {what} child was not running to begin with");
+        }
 
         state.shutdown_subprocesses();
         std::thread::sleep(std::time::Duration::from_millis(400));

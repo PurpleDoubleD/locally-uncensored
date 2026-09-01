@@ -2042,15 +2042,18 @@ mod tests {
     }
 
     #[test]
-    #[cfg_attr(target_os = "windows", ignore = "uses sh")]
     fn a_child_that_dies_on_start_is_reported_at_once_and_not_after_the_budget() {
         // GH #118: the health wait watched only the port, so an engine that
         // exited in the first second (a missing runtime library, a GPU backend
         // that will not initialise) still burned the whole budget before the
         // user was told anything. The budget here is 30s; the answer has to
         // arrive in a fraction of that.
+        //
+        // The shell is resolved, not spelled `sh`: on Windows that name is not
+        // on PATH at all and a bare `bash` is the WSL alias stub. See
+        // `test_support::posix_shell`.
         let state = AppState::new();
-        let child = std::process::Command::new("sh")
+        let child = std::process::Command::new(crate::test_support::posix_shell())
             .args(["-c", "exit 3"])
             .stdin(Stdio::null())
             .stdout(Stdio::null())
@@ -2079,14 +2082,12 @@ mod tests {
     }
 
     #[test]
-    #[cfg_attr(target_os = "windows", ignore = "uses sleep")]
     fn a_child_that_is_still_loading_is_left_alone_until_the_budget_ends() {
         // Negative control for the check above: a LIVE child must still get
         // its full budget, or a big GGUF on a cold disk would be declared dead
         // while it is only slow (ENG-4).
         let state = AppState::new();
-        let child = std::process::Command::new("sleep")
-            .arg("30")
+        let child = crate::test_support::sleeper(30)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
