@@ -24,15 +24,16 @@
  * niemand diesen Test als Auftrag missversteht, `src-tauri/icons/` zu
  * „vektorisieren".
  *
- * ## Was ausserhalb der Reichweite liegt, und warum
+ * ## Der Mobile-Client gehoert seit b133160b dazu
  *
- * `mobile-client/client.js` zeigt die Marke an vier Stellen (64/22/18/82px)
- * weiterhin als 512px-PNG. Das ist eine ANDERE Oberflaeche — die Seite, die
- * das Telefon per HTTP bekommt — und sie ist von
- * `src/api/__tests__/mobile-html-content.test.ts` auf genau diesen Pfad
- * festgenagelt. Diese Wache umfasst deshalb `src/` und `index.html`, nicht
- * `mobile-client/`. Der Befund dort steht im Bericht, nicht hier: ihn zu
- * schliessen hiesse, einen fremden Test rot zu machen.
+ * Bis dahin zeigte `mobile-client/client.js` die Marke an vier Stellen
+ * (64/22/18/82px) als 512px-PNG, festgenagelt von
+ * `src/api/__tests__/mobile-html-content.test.ts`. Der Remote-Server liefert
+ * keine Datei aus `mobile-client/` aus — er baut EINE Seite und kennt genau
+ * eine Bildroute — deshalb liegt der Vektor dort als `<symbol>` im Dokument,
+ * und die vier Stellen holen ihn per `<use>`. Seitdem laeuft diese Wache
+ * auch ueber `mobile-client/`; die Drift zwischen Sprite und
+ * `public/LU-monogram.svg` haelt `mobile-hauszeichen-ist-vektor.test.ts`.
  *
  * Run: npx vitest run src/components/layout/__tests__/kein-raster-als-hauszeichen.test.ts
  */
@@ -80,7 +81,7 @@ function quelldateien(dir: string, out: string[] = []): string[] {
 // die KF-10 an fuenf hand-kopierten Wanderern schon einmal geschlossen hat;
 // dieser hier ist juenger als der geteilte in quelldateien.ts und hat sie
 // trotzdem wieder aufgemacht. Der eigene Wanderer bleibt vorerst — benannt.
-const DATEIEN = quelldateien(SRC).map(
+const DATEIEN = [...quelldateien(SRC), ...quelldateien(`${ROOT}/mobile-client`)].map(
   (f) => [f.slice(ROOT.length + 1).split('\\').join('/'), nurCode(readFileSync(f, 'utf-8'))] as const,
 )
 const INDEX_HTML = readFileSync(resolve(ROOT, 'index.html'), 'utf-8')
