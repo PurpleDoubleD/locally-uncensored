@@ -499,3 +499,124 @@ Denselben Mechanismus gibt es ein zweites Mal, in Rust:
 Modell aus dem Verzeichnis der **echten** App und tut sonst nichts — lesend,
 also keine Isolationsverletzung, aber dieselbe stille Selbstabschaltung. Steht
 als offener Posten.
+
+---
+
+## Sieben Pakete, ein wiederkehrender Satz: „zwei Wege, einer gepflegt"
+
+Der Abschnitt fasst `c5773322` bis `4c7bf748` zusammen. Ich habe jedes Paket
+in einem eigenen Worktree geprüft — nur die Dateien dieses Pakets auf den
+aktuellen HEAD kopiert, dann `tsc`, voller `vitest`, `madge`, und **eine
+eigene Mutationssonde**, die ich aus dem Befund abgeleitet habe und nicht aus
+den Tests des Agenten.
+
+### Der Sweep, der aussah, als griffe er
+
+`kill_orphaned_tunnels` läuft beim Start und soll verwaiste `cloudflared`-
+Prozesse abräumen — sonst republiziert ein alter Tunnel still die neue
+Sitzung. Der Matcher verlangt `targets_loopback_port(&cmd.join(" "), port)`.
+
+`sysinfo` 0.33 liefert `process.cmd()` **leer**, wenn man die Kommandozeilen
+nicht ausdrücklich anfordert — und die Kette, die das Projekt benutzt,
+enthält kein `.with_cmd()`. Also war `cmd` immer leer, der Matcher immer
+`false`, und der Sweep konnte **nie etwas töten**. Er lief, er meldete
+nichts, und in der Deckungsmatrix stand er auf „umgesetzt".
+
+An fünf Stellen wurde über Prozesse geurteilt, nur eine holte sich die
+Kommandozeilen. Jetzt baut `process_util::process_table_with_cmdlines()` die
+Tabelle für alle. Meine Sonde: die eine Zeile 67 entschärft — **drei Tests
+rot, in beiden Aufrufern und im Helfer selbst.** Genau die Eigenschaft, die
+ich verlangt hatte: eine Mutation erreicht jeden, der die Frage stellt.
+
+### Der Timer, der nie aufhörte
+
+Der Built-in-Engine-Installpfad wartete mit `setInterval(…, 500)` auf die
+heruntergeladene Datei und rief `clearInterval` in **zwei von fünf** möglichen
+Ausgängen. Pausiert der Nutzer, steht der Eintrag auf `paused`; bricht er ab,
+verschwindet die Zeile; verlässt er die Ansicht, hört niemand mehr zu. In
+allen drei Fällen lief der Timer mit 2 Hz weiter und das `await`ete Promise
+settelte nie — pro Versuch ein Timer, und die Installation darunter stand für
+immer.
+
+Der Fix ist kein sechster Ausgang, sondern der Verzicht auf den Timer: der
+Store wird ohnehin im Sekundentakt aus Rust gefüllt, also wird auf die
+Nachricht gewartet, die es schon gibt.
+
+### 34 von 58 Deklarationen waren vier Kopien einer Maschine
+
+Das Audit verlangt für `Onboarding.tsx` (59 `useState`) eine Zerlegung *pro
+Schritt*. Das wäre falsch gewesen: 34 der Deklarationen sind vier Kopien
+**einer** Maschine — Ollama, LM Studio, ComfyUI, Python, jeweils
+„herunterladen, Fortschritt zeigen, fertig oder fehlgeschlagen", vier davon
+mit eigenem `setInterval` für dieselbe Rechnung `jetzt − startedAt`. Eine
+Zerlegung pro Schritt hätte vier Kopien auf vier Dateien verteilt.
+
+Ein `installerReducer`, viermal benutzt: 58 → 29. Und dabei fielen **zwei
+echte Fehler** heraus, die vorher viermal einzeln hätten auffallen müssen:
+ein Poll-Tick nach dem Ende konnte eine fertige Installation zurück auf
+„läuft" ziehen, und ein zweiter Anlauf begann mit dem Fortschrittsbalken des
+ersten.
+
+### Der Befund stimmte, die Begründung war daneben
+
+Das Design-Audit sagt zum Hellmodus: „keine Ebenen". Nachgemessen war der
+Stufenabstand in beiden Modi fast gleich (dunkel 1,105:1, hell 1,100:1).
+Gefehlt hat die **Kante**: hell 1,008:1 gegen dunkel 1,271:1 —
+vierunddreißigmal schwächer. Eine Pane ohne spürbare Stufe *und* ohne Kante
+liegt nicht auf der Leinwand, sie **ist** die Leinwand.
+
+Beim Nachmessen fiel nebenbei auf, dass die aktive Navigationspille im
+Hellmodus `bg-gray-100` auf einer `bg-gray-100`-Leiste trug: **1,000:1**. Das
+Amateur-Signal „aktiv als Fläche" galt im Hellmodus nie.
+
+### Der Audit-Zeiger traf die eine geschlossene Tür
+
+T-76 („Create-Dateislots geben ihre Blob-URLs nie frei") zeigt auf
+`SpecialIntentControls.tsx:55`. Diese Stelle ist seit längerem in Ordnung.
+Das Leck sitzt beim **dritten Slot derselben Familie**, den das Audit nicht
+nennt, gemintet in einer wörtlichen Inline-Kopie in `Stage.tsx:596`. Alle
+drei Wege, auf denen der Store dort Refs wegwarf, warfen sie ohne Freigabe
+weg — einer davon nach jedem abgeschickten Trainingslauf. Gemessen: **60
+gemintet, 60 lebendig, 0 nachher.**
+
+Das ist die Lehre aus mehreren Paketen: die Befunde stimmen fast immer im
+Muster und oft nicht in der Zeilennummer. Wer die Zeile fixt statt das
+Muster, schließt die Tür, die schon zu war.
+
+### Und einmal war ich selbst der Fall
+
+Meine eigene Deckungsmatrix erzeugt ausgeliefertes CSS. Tailwind 4 scannt das
+Projektverzeichnis als Text, `.md` eingeschlossen — eine Erwähnung von
+`active:scale-[0.97]` in `AUDIT-COVERAGE.md` erzeugte die Utility im Bundle,
+obwohl keine Komponente sie benutzt. Bewiesen mit zwei echten Builds: die
+Erwähnung ersetzt, die Utility weg, der Dateihash ändert sich;
+Kontrollprobe mit denselben Erwähnungen aus `index.css` entfernt, Build
+byte-identisch.
+
+Der Schaden ist doppelt. Totes CSS im Produkt — und `fokusring-und-press.
+test.ts` suchte mit `indexOf(':active{scale:.97}')` nach der Hausregel, fand
+aber diese Utility, weil sie im Bundle früher steht. Der Test maß vier
+Monate lang die falsche Regel.
+
+Dass das überhaupt aufgefallen ist, liegt an einer Protokolländerung: der
+Test liest aus `dist/assets` und trägt `describe.skipIf(builtCss === null)`
+— wo kein `dist/` steht, schaltet er sich **still** ab. Seit ich vor jedem
+Lauf baue, läuft er. Und einmal bin ich dabei selbst hereingefallen: ein Lauf
+war grün gegen ein `dist/`, das aus einer früheren Sonde stammte und nicht
+mehr zum Quelltext passte. Seitdem gilt `rm -rf dist && npx vite build`.
+
+### Windows-Zwischenprüfung
+
+Am Stand `63294828` auf der echten Maschine: `cargo test` **740 grün, 0 rot,
+3 ignoriert**. Die Differenz zu 758 auf dem Mac sind die `#[cfg(unix)]`-
+Tests. Das Rust-Paket mit seinen Plattformzweigen kompiliert und läuft dort.
+
+### Was in keinem Audit steht und trotzdem offen ist
+
+`AppState::shutdown_subprocesses` (`state.rs:462`) ist 115 Zeilen lang und
+erwähnt `remote`, `RemoteServer`, `tunnel` oder `cloudflared` kein einziges
+Mal. Ollama, ComfyUI, llama-server, der Embeddings-Server, der Trainer und
+der MLX-Sidecar stehen dort. Der Tunnel hängt allein an `Drop for
+RemoteServer` — und der Kommentar über der Funktion begründet selbst, warum
+das nicht reicht: Tauri v2 führt `Drop` nicht zuverlässig aus, genau deshalb
+existiert der explizite Pfad.
