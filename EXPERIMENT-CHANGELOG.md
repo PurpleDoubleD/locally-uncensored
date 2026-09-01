@@ -920,3 +920,401 @@ Blöcke, Gewicht 500 und 700, je latin, latin-ext und vietnamesisch. Ein leerer
 Das ist dasselbe Muster wie überall in diesem Projekt, eine Ebene höher: zwei
 Beschreibungen desselben Sachverhalts, von denen nur eine gepflegt wurde. Die
 Matrix führt seitdem eine Spalte „gemessen wie" nicht als Zierde.
+
+## Der Installer-Digest ist angeheftet — gemessen, nicht geraten
+
+`LMSTUDIO_INSTALLER_SHA256` stand auf `None`, mit der ehrlichen Begründung, dass
+die Datei auf keiner erreichbaren Maschine lag. Der Eigentümer hat den Download
+freigegeben; damit ist die letzte halbe Position des Technik-Audits geschlossen.
+Gemessen auf der echten Windows-Maschine, von der versionsfesten URL: 221 768 208
+Bytes — **Delta zur angehefteten Größe: 0** —, der SHA-256, und eine gültige
+Signatur auf `CN=Element Labs Inc.`. Danach wurde die Datei gelöscht.
+
+Interessanter als die Zahl ist, was jetzt am Code über sie steht. Der Hersteller
+veröffentlicht **keine** Prüfsumme zum Vergleichen: `.sha256`, `.sha256sum`,
+`.SHA256`, `.checksum` und der Verzeichnisindex antworten alle 404. Der Digest
+stammt also aus der Datei selbst, durch denselben unauthentifizierten Kanal, durch
+den die App lädt — trust-on-first-use. Er sichert gegen eine *spätere* Ersetzung an
+dieser URL, nicht gegen einen bereits manipulierten Erstdownload.
+
+Was diese Lücke schließt, ist die Authenticode-Prüfung, und die beiden sind
+ausdrücklich nicht redundant: die Signatur hängt an einem EV-Zertifikat einer CA
+und läuft damit **nicht** durch den Download-Kanal. Digest und Signatur beantworten
+zwei verschiedene Fragen — „sind das die Bytes, die wir gesehen haben" und „hat der
+Hersteller sie signiert". Keine der beiden allein ist die Antwort. Die
+Größenübereinstimmung ist Bestätigung, keine dritte Prüfung: sie stammt aus dem
+`content-length` desselben Kanals, und eine längengleiche Fälschung käme durch.
+
+Die Wache sagt deshalb die schärfere Sache, nicht die naheliegende: der Pin muss
+**bleiben**. Ein Rückfall auf `None` würde einen ausgeführten Installer still auf
+Größe-plus-Signatur herabstufen — und weil dieser Pfad Windows-only ist, fiele das
+auf dem Mac niemandem auf. Sonde: Pin auf `None` → ein Fehlschlag mit dem Satz „the
+digest pin was removed"; Pin zurück → grün.
+
+## Die Argumente werden geprüft, wo die Anfrage entsteht
+
+`executeFileWrite` reichte `args.path` des Modells ungeprüft an `fs_write` weiter.
+Fehlte das Feld, fiel es bei `JSON.stringify` aus dem Körper — und genau diese
+Anfrage hat einmal live eine 0-Byte-**Datei** an der Stelle erzeugt, an der eine
+Käfigwurzel gemeint war. Der Dev-Server fing sie inzwischen ab, der gepackte Build
+auch; die dritte Ebene, an der sie *entsteht*, prüfte nichts. Damit sind alle drei
+zu.
+
+Beim Lesen fielen sechs weitere Werkzeuge mit demselben Problem auf. Der neue
+Helfer folgt dem vorhandenen Muster der Datei: ein zurückgegebener **Text**, kein
+`throw`, weil das Werkzeugergebnis der einzige Rückkanal zum Modell ist. Zwei
+Unterscheidungen sind bewusst gesetzt: bei `content` und `new_string` heißt `''`
+etwas anderes als bei `path` — eine absichtlich leere Datei ist ein gültiger
+Auftrag, ein fehlendes Feld nicht. Vorher zog `String(args.content ?? '')` beides
+zusammen; genau diese Verwechslung wurde zur 0-Byte-Datei.
+
+Die Wache misst nicht den Wortlaut der Ablehnung, sondern **dass nichts
+hinausgeht** — pro Fall wird der Bridge-Befehl gezählt. Dazu ein
+Vollständigkeitstest gegen `inputSchema.required` des Katalogs: ein neues Werkzeug
+mit ungeprüftem Pflichtargument fliegt automatisch auf, statt auf die nächste
+Handzählung zu warten.
+
+Im selben Paket fiel eine Entscheidung, die seit Wochen als „Verhaltensfrage"
+offen stand. Die Prüfung, ob der Denkmodus herabgestuft werden muss, stand dreimal
+da, und nur die Hermes-Kopie trug die Bedingung `thinking !== undefined`. Das
+Urteil lautet jetzt: **Fehler in den anderen beiden, keine Hermes-Besonderheit.**
+Der Abstieg *besteht* darin, `thinking` fallenzulassen; war es schon `undefined`,
+ist die Wiederholung byte-identisch mit der gescheiterten Anfrage — zweite Absage,
+zweite Abrechnung, kann per Konstruktion nicht helfen. Also nicht weggeräumt,
+sondern eingezogen: eine Funktion, drei Aufrufstellen, jede reicht ihre eigene
+Options-Variable hinein. Ollama und OpenAI bekommen die Bedingung damit erstmals.
+
+## Kein Raster mehr als Hauszeichen
+
+Es waren zwölf Einbindungen, nicht zehn. Die elfte stand in keiner Audit-Liste und
+fiel durch die alte Wache: `create/experimental/Stage.tsx` hing an
+`/LU-monogram-white.png` — einer **byteidentischen Kopie** des `-bw`-PNG, gleicher
+MD5, 3219 Bytes, 512×512. Die alte Wache suchte einen *Namen*. Die neue sucht ein
+*Muster*: jede Zeichenkette `*(monogram|logo|brand|wordmark)*.(png|jpg|webp|…)` in
+`src/**` und `index.html`, Kommentare gestrippt. Null Treffer. Die Plattform-Icons
+unter `src-tauri/icons/` werden dabei **positiv** als Raster festgehalten, damit
+niemand den Test als Auftrag missversteht, sie zu vektorisieren.
+
+Die Lesbarkeit ist gemessen, nicht behauptet — Alphakanal ausgezählt. Der Gewinn
+des SVG wächst mit der Größe und ist bei 18 px im Rauschen. Bei 10 und 12 px hat
+**keine** der beiden Fassungen ein voll deckendes Pixel: das Zeichen ist dort unter
+seiner Lesbarkeitsgrenze und nur tragbar, weil das Wort daneben steht. Das steht
+jetzt in `brand.ts`, statt als stille Annahme im Kopf des nächsten Lesers.
+
+Beim Titlebar-Monogramm gibt es bewusst **kein** pauschales Urteil, weil die zwei
+Zweige nicht dasselbe Ding sind. Auf mac zeichnet das System kein App-Symbol in den
+Balken; das Zeichen saß dort rechts als erfundene Marke, 32 px über der zweiten im
+Header — und seit dem Header-Umbau mit 18 und 20 px fast gleich groß, die Redundanz
+war also *stärker* geworden. Gestrichen; der Streifen bleibt für die nativen
+Lichter. Unter Windows und Linux **ersetzt** die App den Systembalken, und was dort
+links steht, ist keine Marke, sondern das Fenstersymbol. Bleibt. Beides im Code
+begründet, beides im Test festgenagelt.
+
+Nebenbei ist die Pfad-Doppelung aufgelöst, die der vorige Monogramm-Commit selbst
+gemeldet hatte. Die zugehörige Wache wurde dafür **umgedreht statt entschärft**:
+sie verlangt jetzt den Import *und* die Abwesenheit jedes eigenen Pfadliterals,
+8 → 12 Prüfungen. Sonden: `Stage.tsx` zurück aufs PNG → 3 rot, während die alte
+Wache grün blieb — das war das Loch; mac-Zeichen wieder eingesetzt → 3 rot; zweite
+Füllfarbe im SVG → rot.
+
+## Der scharfe Reset war unter AA, und zwar genau dann, wenn er gefährlich wurde
+
+Der Befund in der Matrix war veraltet, und darunter lag ein echter. Behauptet war,
+ein Reset-Link stehe im Dunkelmodus auf 3,37:1. Live gemessen — Farben aus
+`getComputedStyle`, `oklch` über Canvas aufgelöst — steht er in Ruhe dunkel bei
+**6,57:1** und hell bei **10,31:1**. Die 3,37 gab es nie auf dem Schirm. Sie waren
+aus Klassennamen gerechnet, mit zwei falschen Annahmen: der Grund ist `#1e1e1e`,
+nicht `#202020`, und `text-gray-500` erreicht den Browser gar nicht, weil der
+Rescue-Layer in `index.css` es anhebt.
+
+Offen war stattdessen der **scharfe** Zustand desselben Knopfs: `text-red-400` ohne
+hellen Gegenpart, und `red-400` heißt in Tailwind 4 `#ff6467` — hell scharf
+**2,89:1**. Der Knopf war also ausgerechnet dann unter AA, wenn er gefährlich
+geworden war. Jetzt `text-red-600 dark:text-red-400`, das Rotpaar des Gefahrknopfs
+daneben: hell 4,77:1, dunkel 5,77:1. Eine fremde Wache pinnte beide Zweige wörtlich
+und ist bewusst mitgezogen, mit der alten Zeile als Zitat davor.
+
+Die Settings-Spalte stand seit dem Rail-Umbau nicht mittig, sondern links mit einer
+großen Leere rechts. Ein `justify-center` auf der Zeile, die Rail und Inhalt
+enthält, Breiten unangetastet. Gemessen in drei Fensterbreiten, links/rechts:
+1280 → 134,0/134,0 · 1440 → 214,0/214,0 · 1920 → 454,0/454,0. Zentriert wird das
+**Paar**, nicht der Inhalt allein — der allein mittig wäre wieder die
+freischwebende Spalte, also genau der Befund, den derselbe Umbau geschlossen hat.
+
+Und die Frage, ob vor dem ersten Inhalt zwei Bänder eines zu viel sind, ist
+beantwortet: **zwei ist die richtige Zahl.** Fensterrahmen und Header tragen
+dieselbe Fläche — Kontrast 1,00:1 in beiden Modi, keine Kante, kein Schatten —, und
+außerhalb von Tauri rendert die Titlebar `null`. Es liegen also nicht zwei Streifen
+übereinander, sondern ein Grund, auf dem die Pane liegt. Der Schritt auf eins wäre
+ein DOM-Schritt ohne Bildschirmwirkung, sein Preis (Drag-Region, Ampeln,
+Fensterknöpfe in die Kopfzeile) real. Die neue Wache pinnt deshalb nicht das
+Ergebnis, sondern die **Voraussetzung** der Entscheidung: Gleichheit der
+Flächenklassen, keine Kante dazwischen. Kippt die, ist die Begründung hinfällig.
+
+## Das Token-System hat einen Aufrufer je Stufe — und zwanzig Sperrklinken
+
+Der Audit nannte sieben Token-Zeilen. Es ist **ein** Befund in sieben
+Ausprägungen: es gibt ein System, und die App geht daran vorbei. Die Zahlen, jede
+mit dem Zähler ihrer eigenen Wache, vorher → nachher: `text-[…]` 1008 Fundstellen
+über 25 Werte → **826 über 23**, `.t-*`-Nutzungen 152 → **333**, Akzent-Hex im Code
+23/11/5 → **0**, dunkle Graustufen als Literal 15 → **11**, Schwebeblätter mit
+eigener Klassenkette 10 → **0**, `.lu-elevated`-Call-Sites 6 → **15**,
+`transition-all` 49 → **33**, `MOTION_S`-Aufrufe 0 → **23**, verschiedene
+`size={n}` 19 → **15**.
+
+Der Hebel lag jedes Mal in der Sprache, nicht in der Fundstellenzahl. `text-[…]`
+sank um 182 Stellen, weil **eine** Klasse das 4-px-Band unter dem Fließtext
+übernahm — nicht weil jemand 182 Call-Sites einzeln angefasst hätte. `shadow-sm`
+ist im Dunkelmodus durch **eine** Hausregel neutralisiert statt an achtzehn Stellen
+entfernt, und das ist Arithmetik, keine Bequemlichkeit: selbst 100 % Schwarz schafft
+auf `#141414` nur 1,140:1, der Schatten ist dort schlicht unsichtbar. Zehn
+Schwebeblätter trugen sechs Flächen, drei Schatten und zwei Kanten; das
+Kontextmenü stand in der Farbe der Leinwand darunter. Alle zehn tragen jetzt ein
+Rezept.
+
+Ein Fund verdient eigene Erwähnung, weil er die Klasse von Fehler ist, die man nur
+beim Hinsehen findet: `--color-lu-raised: #2d2d2d` war **tot**, und tot heißt hier
+schlimmer als ungenutzt. Tailwind gibt ein Farbtoken ohne Aufrufer gar nicht erst
+aus — wer `bg-lu-raised` schrieb, bekam im Fenster eine leere Variable, also
+**keine Farbe und keinen Fehler**. Eine Stufe, die beim ersten Gebrauch still
+danebengreift, gehört nicht beschriftet, sondern gelöscht. Die vorige Fassung hatte
+nur geprüft, dass „0 Call-Sites" danebensteht; das war die halbe Antwort.
+
+Umgekehrt bleibt `--shadow-2xl` bewusst stehen, obwohl es keinen `var()`-Aufrufer
+hat: die Zeile zu löschen entfernt den Schatten nicht, sie fällt auf Tailwinds
+Werkswert zurück. Genau der stille Halbbesitz, um den es geht — ein sichtbarer
+toter Token ist ehrlicher als ein unsichtbarer Werkswert.
+
+`rounded-[5px]` ist entschieden statt aufgezählt: **keine Sprosse.** Zwischen 4 und
+6 läge sie bei `--ui-scale` 1,15 einen Gerätepixel von beiden Nachbarn — dieselbe
+Auflösung, in der vierzehn Schriftgrößen als Rauschen verworfen wurden. Die zwanzig
+gehören auf `rounded-md`. Alle zwanzig liegen in einer Datei, die im selben
+Durchgang einem anderen Agenten gehörte, also: gedeckelt, nicht gezogen.
+
+Zwanzig Sperrklinken stehen jeweils auf dem **erreichten** Wert, nicht auf einem
+Wunschwert, und jede ist mit einer Sonde rot→grün belegt. Zwei vorhandene Wachen
+mussten verschärft werden, weil sie ohne den Fix grün geblieben wären — eine las
+die Klasse, über die sie urteilte, aus einem Kommentar.
+
+## Testflocken ohne Uhr, eine Antwort für `fs-list`, und vier Versprechen weniger
+
+Die roten Rust-Tests unter Last waren nie ein Produktfehler, aber sie waren auch
+nicht „einfach flaky". Gemessen mit einer Apparatur — N Kopien des Testbinaries
+gleichzeitig, zehn Runden: bei drei Kopien 14 Fehlschläge in 12 roten Läufen, bei
+sechs Kopien **87 Fehlschläge in 57 roten Läufen**. Danach: 0 und 0.
+
+Der ursprünglich benannte Haupttest war schon zu. Rot waren die Nachbarn, und jeder
+aus einem eigenen, lehrreichen Grund. `the_call_does_not_block_for_the_grace_period`
+maß mit `took < 400ms` gar nicht den Gnadenzeitraum, sondern wie schnell die
+Prozesstabelle durchgegangen wird — die Stoppuhr ist raus, an ihre Stelle tritt eine
+**Ordnungsfrage ohne Uhr**: direkt nach dem Kill ist das Kind noch unser ungeernteter
+Zombie, also kann der Aufruf nicht gewartet haben. `every_screenshot_gets_its_own_
+temp_file` zählte alle `lu-screenshot-*` im geteilten Temp und stellte damit eine
+Frage über die *Maschine*; jetzt steht die PID im Namen.
+`lists_only_directory_names_sorted` hatte den Rumpf der Produktionsfunktion
+**kopiert** und die Kopie geprüft; die Regel steht jetzt an einer Stelle, von
+Kommando und Test gerufen.
+
+`fs-list` auf die Wurzel beantworteten Rust und der Dev-Server unterschiedlich —
+der Grundfehler dieses Projekts in Reinform. Aufgelöst zugunsten des Dev-Servers,
+und die Begründung ist eine Regel, kein Münzwurf: **eine Auflistung ist ein
+Lesevorgang und darf nichts anlegen.** `fs_list` war die einzige der sechs Türen,
+die die Platte veränderte, und diese Datei hat für „eine Anfrage ohne Datei löst
+einen Schreibvorgang aus" schon zweimal bezahlt. Greifbar war es auch: der
+Explorer ruft `fs_list` direkt, das alte Verhalten legte für jeden bloß
+angeschauten Chat einen Ordner an. Wachen stehen jetzt auf beiden Seiten; die
+Rust-Seite liest die TypeScript-Datei per `include_str!` und prüft, dass deren
+`fs-list`-Block kein `mkdirSync` trägt.
+
+Und vier Funktionen ohne Aufrufer sind weg — `mlx_stop`, `lmstudio_installed`,
+`ollama_installed`, `comfyui_search_roots`, alle vier mit einem
+`#[allow(dead_code)]` und einem „entscheide später" daran. Ein repo-weiter `git
+grep` über `src/`, `dev-server/`, `e2e/` und `mobile-client/` fand für jede genau
+**einen** Treffer: ihre eigene Definition. Mit ihnen fiel die Kaskade der vier
+Helfer, die nur sie am Leben hielten. Die Frage, die sie beantworten sollten, wird
+längst woanders beantwortet — genau die zweite Tür, um die es hier durchgehend
+geht.
+
+## Der letzte gewachsene Riese, und ein Knopf, der nie hing
+
+`Onboarding.tsx` hatte 1909 Zeilen und war die letzte der drei Dateien, die unter
+den Audit-Fixes *gewachsen* statt zerlegt worden waren. Jetzt 343. Geschnitten nach
+geteiltem Zustand, nicht nach Schritten — und das ist der ganze Punkt: ein Schnitt
+pro Schritt hätte die vier Installer wieder auf vier Dateien verteilt und damit
+vier Uhren gemacht, also genau die Regression, die das Onboarding-Paket vorher
+mühsam beseitigt hatte. Ein Schritt, der den Zustand von vier anderen hält, ist
+kein Schritt.
+
+Die Treue ist nachgemessen, nicht behauptet: von 1457 Codezeilen stehen **1441
+wörtlich** im neuen Satz. Die 16 Abweichungen sind Import-Teilungen, zwei `export`,
+vier Zeilen aus einem Design-Befund im selben Paket — und zwei erzwungene, beide im
+Code begründet: ein `set-state-in-effect`, das der React-Compiler in der
+1909-Zeilen-Funktion nie gelesen hatte (klein genug, meldet er es), und zwei
+Dependency-Arrays um stabile Identitäten. `useState` 25 → 25: verteilt, nicht
+vermehrt. Das DOM ist byte-gleich.
+
+42 angeheftete Zusicherungen in sechs Testdateien mussten mitgehen; 25 wurden
+bewegt, 17 blieben, weil der Schnitt danach gelegt wurde. Eine fremde Wache las
+bisher nur eine Datei und deckt jetzt zwei — sonst hätte sie nach dem Schnitt nur
+noch zwei der vier Installer gesehen. Und eine neue Prüfung hält fest, dass die
+Dateiliste den Ordner **abdeckt**: ohne sie wäre die Zerlegung selbst das
+Schlupfloch für die `useState`-Sperrklinke gewesen. Diese Prüfung hat sich schon
+bewährt — sie schlägt zuverlässig an, sobald jemand eine neue Datei in den Ordner
+legt.
+
+Der Nebenertrag ist die Auflösung eines Fehlerbilds, das monatelang wie ein
+Produktfehler aussah: zwei Schaltflächen **„Continue"** auf demselben Schritt, die
+zweite in einer Klappe. Playwright wiederholt eine strict-mode-Verletzung bis zum
+Timeout — deshalb las sich das als 60-Sekunden-Hänger an einem Knopf, der weder
+deaktiviert noch animiert war. Die zweite heißt jetzt „Use this engine": kein
+„Continue" im Namen, denn `getByRole` trifft auf Teilstrings, und ein „Continue
+with…" hätte die Verletzung nur schöner formuliert. Ein Screenreader hört seitdem
+zwei Namen statt zweimal denselben.
+
+Im selben Paket fielen die letzten Sonderbehandlungen unter den Onboarding-Knöpfen.
+„Cancel" war das eigentliche Einzelstück — 8,8 px Schrift, rote Kante, 11 px
+Trefferfläche — und trägt jetzt dasselbe Rezept wie Stop: **Abbrechen ist der
+normale Ausgang, nicht der Defekt.** 6,42:1 / 7,23:1. Keiner der vier musste anders
+bleiben.
+
+## Der 422 gehört allen
+
+Nach dem Einziehen des Denk-Abstiegs hatte eine Datei genau eine Stelle. Draußen
+standen weitere **vier** Kopien derselben Fehlerform, drei in `useAgentChat.ts`,
+eine in `useChat.ts` — und die letzte trug eine 422-Bedingung, die den anderen
+fehlte. Die Wache war grün geblieben, während das passierte, weil sie nur in einer
+Datei zählte. Sie zählt jetzt repo-weit, mit Landkarte und einem Selbsttest gegen
+einen verrutschten Wurzelpfad.
+
+Der 422 ist keine Transport-Eigenart, sondern eine Lücke in den anderen. DeepInfra
+antwortet 422 auf einen schlechten Parameter, der Cloud-Proxy reicht ihn absichtlich
+durch, und die Provider-Schicht behandelt 400 und 422 selbst als **eine** Klasse.
+Er erreicht alle Pfade über denselben Aufruf — nur hatte `useChat` ihn, und die
+Agentenpfade beendeten beim selben Anbieter den ganzen Lauf. Der Preis eines
+Fehlalarms ist genau eine zusätzliche Anfrage, derselbe Preis, den 400 seit jeher
+hat, und die Zusatzbedingung deckelt ihn. Ein Test hält ausdrücklich dagegen, dass
+daraus „irgendein 4xx" wird.
+
+## Eine Wache verglich Pfade mit dem Trennzeichen des Betriebssystems
+
+Auf der Windows-Maschine, am selben Commit: 548 Testdateien grün, **eine** rot, zwei
+Zusicherungen. Die Monogramm-Wache nimmt ihre eigene Quelldatei per
+`rel !== 'src/components/layout/brand.ts'` aus der Suche — und unter Windows heißt
+dieselbe Datei `src\components\layout\brand.ts`. Für die Wache war `brand.ts` also
+eine zweite Kopie ihrer selbst.
+
+Das ist Zeile für Zeile derselbe Fehler, den eine Woche zuvor an fünf Stellen
+weggeräumt wurde: ein handkopierter Verzeichnis-Wälzer, der Pfade mit dem
+Trennzeichen des Systems zusammensetzt. Diese Wache ist **jünger** als der geteilte
+Wälzer und hat trotzdem ihren eigenen bekommen. Der relative Pfad wird jetzt beim
+Einsammeln an genau einer Stelle normalisiert, mit dem Grund daneben. Der eigene
+Wälzer bleibt vorerst — das ist ein zweiter, benannter Rest, kein Versehen, und er
+steht seitdem als eigene Zeile in der Matrix.
+
+## Der tote Zweig, den ein Test am Leben hielt
+
+Im Mobile-Client war der Doppel-Dekodier-Zweig unter dem ersten `JSON.parse`
+**unerreichbar**: ein doppelt kodiertes Argument *ist* gültiges JSON — eine
+JSON-Zeichenkette —, das erste Parse gelingt, `typeof` sagt `'string'`, Rückgabe
+`{}`. Genau der Fehler, den der Kommentar daneben zu beheben behauptete.
+
+Er stand so lange, weil ein Pin ihn hielt: eine Paritätswache verlangte das `{}`
+wörtlich, mit dem Vermerk „deliberately NOT fixed here" aus dem Umbau, der den
+Client aus einem Rust-Rohstring geholt hat. Damals war das richtig — dort ging es
+um Byte-Gleichheit, nicht um Verhalten. Jetzt ist der Pin nachgezogen und der Zweig
+durch eine Schleife ersetzt: parsen, solange das Ergebnis eine Zeichenkette ist, auf
+vier Lagen gedeckelt. Elf neue Fälle, auch über den Weg, auf dem der Client die
+Argumente wirklich bekommt.
+
+Gemessen und ausdrücklich **nicht** hier gefixt: der Desktop hat denselben Fehler.
+Für dieselbe Eingabe gibt `src/lib/tool-call-repair.ts` `{}` zurück. Mobile ist an
+dieser Stelle jetzt besser als Desktop — die Umkehrung des Normalfalls in diesem
+Projekt, wo sonst der Nachbau der schlechtere ist. Steht als offener Rest in der
+Matrix.
+
+Die zweite lose Sperrklinke aus derselben Familie ist ebenfalls nachgezogen:
+`toBeGreaterThanOrEqual(9)` bei zehn Werkzeugen wurde nicht auf 10 gesetzt, sondern
+**aus dem Katalog abgeleitet**. Sonde: ein Werkzeug entfernt → rot; die alte Klinke
+wäre im selben Zustand grün geblieben.
+
+Und die Marke: der Remote-Server liefert keine Datei aus dem Client-Verzeichnis
+aus, er baut **eine** Seite und kennt genau eine Bildroute. Ein
+`<img src="/LU-monogram.svg">` wäre dort ein 404 gewesen. Deshalb steht die Marke
+jetzt als `<symbol>` im Dokument, Pfaddaten Zeichen für Zeichen aus der SVG-Quelle,
+vier `<use>`-Stellen, mit einer Driftwache zwischen Sprite und Quelle. Visuell bei
+375×812 nachgemessen: 64/22/18/82 px, Marke exakt mittig. Danach hat das alte PNG
+keinen Aufrufer mehr; die Route dorthin bleibt als benannter Rest stehen, weil
+`src-tauri` nicht zum Paket gehörte.
+
+## Ein Absatz, der das Falsche sagte
+
+Der Abschnitt „Was außerhalb der Reichweite liegt" in der Monogramm-Wache
+begründete, warum das Mobile-Verzeichnis nicht mitgeprüft wird: dort stehe die
+Marke als PNG. Seit dem Sprite-Umbau stimmt das nicht mehr, also ist der Grund weg
+und mit ihm der Ausschluss. Der Wälzer nimmt das Verzeichnis dazu.
+
+Das ist ein kleiner Commit und steht hier trotzdem, weil er den Fehler behandelt,
+um den es in diesem ganzen Protokoll geht: eine Begründung, die ihren Gegenstand
+überlebt hat. Eine Wache mit einem veralteten Absatz ist nicht falsch — sie ist
+schlimmer, sie ist plausibel.
+
+## Clippy war auf Windows rot, in Code, den der Mac nie kompiliert
+
+Die CI fährt `cargo clippy --all-targets -- -D warnings` über die ganze
+Plattform-Matrix. Auf der Windows-Maschine brach es am selben Commit, an dem der
+Mac grün ist, mit **acht** Fehlern ab. Keiner davon ist auf dem Mac sichtbar: vier
+stehen in Funktionen hinter `#[cfg(target_os = "windows")]`, vier sind Funktionen,
+deren einziger Aufrufer hinter einem cfg-Tor liegt, das auf Windows zu ist — dort
+sind sie tot, hier nicht.
+
+Die windows-only Hälfte ist mechanisch: ein zusammengeklapptes `else { if let }`,
+zweimal `sort_by` auf `sort_by_key(Reverse)`, ein `map_or(false, …)` auf
+`is_some_and`. Die andere Hälfte ist die interessante, und sie ist **nicht** mit
+`#[allow(dead_code)]` erledigt worden — das hätte die Frage nur zugeklebt. Jede der
+vier Funktionen trägt jetzt exakt das cfg ihres Aufrufers: der
+Port-Killer das von `state.rs` beim Beenden, der LM-Studio-CLI-Sucher das seines
+Nicht-Windows-Zweigs, der Test-Portleaser und ein Testmodul-Import je `unix`. Das
+Attribut sagt damit, **wo die Funktion lebt**, statt zu behaupten, sie dürfe
+unbenutzt sein.
+
+Auf Windows nachgemessen: clippy 0, `cargo test` unverändert grün. Auf dem Mac
+konnte in diesem Moment kein `cargo check` laufen — der Fenster-Agent hatte
+`main.rs` mitten im Umbau; die Gegenprobe wird mit dessen Paket zusammen gemessen
+und steht bis dahin ausdrücklich aus.
+
+Damit ist derselbe Befund zum vierten Mal in derselben Form wiedergekommen: acht
+rote Tests aus Pfadtrennzeichen, neun aus dem Ort der Testkulisse, eine Wache, die
+sich für ihre eigene Kopie hielt, und jetzt acht Clippy-Befunde. **Eine Zone, die
+eine Maschine nie ansieht, ist ungedeckt — auch wenn dort grün steht.**
+
+## Was diese Runde über die Matrix selbst herausgefunden hat
+
+Diese Fassung der Befundmatrix hat mehr Zeilen geändert als jede vorige, und der
+Grund ist unangenehm: die Datei nannte **zwei** verschiedene Mess-Commits, einen in
+der Kopfzeile und einen achtzehn Zeilen tiefer, vierzig Commits auseinander.
+Solange beide dastanden, war für keine einzige Zeile entscheidbar, gegen welchen
+Stand sie gilt — und genau deshalb konnte sie veralten, ohne dass es auffiel.
+
+Was dabei herauskam, ist wörtlich der Befund, den dieselbe Matrix dem Code an
+zwölf Stellen vorhält: zwei Beschreibungen desselben Sachverhalts, eine gepflegt.
+Acht Token-Zeilen standen auf „OFFEN", obwohl zwei Pakete sie geschlossen hatten.
+Zwei Nachtragszeilen standen auf „offen", obwohl die Commits, die sie schlossen,
+in derselben Datei zitiert wurden. Zwei Wellen-Posten standen auf „OFFEN", obwohl
+die Kommandopalette und die Kontextmenüs seit Wochen im Baum lagen — einmal wurde
+deshalb ein Agent losgeschickt, der nach eigener Messung zurückkam und meldete, es
+sei nichts zu tun.
+
+Die Gegenmaßnahme ist keine Sorgfaltsermahnung, sondern dieselbe, die dieses
+Projekt überall anwendet: **die Summen werden jetzt aus der Datei gezählt, nicht
+aus dem Kopf**, und der `grep`, der das tut, steht als Kommentar unter jeder
+Tabelle. Er hat beim ersten Lauf sofort etwas gefunden — die Signale-Spalte stand
+auf 12 und ergab damit 74 statt der 73, die zwei Zeilen darüber im selben Abschnitt
+stehen. Eine Zahl, die niemand nachrechnen kann, ist keine Zahl, sondern eine
+Behauptung.
+
+Vierzehn neue Zeilen sind dazugekommen, und zwölf davon sind **Selbstmeldungen**
+aus den Paketen dieser Runde: „gemessen und nicht hier gefixt", „bleibt als
+benannter Rest", „gehört einem anderen Agenten". Das ist der eigentliche Ertrag.
+Ein Rest, den ein Commit ehrlich benennt und den kein Register aufnimmt, ist genau
+so verloren wie einer, den niemand gesehen hat — nur teurer, weil ihn schon einmal
+jemand bezahlt hat.
