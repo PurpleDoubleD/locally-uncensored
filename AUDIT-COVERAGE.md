@@ -16,7 +16,7 @@ Zeile für Zeile: welcher Audit-Befund ist im Branch `experiment/audits-komplett
 
 ## 1. Bilanz
 
-Gemessen am HEAD `613df75b`. Die Zählung des Audits („12 kritisch, 34 hoch, 30 mittel, 2 niedrig") meint die **CONFIRMED**-Befunde; die Befundtabelle §4b hat 85 Zeilen, weil 7 als *unbewiesen* markierte dazukommen (1 kritisch, 3 hoch, 3 mittel). Diese Matrix führt alle 85.
+Gemessen am HEAD `cebf5c08`. Die Zählung des Audits („12 kritisch, 34 hoch, 30 mittel, 2 niedrig") meint die **CONFIRMED**-Befunde; die Befundtabelle §4b hat 85 Zeilen, weil 7 als *unbewiesen* markierte dazukommen (1 kritisch, 3 hoch, 3 mittel). Diese Matrix führt alle 85.
 
 ### Technik-Audit — 85 Befunde
 
@@ -37,18 +37,20 @@ Gezählt sind §3 (10 Amateur-Signale), §4 (49 Screen-Bullets), §5 (13 Token-Z
 
 | Status | Signale | Screens (49) | Tokens (13) | **gesamt** |
 |---|---|---|---|---|
-| umgesetzt | 10 | 35 | 4 | **49** |
+| umgesetzt | 12 | 39 | 4 | **55** |
 | teilweise | 0 | 4 | 3 | **7** |
 | begründet abgelehnt | 0 | 2 | 0 | **2** |
 | war schon behoben | 0 | 2 | 0 | **2** |
-| **OFFEN** | **2** | **6** | **6** | **14** |
+| **OFFEN** | **0** | **2** | **6** | **8** |
+
+**Alle Amateur-Signale sind zu.** Was offen bleibt, liegt fast vollständig in den Token-Zeilen (§5) — dem Teil, der nicht ein Bildschirm ist, sondern die Sprache darunter.
 
 Verifikationsgrad, Design: der Anteil `per Test` ist von 12 auf über 30 gestiegen, weil jedes Paket seit dem letzten Stand Sonden mitbringen musste. Was **nicht** per Test geht, ist jede DOM-Messung des Audits (Pixelabstände, Spaltenbreiten): der Testlauf hat keinen Renderer (`environment: 'node'`). Bewiesen ist dort jeweils die benannte **Ursache**, nicht die Zahl — außer wo ausdrücklich „Live-Messung" steht, dann lief ein echter Dev-Server.
 
 
 ### Das Gesamtbild in einem Satz
 
-Der Technik-Audit ist zu **96 %** umgesetzt, in beiden schweren Klassen vollständig (50 von 50), und die einzige verbliebene offene Position ist eine, die ich nicht entscheiden darf. Der Design-Audit steht bei **67 % ganz, 10 % halb und 3 % begründet abgelehnt** — bei der ersten Aufnahme waren es 25 %. „Ausnahmslos" stimmt für den Technik-Audit jetzt bis auf zwei Positionen, die beim Eigentümer liegen; beim Design-Audit sage ich lieber die Zahl als ein Wort.
+Der Technik-Audit ist zu **96 %** umgesetzt, in beiden schweren Klassen vollständig (50 von 50), und die einzige verbliebene offene Position darf ich nicht entscheiden. Der Design-Audit steht bei **75 % ganz, 10 % halb und 3 % begründet abgelehnt** — bei der ersten Aufnahme waren es 25 %, und **alle zehn Amateur-Signale sind zu**. Offen sind acht, sechs davon Token-Zeilen. „Ausnahmslos" stimmt für den Technik-Audit bis auf zwei Positionen beim Eigentümer; beim Design-Audit sage ich lieber die Zahl als ein Wort.
 
 > **Stand der Messung.** Alles unten ist am committeten HEAD gemessen. Im Arbeitsbaum liegen zum Zeitpunkt dieser Aufnahme uncommittete Änderungen von drei parallel arbeitenden Agenten (Chat/Header-Design, Persistenz-Rennen, Tailwind-Scan); sie sind hier **nicht** eingerechnet.
 
@@ -187,9 +189,10 @@ Zwei Befunde, die in **keinem** der beiden Audits stehen. Ich habe sie beim Nach
 
 | ID | Was | Fundstelle | Status | Anmerkung |
 |---|---|---|---|---|
-| KF-1 | Der Beenden-Pfad erreicht jeden Daemon außer dem Tunnel | `state.rs:462` | **OFFEN** | `AppState::shutdown_subprocesses` ist 115 Zeilen lang und erwähnt `remote`, `RemoteServer`, `tunnel` oder `cloudflared` **kein einziges Mal** — am HEAD `63294828` von mir nachgezählt. Ollama, ComfyUI, llama-server, der Embeddings-Server, der Trainer und der MLX-Sidecar stehen dort; der Tunnel hängt allein an `impl Drop for RemoteServer`. Der Kommentar über der Funktion begründet selbst, warum das nicht reicht: Tauri v2 führt `Drop for AppState` nicht zuverlässig aus — genau deshalb existiert der explizite Pfad. Dies ist die zweite Hälfte von T-39, siehe Abschnitt 5. |
+| KF-1 | Der Beenden-Pfad erreicht jeden Daemon außer dem Tunnel | `state.rs:462` | umgesetzt | `067a3c2b` | per Test (3 Sonden des Agenten + 3 eigene) | `RemoteServer::shutdown_tunnel()` ist jetzt der eine Eintrittspunkt; `Drop` ruft dieselbe Methode statt einer zweiten Kopie. `take()` wie jeder andere Slot — ein zweiter Schlag ginge auf eine womöglich recycelte pid, unter Windows als `taskkill /T /F` auf einen fremden Baum. **Was ich selbst gefunden habe: die Reihenfolge ist begründet, aber nicht festgenagelt.** Der Tunnel muss zuerst sterben, weil das Internet ihn hindurch weiter zu den Daemons erreicht, die der Rest der Funktion gerade abräumt. Meine Sonde: den Aufruf ans Ende verschoben → alle 774 Tests bleiben grün. Nachtrag beauftragt. |
 | KF-2 | Prosa erzeugt ausgeliefertes CSS | `AUDIT-COVERAGE.md:301` → `dist/assets/index-*.css` | umgesetzt | `fcce2b54` | per Test (13 Sonden des Agenten + 2 eigene) + A/B/A-Messung an echten Builds | Tailwind 4 scannt das Projektverzeichnis als Text. **30 Klassen ohne jede Call-Site** landeten im Bundle (roh −1.863 B, gzip −339 B; 1426 → 1396 Klassen, keine kommt hinzu) — aus Markdown, aus `docs/`, aus **Rust-Kommentaren** (`gpu.rs:217` → `[vendor:device]`) und aus 20 Testdateien, wo Platzhalter zu Regeln mit buchstäblich `background-color:#...` wurden. Eine davon steht in diesem Dokument in der Beschreibung **ihrer eigenen Entfernung** (`:194` → `max-w-[760px]`). Fix ist positiv formuliert (`source(none)` + zwei `@source` + ein `not`), keine Ausschlussliste nach Endungen — dieselbe Klasse steht in Tabelle *und* Testkommentar, eine Quelle abzuschalten hätte nichts genützt. Eine Zeile wurde gemessen und **verworfen**: `@source not "./index.css"` ergab ein byte-identisches Bundle. **Die eigentliche Kur am Test:** jede Nadel wird gegen *alle* Treffer geprüft, nicht gegen den ersten. |
 | KF-3 | Sechs Befunde, die erst sichtbar wurden, als der Client aufhörte, ein String zu sein | `mobile-client/**` | **teils offen** | Herausgefallen beim T-75-Umbau, in keinem Audit: (1) `repairToolCallArgs` — der Doppel-Dekodier-Zweig ist **unerreichbar**: ein doppelt kodiertes Argument ist gültiges JSON, das erste `JSON.parse` gelingt, `typeof === 'string'`, Rückgabe `{}` — genau der Fehler, den der Kommentar zu beheben behauptet. Verhalten festgenagelt, nicht repariert (Bytes eingefroren). (2) **Codex ignoriert eine eingeschaltete Persona nicht** — der TS-Nachbau hatte ein `else`, der echte Client nicht; neun grüne Zusicherungen betrafen die Kopie. (3) `mobile-parity.test.ts` testete das **Desktop**-`isThinkingCompatible` unter der Überschrift „mobile parity". (4) `useCodex-prompt-contract` prüfte `toContain('AUTONOMY CONTRACT')` gegen die ganze Rust-Datei — grün war es an der Desktop-Kopie nebenan; der Mobil-Prompt sagt „HARD RULES". (5) eslint lief zum ersten Mal überhaupt auf diesem Code: **5 echte Fehler**. (6) `tool-description-parity` prüfte `>= 9` bei 10 Werkzeugen — ein verlorenes hätte der Parser still geschluckt. |
+| KF-4 | Die App meldete den Zug fertig, bevor er im Store lag | `useChat.ts:323/994`, `useCodex.ts:2512`, `useAgentChat.ts:2224` | umgesetzt | `4bb21590` | **per Messung in echtem Chromium gegen echtes IndexedDB** + eigene Sonde | Vier Stellen veröffentlichten „fertig" und starteten *danach* den Schreibvorgang. Gemessen mit gepatchtem `IDBObjectStore.prototype.put` und rAF-Ticker, Profil 6,48 MB: unbelastet 0,6–4,3 ms (der Put ist oft schon **vor** dem Paint abgeschickt, −0,9 ms), bei CPU 20× gedrosselt **283–522 ms**. Der Verlust selbst reproduziert: gedrosselt **6 von 6** Läufen kamen nach `reload()` ohne die Antwort zurück. Der Fix dreht die Reihenfolge statt ein `await` davorzusetzen; nachher −225/−318/−256 ms, Vorzeichenwechsel. **Ehrlich:** der Verlust ist nicht weg — wer neu lädt, während die Antwort auf dem Schirm steht, verliert sie weiter (4/12, mit und ohne Fix). Was der Fix kauft, ist ein beobachtbares Signal. **Meine eigene Sonde fand eine Lücke:** die Position des Aufrufs ist nur kommentiert, nicht festgenagelt — verschoben bleiben 1233 Tests grün. Nachtrag beauftragt. |
 
 **Wie KF-2 vier Monate unentdeckt bleiben konnte:** `fokusring-und-press.test.ts:248` trägt `describe.skipIf(builtCss === null)` und liest aus `dist/assets`. Wo kein `dist/` steht, schaltet sich der ganze Block **still** ab. Das ist der dritte Fall desselben Musters in diesem Projekt (nach `gguf.rs:264` und `bundle-size-drift.live.test.ts`) — und ich bin selbst einmal darauf hereingefallen: ein Lauf war grün gegen ein `dist/`, das aus einer früheren Sonde stammte und nicht mehr zum Quelltext passte. Seitdem gilt für mich: **vor jedem Testlauf, der gebautes CSS liest, `rm -rf dist && npx vite build`.**
 
@@ -206,13 +209,13 @@ Der Design-Audit vergibt keine IDs. Vergeben sind hier: **D-A1…D-A10** (§3, d
 | D-A1 | Nachrichtenspalte und Composer sind zwei Formeln | `ChatInput.tsx:246`, `MessageBubble.tsx:187`, `MessageList.tsx:71` | umgesetzt | `bcec642b` | per Test (`src/components/chat/__tests__/long-transcripts-stay-cheap.test.ts`, `.../plan-done-vs-applied.test.ts` pinnen `--lu-measure`); der 0px-Versatz selbst ist **nicht verifizierbar hier** (braucht gerendertes DOM) | `--lu-measure: 760px` in `index.css:107`, benutzt von MessageList, ChatInput, WorkingAnchor, GoalBar, LoopBar, PlanBar. **Rest:** `GroupCostHint.tsx:54` trägt weiter `max-w-[70%]` und wird über `composerAbove` *innerhalb* der Measure-Spalte gerendert. |
 | D-A2 | Die Hausschrift wird nie ausgeliefert | `index.css:88` | umgesetzt | `44a76aad` (Dateien), `bcec642b` (Einbindung) | nur Review | `public/fonts/` mit 16 woff2 und 39 `@font-face`, verlinkt in `index.html:20`. In `base/` gab es `public/fonts/` nicht. |
 | D-A3 | Vier Maßstäbe gleichzeitig | `index.css:79`, `Sidebar.tsx:236`, `IntentBar.tsx:42`, `Composer.tsx:345` | umgesetzt | `c7076fca` | per Test (`ein-massstab.test.ts`, 10 Zeilen Sperrklinke) | Ein Maßstab: Wurzel zurück auf `16px`, `--ui-scale: 1.15` einmal definiert, **genau eine** `zoom`-Deklaration, die das Token liest — auf `#root, body > :not(#root)` (Geschwister, nie Nachfahren: `zoom` auf `body`/`html` skaliert Portale doppelt, `transform: scale()` macht das Element zum Containing Block und bricht `position: fixed`). Die drei anderen Ebenen sind an ihren alten Fundstellen weg und dort festgenagelt. Nebenfund: `Composer.tsx:178` trug `max-w-[760px]` als **handgetippte Kopie** von `--lu-measure` und war unbemerkt auf 874 gerenderte px gewachsen, weil sie nicht so heißt wie das Token. |
-| D-A4 | Der Platzhalter ist heller als der eingegebene Text | `index.css:362-363` | **OFFEN** | — | nur Review | `index.css:501-502` sind byte-gleich mit dem Audit-Zitat: `.light ::placeholder { rgb(31 41 55) }` (gray-800), `.dark ::placeholder { rgb(229 231 235) }` (gray-200). Die Grundrelation eines Eingabefelds steht weiter auf dem Kopf. |
+| D-A4 | Der Platzhalter ist heller als der eingegebene Text | `index.css:362-363` | umgesetzt | `cebf5c08` | per Test (Kontrast in **beide** Richtungen) + Live-Messung + eigene Sonde | Farben aus `getComputedStyle` gelesen, nicht aus Klassennamen. Im **Hellmodus war der Platzhalter exakt so stark wie der Text** (beide 14,68:1), im Dunkelmodus 89 %. Jetzt 7,56:1 / 6,78:1. Untergrenze geprüft: 5,73:1 auf dem hellsten dunklen Feldgrund, 6,93:1 auf dem dunkelsten hellen — nichts unter 4,5:1. Die zwei Werte sind nicht erfunden: gray-600 ist, was `.light .placeholder-gray-600` ohnehin setzt, gray-400 das, worauf der Rescue-Layer dimme Textklassen hebt. **Meine eigene Sonde:** die dunkle Regel auf einen Wert *heller* als der Text gesetzt, also den Befund umgedreht → 2 rot. **Offen und benannt:** zwei globale Zeilen können nicht garantieren, dass der Platzhalter in *jedem* Feld leiser ist als sein Text — das Sidebar-Suchfeld hat Text bei 3,45:1, dort bleibt die Relation umgedreht (Faktor 3,9 → 1,9). |
 | D-A5 | Sieben Controls im Composer, sieben Rezepte | `ChatInput.tsx:383/411/452`, `VoiceButton.tsx:123`, `ChatView.tsx:348`, `PluginsDropdown.tsx:69`, `ModelSelector.tsx:711` | umgesetzt | `8198495f` + `3883eaa8` (VoiceButton) | per Test (`src/components/chat/__tests__/composer-grammar.test.ts`) | Zwei Rezepte: `.lu-control` (+ `--icon`) und `.lu-primary`. Der Commit meldet, dass es tatsächlich **zehn** Formsprachen waren, nicht sieben. |
 | D-A6 | Die Hauptnavigation ist Text, kein Ziel | `Header.tsx:157/174/310` | umgesetzt | `bcec642b` | nur Review | Ein `NAV_BASE` (`Header.tsx:147`): `h-7 px-2 rounded-md text-[0.68rem]`, aktiv als Fläche. |
 | D-A7 | Streaming ist kein eigener Zustand | `MessageBubble.tsx:442`, `WorkingAnchor.tsx:37` | umgesetzt | `bcec642b` + `3883eaa8` | per Test (`src/components/chat/__tests__/der-caret-ist-reines-css.test.ts`) | Caret als CSS-`::after` mit `@keyframes` (kein Timer, kein neues Prop); Aktionsleiste beim Streamen aus; Anker in der Measure-Spalte. **Zwei bewusste Abweichungen, beide im Code begründet:** Gate auf `!isStreaming` statt auf `(!isLast \|\| !!message.usage)` (ein Backend ohne `usage` verlöre die Leiste sonst dauerhaft), Blink 300/300 ms statt 133/133 (3,76 Hz liegt an der Schwelle von WCAG 2.3.1). |
 | D-A8 | Der primäre Button ist auf drei Screens grau | `create/ui/Button.tsx:43`, `auth/AccountPanel.tsx:164`, `ChatInput.tsx:455` | umgesetzt | `f336b91e` | per Test (`src/components/__tests__/primary-recipe.test.ts` rechnet den WCAG-Kontrast aus den echten Tokens) | `.lu-primary` an genau einer Stelle definiert, benutzt von allen drei. **Rest:** `Onboarding.tsx:795` hat sein eigenes `primaryBtn` und erbt das Rezept nicht (siehe D-S36). |
 | D-A9 | Die Marke erscheint vier Mal in vier Größen | `Titlebar.tsx:59/71`, `Header.tsx:227`, `CloudSwitch.tsx:52`, `ChatView.tsx:159`, `Onboarding.tsx:790` | umgesetzt | `b3f0f786` | per Test (`das-zeichen-ist-vektor.test.ts`) + eigene Sonde | `brand.ts` mit `MONOGRAM`/`MONOGRAM_INVERT`, alle Einbindungen ziehen daraus; Header 33px → 20px. Es waren **zehn**, nicht neun: der Test durchsucht `src/components/**`, statt eine Liste abzuhaken, und fand `CloudGateModal.tsx:71`, das im Audit nicht steht. Der Test verbietet ausdrücklich die Behauptung „spart Platz" — er liest die echten Dateigrößen (SVG 11.179 B > PNG 3.219 B) und rechnet stattdessen die Rasterzahlen nach. **Offen:** die Titlebar trägt weiterhin ihre eigene Kopie der Pfadkonstante, weil `titlebar-monogramm.test.ts:44-52` den Literalpfad wörtlich festnagelt — eine Doppelung, die der Agent meldet statt sie zu verstecken. Meine eigene Sonde: eine Einbindung zurück auf den PNG-Pfad → 4 rot. |
-| D-A10 | Elf Icons ohne Label als Hauptnavigation von Create | `intents.ts:33-154`, `IntentBar.tsx:88` | **OFFEN** | — | nur Review | `IntentBar.tsx:87` unverändert: nicht-selektierte Labels auf `max-w-0 opacity-0 px-0`. Die `short`-Labels liegen weiter ungenutzt im Datenmodell. |
+| D-A10 | Elf Icons ohne Label als Hauptnavigation von Create | `intents.ts:33-154`, `IntentBar.tsx:88` | umgesetzt | `cebf5c08` | per Test + Live-Messung + eigene Sonde | Es sind **zwölf** Intents, nicht elf, und `meta.short` hatte **null Leser** im ganzen Projekt. Gemessen: nur Icons 476 px, `short` **1.068 px**, `label` 1.704 px — verfügbar bei 1280 px Fenster sind 1.252 px. Die vollen Namen sprengen das Standardfenster um 452 px; das ist die Antwort darauf, warum `short` existiert. Gegengeprüft statt vermutet, was bei Platzmangel passiert: bei 700 px ohne `flex-wrap` läuft die Leiste **50 px über ihren Container** und die Pillen stauchen nicht. Der Agent hatte `shrink-0` gesetzt und wieder **entfernt**, weil die Messung zeigte, dass es nichts tut. Meine eigene Sonde: `meta.short` → `meta.label` → 1 rot, der Test heißt „rendert `short`, nicht `label`". |
 | D-E1 | §7 „Die eine Sache“: eine gemeinsame Messgröße | = D-A1 | umgesetzt | `bcec642b` | per Test (siehe D-A1) | Der als stärkstes Signal des Audits benannte Punkt (4 von 6 Prüfern unabhängig) ist der eine Design-Befund, der vollständig gelandet ist. |
 | D-X1 | Anhang-Korrektur: `big.dot = 'bg-red-400/80'` | `ModelTiles.tsx:32` | umgesetzt | `3883eaa8` | nur Review | `orange-500/80` und „Runs on CPU, slower“ statt „Too big for your GPU“ — die Leiter bleibt emerald → amber → orange. |
 
@@ -250,10 +253,10 @@ Der Design-Audit vergibt keine IDs. Vergeben sind hier: **D-A1…D-A10** (§3, d
 | D-S28 | 12 identische Sektionsköpfe | `SettingsPage.tsx:155` | umgesetzt | `51732e63` | per Test (Kontrast nachgerechnet) | `dark:text-gray-500` `#6b7280` auf `#202020` = **3.37:1**, also unter AA. Jetzt drei echte Stufen (21,16 / 15,09 / 12,88 px) bei 13.16:1. |
 | D-S29 | Zwei gleich aussehende Reset-Textlinks | `SettingsPage.tsx` | **teilweise** | `51732e63` | per Test (Kontrast nachgerechnet) | Der **gefährlichere** der beiden trug `dark:text-gray-600` = **2.16:1**, war also der unlesbarere. Jetzt ein umrandeter Gefahrknopf mit `AlertTriangle` und dem Satz „Every tab, not just {tab}." — 4.83:1 / 5.89:1, Kante nach 1.4.11. **Offen und benannt:** der tab-weite Reset-Link steht im Dunkelmodus weiter auf 3.37:1; eine fremde Testdatei (`reset-arming-is-visible.test.ts`) pinnt seine Klassen wörtlich. |
 | D-S30 | Aktiver Tab und Aktionsbutton tragen dieselbe Fläche | `SettingsPage.tsx` | umgesetzt | `51732e63` | per Test (Kontrast + Negativkontrolle) | Eine Zustandssprache: `bg-lu-accent-soft` + Akzentkante für aktiven Tab, gewähltes Theme und TTS-Motor (Kante 3.37:1 hell / 6.27:1 dunkel, über den 3:1 aus 1.4.11), `aria-current="page"`. Aktionen behalten Neutralgrau — der Upload-Button ist als **Negativkontrolle** gepinnt, damit die Grenze nicht wieder verwischt. |
-| D-S31 | Banner und Empty-State widersprechen sich | `CreateExperimental.tsx:145`, `Stage.tsx:509` | **OFFEN** | — | nur Review | `CreateExperimental.tsx:207` und `Stage.tsx:505`, beide Texte unverändert. |
-| D-S32 | QUALITY/ASPECT zentriert über linksbündigem Prompt | `create/experimental/Composer.tsx` | **OFFEN** | — | nur Review | `Composer.tsx:336-337`: `justify-center` plus `scale(0.7)` unverändert. |
-| D-S33 | „Neg“ sieht aus wie ein zweiter Platzhalter | `Composer.tsx:236` | **OFFEN** | — | nur Review | `:224-228` byte-identisch zu `base/`. |
-| D-S34 | Rechte 45px-Leiste mit zwei unbeschrifteten Icons | `CreatePanel.tsx:43,53` | **OFFEN** | — | nur Review | Die ganze Datei ist zu `base/` byte-identisch. |
+| D-S31 | Banner und Empty-State widersprechen sich | `CreateExperimental.tsx:145`, `Stage.tsx:509` | umgesetzt | `cebf5c08` | per Test + Live-Messung | **Auf dem Mac gibt es keinen Widerspruch, auf Windows schon:** dort steht „Start it from Settings or wait for auto-start" über einem Knopf, der ComfyUI selbst mitinstalliert. Beide Wortlaute lagen außerhalb des Gebiets und keiner ist für sich falsch — deshalb hat der Agent nicht umformuliert, sondern entschieden, **wer spricht**: `stageShowsSetupCard` steht einmal in `stageGate.ts`, Bühne und Kopfzeile lesen dieselbe Regel; solange die Karte da ist, schweigt `modelLoadError`. |
+| D-S32 | QUALITY/ASPECT zentriert über linksbündigem Prompt | `create/experimental/Composer.tsx` | umgesetzt | `cebf5c08` | per Test + Live-Messung | **Kleiner als beschrieben:** der `scale(0.7)` ist mit `c7076fca` weg, am HEAD stand `transform: none`, `zoom: 1` — nur der Kommentar erinnerte daran. Übrig war `justify-center`, und zwar auf **allen drei** Rückgaben von `LaneControls`. Versatz 142,5 px gemessen, nachher 0,1 px Rundung. Die 15 px linkes Polster sind kein gewählter Wert (Panelrand 1 + `px-3.5` 14), und der Test rechnet das aus der Datei nach, statt die Zahl zu glauben. |
+| D-S33 | „Neg“ sieht aus wie ein zweiter Platzhalter | `Composer.tsx:236` | umgesetzt | `cebf5c08` | per Test (Kontrast) + Live-Messung | **Anders als beschrieben, aber real:** „Neg" war am HEAD kein Eingabefeld, sondern schon ein Toggle. Der echte Befund liegt beim *aufgeklappten* Feld: der eingetippte Wert stand auf 6,78:1, der Platzhalter auf 13,91:1 — **das Feld las sich leer stärker als gefüllt.** Dazu hatte der Schalter weder `aria-pressed` noch `aria-expanded`. Jetzt eigene Fläche, sichtbare Beschriftung, Wert erbt die Promptfarbe (15,65:1), beide aria-Zustände plus `aria-controls`. |
+| D-S34 | Rechte 45px-Leiste mit zwei unbeschrifteten Icons | `CreatePanel.tsx:43,53` | umgesetzt | `cebf5c08` | per Test + Live-Messung | **Zahl veraltet, Befund verschoben:** die Leiste ist **59,8 px**, nicht 45, und „unbeschriftet" stimmte nur für die sichtbare Fläche — beide Icons trugen `aria-label` *und* `title`. Der eigentliche Befund: **beide riefen dasselbe `onOpenChange(true)`**, getrennt durch einen Strich, der eine Gruppierung andeutete, die es nicht gab. Zwei Piktogramme für einen Befehl. Jetzt ein Knopf mit dem Wort „Gallery". Die Leiste bleibt eine eigene, und das ist begründet: sie *ist* das Panel, nur zugeklappt — beide Zustände teilen dieselbe Layoutzeile, sonst springt das Layout beim Klappen. |
 | D-S35 | Sechs Onboarding-Schritte, nicht drei | `Onboarding.tsx:782…1791` | umgesetzt | `51732e63` | per Test (`onboarding-schritte-und-primaer.test.ts`) | **Keine Schritte gelöscht** — das wäre eine Produktentscheidung. Weg ist die *Behauptung*, es seien sechs Aufgaben: `welcome` ist ein Titelbild, `done` eine Bestätigung. Gezählt werden Arbeitsschritte (macOS 3, Windows/Linux 4) und in Worten gesagt: „Step 2 of 4 · Image & video". |
 | D-S36 | Primärbutton-Hover liest als deaktiviert | `Onboarding.tsx:745` | umgesetzt | `51732e63` | per Test (Kontrast nachgerechnet) | Nachgerechnet: alt lief der Hover in Dunkel **dunkler** (`#ffffff → #e5e7eb`) und in Hell **heller** — die beiden Modi liefen gegenläufig. Jetzt `.lu-primary`, in beiden Modi heller (6.83:1 → 8.25:1), plus die **vier** Inline-Kopien desselben Rezepts. |
 | D-S37 | H1 ist `text-base` = 18,4px | `Onboarding.tsx:790` | umgesetzt | `51732e63` | per Test | `text-[1.5rem]`, **rem statt px mit Absicht**: die Wurzel kippte während des Pakets zwischen `18.4px` und `16px + --ui-scale:1.15` (D-A3). 1.5rem ergibt in *beiden* Regimen 27,6 px; `text-[28px]` wäre im neuen durch `zoom` auf 32,2 px gelaufen. Abweichung vom Soll 1,4 % / 1,8 %, im Test benannt. |
@@ -322,7 +325,7 @@ Die Wellen sind Fixes, keine eigenen Befunde; sie stehen hier, weil der Auftrag 
 
 ## 4. Die offene Liste — was noch zu vergeben ist
 
-18 Positionen: 1 Technik-Befund und 1 halber, 1 eigener Fund, 2 aus dem Technik-Nachtrag, 14 Design-Befunde. Nichts davon ist `unklar` — jede Zeile ist am Code entschieden. Diese Liste ist aus der Haupttabelle **abgeleitet**, nicht von Hand gepflegt; sie stand zweimal veraltet da, weil sie ein zweiter Pflegeweg war.
+12 Positionen: 1 Technik-Befund und 1 halber, 2 aus dem Technik-Nachtrag, 8 Design-Befunde. Nichts davon ist `unklar` — jede Zeile ist am Code entschieden. Diese Liste ist aus der Haupttabelle **abgeleitet**, nicht von Hand gepflegt; sie stand zweimal veraltet da, als sie noch ein zweiter Pflegeweg war.
 
 ### 4.1 Technik — 1 offene und 1 halbe Position
 
@@ -330,7 +333,6 @@ Die Wellen sind Fixes, keine eigenen Befunde; sie stehen hier, weil der Auftrag 
 |---|---|---|
 | T-60 | OAuth-Loopback: `state`-Nonce fehlt. Jede offene Seite kann per Top-Level-Navigation eine laufende Anmeldung beenden und den Fehlertext wählen. **Nur serverseitig zu schließen** — die Änderung an Supabases `uri_allow_list` steht dem Eigentümer zu, nicht mir. | 4 |
 | T-72 | *(halb)* Größe und Authenticode sind gepinnt; der SHA-256 der Installer-URL fehlt. Die echte Prüfsumme verlangt einen Windows-Rechner oder einen 211-MiB-Download — **beides habe ich nicht autorisiert.** | 5 |
-| KF-1 | *(eigener Fund, kein Audit)* Der Beenden-Pfad (`state.rs:462`) erreicht jeden Daemon außer dem Tunnel. Zweite Hälfte von T-39. | 2 |
 
 ### 4.2 Technik-Nachtrag — 2 offene Positionen
 
@@ -339,16 +341,9 @@ Die Wellen sind Fixes, keine eigenen Befunde; sie stehen hier, weil der Auftrag 
 | ZB-7 | `vite.config.ts` ist **2.486 Zeilen** (Audit maß 2.466, Ziel < 100). Die Guards sind extrahiert und getestet, der Dev-Server steckt weiter in der Build-Konfiguration. |
 | AS-10 | Lint ist weiterhin kein Gate (`ci.yml`: `Lint (non-gating — pre-existing debt)`). Die Schuld dahinter ist stark abgetragen, der Befund — „ein dauerhaft rotes Gate ist kein Gate" — steht. |
 
-### 4.3 Design — 14 offene und 7 halbe Befunde
+### 4.3 Design — 8 offene und 7 halbe Befunde
 
 *Aus der Haupttabelle abgeleitet, Stand dieses Commits. Zwei Positionen (D-S16, D-S49) stehen nicht hier: sie sind **begründet abgelehnt**, also entschieden — nachzulesen mit Messung an ihrer Zeile.*
-
-**Amateur-Signale (§3) (2):**
-
-| ID | Was offen ist | |
-|---|---|---|
-| D-A4 | Der Platzhalter ist heller als der eingegebene Text |  |
-| D-A10 | Elf Icons ohne Label als Hauptnavigation von Create |  |
 
 **Token-Zeilen (§5) (9):**
 
@@ -364,7 +359,7 @@ Die Wellen sind Fixes, keine eigenen Befunde; sie stehen hier, weil der Auftrag 
 | D-T11 | Motion | halb |
 | D-T13 | Platzhalter |  |
 
-**Screen-Bullets (§4) (10):**
+**Screen-Bullets (§4) (6):**
 
 | ID | Was offen ist | |
 |---|---|---|
@@ -372,10 +367,6 @@ Die Wellen sind Fixes, keine eigenen Befunde; sie stehen hier, weil der Auftrag 
 | D-S04 | Dritter Modus-Tab ohne Label |  |
 | D-S18 | Drei Bänder vor dem ersten Inhalt | halb |
 | D-S29 | Zwei gleich aussehende Reset-Textlinks | halb |
-| D-S31 | Banner und Empty-State widersprechen sich |  |
-| D-S32 | QUALITY/ASPECT zentriert über linksbündigem Prompt |  |
-| D-S33 | „Neg“ sieht aus wie ein zweiter Platzhalter |  |
-| D-S34 | Rechte 45px-Leiste mit zwei unbeschrifteten Icons |  |
 | D-S39 | Nackter Punkt statt Icon in Schritt 3 | halb |
 | D-S48 | Settings skaliert nach oben nicht | halb |
 
