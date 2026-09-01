@@ -174,7 +174,7 @@ export function ContextMenu({ items, x, y, label, onClose }: ContextMenuProps) {
         ref={menuRef}
         role="menu"
         aria-label={label}
-        className="absolute min-w-[9rem] py-1 rounded-md bg-white dark:bg-[#141414] border border-gray-200 dark:border-white/10 shadow-lg text-[0.7rem]"
+        className="absolute min-w-[9rem] py-1 rounded-md bg-white dark:bg-lu-canvas border border-gray-200 dark:border-white/10 shadow-lg text-[0.7rem]"
         style={{ left: pos.left, top: pos.top }}
         onClick={(e) => e.stopPropagation()}
         onKeyDown={onKeyDown}

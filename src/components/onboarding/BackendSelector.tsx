@@ -99,7 +99,7 @@ export function BackendSelector({ open, backends, onClose }: Props) {
         <h3 className="text-base font-semibold text-white text-center">
           {backends.length} local backend{backends.length > 1 ? 's' : ''} detected
         </h3>
-        <p className="text-[0.75rem] text-gray-400 text-center leading-relaxed">
+        <p className="text-[12px] text-gray-400 text-center leading-relaxed">
           {backends.length === 1
             ? `${backends[0].name} is running on your system.`
             : 'Multiple backends running. Select your primary backend.'}

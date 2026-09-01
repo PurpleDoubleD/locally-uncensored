@@ -93,18 +93,80 @@
    carry no colour identity.
    ───────────────────────────────────────────────────────────────────── */
 @theme {
-  /* ── Neutral ramp — spread for depth (uselu base, widened). Used by the
-     elevated-surface helper below; the canvas/sidebar/header shades live as
-     literals in the layout components. ── */
-  --color-lu-base: #202020;     /* app canvas */
+  /* ── Neutral ramp — spread for depth (uselu base, widened) ──────────
+     D-T06, am 01.09.2026 nachgezaehlt. Der Kommentar, der hier stand, war
+     an einer Stelle schlicht falsch: `--color-lu-base` hiess „app canvas",
+     aber die Leinwand der App ist #141414, nicht #202020. Gemessen im
+     laufenden Fenster (getComputedStyle auf der AppShell-Wurzel):
+
+       Leinwand + Titelleiste + Header   #141414   9 Fundstellen  KEIN Token
+       Pane + Sidebar + Create-Panel     #1e1e1e   5 Fundstellen  KEIN Token
+       --color-lu-base   #202020   2 Fundstellen (zwei Modale)
+       --color-lu-panel  #262626   4 Fundstellen
+       --color-lu-raised #2d2d2d   0 Fundstellen — im Browser als LEERE
+                                   Variable gemessen: Tailwind gibt ein
+                                   Farbtoken nur aus, wenn es jemand
+                                   aufruft. Das Token existiert nur hier.
+       --color-lu-overlay #363636  6 Fundstellen
+
+     Neu ist deshalb nur EINE Stufe, und zwar die meistbenutzte Flaeche der
+     App, die als einzige gar keinen Namen hatte. `--color-lu-raised`
+     bleibt vorerst stehen (Entfernen waere eine eigene Entscheidung), aber
+     es steht jetzt dran, dass es tot ist.
+
+     Diese Leiter ist DUNKEL. Es gibt bewusst kein `.light`-Gegenstueck:
+     im Hellmodus zerfaellt #141414 in ZWEI Rollen, die dieselbe dunkle
+     Zahl teilen — Fensterrahmen (`bg-gray-200`: Titlebar, Header,
+     AppShell) und Vollflaeche (`bg-white`: ViewSkeletons, Kontextmenues,
+     Create-Wurzel). Eine gespiegelte Leiter muesste sich fuer eine der
+     beiden entscheiden und faerbte die andere falsch. Deshalb tragen alle
+     Call-Sites weiterhin `dark:` und ihr eigenes Hell-Pendant. ── */
+  --color-lu-canvas: #141414;   /* Leinwand, Titelleiste, Header */
+  --color-lu-base: #202020;     /* zwei Modalflaechen, NICHT die Leinwand */
   --color-lu-panel: #262626;    /* sidebar, panels */
-  --color-lu-raised: #2d2d2d;   /* cards, hover */
+  --color-lu-raised: #2d2d2d;   /* TOT: 0 Call-Sites (Stand 01.09.2026) */
   --color-lu-overlay: #363636;  /* dropdowns, modals, popovers */
 
-  /* ── Form: moderately less round (pills/cards read less "toy") ── */
-  --radius-xl: 0.5rem;
-  --radius-2xl: 0.625rem;
-  --radius-3xl: 0.75rem;
+  /* ── Form: EINE Radiusleiter ────────────────────────────────────────
+     D-T08. Vorher liefen zwei Systeme nebeneinander: die rem-abgeleitete
+     Tailwind-Leiter und die px-Tokens `--radius-control/panel/pill` unten
+     im `:root`. Das Ergebnis war im Browser nachgemessen (Chromium 149,
+     getComputedStyle):
+
+       rounded      4px      rounded-lg   8px
+       rounded-sm   4px      rounded-xl   8px   ← DIESELBE Zahl wie lg
+       rounded-md   6px      rounded-2xl 10px
+
+     `rounded-lg` und `rounded-xl` waren derselbe Wert: zwei Namen, eine
+     Zahl, und keine Moeglichkeit, im Code eine Stufe ueber 8px zu meinen,
+     ohne in eckige Klammern auszuweichen. Genau das ist passiert —
+     `rounded-[10px]` (3x), `rounded-[8px]` (8x), `rounded-[6px]` (4x)
+     und `rounded-[5px]` (20x) sagen Zahlen, fuer die es Namen gibt oder
+     geben sollte.
+
+     Jetzt sind die Haus-px-Tokens die Quelle, und jede Stufe ist genau
+     einmal da:
+
+       rounded-sm   4px   die Nagelstufe (Badges, Punkte)
+       rounded-md   6px
+       rounded-lg   8px = --radius-control   Controls, Knoepfe
+       rounded-xl  10px                      Panes (die Sidebar steht dort)
+       rounded-2xl 12px = --radius-panel     Dialoge, Panels
+
+     Zwei Werte aendern sich sichtbar: `rounded-xl` 8 → 10px (16
+     Fundstellen) und `rounded-2xl` 10 → 12px (6 Fundstellen). Beide sind
+     kein Zufallssprung, sondern schliessen eine gemessene Luecke: die
+     Hauptpane in AppShell trug `rounded-xl` (8px) und stand direkt neben
+     der Sidebar mit `rounded-[10px]` — zwei Flaechen derselben Familie,
+     nebeneinander, mit verschiedenen Ecken. Und `rounded-2xl` ist der
+     Dialogradius, der damit auf `--radius-panel` faellt statt 2px
+     daneben zu liegen.
+
+     `--radius-3xl` ist geloescht: 0 Fundstellen, und im Browser als leere
+     Variable gemessen — die Klasse haette 0px ergeben. ── */
+  --radius-lg: var(--radius-control);
+  --radius-xl: 10px;
+  --radius-2xl: var(--radius-panel);
 
   /* ── Depth: shadows tuned to be visible on dark backgrounds ── */
   --shadow-lg: 0 8px 24px -6px rgba(0, 0, 0, 0.6), 0 2px 6px -2px rgba(0, 0, 0, 0.4);
@@ -132,6 +194,48 @@
      erfuellt damit 1.4.11 (Nicht-Text-Kontrast) fuer die Buttongrenze. */
   --color-lu-on-accent: #111827;
   --color-lu-accent-edge: #8b7cf0;
+
+  /* ── Der Cloud-Akzent (D-T05) ───────────────────────────────────────
+     Der Audit las die Lage als „zwei Akzente nebeneinander": #a094f8
+     steht hier als Token, #7c3aed stand an 20 Stellen als Literal, und
+     das Brand-Kit-Violett #8b5cf6 kommt in src/ ueberhaupt nicht vor
+     (nachgezaehlt: 0 Fundstellen). Der naheliegende Schluss waere, auf
+     EINEN Hex zusammenzufallen. Nachgerechnet ist dieser Schluss falsch,
+     und zwar deutlich.
+
+     Es sind keine zwei Marken, es sind zwei ROLLEN. #7c3aed steht
+     ausschliesslich an der Cloud: der getoente Composer-Rahmen im
+     Cloud-Modus, das „Cloud"-Abzeichen ueber dem Eingabefeld, der
+     Cloud-Schalter, der Cloud-Gate-Dialog. Cloud ist in dieser App ein
+     GELDZUSTAND — die Nachricht laeuft auf gemieteten GPUs und wird
+     abgerechnet. Dass dieser Zustand nicht dieselbe Farbe traegt wie die
+     Hausmarke, ist die Aussage, nicht der Fehler.
+
+     Die Rechnung (WCAG 2.1, relative Luminanz, alle Halbtransparenzen
+     ueber ihren echten Grund gedeckt — #ffffff hell, #1e1e1e dunkel;
+     Minimum ueber die sechs Cloud-Textstellen):
+
+       heute   #7c3aed hell / #a78bfa dunkel      4,53:1   ✓ AA
+       nur     #a094f8 (Haus-Akzent)              2,29:1   ✗
+       nur     #8b5cf6 (Brand-Kit)                3,36:1   ✗
+       Paar    #8b7cf0 hell / #a094f8 dunkel      2,87:1   ✗
+
+     Das heutige Paar ist das einzige der vier, das AA haelt. Ein Wechsel
+     KOSTET also zwischen 1,2 und 2,2 Kontraststufen und wirft jede
+     Cloud-Beschriftung unter die Grenze. Die gefuellte Cloud-Flaeche
+     (`bg-lu-cloud text-white`) traegt in beiden Modi dieselbe Farbe und
+     kommt auf 5,70:1; unter #a094f8 waere sie 2,60:1.
+
+     Was hier also passiert, ist NICHT „ein Akzent statt zwei", sondern
+     „eine Definition statt zwanzig Literalen". Dieselbe Aufteilung wie
+     beim Haus-Akzent oben: eine Farbe fuers Helle, eine angehobene
+     fuers Dunkle.
+
+       hell   #7c3aed auf #ffffff  5,70:1   (und als Flaeche, beide Modi)
+       dunkel #a78bfa auf #1e1e1e  6,13:1
+     ── */
+  --color-lu-cloud: #7c3aed;
+  --color-lu-cloud-lift: #a78bfa;
 
   /* ── Motion — eine benannte Leiter statt verstreuter Zahlen ──
      Dauer und Kurve standen bisher als Literale in den Komponenten. Erhoben
@@ -205,12 +309,51 @@
      17,48 / 14,72 / 13,248 / 11,408 / 12,88px fielen; keine einzige davon
      lag auf einem Pixel. Die Stufen selbst sind unverändert gemeint, nur
      gerundet: 20 / 15 / 13 / 12 / 10 / 11px. */
-  --text-display: 20px;      --text-display-lh: 1.2;   --text-display-fw: 600;
+  --text-display: 20px;      --text-display-lh: 1.2;   --text-display-fw: 500;
   --text-title:   15px;      --text-title-lh:   1.3;   --text-title-fw:   600;
   --text-body:    13px;      --text-body-lh:    1.5;   --text-body-fw:    400;
   --text-control: 12px;      --text-control-lh: 1;     --text-control-fw: 500;
   --text-label:   10px;      --text-label-lh:   1;     --text-label-fw:   600;
   --text-mono:    11px;
+  /* --text-micro ist KEINE siebte Zahl: es ist dieselbe 10, die
+     --text-label traegt. Siehe die Rechnung bei `.t-micro` unten. */
+  --text-micro:   var(--text-label);
+
+  /* ── Die Markenschrift fuer die Displaystufe ────────────────────────
+     D-T03 stand als „Display-Schrift fehlt ganz" in der Matrix, mit der
+     Begruendung, `public/fonts/lu-fonts.css` enthalte ausschliesslich
+     Inter-Faces. Das ist nachgemessen falsch. Die Datei hat 39
+     `@font-face`-Bloecke in drei Familien:
+
+       Inter           21 Bloecke  (400/500/600, sieben Unicode-Bereiche)
+       JetBrains Mono  12 Bloecke  (500)
+       Space Grotesk    6 Bloecke  (500 und 700, latin/latin-ext/vietn.)
+
+     Und sie ist nicht nur deklariert, sie laedt. Im laufenden Fenster
+     (Chromium 149) nach `document.fonts.load`:
+
+       [...document.fonts] enthaelt „Space Grotesk" 500 und 700,
+       document.fonts.check('500 20px "Space Grotesk"') === true
+       Breite von „Locally Uncensored" bei 100px Schriftgrad:
+         Inter 600         1103,51px
+         Space Grotesk 500 1094,18px   (-0,85 %)
+         Space Grotesk 700 1094,34px
+         serif (Rueckfall)  972,23px   ← klar unterscheidbar, es faellt
+                                          also nichts zurueck
+
+     Die drei woff2-Dateien liegen in public/fonts/woff2/ und sind ueber
+     `index.html` schon heute im Bundle. Nichts wird nachgeladen, nichts
+     kommt hinzu — der Slot war unbesetzt, obwohl die Schrift ausgeliefert
+     wurde.
+
+     Gewicht 500, nicht 600: Space Grotesk hat in dieser Datei genau die
+     Schnitte 500 und 700. Bei `font-weight: 600` waehlt Chromium nach der
+     CSS-Font-Matching-Regel den naechsthoeheren echten Schnitt, also 700
+     — gemessen an der Breite (600 ergab 1094,34 = exakt der 700er-Wert,
+     nicht 1094,18 wie 500). Die Displaystufe haette also still fett
+     gerendert. --text-display-fw geht deshalb auf 500, den Schnitt, den
+     es wirklich gibt. ── */
+  --font-display: 'Space Grotesk', 'Inter', system-ui, -apple-system, sans-serif;
 
   /* Control heights + spacing rhythm */
   --space-unit: 4px;
@@ -653,6 +796,58 @@ input[type="range"]::-webkit-slider-thumb {
 }
 
 /* ─────────────────────────────────────────────────────────────────────
+   `shadow-sm` ist ein Hellmodus-Rezept — eine Regel statt zwoelf
+   Call-Sites (D-T09).
+
+   `--shadow-lg/xl/2xl` hat dieses Haus fuer dunkle Flaechen nachgezogen
+   (0,6–0,8 Alpha, grosse Weichzeichnung). `shadow-sm` NICHT: es steht
+   weiterhin auf Tailwinds Werkseinstellung, `0 1px 3px rgb(0 0 0/.1)`
+   plus `0 1px 2px -1px rgb(0 0 0/.1)`. An zwoelf Stellen der App.
+
+   Nachgerechnet (WCAG 2.1, dunkelster Schattenpixel gegen seinen Grund;
+   wo beide Lagen uebereinanderliegen, deckt der Schatten 19 % Schwarz):
+
+     hell   #ffffff Blatt        1,248 … 1,558:1
+     hell   #e5e7eb Leinwand     1,247 … 1,554:1
+     dunkel #141414 Leinwand     1,017 … 1,033:1
+     dunkel #1e1e1e Pane         1,033 … 1,065:1
+     dunkel #262626 Panel        1,051 … 1,089:1
+     dunkel #363636 Overlay      1,077 … 1,156:1
+
+   Zum Vergleich: die Pane-Kante im Hellmodus stand vor D-S42 bei 1,008:1
+   und wurde dort als „keine Kante, das ist Rauschen" verworfen. Die
+   dunklen Werte hier liegen in derselben Klasse.
+
+   Und es hilft NICHT, den Schatten dunkler zu stellen. Ein Schatten kann
+   eine Flaeche nur abdunkeln, also ist er nach unten durch Schwarz
+   begrenzt. Selbst 100 % Schwarz schafft:
+
+     auf #141414   1,140:1        auf #ffffff   21,000:1
+     auf #1e1e1e   1,260:1        auf #e5e7eb   16,962:1
+
+   Auf der Leinwand dieser App ist die theoretische Obergrenze eines
+   Schattens also 1,14:1. Das ist keine Frage der Einstellung, das ist
+   Arithmetik — Erhebung im Dunkeln kommt aus einer Kante, nicht aus
+   einem Schatten (so hat es D-S24 an den 53 Modellkacheln schon
+   entschieden).
+
+   Im HELLMODUS bleibt er, und dort traegt er wirklich: der weisse
+   Schaltknopf der Toggles steht auf seiner hellen Spur
+   (`bg-gray-300/30` ueber Weiss = #f1f2f4) bei 1,120:1 — ohne den
+   Schatten waere er dort fast unsichtbar.
+
+   Warum `--tw-shadow` und nicht `box-shadow: none`: Tailwind 4 setzt
+   `box-shadow` als EINE Liste aus fuenf Variablen zusammen (inset-shadow,
+   inset-ring, ring-offset, ring, shadow). `box-shadow: none` haette auch
+   jeden `ring-*` auf demselben Element geloescht. Ueberschrieben wird
+   deshalb genau die eine Variable, die dem Schatten gehoert — dasselbe,
+   was Tailwinds eigenes `shadow-none` tut.
+   ───────────────────────────────────────────────────────────────────── */
+.dark .shadow-sm {
+  --tw-shadow: 0 0 #0000;
+}
+
+/* ─────────────────────────────────────────────────────────────────────
    Theme-contrast rescue layer — ported from the web companion.
    Many components were authored dark-first and use raw `text-gray-300/400`,
    `text-white`, `bg-white/N`, `border-white/N` without a `dark:` variant.
@@ -761,12 +956,77 @@ input[type="range"]::-webkit-slider-thumb {
    the control-height vars above were undefined. See the token block near the
    top of this file for the full rationale.
    ───────────────────────────────────────────────────────────────────── */
-.t-display { font-size: var(--text-display); line-height: var(--text-display-lh); font-weight: var(--text-display-fw); }
+.t-display { font-size: var(--text-display); line-height: var(--text-display-lh); font-weight: var(--text-display-fw); font-family: var(--font-display); letter-spacing: -0.01em; }
 .t-title   { font-size: var(--text-title);   line-height: var(--text-title-lh);   font-weight: var(--text-title-fw); }
 .t-body    { font-size: var(--text-body);    line-height: var(--text-body-lh);    font-weight: var(--text-body-fw); }
 .t-control { font-size: var(--text-control); line-height: var(--text-control-lh); font-weight: var(--text-control-fw); }
 .t-label   { font-size: var(--text-label);   line-height: var(--text-label-lh);   font-weight: var(--text-label-fw); letter-spacing: 0.08em; text-transform: uppercase; }
 .t-mono    { font-size: var(--text-mono); font-variant-numeric: tabular-nums; font-family: ui-monospace, 'JetBrains Mono', 'SF Mono', Menlo, monospace; }
+
+/* ─────────────────────────────────────────────────────────────────────
+   `.t-micro` — die Stufe, deren Fehlen die Leiter umgangen hat (D-T04)
+
+   Gezaehlt am 01.09.2026 ueber src/ ohne __tests__: 1026 Fundstellen
+   einer arbitraeren Schriftgroesse in eckigen Klammern, verteilt auf 30
+   verschiedene Werte (28 Groessen + 2 Farben). Dagegen 143 Nutzungen der
+   `.t-*`-Klassen. Das System existiert und wird umgangen.
+
+   Die Frage war, WARUM. Die Antwort steht in der Verteilung:
+
+     947 von 1026 (92,3 %) liegen zwischen 8 und 11,99 px, also UNTER
+     --text-body (13). Nur 65 (6,3 %) sitzen exakt auf einer Stufe.
+
+     Unter 13px hat die Leiter drei Stufen — und keine davon ist
+     schlichter Text:
+       --text-label (10)  erzwingt uppercase + 0,08em Laufweite
+       --text-mono  (11)  wechselt die Schriftfamilie
+       --text-control (12) setzt line-height 1 (Controlmass, kein Satz)
+
+     Von den 947 Bandstellen tragen 38 uppercase/tracking, waeren also
+     `.t-label`-Kandidaten. Die anderen 909 sind schlichter Kleintext,
+     und dafuer gab es keinen Namen.
+
+   Die Luecke ist also KEINE fehlende Zahl. Der haeufigste Umgehungswert
+   ist 0.6rem = 9,6px, der gewichtete Mittelwert des ganzen Bandes 9,75px
+   — beides einen Viertelpixel neben der 10, die schon da ist. Die
+   Leiter hatte die Zahl und hat sie in einem Stilrezept eingesperrt.
+
+   Deshalb bekommt `.t-micro` KEINE eigene Zahl: --text-micro ist
+   `var(--text-label)`. Eine Groesse, zwei Rezepte — das Grossbuchstaben-
+   Etikett und der schlichte Kleintext.
+
+   Die Auflösung, in der bisher entworfen wurde, ist der zweite Teil des
+   Befunds: 14 verschiedene Werte in einem 4px-Band, die engsten 0,08px
+   auseinander (0.62rem = 9,92 gegen 0.63rem = 10,08). Bei --ui-scale
+   1,15 sind das 0,09 gerenderte Pixel. Das ist keine Entscheidung, das
+   ist Rauschen.
+
+   ── Warum diese Klasse NUR die Groesse setzt ──
+
+   Es gibt einen zweiten Grund fuer die Umgehung, und er ist im Browser
+   nachgemessen: die sechs Klassen oben stehen UNGESCHICHTET und schlagen
+   damit jede Tailwind-Utility, egal mit welcher Spezifitaet (dieselbe
+   Mechanik wie beim Fokusring weiter oben). Gemessen mit
+   getComputedStyle, Chromium 149:
+
+     class="t-body font-semibold"   → font-weight 400  (nicht 600)
+     class="t-control font-bold"    → font-weight 500  (nicht 700)
+     class="t-body leading-none"    → line-height 19,5px (nicht 1)
+     class="t-label font-normal"    → font-weight 600  (nicht 400)
+
+   Wer `.t-body` nimmt, verliert also still sein `font-semibold`. Ein
+   Rezept, das die Entscheidungen der Call-Site frisst, ist kein
+   Angebot — es ist ein Grund, in eckige Klammern auszuweichen.
+
+   `.t-micro` macht das ausdruecklich nicht: EINE Eigenschaft, sonst
+   nichts. Damit ist der Tausch gegen `text-[10px]` beweisbar
+   folgenlos. Nachgemessen: `text-[10px]` erbt line-height 1,5 aus dem
+   Preflight (`html { line-height: 1.5 }` vererbt als ZAHL) und rendert
+   15px; `.t-micro` aendert daran nichts und rendert ebenfalls 15px.
+   Ein `line-height` hier wuerde genau den Fehler wiederholen, der die
+   anderen fuenf Klassen unbrauchbar macht.
+   ───────────────────────────────────────────────────────────────────── */
+.t-micro   { font-size: var(--text-micro); }
 
 /* `.lu-focus-ring` stand hier und ist ersatzlos gestrichen (Audit §5:
    „9 redundante Nutzungen"). Sie war die Kopie der globalen Regel fuer

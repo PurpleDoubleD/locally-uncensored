@@ -755,10 +755,10 @@ export function ProviderSettings() {
       <Modal open={showCloudWarning} onClose={() => { setShowCloudWarning(false); setPendingPreset(null) }} title="">
         <div className="space-y-4 text-center">
           <h3 className="text-base font-semibold text-white">Enable Cloud Provider</h3>
-          <p className="text-[0.75rem] text-gray-400 leading-relaxed">
+          <p className="text-[12px] text-gray-400 leading-relaxed">
             Cloud providers send your data to external servers. Your conversations will no longer be fully private or offline.
           </p>
-          <p className="text-[0.75rem] text-gray-400 leading-relaxed">
+          <p className="text-[12px] text-gray-400 leading-relaxed">
             For maximum privacy, use Ollama or a local backend instead.
           </p>
           <div className="flex items-center justify-center gap-3 pt-2">

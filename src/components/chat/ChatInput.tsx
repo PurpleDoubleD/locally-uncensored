@@ -284,7 +284,7 @@ export function ChatInput({ onSend, onStop, isGenerating, pendingApproval, onApp
           isDragOver
             ? 'bg-blue-500/5 border-blue-500/30'
             : cloudMode
-              ? 'bg-[#7c3aed]/[0.04] border-[#7c3aed]/40 focus-within:border-[#7c3aed]/70'
+              ? 'bg-lu-cloud/[0.04] border-lu-cloud/40 focus-within:border-lu-cloud/70'
               : 'bg-gray-50 dark:bg-white/[0.03] border-gray-200 dark:border-white/[0.06] focus-within:border-gray-400 dark:focus-within:border-white/15'
         }`}
         onDragOver={handleDragOver}
@@ -399,7 +399,7 @@ export function ChatInput({ onSend, onStop, isGenerating, pendingApproval, onApp
             placeholder={disabled ? "Unavailable" : isDragOver ? "Drop images here..." : isTranscribing ? "Transcribing..." : isVoiceRecording ? "Recording..." : "Message..."}
             disabled={disabled}
             rows={1}
-            className="w-full bg-transparent resize-none text-gray-800 dark:text-gray-200 placeholder-gray-400 dark:placeholder-gray-600 focus:outline-none text-[0.75rem] leading-relaxed max-h-[200px] disabled:opacity-50 scrollbar-thin"
+            className="w-full bg-transparent resize-none text-gray-800 dark:text-gray-200 placeholder-gray-400 dark:placeholder-gray-600 focus:outline-none text-[12px] leading-relaxed max-h-[200px] disabled:opacity-50 scrollbar-thin"
           />
         </div>
 
@@ -486,7 +486,7 @@ export function ChatInput({ onSend, onStop, isGenerating, pendingApproval, onApp
             <span
               data-testid="composer-cloud-state"
               title="Cloud mode: this message runs on LU's hosted GPUs and is billed to your lu-labs.ai credits. The Cloud switch up in the header turns it off."
-              className="flex items-center gap-1 px-1.5 py-1.5 rounded-md shrink-0 text-[0.6rem] font-medium bg-[#7c3aed]/15 text-[#7c3aed] dark:text-[#a78bfa] border border-[#7c3aed]/30"
+              className="flex items-center gap-1 px-1.5 py-1.5 rounded-md shrink-0 text-[0.6rem] font-medium bg-lu-cloud/15 text-lu-cloud dark:text-lu-cloud-lift border border-lu-cloud/30"
             >
               <img
                 src={MONOGRAM}

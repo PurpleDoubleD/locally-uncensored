@@ -272,7 +272,7 @@ function WorkspaceOption({ icon, title, body, monoBody, onClick, disabled }: Opt
     >
       <span className="mt-0.5 shrink-0">{icon}</span>
       <span className="flex-1 min-w-0">
-        <span className="block text-[0.75rem] font-medium text-gray-900 dark:text-white">
+        <span className="block text-[12px] font-medium text-gray-900 dark:text-white">
           {title}
         </span>
         <span

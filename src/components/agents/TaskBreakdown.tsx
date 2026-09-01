@@ -39,7 +39,7 @@ export function TaskBreakdown({ tasks }: Props) {
 
   if (tasks.length === 0) {
     return (
-      <div className="text-[0.75rem] text-gray-500 py-2">
+      <div className="text-[12px] text-gray-500 py-2">
         <div className="flex items-center gap-1.5 text-gray-400 mb-2 font-medium">
           <Wrench size={13} />
           Tasks
@@ -51,7 +51,7 @@ export function TaskBreakdown({ tasks }: Props) {
 
   return (
     <div>
-      <div className="flex items-center gap-1.5 text-[0.75rem] text-gray-400 mb-2 font-medium">
+      <div className="flex items-center gap-1.5 text-[12px] text-gray-400 mb-2 font-medium">
         <Wrench size={13} />
         Tasks ({tasks.filter((t) => t.status === 'completed').length}/{tasks.length})
       </div>

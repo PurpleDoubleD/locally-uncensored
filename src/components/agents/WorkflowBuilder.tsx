@@ -101,7 +101,7 @@ export function WorkflowBuilder({ workflowId, onSave, onCancel }: WorkflowBuilde
         <button onClick={onCancel} className="p-1 rounded hover:bg-white/10 text-gray-400">
           <ArrowLeft size={14} />
         </button>
-        <h3 className="text-[0.75rem] font-semibold text-white">
+        <h3 className="text-[12px] font-semibold text-white">
           {workflowId ? 'Edit Workflow' : 'New Workflow'}
         </h3>
       </div>

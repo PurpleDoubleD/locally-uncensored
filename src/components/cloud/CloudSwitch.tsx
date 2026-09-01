@@ -81,9 +81,9 @@ export function CloudSwitch() {
       className={cn(
         'flex items-center gap-1.5 pl-2 pr-1.5 py-[3px] rounded-full border transition-colors',
         on
-          ? 'border-[#7c3aed] bg-[#7c3aed]/10 text-[#7c3aed] dark:text-[#a78bfa]'
+          ? 'border-lu-cloud bg-lu-cloud/10 text-lu-cloud dark:text-lu-cloud-lift'
           : armed
-            ? 'border-[#7c3aed] bg-[#7c3aed]/10 text-[#7c3aed] dark:text-[#a78bfa] ring-1 ring-[#7c3aed]/40'
+            ? 'border-lu-cloud bg-lu-cloud/10 text-lu-cloud dark:text-lu-cloud-lift ring-1 ring-lu-cloud/40'
             : 'border-gray-200 dark:border-white/10 text-gray-500 hover:text-gray-800 dark:hover:text-gray-200 hover:border-gray-300 dark:hover:border-white/20',
       )}
     >
@@ -112,7 +112,7 @@ export function CloudSwitch() {
         aria-hidden
         className={cn(
           'relative w-[22px] h-[12px] rounded-full transition-colors shrink-0',
-          on ? 'bg-[#7c3aed]' : armed ? 'bg-[#7c3aed]/50' : 'bg-gray-300 dark:bg-white/15',
+          on ? 'bg-lu-cloud' : armed ? 'bg-lu-cloud/50' : 'bg-gray-300 dark:bg-white/15',
         )}
       >
         <span

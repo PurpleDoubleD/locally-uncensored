@@ -40,7 +40,7 @@ export function CodexConfirmDialog() {
           <span className="text-gray-500">needs your ok</span>
         </div>
 
-        <pre className="mt-1 max-h-20 overflow-auto rounded bg-black/5 dark:bg-black/30 px-1.5 py-1 text-[0.63rem] font-mono text-gray-800 dark:text-gray-200 whitespace-pre-wrap break-all">
+        <pre className="mt-1 max-h-20 overflow-auto rounded bg-black/5 dark:bg-black/30 px-1.5 py-1 t-micro font-mono text-gray-800 dark:text-gray-200 whitespace-pre-wrap break-all">
           {pending.command || '(no command preview)'}
         </pre>
 

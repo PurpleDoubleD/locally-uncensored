@@ -333,7 +333,7 @@ export function ModelManager() {
                     {mode === 'video' ? <VideoIcon size={22} className="text-gray-400 dark:text-gray-500" /> : <ImageIcon size={22} className="text-gray-400 dark:text-gray-500" />}
                   </div>
                   <div className="space-y-1">
-                    <p className="text-[0.75rem] font-medium text-gray-800 dark:text-gray-200">Start ComfyUI to see your {mode} models</p>
+                    <p className="text-[12px] font-medium text-gray-800 dark:text-gray-200">Start ComfyUI to see your {mode} models</p>
                     <p className="text-[0.6rem] text-gray-500 max-w-[300px] leading-relaxed">
                       {mode === 'image' ? 'Image' : 'Video'} models are served by ComfyUI, which isn't running right now, so the ones you've downloaded can't be listed yet. Open Settings, go to AI Backends, and press Start under ComfyUI (Image &amp; Video), then come back.
                     </p>
@@ -357,7 +357,7 @@ export function ModelManager() {
                     <PackageOpen size={22} className="text-gray-400 dark:text-gray-500" />
                   </div>
                   <div className="space-y-1">
-                    <p className="text-[0.75rem] font-medium text-gray-800 dark:text-gray-200">No models installed yet</p>
+                    <p className="text-[12px] font-medium text-gray-800 dark:text-gray-200">No models installed yet</p>
                     <p className="text-[0.6rem] text-gray-500 max-w-[280px] leading-relaxed">
                       Browse curated chat, image and video models and install them with one click.
                     </p>

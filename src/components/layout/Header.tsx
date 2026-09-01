@@ -171,12 +171,31 @@ export function Header() {
   }
 
   // ONE recipe for every nav item, in the bar and in the overflow menu alike:
-  // h-7 so each one is a real click target instead of a 9px word, a filled
-  // rounded-md for the active view so "where am I" survives a glance, and the
-  // idle/hover pair as the only other state. Bare colour-only labels gave the
-  // active tab no hit area and no boundary, which is why the row read as
-  // running text rather than as navigation.
-  const NAV_BASE = 'flex items-center h-7 px-2 rounded-md text-[0.68rem] font-medium transition-colors'
+  // a real click target instead of a 9px word, a filled rounded-md for the
+  // active view so "where am I" survives a glance, and the idle/hover pair as
+  // the only other state. Bare colour-only labels gave the active tab no hit
+  // area and no boundary, which is why the row read as running text rather
+  // than as navigation.
+  //
+  // D-T07: die Hoehe war 28px und stand damit neben, nicht auf der Leiter
+  // (26/32/40). Gemessen am laufenden Fenster hatte diese Leiste fuenf
+  // verschiedene Control-Hoehen nebeneinander — 19,73 / 20 / 21,98 / 22,99
+  // und diese 28 —, keine einzige davon benannt. Die Reiter nehmen jetzt
+  // --control-h-md, die Stufe, die index.css woertlich "default control
+  // height" nennt.
+  //
+  // Zuordnung nach BEDEUTUNG, nicht nach naechstem Zahlenwert — genau wie
+  // in der Sidebar (287903aa): --control-h-sm (26) ist das Mass der
+  // Composer-Werkzeugleiste, und dass 26 naeher an 28 liegt als 32, ist
+  // kein Argument. Dies ist die oberste Navigation der App in einer
+  // 40px-Leiste; sie nimmt die Standardstufe und laesst 4px Luft nach oben
+  // und unten.
+  //
+  // Die vier kleineren Hoehen dieser Leiste bleiben ungeaendert: es sind
+  // reine Icon-Knoepfe, die ihre Hoehe aus dem Innenabstand ziehen, und
+  // eine Leiter fuer Icon-Flaechen ist eine eigene Entscheidung — der
+  // Befund steht im Bericht, nicht als halbe Aenderung hier.
+  const NAV_BASE = 'flex items-center h-[var(--control-h-md)] px-2 rounded-md text-[0.68rem] font-medium transition-colors'
   // Aktiv = eine FLAECHE, in beiden Modi (D-A6 wollte das, hell hatte es nie).
   // Gemessen am laufenden Fenster: die aktive Pille war hell `bg-gray-100` auf
   // einer `bg-gray-100`-Leiste — derselbe Farbwert, Kontrast 1,000:1. Der
@@ -284,7 +303,7 @@ export function Header() {
        Nebeneffekt, gemessen: die aktive Nav-Pille und die Hover-Flaeche der
        Fensterknoepfe waren beide `gray-100` auf `gray-100` und damit
        unsichtbar; sie haben jetzt Grund unter sich. */
-    <header className="h-10 grid grid-cols-[auto_1fr_auto] items-center px-3 bg-gray-200 dark:bg-[#141414] z-40 gap-4">
+    <header className="h-10 grid grid-cols-[auto_1fr_auto] items-center px-3 bg-gray-200 dark:bg-lu-canvas z-40 gap-4">
       {/* Left: Sidebar + Logo */}
       <div className="flex items-center gap-2 min-w-0">
         <button

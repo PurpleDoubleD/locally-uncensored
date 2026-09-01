@@ -977,7 +977,7 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
           <div className="flex items-center justify-between gap-2">
             <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Search CivitAI</h3>
             {/* Mirror toggle (#53) — civitai.red for regions where .com is blocked. */}
-            <div className="flex items-center gap-1 text-[10px]">
+            <div className="flex items-center gap-1 t-micro">
               <span className="text-gray-400 dark:text-gray-500 mr-0.5">mirror</span>
               {(['civitai.com', 'civitai.red'] as const).map((h) => (
                 <button
@@ -1030,13 +1030,13 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
                         <span className="text-sm font-medium text-gray-900 dark:text-white truncate">{model.name}</span>
-                        {model.sizeGB && <span className="text-[10px] text-gray-400 flex-shrink-0">{model.sizeGB} GB</span>}
+                        {model.sizeGB && <span className="t-micro text-gray-400 flex-shrink-0">{model.sizeGB} GB</span>}
                       </div>
                       {model.description && <p className="text-[11px] text-gray-500 line-clamp-1 mt-0.5">{model.description}</p>}
                       {isDl && dlState && dlState.total > 0 && (
                         <div className="mt-1.5">
                           <ProgressBar progress={(dlState.progress / dlState.total) * 100} />
-                          <span className="text-[10px] text-gray-400">{formatBytes(dlState.progress)} / {formatBytes(dlState.total)}</span>
+                          <span className="t-micro text-gray-400">{formatBytes(dlState.progress)} / {formatBytes(dlState.total)}</span>
                         </div>
                       )}
                     </div>
@@ -1046,11 +1046,11 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
                       ) : isDl ? (
                         <Loader2 size={16} className="animate-spin text-gray-400" />
                       ) : model.downloadUrl ? (
-                        <button onClick={() => handleCivitaiDownload(model)} className="p-2 rounded-lg bg-green-100 dark:bg-green-500/15 hover:bg-green-200 dark:hover:bg-green-500/25 text-green-700 dark:text-green-400 transition-all" title="Download" aria-label="Download">
+                        <button onClick={() => handleCivitaiDownload(model)} className="p-2 rounded-lg bg-green-100 dark:bg-green-500/15 hover:bg-green-200 dark:hover:bg-green-500/25 text-green-700 dark:text-green-400 transition-colors" title="Download" aria-label="Download">
                           <Download size={14} />
                         </button>
                       ) : null}
-                      <button onClick={() => openExternal(model.sourceUrl)} className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-white/10 text-gray-500 transition-all" title="View on CivitAI" aria-label="View on CivitAI">
+                      <button onClick={() => openExternal(model.sourceUrl)} className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-white/10 text-gray-500 transition-colors" title="View on CivitAI" aria-label="View on CivitAI">
                         <ExternalLink size={14} />
                       </button>
                     </div>
@@ -1192,11 +1192,11 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
             <p className="text-[0.72rem] text-gray-700 dark:text-gray-200 leading-relaxed">{infoModel.description}</p>
             <div className="flex items-center gap-1.5 flex-wrap">
               {infoModel.tags.map(t => (
-                <span key={t} className="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 dark:bg-white/5 text-gray-600 dark:text-gray-400">{t}</span>
+                <span key={t} className="t-micro px-1.5 py-0.5 rounded bg-gray-100 dark:bg-white/5 text-gray-600 dark:text-gray-400">{t}</span>
               ))}
-              {infoModel.sizeGB && <span className="text-[10px] text-gray-400">{infoModel.sizeGB} GB</span>}
-              {infoModel.pulls && <span className="text-[10px] text-gray-400">{infoModel.pulls} pulls</span>}
-              {infoModel.released && <span className="text-[10px] text-gray-400">released {infoModel.released}</span>}
+              {infoModel.sizeGB && <span className="t-micro text-gray-400">{infoModel.sizeGB} GB</span>}
+              {infoModel.pulls && <span className="t-micro text-gray-400">{infoModel.pulls} pulls</span>}
+              {infoModel.released && <span className="t-micro text-gray-400">released {infoModel.released}</span>}
             </div>
             {infoRepoUrl(infoModel) && (
               <button
@@ -1213,7 +1213,7 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
       <Modal open={!!confirmDownload} onClose={() => setConfirmDownload(null)} title="Download split model">
         {confirmDownload && (
           <div className="space-y-3">
-            <p className="text-[0.75rem] text-gray-700 dark:text-gray-200">
+            <p className="text-[12px] text-gray-700 dark:text-gray-200">
               <span className="font-semibold text-gray-900 dark:text-white">{confirmDownload.name}</span> is split into{' '}
               <span className="font-semibold text-gray-900 dark:text-white">{confirmDownload.files.length} files</span>{' '}
               totalling <span className="font-semibold text-gray-900 dark:text-white">{confirmDownload.totalGB} GB</span>.

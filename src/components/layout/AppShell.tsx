@@ -961,14 +961,26 @@ function AppShellTree() {
        anderen Agenten — eine Kante nur an der Pane zu schaerfen haette zwei
        Raender aus einer Familie auseinanderlaufen lassen.
 
-       Was hier NICHT passiert und warum: die Literale wurden NICHT durch
-       `bg-lu-*` ersetzt. Die vier Flaechentokens in `index.css:21-24` sind
-       reine DUNKEL-Werte ohne `.light`-Gegenstueck; `bg-lu-base` wuerde im
-       Hellmodus #202020 malen. Und die beiden Familien lassen sich auch dunkel
-       nicht sauber migrieren: fuer #141414 (Leinwand + Header + Titlebar) gibt
-       es gar kein Token, und #1e1e1e (Pane) teilt sich die Pane mit der
-       Sidebar. Die fehlenden Zeilen stehen im Bericht. */
-    <div className="h-screen w-screen overflow-hidden bg-gray-200 dark:bg-[#141414] text-gray-900 dark:text-gray-100">
+       NACHTRAG D-T06 (01.09.2026): hier stand, die Literale liessen sich
+       nicht durch ein Token ersetzen, weil es fuer die Leinwand keins gab.
+       Der zweite Halbsatz stimmte, der erste nicht. Es gibt jetzt eins —
+       `--color-lu-canvas` in index.css, mit genau dem Wert, der hier stand.
+       Ersetzt ist ausschliesslich die DUNKLE Seite; das helle
+       `bg-gray-200` bleibt Zeichen fuer Zeichen stehen. Der Tausch ist
+       damit im Browser folgenlos, in beiden Modi.
+
+       Was weiterhin NICHT passiert: eine `.light`-Spiegelung der Leiter.
+       Nachgezaehlt zerfaellt #141414 im Hellmodus in ZWEI Rollen —
+       Fensterrahmen (`bg-gray-200`: hier, Titlebar, Header) und Vollflaeche
+       (`bg-white`: ViewSkeletons, Kontextmenues, die Create-Wurzel). Eine
+       gespiegelte Leiter muesste eine der beiden falsch faerben. Die
+       Begruendung steht ausfuehrlich am Token selbst.
+
+       Und #1e1e1e (die Pane, eine Zeile tiefer) bleibt Literal: sie teilt
+       ihren Wert mit der Sidebar, und die gehoert in diesem Durchgang einem
+       anderen Agenten. Ein halb migriertes Paar waere schlechter als ein
+       ganzes Literal. */
+    <div className="h-screen w-screen overflow-hidden bg-gray-200 dark:bg-lu-canvas text-gray-900 dark:text-gray-100">
       <div className="h-full flex flex-col">
         <Titlebar />
         <Header />

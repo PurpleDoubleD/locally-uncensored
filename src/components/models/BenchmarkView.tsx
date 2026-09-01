@@ -230,7 +230,7 @@ export function BenchmarkView() {
             return (
               <div
                 key={model.name}
-                className="flex items-center justify-between px-3 py-2 rounded-lg hover:bg-gray-100 dark:hover:bg-white/[0.03] border border-transparent hover:border-gray-200 dark:hover:border-white/5 transition-all"
+                className="flex items-center justify-between px-3 py-2 rounded-lg hover:bg-gray-100 dark:hover:bg-white/[0.03] border border-transparent hover:border-gray-200 dark:hover:border-white/5 transition-colors"
               >
                 <div className="flex items-center gap-2 min-w-0">
                   <span className="text-[0.7rem] text-gray-800 dark:text-gray-200 truncate">{model.name}</span>

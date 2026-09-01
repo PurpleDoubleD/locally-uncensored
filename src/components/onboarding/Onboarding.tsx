@@ -765,7 +765,7 @@ export function Onboarding() {
   // Onboarding nur nie erreicht; AUDIT-COVERAGE fuehrt das unter D-A8 als
   // ausdruecklichen Rest. Kein eigenes Rezept hier, sondern jenes.
   const primaryBtn = 'lu-primary mx-auto flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[0.7rem] transition-all'
-  const secondaryBtn = `mx-auto flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[0.7rem] font-medium transition-all ${
+  const secondaryBtn = `mx-auto flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[0.7rem] font-medium transition-colors ${
     isDark ? 'bg-white/10 text-white hover:bg-white/15' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
   }`
 
@@ -838,9 +838,9 @@ export function Onboarding() {
                 Der Zusatz „by LU Labs" bleibt eine Stufe kleiner, damit die
                 Groesse dem Namen gehoert und nicht der ganzen Zeile. */}
             <h1 className="text-[1.5rem] leading-[1.21] font-semibold tracking-tight">
-              LU <span className="text-[0.75rem] font-normal opacity-60 align-middle">by LU Labs</span>
+              LU <span className="text-[12px] font-normal opacity-60 align-middle">by LU Labs</span>
             </h1>
-            <p className={`text-[0.75rem] leading-relaxed ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
+            <p className={`text-[12px] leading-relaxed ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
               Private, local AI chat that works right away. No extra software to install. No servers, no tracking, everything stays on your machine.
             </p>
             <button
@@ -888,7 +888,7 @@ export function Onboarding() {
 
                 <button
                   onClick={() => setSelectedBackend(BUILTIN_BACKEND_ID)}
-                  className={`w-full flex items-center gap-2.5 px-2.5 py-2.5 rounded-lg border text-left transition-all ${
+                  className={`w-full flex items-center gap-2.5 px-2.5 py-2.5 rounded-lg border text-left transition-colors ${
                     selectedBackend === BUILTIN_BACKEND_ID
                       ? isDark ? 'bg-white/10 border-white/20' : 'bg-gray-100 border-gray-900'
                       : isDark ? 'border-white/10 hover:border-white/20' : 'border-gray-200 hover:border-gray-400'
@@ -933,7 +933,7 @@ export function Onboarding() {
                     <button
                       key={b.id}
                       onClick={() => setSelectedBackend(b.id)}
-                      className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg border text-left transition-all ${
+                      className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg border text-left transition-colors ${
                         selectedBackend === b.id
                           ? isDark ? 'bg-white/10 border-white/20' : 'bg-gray-100 border-gray-900'
                           : isDark ? 'border-white/10 hover:border-white/20' : 'border-gray-200 hover:border-gray-400'
@@ -1227,7 +1227,7 @@ export function Onboarding() {
                         <button
                           key={b.id}
                           onClick={() => openExternal(b.url)}
-                          className={`w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg border transition-all group text-left ${
+                          className={`w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg border transition-colors group text-left ${
                             isDark
                               ? 'border-white/[0.06] hover:border-white/15 hover:bg-white/[0.03]'
                               : 'border-gray-200 hover:border-gray-400 hover:bg-gray-50'
@@ -1734,7 +1734,7 @@ export function Onboarding() {
                     key={model.name}
                     onClick={() => !pulled && !isDownloading && toggleModel(model.name)}
                     disabled={pulled || isDownloading}
-                    className={`text-left p-2.5 rounded-lg border transition-all ${
+                    className={`text-left p-2.5 rounded-lg border transition-colors ${
                       pulled
                         ? isDark ? 'bg-green-500/10 border-green-500/30' : 'bg-green-50 border-green-300'
                         : selected
@@ -1887,7 +1887,7 @@ export function Onboarding() {
           >
             <div className="w-3 h-3 rounded-full bg-green-400 mx-auto" />
             <h2 className="text-base font-semibold">You're all set!</h2>
-            <p className={`text-[0.75rem] ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
+            <p className={`text-[12px] ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
               {pulledModels.length > 0
                 ? `${pulledModels.length} model${pulledModels.length > 1 ? 's' : ''} installed. You're ready to go.`
                 : selectedBackend === BUILTIN_BACKEND_ID

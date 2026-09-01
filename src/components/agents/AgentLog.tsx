@@ -41,7 +41,7 @@ export function AgentLog({ entries, onApprove, onReject }: Props) {
 
   return (
     <div className="flex flex-col h-full min-h-0">
-      <div className="flex items-center gap-1.5 text-[0.75rem] text-gray-400 mb-2 font-medium flex-shrink-0">
+      <div className="flex items-center gap-1.5 text-[12px] text-gray-400 mb-2 font-medium flex-shrink-0">
         <ScrollText size={13} />
         Agent Log ({entries.length})
       </div>
@@ -67,7 +67,7 @@ export function AgentLog({ entries, onApprove, onReject }: Props) {
                 </div>
                 <div
                   className={`text-[0.8rem] leading-relaxed whitespace-pre-wrap break-words ${
-                    entry.type === 'observation' ? 'font-mono text-[0.75rem]' : ''
+                    entry.type === 'observation' ? 'font-mono text-[12px]' : ''
                   } ${style.text}`}
                 >
                   {entry.content}

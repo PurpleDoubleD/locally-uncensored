@@ -367,7 +367,7 @@ export function CodexView() {
                                         if (!answer || skippedAnswers.has(block.id)) return null
                                         return (
                                           <div key={block.id} className="px-1 py-0.5">
-                                            <div className="text-[0.75rem] leading-relaxed">
+                                            <div className="text-[12px] leading-relaxed">
                                               <MarkdownRenderer content={answer} />
                                             </div>
                                           </div>
@@ -399,7 +399,7 @@ export function CodexView() {
                               ? 'rounded-lg px-2.5 py-1.5 bg-gray-100 dark:bg-white/[0.06] border border-gray-200 dark:border-white/[0.08]'
                               : 'px-1 py-0.5'
                           }>
-                            <div className="text-[0.75rem] leading-relaxed">
+                            <div className="text-[12px] leading-relaxed">
                               {msg.role === 'user' ? (
                                 <p className="text-gray-800 dark:text-gray-200 whitespace-pre-wrap">{cleanContent}</p>
                               ) : (
@@ -455,7 +455,7 @@ export function CodexView() {
                                         if (prev && stripChannelTags(prev.content) === answer) return null
                                         return (
                                           <div key={block.id} className="px-1 py-0.5">
-                                            <div className="text-[0.75rem] leading-relaxed">
+                                            <div className="text-[12px] leading-relaxed">
                                               <MarkdownRenderer content={answer} />
                                             </div>
                                           </div>
@@ -467,7 +467,7 @@ export function CodexView() {
                               )}
                               {finalAnswerText && (
                                 <div className="px-1 py-0.5">
-                                  <div className="text-[0.75rem] leading-relaxed">
+                                  <div className="text-[12px] leading-relaxed">
                                     <MarkdownRenderer content={finalAnswerText} />
                                   </div>
                                 </div>

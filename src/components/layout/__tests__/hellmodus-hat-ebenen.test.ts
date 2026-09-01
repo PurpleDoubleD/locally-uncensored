@@ -36,6 +36,15 @@ const LAYOUT = resolve(__dirname, '..')
 const SHELL = readFileSync(resolve(LAYOUT, 'AppShell.tsx'), 'utf-8')
 const HEADER = readFileSync(resolve(LAYOUT, 'Header.tsx'), 'utf-8')
 const TITLEBAR = readFileSync(resolve(LAYOUT, 'Titlebar.tsx'), 'utf-8')
+const CSS = readFileSync(resolve(LAYOUT, '..', '..', 'index.css'), 'utf-8')
+
+/** '#141414' -> [20, 20, 20]. Damit die Farbe des Tokens hier nachgerechnet
+ *  und nicht abgeschrieben wird. */
+const hex = (s: string): readonly [number, number, number] => [
+  parseInt(s.slice(1, 3), 16),
+  parseInt(s.slice(3, 5), 16),
+  parseInt(s.slice(5, 7), 16),
+]
 
 /* ── WCAG 2.1, relative Luminanz und Kontrastverhaeltnis ─────────────────── */
 type RGB = readonly [number, number, number]
@@ -93,7 +102,14 @@ describe('so steht es jetzt', () => {
   })
 
   it('der Wert steht wirklich an der Leinwand', () => {
-    expect(SHELL).toMatch(/className="h-screen w-screen overflow-hidden bg-gray-200 dark:bg-\[#141414\]/)
+    // Die dunkle Haelfte heisst seit D-T06 `dark:bg-lu-canvas` statt
+    // `dark:bg-[#141414]`. Der WERT ist derselbe — das Token ist in
+    // index.css auf #141414 definiert und wird dort gegengeprueft
+    // (components/__tests__/zwei-akzente-und-eine-leinwand.test.ts). Die
+    // helle Haelfte, um die es in diesem Befund geht, ist unangetastet.
+    expect(SHELL).toMatch(/className="h-screen w-screen overflow-hidden bg-gray-200 dark:bg-lu-canvas/)
+    expect(DARK_CANVAS).toEqual(hex('#141414'))
+    expect(CSS).toMatch(/--color-lu-canvas:\s*#141414/)
   })
 
   it('die Pane und der Ring sind NICHT angefasst', () => {
@@ -104,17 +120,20 @@ describe('so steht es jetzt', () => {
 })
 
 describe('Kopfzeile und Fensterbalken gehoeren zur Leinwand, in beiden Modi', () => {
-  it('dunkel teilen sie sich seit jeher #141414', () => {
-    expect(SHELL).toContain('dark:bg-[#141414]')
-    expect(HEADER).toContain('dark:bg-[#141414]')
-    expect(TITLEBAR).toContain('dark:bg-[#141414]')
+  it('dunkel teilen sie sich seit jeher #141414 — jetzt unter einem Namen', () => {
+    // Vorher stand die Zahl dreimal da und niemand konnte sagen, ob die drei
+    // Vorkommen zusammengehoeren. Jetzt sagt der Name es.
+    expect(SHELL).toContain('dark:bg-lu-canvas')
+    expect(HEADER).toContain('dark:bg-lu-canvas')
+    expect(TITLEBAR).toContain('dark:bg-lu-canvas')
+    for (const src of [SHELL, HEADER, TITLEBAR]) expect(src).not.toContain('dark:bg-[#141414]')
   })
 
   it('hell tun sie es jetzt auch', () => {
     // Vorher: Leinwand gray-100, Kopfzeile gray-100 — gleich, aber beide zu
     // hell. Jetzt beide gray-200, also weiterhin eine Familie, nur tiefer.
-    expect(HEADER).toMatch(/bg-gray-200 dark:bg-\[#141414\]/)
-    expect([...TITLEBAR.matchAll(/bg-gray-200 dark:bg-\[#141414\]/g)]).toHaveLength(2)
+    expect(HEADER).toMatch(/bg-gray-200 dark:bg-lu-canvas/)
+    expect([...TITLEBAR.matchAll(/bg-gray-200 dark:bg-lu-canvas/g)]).toHaveLength(2)
   })
 
   it('und der aktive Reiter ist dadurch hell ueberhaupt erst eine Flaeche', () => {

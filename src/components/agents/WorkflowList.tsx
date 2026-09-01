@@ -36,7 +36,7 @@ export function WorkflowList({ onRun, onEdit, onCreate }: WorkflowListProps) {
     return (
       <div
         key={workflow.id}
-        className="flex items-center gap-2.5 px-2.5 py-2 rounded-lg hover:bg-white/[0.03] group border border-transparent hover:border-white/5 transition-all"
+        className="flex items-center gap-2.5 px-2.5 py-2 rounded-lg hover:bg-white/[0.03] group border border-transparent hover:border-white/5 transition-colors"
       >
         <div className="w-7 h-7 rounded-lg bg-white/5 flex items-center justify-center shrink-0">
           <Icon size={13} className="text-gray-400" />

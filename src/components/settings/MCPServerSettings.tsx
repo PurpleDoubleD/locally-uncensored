@@ -221,7 +221,7 @@ export function MCPServerSettings() {
       ) : (
         <button
           onClick={() => setShowAddForm(true)}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[0.65rem] text-gray-500 hover:text-gray-300 bg-white/[0.03] hover:bg-white/5 border border-white/10 hover:border-white/20 transition-all w-full justify-center"
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[0.65rem] text-gray-500 hover:text-gray-300 bg-white/[0.03] hover:bg-white/5 border border-white/10 hover:border-white/20 transition-colors w-full justify-center"
         >
           <Plus size={12} />
           Add MCP Server

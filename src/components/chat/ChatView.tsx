@@ -454,7 +454,7 @@ export function ChatView() {
                           <button
                             onClick={remoteClearError}
                             title="Dismiss error"
-                            className="p-0.5 rounded text-red-400/70 hover:text-red-300 hover:bg-red-500/15 transition-all"
+                            className="p-0.5 rounded text-red-400/70 hover:text-red-300 hover:bg-red-500/15 transition-colors"
                           >
                             <X size={9} />
                           </button>

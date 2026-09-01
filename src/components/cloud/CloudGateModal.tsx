@@ -37,9 +37,9 @@ function PlanGrid() {
         <button
           key={p.anchor}
           onClick={() => void openExternal(`${CLOUD_BASE}/pricing#${p.anchor}`)}
-          className="flex flex-col items-center gap-0.5 px-2 py-3 rounded-lg border border-[#7c3aed]/40 bg-[#7c3aed]/5 hover:bg-[#7c3aed]/15 transition-colors"
+          className="flex flex-col items-center gap-0.5 px-2 py-3 rounded-lg border border-lu-cloud/40 bg-lu-cloud/5 hover:bg-lu-cloud/15 transition-colors"
         >
-          <span className="text-[0.8rem] font-semibold text-[#7c3aed] dark:text-[#a78bfa]">{p.name}</span>
+          <span className="text-[0.8rem] font-semibold text-lu-cloud dark:text-lu-cloud-lift">{p.name}</span>
           <span className="text-[0.62rem] font-medium text-gray-500 dark:text-gray-400">
             {p.price}<span className="text-gray-400 dark:text-gray-500">/mo</span>
           </span>
@@ -78,7 +78,7 @@ function CloudHero({ subtitle }: { subtitle?: string }) {
       />
       <h2 className="text-xl font-semibold text-gray-900 dark:text-white">LU Cloud</h2>
       {subtitle && (
-        <p className="text-[0.75rem] leading-relaxed text-gray-600 dark:text-gray-400 max-w-xs">{subtitle}</p>
+        <p className="text-[12px] leading-relaxed text-gray-600 dark:text-gray-400 max-w-xs">{subtitle}</p>
       )}
     </div>
   )
@@ -153,7 +153,7 @@ export function CloudGateModal() {
   }, [open, refresh])
 
   const primaryBtn =
-    'w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-[0.72rem] font-medium bg-[#7c3aed] text-white hover:opacity-90 transition-opacity'
+    'w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-[0.72rem] font-medium bg-lu-cloud text-white hover:opacity-90 transition-opacity'
   const ghostBtn =
     'w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-[0.72rem] font-medium border border-gray-200 dark:border-white/10 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-white/5 transition-colors'
   const linkRow =

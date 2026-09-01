@@ -143,7 +143,7 @@ export function BenchmarkSkeleton() {
 export function CreateSkeleton() {
   return (
     <Shell label="Loading create">
-      <div className="relative h-full w-full flex flex-col bg-white dark:bg-[#141414] overflow-hidden">
+      <div className="relative h-full w-full flex flex-col bg-white dark:bg-lu-canvas overflow-hidden">
         <div className="shrink-0 flex items-center gap-2 px-4 py-2.5 border-b border-gray-200 dark:border-white/[0.06]">
           {[56, 56, 56, 56].map((w, i) => (
             <div key={i} style={{ width: w }}><Bar className="h-6 rounded-md" /></div>

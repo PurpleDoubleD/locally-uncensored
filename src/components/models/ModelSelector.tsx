@@ -75,7 +75,7 @@ function CloudTeaserSection({ onOpen }: { onOpen: () => void }) {
             <span className="text-[0.68rem] text-gray-400 truncate">
               {('displayName' in m && m.displayName) || displayModelName(m.name)}
             </span>
-            <span className="ml-auto text-[8px] text-violet-500 dark:text-violet-200">Cloud</span>
+            <span className="ml-auto text-[0.5rem] text-violet-500 dark:text-violet-200">Cloud</span>
           </button>
       ))}
       {cloudChat.length > 0 && cloudMore > 0 && (
@@ -99,7 +99,7 @@ function CloudTeaserSection({ onOpen }: { onOpen: () => void }) {
           <span className="text-[0.68rem] text-gray-400">
             Frontier chat models, no GPU needed
           </span>
-          <span className="ml-auto text-[8px] text-violet-500 dark:text-violet-200">Cloud</span>
+          <span className="ml-auto text-[0.5rem] text-violet-500 dark:text-violet-200">Cloud</span>
         </button>
       )}
     </div>
@@ -472,7 +472,7 @@ function LoadToggle({ loaded, busy, disabled, onClick }: {
       title={loaded
         ? 'Loaded in VRAM. Click to unload (Off)'
         : 'Not loaded. Click to load into VRAM (On)'}
-      className={`flex items-center gap-0.5 pl-1 pr-1.5 py-0.5 rounded text-[8px] font-semibold uppercase tracking-wide transition-colors disabled:opacity-40 ${
+      className={`flex items-center gap-0.5 pl-1 pr-1.5 py-0.5 rounded text-[0.5rem] font-semibold uppercase tracking-wide transition-colors disabled:opacity-40 ${
         loaded
           ? 'text-emerald-400 bg-emerald-500/[0.12] hover:bg-emerald-500/20'
           : 'text-gray-500 hover:text-gray-300 hover:bg-white/[0.06]'
@@ -987,12 +987,12 @@ export function ModelSelector({ openUpward = false, surface = 'chat' }: ModelSel
 
                           {/* Subtle meta */}
                           {model.type !== 'text' && (
-                            <span className={`text-[8px] uppercase font-medium tracking-wide ${TYPE_COLOR[model.type] || 'text-gray-500'} opacity-60`}>
+                            <span className={`text-[0.5rem] uppercase font-medium tracking-wide ${TYPE_COLOR[model.type] || 'text-gray-500'} opacity-60`}>
                               {TYPE_LABEL[model.type] || model.type}
                             </span>
                           )}
                           {modelProvider !== 'ollama' && (
-                            <span className={`text-[8px] ${providerBadge.color}`}>
+                            <span className={`text-[0.5rem] ${providerBadge.color}`}>
                               {providerBadge.label}
                             </span>
                           )}
@@ -1045,7 +1045,7 @@ export function ModelSelector({ openUpward = false, surface = 'chat' }: ModelSel
                           {/* §18 — inline load state while we auto-load this
                               LM Studio model on the way to selecting it. */}
                           {isSelectingThis && (
-                            <span className="inline-flex items-center gap-0.5 text-[8px] text-blue-400">
+                            <span className="inline-flex items-center gap-0.5 text-[0.5rem] text-blue-400">
                               <Loader2 size={8} className="animate-spin" />
                               loading…
                             </span>
@@ -1055,7 +1055,7 @@ export function ModelSelector({ openUpward = false, surface = 'chat' }: ModelSel
                         {/* Details on right */}
                         <div className="flex items-center gap-1 shrink-0">
                           {model.type === 'text' && 'details' in model && (model as any).details && (
-                            <span className="text-[8px] text-gray-600">
+                            <span className="text-[0.5rem] text-gray-600">
                               {(model as any).details.parameter_size}
                             </span>
                           )}

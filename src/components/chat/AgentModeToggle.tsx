@@ -169,7 +169,7 @@ export function AgentModeToggle() {
             </div>
 
             <h3 className="text-base font-semibold text-white">New Chat Required</h3>
-            <p className="text-[0.75rem] text-gray-400 leading-relaxed">
+            <p className="text-[12px] text-gray-400 leading-relaxed">
               Agent Mode needs to be active from the start of a conversation to work properly. Start a new chat with Agent Mode enabled.
             </p>
           </motion.div>

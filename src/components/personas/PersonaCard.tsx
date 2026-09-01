@@ -32,7 +32,7 @@ export function PersonaCard({ name, icon, isActive, onClick }: Props) {
       <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${isActive ? 'bg-gray-300 dark:bg-white/10' : 'bg-gray-100 dark:bg-white/5'}`}>
         <Icon size={16} className={isActive ? 'text-gray-700 dark:text-gray-300' : 'text-gray-400'} />
       </div>
-      <span className={`text-[10px] font-medium leading-tight text-center line-clamp-2 px-1 ${isActive ? 'text-gray-800 dark:text-white' : 'text-gray-500 dark:text-gray-400'}`}>
+      <span className={`t-micro font-medium leading-tight text-center line-clamp-2 px-1 ${isActive ? 'text-gray-800 dark:text-white' : 'text-gray-500 dark:text-gray-400'}`}>
         {name}
       </span>
     </button>

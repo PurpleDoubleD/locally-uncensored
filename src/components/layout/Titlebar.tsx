@@ -81,7 +81,7 @@ export function Titlebar() {
     return (
       <div
         data-tauri-drag-region
-        className="h-8 flex items-center justify-end bg-gray-200 dark:bg-[#141414] select-none pl-[80px] pr-3"
+        className="h-8 flex items-center justify-end bg-gray-200 dark:bg-lu-canvas select-none pl-[80px] pr-3"
       >
         <img src={MONOGRAM} alt="" width={18} height={18} className="pointer-events-none dark:invert-0 invert opacity-80" />
       </div>
@@ -91,7 +91,7 @@ export function Titlebar() {
   return (
     <div
       data-tauri-drag-region
-      className="h-8 flex items-center justify-between bg-gray-200 dark:bg-[#141414] select-none"
+      className="h-8 flex items-center justify-between bg-gray-200 dark:bg-lu-canvas select-none"
     >
       {/* Left: App icon + title */}
       <div data-tauri-drag-region className="flex items-center gap-1.5 pl-3">
