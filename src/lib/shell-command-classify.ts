@@ -132,16 +132,46 @@ export function isReadOnlyCommand(command: string): boolean {
 }
 
 /**
+ * Every command in a chained line.
+ *
+ * Split on the SAME {@link CHAINING} pattern `isReadOnlyCommand` refuses on,
+ * so both functions agree on what a separator is: `;` `&` `|`, a newline,
+ * every output redirection, and the two substitution openers. The pattern has
+ * no capture groups, so `split` drops the separators and hands back only the
+ * commands between them — including the BODY of a `$(…)` or a backtick pair,
+ * which is a place a commit hides just as well as after an `&&`.
+ */
+function commandSegments(command: string): string[] {
+  return command.split(CHAINING).map((s) => s.trim()).filter((s) => s.length > 0)
+}
+
+/**
  * The one refusal that stays hard: --no-verify on a commit. The old
  * git_commit tool could not emit it (buildGitCommitCommand never did); with
  * the model writing the command itself, the executor has to say no
  * (plan E4 point 2).
  *
+ * The ban applies to a commit ANYWHERE in the line. It used to ask
+ * `commandKind`, which reports the kind of whatever comes FIRST, so anything
+ * at all in front of the commit turned the refusal off: `git status && git
+ * commit --no-verify` classified as 'git-status', `echo hi && …` and `cd
+ * repo; …` as 'generic', and all three ran. Only `git add … && git commit …`
+ * was caught, by a special case in `commandKind` that patched this exact hole
+ * for exactly one prefix. Segmenting covers every prefix and needs no special
+ * case; `commandKind` is left alone because `commandTimeoutMs` and
+ * `commandIcon` read it too.
+ *
+ * `--no-verify` is deliberately still matched against the WHOLE line rather
+ * than per segment: the split is quote-blind, so a `;` inside a commit
+ * message would otherwise put the flag in a different segment from the commit
+ * (`git commit -m "a;b" --no-verify`) and hand back the very bypass this is
+ * closing. Testing the wider string can only ever refuse more, never less.
+ *
  * Returns the refusal text, or null when the command may run.
  */
 export function rejectShellCommand(command: string): string | null {
-  const kind = commandKind(command)
-  if (kind === 'git-commit' && /--no-verify\b/.test(command)) {
+  const commits = commandSegments(command).some((seg) => /^git\s+commit\b/.test(seg))
+  if (commits && /--no-verify\b/.test(command)) {
     return 'Refused: git commit --no-verify skips the repository hooks. Fix what the hook reports instead of silencing it, then commit normally.'
   }
   return null

@@ -172,6 +172,63 @@ describe('the --no-verify ban survives the merge', () => {
   })
 })
 
+// Die Sperre hing an commandKind, und commandKind entscheidet nach dem ERSTEN
+// passenden Praefix. Irgendein Kommando davor — und sei es `echo hi` — machte
+// sie wirkungslos; gefangen wurde nur `git add … && git commit …`, weil
+// commandKind dafuer einen Sonderfall traegt. Alle fuenf Zeilen der Messung
+// stehen hier, dazu die Faelle, die weiter durchlaufen muessen.
+describe('the --no-verify ban applies to a commit anywhere in the line', () => {
+  const refused = (c: string) => rejectShellCommand(c) !== null
+
+  it('refuses the bare commit (unchanged)', () => {
+    expect(refused('git commit --no-verify -m x')).toBe(true)
+  })
+
+  it('refuses a commit behind a read command', () => {
+    expect(refused('git status && git commit --no-verify -m x')).toBe(true)
+  })
+
+  it('refuses a commit behind an unrelated command', () => {
+    expect(refused('echo hi && git commit --no-verify -m x')).toBe(true)
+  })
+
+  it('refuses a commit behind a semicolon', () => {
+    expect(refused('cd repo; git commit --no-verify -m x')).toBe(true)
+  })
+
+  it('still refuses the add-then-commit chain commandKind special-cased', () => {
+    expect(refused('git add -A && git commit --no-verify -m x')).toBe(true)
+  })
+
+  it('refuses a commit hidden in a substitution or a pipe', () => {
+    expect(refused('echo $(git commit --no-verify -m x)')).toBe(true)
+    expect(refused('true | git commit --no-verify -m x')).toBe(true)
+    expect(refused('git commit --no-verify -m x > /tmp/out')).toBe(true)
+  })
+
+  it('refuses even when a quoted separator splits the flag off the commit', () => {
+    // Der Split ist anfuehrungszeichen-blind: `;` in der Nachricht trennt das
+    // Flag vom Commit. Deshalb wird --no-verify weiter gegen die GANZE Zeile
+    // geprueft, nicht je Segment.
+    expect(refused('git commit -m "a;b" --no-verify')).toBe(true)
+  })
+
+  // Negativkontrollen: die Sperre gilt --no-verify, nicht dem Committen.
+  it('lets an ordinary commit run inside a chain', () => {
+    expect(rejectShellCommand('git add -A && git commit -m wip')).toBeNull()
+    expect(rejectShellCommand('git status && git commit -m wip')).toBeNull()
+  })
+
+  it('lets an ordinary chain without a commit run', () => {
+    expect(rejectShellCommand('git status && ls')).toBeNull()
+    expect(rejectShellCommand('echo hi && ls -la')).toBeNull()
+  })
+
+  it('does not fire when a segment merely mentions the word commit', () => {
+    expect(rejectShellCommand('git log --grep=commit')).toBeNull()
+  })
+})
+
 describe('timeout and icon follow the command', () => {
   it('a recognised test run keeps the 300 s budget', () => {
     expect(commandTimeoutMs('npm test', 600_000)).toBe(TEST_RUN_TIMEOUT_MS)
