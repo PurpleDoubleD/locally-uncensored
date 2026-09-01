@@ -30,7 +30,7 @@ export interface ToolTimeoutSettings {
 /** The JS race ceiling for one tool call, in ms. */
 export function toolCallCapMs(
   name: string,
-  args: Record<string, any> | undefined,
+  args: Record<string, unknown> | undefined,
   settings: ToolTimeoutSettings,
 ): number {
   if (name === 'image_generate') {

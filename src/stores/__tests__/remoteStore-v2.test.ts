@@ -18,6 +18,7 @@ vi.mock('../../api/backend', () => ({
   isTauri: vi.fn(() => true),
 }))
 import { backendCall } from '../../api/backend'
+import { prop } from '../../types/json-guards'
 const mockBackend = backendCall as unknown as ReturnType<typeof vi.fn>
 
 beforeEach(() => {
@@ -40,7 +41,10 @@ beforeEach(() => {
     dispatchedConversationId: null,
     qrVisible: false,
   })
-  useMemoryStore.setState({ memories: [] } as any)
+  // NOTE: this reset named `memories`, a field the memory store does not
+  // have — `as any` let it compile, so it never reset anything. The real
+  // field is `entries`.
+  useMemoryStore.setState({ entries: [] })
 })
 
 afterEach(() => {
@@ -101,9 +105,7 @@ describe('remoteStore › dispatch()', () => {
   })
 
   it('enriches systemPrompt with memory before sending', async () => {
-    useMemoryStore.setState({
-      getMemoriesForPrompt: () => 'MEM CONTEXT HERE',
-    } as any)
+    useMemoryStore.setState({ getMemoriesForPrompt: () => 'MEM CONTEXT HERE' })
     mockBackend.mockResolvedValue({ port: 11435, passcode: '123456' })
     await useRemoteStore.getState().dispatch('c', 'm', 'BASE')
     const call = mockBackend.mock.calls.find(c => c[0] === 'start_remote_server')
@@ -112,9 +114,7 @@ describe('remoteStore › dispatch()', () => {
   })
 
   it('uses memory-only prompt if base systemPrompt is empty', async () => {
-    useMemoryStore.setState({
-      getMemoriesForPrompt: () => 'ONLY_MEMORIES',
-    } as any)
+    useMemoryStore.setState({ getMemoriesForPrompt: () => 'ONLY_MEMORIES' })
     mockBackend.mockResolvedValue({ port: 11435, passcode: '123456' })
     await useRemoteStore.getState().dispatch('c', 'm', '')
     const call = mockBackend.mock.calls.find(c => c[0] === 'start_remote_server')
@@ -122,9 +122,7 @@ describe('remoteStore › dispatch()', () => {
   })
 
   it('leaves systemPrompt unchanged when no memories', async () => {
-    useMemoryStore.setState({
-      getMemoriesForPrompt: () => '',
-    } as any)
+    useMemoryStore.setState({ getMemoriesForPrompt: () => '' })
     mockBackend.mockResolvedValue({ port: 11435, passcode: '123456' })
     await useRemoteStore.getState().dispatch('c', 'm', 'KEEP_THIS')
     const call = mockBackend.mock.calls.find(c => c[0] === 'start_remote_server')
@@ -206,7 +204,7 @@ describe('remoteStore › undispatch()', () => {
 
 describe('remoteStore › memory enrichment behaviour', () => {
   it('prepends "remembered context" preamble to memory block', async () => {
-    useMemoryStore.setState({ getMemoriesForPrompt: () => 'FACT_A\nFACT_B' } as any)
+    useMemoryStore.setState({ getMemoriesForPrompt: () => 'FACT_A\nFACT_B' })
     mockBackend.mockResolvedValue({})
     await useRemoteStore.getState().dispatch('c', 'm', '')
     const call = mockBackend.mock.calls.find(c => c[0] === 'start_remote_server')
@@ -214,7 +212,7 @@ describe('remoteStore › memory enrichment behaviour', () => {
   })
 
   it('separates base prompt and memory with double newline', async () => {
-    useMemoryStore.setState({ getMemoriesForPrompt: () => 'MEM' } as any)
+    useMemoryStore.setState({ getMemoriesForPrompt: () => 'MEM' })
     mockBackend.mockResolvedValue({})
     await useRemoteStore.getState().dispatch('c', 'm', 'BASE')
     const call = mockBackend.mock.calls.find(c => c[0] === 'start_remote_server')
@@ -222,9 +220,7 @@ describe('remoteStore › memory enrichment behaviour', () => {
   })
 
   it('swallows memory-store errors gracefully', async () => {
-    useMemoryStore.setState({
-      getMemoriesForPrompt: () => { throw new Error('store broke') },
-    } as any)
+    useMemoryStore.setState({ getMemoriesForPrompt: () => { throw new Error('store broke') } })
     mockBackend.mockResolvedValue({})
     await useRemoteStore.getState().dispatch('c', 'm', 'STILL_OK')
     const call = mockBackend.mock.calls.find(c => c[0] === 'start_remote_server')
@@ -233,9 +229,10 @@ describe('remoteStore › memory enrichment behaviour', () => {
   })
 
   it('enrichment applies to restart as well (via restart_remote_server)', async () => {
-    useMemoryStore.setState({ getMemoriesForPrompt: () => 'MEM' } as any)
+    useMemoryStore.setState({ getMemoriesForPrompt: () => 'MEM' })
     mockBackend.mockResolvedValue({})
-    const restart = (useRemoteStore.getState() as any).restart
+    // `restart` is not on the store's interface; the test probes for it.
+    const restart = prop(useRemoteStore.getState(), 'restart')
     if (typeof restart === 'function') {
       await restart('conv-r', 'm', 'BASE')
       const call = mockBackend.mock.calls.find(c => c[0] === 'restart_remote_server')

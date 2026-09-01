@@ -19,7 +19,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 const backendCall = vi.fn()
 vi.mock('../../api/backend', () => ({
-  backendCall: (...args: any[]) => backendCall(...args),
+  backendCall: (...args: unknown[]) => backendCall(...args),
 }))
 
 const { pathToFileUrl, fileUrlToPath, guessMimeFromName, readLocalFileAsBlobUrl } =
@@ -81,14 +81,18 @@ describe('readLocalFileAsBlobUrl', () => {
     backendCall.mockResolvedValue(btoa('fake-bytes'))
     const created: { type: string }[] = []
     const origCreate = URL.createObjectURL
-    ;(URL as any).createObjectURL = (b: Blob) => { created.push({ type: b.type }); return 'blob:made' }
+    // defineProperty rather than an assignment through a cast: `value` is
+    // untyped, so the stub goes in without claiming to be the real overload.
+    const setCreate = (fn: unknown) =>
+      Object.defineProperty(URL, 'createObjectURL', { value: fn, configurable: true, writable: true })
+    setCreate((b: Blob) => { created.push({ type: b.type }); return 'blob:made' })
     try {
       const url = await readLocalFileAsBlobUrl('/tmp/clip.mp4')
       expect(backendCall).toHaveBeenCalledWith('read_media_file', { path: '/tmp/clip.mp4' })
       expect(url).toBe('blob:made')
       expect(created[0].type).toBe('video/mp4')
     } finally {
-      ;(URL as any).createObjectURL = origCreate
+      setCreate(origCreate)
     }
   })
 

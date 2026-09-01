@@ -189,7 +189,7 @@ function askPersist(): void {
   if (_persistAsked) return
   _persistAsked = true
   try {
-    const s = (navigator as any)?.storage
+    const s = typeof navigator !== 'undefined' ? navigator.storage : undefined
     if (s && typeof s.persist === 'function') s.persist().catch(() => {})
   } catch { /* not supported */ }
 }

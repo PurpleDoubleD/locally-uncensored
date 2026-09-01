@@ -33,7 +33,7 @@ export interface ToolAuditEntry {
   /** AgentToolCall.id — correlates with the block. */
   toolCallId: string
   toolName: string
-  args: Record<string, any>
+  args: Record<string, unknown>
   /** Deterministic hash of args for cache / dedup. */
   argsHash: string
   status: ToolAuditStatus
@@ -89,7 +89,7 @@ interface ToolAuditState {
     convId: string
     toolCallId: string
     toolName: string
-    args: Record<string, any>
+    args: Record<string, unknown>
     parentToolCallId?: string
     startedAt?: number
     status?: ToolAuditStatus

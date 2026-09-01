@@ -5,7 +5,7 @@ vi.mock('../../api/comfyui', () => ({ classifyModel: () => 'unknown' }))
 // zustand/persist defaults to `window.localStorage` — in the node test env both
 // need shimming BEFORE the store module is imported, or persist silently no-ops.
 const backing = new Map<string, string>()
-;(globalThis as any).window = globalThis
+Object.defineProperty(globalThis, 'window', { value: globalThis, configurable: true, writable: true })
 globalThis.localStorage = {
   getItem: (k: string) => backing.get(k) ?? null,
   setItem: (k: string, v: string) => void backing.set(k, String(v)),

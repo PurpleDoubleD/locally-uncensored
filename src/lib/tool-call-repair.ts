@@ -21,12 +21,87 @@
  */
 
 import { balancedObjectAt, findBalancedObjects } from './json-scan'
+import { isRecord } from '../types/json-guards'
+
+/**
+ * What a repair attempt hands back.
+ *
+ * The input is model output, so the JSON value can be anything — but this
+ * module has one subject, the object a model writes when it means to call a
+ * tool, and its own last-resort branch below MANUFACTURES exactly that shape.
+ * So the result type names the three fields callers read without checking,
+ * and {@link asRepairedJson} makes them true instead of merely claiming them:
+ * a `name` survives only if the model wrote a string, `arguments` /
+ * `parameters` only if they resolve to an object. Every other key stays
+ * `unknown` and has to be checked at the point of use.
+ */
+export interface RepairedJson {
+  /** Tool name — present only when the model wrote it as a string. */
+  name?: string
+  /** Argument object — present only when it is (or repairs to) an object. */
+  arguments?: Record<string, unknown>
+  /** The other spelling half the small models use. Same guarantee. */
+  parameters?: Record<string, unknown>
+  /** Anything else the model wrote. */
+  [key: string]: unknown
+}
+
+/**
+ * An `arguments` / `parameters` value, reduced to an object or nothing.
+ *
+ * The string branch is not cosmetic: OpenAI-shaped producers serialise the
+ * argument object into a JSON STRING, and every consumer of this module reads
+ * `parsed.arguments.something` straight away. Resolving it here is the same
+ * normalisation `repairToolCallArgs` performs one level up.
+ */
+function argumentObject(v: unknown): Record<string, unknown> | undefined {
+  if (isRecord(v)) return v
+  if (typeof v === 'string') {
+    const inner = tryRepair(v)
+    if (isRecord(inner)) return inner
+  }
+  return undefined
+}
+
+/**
+ * Present a parsed JSON value as {@link RepairedJson}.
+ *
+ * A scalar (number, string, boolean, null) is not a repaired call and comes
+ * back as `null`: no caller can read a property off one, so all of them
+ * already treated such a value as a miss.
+ *
+ * A RECORD is rebuilt rather than relabelled, so the three declared fields are
+ * true of the returned value instead of merely claimed about it.
+ *
+ * An ARRAY is handed back unchanged — `repairJson('[1,2,3]')` returning the
+ * array is pinned behaviour. That step is the module's one cast, and it is
+ * sound: all three declared fields are OPTIONAL, and every one of them reads
+ * `undefined` off an array, which is exactly what the optional markers
+ * promise. TypeScript refuses the plain assignment only because an array
+ * carries no STRING index signature, not because one of these reads could
+ * mislead anybody; `Array.isArray` still tells the two containers apart.
+ */
+function asRepairedJson(v: unknown): RepairedJson | null {
+  if (Array.isArray(v)) return v as unknown as RepairedJson
+  if (!isRecord(v)) return null
+  const out: RepairedJson = {}
+  for (const [k, val] of Object.entries(v)) out[k] = val
+  if (typeof v.name === 'string') out.name = v.name
+  else delete out.name
+  const args = argumentObject(v.arguments)
+  if (args) out.arguments = args
+  else delete out.arguments
+  const params = argumentObject(v.parameters)
+  if (params) out.parameters = params
+  else delete out.parameters
+  return out
+}
 
 /**
  * Attempt to repair broken JSON from a tool call.
  * Returns parsed object or null if unfixable.
  */
-export function repairJson(raw: string): any | null {
+export function repairJson(raw: string): RepairedJson | null {
   const trimmed = raw.trim()
   if (!trimmed) return null
 
@@ -41,18 +116,21 @@ export function repairJson(raw: string): any | null {
 
   for (const candidate of candidates) {
     const parsed = tryRepair(candidate)
-    if (parsed !== undefined) return parsed
+    if (parsed !== undefined) {
+      const repaired = asRepairedJson(parsed)
+      if (repaired) return repaired
+    }
   }
 
   // Last resort: pull the name out with a regex and balance the args object.
   const nameMatch = raw.match(/["']?name["']?\s*[:=]\s*["']([^"']+)["']/i)
   if (nameMatch) {
-    let args: Record<string, any> = {}
+    let args: Record<string, unknown> = {}
     const argsKey = /["']?(?:arguments|args|parameters|input)["']?\s*[:=]\s*(?=\{)/i.exec(raw)
     if (argsKey) {
       const obj = balancedObjectAt(raw, argsKey.index + argsKey[0].length)
       const parsed = obj ? tryRepair(obj.text) : undefined
-      if (parsed && typeof parsed === 'object') args = parsed
+      if (isRecord(parsed)) args = parsed
     }
     return { name: nameMatch[1], arguments: args }
   }
@@ -60,12 +138,18 @@ export function repairJson(raw: string): any | null {
   return null
 }
 
-/** Parse `src`, applying one repair at a time and retrying after each. */
-function tryRepair(src: string): any | undefined {
+/**
+ * Parse `src`, applying one repair at a time and retrying after each.
+ *
+ * `undefined` means "did not parse". JSON has no `undefined`, so the sentinel
+ * can never collide with a real result (`null` is a legal parse and is
+ * reported as such).
+ */
+function tryRepair(src: string): unknown {
   let s = src.trim()
   if (!s) return undefined
 
-  const attempt = (t: string): any | undefined => {
+  const attempt = (t: string): unknown => {
     try { return JSON.parse(t) } catch { return undefined }
   }
 
@@ -193,11 +277,19 @@ function closeOpenContainers(src: string): string {
 /**
  * Repair tool call arguments that might be a string instead of object.
  */
-export function repairToolCallArgs(args: any): Record<string, any> {
-  if (typeof args === 'object' && args !== null) return args
+export function repairToolCallArgs(args: unknown): Record<string, unknown> {
+  // `isRecord` rather than the old `typeof === 'object'`: an ARRAY passed that
+  // test and was handed on as if it were an argument object. Nothing could
+  // read a named argument off it, so the tool failed either way — but the
+  // declared type said otherwise. Arrays now resolve to `{}` honestly.
+  if (isRecord(args)) return args
+  // An array is not an argument object — nothing can read a named argument off
+  // one — but handing it back is pinned behaviour, and the label is sound for
+  // reads for the same reason spelled out on asRepairedJson.
+  if (Array.isArray(args)) return args as unknown as Record<string, unknown>
   if (typeof args === 'string') {
     const parsed = repairJson(args)
-    if (parsed && typeof parsed === 'object') return parsed
+    if (parsed) return parsed
   }
   return {}
 }
@@ -206,7 +298,7 @@ export function repairToolCallArgs(args: any): Record<string, any> {
  * Extract tool calls from model content when native tool calling fails.
  * Looks for JSON patterns that look like tool calls.
  */
-export function extractToolCallsFromContent(content: string): { name: string; arguments: Record<string, any> }[] {
+export function extractToolCallsFromContent(content: string): { name: string; arguments: Record<string, unknown> }[] {
   return extractToolCallsWithRanges(content).calls
 }
 
@@ -234,10 +326,10 @@ export function looksLikeToolIntent(text: string): boolean {
  * models (qwen2.5-coder:3b) emit.
  */
 export function extractToolCallsWithRanges(content: string): {
-  calls: { name: string; arguments: Record<string, any> }[]
+  calls: { name: string; arguments: Record<string, unknown> }[]
   ranges: Array<[number, number]>
 } {
-  const calls: { name: string; arguments: Record<string, any> }[] = []
+  const calls: { name: string; arguments: Record<string, unknown> }[] = []
   const ranges: Array<[number, number]> = []
 
   // Pattern 1: {"name": "tool_name", "arguments": {...}}
@@ -256,7 +348,7 @@ export function extractToolCallsWithRanges(content: string): {
     if (argsEnd < 0) continue
     const argsJson = content.slice(argsStart, argsEnd + 1)
     const args = repairJson(argsJson)
-    if (args) {
+    if (isRecord(args)) {
       calls.push({ name: toolName, arguments: args })
       // The full tool-call JSON range: walk backwards from m.index to include
       // the opening `{` of the outer wrapper, and walk forward from argsEnd
@@ -278,11 +370,11 @@ export function extractToolCallsWithRanges(content: string): {
     while ((match = pattern2.exec(content)) !== null) {
       ranges.push([match.index, match.index + match[0].length - 1])
       const argStr = match[2].trim()
-      let args: Record<string, any> = {}
+      let args: Record<string, unknown> = {}
       if (argStr) {
         // Try to parse as JSON
         const parsed = repairJson(`{${argStr}}`)
-        if (parsed) args = parsed
+        if (isRecord(parsed)) args = parsed
         else {
           // Simple single-argument: treat as the first required param
           args = { query: argStr.replace(/^["']|["']$/g, '') }

@@ -1,13 +1,14 @@
 import { create } from 'zustand'
 import { persist, createJSONStorage } from 'zustand/middleware'
 import { v4 as uuid } from 'uuid'
-import type { MemoryEntry, MemoryCategory, MemoryFile, MemoryType, MemorySettings, MemoryBudgetTier } from '../types/agent-mode'
+import type { MemoryCategory, MemoryFile, MemoryType, MemorySettings, MemoryBudgetTier } from '../types/agent-mode'
 import { MEMORY_MIGRATION_MAP, MEMORY_BUDGET_TIERS } from '../types/agent-mode'
 import { idbStorage } from '../lib/idbStorage'
 import { generateEmbeddings } from '../api/rag'
 import { saveVector, loadVectors, deleteVector, clearAll as clearAllVectors, type MemoryVectorRecord } from '../lib/memoryEmbedDB'
 import { scoreMemoriesBlended, isStale, type BlendCandidate } from '../lib/memory-retrieval'
 import type { ResolutionDecision } from '../lib/memory-extraction'
+import { isRecord, prop, asString, asNumber, asStringArray } from '../types/json-guards'
 import { log } from '../lib/logger'
 
 // ── Embedding model + dim (mirrors rag.ts default) ────────────────
@@ -277,27 +278,56 @@ interface MemoryState {
 }
 
 // ── Migration from v1 (old MemoryEntry[]) to v2 (MemoryFile[]) ──
+//
+// WHY EVERY FIELD IS CHECKED HERE. A migration reads data an OLDER build of
+// this app wrote, and zustand gives it no second chance: a migrate that throws
+// lands in persist's `.catch`, hydration is abandoned, the store keeps its
+// empty default — and the next write persists that empty list back over the
+// stored blob. One entry the migration cannot read would take every memory
+// with it, permanently. So each entry is checked on its own and a broken one
+// is dropped alone.
 
-function migrateV1toV2(oldState: any): any {
-  if (!oldState || !Array.isArray(oldState.entries)) return oldState
+/** The v1 fields a MemoryEntry must have to be worth carrying forward. */
+function asLegacyEntry(v: unknown): { id: string; category: string; content: string; timestamp: number; source?: string } | null {
+  if (!isRecord(v)) return null
+  const content = asString(v.content)
+  if (!content) return null
+  return {
+    id: asString(v.id) ?? uuid(),
+    category: asString(v.category) ?? '',
+    content,
+    timestamp: asNumber(v.timestamp) ?? Date.now(),
+    source: asString(v.source),
+  }
+}
 
-  // Check if already migrated (MemoryFile has 'type' field)
-  if (oldState.entries.length > 0 && 'type' in oldState.entries[0]) {
+function migrateV1toV2(oldState: unknown): unknown {
+  if (!isRecord(oldState) || !Array.isArray(oldState.entries)) return oldState
+
+  // Check if already migrated (MemoryFile has 'type' field). Sampling the
+  // first entry is the original test; `in` on a non-object used to throw.
+  const first: unknown = oldState.entries[0]
+  if (oldState.entries.length > 0 && isRecord(first) && 'type' in first) {
     return oldState
   }
 
   // Migrate old MemoryEntry[] to MemoryFile[]
-  const migratedEntries: MemoryFile[] = (oldState.entries as MemoryEntry[]).map((e) => ({
-    id: e.id,
-    type: MEMORY_MIGRATION_MAP[e.category] || 'project',
-    title: e.content.substring(0, 60).replace(/\n/g, ' '),
-    description: e.content.substring(0, 120).replace(/\n/g, ' '),
-    content: e.content,
-    tags: e.source ? [e.source] : [],
-    createdAt: e.timestamp,
-    updatedAt: e.timestamp,
-    source: e.source || 'migration',
-  }))
+  const migratedEntries: MemoryFile[] = []
+  for (const raw of oldState.entries) {
+    const e = asLegacyEntry(raw)
+    if (!e) continue
+    migratedEntries.push({
+      id: e.id,
+      type: MEMORY_MIGRATION_MAP[e.category as MemoryCategory] || 'project',
+      title: e.content.substring(0, 60).replace(/\n/g, ' '),
+      description: e.content.substring(0, 120).replace(/\n/g, ' '),
+      content: e.content,
+      tags: e.source ? [e.source] : [],
+      createdAt: e.timestamp,
+      updatedAt: e.timestamp,
+      source: e.source || 'migration',
+    })
+  }
 
   return {
     ...oldState,
@@ -319,13 +349,68 @@ function migrateV1toV2(oldState: any): any {
 // `stale` flag is a concrete boolean (false) on every entry, so retrieval's
 // `isStale` and the "Show outdated" filter behave deterministically on
 // freshly-rehydrated old stores. All other new fields stay undefined.
-function migrateV2toV3(oldState: any): any {
-  if (!oldState || !Array.isArray(oldState.entries)) return oldState
-  const entries = (oldState.entries as MemoryFile[]).map((e) => ({
-    ...e,
-    stale: e.stale === true ? true : false,
-  }))
+//
+// This is the migration EVERY 2.5.x user runs, so the check above matters
+// most here: `e.stale` on a non-object entry threw, and the throw cost the
+// whole store.
+function migrateV2toV3(oldState: unknown): unknown {
+  if (!isRecord(oldState) || !Array.isArray(oldState.entries)) return oldState
+  const entries: MemoryFile[] = []
+  for (const raw of oldState.entries) {
+    const e = asMemoryFile(raw)
+    if (e) entries.push(e)
+  }
   return { ...oldState, entries }
+}
+
+/**
+ * A persisted MemoryFile, rebuilt from checked fields. The four required
+ * strings and the two timestamps decide whether an entry is usable at all;
+ * the optional staleness fields are carried over when they have the right
+ * type and dropped when they do not.
+ */
+function asMemoryFile(v: unknown): MemoryFile | null {
+  if (!isRecord(v)) return null
+  const content = asString(v.content)
+  if (!content) return null
+  const now = Date.now()
+  const type = MEMORY_TYPES.find((t) => t === v.type) ?? 'project'
+  return {
+    id: asString(v.id) ?? uuid(),
+    type,
+    title: asString(v.title) ?? content.substring(0, 60).replace(/\n/g, ' '),
+    description: asString(v.description) ?? content.substring(0, 120).replace(/\n/g, ' '),
+    content,
+    tags: asStringArray(v.tags),
+    createdAt: asNumber(v.createdAt) ?? now,
+    updatedAt: asNumber(v.updatedAt) ?? asNumber(v.createdAt) ?? now,
+    source: asString(v.source) ?? 'migration',
+    supersededBy: asString(v.supersededBy),
+    supersedesId: asString(v.supersedesId),
+    stale: v.stale === true,
+    validFrom: asNumber(v.validFrom),
+  }
+}
+
+const MEMORY_TYPES: readonly MemoryType[] = ['user', 'feedback', 'project', 'reference']
+
+/**
+ * The persist `migrate` hook. Exported so a test can drive it directly — the
+ * persist internals are not reachable from vitest (same reason
+ * migratePermissionState is exported).
+ */
+export function migrateMemoryState(persistedState: unknown, version: number): MemoryState {
+  let state: unknown = persistedState
+  if (version < 2) {
+    state = migrateV1toV2(state)
+  }
+  if (version < 3) {
+    state = migrateV2toV3(state)
+  }
+  // zustand types migrate as returning the FULL store, but a blob only ever
+  // carries the partialized slice and `merge` puts the actions back. The cast
+  // claims exactly what went in, nothing about the actions.
+  return state as MemoryState
 }
 
 // ── Store ─────────────────────────────────────────────────────
@@ -705,7 +790,7 @@ export const useMemoryStore = create<MemoryState>()(
       },
 
       importFromJSON: (json) => {
-        let raw: any
+        let raw: unknown
         try {
           raw = JSON.parse(json)
         } catch {
@@ -715,28 +800,33 @@ export const useMemoryStore = create<MemoryState>()(
         // Tolerant shape handling: accept LU's own {entries:[...]} export, a
         // bare [...] array, or {memories:[...]} (konata-session 2026-06-07 —
         // imports silently produced 0 entries on any other shape).
-        const arr: any[] = Array.isArray(raw) ? raw
-          : Array.isArray(raw?.entries) ? raw.entries
-          : Array.isArray(raw?.memories) ? raw.memories
+        const entriesField = prop(raw, 'entries')
+        const memoriesField = prop(raw, 'memories')
+        const arr: unknown[] = Array.isArray(raw) ? raw
+          : Array.isArray(entriesField) ? entriesField
+          : Array.isArray(memoriesField) ? memoriesField
           : []
-        const VALID: MemoryType[] = ['user', 'feedback', 'project', 'reference']
         const now = Date.now()
         const newEntries: MemoryFile[] = []
         for (const e of arr) {
-          const content = String(e?.content ?? e?.text ?? e?.value ?? '').trim()
+          // `content` may also arrive as `text` / `value` — a foreign export's
+          // spelling. Only a real string counts: the old String(...) turned an
+          // object into the literal "[object Object]" and imported that.
+          const content = (asString(prop(e, 'content')) ?? asString(prop(e, 'text')) ?? asString(prop(e, 'value')) ?? '').trim()
           if (!content) continue
+          const type = MEMORY_TYPES.find((t) => t === prop(e, 'type')) ?? 'user'
           newEntries.push({
             // Always mint a fresh id so a re-imported export can never collide
             // with an existing entry's id (which broke edit/remove-by-id).
             id: uuid(),
-            type: VALID.includes(e?.type) ? e.type : 'user',
-            title: String(e?.title ?? content).slice(0, 60).replace(/\n/g, ' '),
-            description: String(e?.description ?? content).slice(0, 120),
+            type,
+            title: (asString(prop(e, 'title')) ?? content).slice(0, 60).replace(/\n/g, ' '),
+            description: (asString(prop(e, 'description')) ?? content).slice(0, 120),
             content,
-            tags: Array.isArray(e?.tags) ? e.tags.map((t: any) => String(t)) : [],
-            createdAt: typeof e?.createdAt === 'number' ? e.createdAt : now,
+            tags: asStringArray(prop(e, 'tags')),
+            createdAt: asNumber(prop(e, 'createdAt')) ?? now,
             updatedAt: now,
-            source: String(e?.source ?? 'import'),
+            source: asString(prop(e, 'source')) ?? 'import',
           })
         }
         if (newEntries.length > 0) {
@@ -783,16 +873,7 @@ export const useMemoryStore = create<MemoryState>()(
       // localStorage data on first read. createJSONStorage wrap still required
       // (zustand v5 PersistStorage; raw StateStorage → "[object Object]", FIX-3).
       storage: createJSONStorage(() => idbStorage),
-      migrate: (persistedState, version) => {
-        let state: any = persistedState
-        if (version < 2) {
-          state = migrateV1toV2(state)
-        }
-        if (version < 3) {
-          state = migrateV2toV3(state)
-        }
-        return state as MemoryState
-      },
+      migrate: migrateMemoryState,
       partialize: (state) => ({
         entries: state.entries,
         settings: state.settings,

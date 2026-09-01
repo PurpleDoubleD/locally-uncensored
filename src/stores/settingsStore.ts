@@ -3,6 +3,7 @@ import { persist } from 'zustand/middleware'
 import { safeJSONStorage } from '../lib/storage-quota'
 import type { Settings, Persona } from '../types/settings'
 import { DEFAULT_SETTINGS, BUILT_IN_PERSONAS } from '../lib/constants'
+import { isRecord, asString } from '../types/json-guards'
 
 // v5 (Feature EE v2.5.0): added settings.exclusiveVramMode. The migrate below
 // already merges { ...DEFAULT_SETTINGS, ...persisted.settings }, so bumping the
@@ -155,11 +156,20 @@ export const useSettingsStore = create<SettingsState>()(
       name: 'chat-settings',
       storage: safeJSONStorage(),
       version: STORE_VERSION,
-      migrate: (persisted: any, version: number) => {
+      migrate: (persisted: unknown, version: number): SettingsState => {
+        // Foreign at read time — an older build wrote this. A read that throws
+        // in a migrate costs the whole store: zustand abandons hydration and
+        // the next write persists the empty default over the blob, which here
+        // would mean every setting AND every custom persona.
+        const blob = isRecord(persisted) ? persisted : {}
         if (version < STORE_VERSION) {
-          const customPersonas = (persisted.personas || []).filter((p: Persona) => !p.isBuiltIn)
+          const storedPersonas = Array.isArray(blob.personas) ? blob.personas : []
+          const customPersonas = storedPersonas.filter(
+            (p): p is Persona => isRecord(p) && p.isBuiltIn !== true,
+          )
           // Merge new default settings into existing (fills missing fields like thinkingEnabled)
-          const mergedSettings = { ...DEFAULT_SETTINGS, ...(persisted.settings || {}) }
+          const storedSettings = isRecord(blob.settings) ? blob.settings : {}
+          const mergedSettings = { ...DEFAULT_SETTINGS, ...storedSettings }
           // v10: clear the saved model-picker preferences ONCE so the picker is
           // shown first again on image + video (David 2026-06-16). The additive
           // merge above would otherwise preserve a previously-saved pick.
@@ -176,14 +186,16 @@ export const useSettingsStore = create<SettingsState>()(
             if (isMac) mergedSettings.appMode = 'local'
           }
           return {
-            ...persisted,
+            ...blob,
             settings: mergedSettings,
             personas: [...BUILT_IN_PERSONAS, ...customPersonas],
-            activePersonaId: persisted.activePersonaId || 'unrestricted',
+            activePersonaId: asString(blob.activePersonaId) || 'unrestricted',
             _version: STORE_VERSION,
-          }
+          } as unknown as SettingsState
         }
-        return persisted
+        // zustand types migrate as returning the FULL store, but a blob only
+        // ever carries the partialized slice and `merge` puts the actions back.
+        return persisted as SettingsState
       },
     }
   )

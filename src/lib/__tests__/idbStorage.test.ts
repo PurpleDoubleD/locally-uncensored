@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { idbStorage } from '../idbStorage'
+import { prop } from '../../types/json-guards'
 
 // The vitest env is `node`: no `indexedDB`, so idbStorage takes its SYNC
 // localStorage fallback. That sync path is exactly what keeps Zustand
@@ -19,7 +20,7 @@ function mockLS(init: Record<string, string> = {}): Storage {
 
 describe('idbStorage (no-IndexedDB fallback path)', () => {
   afterEach(() => {
-    try { delete (globalThis as any).localStorage } catch { /* ignore */ }
+    try { Reflect.deleteProperty(globalThis, 'localStorage') } catch { /* ignore */ }
   })
 
   it('round-trips via localStorage SYNCHRONOUSLY (no Promise) when idb is absent', () => {
@@ -29,7 +30,7 @@ describe('idbStorage (no-IndexedDB fallback path)', () => {
     expect(setResult).toBeUndefined()
     const got = idbStorage.getItem('chat-conversations')
     expect(got).toBe('{"state":{"conversations":[]}}')
-    expect(typeof (got as any)?.then).not.toBe('function') // sync string, not a thenable
+    expect(typeof prop(got, 'then')).not.toBe('function') // sync string, not a thenable
     idbStorage.removeItem('chat-conversations')
     expect(idbStorage.getItem('chat-conversations')).toBeNull()
   })

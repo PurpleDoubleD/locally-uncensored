@@ -16,6 +16,7 @@ import { readFileSync } from 'fs'
 import { resolve } from 'path'
 import { hostClockLine, hostEnvironmentBlock, platformPromptLine } from '../host-platform'
 import { pruneSupersededPlans, buildRequestMessages, SUPERSEDED_PLAN_NOTE, type DecayMessage } from '../context-decay'
+import type { ToolCall } from '../../api/providers/types'
 
 const src = (...p: string[]) => readFileSync(resolve(__dirname, '..', '..', ...p), 'utf8')
 
@@ -91,7 +92,7 @@ function planHistory(n: number, mixed = false): DecayMessage[] {
     { role: 'user', content: 'build it' },
   ]
   for (let i = 1; i <= n; i++) {
-    const calls: any[] = [{ id: `t${i}`, function: { name: 'todo_write', arguments: { todos: [`step ${i}`] } } }]
+    const calls: ToolCall[] = [{ id: `t${i}`, function: { name: 'todo_write', arguments: { todos: [`step ${i}`] } } }]
     if (mixed) calls.push({ id: `r${i}`, function: { name: 'file_read', arguments: { path: 'a.ts' } } })
     out.push({ role: 'assistant', content: '', tool_calls: calls })
     out.push({ role: 'tool', content: `plan v${i}: ${'item '.repeat(200)}`, tool_call_id: `t${i}` })

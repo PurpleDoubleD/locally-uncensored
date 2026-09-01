@@ -15,8 +15,9 @@ type OpenReq = {
   onerror: (() => void) | null
   onblocked: (() => void) | null
   onupgradeneeded: (() => void) | null
-  result: any
-  error: any
+  /** The opened database — a stand-in for IDBDatabase, only what idbStorage reads. */
+  result: unknown
+  error: unknown
 }
 
 /** Minimal fake IDB: `failures` opens reject, everything after succeeds. */
@@ -28,7 +29,8 @@ function fakeIndexedDB(failures: number, data: Record<string, string>) {
     transaction: () => ({
       objectStore: () => ({
         get: (k: string) => {
-          const r: any = { onsuccess: null, onerror: null, result: data[k] }
+          const r: { onsuccess: (() => void) | null; onerror: (() => void) | null; result: string | undefined } =
+            { onsuccess: null, onerror: null, result: data[k] }
           queueMicrotask(() => r.onsuccess?.())
           return r
         },

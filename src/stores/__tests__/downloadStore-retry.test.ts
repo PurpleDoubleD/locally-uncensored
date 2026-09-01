@@ -32,13 +32,13 @@ vi.mock('../../api/discover', async () => {
   // eine Attrappe davon.
   const actual = await vi.importActual<typeof import('../../api/discover')>('../../api/discover')
   return {
-    getDownloadProgress: (...a: any[]) => getDownloadProgress(...(a as [])),
+    getDownloadProgress: (...a: unknown[]) => getDownloadProgress(...(a as [])),
     pauseDownload: vi.fn(async () => {}),
-    cancelDownload: (...a: any[]) => cancelDownload(...(a as [])),
-    clearDownloadEntry: (...a: any[]) => clearDownloadEntry(...(a as [])),
-    resumeDownload: (...a: any[]) => resumeDownload(...(a as [])),
-    startModelDownload: (...a: any[]) => startModelDownload(...(a as [])),
-    startModelDownloadToPath: (...a: any[]) => startModelDownloadToPath(...(a as [])),
+    cancelDownload: (...a: unknown[]) => cancelDownload(...(a as [])),
+    clearDownloadEntry: (...a: unknown[]) => clearDownloadEntry(...(a as [])),
+    resumeDownload: (...a: unknown[]) => resumeDownload(...(a as [])),
+    startModelDownload: (...a: unknown[]) => startModelDownload(...(a as [])),
+    startModelDownloadToPath: (...a: unknown[]) => startModelDownloadToPath(...(a as [])),
     lookupFileMeta: () => undefined,
     findOrphanDownloads: vi.fn(async () => []),
     deleteOrphanDownload: vi.fn(async () => {}),
@@ -51,11 +51,12 @@ vi.mock('../../api/discover', async () => {
 })
 
 import { useDownloadStore } from '../downloadStore'
+import type { DownloadProgress } from '../../types/downloads'
 
 function seedErrored(id: string, error = 'boom') {
   useDownloadStore.setState({
     downloads: {
-      [id]: { progress: 10, total: 100, speed: 0, filename: id, status: 'error', error } as any,
+      [id]: { progress: 10, total: 100, speed: 0, filename: id, status: 'error', error } satisfies DownloadProgress,
     },
     downloadMeta: { [id]: { url: 'https://example.test/m.safetensors', subfolder: 'checkpoints' } },
     orphans: {},
@@ -100,7 +101,7 @@ describe('downloadStore.retry', () => {
   it('does not cancel a transfer that is merely paused', async () => {
     useDownloadStore.setState({
       downloads: {
-        'm.gguf': { progress: 5, total: 100, speed: 0, filename: 'm.gguf', status: 'paused' } as any,
+        'm.gguf': { progress: 5, total: 100, speed: 0, filename: 'm.gguf', status: 'paused' } satisfies DownloadProgress,
       },
       downloadMeta: { 'm.gguf': { url: 'https://example.test/m.gguf', subfolder: 'unet' } },
     })

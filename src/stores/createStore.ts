@@ -1,6 +1,16 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { safeJSONStorage } from '../lib/storage-quota'
+import { isRecord } from '../types/json-guards'
+
+/**
+ * Fields a persisted blob must never put back into live state: they steer the
+ * backend axis or carry staged media (source image, mask, capability probe
+ * results, the in-flight flag). Everything else in the blob is a preference.
+ */
+const RUNTIME_ONLY_KEYS: readonly string[] = [
+  'backend', 'source', 'mask', 'caps', 'isGenerating', 'comfyCorsBlocked',
+]
 import type { ModelType, ClassifiedModel } from '../api/comfyui'
 import { classifyModel } from '../api/comfyui'
 import type { HiresUpscaleMethod } from '../api/hires-fix'
@@ -866,20 +876,30 @@ export const useCreateStore = create<CreateState>()(
       // when the stored blob carries a NUMERIC version that differs — legacy
       // pre-version blobs skip it entirely, so their fixups must live in merge.
       version: 1,
-      migrate: (persisted: any) => persisted,
-      merge: (persisted: any, current: any) => {
+      // Explicit annotations for the same reason the state creator carries
+      // them (see above): under `strict: true` zustand v5 loses contextual
+      // typing here and infers the store as Partial<CreateState>.
+      migrate: (persisted: unknown): CreateState => persisted as CreateState,
+      merge: (persisted: unknown, current: CreateState): CreateState => {
         // Never let runtime-only fields rehydrate (a foreign/corrupt blob must
         // not flip the backend axis or inject a stale source/mask), backfill
         // missing keys from defaults, and fix up legacy pre-version blobs
         // ('i2i' mode from the v2.3.0 refactor).
-        const { backend, source, mask, caps, isGenerating, comfyCorsBlocked, ...safe } =
-          persisted ?? {}
-        const merged = { ...current, ...safe }
-        if (merged.mode === 'i2i') {
-          merged.mode = 'image'
-          merged.imageSubMode = 'img2img'
+        const raw = isRecord(persisted) ? persisted : {}
+        const safe: Record<string, unknown> = {}
+        for (const [k, v] of Object.entries(raw)) if (!RUNTIME_ONLY_KEYS.includes(k)) safe[k] = v
+        // 'i2i' was a MODE of its own before v2.3.0; it is now mode 'image'
+        // plus imageSubMode 'img2img'. Fixed on the raw blob, because the
+        // value is not a member of the current union any more.
+        if (safe.mode === 'i2i') {
+          safe.mode = 'image'
+          safe.imageSubMode = 'img2img'
         }
-        return merged
+        // The persisted slice is ~30 independent scalar preferences (see
+        // partialize). They are adopted as written, which is what the store
+        // has always done; the fields that could actually do damage — the
+        // backend axis and the staged media — are the ones dropped above.
+        return { ...current, ...safe } as CreateState
       },
     }
   )

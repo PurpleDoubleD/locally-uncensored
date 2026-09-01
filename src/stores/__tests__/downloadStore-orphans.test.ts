@@ -24,34 +24,40 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 // behind a `typeof window` check, and a half-faked window breaks the import.
 vi.hoisted(() => {
   const backing = new Map<string, string>()
-  ;(globalThis as any).localStorage = {
-    getItem: (k: string) => backing.get(k) ?? null,
-    setItem: (k: string, v: string) => void backing.set(k, String(v)),
-    removeItem: (k: string) => void backing.delete(k),
-    clear: () => backing.clear(),
-    key: (i: number) => [...backing.keys()][i] ?? null,
-    get length() { return backing.size },
-  }
+  // defineProperty rather than an assignment through a cast: the descriptor's
+  // `value` is untyped, so the shim goes in without claiming to BE a Storage.
+  Object.defineProperty(globalThis, 'localStorage', {
+    configurable: true,
+    writable: true,
+    value: {
+      getItem: (k: string) => backing.get(k) ?? null,
+      setItem: (k: string, v: string) => void backing.set(k, String(v)),
+      removeItem: (k: string) => void backing.delete(k),
+      clear: () => backing.clear(),
+      key: (i: number) => [...backing.keys()][i] ?? null,
+      get length() { return backing.size },
+    },
+  })
 })
 
-const findOrphanDownloads = vi.fn(async (_extra: string[]) => [] as any[])
+const findOrphanDownloads = vi.fn(async (_extra: string[]): Promise<OrphanDownload[]> => [])
 const deleteOrphanDownload = vi.fn(async () => {})
 const resumeDownload = vi.fn(async () => {})
-const getDownloadProgress = vi.fn(async () => ({} as Record<string, any>))
+const getDownloadProgress = vi.fn(async (): Promise<Record<string, DownloadProgress>> => ({}))
 
 vi.mock('../../api/discover', async () => {
   const actual = await vi.importActual<typeof import('../../api/discover')>('../../api/discover')
   return {
-    getDownloadProgress: (...a: any[]) => getDownloadProgress(...(a as [])),
+    getDownloadProgress: (...a: unknown[]) => getDownloadProgress(...(a as [])),
     pauseDownload: vi.fn(async () => {}),
     cancelDownload: vi.fn(async () => {}),
     clearDownloadEntry: vi.fn(async () => {}),
-    resumeDownload: (...a: any[]) => resumeDownload(...(a as [])),
+    resumeDownload: (...a: unknown[]) => resumeDownload(...(a as [])),
     startModelDownload: vi.fn(async () => {}),
     startModelDownloadToPath: vi.fn(async () => {}),
     lookupFileMeta: () => undefined,
-    findOrphanDownloads: (...a: any[]) => findOrphanDownloads(...(a as [any])),
-    deleteOrphanDownload: (...a: any[]) => deleteOrphanDownload(...(a as [])),
+    findOrphanDownloads: (...a: unknown[]) => findOrphanDownloads(...(a as [string[]])),
+    deleteOrphanDownload: (...a: unknown[]) => deleteOrphanDownload(...(a as [])),
     catalogFilenames: () => ['wan_2.1_vae.safetensors'],
     orphanFilename: actual.orphanFilename,
     isPermanentDownloadError: actual.isPermanentDownloadError,
@@ -61,6 +67,8 @@ vi.mock('../../api/discover', async () => {
 })
 
 import { useDownloadStore, orphanRows, flushDownloadPersist } from '../downloadStore'
+import type { DownloadProgress } from '../../types/downloads'
+import type { OrphanDownload } from '../../api/discover'
 
 const GGUF_DIR = '/Users/x/.lmstudio/models'
 

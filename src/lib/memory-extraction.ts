@@ -12,6 +12,7 @@
  */
 
 import { extractJsonObject } from './json-scan'
+import { isRecord, asString, asStringArray } from '../types/json-guards'
 import type { MemoryType } from '../types/agent-mode'
 
 export interface ExtractedMemory {
@@ -72,6 +73,13 @@ Analyze this exchange. What (if anything) should be remembered?`
   ]
 }
 
+/** The four categories the prompt offers; anything else is not a category. */
+const VALID_MEMORY_TYPES: readonly MemoryType[] = ['user', 'feedback', 'project', 'reference']
+
+function asMemoryType(v: unknown): MemoryType | undefined {
+  return VALID_MEMORY_TYPES.find((t) => t === v)
+}
+
 /**
  * Parse the LLM's extraction response. Handles models that wrap JSON in
  * markdown code blocks or add preamble text.
@@ -91,28 +99,30 @@ export function parseExtractionResponse(response: string): ExtractionResult {
 
     // Try to find JSON object in the response
     const data = extractJsonObject(jsonStr)
-    if (!data || typeof data !== 'object') return fallback
+    if (!isRecord(data)) return fallback
 
     if (typeof data.shouldSave !== 'boolean') return fallback
     if (!data.shouldSave) return { shouldSave: false, memories: [] }
     if (!Array.isArray(data.memories)) return fallback
 
-    // Validate each memory
-    const validTypes: MemoryType[] = ['user', 'feedback', 'project', 'reference']
-    const memories: ExtractedMemory[] = data.memories
-      .filter((m: any) =>
-        m &&
-        validTypes.includes(m.type) &&
-        typeof m.title === 'string' && m.title.length > 0 &&
-        typeof m.content === 'string' && m.content.length > 0
-      )
-      .map((m: any) => ({
-        type: m.type as MemoryType,
-        title: m.title.substring(0, 60),
-        description: (m.description || m.content.substring(0, 120)).substring(0, 120),
-        content: m.content,
-        tags: Array.isArray(m.tags) ? m.tags.filter((t: any) => typeof t === 'string') : [],
-      }))
+    // Validate each memory. Everything below the guard is derived from checked
+    // values — the model wrote this array and gets no say in the shape.
+    const memories: ExtractedMemory[] = []
+    for (const raw of data.memories) {
+      if (!isRecord(raw)) continue
+      const type = asMemoryType(raw.type)
+      const title = asString(raw.title)
+      const content = asString(raw.content)
+      if (!type || !title || !content) continue
+      const description = asString(raw.description) || content.substring(0, 120)
+      memories.push({
+        type,
+        title: title.substring(0, 60),
+        description: description.substring(0, 120),
+        content,
+        tags: asStringArray(raw.tags),
+      })
+    }
 
     return { shouldSave: memories.length > 0, memories }
   } catch {
@@ -212,14 +222,14 @@ export function parseResolutionResponse(
     if (codeBlockMatch) jsonStr = codeBlockMatch[1].trim()
 
     const data = extractJsonObject(jsonStr)
-    if (!data || typeof data !== 'object') return fallback
-    const action = typeof data.action === 'string' ? data.action.toUpperCase() : ''
+    if (!isRecord(data)) return fallback
+    const action = (asString(data.action) ?? '').toUpperCase()
 
     if (action === 'NOOP') return { action: 'NOOP' }
 
     if (action === 'UPDATE') {
-      const targetId = typeof data.targetId === 'string' ? data.targetId : ''
-      const mergedContent = typeof data.mergedContent === 'string' ? data.mergedContent.trim() : ''
+      const targetId = asString(data.targetId) ?? ''
+      const mergedContent = (asString(data.mergedContent) ?? '').trim()
       // UPDATE needs a valid target + non-empty merged content; otherwise the
       // safest interpretation is "this is new" → ADD.
       const idOk = targetId && (!validIds || validIds.includes(targetId))

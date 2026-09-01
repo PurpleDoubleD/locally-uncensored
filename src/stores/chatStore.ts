@@ -13,6 +13,7 @@ import { useTodoStore } from './todoStore'
 import { usePermissionStore } from './permissionStore'
 import { useStagedChangesStore } from './stagedChangesStore'
 import { log } from '../lib/logger'
+import { isRecord, prop } from '../types/json-guards'
 
 /**
  * Rehydration migration for Phase 1 (v2.4.0) — wraps legacy
@@ -20,14 +21,20 @@ import { log } from '../lib/logger'
  * form. Idempotent: safe to run on already-migrated data. Leaves the legacy
  * field in place during a transition window so reads via either shape work.
  */
-export function migratePersistedChat(state: any): any {
-  if (!state || !Array.isArray(state.conversations)) return state
-  for (const conv of state.conversations) {
-    if (!conv || !Array.isArray(conv.messages)) continue
-    for (const msg of conv.messages) {
-      if (!msg || !Array.isArray(msg.agentBlocks)) continue
-      for (const block of msg.agentBlocks as AgentBlock[]) {
-        if (block) migrateBlockInPlace(block)
+export function migratePersistedChat(state: unknown): unknown {
+  const conversations = prop(state, 'conversations')
+  if (!Array.isArray(conversations)) return state
+  for (const conv of conversations) {
+    const messages = prop(conv, 'messages')
+    if (!Array.isArray(messages)) continue
+    for (const msg of messages) {
+      const blocks = prop(msg, 'agentBlocks')
+      if (!Array.isArray(blocks)) continue
+      for (const block of blocks) {
+        // migrateBlockInPlace reads `toolCall` and `toolCalls` and writes
+        // `toolCalls`; the cast claims no more than those three, and the
+        // record check above is what makes even that much true.
+        if (isRecord(block)) migrateBlockInPlace(block as unknown as AgentBlock)
       }
     }
   }
@@ -425,7 +432,11 @@ export const useChatStore = create<ChatState>()(
       importConversations: (incoming, mode = 'merge') => {
         // Normalize legacy block shapes on the way in (the same migration the
         // persist layer runs on load), so an older export hydrates cleanly.
-        const clean = ((migratePersistedChat({ conversations: incoming })?.conversations ?? incoming) as Conversation[])
+        // It mutates the array it is handed and returns the same object, so
+        // `incoming` IS the normalised list afterwards — no cast needed, and
+        // the old `?? incoming` fallback could never fire.
+        migratePersistedChat({ conversations: incoming })
+        const clean = incoming
         let added = 0
         let skipped = 0
         set((state) => {
@@ -478,9 +489,9 @@ export const useChatStore = create<ChatState>()(
       // chat history away. That is the R1 DOWNGRADE-KONTRAKT (see codexStore) —
       // 2.6.x builds share one WebView profile — so stamping a number here would
       // buy nothing and cost a reset on every downgrade.
-      merge: (persistedState: any, currentState: ChatState) => {
+      merge: (persistedState, currentState) => {
         const migrated = migratePersistedChat(persistedState)
-        return { ...currentState, ...(migrated || {}) }
+        return { ...currentState, ...(isRecord(migrated) ? migrated : {}) }
       },
     }
   )

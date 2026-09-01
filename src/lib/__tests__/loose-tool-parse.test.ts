@@ -272,6 +272,17 @@ describe('parseLooseToolCalls — nested function object + string args (OpenAI/P
     expect(r.calls[0]).toEqual({ name: 'file_write', arguments: { path: 'a.txt', content: 'hi' } })
   })
 
+  // Fehler 3: derselbe String-Argumente-Fall, aber ueber die HERMES-Schiene.
+  // parseJsonObjectCalls hat die JSON-Zeichenkette selbst repariert, der
+  // <tool_call>-Pfad nicht — dort ging `arguments` als STRING an den Executor,
+  // der `args.path` liest. Ergebnis: "path is required", obwohl das Modell den
+  // Pfad geschickt hatte, und der Agent probierte denselben Aufruf erneut.
+  it('repairs string args that arrive inside a <tool_call> tag', () => {
+    const txt = '<tool_call>{"name": "file_write", "arguments": "{\\"path\\": \\"a.txt\\", \\"content\\": \\"hi\\"}"}</tool_call>'
+    const r = parseLooseToolCalls(txt, KN)
+    expect(r.calls[0]).toEqual({ name: 'file_write', arguments: { path: 'a.txt', content: 'hi' } })
+  })
+
   it('accepts the name carried by a tool_call key', () => {
     const txt = '{"tool_call": "image_generate", "arguments": {"prompt": "y"}}'
     const r = parseLooseToolCalls(txt, KN)

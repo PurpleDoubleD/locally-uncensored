@@ -4,6 +4,7 @@ import { safeJSONStorage } from '../lib/storage-quota'
 import { v4 as uuid } from 'uuid'
 import type { AgentWorkflow, WorkflowExecution, StepResult } from '../types/agent-workflows'
 import { BUILT_IN_WORKFLOWS } from '../lib/built-in-workflows'
+import { isRecord, prop, asString } from '../types/json-guards'
 
 // ── Max execution history ─────────────────────────────────────
 
@@ -147,17 +148,24 @@ export const useAgentWorkflowStore = create<AgentWorkflowState>()(
       storage: safeJSONStorage(),
       version: 1,
       migrate: (persistedState, version) => {
-        const state = persistedState as any
-        if (version < 1 || !state.workflows || state.workflows.length === 0) {
-          return { ...state, workflows: BUILT_IN_WORKFLOWS, executions: [], activeExecutionId: null }
-        }
+        // Persisted state is foreign at read time: an older build wrote it. A
+        // read that throws in here costs the WHOLE store — zustand abandons
+        // hydration and the next write persists the empty default over the
+        // blob — so `workflows` is checked for being an array instead of just
+        // being truthy (`{}.length` is undefined, which is not 0, and the
+        // `.map` below then threw).
+        const state = isRecord(persistedState) ? persistedState : {}
+        const workflows = Array.isArray(state.workflows) ? state.workflows : []
         // Ensure built-ins are present (may have been added in updates)
-        const existingIds = new Set(state.workflows.map((w: any) => w.id))
+        const existingIds = new Set(workflows.map((w) => asString(prop(w, 'id'))))
         const missingBuiltIns = BUILT_IN_WORKFLOWS.filter(w => !existingIds.has(w.id))
-        return {
-          ...state,
-          workflows: [...missingBuiltIns, ...state.workflows],
-        }
+        const next = version < 1 || workflows.length === 0
+          ? { ...state, workflows: BUILT_IN_WORKFLOWS, executions: [], activeExecutionId: null }
+          : { ...state, workflows: [...missingBuiltIns, ...workflows] }
+        // zustand types migrate as returning the FULL store, but a blob only
+        // ever carries the partialized slice and `merge` puts the actions
+        // back. The cast claims exactly what went in, nothing about actions.
+        return next as unknown as AgentWorkflowState
       },
       partialize: (state) => ({
         workflows: state.workflows,
