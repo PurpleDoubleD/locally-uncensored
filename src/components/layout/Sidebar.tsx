@@ -8,7 +8,6 @@ import { useSettingsStore } from '../../stores/settingsStore'
 import { useCodexStore } from '../../stores/codexStore'
 import { useRemoteStore, REMOTE_DEV_MODE_ERROR } from '../../stores/remoteStore'
 import { backendCall, isTauri } from '../../api/backend'
-import { truncate } from '../../lib/formatters'
 import {
   conversationMatches, sameSidebarRows, toSidebarRow, type SidebarRow,
 } from './sidebar-rows'
@@ -323,14 +322,51 @@ export function Sidebar() {
           transition={{ duration: 0.15 }}
         >
           {/* Mode Tabs (Chat | Code | Remote) — icon-only, like uselu.
-              Labels live in title/aria-label for accessibility. */}
+              Labels live in title/aria-label for accessibility.
+
+              D-S17 — die Hoehen kommen jetzt aus der Leiter, nicht aus dem
+              Padding. Der Befund sprach von vier Hoehen; nachgemessen sind es
+              FUENF, und zwei davon standen nebeneinander in DIESER Zeile.
+              Gemessen am Dev-Server (Chromium, 900x900, HEAD b3f0f786,
+              `offsetHeight`, also CSS-px auf dem unskalierten Entwurfsraster):
+
+                Reiter Chat            30 px
+                Reiter Code            30 px
+                Reiter Remote          26 px   <- gleiche Zeile, 4 px kuerzer
+                Suchfeld               31 px
+                Chatzeile              36 px
+                Dispatch / New Chat    36 px
+                LAN / Internet         33 px
+
+              Fuenf Stufen (26/30/31/33/36) auf 250 px Breite, keine davon
+              benannt. Die App hat drei benannte: --control-h-sm 26,
+              --control-h-md 32, --control-h-lg 40. Die Zuordnung ist nach
+              BEDEUTUNG, nicht nach naechstem Zahlenwert:
+
+                md  = das Normalmass der Spalte — Reiter, Suchfeld, Chatzeile.
+                lg  = die EINE Primaeraktion am Fuss (New Chat bzw. Dispatch
+                      und sein Waehler). --control-h-lg traegt in index.css
+                      ausdruecklich den Kommentar „primary Create button";
+                      genau diese Rolle hat der Knopf hier.
+                sm  = kommt in dieser Spalte NICHT vor. 26 px ist das Mass der
+                      Composer-Leiste (`.lu-control`), also einer dichten
+                      Werkzeugzeile. Der Modusumschalter der Sidebar ist keine
+                      Werkzeugzeile, und dass der Remote-Reiter zufaellig schon
+                      auf 26 stand, ist kein Argument dafuer — er stand dort,
+                      weil ihm der Textspan fehlt, nicht weil es gemeint war.
+
+              Keine fuenfte Stufe erfunden. Was das kostet, offen gesagt: die
+              Reiter wachsen um 2 px (30->32) bzw. 6 px (26->32), die Chatzeile
+              schrumpft um 4 px (36->32), der Fussknopf waechst um 4 px
+              (36->40). Die 33 px des LAN/Internet-Waehlers gehen auf 40, weil
+              er im selben Slot steht wie die Aktion, die er ersetzt. */}
           <div className="flex items-center gap-[2.5px] px-2.5 pt-2.5 pb-1.25">
             {/* Chat tab */}
             <button
               onClick={() => { setChatMode('lu'); setActiveConversation(null); setView('chat'); setDispatchPicker(false) }}
               title="Chat"
               aria-label="Chat"
-              className={`flex items-center gap-1.25 justify-center px-2.5 py-1.25 rounded-[5px] text-[12px] font-medium transition-all flex-1 ${
+              className={`flex items-center gap-1.25 justify-center px-2.5 h-[var(--control-h-md)] rounded-[5px] text-[12px] font-medium transition-all flex-1 ${
                 !isCodingMode && !isRemoteMode
                   ? 'bg-gray-200 dark:bg-white/10 text-gray-900 dark:text-white border border-gray-300 dark:border-white/15'
                   : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-white/5 border border-transparent'
@@ -346,7 +382,7 @@ export function Sidebar() {
               onClick={() => { setChatMode('codex'); setActiveConversation(null); setView('chat'); setDispatchPicker(false) }}
               title="Code"
               aria-label="Code"
-              className={`flex items-center gap-1.25 justify-center px-2.5 py-1.25 rounded-[5px] text-[12px] font-medium transition-all flex-1 ${
+              className={`flex items-center gap-1.25 justify-center px-2.5 h-[var(--control-h-md)] rounded-[5px] text-[12px] font-medium transition-all flex-1 ${
                 isCodingMode
                   ? 'bg-gray-200 dark:bg-white/10 text-gray-900 dark:text-white border border-gray-300 dark:border-white/15'
                   : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-white/5 border border-transparent'
@@ -361,7 +397,7 @@ export function Sidebar() {
               onClick={() => { setChatMode('remote'); setActiveConversation(dispatchedConversationId); setView('chat') }}
               title="Remote"
               aria-label="Remote"
-              className={`flex items-center justify-center px-2.5 py-1.25 rounded-[5px] font-medium transition-all flex-1 ${
+              className={`flex items-center justify-center px-2.5 h-[var(--control-h-md)] rounded-[5px] font-medium transition-all flex-1 ${
                 isRemoteMode
                   ? 'bg-gray-200 dark:bg-white/10 text-gray-900 dark:text-white border border-gray-300 dark:border-white/15'
                   : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-white/5 border border-transparent'
@@ -510,17 +546,31 @@ export function Sidebar() {
                 placeholder="Search..."
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                className="w-full pl-7.5 pr-2.5 py-1.25 rounded-[8px] bg-transparent border border-gray-200 dark:border-white/[0.04] text-[13px] text-gray-700 dark:text-gray-300 placeholder-gray-400 dark:placeholder-gray-600 focus:outline-none focus:border-gray-400 dark:focus:border-white/10"
+                /* D-S17: 31 px gemessen -> --control-h-md (32). */
+                className="w-full pl-7.5 pr-2.5 h-[var(--control-h-md)] rounded-[8px] bg-transparent border border-gray-200 dark:border-white/[0.04] text-[13px] text-gray-700 dark:text-gray-300 placeholder-gray-400 dark:placeholder-gray-600 focus:outline-none focus:border-gray-400 dark:focus:border-white/10"
               />
             </div>
           </div>
 
           {/* Conversations */}
           <div className="flex-1 overflow-y-auto px-[7.5px] pt-1.25 space-y-px scrollbar-thin">
-            {filtered.map((conv) => (
+            {filtered.map((conv) => {
+              // Der Marker der abgesetzten Remote-Zeile — dieselbe Bedingung
+              // stand dreimal in dieser Zeile (Punkt, QR-Knopf, und ab jetzt
+              // auch die Frage, ob die Aktionsleiste aus dem Fluss darf).
+              const qrMarker = isRemoteMode && conv.id === dispatchedConversationId && remoteEnabled
+              return (
               <div
                 key={conv.id}
-                className={`group flex items-center gap-[7.5px] px-2.5 py-1.25 rounded-[8px] cursor-pointer transition-all ${
+                /* D-S17: 36 px gemessen -> --control-h-md (32). Die Hoehe ist
+                   jetzt GESETZT und nicht mehr ein Nebenprodukt: vorher
+                   bestimmten die 26 px hohen Hover-Knoepfe plus py-1.25 das
+                   Mass, die Zeile war also so hoch wie etwas, das man 99 % der
+                   Zeit nicht sieht. Genau das macht D-S15 unten erst
+                   ungefaehrlich — eine Leiste, die den Fluss verlaesst, darf
+                   die Zeilenhoehe nicht mitnehmen, sonst springt die Liste
+                   unter dem Zeiger. */
+                className={`group flex items-center gap-[7.5px] px-2.5 h-[var(--control-h-md)] rounded-[8px] cursor-pointer transition-all ${
                   conv.id === activeConversationId
                     ? 'bg-gray-200 dark:bg-white/[0.06] text-gray-900 dark:text-white'
                     : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-white/[0.03] hover:text-gray-800 dark:hover:text-gray-200'
@@ -550,22 +600,61 @@ export function Sidebar() {
                     </div>
                   ) : (
                     <div className="flex items-center gap-[7.5px] min-w-0">
-                      {isRemoteMode && conv.id === dispatchedConversationId && remoteEnabled && (
+                      {qrMarker && (
                         <span className="w-[7.5px] h-[7.5px] rounded-full bg-green-400 shrink-0" />
                       )}
-                      <p className="text-[13px] truncate flex-1 min-w-0">{truncate(conv.title, 30)}</p>
-                      {/* Already formatted in the projection — see SidebarRow. */}
-                      <span className="text-[10px] text-gray-600 shrink-0">{conv.date}</span>
+                      {/* D-S14 — EINE Kuerzung, und zwar die, die die Spalte
+                          kennt.
+                          Hier standen zwei uebereinander: `truncate(title, 30)`
+                          in JS und die CSS-Klasse `truncate` am selben <p>. Die
+                          Messung sagt, welche der beiden ueberhaupt je etwas
+                          tut (Chromium, 900x900, HEAD b3f0f786, Inter 13px):
+
+                            Titelbox der Zeile        118,02 gerenderte px
+                            passen hinein               14 Zeichen + Auslassung
+                            30 Zeichen brauchten       229,27 gerenderte px
+
+                          Die JS-Kuerzung haette also eine fast doppelt so
+                          breite Spalte gebraucht, um je zuzuschneiden. Sie hat
+                          in dieser Sidebar noch nie ein Zeichen entfernt — was
+                          man sah, war immer der CSS-Schnitt. Zwei Kuerzungen
+                          waren es nur auf dem Papier; in Wahrheit eine echte
+                          und eine, die auf ihren Tag wartete.
+                          Und der Tag waere HEUTE gekommen: D-S15 unten gibt der
+                          Titelbox 62,66 gerenderte px zurueck (auf 180,67 =
+                          22 Zeichen). Bliebe die 30er-Grenze stehen, waere sie
+                          weiterhin unerreicht — aber sie waere ab jetzt eine
+                          willkuerliche Obergrenze ueber einer Spalte, deren
+                          Breite sich gerade geaendert hat. Genau dafuer gibt es
+                          `text-overflow: ellipsis`: es misst.
+                          Der zweite Grund ist der DOM. `truncate(t, 30)`
+                          schreibt drei echte Punkte IN den Text — Kopieren,
+                          Vorlesen und `title=` bekamen dann den beschnittenen
+                          String. Der CSS-Schnitt laesst den vollen Titel im
+                          Dokument stehen, deshalb kann `title=` hier jetzt das
+                          Ganze zeigen. */}
+                      <p className="text-[13px] truncate flex-1 min-w-0" title={conv.title}>{conv.title}</p>
+                      {/* Already formatted in the projection — see SidebarRow.
+                          Das Datum weicht, wenn die Aktionsleiste kommt: die
+                          Leiste liegt seit D-S15 UEBER diesem Slot (62,66 von
+                          49,33 gerenderten px Datum plus 7,5 px Abstand), und
+                          zwei Dinge uebereinander sind schlimmer als eins
+                          weniger. Es weicht nur optisch — der Platz bleibt, die
+                          Titelbreite aendert sich beim Ueberfahren also nicht.
+                          `group-focus-within` und nicht `focus-within`: der
+                          Fokus sitzt dann in der Leiste, also im GESCHWISTER,
+                          und nur die Zeile sieht beide. */}
+                      <span className="text-[10px] text-gray-600 shrink-0 group-hover:opacity-0 group-focus-within:opacity-0 transition-opacity">{conv.date}</span>
                     </div>
                   )}
                 </div>
                 {editingId !== conv.id && (
-                  <div className="flex items-center gap-[2.5px] shrink-0">
+                  <div className="relative flex items-center gap-[2.5px] shrink-0">
                     {/* Bug #16: QR icon on the dispatched Remote chat row.
                         Always visible (not hover-gated) and opens the LARGE
                         QR-modal directly — the row icon itself is just a
                         marker, the actual scannable code lives in the modal. */}
-                    {isRemoteMode && conv.id === dispatchedConversationId && remoteEnabled && (
+                    {qrMarker && (
                       <button
                         onClick={(e) => { e.stopPropagation(); setQrModalOpen(true) }}
                         title="Show QR & passcode"
@@ -574,7 +663,73 @@ export function Sidebar() {
                         <QrCode size={16} />
                       </button>
                     )}
-                    <div className="flex items-center gap-[2.5px] opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+                    {/**
+                      * D-S15 — die Aktionsleiste gibt ihren Layoutplatz her.
+                      *
+                      * Gemessen am Dev-Server (Chromium, 900x900, HEAD
+                      * b3f0f786), alles in GERENDERTEN px (--ui-scale 1,15):
+                      *
+                      *   Leiste (2 x 26 px CSS + 2,5 Abstand)   62,66 px
+                      *   Titelbox vorher                       118,02 px
+                      *   Titelbox nachher                      180,67 px
+                      *   Zeichen im Titel                      14  ->  22
+                      *
+                      * Das sind +53 % Titelbreite, dauerhaft, fuer eine Leiste,
+                      * die 99 % der Zeit unsichtbar ist. `opacity-0` nimmt nur
+                      * die Farbe weg, nicht den Platz.
+                      *
+                      * WARUM DIE SIDEBAR DER ANDERE FALL IST ALS D-S07.
+                      * In `chat/MessageBubble.tsx` ist bei D-S07 bewusst die
+                      * umgekehrte Entscheidung getroffen worden — dort behaelt
+                      * die Leiste ihren Platz, „weil sie UNTER der Nachricht
+                      * liegt und das ganze Transkript beim Hovern wegspraenge".
+                      * Der Unterschied ist die ACHSE, nicht die Meinung:
+                      *
+                      *   MessageBubble  Leiste unter der Nachricht -> sie
+                      *                  belegt HOEHE. Faellt die Hoehe weg,
+                      *                  ruecken alle folgenden Nachrichten
+                      *                  eines scrollenden Protokolls nach oben,
+                      *                  waehrend der Zeiger darauf steht.
+                      *   Sidebar        Leiste rechts IN der Zeile -> sie
+                      *                  belegt BREITE. Die Zeilenhoehe steht
+                      *                  seit D-S17 fest (--control-h-md), also
+                      *                  rueckt vertikal nichts, egal was hier
+                      *                  ein- und ausgeblendet wird.
+                      *
+                      * Deshalb `absolute` und nicht `hidden`: `hidden` ist
+                      * `display: none`, und ein Knopf mit `display: none` ist
+                      * nicht fokussierbar. Damit waere Umbenennen/Loeschen per
+                      * Tastatur GAR NICHT mehr erreichbar gewesen — das
+                      * Kontextmenue der Zeile haengt an `onContextMenu`, ist
+                      * also ebenfalls nur mit Zeiger zu oeffnen. `absolute`
+                      * nimmt den Platz und laesst die Erreichbarkeit.
+                      *
+                      * `focus-within:opacity-100` stand hier schon vor dieser
+                      * Aenderung und bleibt: gemessen (Fokus per Tastatur auf
+                      * „Rename chat", nach Ablauf der 150-ms-Blende) steht die
+                      * Leiste auf `opacity: 1`. Es ist kein `group-`Praefix
+                      * noetig, weil die Knoepfe KINDER dieses Kastens sind —
+                      * `group-focus-within` waere dieselbe Regel ueber den
+                      * Umweg der Zeile. In MessageBubble steht das Praefix, weil
+                      * die Sichtbarkeitsklasse dort am Kasten haengt und die
+                      * Gruppe die Nachricht ist.
+                      *
+                      * `pointer-events-none` im Ruhezustand ist die Pflicht,
+                      * die aus `absolute` folgt: der Kasten liegt jetzt UEBER
+                      * dem Datum und den letzten ~4 px des Titels. Ohne die
+                      * Regel wuerde ein unsichtbarer Kasten Klicks abfangen.
+                      * Zum Beweis, dass das kein neues Problem ist: schon am
+                      * HEAD liefert `elementFromPoint` auf einer NICHT
+                      * ueberfahrenen Zeile 12 px vom rechten Rand „Delete
+                      * chat". Diese Aenderung nimmt die Eigenschaft weg.
+                      *
+                      * Die eine Ausnahme: auf der abgesetzten Remote-Zeile
+                      * steht der QR-Knopf im Fluss, und er ist der dokumentierte
+                      * Weg zurueck zum QR-Blatt (Bug #16). Eine daruebergelegte
+                      * Leiste wuerde ihn beim Hovern verdecken. Diese eine Zeile
+                      * behaelt deshalb den reservierten Platz.
+                      */}
+                    <div className={`${qrMarker ? '' : 'absolute right-0 top-1/2 -translate-y-1/2 pointer-events-none group-hover:pointer-events-auto focus-within:pointer-events-auto'} flex items-center gap-[2.5px] opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity`}>
                       <button
                         onClick={(e) => { e.stopPropagation(); setEditingId(conv.id); setEditTitle(conv.title) }}
                         title="Rename chat"
@@ -595,7 +750,8 @@ export function Sidebar() {
                   </div>
                 )}
               </div>
-            ))}
+              )
+            })}
 
             {filtered.length === 0 && (
               <p className="text-center text-gray-600 text-[12px] py-7.5">
@@ -636,7 +792,7 @@ export function Sidebar() {
                     transition={{ duration: 0.1 }}
                     onClick={() => setDispatchPicker(true)}
                     disabled={remoteLoading || !activeModel}
-                    className="w-full flex items-center justify-center gap-[7.5px] px-[12.5px] py-[7.5px] rounded-[8px] text-[13px] text-gray-500 hover:text-white hover:bg-white/[0.04] border border-zinc-300/40 dark:border-zinc-500/40 hover:border-zinc-300/60 dark:hover:border-zinc-400/60 transition-all disabled:opacity-40"
+                    className="w-full flex items-center justify-center gap-[7.5px] px-[12.5px] h-[var(--control-h-lg)] rounded-[8px] text-[13px] text-gray-500 hover:text-white hover:bg-white/[0.04] border border-zinc-300/40 dark:border-zinc-500/40 hover:border-zinc-300/60 dark:hover:border-zinc-400/60 transition-all disabled:opacity-40"
                   >
                     <Radio size={15} />
                     <span>{remoteLoading ? '...' : 'Dispatch'}</span>
@@ -654,14 +810,14 @@ export function Sidebar() {
                     >
                       <button
                         onClick={() => handleDispatch('lan')}
-                        className="flex-1 flex items-center justify-center gap-1.25 py-[7.5px] rounded-[8px] text-[11px] font-medium text-gray-400 border border-zinc-300/40 dark:border-zinc-500/40 hover:bg-white/[0.05] hover:text-zinc-100 hover:border-zinc-300/60 dark:hover:border-zinc-400/60 transition-all cursor-pointer"
+                        className="flex-1 flex items-center justify-center gap-1.25 h-[var(--control-h-lg)] rounded-[8px] text-[11px] font-medium text-gray-400 border border-zinc-300/40 dark:border-zinc-500/40 hover:bg-white/[0.05] hover:text-zinc-100 hover:border-zinc-300/60 dark:hover:border-zinc-400/60 transition-all cursor-pointer"
                       >
                         <Wifi size={12} className="text-zinc-400" />
                         LAN
                       </button>
                       <button
                         onClick={() => handleDispatch('internet')}
-                        className="flex-1 flex items-center justify-center gap-1.25 py-[7.5px] rounded-[8px] text-[11px] font-medium text-gray-400 border border-zinc-300/40 dark:border-zinc-500/40 hover:bg-white/[0.05] hover:text-zinc-100 hover:border-zinc-300/60 dark:hover:border-zinc-400/60 transition-all cursor-pointer"
+                        className="flex-1 flex items-center justify-center gap-1.25 h-[var(--control-h-lg)] rounded-[8px] text-[11px] font-medium text-gray-400 border border-zinc-300/40 dark:border-zinc-500/40 hover:bg-white/[0.05] hover:text-zinc-100 hover:border-zinc-300/60 dark:hover:border-zinc-400/60 transition-all cursor-pointer"
                       >
                         <Globe size={12} className="text-zinc-400" />
                         Internet
@@ -674,7 +830,7 @@ export function Sidebar() {
               <button
                 onClick={handleNewChat}
                 title={activeModel ? 'Start a new chat' : 'Pick or install a model first'}
-                className="w-full flex items-center justify-center gap-[7.5px] px-[12.5px] py-[7.5px] rounded-[8px] text-[13px] font-medium bg-gray-50 dark:bg-white/[0.03] hover:bg-gray-100 dark:hover:bg-white/[0.05] text-gray-800 dark:text-gray-200 border border-gray-200 dark:border-white/[0.06] hover:border-gray-300 dark:hover:border-white/[0.1] transition-all"
+                className="w-full flex items-center justify-center gap-[7.5px] px-[12.5px] h-[var(--control-h-lg)] rounded-[8px] text-[13px] font-medium bg-gray-50 dark:bg-white/[0.03] hover:bg-gray-100 dark:hover:bg-white/[0.05] text-gray-800 dark:text-gray-200 border border-gray-200 dark:border-white/[0.06] hover:border-gray-300 dark:hover:border-white/[0.1] transition-all"
               >
                 <Plus size={15} />
                 <span>New Chat</span>
