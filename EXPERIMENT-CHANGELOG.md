@@ -620,3 +620,47 @@ der MLX-Sidecar stehen dort. Der Tunnel hängt allein an `Drop for
 RemoteServer` — und der Kommentar über der Funktion begründet selbst, warum
 das nicht reicht: Tauri v2 führt `Drop` nicht zuverlässig aus, genau deshalb
 existiert der explizite Pfad.
+
+---
+
+## Eine Lücke in meinem eigenen Prüfverfahren
+
+Ich habe jedes Paket isoliert geprüft: nur seine Dateien auf den aktuellen
+HEAD kopiert, dann `tsc`, voller `vitest`, `madge`, plus eine eigene
+Mutationssonde, die ich aus dem Befund abgeleitet habe statt aus den Tests
+des Agenten. Das hat viel gefangen — zweimal eine Reihenfolge, die begründet
+und kommentiert, aber von nichts erzwungen war.
+
+**Was ich nicht gefahren habe, ist e2e.** Und `ci.yml` fährt
+`npm run test:e2e` als scharfes Gate, ohne `continue-on-error`.
+
+Gefunden hat es ein Agent im Vorbeigehen, nicht ich. `builtin-ctx.spec.ts:55`
+sucht
+
+    getByRole('button', { name: /ctx 8K/ })
+
+Genau diese Beschriftung hat D-S06 ersetzt: der Füllstand des Kontextfensters
+*ist* jetzt das Label des Wählers — der Messwert sitzt auf dem Regler, der
+ihn bewegt. Das war die Absicht des Bullets, und der Test nagelt den alten
+Entwurf fest.
+
+Zwei Dinge folgen daraus, und das zweite ist mir das wichtigere:
+
+1. **Mein Gate war unvollständig.** Ein Design-Paket, das sichtbare
+   Beschriftungen ändert, muss gegen die Specs laufen, die diese
+   Beschriftungen anklicken. `tsc` und `vitest` sehen davon nichts — die
+   Unit-Tests dieses Projekts lesen Quelltext, keine gerenderte Oberfläche.
+   Ab hier gehört `npm run test:e2e` in die Paketprüfung jedes Pakets, das
+   `src/components/**` anfasst.
+
+2. **„Test rot, also Test anpassen" ist genau die Bewegung, vor der dieses
+   ganze Dokument warnt.** Die Reparatur muss für jeden roten Spec
+   entscheiden, ob er eine *Eigenschaft* festhält, die noch gilt (dann ist
+   nur der Selektor veraltet), oder einen *Entwurf*, der absichtlich weg ist
+   (dann muss der Test die entsprechende Eigenschaft des neuen Entwurfs
+   prüfen, nicht verschwinden). Das ist eine Entscheidung pro Fall, keine
+   Sammelumbenennung.
+
+Es ist übrigens dasselbe Muster wie überall sonst hier, nur eine Ebene höher:
+zwei Beschreibungen derselben Oberfläche — die Komponente und der Spec — von
+denen nur eine gepflegt wurde.
