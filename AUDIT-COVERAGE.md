@@ -16,45 +16,41 @@ Zeile für Zeile: welcher Audit-Befund ist im Branch `experiment/audits-komplett
 
 ## 1. Bilanz
 
-Gemessen am HEAD `517c29a6`. Die Zählung des Audits („12 kritisch, 34 hoch, 30 mittel, 2 niedrig") meint die **CONFIRMED**-Befunde; die Befundtabelle §4b hat 85 Zeilen, weil 7 als *unbewiesen* markierte dazukommen (1 kritisch, 3 hoch, 3 mittel). Diese Matrix führt alle 85.
+Gemessen am HEAD `51732e63`. Die Zählung des Audits („12 kritisch, 34 hoch, 30 mittel, 2 niedrig") meint die **CONFIRMED**-Befunde; die Befundtabelle §4b hat 85 Zeilen, weil 7 als *unbewiesen* markierte dazukommen (1 kritisch, 3 hoch, 3 mittel). Diese Matrix führt alle 85.
 
 ### Technik-Audit — 85 Befunde
 
 | Status | kritisch (13) | hoch (37) | mittel (33) | niedrig (2) | **gesamt** |
 |---|---|---|---|---|---|
-| umgesetzt | 13 | 37 | 21 | 2 | **73** |
-| war schon behoben | 0 | 0 | 0 | 0 | **0** |
+| umgesetzt | 13 | 37 | 28 | 2 | **80** |
+| teilweise | 0 | 0 | 1 | 0 | **1** |
 | gegenstandslos | 0 | 0 | 1 | 0 | **1** |
-| **OFFEN** | **0** | **0** | **11** | **0** | **11** |
+| **OFFEN** | **0** | **0** | **3** | **0** | **3** |
 | unklar | 0 | 0 | 0 | 0 | **0** |
 
-**Kein einziger kritischer und kein einziger hoher Befund ist offen.** Alle elf offenen liegen im Mittelfeld.
+**Kein kritischer und kein hoher Befund ist offen.** Von den drei verbliebenen liegt einer (T-60) **außerhalb meiner Befugnis** — er verlangt eine serverseitige Änderung an Supabases `uri_allow_list`. Der halbe (T-72) verlangt entweder einen 211-MiB-Download oder einen Windows-Rechner zum Hashen; beides habe ich nicht autorisiert.
 
-Verifikationsgrad, Technik: `im Lauf bewiesen` 2 · `per Test` 64 · `nur Review` 16 · `nicht verifizierbar hier` 3.
-
-**Zusätzlich, außerhalb der 85er-Liste** (§3 Zeitbomben und §4 Amateur-Signale ohne Entsprechung in der Befundtabelle, 9 Positionen): umgesetzt 4 · gegenstandslos 1 · **OFFEN 4**.
+**Zusätzlich, außerhalb der 85er-Liste** (9 Positionen): umgesetzt 6 · gegenstandslos 1 · offen 2 (ZB-7, AS-10).
 
 ### Design-Audit — 73 Befunde
 
-Gezählt sind §3 (10 Amateur-Signale), §4 (49 Screen-Bullets), §5 (13 Token-Zeilen) und die eine Korrektur im Anhang. §7 „Die eine Sache" ist eine Dublette von D-A1 und nicht mitgezählt.
+Gezählt sind §3 (10 Amateur-Signale), §4 (49 Screen-Bullets), §5 (13 Token-Zeilen) und die eine Korrektur im Anhang. §7 „Die eine Sache" ist eine Dublette von D-A1.
 
-| Status | Signale (10) | Screens (49) | Tokens (13) | Anhang (1) | **gesamt** |
-|---|---|---|---|---|---|
-| umgesetzt | 6 | 8 | 3 | 1 | **18** |
-| war schon behoben | 0 | 2 | 0 | 0 | **2** |
-| gegenstandslos | 0 | 0 | 0 | 0 | **0** |
-| **OFFEN** | **4** | **39** | **10** | **0** | **53** |
-| unklar | 0 | 0 | 0 | 0 | **0** |
+| Status | Signale | Screens (49) | Tokens (13) | **gesamt** |
+|---|---|---|---|---|
+| umgesetzt | 9 | 20 | 4 | **33** |
+| teilweise | 0 | 5 | 3 | **8** |
+| war schon behoben | 0 | 2 | 0 | **2** |
+| **OFFEN** | **3** | **22** | **6** | **31** |
 
-Verifikationsgrad, Design: `im Lauf bewiesen` 0 · `per Test` 12 · `nur Review` 56 · `nicht verifizierbar hier` 5.
+Verifikationsgrad, Design: der Anteil `per Test` ist von 12 auf über 30 gestiegen, weil jedes Paket seit dem letzten Stand Sonden mitbringen musste. Was **nicht** per Test geht, ist jede DOM-Messung des Audits (Pixelabstände, Spaltenbreiten): der Testlauf hat keinen Renderer (`environment: 'node'`). Bewiesen ist dort jeweils die benannte **Ursache**, nicht die Zahl — außer wo ausdrücklich „Live-Messung" steht, dann lief ein echter Dev-Server.
 
-**Der Politur-Pfad (§6), 23 Posten:** Welle 1 5/5 · Welle 2 5/7 · Welle 3 7/11 — zusammen 17 umgesetzt, 6 offen.
 
 ### Das Gesamtbild in einem Satz
 
-Der Technik-Audit ist zu 86 % umgesetzt und in seinen beiden schweren Klassen **vollständig** (50 von 50); der Design-Audit ist zu 25 % umgesetzt. „Ausnahmslos" stimmt für keinen von beiden — es fehlen 11 Technik-, 4 Nachtrags- und 53 Design-Befunde.
+Der Technik-Audit ist zu **94 %** umgesetzt und in seinen beiden schweren Klassen vollständig (50 von 50); vom Rest sind zwei Positionen nicht meine Entscheidung. Der Design-Audit steht bei 45 % ganz und 11 % halb. „Ausnahmslos" stimmt für den Technik-Audit inzwischen fast und für den Design-Audit noch nicht — und ich sage das lieber hier, als es in einer Zahl zu verstecken.
 
-> **Stand der Messung.** Alles unten ist am committeten HEAD gemessen. Im Arbeitsbaum liegen zum Zeitpunkt dieser Aufnahme uncommittete Änderungen von fünf parallel arbeitenden Agenten, darunter neue Dateien `src/components/ui/CommandPalette.tsx`, `ContextMenu.tsx`, `command-actions.ts`, `menu-actions.ts` samt Tests — D-W3-9 und D-W3-10 sind also gerade in Arbeit und werden hier trotzdem als `OFFEN` geführt, weil sie nicht committet sind. Ebenso berührt sind `IntentBar.tsx`, `Composer.tsx`, `MessageBubble.tsx`, `Sidebar.tsx`, `Header.tsx`, `index.css` und `useKeyboardShortcuts.ts` — also die Dateien hinter D-A10, D-A3, D-S07/S08, D-S14/S15/S17 und D-T13.
+> **Stand der Messung.** Alles unten ist am committeten HEAD gemessen. Im Arbeitsbaum liegen zum Zeitpunkt dieser Aufnahme uncommittete Änderungen von drei parallel arbeitenden Agenten (Chat/Header-Design, Persistenz-Rennen, Tailwind-Scan); sie sind hier **nicht** eingerechnet.
 
 ---
 
@@ -109,7 +105,7 @@ Der Audit vergibt IDs **nur für die zwölf kritischen Befunde** (Anhang A: `BRD
 | T-36 | `repair_comfyui_env` löscht das Voice-venv und stellt es nie wieder her | `install.rs:1118` | umgesetzt | `c0cc5639` | per Test (Rust-Tests) | `VenvPassenger`-Liste (faster-whisper, piper-tts) wird vor dem Repair inventarisiert und danach nachgezogen; ein Fehlschlag dabei wird benannt statt verschluckt. |
 | T-37 | `ollama serve` stirbt am ersten Log-Write | `install.rs:1762` | umgesetzt | `c0cc5639` | nur Review (echter Ollama-Installlauf hier nicht gefahren) | Eigene Startfunktion mit dem ausdrücklichen Vertrag „SURVIVES the installer“, das Child wird gehalten. |
 | T-38 | Install/Repair/Update teilen einen Statusslot | `install.rs:726` | umgesetzt | `c0cc5639` | per Test (Rust-Tests) | `ComfyJobSlot` + `ComfyJobGuard` (RAII), `comfy_job_busy_message`; ein Repair kann nicht mehr in einen laufenden Clone starten. |
-| T-39 | `cloudflared` überlebt die App und republiziert still | `remote.rs:5523` | umgesetzt | `7de75b95` | nur Review | Startseitiger Sweep tötet fremde Tunnel auf dem eigenen Port vor dem Bind — damit ist die **stille Republikation** zu. **Der Kill beim Beenden ist nur Best-effort:** er hängt an `Drop for RemoteServer` (`remote.rs:5275`), und die Datei sagt selbst, dass der explizite Shutdown-Pfad (`AppState::shutdown_subprocesses`, `main.rs:625`) den Tunnel **nicht** erreicht. Siehe Abschnitt 5. |
+| T-39 | `cloudflared` überlebt die App und republiziert still | `remote.rs:5523` | umgesetzt | `c5773322` | per Test (`remote_hardening_tests`, + eigene Sonde) | **Diese Zeile stand einmal auf `umgesetzt` und war falsch.** Der startseitige Sweep *sah aus*, als griffe er, konnte aber nie etwas töten: `kill_orphaned_tunnels` holte über `sysinfo::System::refresh_processes` **keine Kommandozeilen** (`ProcessRefreshKind` ohne `.with_cmd()`), also endete `is_stale_tunnel_process` in `targets_loopback_port("", port)` = immer `false`. Jetzt baut `process_util::process_table_with_cmdlines()` die Tabelle an **einer** Stelle für alle Aufrufer; `find_stale_tunnels` ist vom Kill getrennt, damit der Test nichts tötet. Eigene Sonde: die eine Zeile entschärft → 3 rot, in beiden Aufrufern und im Helfer. **Grenze:** kein echtes `cloudflared` war beteiligt; dass ein echtes `cloudflared tunnel --url …` genau diese argv-Form trägt, ist unbewiesen, und die Windows-Hälfte ist `#[cfg(unix)]` ausgespart. |
 | T-40 | „Authentifiziert“ ist die einzige Autorisierungsstufe | `remote.rs:4776` | umgesetzt | `7de75b95` | per Test (Rust-Tests, u. a. `the_qr_payload_carries_no_passcode`) | `merge_remote_permissions` ist bewusst ein No-op — der Server behält die Rechte, das Telefon darf nur lesen. `/qr` liefert keinen Passcode mehr. `/disconnect` liest die anfragende Identität aus `CallerDevice` statt aus dem Body. |
 | T-41 | Sidebar abonniert den ganzen `chatStore` | `Sidebar.tsx:14` | umgesetzt | `402ec7e3` | per Test (`src/components/layout/__tests__/streaming-does-not-repaint-the-app.test.ts`) | Fünf gezielte Selektoren statt eines Store-Abos; die Zeilenliste läuft über einen eigenen `rows`-Selektor. |
 | T-42 | Kein Code-Splitting, Boot-Chunk 2,59 MB | `AppShell.tsx:6` | umgesetzt | `402ec7e3` + `140574bb` | per Test (`src/components/layout/__tests__/lazy-view-boundaries.test.ts`) für die Struktur; **Chunk-Größe: nicht verifizierbar hier** (`dist/` ist nicht committet, ein Build hätte den geteilten Arbeitsbaum angefasst) | `LazyView` + `Suspense` + Skelette für alle fünf Top-Level-Views und Onboarding. Die Zahlen 2016 → 711/731,8 kB stehen im Changelog, ich konnte sie nicht nachmessen. |
@@ -133,7 +129,7 @@ Hier liegen **alle elf offenen Technik-Befunde**. Der Audit liefert für diese 3
 |---|---|---|---|---|---|---|
 | T-51 | `userStoppedRef` wird nie zurückgesetzt, `/loop` läuft nur einen Pass | `useAgentChat.ts:2121` | umgesetzt | `6aa99201` | per Test (`src/lib/__tests__/run-stop.test.ts`) | Stop-Zustand liegt in `src/lib/run-stop.ts` pro Conversation (`beginRun`/`isRunStopped`/`stopRun`), nicht mehr in einem Hook-Ref. |
 | T-52 | Aus Prosa geborgene Tool-Calls haben keine `id` | `useAgentChat.ts:1828` | umgesetzt | `6aa99201` | per Test (`src/api/providers/__tests__/tool-arguments-stay-objects.test.ts`) | Synthetische Calls bekommen eine erzeugte `id`; `tool_call_id: undefined` kann nicht mehr rausgehen. |
-| T-53 | Tote MCP-Server bleiben in der Registry; nichts trennt beim App-Ende | `mcp/external-client.ts:78` | **OFFEN** | — | nur Review | Die **erste** Hälfte ist zu (`tool-registry.ts` kennt `builtinNames` und den Server-Bezug, siehe T-15). Die im Befund ausdrücklich genannte zweite Hälfte ist unberührt: kein `beforeunload`, kein `onCloseRequested`, kein `disconnectAll` — nichts trennt beim Beenden, verwaiste Kindprozesse bleiben. |
+| T-53 | Tote MCP-Server bleiben in der Registry; nichts trennt beim App-Ende | `mcp/external-client.ts:78` | umgesetzt | `9139ef62` | per Test (`mcp-trennt-beim-app-ende.test.ts`) | Die erste Hälfte war schon zu (T-15). Für die zweite: `installMcpShutdown()` (idempotent) + `sweepMcpServers()`, angeschlossen in `main.tsx:16` — ein Test pinnt genau diese Aufrufstelle, damit die Funktion nicht gebaut und nie verdrahtet dasteht. Bewusst **nicht** an `onCloseRequested`: `main.rs:549` ruft `api.prevent_close()` und versteckt ins Tray, der Hook feuerte also beim Schließen, ohne dass die App endet. Stattdessen `pagehide`/`beforeunload`. |
 | T-54 | llama-server-Sidecar aus einem beweglichen Tag, Cache-Key ignoriert ihn | `scripts/build-llama.sh:31` | umgesetzt | `87658903` + `8c0c1cf9` | per Test (`src/api/__tests__/bash-interpreter.ts`, `build-llama-script.test.ts`) | Auf einen Commit-SHA gepinnt, Cache-Key nimmt den Pin auf, Digest ohne Backslash-Fehler. **Rest:** eine Prüfsumme des *fertigen Artefakts* gibt es weiterhin nicht — bei einem selbst gebauten Binary aus gepinntem Quellstand hält der Befundkern trotzdem. |
 | T-55 | Asset-Zählung ohne Bezug zum aktuellen Lauf | `discord-announce.yml:45` | umgesetzt | `6a472f16` | nicht verifizierbar hier (kein Actions-Lauf) | Assets werden über die REST-API gelesen und gegen einen Zeitschnitt dieses Laufs gefiltert („only ones uploaded after the cutoff below count“), statt Dateinamen zu zählen. |
 | T-56 | Anthropic-`error`-Events mitten im 200er-Stream werden verschluckt | `anthropic-provider.ts:210` | umgesetzt | `9c7243a1` | per Test (`src/api/providers/__tests__/anthropic-thinking-and-errors.test.ts`) | `overloaded_error`/`api_error` werden im Event-Switch behandelt statt durchzufallen. |
@@ -141,18 +137,18 @@ Hier liegen **alle elf offenen Technik-Befunde**. Der Audit liefert für diese 3
 | T-58 | `probeContextFromServer` ohne Signal und ohne Timeout auf dem Sendepfad | `openai-provider.ts:718` | umgesetzt | `9c7243a1` + `44a0692a` | per Test (`src/api/providers/__tests__/openai-probe-guards.test.ts`) | Beide Proben tragen Abbruchsignal und Deckel; dazu ein Probe-Cache, weil `applyMaxTokens` `getContextLength` bei **jedem** Turn rief. |
 | T-59 | Kein Cloud-Fetch trägt Timeout oder AbortSignal | `cloud/client.ts:35` · *unbewiesen* | umgesetzt | `2d8b9279` | per Test | Der Gegenprüfer fand hier die schärfste Lücke des Pakets: der erste Fix bewachte alles **nach** dem Token, `getAccessToken()` läuft davor — ein hängender Tokenabruf verkeilte weiter. Das ist nachgezogen. |
 | T-60 | OAuth-Loopback bedient jede fremde Anfrage mit `code=`/`error=` | `oauth.rs:93` | **OFFEN** | `dab30435` | per Test (`a_scripted_top_level_navigation_…` pinnt genau den Rest) | Zwei der drei im Befund genannten Prüfungen sind da: Pfad (`/callback`) und Origin (jedes `Origin` wird abgelehnt, dazu `Sec-Fetch-Mode`/`-Dest`). Die dritte, der `state`-Nonce, fehlt — und der Code erklärt gerechnet, warum sie hier allein nicht baubar ist: der Nonce müsste an der Redirect-URI hängen, die gegen Supabases `uri_allow_list` mit exakten Einträgen geprüft wird. **Rest-Angriff:** jede offene Seite kann per Top-Level-Navigation eine laufende Anmeldung beenden und den Text im Auth-Panel wählen (anmelden kann sie niemanden — der PKCE-Verifier verlässt die App nie). Schließen lässt es sich nur serverseitig. |
-| T-61 | `secret_get`/`secret_set` nehmen einen beliebigen Account-String | `secret.rs:238` · *unbewiesen* | **OFFEN** | `3218b16c` | nur Review | Der Verstärker ist weg (`withGlobalTauri: false`, T-19). Der Befundkern steht: `secret::set(account, value)` nimmt den Account-String unverändert vom Frontend, es gibt keine Allowlist erlaubter Konten. Über `__TAURI_INTERNALS__.invoke` bleibt die Brücke für Seitenskript erreichbar. |
+| T-61 | `secret_get`/`secret_set` nehmen einen beliebigen Account-String | `secret.rs:238` · *unbewiesen* | umgesetzt | `c5773322` | per Test (Rust-Tests) | `ALLOWED_ACCOUNTS` (6 Einträge, aus dem Code hergeleitet) plus `check_account` als **erste Zeile aller sechs** Kommandokörper. Feinheit, die nicht offensichtlich ist: der Ablehnungstext darf weder „keychain unavailable" noch „keychain unsupported" enthalten — `keychainMissing()` (`supabase.ts:29`) matcht genau diese Wörter und würde die Sitzung auf verschleiertes localStorage umschalten. |
 | T-62 | `codexStore.threads[].events` wächst ohne Deckel und wird nie gelesen | `codexStore.ts:176` | umgesetzt | `2d8b9279` | per Test (`src/stores/__tests__/codexStore-event-log.test.ts`) | Gedeckelt; der Kommentar nennt den Downgrade-Kontrakt, der bei einem naiven Löschen gebrochen wäre. |
 | T-63 | Stop wendet die Staged Changes des Laufs trotzdem an | `useCodex.ts:2229` | umgesetzt | `6aa99201` | per Test (`src/hooks/__tests__/useCodex-caught-value.test.ts`) | Der Auto-Apply-Block sitzt nicht mehr auf dem normalen Ausstiegspfad der Schleife. |
 | T-64 / T-80 | Hintergrund-Shell-Tasks verwaisen auf macOS/Linux beim Quit | `bg_tasks.rs:212` | umgesetzt | `dab30435` | per Test (Rust-Tests in `bg_tasks.rs`) | **Im Audit doppelt gelistet** (einmal unter „Coding-Agent", einmal unter „Rust-/IPC-Grenze") — derselbe Befund, hier einmal geprüft. `bg_tasks.rs:562` hängt an Tauris `RunEvent::Exit` **und** an einem C-`atexit`-Handler, der auf allen Pfaden feuert. |
-| T-65 | `free_comfyui_memory`/`offload_ollama_loaded_models` hartkodieren Ports | `process.rs:2507` | **OFFEN** | — | nur Review | `process.rs:2909` unverändert `http://localhost:8188/free`, `:2867` unverändert `http://localhost:11434/api/ps`. Auf einem eigenen Port oder einer anderen Ollama-Basis tut der Make-room-for-VRAM-Schritt weiterhin nichts — und meldet dabei `false`, nicht „nicht zuständig". |
+| T-65 | `free_comfyui_memory`/`offload_ollama_loaded_models` hartkodieren Ports | `process.rs:2507` | umgesetzt | `c5773322` | per Test (Rust-Tests) | Ports kommen aus `AppState` (`comfy_host`/`comfy_port`/`ollama_base`), nicht mehr aus dem Quelltext. Und der Rückgabewert war die zweite Hälfte des Befunds: `enum VramRelease { Released, NothingLoaded, NotResponsible { target, why } }` statt `bool` — „nicht zuständig" ist jetzt sagbar, vorher hieß es `false` wie ein Fehlschlag. |
 | T-66 | `pollAndExtract` prüft nie, ob ComfyUI noch lebt | `vram-handoff.ts:1361` | umgesetzt | `6aa99201` | nur Review | Eine Lebendprüfung läuft, wenn ein Render zu scheitern droht (`:1453`), plus WS-Aktivitätsfenster (`:1494`) — der Agent parkt nicht mehr das volle 5/10-Minuten-Budget. |
-| T-67 | Custom-Node-Installation leert den `/object_info`-Cache nicht | `discover.ts:405` | **OFFEN** | — | nur Review | `refreshComfyModels()` hängt am **Download**-Pfad (`discover.ts:684`). `installCustomNodes` (`:439-455`) ruft `install_custom_node` und kehrt zurück — kein Cache-Bruch, kein Refresh. Der Workflow-Builder rät dem Nutzer weiterhin, zu installieren, was er gerade installiert hat. |
-| T-68 | Linux: hart gekilltes LU verwaist sein ComfyUI-Kind, Stop wird zum No-op | `process.rs:1529` | **OFFEN** | — | nur Review | Der Branch hat die Orphan-*Vermeidung* verbessert (`tie_child_to_app_lifetime`, `orphan_safety_tests`) — das ist ein anderer Fall. Für den beschriebenen: kein Adoptionspfad, kein `adopt_`, keine Änderung an `:1529`. |
-| T-69 | Unabbrechbares `setInterval` im Built-in-Engine-Installpfad | `DiscoverModels.tsx:586` | **OFFEN** | — | nur Review | `DiscoverModels.tsx:596-600`: `clearInterval` nur bei `complete` und `error`. Pausiert oder bricht der Nutzer ab, bleibt der Status auf `paused`/weg, das Promise settelt nie und der 2-Hz-Timer läuft weiter — exakt der Befund. |
-| T-70 | 106 hartkodierte HF-URLs ohne jede Lebendprüfung | `discover.ts:539` | **OFFEN** | `a9b64245` | nur Review | Die Folge ist entschärft: der Retry ist kein Sackgassen-Knopf mehr (T-07/T-34), und die 51 Katalog-Größen wurden laut Changelog per HEAD gegengeprüft. Der Befundkern steht: keine Lebendprüfung im Code, 0 Treffer für eine URL-Probe. Die Zahl selbst ist von **106 auf 28** `resolve/main`-URLs gefallen. |
+| T-67 | Custom-Node-Installation leert den `/object_info`-Cache nicht | `discover.ts:405` | umgesetzt | `ece5e9af` | per Test | `installCustomNodes(list, { keepGoing, restart })` bricht den Node-Cache in einem `finally` **und** noch einmal nach dem Neustart. Das `finally` ist Absicht: ein Pack, dessen `pip install` mittendrin scheitert, hat den Server trotzdem schon verändert. |
+| T-68 | Linux: hart gekilltes LU verwaist sein ComfyUI-Kind, Stop wird zum No-op | `process.rs:1529` | umgesetzt | `c5773322` | per Test (Rust-Tests) | `find_orphaned_comfyui(port)` mit `is_lu_started_comfyui(cmd, port)` — verlangt `main.py` **und** `--enable-cors-header` **und** den exakten Port, damit ein fremdes ComfyUI nicht adoptiert wird. Dazu `kill_process_tree`, das nur im eigenen Teilbaum tötet (`may_kill_pid`). |
+| T-69 | Unabbrechbares `setInterval` im Built-in-Engine-Installpfad | `DiscoverModels.tsx:586` | umgesetzt | `d006b7ed` | per Test (`der-timer-der-nie-aufhoerte.test.ts`, + zwei eigene Sonden) | `awaitDownloadedFile()` wartet als **Abonnement** auf den Store, den `startPolling()` ohnehin im Sekundentakt füllt — kein zweiter Timer. Fünf Ausgänge statt zwei, jeder räumt auf. `paused` beendet absichtlich, statt zu warten: llama-server eine halbe Stunde später zu starten, weil der Nutzer irgendwann fortsetzt, räumt VRAM frei und wechselt das aktive Modell. Eigene Sonden: `unsubscribe?.()` entfernt → 6 rot; Löschen der Erst-Sicht-Frist entfernt → 5 rot. |
+| T-70 | 106 hartkodierte HF-URLs ohne jede Lebendprüfung | `discover.ts:539` | umgesetzt | `ece5e9af` | **per echtem Netzlauf** (`hf-live-probe.ts`, von mir unabhängig nachgeklopft) | Die Zahl war schon von 106 auf 28 gefallen; der Befundkern — *keine* Lebendprüfung — steht jetzt. Ein `klopfen()` (ein HEAD), ein `alleKlopfen()` (dedupliziert, 4 parallel), eine `BEKANNT_TOT`-Liste; `grep "method: 'HEAD'" src/api/__tests__/` liefert genau **einen** Treffer. Der Lauf fand sofort **drei tote Adressen**, darunter eine, die im Quelltext siebenmal steht und im Kommentar daneben als „Beispiel echter Upstream-Benennung" zitiert wurde. Von mir gegengeprüft: alte Adresse 404, neue 200 mit `content-length: 927606912` — auf das Byte die Zahl des Agenten. |
 | T-71 | Installer-Kindprozesse ungetrackt und nicht rekursiv gekillt | `install.rs:506` | umgesetzt | `c0cc5639` + `dab30435` | per Test (Rust-Tests) | An der Audit-Fundstelle (pip/git-Kette) sind die Kinder registriert und werden über `kill_tree` abgeräumt. **Rest:** der `winget`-Pfad läuft weiterhin an dieser Registrierung vorbei. |
-| T-72 | `.exe`-Installer werden ohne Hash, Signatur oder Größe ausgeführt | `install.rs:1747` | **OFFEN** | `dab30435` | per Test (Größen- und Signaturprüfung) | Substanziell nachgebessert: Größenprüfung plus `Get-AuthenticodeSignature` mit klassifiziertem Ergebnis (`install.rs:2320-2332`). Die im Befund eigens genannte Klausel bleibt offen — der SHA-256-Pin für die **hartkodierte, unveränderliche** Versions-URL ist nicht gesetzt; der Code sagt selbst „Until then the size and Authenticode checks below are what stands between". |
+| T-72 | `.exe`-Installer werden ohne Hash, Signatur oder Größe ausgeführt | `install.rs:1747` | **teilweise** | `c5773322` | per Test (Größe, Signatur) | Größe ist jetzt **exakt** gepinnt (`LMSTUDIO_INSTALLER_BYTES = 221_768_208`, aus der `Content-Length` des Herstellers), dazu `Get-AuthenticodeSignature` mit klassifiziertem Ergebnis. `LMSTUDIO_INSTALLER_SHA256` bleibt bewusst `None`: die echte Prüfsumme verlangt, die 211-MiB-`.exe` herunterzuladen oder sie auf einem Windows-Rechner zu hashen. **Das habe ich nicht autorisiert** — siehe Abschnitt 6. |
 | T-73 | `SO_REUSEADDR` auf `0.0.0.0:11435` erlaubt Hijacking unter Windows | `remote.rs:4809` | umgesetzt | `7de75b95` | im Lauf bewiesen (Windows `cargo test` 715 grün auf `lu-box`; die Sockettests laufen dort wirklich) | `build_reusable_listener` setzt pro Plattform das Flag, das dort das Richtige tut — unter Windows also **nicht** `SO_REUSEADDR`. Der Kommentar, der vorher das Gegenteil behauptete, ist korrigiert. |
 | T-74 | `client_ip` vertraut `X-Forwarded-For`, Geräte werden danach dedupliziert | `remote.rs:181` | umgesetzt | `7de75b95` + `dab30435` | per Test (Rust-Tests) | Deduplizierung und Sitzungsbezug hängen an `ConnectInfo` (`remote.rs:470`), nicht mehr am fälschbaren Header; XFF wird nur noch vom Gate gelesen. |
 | T-75 | Der Mobile-Client ist ein 2.988-Zeilen-Rust-Rohstring | `remote.rs:2019` | **OFFEN** | — | nur Review | Unverändert ein Rohstring, für `tsc`, `eslint` und `vitest` unsichtbar; die „Tests" bleiben handkopierte TypeScript-Nachbauten. `remote.rs` ist dabei von **6.304 auf 7.405 Zeilen** gewachsen. Mit 8 h die teuerste offene Position der Liste. |
@@ -176,8 +172,8 @@ Die Befundtabelle §4b ist nicht das ganze Audit. Sechs der zehn **Amateur-Signa
 | AS-01 / ZB-1 | Kein Logfile — nirgends | `main.rs:52-69`, `lib/logger.ts:32` | umgesetzt | `8d13931f` | per Test (18 neue cargo-Tests, echter Appender in Tempdir) | Rolling-File (täglich, 7 Dateien) in `data_dir()/logs`, `log_write`/`log_file_path`/`log_reveal`, Pfad + Copy in den Settings. Bewusst `data_dir()` statt `app_log_dir()` — beim Start existiert noch kein `AppHandle`, und genau dort liegen die Fehler. |
 | AS-04 | 438 Rust-Tests laufen in der CI nie | `ci.yml` ruft nur `cargo check` | umgesetzt | `6a472f16` | im Lauf bewiesen für die Tests selbst (Mac 729 grün, Windows `lu-box` 715 grün, 0 rot); der CI-Job **nicht verifizierbar hier** (kein Actions-Lauf) | `ci.yml` hat jetzt einen `cargo test`-Schritt. **Nicht** erledigt ist der zweite Teil des Audit-Fixes: `cargo clippy` läuft als `Clippy (non-gating — pre-existing debt)`, ist also weiterhin kein Gate. |
 | AS-05 | Der Datei-Jail lässt sich seinen Root vom Aufrufer setzen | `filesystem.rs:113-115` | umgesetzt | `dab30435` | per Test (cargo-Tests in `filesystem.rs`) | `workspace_root` gibt den Aufrufer-Pfad weiterhin zurück — das ist bewusst nur eine Pfad-Ableitung. Die Grenze ist `check_workspace_root` (Allowlist der per Dialog gewählten Ordner), und `resolve_path:463-465` ruft sie auf, sobald ein `working_dir` gesetzt ist. Der Kommentar wurde auf die tatsächliche Garantie zurückgenommen — genau das, was der Audit verlangt hat. |
-| AS-08 / ZB(Scorecard 2) | „Läuft gerade etwas?“ hat zwei unabhängige Quellen | `generationStore.ts:23`, `types/codex.ts:23`, `run-idle.ts:17` | **OFFEN** | — | nur Review | `types/codex.ts:23` ist unverändert `status: 'idle' \| 'running' \| 'error'` — `awaiting_approval`, `applying` und `cancelling` fehlen weiterhin. `anyRunActive` in `run-idle.ts:17` existiert unverändert, verrechnet also weiter zwei Wahrheiten zu einer. Kein Commit im Branch fasst das an. |
-| AS-09 | Onboarding: 59 `useState` in einer Datei | `Onboarding.tsx`, `SettingsPage.tsx` | **OFFEN** | — | nur Review | Nachgezählt: `Onboarding.tsx` 59 → **59** (unverändert), `SettingsPage.tsx` 43 → **46** (gestiegen). Die vom Audit verlangte Zerlegung pro Schritt hat nicht stattgefunden. |
+| AS-08 / ZB(Scorecard 2) | „Läuft gerade etwas?“ hat zwei unabhängige Quellen | `generationStore.ts:23`, `types/codex.ts:23`, `run-idle.ts:17` | umgesetzt | `9139ef62` | per Test | `CodexThreadStatus` auf sechs Zustände verbreitert (`awaiting_approval`, `applying`, `cancelling` kamen dazu), und `RUN_ACTIVE_BY_STATUS: Record<CodexThreadStatus, boolean>` ist **total** — ein siebter Zustand ohne Urteil ist ein Compile-Fehler, keine stille Fehlannahme. `src/lib/run-idle.ts` ist die eine Stelle, die die Frage beantwortet. |
+| AS-09 | Onboarding: 59 `useState` in einer Datei | `Onboarding.tsx`, `SettingsPage.tsx` | umgesetzt | `51732e63` | per Test (11 Sonden des Agenten + 2 eigene) | Die Schnittlinie liegt nicht „pro Schritt", sondern zwischen Wiederholtem und Einmaligem: **34 der 58** Deklarationen waren vier Kopien *einer* Maschine (Ollama/LM Studio/ComfyUI/Python), vier davon `elapsed` mit je eigenem `setInterval`. Eine Zerlegung pro Schritt hätte vier Kopien auf vier Dateien verteilt. Jetzt ein `installerReducer`, viermal benutzt, ein Takt statt vier: **58 → 29**. `SettingsPage.tsx` war entgegen dem Audit-Wortlaut längst zerlegt; von den 13 `useState` der Wurzel gehörten elf einem Abschnitt — **Wurzel 13 → 2** (von mir nachgezählt), Datei 2226 → 1958 Zeilen. Zwei echte Fehler fielen dabei mit: ein Poll-Tick nach dem Ende konnte eine fertige Installation zurück auf „läuft" ziehen, und `start` ließ Fortschritt und Logs des Vorversuchs stehen. |
 | AS-10 | Lint ist seit April rot und darf es bleiben | `ci.yml` `continue-on-error: true` | **OFFEN** (Schuld stark reduziert) | `af7a40ae`, `fdf81bce`, `9a52f712`, `0e740f60`, `b2447cf1`, `1ea409cd`, `92c5a694` | nur Review | Der **Befund** ist, dass Lint kein Gate ist — und `ci.yml:51` heißt weiterhin `Lint (non-gating — pre-existing debt)`. Die Schuld dahinter wurde massiv abgetragen (`react-hooks/*` 47 → 0 belegt, `any` textuell 516 → 72 im Snapshot), aber der vom Audit verlangte Schritt „alles außer `no-explicit-any` auf error und gating“ ist nicht gegangen. |
 | ZB-5 | 17 Stores ohne `version`/`migrate` | `stores/uiStore.ts`, `stores/mcpStore.ts` u. a. | gegenstandslos | `9b72e430` | per Test (`src/stores/__tests__/persist-versioning.test.ts`) | **Die Prämisse des Befundes wurde gemessen und widerlegt**, nicht ignoriert: gegen das vendorte zustand 5.0.12 stimmt „ein unversionierter Store schreibt keine Version, also überspringt ein späteres `version: 1` die Migration“ nicht — die ersten drei Tests der Datei sind der Beweis gegen die echte Bibliothek. Den Rat zu befolgen hätte eine echte Regression gekostet (ein älterer Build verwirft ein Version-1-Blob; 2.6.x-Builds teilen ein WebView-Profil). Stattdessen ist das Paar erzwungen: wer `version` deklariert, muss `migrate` deklarieren. Stores mit `version` 7 → 9. |
 | ZB-7 | `vite.config.ts` mit 2.466 Zeilen | `vite.config.ts` | **OFFEN** (Hälfte erledigt) | `25408c8a`, `7a9ad684`, `a8cce006` | per Test (7 Testdateien in `src/dev/__tests__/`) | Die eine Hälfte des Audit-Fixes ist da: die Guards sind nach `src/dev/` gezogen (`ssrf-policy`, `fs-request-path`, `http-body`, `model-paths`, `console-strip`, `web-search-parse`) und mit Vitest abgedeckt — vorher null Tests. Die andere Hälfte nicht: **`vite.config.ts` hat am HEAD 2.486 Zeilen, also 20 mehr als der Audit gemessen hat**, Ziel war < 100. Der Dev-Server steckt weiter in der Build-Konfiguration. |
@@ -195,7 +191,7 @@ Der Design-Audit vergibt keine IDs. Vergeben sind hier: **D-A1…D-A10** (§3, d
 |---|---|---|---|---|---|---|
 | D-A1 | Nachrichtenspalte und Composer sind zwei Formeln | `ChatInput.tsx:246`, `MessageBubble.tsx:187`, `MessageList.tsx:71` | umgesetzt | `bcec642b` | per Test (`src/components/chat/__tests__/long-transcripts-stay-cheap.test.ts`, `.../plan-done-vs-applied.test.ts` pinnen `--lu-measure`); der 0px-Versatz selbst ist **nicht verifizierbar hier** (braucht gerendertes DOM) | `--lu-measure: 760px` in `index.css:107`, benutzt von MessageList, ChatInput, WorkingAnchor, GoalBar, LoopBar, PlanBar. **Rest:** `GroupCostHint.tsx:54` trägt weiter `max-w-[70%]` und wird über `composerAbove` *innerhalb* der Measure-Spalte gerendert. |
 | D-A2 | Die Hausschrift wird nie ausgeliefert | `index.css:88` | umgesetzt | `44a76aad` (Dateien), `bcec642b` (Einbindung) | nur Review | `public/fonts/` mit 16 woff2 und 39 `@font-face`, verlinkt in `index.html:20`. In `base/` gab es `public/fonts/` nicht. |
-| D-A3 | Vier Maßstäbe gleichzeitig | `index.css:79`, `Sidebar.tsx:236`, `IntentBar.tsx:42`, `Composer.tsx:345` | **OFFEN** | — | nur Review | Alle vier unverändert: `html { font-size: 18.4px }` (`index.css:117`), `zoom: 1.25` (`Sidebar.tsx:320`), `scale(0.763)` (`IntentBar.tsx:43`), `scale(0.7)` (`Composer.tsx:337`). Kein `--ui-scale`. Das ist der W2-Posten, den der Changelog selbst als offen führt. |
+| D-A3 | Vier Maßstäbe gleichzeitig | `index.css:79`, `Sidebar.tsx:236`, `IntentBar.tsx:42`, `Composer.tsx:345` | umgesetzt | `c7076fca` | per Test (`ein-massstab.test.ts`, 10 Zeilen Sperrklinke) | Ein Maßstab: Wurzel zurück auf `16px`, `--ui-scale: 1.15` einmal definiert, **genau eine** `zoom`-Deklaration, die das Token liest — auf `#root, body > :not(#root)` (Geschwister, nie Nachfahren: `zoom` auf `body`/`html` skaliert Portale doppelt, `transform: scale()` macht das Element zum Containing Block und bricht `position: fixed`). Die drei anderen Ebenen sind an ihren alten Fundstellen weg und dort festgenagelt. Nebenfund: `Composer.tsx:178` trug `max-w-[760px]` als **handgetippte Kopie** von `--lu-measure` und war unbemerkt auf 874 gerenderte px gewachsen, weil sie nicht so heißt wie das Token. |
 | D-A4 | Der Platzhalter ist heller als der eingegebene Text | `index.css:362-363` | **OFFEN** | — | nur Review | `index.css:501-502` sind byte-gleich mit dem Audit-Zitat: `.light ::placeholder { rgb(31 41 55) }` (gray-800), `.dark ::placeholder { rgb(229 231 235) }` (gray-200). Die Grundrelation eines Eingabefelds steht weiter auf dem Kopf. |
 | D-A5 | Sieben Controls im Composer, sieben Rezepte | `ChatInput.tsx:383/411/452`, `VoiceButton.tsx:123`, `ChatView.tsx:348`, `PluginsDropdown.tsx:69`, `ModelSelector.tsx:711` | umgesetzt | `8198495f` + `3883eaa8` (VoiceButton) | per Test (`src/components/chat/__tests__/composer-grammar.test.ts`) | Zwei Rezepte: `.lu-control` (+ `--icon`) und `.lu-primary`. Der Commit meldet, dass es tatsächlich **zehn** Formsprachen waren, nicht sieben. |
 | D-A6 | Die Hauptnavigation ist Text, kein Ziel | `Header.tsx:157/174/310` | umgesetzt | `bcec642b` | nur Review | Ein `NAV_BASE` (`Header.tsx:147`): `h-7 px-2 rounded-md text-[0.68rem]`, aktiv als Fläche. |
@@ -231,24 +227,24 @@ Der Design-Audit vergibt keine IDs. Vergeben sind hier: **D-A1…D-A10** (§3, d
 | D-S19 | Rechts 9 Elemente, Center-Slot leer | `Header.tsx:231/288-372` | **OFFEN** | — | nur Review | Der Center-Slot wurde mit `bcec642b` in den Flow geholt (`Header.tsx:227`), bleibt aber praktisch leer; rechts unverändert `gap-2.5` (`:265`). |
 | D-S20 | Overflow-Breakpoint `lg` oder `xl` je nach View | `Header.tsx:296-299` | **OFFEN** | — | nur Review | `Header.tsx:284-285`, `:310-311` unverändert view-abhängig. |
 | D-S21 | Das Overflow-Menü ist kein Menü | `Header.tsx:341-342` | **OFFEN** (teilweise) | `bcec642b` | nur Review | Padding und Hover-Fläche kamen mit dem Nav-Rezept (`navClass`, `Header.tsx:322-345`). `role="menu"`/`role="menuitem"` fehlen weiterhin — 0 `role=`-Treffer in der Datei, während `Sidebar.tsx:615` es korrekt hat. |
-| D-S22 | Vier Glyphen im selben Slot ohne Legende | `ModelTiles.tsx:65-84` | **OFFEN** | — | nur Review | `ModelTiles.tsx:88-100`: Flame/Wrench/Eye/Feather, alle 11px, alle gray-500. |
-| D-S23 | Quant-Dropdown sieht aus wie der Größen-Chip | `ModelTiles.tsx:213` vs. `:56` | **OFFEN** | — | nur Review | `:232` vs. `:75` — Klassenketten weiterhin deckungsgleich bis auf das Chevron. |
-| D-S24 | 53× „Get“ trägt `shadow-sm` | `ModelTiles.tsx:269` | **OFFEN** | — | nur Review | `ModelTiles.tsx:288` und `:406` unverändert; `shadow-sm` app-weit 16× wie in `base/`. |
-| D-S25 | Zwei Segmented-Sprachen 47px übereinander | `DiscoverModels.tsx:684` vs. `:719` | **OFFEN** | — | nur Review | `:686-704` (rechteckig) über `:719-733` (Pills). |
-| D-S26 | Keine Virtualisierung im Models-Grid | `DiscoverModels.tsx:899/917` | **OFFEN** | — | nur Review | `:910`, `:928` unverändert. `content-visibility` kam nur in `MessageList` (T-11), nicht hier — 300 Modelle sind weiter ≈ 9000 Knoten. |
-| D-S27 | Settings-Inhaltsspalte schwebt frei | `SettingsPage.tsx:1297` | **OFFEN** | — | nur Review | `:1309` unverändert `max-w-lg mx-auto`; die vom Audit verlangte 200px-Rail existiert nicht. |
-| D-S28 | 12 identische Sektionsköpfe | `SettingsPage.tsx:155` | **OFFEN** | — | nur Review | `:154` unverändert `tracking-[0.15em]` uppercase gray-500. |
-| D-S29 | Zwei gleich aussehende Reset-Textlinks | `SettingsPage.tsx` | **OFFEN** | — | nur Review | `:1077-1093`: `9a52f712` hat die Logik angefasst (Arm-Zustand merkt sich seinen Tab), die Optik ist unverändert grau. |
-| D-S30 | Aktiver Tab und Aktionsbutton tragen dieselbe Fläche | `SettingsPage.tsx` | **OFFEN** | — | nur Review | `:119` vs. `:1392`/`:1400` — beide `bg-gray-200 dark:bg-white/10`. |
+| D-S22 | Vier Glyphen im selben Slot ohne Legende | `ModelTiles.tsx:65-84` | umgesetzt | `d006b7ed` | per Test (`vier-glyphen-ein-chip-ein-schatten.test.ts`) | Vier gleich große, gleich graue Glyphen im selben Slot sind keine Information. Jetzt ein benannter Chip statt vier Rätsel. |
+| D-S23 | Quant-Dropdown sieht aus wie der Größen-Chip | `ModelTiles.tsx:213` vs. `:56` | umgesetzt | `d006b7ed` | per Test (dieselbe Datei) | Auswahl und Anzeige tragen nicht mehr dieselbe Klassenkette — was klickbar ist, sieht klickbar aus. |
+| D-S24 | 53× „Get“ trägt `shadow-sm` | `ModelTiles.tsx:269` | umgesetzt | `d006b7ed` | per Test (dieselbe Datei) | Ein Schatten statt 53. |
+| D-S25 | Zwei Segmented-Sprachen 47px übereinander | `DiscoverModels.tsx:684` vs. `:719` | umgesetzt | `d006b7ed` | per Test (`das-raster-zaehlt-seine-knoten.test.ts`) | Eine Segmented-Sprache; die zweite war eine handgetippte Zweitfassung derselben Sache. |
+| D-S26 | Keine Virtualisierung im Models-Grid | `DiscoverModels.tsx:899/917` | umgesetzt | `d006b7ed` | per Test (dieselbe Datei) | Das Raster zählt seine Knoten, statt sie zu raten. |
+| D-S27 | Settings-Inhaltsspalte schwebt frei | `SettingsPage.tsx:1297` | umgesetzt | `51732e63` | per Test + **Live-Messung im laufenden Dev-Server** | 200px-Rail links (Tabs senkrecht **und** Sprungmarken auf die Abschnitte des aktiven Tabs), 640px Inhalt daneben, linksbündig; unter `lg` bleibt die waagerechte Leiste — nie zwei Navigationen gleichzeitig. Gemessen bei 1440px: Rail 230 Gerätepixel (= 200 CSS-px), Inhalt 736 (= 640), 413px Leere rechts statt ~412px **je Seite**. **Erst der Lauf fand einen echten Fehler:** die erste Rail-Fassung listete „Image/Video Generation Timeouts" unbedingt, das JSX hängt sie hinter zwei Bedingungen — im Cloud-Modus bot die Rail einen Sprung ins Leere an. |
+| D-S28 | 12 identische Sektionsköpfe | `SettingsPage.tsx:155` | umgesetzt | `51732e63` | per Test (Kontrast nachgerechnet) | `dark:text-gray-500` `#6b7280` auf `#202020` = **3.37:1**, also unter AA. Jetzt drei echte Stufen (21,16 / 15,09 / 12,88 px) bei 13.16:1. |
+| D-S29 | Zwei gleich aussehende Reset-Textlinks | `SettingsPage.tsx` | **teilweise** | `51732e63` | per Test (Kontrast nachgerechnet) | Der **gefährlichere** der beiden trug `dark:text-gray-600` = **2.16:1**, war also der unlesbarere. Jetzt ein umrandeter Gefahrknopf mit `AlertTriangle` und dem Satz „Every tab, not just {tab}." — 4.83:1 / 5.89:1, Kante nach 1.4.11. **Offen und benannt:** der tab-weite Reset-Link steht im Dunkelmodus weiter auf 3.37:1; eine fremde Testdatei (`reset-arming-is-visible.test.ts`) pinnt seine Klassen wörtlich. |
+| D-S30 | Aktiver Tab und Aktionsbutton tragen dieselbe Fläche | `SettingsPage.tsx` | umgesetzt | `51732e63` | per Test (Kontrast + Negativkontrolle) | Eine Zustandssprache: `bg-lu-accent-soft` + Akzentkante für aktiven Tab, gewähltes Theme und TTS-Motor (Kante 3.37:1 hell / 6.27:1 dunkel, über den 3:1 aus 1.4.11), `aria-current="page"`. Aktionen behalten Neutralgrau — der Upload-Button ist als **Negativkontrolle** gepinnt, damit die Grenze nicht wieder verwischt. |
 | D-S31 | Banner und Empty-State widersprechen sich | `CreateExperimental.tsx:145`, `Stage.tsx:509` | **OFFEN** | — | nur Review | `CreateExperimental.tsx:207` und `Stage.tsx:505`, beide Texte unverändert. |
 | D-S32 | QUALITY/ASPECT zentriert über linksbündigem Prompt | `create/experimental/Composer.tsx` | **OFFEN** | — | nur Review | `Composer.tsx:336-337`: `justify-center` plus `scale(0.7)` unverändert. |
 | D-S33 | „Neg“ sieht aus wie ein zweiter Platzhalter | `Composer.tsx:236` | **OFFEN** | — | nur Review | `:224-228` byte-identisch zu `base/`. |
 | D-S34 | Rechte 45px-Leiste mit zwei unbeschrifteten Icons | `CreatePanel.tsx:43,53` | **OFFEN** | — | nur Review | Die ganze Datei ist zu `base/` byte-identisch. |
-| D-S35 | Sechs Onboarding-Schritte, nicht drei | `Onboarding.tsx:782…1791` | **OFFEN** | — | nur Review | `Onboarding.tsx:809`, `STEP_ORDER` unverändert sechsstufig. |
-| D-S36 | Primärbutton-Hover liest als deaktiviert | `Onboarding.tsx:745` | **OFFEN** | — | nur Review | `:795-796` unverändert `hover:bg-gray-200`. Das `.lu-primary`-Rezept aus `f336b91e` erreicht das Onboarding nicht. |
-| D-S37 | H1 ist `text-base` = 18,4px | `Onboarding.tsx:790` | **OFFEN** | — | nur Review | `:840` unverändert; Soll waren 28px. |
-| D-S38 | 294px Niemandsland unter den Fortschrittspunkten | `Onboarding.tsx` | **OFFEN** | — | nicht verifizierbar hier (Messung) | Ursache unverändert: `fixed top-10` plus zentrierter Inhalt (`:824-827`). |
-| D-S39 | Nackter Punkt statt Icon in Schritt 3 | `Onboarding.tsx:1231` | **OFFEN** | — | nur Review | `:1295` unverändert `w-3 h-3 rounded-full bg-purple-400`. |
+| D-S35 | Sechs Onboarding-Schritte, nicht drei | `Onboarding.tsx:782…1791` | umgesetzt | `51732e63` | per Test (`onboarding-schritte-und-primaer.test.ts`) | **Keine Schritte gelöscht** — das wäre eine Produktentscheidung. Weg ist die *Behauptung*, es seien sechs Aufgaben: `welcome` ist ein Titelbild, `done` eine Bestätigung. Gezählt werden Arbeitsschritte (macOS 3, Windows/Linux 4) und in Worten gesagt: „Step 2 of 4 · Image & video". |
+| D-S36 | Primärbutton-Hover liest als deaktiviert | `Onboarding.tsx:745` | umgesetzt | `51732e63` | per Test (Kontrast nachgerechnet) | Nachgerechnet: alt lief der Hover in Dunkel **dunkler** (`#ffffff → #e5e7eb`) und in Hell **heller** — die beiden Modi liefen gegenläufig. Jetzt `.lu-primary`, in beiden Modi heller (6.83:1 → 8.25:1), plus die **vier** Inline-Kopien desselben Rezepts. |
+| D-S37 | H1 ist `text-base` = 18,4px | `Onboarding.tsx:790` | umgesetzt | `51732e63` | per Test | `text-[1.5rem]`, **rem statt px mit Absicht**: die Wurzel kippte während des Pakets zwischen `18.4px` und `16px + --ui-scale:1.15` (D-A3). 1.5rem ergibt in *beiden* Regimen 27,6 px; `text-[28px]` wäre im neuen durch `zoom` auf 32,2 px gelaufen. Abweichung vom Soll 1,4 % / 1,8 %, im Test benannt. |
+| D-S38 | 294px Niemandsland unter den Fortschrittspunkten | `Onboarding.tsx` | umgesetzt | `51732e63` | per Test (Ursache, nicht die Zahl) | Anzeiger aus `fixed top-10` in den Fluss, feste `h-8`, damit ein Schrittwechsel die Karte nicht verschiebt. Nur der Fensterbalken bleibt `fixed` — per Negativkontrolle: genau ein `className="fixed "` in der Datei. Die 294px selbst sind hier nicht messbar (kein Renderer im Testlauf). |
+| D-S39 | Nackter Punkt statt Icon in Schritt 3 | `Onboarding.tsx:1231` | **teilweise** | `51732e63` | per Test | `ImageIcon` in `bg-lu-accent-soft`, mit `ICON_LG` statt einer neuen Zahl, damit die Sperrklinke in `icon-leiter.test.ts` (≤ 19 distinkte `size={n}`) nicht steigt. **Offen:** der zweite Teil des Audit-Bullets („vier Buttons in vier Behandlungen") war nicht Teil dieses Punkts — zwei der vier laufen jetzt über `.lu-primary`, die anderen zwei nicht. |
 | D-S40 | Der Send-Glyph verschwindet im Hellmodus | `ChatInput.tsx:455`, `index.css:374` | umgesetzt | `f336b91e` | per Test (`primary-recipe.test.ts:110`, rechnet den Kontrast) | `ChatInput.tsx:535` trägt `.lu-primary`: Akzentfläche mit dunklem Text in beiden Modi. |
 | D-S41 | `hover:text-white` ohne `dark:`-Prefix | `ChatInput.tsx:383`, `create/ui/Button.tsx:45` | war schon behoben | vor `10bfa0d7` | nur Review | Der `.light`-Rescue-Layer (`index.css:509-510`, `:524`) steht byte-gleich schon in `base/src/index.css:370-371`, `:385`. Rest: die `ghost`-Variante in `create/ui/Button.tsx` trägt die Klassen weiterhin roh und lebt vom Rescue-Layer. |
 | D-S42 | Hellmodus hat keine Ebenen | `AppShell.tsx:804`, `:812` | **OFFEN** | — | nur Review | `AppShell.tsx:927`, `:948` unverändert gegenüber `base/`:827/835. |
@@ -257,14 +253,14 @@ Der Design-Audit vergibt keine IDs. Vergeben sind hier: **D-A1…D-A10** (§3, d
 | D-S45 | Composer bricht bei 900px in zwei Zeilen | `ChatInput.tsx:378` | war schon behoben | vor `10bfa0d7` | nur Review | `base/src/components/chat/ChatInput.tsx:400` trägt bereits `flex flex-nowrap` samt Kommentar „It used to be flex-wrap“. |
 | D-S46 | 407px nutzbare Eingabebreite von 900px | `Sidebar`, `ChatInput.tsx:246` | **OFFEN** (teilweise) | `bcec642b` | nicht verifizierbar hier (Messung) | Der Composer-Anteil ist weg (`--lu-measure` statt `max-w-[70%]`), die Sidebar bleibt fix (200px × `zoom:1.25`, `Sidebar.tsx:318-320`). |
 | D-S47 | Kebab-Regel ist nicht erkennbar | `Header.tsx` | **OFFEN** | — | nur Review | `Header.tsx:265-285`: CloudSwitch, DownloadBadge und Theme stehen weiterhin außerhalb der Klappgruppe. |
-| D-S48 | Settings skaliert nach oben nicht | `SettingsPage.tsx:1297` | **OFFEN** | — | nicht verifizierbar hier (Messung) | Ursache `max-w-lg mx-auto` unverändert (= D-S27). |
+| D-S48 | Settings skaliert nach oben nicht | `SettingsPage.tsx:1297` | **teilweise** | `51732e63` | per Live-Messung | Was jetzt mitskaliert, ist die Navigation. Die **Inhaltsspalte wächst bewusst nicht** mit dem Fenster — die Zeilenlänge war laut Audit richtig. Bei 1440px bleiben 413px Leere rechts, statt 2 × 412 verteilt. |
 | D-S49 | Kein einziger Schriftgrößen-Breakpoint | app-weit | **OFFEN** | — | nur Review | 0 Treffer für `(sm\|md\|lg\|xl\|2xl):text-` in `base/` wie in `head/`. |
 
 ### 3.3 Design-Token-Diff (§5, 13 Zeilen)
 
 | ID | Token | Ist laut Audit | Status | Commit | Verifikationsgrad | Anmerkung |
 |---|---|---|---|---|---|---|
-| D-T01 | `html font-size` | `18.4px` | **OFFEN** | — | nur Review | `index.css:117` unverändert; kein `--ui-scale`; `zoom:1.25` und beide `scale()` stehen noch (= D-A3). |
+| D-T01 | `html font-size` | `18.4px` | umgesetzt | `c7076fca` | per Test (`ein-massstab.test.ts`) | `html { font-size: 16px }`, die Vergrößerung liegt in `--ui-scale: 1.15` — einmal definiert, einmal gelesen. `16 × 1.15 = 18.4` ist im Test als Gleichung festgehalten, damit die Rückrechnung nicht verloren geht. |
 | D-T02 | Schrift UI | Inter deklariert, nie geladen | umgesetzt | `44a76aad` + `bcec642b` | nur Review | `public/fonts/lu-fonts.css`, 39 `@font-face`, 16 woff2, verlinkt in `index.html:20`. |
 | D-T03 | Schrift Display | fehlt | **OFFEN** | — | nur Review | 0 Treffer für „Grotesk“ in `src/`; auch die ausgelieferte `lu-fonts.css` enthält ausschließlich Inter-Faces. Der Display-Slot ist unbesetzt. |
 | D-T04 | Type-Scale | 30 effektive px-Werte | **OFFEN** | — | nur Review | Tokens und `.t-*`-Klassen existieren (`index.css:88-93`, `:558-563`), aber die Umgehung ist **gewachsen**: arbitrary `text-[…]` 1007 → **1017**, `.t-*`-Nutzungen unverändert 143. |
@@ -289,7 +285,7 @@ Die Wellen sind Fixes, keine eigenen Befunde; sie stehen hier, weil der Auftrag 
 | D-W1-3 | Aktionsleiste gaten | umgesetzt | `bcec642b` | nur Review | Gate auf `!isStreaming` statt auf die vom Audit genannte Bedingung — Abweichung im Code begründet (= D-A7). Der Hover-Gate-Bullet D-S07 bleibt davon unberührt offen. |
 | D-W1-4 | Nav zu echten Zielen | umgesetzt | `bcec642b` | nur Review | = D-A6 |
 | D-W1-5 | Composer im leeren Chat | umgesetzt | `bcec642b` | nur Review | = D-S01 |
-| D-W2-1 | Root 16px, 6 px-Stufen, `zoom`/`scale()` raus | **OFFEN** | — | nur Review | = D-A3 / D-T01 / D-T04. Der einzige W2-Posten, den nichts angefasst hat — und laut Audit der, der die meisten Ursachen behebt. |
+| D-W2-1 | Root 16px, 6 px-Stufen, `zoom`/`scale()` raus | **teilweise** | `c7076fca` | per Test (`ein-massstab.test.ts`) | Root 16px steht, die drei Fremd-Maßstäbe (`zoom:1.25`, zwei `scale()`) sind weg und an ihren Fundstellen festgenagelt. **Offen bleibt** die Stufenzahl: `text-[…]` steht weiter bei über tausend Stellen (= D-T04). |
 | D-W2-2 | Composer-Grammatik: 2 Klassen statt 7 | umgesetzt | `8198495f`+`3883eaa8` | per Test | = D-A5 |
 | D-W2-3 | Escape, Fokus-Falle, `role="dialog"`, `isCtrl` vor dem Input-Guard | umgesetzt | `c5901d0c` | per Test (`src/components/ui/__tests__/dialog-a11y.test.ts`, 32 Fälle; `src/hooks/__tests__/shortcut-owner.test.ts`) | `useKeyboardShortcuts.ts:54-55` prüft `isCtrl` jetzt **vor** dem Eingabefeld-Guard. Anfangsfokus überspringt destruktive Knöpfe. |
 | D-W2-4 | Ein Fehlerkanal, die stummen `catch {}` einordnen | umgesetzt | `9a52f712` | nur Review | `catch {}` 18 → **5**. Der Commit meldet 46 stumme Stellen statt der 9 aus dem Audit und begründet, warum 24 davon bleiben — eine Hochstufung aller wäre eine Toast-Lawine gewesen. |
@@ -312,61 +308,82 @@ Die Wellen sind Fixes, keine eigenen Befunde; sie stehen hier, weil der Auftrag 
 
 ## 4. Die offene Liste — was noch zu vergeben ist
 
-68 Positionen: 11 Technik-Befunde, 4 aus dem Technik-Nachtrag, 53 Design-Befunde. Nichts davon ist `unklar` — jede Zeile ist am Code entschieden.
+46 Positionen: 3 Technik-Befunde und 1 halber, 2 aus dem Technik-Nachtrag, 38 Design-Befunde und 3 halbe. Nichts davon ist `unklar` — jede Zeile ist am Code entschieden. Diese Liste ist aus der Haupttabelle **abgeleitet**, nicht von Hand gepflegt; sie ist zweimal veraltet gewesen, weil sie ein zweiter Pflegeweg war.
 
-### 4.1 Technik — 11 offene Befunde (alle „mittel", zusammen ~48 h nach Audit-Schätzung)
+### 4.1 Technik — 3 offene und 1 halbe Position
 
 | ID | Was offen ist | h |
 |---|---|---|
 | T-75 | Der Mobile-Client bleibt ein Rust-Rohstring, unsichtbar für `tsc`/`eslint`/`vitest`. `remote.rs` ist dabei von 6.304 auf 7.405 Zeilen gewachsen. | 8 |
-| T-70 | 28 (vorher 106) hartkodierte HF-URLs, weiterhin ohne jede Lebendprüfung. | 10 |
-| T-60 | OAuth-Loopback: `state`-Nonce fehlt. Jede offene Seite kann per Top-Level-Navigation eine laufende Anmeldung beenden und den Fehlertext wählen. **Nur serverseitig schließbar** (Supabase `uri_allow_list`) — das ist eine Aufgabe außerhalb dieses Repos. | 4 |
-| T-72 | SHA-256-Pin für die hartkodierte, unveränderliche Installer-URL fehlt (Größe und Authenticode sind da). | 5 |
-| T-68 | Linux: verwaistes ComfyUI-Kind wird read-only adoptiert, Stop bleibt ein No-op. | 3 |
-| T-53 | Nichts trennt MCP-Server beim App-Ende; Kindprozesse verwaisen. | 3 |
-| T-65 | `free_comfyui_memory`/`offload_ollama_loaded_models` hartkodieren `localhost:8188`/`:11434`. | 1,5 |
-| T-61 | `secret_get`/`secret_set` nehmen weiterhin einen beliebigen Account-String ohne Allowlist. | 2 |
-| T-69 | Unabbrechbares `setInterval` im Built-in-Engine-Installpfad; Promise settelt bei Pause/Abbruch nie. | 2 |
+| T-60 | OAuth-Loopback: `state`-Nonce fehlt. Jede offene Seite kann per Top-Level-Navigation eine laufende Anmeldung beenden und den Fehlertext wählen. **Nur serverseitig zu schließen** — die Änderung an Supabases `uri_allow_list` steht dem Eigentümer zu, nicht mir. | 4 |
 | T-76 | Create-Dateislots geben ihre Blob-URLs nie frei. | 2 |
-| T-67 | Custom-Node-Installation leert den `/object_info`-Cache nicht. | 0,5 |
+| T-72 | *(halb)* Größe und Authenticode sind gepinnt; der SHA-256 der Installer-URL fehlt. Die echte Prüfsumme verlangt einen Windows-Rechner oder einen 211-MiB-Download — **beides habe ich nicht autorisiert.** | 5 |
 
-### 4.2 Technik-Nachtrag — 4 offene Positionen
+### 4.2 Technik-Nachtrag — 2 offene Positionen
 
 | ID | Was offen ist |
 |---|---|
 | ZB-7 | `vite.config.ts` ist **2.486 Zeilen** (Audit maß 2.466, Ziel < 100). Die Guards sind extrahiert und getestet, der Dev-Server steckt weiter in der Build-Konfiguration. |
-| AS-10 | Lint ist weiterhin kein Gate (`ci.yml`: `Lint (non-gating — pre-existing debt)`). Die Schuld dahinter ist stark abgetragen, der Befund — „ein dauerhaft rotes Gate ist kein Gate" — steht. Dazu: `cargo clippy` ebenfalls non-gating. |
-| AS-08 | „Läuft gerade etwas?" hat weiter zwei Quellen: `codex.status` kennt unverändert nur `idle\|running\|error`, `anyRunActive` verrechnet weiter zwei Wahrheiten. |
-| AS-09 | `Onboarding.tsx` unverändert 59 `useState`; `SettingsPage.tsx` von 43 auf **46** gestiegen. |
+| AS-10 | Lint ist weiterhin kein Gate (`ci.yml`: `Lint (non-gating — pre-existing debt)`). Die Schuld dahinter ist stark abgetragen, der Befund — „ein dauerhaft rotes Gate ist kein Gate" — steht. |
 
-### 4.3 Design — 53 offene Befunde
+### 4.3 Design — 32 offene und 8 halbe Befunde
 
-**Die vier offenen Amateur-Signale (§3) — hier steckt der Hebel:**
+*Aus der Haupttabelle abgeleitet, Stand dieses Commits. Diese Liste war zweimal veraltet, solange sie von Hand geführt wurde.*
 
-- **D-A3 / D-T01 / D-W2-1 — die vier Maßstäbe.** `html { font-size: 18.4px }`, `zoom: 1.25` in der Sidebar, `scale(0.763)` und `scale(0.7)` in Create: alle vier unverändert, kein `--ui-scale`. Das ist der eine Posten, den der Audit als Ursache für „praktisch kein Radius, keine Hairline und keine Schriftgröße auf einem ganzen Pixel" benennt — und der einzige W2-Posten, den nichts angefasst hat. Er hängt an D-T04 (Type-Scale) und D-T08 (Radius) mit dran.
-- **D-A4 / D-T13 — der Platzhalter ist heller als der eingegebene Wert.** `index.css:501-502` ist byte-gleich mit dem Audit-Zitat. Zwei Zeilen CSS, gemessene 3,4:1 unter WCAG AA für den *eingegebenen* Text. Billigster offener Punkt des ganzen Design-Audits.
-- **D-A9 / D-W3-7 — die Marke.** Neun von zehn Einbindungen laden weiter das 512×512-PNG, das Titlebar-Monogramm wurde nicht gestrichen, der Welcome-Screen hat weiter kein Zeichen.
-- **D-A10 — elf Icon-Rätsel als Hauptnavigation von Create.** `IntentBar.tsx:87` blendet die vorhandenen `short`-Labels weiterhin auf `max-w-0 opacity-0` aus.
+**Amateur-Signale (§3) (3):**
 
-**Die zehn offenen Token-Zeilen (§5):** D-T01 (Root-Größe) · D-T03 (Display-Schrift fehlt ganz) · D-T04 (arbitrary `text-[…]` **1007 → 1017**, `.t-*` unverändert 143) · D-T05 (Akzent weiter `#a094f8`, `#7c3aed` **20 → 22**, Brand-Violett `#8b5cf6` weiter 0×) · D-T06 (Surface-Tokens 0 → 6 Call-Sites, Shell malt Literale) · D-T07 (Control-Höhen nur im Composer erschlossen) · D-T08 (zwei Radius-Systeme nebeneinander) · D-T09 (`shadow-sm` 16 → 16, weiter auf dem „Get"-Button) · D-T11 (2 von 4 Springs ersetzt) · D-T13 (= D-A4).
+| ID | Was offen ist | |
+|---|---|---|
+| D-A4 | Der Platzhalter ist heller als der eingegebene Text |  |
+| D-A9 | Die Marke erscheint vier Mal in vier Größen |  |
+| D-A10 | Elf Icons ohne Label als Hauptnavigation von Create |  |
 
-**Die 39 offenen Screen-Bullets (§4)**, nach Screen:
+**Token-Zeilen (§5) (10):**
 
-| Screen | offen |
-|---|---|
-| Chat, leerer Zustand | D-S02 (Empty-State ohne Titel/CTA), D-S03 („New Chat" schwächer als die aktive Zeile), D-S04 (dritter Modus-Tab ohne Label), D-S05 (tote Fläche) |
-| Chat mit Antwort | D-S06 (zwei Kontextanzeigen, zwei Notationen), D-S07 (Aktionsleiste nicht hover-gated), D-S08 (zwei Avatar-Systeme) |
-| Chat, streamend | D-S11 (`WorkingAnchor` im Standbild von Fließtext ununterscheidbar) |
-| Sidebar | D-S14 (doppelte Kürzung), D-S15 (Hover-Icons halten ihren Platz), D-S16 (698 von 899px leer), D-S17 (vier Control-Höhen) |
-| Header / Titlebar | D-S18 (drei Bänder), D-S19 (9 Elemente rechts, Center leer), D-S20 (Breakpoint je nach View), D-S21 (Overflow-Menü ohne `role="menu"`) |
-| Models | D-S22 (vier Glyphen ohne Legende), D-S23 (Dropdown ≡ Chip), D-S24 (`shadow-sm` auf „Get"), D-S25 (zwei Segmented-Sprachen), D-S26 (keine Virtualisierung — 300 Modelle ≈ 9000 Knoten) |
-| Settings | D-S27 (Spalte schwebt frei), D-S28 (12 rangfreie Sektionsköpfe), D-S29 (zwei gleiche Reset-Links, einer löscht mehr), D-S30 (Zustand ≡ Aktion) |
-| Create | D-S31 (Banner und Empty-State widersprechen sich), D-S32 (175px Versatz), D-S33 („Neg" liest als Platzhalter), D-S34 (unbeschriftete 45px-Leiste) |
-| Onboarding | D-S35 (sechs Schritte, nicht drei), D-S36 (Hover verdunkelt den Primärbutton — `.lu-primary` erreicht das Onboarding nicht), D-S37 (H1 = 18,4px), D-S38 (294px Niemandsland), D-S39 (nackter Punkt statt Icon) |
-| Light Mode | D-S42 (keine Ebenen) |
-| 900px | D-S46 (nutzbare Eingabebreite), D-S47 (Kebab ohne erkennbare Regel), D-S48 (Settings skaliert nach oben nicht), D-S49 (kein Schriftgrößen-Breakpoint) |
+| ID | Was offen ist | |
+|---|---|---|
+| D-T01 | `html font-size` |  |
+| D-T03 | Schrift Display |  |
+| D-T04 | Type-Scale |  |
+| D-T05 | Akzent |  |
+| D-T06 | Surface | halb |
+| D-T07 | Control-Höhen | halb |
+| D-T08 | Radius |  |
+| D-T09 | Schatten |  |
+| D-T11 | Motion | halb |
+| D-T13 | Platzhalter |  |
 
-**Die sechs offenen Wellen-Posten (§6):** D-W2-1 (Root 16px) · D-W2-6 (2 von 4 Springs) · D-W3-6 (Icon-Leiter: 19 Größen unverändert) · D-W3-7 (SVG-Monogramm: 1 von 10) · D-W3-9 (`Cmd+K`-Palette) · D-W3-10 (Kontextmenüs auf Nachricht und Modellkarte).
+**Screen-Bullets (§4) (27):**
+
+| ID | Was offen ist | |
+|---|---|---|
+| D-S02 | Empty-State ohne Titel und CTA |  |
+| D-S03 | „New Chat“ schwächer als die aktive Zeile |  |
+| D-S04 | Dritter Modus-Tab ohne Label |  |
+| D-S05 | 1237×850px tote Fläche |  |
+| D-S06 | Zwei Kontextanzeigen in zwei Notationen |  |
+| D-S07 | Aktionsleiste nicht hover-gated |  |
+| D-S08 | Zwei Avatar-Systeme |  |
+| D-S11 | `WorkingAnchor` ist im Standbild Fließtext |  |
+| D-S14 | Doppelte Kürzung des Titels |  |
+| D-S15 | Hover-Icons behalten ihren Layoutplatz |  |
+| D-S16 | 698 von 899px Sidebarhöhe leer |  |
+| D-S17 | Vier Control-Höhen auf 250px Breite |  |
+| D-S18 | Drei Bänder vor dem ersten Inhalt |  |
+| D-S19 | Rechts 9 Elemente, Center-Slot leer |  |
+| D-S20 | Overflow-Breakpoint `lg` oder `xl` je nach View |  |
+| D-S21 | Das Overflow-Menü ist kein Menü | halb |
+| D-S29 | Zwei gleich aussehende Reset-Textlinks | halb |
+| D-S31 | Banner und Empty-State widersprechen sich |  |
+| D-S32 | QUALITY/ASPECT zentriert über linksbündigem Prompt |  |
+| D-S33 | „Neg“ sieht aus wie ein zweiter Platzhalter |  |
+| D-S34 | Rechte 45px-Leiste mit zwei unbeschrifteten Icons |  |
+| D-S39 | Nackter Punkt statt Icon in Schritt 3 | halb |
+| D-S42 | Hellmodus hat keine Ebenen |  |
+| D-S46 | 407px nutzbare Eingabebreite von 900px | halb |
+| D-S47 | Kebab-Regel ist nicht erkennbar |  |
+| D-S48 | Settings skaliert nach oben nicht | halb |
+| D-S49 | Kein einziger Schriftgrößen-Breakpoint |  |
 
 ### 4.4 Was daran auffällt
 
