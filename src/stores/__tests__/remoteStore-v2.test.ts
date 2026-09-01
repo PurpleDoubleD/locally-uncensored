@@ -21,6 +21,9 @@ import { backendCall } from '../../api/backend'
 import { prop } from '../../types/json-guards'
 const mockBackend = backendCall as unknown as ReturnType<typeof vi.fn>
 
+/** Die unveraenderte Implementierung, einmal vor dem ersten Test gegriffen. */
+const realGetMemoriesForPrompt = useMemoryStore.getState().getMemoriesForPrompt
+
 beforeEach(() => {
   mockBackend.mockClear()
   useRemoteStore.setState({
@@ -41,10 +44,13 @@ beforeEach(() => {
     dispatchedConversationId: null,
     qrVisible: false,
   })
-  // NOTE: this reset named `memories`, a field the memory store does not
-  // have — `as any` let it compile, so it never reset anything. The real
-  // field is `entries`.
-  useMemoryStore.setState({ entries: [] })
+  // Der Reset hiess frueher `memories` — ein Feld, das der Store nicht hat;
+  // `as any` liess es kompilieren, also hat er nie etwas zurueckgesetzt. Neben
+  // dem richtigen Feldnamen gehoert die ECHTE `getMemoriesForPrompt` wieder
+  // hin: mehrere Tests unten ersetzen sie, und ohne diese Zeile trug jede
+  // Ersetzung in alle folgenden Tests weiter — die Testreihenfolge entschied
+  // dann mit, was ein Test sieht.
+  useMemoryStore.setState({ entries: [], getMemoriesForPrompt: realGetMemoriesForPrompt })
 })
 
 afterEach(() => {
@@ -240,6 +246,20 @@ describe('remoteStore › memory enrichment behaviour', () => {
         expect(call[1].systemPrompt).toContain('MEM')
       }
     }
+  })
+})
+
+// Laeuft NACH dem Block, der `getMemoriesForPrompt` mehrfach ersetzt. Wenn das
+// beforeEach die echte Implementierung nicht zuruecklegt, sieht dieser Test die
+// letzte Attrappe des vorigen Blocks statt des Stores — genau die stille
+// Reihenfolgen-Abhaengigkeit, die hier festgenagelt wird.
+describe('remoteStore › the memory store is isolated between tests', () => {
+  it('sees the real getMemoriesForPrompt again, not the previous block\'s stub', () => {
+    expect(useMemoryStore.getState().getMemoriesForPrompt('anything', 8192)).toBe('')
+  })
+
+  it('and an empty entries list', () => {
+    expect(useMemoryStore.getState().entries).toEqual([])
   })
 })
 

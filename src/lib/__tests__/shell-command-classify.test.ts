@@ -229,6 +229,74 @@ describe('the --no-verify ban applies to a commit anywhere in the line', () => {
   })
 })
 
+// Ein Segment gilt als Commit, wenn es mit `git` beginnt UND `commit` als Wort
+// enthaelt — nicht `^git\s+commit`. Gits eigene Globaloptionen stehen sonst
+// dazwischen und die Sperre laeuft ins Leere. Die Regel weiss nichts von `-C`,
+// `-c` oder `--git-dir`, weil sie gar nicht erst versucht, sie zu ueberspringen.
+describe('the ban survives git\'s own global options in front of `commit`', () => {
+  const refused = (c: string) => rejectShellCommand(c) !== null
+
+  it('refuses a commit behind -C', () => {
+    expect(refused('git -C /repo commit --no-verify -m x')).toBe(true)
+  })
+
+  it('refuses a commit behind -c', () => {
+    expect(refused('git -c a=b commit --no-verify -m x')).toBe(true)
+  })
+
+  it('refuses a commit behind --git-dir', () => {
+    expect(refused('git --git-dir=/r/.git commit --no-verify -m x')).toBe(true)
+  })
+
+  it('refuses those forms behind a chain as well', () => {
+    expect(refused('cd repo; git -C /repo commit --no-verify -m x')).toBe(true)
+    expect(refused('echo hi && git -c a=b commit --no-verify -m x')).toBe(true)
+  })
+
+  // Negativkontrollen: die Weitung darf keine der Zeilen fangen, die vorher
+  // durchliefen. Alle drei tragen kein --no-verify, also entscheidet allein
+  // der Commit-Matcher — und der darf hier nichts ausloesen.
+  it('leaves the ordinary lines alone', () => {
+    expect(rejectShellCommand('git log --grep=commit')).toBeNull()
+    expect(rejectShellCommand('git status && ls')).toBeNull()
+    expect(rejectShellCommand('git add -A && git commit -m wip')).toBeNull()
+  })
+
+  // Ein git-Kommando mit ECHTEM --no-verify, das kein Commit ist, bleibt frei:
+  // die Sperre gilt dem Commit-Hook, nicht dem Flag an sich.
+  it('does not touch a non-commit git command that legitimately carries the flag', () => {
+    expect(rejectShellCommand('git push --no-verify')).toBeNull()
+    expect(rejectShellCommand('git merge --no-verify feature')).toBeNull()
+  })
+})
+
+// Die Kehrseite der Ganzzeilen-Pruefung, ausdruecklich festgehalten statt als
+// unbeschriebene Nebenwirkung stehenzulassen. `--no-verify` wird gegen die
+// GANZE Zeile geprueft, weil der Split anfuehrungszeichen-blind ist; damit
+// faellt jede Zeile mit, die irgendwo das Flag traegt UND irgendwo ein
+// Commit-Segment hat. Das ist die gewollte Richtung — lieber eine Zeile zu
+// viel ablehnen als eine Umgehung offen lassen.
+describe('accepted false alarms of the whole-line flag test', () => {
+  const refused = (c: string) => rejectShellCommand(c) !== null
+
+  it('refuses a commit whose line merely MENTIONS the flag elsewhere', () => {
+    // Der Commit selbst ist gewoehnlich; das Flag steht im echo. Ablehnen ist
+    // richtig: unterscheiden koennte man die beiden nur per Segment, und die
+    // Segmentpruefung ist genau die Umgehung (`git commit -m "a;b"
+    // --no-verify`), die oben geschlossen wurde.
+    expect(refused('echo --no-verify && git commit -m x')).toBe(true)
+  })
+
+  it('refuses an ordinary commit chained with a push that skips the PUSH hook', () => {
+    // Bekannter Fehlalarm, im Bericht als offene Frage vermerkt: hier gehoert
+    // --no-verify zu `git push`, nicht zum Commit, und der Nutzer bekommt eine
+    // Meldung ueber `git commit --no-verify`, die nicht zu seiner Zeile passt.
+    // Faellt weg, sobald die Sperre segmentlokal entscheidet — dann kippt diese
+    // Erwartung bewusst, statt still.
+    expect(refused('git add -A && git commit -m wip && git push --no-verify')).toBe(true)
+  })
+})
+
 describe('timeout and icon follow the command', () => {
   it('a recognised test run keeps the 300 s budget', () => {
     expect(commandTimeoutMs('npm test', 600_000)).toBe(TEST_RUN_TIMEOUT_MS)

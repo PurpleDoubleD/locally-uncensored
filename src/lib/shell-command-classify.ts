@@ -167,10 +167,25 @@ function commandSegments(command: string): string[] {
  * (`git commit -m "a;b" --no-verify`) and hand back the very bypass this is
  * closing. Testing the wider string can only ever refuse more, never less.
  *
+ * A segment counts as a commit when it STARTS with `git` and mentions
+ * `commit` as a word — not `^git\s+commit`, which git's own global options
+ * walk straight past (`git -C /repo commit`, `git -c a=b commit`,
+ * `git --git-dir=… commit`). Skipping those options properly would mean
+ * parsing git's option grammar AND shell quoting (`git -c 'a b' commit`
+ * defeats any token walk), and an option-skipper that is wrong in the
+ * permissive direction is a new bypass rather than a fix. This test needs to
+ * know none of it: it is deliberately too coarse, in the same direction as
+ * the whole-line flag test. What it costs is a segment that merely SAYS
+ * commit while the line also carries the flag — `git log --grep=commit
+ * --no-verify`, which is not a thing anybody writes, since `--no-verify` is
+ * no `log` flag.
+ *
  * Returns the refusal text, or null when the command may run.
  */
 export function rejectShellCommand(command: string): string | null {
-  const commits = commandSegments(command).some((seg) => /^git\s+commit\b/.test(seg))
+  const commits = commandSegments(command).some(
+    (seg) => /^git\b/.test(seg) && /\bcommit\b/.test(seg),
+  )
   if (commits && /--no-verify\b/.test(command)) {
     return 'Refused: git commit --no-verify skips the repository hooks. Fix what the hook reports instead of silencing it, then commit normally.'
   }
