@@ -21,7 +21,12 @@ function walk(dir: string, out: string[] = []): string[] {
   for (const name of readdirSync(dir)) {
     const p = join(dir, name)
     if (statSync(p).isDirectory()) walk(p, out)
-    else if (/\.(ts|tsx)$/.test(name) && !/\.test\.tsx?$/.test(name)) out.push(p)
+    // KF-10d. Auf `/` normalisiert, bevor irgendjemand den Pfad vergleicht:
+    // unter Windows liefert join() `src\lib\host-window.ts`, und der
+    // Ausschluss `endsWith('/lib/host-window.ts')` unten griff nicht — die
+    // Wache hielt die einzige erlaubte Datei fuer einen Verstoss. Auf der
+    // echten Maschine gemessen, am selben Commit auf dem Mac gruen.
+    else if (/\.(ts|tsx)$/.test(name) && !/\.test\.tsx?$/.test(name)) out.push(p.replace(/\\/g, '/'))
   }
   return out
 }
