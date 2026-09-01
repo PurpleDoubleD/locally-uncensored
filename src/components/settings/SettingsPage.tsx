@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, type ReactNode, type ChangeEvent } from 'react'
 import { withInstallerOutput, withDetail } from '../../lib/error-text'
+import type { InstallerStatusResponse } from '../onboarding/installer-state'
 import { ArrowLeft, RotateCcw, Sun, Moon, Check, Loader2, Shield, ChevronRight, GraduationCap, Lock, Sliders, Plug, Bot, Phone, User, Download, AlertTriangle } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { SETTINGS_TAB_RESET_KEYS, type SettingsTab } from '../../lib/settings-reset'
@@ -373,8 +374,54 @@ function ImportLocalModels() {
 
 // ── ComfyUI Settings ────────────────────────────────────────────
 
+/**
+ * Antwort von `comfyui_status` (`src-tauri/src/commands/process.rs:1989`).
+ *
+ * Der Typ stand als Ganzes schon da — als der inline notierte Zustandstyp von
+ * `useState` eine Zeile weiter unten. Nur der Weg dorthin trug `any`, und der
+ * hat zwei Abweichungen zugedeckt, die beide nachgemessen sind:
+ *
+ *  1. `path` ist auf der Rust-Seite `Option<String>`, kommt also als `null`
+ *     an — nicht als `undefined`. Der Zustandstyp sagte `path?: string`; ein
+ *     `null` haette dort nie hineingedurft, und `any` hat es hineingelassen.
+ *     Beide Lesestellen (`status?.path || ''`) vertragen `null` ohnehin.
+ *  2. Der Dev-Server, den der Browser-Modus statt Tauri anspricht, sendet von
+ *     den zehn Schluesseln nur sechs (`dev-server/comfy.ts:461`): `stalled`,
+ *     `complete`, `port`, `host` und `isLocal` fehlen dort. Deshalb sind sie
+ *     hier optional — im Browser sind sie wirklich nicht da.
+ */
+interface ComfyStatusResponse {
+  running: boolean
+  found: boolean
+  /** Tauri sendet immer; der Dev-Server nur `running`/`starting`/`found`/`path`. */
+  starting?: boolean
+  stalled?: boolean
+  complete?: boolean
+  /** `null`, solange kein Pfad gespeichert ist — auch bei `found: true`. */
+  path?: string | null
+  port?: number
+  host?: string
+  isLocal?: boolean
+}
+
+/** Antwort von `comfyui_last_output` (`process.rs:1968`). Alle drei Schluessel
+ *  immer gesetzt; `lines` ist `[]` statt `null`, wenn nichts anliegt. Im
+ *  Browser-Modus existiert die Route nicht, der Aufruf wirft dann. */
+interface ComfyLastOutput {
+  lines: string[]
+  exited: boolean
+  envBroken: boolean
+}
+
+/** Antwort von `python_check` (`install.rs:3886`). Der Fehlerzweig schreibt
+ *  `path: null` ausdruecklich hin, laesst den Schluessel also nicht weg. */
+interface PythonCheckResponse {
+  available: boolean
+  path: string | null
+}
+
 function ComfyUISettings() {
-  const [status, setStatus] = useState<{ running: boolean; found: boolean; complete?: boolean; path?: string; port?: number; host?: string; isLocal?: boolean; starting?: boolean; stalled?: boolean } | null>(null)
+  const [status, setStatus] = useState<ComfyStatusResponse | null>(null)
   // Why the last start attempt did not stick. The button used to swallow this
   // whole (E16): on a box with no ComfyUI python environment, Start answered
   // "started", the panel went back to `Stopped`, and six minutes later there
@@ -403,7 +450,7 @@ function ComfyUISettings() {
     const check = async () => {
       try {
         const { backendCall, setComfyPort, setComfyHost } = await import('../../api/backend')
-        const s: any = await backendCall('comfyui_status')
+        const s = await backendCall<ComfyStatusResponse>('comfyui_status')
         if (!cancelled) {
           setStatus(s)
           // Mirror backend truth into the frontend URL builder so subsequent
@@ -436,7 +483,7 @@ function ComfyUISettings() {
       // does nothing". Look once, a few seconds in, and say what happened.
       setTimeout(async () => {
         try {
-          const out: any = await backendCall('comfyui_last_output')
+          const out = await backendCall<ComfyLastOutput>('comfyui_last_output')
           if (out?.exited && Array.isArray(out?.lines) && out.lines.length > 1) {
             const { comfyStartupError } = await import('../create/experimental/comfyError')
             setStartError(
@@ -463,7 +510,7 @@ function ComfyUISettings() {
       await backendCall('repair_comfyui_env')
       const poll = setInterval(async () => {
         try {
-          const data: any = await backendCall('install_comfyui_status')
+          const data = await backendCall<InstallerStatusResponse>('install_comfyui_status')
           setInstallLogs(data.logs || [])
           setInstallDl({ progress: data.download_progress || 0, total: data.download_total || 0, speed: data.download_speed || 0 })
           if (data.status === 'complete') {
@@ -694,7 +741,7 @@ function ComfyUISettings() {
               // and the previous run died on the Microsoft Store stub.
               let pythonOk = false
               try {
-                const probe: any = await backendCall('python_check')
+                const probe = await backendCall<PythonCheckResponse>('python_check')
                 pythonOk = !!probe?.available
               } catch { pythonOk = false }
 
@@ -711,7 +758,7 @@ function ComfyUISettings() {
                 pythonOk = await new Promise<boolean>((resolve) => {
                   const poll = setInterval(async () => {
                     try {
-                      const data: any = await backendCall('install_python_status')
+                      const data = await backendCall<InstallerStatusResponse>('install_python_status')
                       setInstallLogs(data.logs || [])
                       if (data.status === 'complete' || data.status === 'already_installed') {
                         clearInterval(poll); resolve(true)
@@ -739,7 +786,7 @@ function ComfyUISettings() {
                 await backendCall('install_comfyui', installTarget ? { installPath: installTarget } : {})
                 const poll = setInterval(async () => {
                   try {
-                    const data: any = await backendCall('install_comfyui_status')
+                    const data = await backendCall<InstallerStatusResponse>('install_comfyui_status')
                     setInstallLogs(data.logs || [])
                     setInstallDl({ progress: data.download_progress || 0, total: data.download_total || 0, speed: data.download_speed || 0 })
                     if (data.status === 'complete') {
@@ -777,7 +824,7 @@ function ComfyUISettings() {
                 await backendCall('update_comfyui')
                 const poll = setInterval(async () => {
                   try {
-                    const data: any = await backendCall('install_comfyui_status')
+                    const data = await backendCall<InstallerStatusResponse>('install_comfyui_status')
                     setInstallLogs(data.logs || [])
                     setInstallDl({ progress: data.download_progress || 0, total: data.download_total || 0, speed: data.download_speed || 0 })
                     if (data.status === 'complete') {

@@ -187,7 +187,13 @@ export function WorkflowBuilder({ workflowId, onSave, onCancel }: WorkflowBuilde
                     <input
                       value={step.toolArgTemplates ? JSON.stringify(step.toolArgTemplates) : ''}
                       onChange={(e) => {
-                        try { updateStep(step.id, { toolArgTemplates: JSON.parse(e.target.value) }) } catch {}
+                        // Halb getippter JSON ist der Normalfall, nicht der
+                        // Fehlerfall: das Feld wird bei JEDEM Tastendruck
+                        // geparst, und `{"q"` ist auf dem Weg zu `{"q": 1}`
+                        // unvermeidlich ungueltig. Der letzte gueltige Stand
+                        // bleibt stehen, bis wieder einer da ist — deshalb
+                        // wird hier nichts gemeldet und nichts gesetzt.
+                        try { updateStep(step.id, { toolArgTemplates: JSON.parse(e.target.value) }) } catch { /* siehe oben */ }
                       }}
                       placeholder='Args JSON: {"query": "{{user_input}}"}'
                       className="w-full px-2 py-1 rounded bg-white/5 border border-white/10 text-[0.65rem] text-gray-300 placeholder-gray-600 focus:outline-none"

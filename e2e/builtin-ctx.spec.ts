@@ -71,12 +71,29 @@ async function completeBuiltinOnboarding(page: Page) {
 test('context dropdown relaunches the built-in engine and the counter follows', async ({ page }) => {
   await completeBuiltinOnboarding(page)
 
-  // Der eine Waehler. Sein Name ist gesetzt (`aria-label`), sein Text
-  // wechselt — deshalb wird er ueber den Namen gegriffen und nie ueber das,
-  // was gerade darin steht.
-  const trigger = page.getByRole('button', { name: 'Context window', exact: true })
+  // Der eine Waehler, weiterhin ueber seinen Namen gegriffen und nie ueber
+  // das, was gerade darin steht.
+  //
+  // KF-9 hat `exact: true` gekostet, und zwar begruendet. Der Name war
+  // „Context window" — ein `aria-label`, das den SICHTBAREN Text („117/16.4k")
+  // ersetzte statt ihn zu enthalten. Das ist der Verstoss gegen WCAG 2.5.3
+  // (Label in Name), und seit D-S06 ist dieser Knopf die einzige Stelle, an
+  // der die Zahl noch steht: fuer einen Screenreader war sie nirgends mehr zu
+  // holen. Der Name lautet jetzt „Context window 117/16.4k" (unsichtbares
+  // Praefix via `aria-labelledby`, dahinter der gerenderte Text).
+  //
+  // Beides zugleich — Messwert hoerbar UND Name buchstabengleich stabil — geht
+  // nicht: ein exakter Name „Context window" schliesst die Zahl per Definition
+  // aus. Was stabil BLEIBT, ist das Praefix, und genau darauf greift der
+  // Teilstring-Treffer hier. Er ist keine Lockerung: „Context window" trifft
+  // in dieser App weiterhin genau ein Bedienelement, und der Zaehler dahinter
+  // wird unten ohnehin Ziffer fuer Ziffer geprueft.
+  const trigger = page.getByRole('button', { name: 'Context window' })
 
   await openNewChat(page)
+  // Der Teilstring trifft genau einen Knopf — sonst waere die Lockerung oben
+  // eine Verschlechterung und nicht bloss eine andere Schreibweise.
+  await expect(trigger).toHaveCount(1)
   // Leerer Chat: `TokenCounter` liefert `null`, also traegt der Knopf die
   // Lesart des WAEHLERS — `ctx.contextWindow` aus seiner eigenen
   // `useActiveContextWindow(tick)`-Instanz. Default-Tuning = -c 8192.

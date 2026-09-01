@@ -88,6 +88,18 @@ describe('the viewer owns the blob, so it can end', () => {
   it('picks the element kind from the raw result, not the resolved URL', () => {
     // Reading off disk is async; keying the video/image decision on the
     // resolved URL would render the wrong element for the first frame.
-    expect(block).toMatch(/const isVideoResult = !!rawLocalUrl/)
+    //
+    // Hier stand `/const isVideoResult = !!rawLocalUrl/`. Das doppelte
+    // Nicht-Nicht war nie Teil dieser Behauptung: in einer Bedingung ist es
+    // wirkungslos, und `no-extra-boolean-cast` hat es (AS-10b, zweiter
+    // Durchgang) entfernt. Der Test hielt damit die Zeichensetzung fest statt
+    // die Aussage. Jetzt steht hier, was die Ueberschrift verspricht — WELCHER
+    // Wert entscheidet, und wohin der Ja-Zweig greift.
+    expect(block).toMatch(
+      /const isVideoResult = rawLocalUrl\s*\?\s*toolCall\.toolName === 'video_generate'/,
+    )
+    // Und die Gegenprobe zur Ueberschrift: der aufgeloeste URL darf die
+    // Entscheidung NICHT tragen. Er kommt erst im Nein-Zweig vor.
+    expect(block).not.toMatch(/const isVideoResult = effectivePreviewUrl/)
   })
 })

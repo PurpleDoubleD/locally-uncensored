@@ -89,7 +89,7 @@ export function ChatbotImporter() {
     setError(null)
     setDoneCount(0)
     let done = 0
-    let failed: string[] = []
+    const failed: string[] = []
     for (const conv of toImport) {
       try {
         const file = conversationToFile(conv)

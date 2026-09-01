@@ -24,7 +24,9 @@ import { useReleaseNotesStore } from '../../stores/releaseNotesStore'
 import { wizardProgress, workStepsFor, type Step } from './wizard-steps'
 import {
   installerReducer, IDLE_INSTALLER, isRunning, isReady, elapsedSeconds, formatElapsed, lastLog,
+  type InstallerStatusResponse,
 } from './installer-state'
+import type { LmStudioServerStatus } from '../models/ModelSelector'
 
 // Bug (h): the dedicated 'theme' onboarding step was removed because users
 // kept ending up on Light by accident, and the project standard is "dark
@@ -39,7 +41,7 @@ import {
 // zusammen mit der Unterscheidung zwischen einem Bildschirm und einem
 // Arbeitsschritt, die dieser Datei bisher fehlte. Der Typ wird hier
 // re-exportiert, damit die 60 Fundstellen unten unveraendert bleiben.
-const isTauri = typeof window !== 'undefined' && !!(window as any).__TAURI_INTERNALS__
+const isTauri = typeof window !== 'undefined' && !!window.__TAURI_INTERNALS__
 
 /* ── Local backend info for the "nothing found" state ──────── */
 interface LocalBackendInfo {
@@ -409,7 +411,7 @@ export function Onboarding() {
       // they obviously *have* LM Studio, regardless of whether our path
       // scan turned up lms.exe (techx69's system-wide install reproed this).
       try {
-        const status: any = await backendCall('lmstudio_server_status')
+        const status = await backendCall<LmStudioServerStatus>('lmstudio_server_status')
         const offline = status?.lms_present && !status?.running
         const softDetect = status?.models_detected && !status?.running
         if (offline || softDetect) {
@@ -728,7 +730,7 @@ export function Onboarding() {
     return await new Promise<boolean>((resolve) => {
       const poll = setInterval(async () => {
         try {
-          const status: any = await backendCall('install_python_status')
+          const status = await backendCall<InstallerStatusResponse>('install_python_status')
           pythonDo({ type: 'progress', status: status.status, logs: status.logs || [] })
           if (status.status === 'complete' || status.status === 'already_installed') {
             clearInterval(poll)
@@ -998,7 +1000,7 @@ export function Onboarding() {
                         await backendCall('install_ollama')
                         const poll = setInterval(async () => {
                           try {
-                            const s: any = await backendCall('install_ollama_status')
+                            const s = await backendCall<InstallerStatusResponse>('install_ollama_status')
                             ollamaDo({
                               type: 'progress',
                               status: s.status || '',
@@ -1101,7 +1103,7 @@ export function Onboarding() {
                         await backendCall('install_lmstudio')
                         const poll = setInterval(async () => {
                           try {
-                            const s: any = await backendCall('install_lmstudio_status')
+                            const s = await backendCall<InstallerStatusResponse>('install_lmstudio_status')
                             lmstudioDo({
                               type: 'progress',
                               status: s.status || '',
@@ -1394,7 +1396,7 @@ export function Onboarding() {
                       // Poll installation status
                       const poll = setInterval(async () => {
                         try {
-                          const status: any = await backendCall('install_comfyui_status')
+                          const status = await backendCall<InstallerStatusResponse>('install_comfyui_status')
                           comfyDo({
                             type: 'progress',
                             status: status.status,

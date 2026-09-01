@@ -59,7 +59,14 @@ export function ModelManager() {
   const ollamaEnabled = useProviderStore(s => s.providers.ollama.enabled)
   const [pullOpen, setPullOpen] = useState(false)
   const [infoOpen, setInfoOpen] = useState(false)
-  const [modelInfo, setModelInfo] = useState<any>(null)
+  // Gesetzt wird das aus `{ name, ...await showModel(name) }` (unten in
+  // `handleInfo`), und `showModel` gibt `Record<string, unknown>` zurueck
+  // (api/ollama.ts:61) — es reicht die Antwort von Ollamas /api/show
+  // unveraendert durch, deren Felder je nach Modell wechseln. Genau dafuer ist
+  // der Typ hier gebaut: `name` kennen wir, weil wir es selbst danebenschreiben,
+  // der Rest ist `unknown`. Gelesen wird ohnehin nur `name` (Modal-Titel) und
+  // das Ganze als JSON.stringify.
+  const [modelInfo, setModelInfo] = useState<({ name: string } & Record<string, unknown>) | null>(null)
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
   // Open on Discover by default — most opens are to find and install
   // something new. Installed is one click away in the segment control.

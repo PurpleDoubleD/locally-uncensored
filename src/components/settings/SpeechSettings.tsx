@@ -150,7 +150,10 @@ export function SpeechSettings() {
       // Poll install status until it leaves "installing" (cap ~10 min — a
       // model download on a slow link can be lengthy; pip itself is quick).
       const start = Date.now()
-      // eslint-disable-next-line no-constant-condition
+      // Endlosschleife mit Ausstiegen im Rumpf (complete / error / 10-min-Kappe).
+      // Hier stand eine Unterdrueckung von `no-constant-condition`. Die Regel
+      // laeuft in diesem Baum mit `checkLoops: 'allExceptWhileTrue'` und hat
+      // genau diese Form nie beanstandet — die Zeile unterdrueckte nichts.
       while (true) {
         await new Promise((r) => setTimeout(r, 2000))
         let s: { status?: string; error?: string } = {}
@@ -183,7 +186,10 @@ export function SpeechSettings() {
     try {
       await backendCall('install_tts')
       const start = Date.now()
-      // eslint-disable-next-line no-constant-condition
+      // Endlosschleife mit Ausstiegen im Rumpf (complete / error / 10-min-Kappe).
+      // Hier stand eine Unterdrueckung von `no-constant-condition`. Die Regel
+      // laeuft in diesem Baum mit `checkLoops: 'allExceptWhileTrue'` und hat
+      // genau diese Form nie beanstandet — die Zeile unterdrueckte nichts.
       while (true) {
         await new Promise((r) => setTimeout(r, 2000))
         let s: { status?: string; error?: string } = {}

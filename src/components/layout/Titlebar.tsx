@@ -29,7 +29,7 @@ import { ICON_SM } from '../ui/icon-size'
  */
 const MONOGRAM = '/LU-monogram.svg'
 
-const isTauri = typeof window !== 'undefined' && !!(window as any).__TAURI_INTERNALS__
+const isTauri = typeof window !== 'undefined' && !!window.__TAURI_INTERNALS__
 
 export function Titlebar() {
   const [isMaximized, setIsMaximized] = useState(false)

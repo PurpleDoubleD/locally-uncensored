@@ -14,6 +14,7 @@ import { canUseTools, resolveToolSupport, type ToolSupport } from '../../lib/too
 import { backendCall } from '../../api/backend'
 import { listLoadedLmStudioModels, loadLmStudioModel, unloadLmStudioModel } from '../../api/lmstudio'
 import { isLmStudioProvider } from '../../lib/hf-to-provider'
+import { detailOf } from '../../lib/error-text'
 import { lmStudioSlotUpdate, adoptionReplacesBuiltinEngine } from '../../lib/lmstudio-backend-adopt'
 import { nextProbeDelayMs } from '../../lib/probe-backoff'
 import { noChatBackendEnabled } from '../../lib/provider-visibility'
@@ -135,7 +136,13 @@ function sameStringSet(prev: Set<string>, next: string[]): boolean {
 // re-fetches the model list so the LM Studio models appear without a
 // restart.
 
-interface LmStudioServerStatus {
+/**
+ * Antwort von `lmstudio_server_status`. Deckungsgleich mit der Rust-Seite
+ * (`src-tauri/src/commands/install.rs:3379` baut genau diese fuenf Schluessel,
+ * alle immer gesetzt). Exportiert, weil das Onboarding denselben Befehl ruft
+ * und dort ein `any` stand — eine Antwort, ein Typ.
+ */
+export interface LmStudioServerStatus {
   running: boolean
   port: number
   lms_present: boolean
@@ -204,8 +211,16 @@ function LmStudioServerHint({ onStarted }: { onStarted: () => void }) {
           }
         }
       }
-    } catch (e: any) {
-      setStartError(e?.message ? String(e.message).slice(0, 80) : 'Start failed')
+    } catch (e) {
+      // Hier stand `catch (e: any)` mit `e?.message`. Das las genau EINE Sorte
+      // Fehler: ein `Error`-Objekt. Tauris `invoke` lehnt aber mit einem STRING
+      // ab (die Rust-Seite gibt `Result<_, String>` zurueck) — im ausgelieferten
+      // Programm hatte `e.message` deshalb nie einen Wert, und der Grund des
+      // Fehlschlags wurde jedes Mal durch das pauschale „Start failed" ersetzt.
+      // `detailOf` ist die Stelle, an der dieses Projekt genau diese Frage schon
+      // beantwortet (lib/error-text.ts): String, Error oder sonst etwas.
+      const detail = detailOf(e)
+      setStartError(detail ? detail.slice(0, 80) : 'Start failed')
     } finally {
       setStarting(false)
     }
@@ -380,9 +395,15 @@ function groupByFamily(models: AIModel[]): { family: string; models: AIModel[] }
  * displayModelName. (Found via live E2E 2026-06-01.)
  */
 export function lmsIdOf(model: AIModel): string {
-  const raw = ('lmsKey' in model && typeof (model as any).lmsKey === 'string'
-    ? (model as any).lmsKey
-    : model.name) as string
+  // `lmsKey` steht auf keinem der vier Glieder von `AIModel`. Seit TS 4.9
+  // verengt `'lmsKey' in model` trotzdem — auf `AIModel & Record<'lmsKey',
+  // unknown>` —, und die `typeof`-Pruefung dahinter macht daraus `string`.
+  // Beide Zusicherungen waren also nur die Handarbeit, die der Compiler seither
+  // selbst macht; die aeussere `as string` hat obendrein verdeckt, dass die
+  // innere Pruefung ueberhaupt etwas garantiert.
+  const raw = 'lmsKey' in model && typeof model.lmsKey === 'string'
+    ? model.lmsKey
+    : model.name
   return raw.replace(/^[^:]+::/, '')
 }
 
@@ -582,8 +603,12 @@ export function ModelSelector({ openUpward = false, surface = 'chat' }: ModelSel
       // dropdown ever stalled on a down LM Studio (the Rust side is now async +
       // port-pre-checked too). Ollama's /api/ps is a cheap loopback call and
       // always runs.
+      // `providerName` steht auf ALLEN vier Gliedern von `AIModel` (auf dreien
+      // optional, auf `CloudModel` verpflichtend) — der `in`-Test und die
+      // Zusicherung waren beide ueberfluessig. `m.providerName` ist von sich aus
+      // `string | undefined`, also genau das, was `isLmStudioProvider` nimmt.
       const hasLmsRows = useModelStore.getState().models.some((m) =>
-        isLmStudioProvider(('providerName' in m && (m as any).providerName) as string | undefined),
+        isLmStudioProvider(m.providerName),
       )
       if (hasLmsRows) {
         void listLoadedLmStudioModels().then((list) => { if (!cancelled) setLmsLoaded((prev) => sameStringSet(prev, list) ? prev : new Set(list)) }).catch(() => {})
@@ -1054,9 +1079,14 @@ export function ModelSelector({ openUpward = false, surface = 'chat' }: ModelSel
 
                         {/* Details on right */}
                         <div className="flex items-center gap-1 shrink-0">
-                          {model.type === 'text' && 'details' in model && (model as any).details && (
+                          {/* `type === 'text'` verengt auf OllamaModel | CloudModel,
+                              `'details' in model` von dort auf OllamaModel — und
+                              nur das hat `details`. Der Zugriff braucht deshalb
+                              keine Zusicherung; `parameter_size` ist dort als
+                              `string` deklariert (types/models.ts:15). */}
+                          {model.type === 'text' && 'details' in model && model.details && (
                             <span className="text-[0.5rem] text-gray-600">
-                              {(model as any).details.parameter_size}
+                              {model.details.parameter_size}
                             </span>
                           )}
                           {/* On/Off VRAM load toggle for LOCAL models — LM Studio

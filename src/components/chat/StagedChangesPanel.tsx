@@ -71,7 +71,13 @@ export function StagedChangesPanel({ chatId }: Props) {
   async function applyAll() {
     if (!chatId) return
     for (const change of [...changes]) {
-      // eslint-disable-next-line no-await-in-loop
+      // Sequential on purpose, not an oversight: two changes can touch the same
+      // file, and `applyOne` reads-modifies-writes. In parallel the later write
+      // would be based on a snapshot taken before the earlier one landed.
+      // (Hier stand eine Unterdrueckung der Regel `no-await-in-loop`. Die ist
+      //  in KEINER Config dieses Baums eingeschaltet — die Zeile hat nie etwas
+      //  unterdrueckt, sie hat nur behauptet, es gaebe ein Gate. Der Grund war
+      //  richtig, die Form war eine Luege; der Grund bleibt.)
       await applyOne(change)
     }
   }

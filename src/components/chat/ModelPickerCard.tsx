@@ -4,6 +4,7 @@ import { useModelPickStore, MODEL_PICK_TIMEOUT_MS, type ModelPickKind, type Mode
 import { useSettingsStore } from '../../stores/settingsStore'
 import { getImageModels, getVideoModels, isI2VModel, isT2VCapable } from '../../api/comfyui'
 import type { AgentToolCall } from '../../types/agent-mode'
+import type { ToolArgs } from '../../api/mcp/types'
 
 /**
  * Model-Picker UI (v2.5.3, David 2026-06-10). Two faces of one feature:
@@ -39,8 +40,13 @@ export const PICK_PREF_KEY: Record<ModelPickKind, 'preferredImageModel' | 'prefe
 export function pickKindForToolCall(toolCall: Pick<AgentToolCall, 'toolName' | 'args'>): ModelPickKind | null {
   if (toolCall.toolName === 'image_generate') return 'image'
   if (toolCall.toolName !== 'video_generate') return null
-  const a = (toolCall.args ?? {}) as Record<string, any>
-  const s = (a.settings && typeof a.settings === 'object' ? a.settings : {}) as Record<string, any>
+  // `AgentToolCall['args']` ist bereits `ToolArgs` (types/agent-mode.ts:91), es
+  // braucht also gar keine Zusicherung. `s` verengt `unknown` mit derselben
+  // Pruefung wie vorher — nur dass das Ergebnis jetzt auch `unknown` ist und die
+  // `typeof inputImage === 'string'`-Pruefung unten wirklich etwas tut, statt
+  // eine schon durchgewinkte Zusage zu wiederholen.
+  const a: ToolArgs = toolCall.args ?? {}
+  const s: ToolArgs = a.settings && typeof a.settings === 'object' ? (a.settings as ToolArgs) : {}
   const inputImage = a.inputImage ?? a.input_image ?? a.image ?? s.inputImage ?? s.input_image ?? s.image
   return typeof inputImage === 'string' && inputImage ? 'video-i2v' : 'video-t2v'
 }

@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react'
+import { useId, useState, type ReactNode } from 'react'
 import { ChevronDown, Check, Loader2, AlertTriangle } from 'lucide-react'
 import { useModelStore } from '../../stores/modelStore'
 import { useChatStore } from '../../stores/chatStore'
@@ -52,6 +52,12 @@ const fmt = (n: number) =>
  *     entfernt, wo er vorher stand.
  */
 export function ContextDropdown({ children }: { children?: ReactNode }) {
+  // `useId` und keine Modulkonstante: die Kopfzeile kann diesen Knopf mehr als
+  // einmal rendern (Vergleichsmodus), und doppelte `id`s machen aus
+  // `aria-labelledby` einen Zeiger auf den erstbesten Treffer im Dokument.
+  const uid = useId()
+  const labelId = `${uid}-ctx-label`
+  const valueId = `${uid}-ctx-value`
   const activeModel = useModelStore((s) => s.activeModel)
   const override = useSettingsStore((s) => s.settings.contextWindowOverride)
   const updateSettings = useSettingsStore((s) => s.updateSettings)
@@ -148,16 +154,41 @@ export function ContextDropdown({ children }: { children?: ReactNode }) {
         onClick={() => setOpen((o) => !o)}
         disabled={busy}
         title={`Context window: ${ctx.provider === 'lmstudio' ? "LM Studio's loaded context" : ctx.provider === 'builtin' ? "the built-in engine's loaded context" : 'Ollama num_ctx'}. Changing it reloads the model so it takes effect now.`}
-        aria-label="Context window"
+        /* KF-9 — der Knopf verdeckte seinen eigenen Messwert.
+         *
+         * Hier stand `aria-label="Context window"`. Ein `aria-label` ERSETZT
+         * den Namen aus dem Inhalt; sichtbar steht im Knopf aber „117/16.4k".
+         * Damit war der Name genau das, was WCAG 2.5.3 (Label in Name)
+         * verbietet: er enthielt die sichtbare Beschriftung nicht. Und seit
+         * D-S06 die zwei Anzeigen zusammengelegt hat, ist dieser Knopf die
+         * EINZIGE Stelle, an der die Zahl ueberhaupt noch steht — ein
+         * Screenreader-Nutzer bekam sie nirgends mehr.
+         *
+         * `aria-labelledby` statt eines zusammengebauten `aria-label`-Strings:
+         * der Name zeigt damit auf den GERENDERTEN Knoten und kann nicht von
+         * ihm abweichen. Ein `aria-label={`Context window ${…}`}` waere eine
+         * zweite Ableitung derselben Zahl — also genau der zweite Pflegeweg,
+         * den D-S06 gerade weggenommen hat.
+         *
+         * Der Name lautet jetzt „Context window 117/16.4k" bzw. „Context
+         * window ctx 8K": das unsichtbare Wort zuerst (es sagt, WAS der Knopf
+         * ist), der sichtbare Text danach (er ist die Beschriftung). Der Name
+         * bleibt damit ueber ein STABILES Praefix greifbar, obwohl er sich
+         * mitbewegt — siehe die Anpassung in e2e/builtin-ctx.spec.ts.
+         */
+        aria-labelledby={`${labelId} ${valueId}`}
         aria-expanded={open}
         aria-haspopup="menu"
         className="flex items-center gap-1 px-1.5 py-0.5 rounded border border-gray-200 dark:border-white/[0.06] hover:border-gray-400 dark:hover:border-white/15 text-gray-500 transition-colors text-[0.55rem] lu-hud-num disabled:opacity-60"
       >
+        <span id={labelId} className="sr-only">Context window</span>
         {busy ? <Loader2 size={9} className="animate-spin" /> : null}
         {applyError && !busy ? <AlertTriangle size={9} className="text-red-400" /> : null}
         {/* Der Fuellstand IST die Beschriftung. Nur wenn es keinen gibt (leerer
             Chat), steht hier wieder das Fenster allein. */}
-        {hasFill ? children : <span>ctx {fmt(ctx.contextWindow)}</span>}
+        <span id={valueId}>
+          {hasFill ? children : <span>ctx {fmt(ctx.contextWindow)}</span>}
+        </span>
         <ChevronDown size={8} className={`transition-transform ${open ? 'rotate-180' : ''}`} />
       </button>
       {applyError && !open && (

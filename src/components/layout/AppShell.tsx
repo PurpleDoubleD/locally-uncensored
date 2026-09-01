@@ -34,6 +34,8 @@ import { idbKeysToRestore, mayReloadForIdbRestore } from '../../lib/idb-restore'
 import { log } from '../../lib/logger'
 import { withDetail } from '../../lib/error-text'
 import { pickForMode } from '../../lib/active-model-mode'
+import type { TextChunk } from '../../types/rag'
+import type { Role } from '../../types/chat'
 import { useKeyboardShortcuts } from '../../hooks/useKeyboardShortcuts'
 import { useCloudAuth } from '../../hooks/useCloudAuth'
 import { useCloudAuthStore, deriveCloudAvailable } from '../../stores/cloudAuthStore'
@@ -51,6 +53,31 @@ import { Titlebar } from './Titlebar'
 // seine eigene Abhaengigkeit nicht nennen konnte. STORE_KEYS ist ein
 // Modulkonstante, das Set also genauso konstant.
 const STORE_KEYS_SET = new Set(STORE_KEYS)
+
+/**
+ * Was das Ereignis `remote-chat-message` traegt (Nutzlast von
+ * `src-tauri/src/commands/remote.rs:950`, `ChatEventPayload`).
+ *
+ * `role` steht hier ENGER als `Role` (das vier Werte hat), und das ist keine
+ * Annahme, sondern die gemessene Zusicherung der Gegenseite: `remote.rs:976`
+ * weist jede Anfrage mit einer anderen Rolle mit HTTP 400 ab, BEVOR das
+ * Ereignis ueberhaupt ausgesendet wird — der Kommentar dort nennt es Bug #9,
+ * „role must be 'user' or 'assistant' (never 'system' or arbitrary text)".
+ * Der Empfaenger kann also gar nichts anderes sehen, und das frueher hier
+ * stehende `role as any` hat genau diese schon erledigte Pruefung verdeckt.
+ *
+ * Die vier optionalen Felder tragen drueben `#[serde(default)]`: sie sind auf
+ * dem Draht immer da, aber als leerer String. Der Code unten liest sie mit
+ * Wahrheitspruefungen, was fuer „fehlt" und fuer „leer" dasselbe tut.
+ */
+type RemoteChatMessage = {
+  role: Extract<Role, 'user' | 'assistant'>
+  content: string
+  model?: string
+  mode?: string
+  chat_id?: string
+  chat_title?: string
+}
 
 // The backup triad must never write %APPDATA%/store_backup.json before the
 // restore decision — on a post-NSIS boot the first doBackup would otherwise
@@ -349,7 +376,7 @@ function AppShellTree() {
                 const live = await exportAllChunks()
                 // Only import entries the live store is missing — never clobber
                 // newer in-app activity with a stale backup.
-                const toImport: Record<string, any> = {}
+                const toImport: Record<string, TextChunk[]> = {}
                 for (const [docId, chunks] of Object.entries(parsed)) {
                   if (!live[docId] && Array.isArray(chunks) && chunks.length > 0) {
                     toImport[docId] = chunks
@@ -409,7 +436,13 @@ function AppShellTree() {
                       // Feature FF: restore memory embeddings, then RAG chunks.
                       const ragOnly = await restoreMemoryVectorsFrom(parsedRag as Record<string, unknown>)
                       const { importAllChunks } = await import('../../lib/ragDB')
-                      await importAllChunks(ragOnly as Record<string, any>)
+                      // Der Wert kommt aus JSON.parse, ist also `unknown`. Die
+                      // Pruefung, die der Zweig oben (Zeile ~355) selbst macht,
+                      // steht hier in `importAllChunks` — `ragDB.ts:133`
+                      // ueberspringt jeden Eintrag, der kein nichtleeres Array
+                      // ist. Die Zusicherung ist deshalb nur ein Typ-Schritt,
+                      // kein Vertrauensvorschuss zur Laufzeit.
+                      await importAllChunks(ragOnly as Record<string, TextChunk[]>)
                     }
                   }
                 } catch { /* best-effort */ }
@@ -699,7 +732,10 @@ function AppShellTree() {
     const afterHydration = () => {
       // Either hydration already finished (so we run now) or we register a
       // one-shot callback for when it does.
-      const persist = (useProviderStore as any).persist
+      // `persist` steht am Store, weil er mit dem persist-Middleware gebaut ist
+      // (stores/providerStore.ts:175) — zustand haengt die API dort typisiert an.
+      // Das `as any` war ein Rest aus der Zeit davor.
+      const persist = useProviderStore.persist
       if (!persist || persist.hasHydrated?.()) {
         void pullAndArm()
       } else {
@@ -727,7 +763,6 @@ function AppShellTree() {
       if (storeUnsub) storeUnsub()
       if (hydrationUnsub) hydrationUnsub()
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // ── Mirror remote mobile chat into the dispatched desktop conversation ──
@@ -736,10 +771,14 @@ function AppShellTree() {
     let unlisten: (() => void) | undefined
     ;(async () => {
       const { listen } = await import('@tauri-apps/api/event')
-      unlisten = await listen<{ role: string; content: string; model?: string; mode?: string; chat_id?: string; chat_title?: string }>(
+      unlisten = await listen<RemoteChatMessage>(
         'remote-chat-message',
         (event) => {
-          const { role, content, mode, chat_id, chat_title, model } = event.payload || ({} as any)
+          // `Partial<…>` statt einer Zusicherung: der `?? {}`-Zweig existiert,
+          // WEIL die Nutzlast fehlen kann, und genau das sagt der Typ jetzt.
+          // Die Wahrheitspruefung in der naechsten Zeile ist die Verengung.
+          const { role, content, mode, chat_id, chat_title, model }: Partial<RemoteChatMessage> =
+            event.payload ?? {}
           if (!role || !content) return
           const chat = useChatStore.getState()
 
@@ -751,8 +790,17 @@ function AppShellTree() {
           if (mode === 'codex') {
             const mobileChatId = chat_id || 'mobile-codex'
             const tagged = `[mobile:${mobileChatId}]`
-            let conv = chat.conversations.find((c) =>
-              c.mode === 'codex' && (c.title.includes(tagged) || (c as any).remoteChatId === mobileChatId),
+            const conv = chat.conversations.find((c) =>
+              // `remoteChatId` steht auf KEINEM Typ dieses Baums, und es wird
+              // auch nirgends geschrieben: die Zeile kam mit 55ceb072 herein und
+              // ist seither die einzige Fundstelle im ganzen Verzeichnisbaum
+              // (`git log -S remoteChatId --all` = ein Treffer, dieser Lesezugriff).
+              // Der Vergleich ist damit seit seiner Entstehung immer `false`;
+              // getragen hat den Treffer immer der Titel-Zweig davor. Das `as any`
+              // hat das verdeckt — die benannte Form sagt es.
+              c.mode === 'codex' &&
+              (c.title.includes(tagged) ||
+                (c as { remoteChatId?: string }).remoteChatId === mobileChatId),
             )
             let convId = conv?.id
             if (!convId) {
@@ -769,7 +817,7 @@ function AppShellTree() {
             if (last && last.role === role && last.content === content) return
             useChatStore.getState().addMessage(convId, {
               id: `remote-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-              role: role as any,
+              role,
               content,
               timestamp: Date.now(),
             })
@@ -784,7 +832,7 @@ function AppShellTree() {
           if (last && last.role === role && last.content === content) return
           chat.addMessage(dispatchedConversationId, {
             id: `remote-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-            role: role as any,
+            role,
             content,
             timestamp: Date.now(),
           })

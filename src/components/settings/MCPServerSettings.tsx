@@ -4,9 +4,15 @@ import { Plus, Trash2, Power, PowerOff } from 'lucide-react'
 import { useMCPStore } from '../../stores/mcpStore'
 import { toolRegistry } from '../../api/mcp'
 import type { MCPServerConfig } from '../../api/mcp/types'
+// `import type` und nicht `import`: die Klasse wird unten bewusst dynamisch
+// geladen, damit der Tauri-Import im Dev-Modus nicht mitkommt. Ein Typ-Import
+// wird beim Uebersetzen geloescht und erzeugt keine Laufzeit-Abhaengigkeit —
+// er kostet also nichts und deckt dafuer `client.disconnect()` mit ab, das
+// unter `any` ungeprueft war.
+import type { MCPExternalClient } from '../../api/mcp/external-client'
 
 // Active client instances (lazy-loaded to avoid Tauri import in dev mode)
-const clients = new Map<string, any>()
+const clients = new Map<string, MCPExternalClient>()
 
 export function MCPServerSettings() {
   const { servers, connectedServers, serverTools, addServer, removeServer, setConnected, setServerTools, clearServerTools } = useMCPStore()

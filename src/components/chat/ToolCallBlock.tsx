@@ -285,7 +285,7 @@ function ToolCallBlockImpl({ toolCall, onApprove, onReject }: Props) {
   // Keyed off the RAW result line, not the resolved one: a file:// URL takes a
   // moment to read off disk, and the kind of element to render must not depend
   // on whether that read has landed yet.
-  const isVideoResult = !!rawLocalUrl
+  const isVideoResult = rawLocalUrl
     ? toolCall.toolName === 'video_generate'
     : !!effectivePreviewUrl && isInlineVideoUrl(effectivePreviewUrl)
 

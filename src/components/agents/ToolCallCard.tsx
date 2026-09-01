@@ -2,6 +2,7 @@ import { motion } from 'framer-motion'
 import { Loader2, Check, X } from 'lucide-react'
 import { GlowButton } from '../ui/GlowButton'
 import type { ToolCall } from '../../types/agents'
+import type { ToolArgs } from '../../api/mcp/types'
 
 interface Props {
   toolCall: ToolCall
@@ -9,7 +10,10 @@ interface Props {
   onReject?: () => void
 }
 
-function formatArgs(args: Record<string, any>): string {
+// Der einzige Aufrufer uebergibt `toolCall.args`, und das IST `ToolArgs`
+// (types/agents.ts:45). Die Funktion serialisiert nur — sie greift auf keinen
+// einzigen Schluessel zu, `unknown` kostet hier also nichts.
+function formatArgs(args: ToolArgs): string {
   try {
     return JSON.stringify(args, null, 2)
   } catch {

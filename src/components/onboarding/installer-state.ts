@@ -46,6 +46,52 @@
  *     eine eigene Zeile, die genau einmal (im Python-Pfad) fehlte.
  */
 
+/**
+ * Was ein `*_status`-Poll zurueckgibt — die EINGABE dieser Zustandsmaschine.
+ *
+ * Vier Befehle liefern exakt dieselben fuenf Schluessel, weil sie auf der
+ * Rust-Seite denselben `InstallState` serialisieren (`src-tauri/src/state.rs:54`):
+ *
+ *   install_comfyui_status    src-tauri/src/commands/install.rs:1732
+ *   install_python_status     src-tauri/src/commands/install.rs:3870
+ *   install_ollama_status     src-tauri/src/commands/install.rs:2787
+ *   install_lmstudio_status   src-tauri/src/commands/install.rs:3324
+ *
+ * An acht Stellen in `Onboarding.tsx` und `SettingsPage.tsx` stand dafuer
+ * `const s: any = await backendCall(...)`.
+ *
+ * ── Warum drei Felder optional sind und zwei nicht ────────────────────────
+ *
+ * Nicht geraten, sondern an BEIDEN Backends nachgesehen. Die Rust-Seite baut
+ * alle fuenf immer (`serde_json::json!`, kein `skip_serializing_if`). Der
+ * Dev-Server, den der Browser-Modus statt Tauri anspricht, tut das NICHT: sein
+ * `/local-api/install-comfyui` (`dev-server/comfy.ts:333`) antwortet mit
+ * `{ status, error, logs }` — die drei Download-Zaehler fehlen dort.
+ *
+ * Deshalb: `status` und `logs` verpflichtend (beide Seiten senden sie immer),
+ * die drei Zaehler optional (eine Seite laesst sie weg). Wer sie liest, muss
+ * den Fall behandeln — und alle acht Aufrufer taten das laengst mit `|| 0`,
+ * nur konnte man es unter `any` nicht nachpruefen.
+ *
+ * `error` ist der umgekehrte Fall: nur der Dev-Server sendet es. Es steht hier,
+ * damit die Divergenz aufgeschrieben ist und nicht wieder gesucht werden muss.
+ */
+export interface InstallerStatusResponse {
+  /** 'idle' | 'downloading' | 'installing' | 'complete' | 'error' | … — die
+   *  Rust-Seite setzt einen freien String, und die Aufrufer vergleichen ihn mit
+   *  je eigenen Werten (`'cancelled'` in SettingsPage, `'already_installed'` im
+   *  Python-Pfad, `'done'` im ComfyUI-Pfad). Eine engere Union waere hier eine
+   *  Behauptung ueber Code, der in einer anderen Sprache steht. */
+  status: string
+  logs: string[]
+  /** Nur Tauri. Der Dev-Server laesst die drei weg — siehe oben. */
+  download_progress?: number
+  download_total?: number
+  download_speed?: number
+  /** Nur Dev-Server; die Rust-Seite meldet Fehler als abgelehntes Promise. */
+  error?: string
+}
+
 /** Wo ein Installer steht. Vier Zustaende, nicht drei Boolesche. */
 export type InstallerPhase = 'idle' | 'running' | 'ready' | 'failed'
 

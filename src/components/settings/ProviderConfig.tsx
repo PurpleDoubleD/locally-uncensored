@@ -21,7 +21,7 @@ import { diagnoseBuiltinEngine, readBuiltinSlotStatus } from '../../api/builtin-
 import type { SlotStatus } from '../../lib/builtin-slot-status'
 import type { ProviderId, ProviderConfig } from '../../api/providers/types'
 
-const isTauri = typeof window !== 'undefined' && !!(window as any).__TAURI_INTERNALS__
+const isTauri = typeof window !== 'undefined' && !!window.__TAURI_INTERNALS__
 
 /** What a slot in the provider list may show and let the user change. */
 export interface SlotView {
