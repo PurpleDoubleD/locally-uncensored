@@ -1,6 +1,6 @@
 import { test, expect, type Page } from '@playwright/test'
 import { tauriMockInit, DEFAULT_ASSISTANT_REPLY, DEFAULT_MODEL_NAME } from './support/tauri-mock'
-import { routeCloud, seedOnboardingDone, signInViaGate, cloudSwitch, type CloudScenario } from './support/cloud-mock'
+import { routeCloud, seedOnboardingDone, signInViaGate, cloudSwitch, cloudSwitchBehindModal, type CloudScenario } from './support/cloud-mock'
 
 /**
  * 2.5.7 cloud gate — the wall in front of Cloud mode (David's 4-options flow).
@@ -42,8 +42,11 @@ test('signed in without a plan: plan buttons → browser, switch stays off', asy
   const opened = await page.evaluate(() => (window as unknown as { __E2E_OPENED_URLS__?: string[] }).__E2E_OPENED_URLS__ ?? [])
   expect(opened.some((u) => u.includes('/pricing#max'))).toBe(true)
 
-  // Gate holds: the switch is still off.
-  await expect(cloudSwitch(page)).not.toBeChecked()
+  // Gate holds: the switch is still off. Read through the modal-proof locator —
+  // the gate is still open here, and an open dialog marks the rest of the page
+  // `inert` + `aria-hidden`, so the role query would find nothing and this
+  // would fail for a reason that has nothing to do with the switch.
+  await expect(cloudSwitchBehindModal(page)).toHaveAttribute('aria-checked', 'false')
 })
 
 test('licensed but not server-enabled (access:false): wall with Check again, switch stays off', async ({ page }) => {
@@ -52,7 +55,9 @@ test('licensed but not server-enabled (access:false): wall with Check again, swi
 
   await expect(page.getByText(/hasn't switched Cloud on/i)).toBeVisible({ timeout: 20_000 })
   await expect(page.getByRole('button', { name: /Check again/i })).toBeVisible()
-  await expect(cloudSwitch(page)).not.toBeChecked()
+  // Same reason as above: the wall IS the open dialog, so the switch behind it
+  // is out of the accessibility tree by design.
+  await expect(cloudSwitchBehindModal(page)).toHaveAttribute('aria-checked', 'false')
 })
 
 test('"Stay on Local" closes the gate with the switch off', async ({ page }) => {
