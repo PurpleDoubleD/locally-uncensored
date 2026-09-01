@@ -21,26 +21,24 @@ import { streamProviderTurn, type StreamedProviderTurn } from '../lib/provider-s
 import { createHermesDisplayFilter, createThinkStreamSplitter, createTurnThinkingSink } from '../lib/hermes-stream'
 import { beginAgentRun, endAgentRun, setActiveAgentModel, type AgentRunContext } from '../api/agent-context'
 import { resolveChatWorkspaceSlug } from '../api/workspace-slug'
-import { codexModeKnobs, CODEX_MODE_LABELS, type CodexMode } from '../lib/codex-mode'
+import { codexModeKnobs, type CodexMode } from '../lib/codex-mode'
 import { CODEX_PLAN_SYSTEM_PROMPT } from '../lib/codex-plan-prompt'
 import { resolveWorkspace } from '../api/agents/workspace-resolve'
 import { useAgentModeStore } from '../stores/agentModeStore'
-import { loadLurules, renderRulesSection, type RulesReader } from '../lib/lurules'
+import { loadLurules, renderRulesSection } from '../lib/lurules'
 import {
   parseAgentCommand, parseLoopSpec, buildLoopRecheck,
   loopPassSaysDone,
 } from '../lib/agent-commands'
 import { useGenerationStore } from '../stores/generationStore'
-import { backendCall, isOllamaLocal } from '../api/backend'
+import { isOllamaLocal } from '../api/backend'
 import { requestGenerationCancel } from '../api/vram-handoff'
 import { planWithArchitect, renderArchitectPlanSection } from '../api/agents/architect'
 import { fetchRepoMap, renderRepoMapSection } from '../api/agents/repo-map'
 import { isLocalModelByName } from '../api/agents/model-locality'
 import { useStagedChangesStore, flushStagedPersist } from '../stores/stagedChangesStore'
-import { computeUnifiedDiff } from '../lib/diff'
-import { applyUniqueEdit } from '../lib/surgical-edit'
 import { log } from '../lib/logger'
-import type { AgentBlock, AgentToolCall } from '../types/agent-mode'
+import type { AgentToolCall } from '../types/agent-mode'
 import { isThinkingCompatible, isPlainTextPlanner } from '../lib/model-compatibility'
 import type { ChatMessage, ToolCall, ToolDefinition } from '../api/providers/types'
 import { executeParallel, applyResultToToolCall, APPROVE_ALL, type ExecutionRequest } from '../api/agents/tool-executor'
@@ -58,7 +56,6 @@ import { asString, errorText, prop } from '../types/json-guards'
 import type { ToolArgs } from '../api/mcp/types'
 import { CREDITS_EXHAUSTED_MESSAGE } from '../lib/credits-exhausted'
 import { streamOllamaChatWithTools } from '../lib/ollama-stream-tools'
-import { extractToolCallsWithRanges, stripRanges } from '../lib/tool-call-repair'
 import { canonicalToolName } from '../lib/loose-tool-parse'
 import { selectRelevantTools, selectRelevantToolsAsync, SMALL_MODEL_MAX_TOOLS, gateCreateTools, wantsMediaTools, isGatedTool } from '../lib/tool-selection'
 import { generateEmbeddings } from '../api/rag'
@@ -72,11 +69,26 @@ import { resolveAgentNumCtx } from '../lib/agent-num-ctx'
 import { platformPromptLine, hostClockLine } from '../lib/host-platform'
 import { ensureBuiltinAgentCtx } from '../api/builtin-ensure'
 import { AgentLoopGuard } from '../lib/agent-loop-guard'
-import { findStagedForPath, stagedReadResult, stagedListingNote } from '../lib/staged-overlay'
 import { applyAllStagedChanges } from '../lib/staged-apply'
 import { useMemoryStore } from '../stores/memoryStore'
 import { extractMemoriesFromPair } from './useMemory'
 import { useCodexConfirmStore } from '../stores/codexConfirmStore'
+// ── Die Teile, die dieser Haken nicht mehr selbst traegt ────────────────────
+// Jedes dieser Module haelt EINEN geteilten Zustand oder EINE Regel, die
+// mehrere Stellen hier gemeinsam brauchen; der Dateikopf dort sagt jeweils,
+// welchen. Was hier bleibt, ist die Reihenfolge des Zuges.
+import { codexReadCtx, readWorkspaceFile, makeLurulesReader } from './codex/workspace-fs'
+import { resolveCodexWorkspace } from './codex/workspace-precedence'
+import { codexModeRefusal } from './codex/mode-refusal'
+import { createAgentBlockSink } from './codex/agent-blocks'
+import { createLivePaint } from './codex/live-paint'
+import { seedEstimatedUsage, reportTurnUsage } from './codex/turn-usage'
+import { isThinkingUnsupportedError } from './codex/thinking-downgrade'
+import { recoverToolCallsFromContent } from './codex/tool-call-recovery'
+import { codexStallVerdict } from './codex/stall-verdict'
+import { createStagedWriter } from './codex/staged-writes'
+import { codexToolDiff, codexEventKind } from './codex/tool-result-view'
+import { capHiddenToolHistory } from './codex/hidden-history'
 
 // No-op diagnostic hook. Kept as a call site so future debugging can swap
 // this for a file logger without re-editing every iter-point in the loop.
@@ -176,31 +188,6 @@ const streamWithTools = streamOllamaChatWithTools
 // the full catalog.
 const CODEX_CATEGORIES = ['filesystem', 'terminal', 'system', 'web', 'image', 'video', 'workflow'] as const
 
-
-// `.lurules` reader. MUST go through `fs_read` (the workspace-aware command)
-// with the run's chatId + workingDirectory — NOT the older `file_read`, which
-// jails every path to the per-chat sandbox (agent-workspace/<id>) and so
-// REJECTS the absolute `<workDir>/.lurules` path with "escapes the allowed
-// workspace". That silent rejection meant per-repo rules never loaded in a real
-// folder workspace. Threading workingDirectory sets the jail root to the actual
-// project folder, so the absolute rules path resolves. Errors still swallow to
-// null so loadLurules() treats "missing file" and "fs error" identically.
-function makeLurulesReader(chatId: string, workDir: string): RulesReader {
-  return {
-    async read(path: string): Promise<string | null> {
-      try {
-        const r = await backendCall<{ content?: string }>('fs_read', {
-          path,
-          chatId,
-          workingDirectory: workDir,
-        })
-        return r?.content ?? null
-      } catch {
-        return null
-      }
-    },
-  }
-}
 
 // Detect when the model emits a re-introduction of itself ("Hello, I am
 // the Coding Agent, an autonomous coding agent…") instead of the actual
@@ -360,37 +347,13 @@ export function useCodex() {
     }
 
     const thread = codexStore.getThread(convId)!
-    // Resolve working directory with this precedence:
-    //   1. Explicit codex thread.workingDirectory (file-tree picker)
-    //   2. Resolved agent workspace path (when folder-kind)
-    //   3. Global codexStore.workingDirectory
-    //   4. '.' (bridge's per-chat sandbox)
-    const workspacePath =
-      codexWorkspace && codexWorkspace.kind === 'folder' && codexWorkspace.path
-        ? codexWorkspace.path
-        : null
-    const workDir =
-      (thread.workingDirectory && thread.workingDirectory !== '.' ? thread.workingDirectory : null) ||
-      workspacePath ||
-      codexStore.workingDirectory ||
-      '.'
-
-    // Pin the tool-containment workspace to the SAME folder the model is told
-    // to use (workDir). resolveWorkspace() above only sees the agent-mode
-    // per-chat store + settings.defaultWorkspace — it MISSES the folder the
-    // Code tab's explorer picker sets (codexStore.workingDirectory), which is
-    // the primary way to pick a repo in the Code tab. Without this, containment
-    // stayed pinned to the per-chat sandbox while the model was told to work in
-    // a real folder, so every file_list/file_read of the working dir failed
-    // with "path escapes the allowed workspace" (live cloud find, 2026-07-11).
-    const runWorkspace =
-      workDir && workDir !== '.'
-        ? {
-            kind: 'folder' as const,
-            path: workDir,
-            extraPaths: codexWorkspace && codexWorkspace.kind === 'folder' ? codexWorkspace.extraPaths : undefined,
-          }
-        : codexWorkspace
+    // Welcher Ordner: Rangfolge, Sperre und die Zusicherung, dass beide
+    // denselben Pfad nennen — hooks/codex/workspace-precedence.ts.
+    const { workDir, runWorkspace } = resolveCodexWorkspace({
+      threadWorkingDirectory: thread.workingDirectory,
+      codexWorkspace,
+      storeWorkingDirectory: codexStore.workingDirectory,
+    })
 
     // `/goal` is bookkeeping, not a prompt. Handle it here and show the result;
     // every LATER turn picks the goal up from the system prompt below.
@@ -405,30 +368,20 @@ export function useCodex() {
       return
     }
 
-    // Review Mode strips every mutating tool. A command whose whole job is to
-    // change something would then run to completion narrating work it could not
-    // do, with nothing on screen explaining why. Say it and stop.
-    if (settings.codexReviewMode && slash && !slash.command.readOnly) {
+    // Ein Befehl, der in diesem Modus nichts ausrichten kann, wird gesagt und
+    // nicht erzaehlt. Rangfolge und Wortlaut: hooks/codex/mode-refusal.ts.
+    const modeRefusal = codexModeRefusal({
+      reviewMode: settings.codexReviewMode,
+      codexMode,
+      slash,
+    })
+    if (modeRefusal) {
       useChatStore.getState().addMessage(convId, {
         id: uuid(), role: 'user', content: rawInstruction, timestamp: Date.now(),
       })
       useChatStore.getState().addMessage(convId, {
         id: uuid(), role: 'assistant', timestamp: Date.now(),
-        content: `Review Mode is on, so I cannot write files or run commands, and /${slash.command.name} needs both. Turn Review Mode off in Settings, or use a read-only command such as /review, /plan, /diff or /explain.`,
-      })
-      return
-    }
-
-    // Same for Plan mode: it is read-only for the whole conversation, so a
-    // command whose job is to change something has nowhere to land. Saying so
-    // beats narrating work that silently could not happen.
-    if (codexMode === 'plan' && slash && !slash.command.readOnly) {
-      useChatStore.getState().addMessage(convId, {
-        id: uuid(), role: 'user', content: rawInstruction, timestamp: Date.now(),
-      })
-      useChatStore.getState().addMessage(convId, {
-        id: uuid(), role: 'assistant', timestamp: Date.now(),
-        content: `Plan mode is read-only, and /${slash.command.name} needs to write files or run commands. Switch the mode dropdown to "${CODEX_MODE_LABELS.ask}" first, or use a read-only command such as /review, /plan, /diff or /explain.`,
+        content: modeRefusal,
       })
       return
     }
@@ -481,17 +434,10 @@ export function useCodex() {
     // classic top-of-bubble field (plain answer turns keep the old look).
     let anyToolExecuted = false
 
-    const blocks: AgentBlock[] = []
-    function addBlock(block: AgentBlock) {
-      blocks.push(block)
-      useChatStore.getState().updateMessageAgentBlocks(convId!, assistantMsg.id, [...blocks])
-    }
-    function updateBlockById(blockId: string, updates: Partial<AgentBlock>) {
-      const idx = blocks.findIndex((b) => b.id === blockId)
-      if (idx < 0) return
-      blocks[idx] = { ...blocks[idx], ...updates }
-      useChatStore.getState().updateMessageAgentBlocks(convId!, assistantMsg.id, [...blocks])
-    }
+    // Die Blockliste und ihr Spiegel im Speicher — hooks/codex/agent-blocks.ts.
+    const blockSink = createAgentBlockSink(convId!, assistantMsg.id)
+    const addBlock = blockSink.add
+    const updateBlockById = blockSink.update
 
     // Resolve provider
     const { provider, modelId } = getProviderForModel(activeModel)
@@ -779,14 +725,13 @@ export function useCodex() {
         // Cloud model picked without explicit opt-in → fall back to
         // editor-only. Surface a one-line reflection so the user knows
         // why the plan didn't appear.
-        blocks.push({
+        addBlock({
           id: uuid(),
           phase: 'reflection',
           content:
             `🏗️ Architect skipped, \`${archModel}\` is a cloud model and "Allow cloud architect" is off. Enable it in Settings → Coding Agent, or pick a local model.`,
           timestamp: Date.now(),
         })
-        useChatStore.getState().updateMessageAgentBlocks(convId, assistantMsg.id, [...blocks])
       } else {
         try {
           const planResult = await planWithArchitect({
@@ -801,13 +746,12 @@ export function useCodex() {
           if (planResult.plan) {
             systemPrompt += renderArchitectPlanSection(planResult.plan)
             messages[0] = { role: 'system', content: systemPrompt }
-            blocks.push({
+            addBlock({
               id: uuid(),
               phase: 'reflection',
               content: `🏗️ **Architect plan** (\`${planResult.modelUsed}\`, ${planResult.tookMs}ms)\n\n${planResult.plan}`,
               timestamp: Date.now(),
             })
-            useChatStore.getState().updateMessageAgentBlocks(convId, assistantMsg.id, [...blocks])
           }
         } catch (e) {
           // Architect is advisory — never blocks the editor loop. Use
@@ -834,13 +778,12 @@ export function useCodex() {
         if (repoMap.files.length > 0) {
           systemPrompt += renderRepoMapSection(repoMap)
           messages[0] = { role: 'system', content: systemPrompt }
-          blocks.push({
+          addBlock({
             id: uuid(),
             phase: 'reflection',
             content: `🗺️ Repo map: top ${repoMap.files.length} files (of ${repoMap.count}), ${repoMap.files.slice(0, 5).map((f) => f.path).join(', ')}${repoMap.files.length > 5 ? '…' : ''}`,
             timestamp: Date.now(),
           })
-          useChatStore.getState().updateMessageAgentBlocks(convId, assistantMsg.id, [...blocks])
         }
       } catch (e) {
         log.warn('codex.repo_map_fetch_failed', { err: e })
@@ -1096,24 +1039,15 @@ export function useCodex() {
         // cancels the queued frame the moment the stream call returns, so a
         // stale frame can never fire AFTER a final direct write and repaint
         // old content over it.
-        let livePaintPending: string | null = null
-        let livePaintFrame = false
-        const settleLivePaint = () => {
-          livePaintPending = null
-        }
-        const liveContent = (c: string) => {
-          if (echoRetriesRemaining > 0 && isSystemPromptEcho(c)) return
-          livePaintPending = fullContent ? fullContent + '\n\n' + c : c
-          if (livePaintFrame) return
-          livePaintFrame = true
-          requestAnimationFrame(() => {
-            livePaintFrame = false
-            if (livePaintPending !== null) {
-              useChatStore.getState().updateMessageContent(convId!, assistantMsg.id, livePaintPending)
-              livePaintPending = null
-            }
-          })
-        }
+        // Ein Puffer, drei Transporte, ein Bild pro Zeichenrunde — und ein
+        // settle(), das ein wartendes Bild loescht: hooks/codex/live-paint.ts.
+        const livePaint = createLivePaint({
+          suppress: (c) => echoRetriesRemaining > 0 && isSystemPromptEcho(c),
+          prefix: () => fullContent,
+          paint: (text) => useChatStore.getState().updateMessageContent(convId!, assistantMsg.id, text),
+        })
+        const settleLivePaint = livePaint.settle
+        const liveContent = livePaint.feed
 
         if (strategy === 'native') {
           // Route on the USER's instruction, never on the newest user-role
@@ -1220,18 +1154,7 @@ export function useCodex() {
             // char/4 guess of just the visible messages. Provisional estimate that
             // the model's exact count overwrites below; only (re)set while no real
             // count has landed yet, so a real value is never downgraded.
-            {
-              const existingUsage = useChatStore.getState().conversations
-                .find((c) => c.id === convId)?.messages.find((m) => m.id === assistantMsg.id)?.usage
-              if (!existingUsage || existingUsage.estimated) {
-                const estPrompt =
-                  estimateTokens(sendMessages.map((m) => (typeof m.content === 'string' ? m.content : JSON.stringify(m.content))).join('\n')) +
-                  estimateTokens(JSON.stringify(tools))
-                useChatStore.getState().updateMessageUsage(convId!, assistantMsg.id, {
-                  promptTokens: estPrompt, completionTokens: 0, totalTokens: estPrompt, estimated: true,
-                })
-              }
-            }
+            seedEstimatedUsage(convId!, assistantMsg.id, sendMessages, tools)
             try {
               void diagLog('streamWithTools-enter', { iter: i, messagesLen: sendMessages.length, toolsCount: tools.length, thinking: chatOptions.thinking })
               turn = await streamWithTools(
@@ -1253,7 +1176,7 @@ export function useCodex() {
                 messageHead: errorText(thinkErr).slice(0, 400),
                 name: asString(prop(thinkErr, 'name')),
               })
-              if (httpStatusOf(thinkErr) === 400 || errorText(thinkErr).includes('does not support thinking')) {
+              if (isThinkingUnsupportedError(thinkErr)) {
                 turn = await streamWithTools(
                   modelToUse, sendMessages, tools,
                   { temperature: 0.1, thinking: undefined, maxTokens: chatOptions.maxTokens, contextWindow: numCtx, signal: abort.signal },
@@ -1268,18 +1191,7 @@ export function useCodex() {
             settleLivePaint()
             toolCalls = turn.toolCalls
             turnContent = turn.content || ''
-            // Real consumed-context usage for THIS coding turn (system + tools +
-            // RAG + file context + history). Multiple model calls run per task;
-            // the latest has the fullest prompt, so store each (last wins) to
-            // keep the TokenCounter on the true fill, not a char/4 estimate.
-            if (turn.promptEvalCount || turn.evalCount) {
-              useChatStore.getState().updateMessageUsage(convId!, assistantMsg.id, {
-                promptTokens: turn.promptEvalCount || 0,
-                completionTokens: turn.evalCount || 0,
-                totalTokens: (turn.promptEvalCount || 0) + (turn.evalCount || 0),
-                estimated: false,
-              })
-            }
+            reportTurnUsage(convId!, assistantMsg.id, turn)
             void diagLog('streamWithTools-return', {
               iter: i,
               toolCallsCount: toolCalls.length,
@@ -1293,50 +1205,13 @@ export function useCodex() {
               useChatStore.getState().updateMessageThinking(convId!, assistantMsg.id, thinkingContent)
             }
 
-            // v2.5.0 fix (post-merge bug hunt): some Ollama models
-            // (qwen2.5-coder:3b confirmed) emit tool calls as a fenced
-            // ```json { "name":..., "arguments":... } ``` block inside
-            // message.content INSTEAD of the native message.tool_calls
-            // array. When the native list is empty but content looks like
-            // a tool call, extract it and strip the fence so the user
-            // doesn't see raw JSON.
-            // Track whether this iteration's content held tool-call JSON.
-            // qwen2.5-coder:3b emits the JSON in content rather than native
-            // tool_calls, and every iteration wraps the JSON with the same
-            // narrative ("I'm about to verify…" + code blocks). Those lines
-            // are not the FINAL answer — they're filler between tool calls
-            // and would duplicate across iterations if accumulated.
-            let extractedFromContent = false
-            if (toolCalls.length === 0 && turnContent) {
-              const { calls: extracted, ranges } = extractToolCallsWithRanges(turnContent)
-              if (extracted.length > 0) {
-                toolCalls = extracted.map(tc => ({ function: { name: tc.name, arguments: tc.arguments } }))
-                turnContent = stripRanges(turnContent, ranges)
-                extractedFromContent = true
-              }
+            // Werkzeugaufrufe, die im Fliesstext stehen — und die Prosa, die dabei
+            // stehen bleiben MUSS: hooks/codex/tool-call-recovery.ts.
+            {
+              const recovered = recoverToolCallsFromContent(toolCalls, turnContent)
+              toolCalls = recovered.toolCalls
+              turnContent = recovered.content
             }
-            // Safety net for qwen2.5-coder: sometimes the model emits the
-            // tool-call JSON alongside native tool_calls — native was parsed
-            // already, but the same JSON still sits in the content. Strip
-            // those too so the chat bubble stays readable.
-            if (toolCalls.length > 0 && turnContent && /\{\s*"(?:name|tool|function)"\s*:/.test(turnContent)) {
-              const { ranges } = extractToolCallsWithRanges(turnContent)
-              if (ranges.length > 0) {
-                turnContent = stripRanges(turnContent, ranges)
-                extractedFromContent = true
-              }
-            }
-            // When the model bundles its tool-call JSON INSIDE the text
-            // (qwen2.5-coder & co.), KEEP the surrounding prose as this
-            // iteration's commentary — the JSON itself was already removed by
-            // stripRanges above. Keeping it (instead of clearing) is what makes
-            // every between-tool answer survive so the renderer can interleave
-            // them chronologically: tool → answer → tool → tool → answer …
-            // (David 2026-06-02 r2: "antworten zwischen drin verschwinden immer,
-            // darf nicht sein"). Older answers auto-collapse in the UI, so the
-            // old "stack of duplicated I'm-about-to paragraphs" problem is gone.
-            // Only drop it when nothing but punctuation/whitespace remains.
-            if (extractedFromContent && !/[A-Za-z0-9]/.test(turnContent)) turnContent = ''
           } else {
             // ── Streaming path for OpenAI-compat / Anthropic / LU Cloud ──
             // chatStream carries the tool defs (ChatOptions.tools) and the
@@ -1355,7 +1230,7 @@ export function useCodex() {
             try {
               turn = await streamProviderTurn(provider, modelToUse, sendMessages, streamOpts, liveContent, liveThinking)
             } catch (thinkErr) {
-              if (errorText(thinkErr).includes('does not support thinking') || httpStatusOf(thinkErr) === 400) {
+              if (isThinkingUnsupportedError(thinkErr)) {
                 turn = await streamProviderTurn(provider, modelToUse, sendMessages, { ...streamOpts, thinking: undefined as unknown as boolean }, liveContent, () => {})
               } else {
                 throw thinkErr
@@ -1364,14 +1239,7 @@ export function useCodex() {
             settleLivePaint()
             toolCalls = turn.toolCalls
             turnContent = turn.content || ''
-            if (turn.promptEvalCount || turn.evalCount) {
-              useChatStore.getState().updateMessageUsage(convId!, assistantMsg.id, {
-                promptTokens: turn.promptEvalCount || 0,
-                completionTokens: turn.evalCount || 0,
-                totalTokens: (turn.promptEvalCount || 0) + (turn.evalCount || 0),
-                estimated: false,
-              })
-            }
+            reportTurnUsage(convId!, assistantMsg.id, turn)
             if (keepThinking && turn.thinking) {
               thinkingContent += (thinkingContent ? '\n\n' : '') + turn.thinking
               useChatStore.getState().updateMessageThinking(convId!, assistantMsg.id, thinkingContent)
@@ -1480,8 +1348,9 @@ export function useCodex() {
             // Same downgrade the native branch carries: an old Ollama build or
             // an endpoint that predates the knob answers 400, and the run must
             // survive that instead of ending on it.
-            if (hermesOpts.thinking !== undefined
-              && (errorText(thinkErr).includes('does not support thinking') || httpStatusOf(thinkErr) === 400)) {
+            // Die Zusatzbedingung bleibt HIER: nur absteigen, wenn ueberhaupt ein
+            // Denk-Schalter gesetzt war. Das ist Verhalten, keine Doppelung.
+            if (hermesOpts.thinking !== undefined && isThinkingUnsupportedError(thinkErr)) {
               hermesTurn = await runHermes({ ...hermesOpts, thinking: undefined as unknown as boolean })
             } else {
               throw thinkErr
@@ -1669,34 +1538,9 @@ export function useCodex() {
         // (only strong "is complete / all tests pass / committed" phrases, not
         // forward-looking "to complete the fix") so we err toward nudging.
         if (toolCalls.length === 0) {
-          // Nudge ONLY when the model clearly STALLED mid-task — it narrated the
-          // next step ("I'm about to…", "let me…", "next I'll…", "I need to read…")
-          // or asked for info it could find itself ("please provide the path",
-          // "which file?"), or returned no text at all. A substantive ANSWER
-          // matches none of these, so simple Q&A ("2+2 is 4" / "Task completed.
-          // The answer is 4.") stops cleanly. The previous "nudge unless a
-          // completion keyword is present" version looped on already-answered
-          // questions (David 2026-06-02: coding agent "antwortet in loops" on a
-          // simple question — it called shell_execute 3× + repeated "Task
-          // completed" because "completed" never matched the completion regex).
-          const stalledNarration = /\b(i(?:'?m| am) about to|i will(?: now)?|i'?ll\b|let me\b|next,?\s*i\b|now i'?ll|going to|first,?\s*i\b|then i'?ll|i (?:need|have|am going) to (?:read|open|check|look|run|see|find))\b/i.test(turnContent)
-          // "asksForInfo" also catches the model giving up by asking the user to
-          // VERIFY/CONFIRM a path it can discover itself ("it seems there is an
-          // issue with the file path … could you please verify the correct path
-          // to sum.js?" — David 2026-06-02 live coding run with qwen2.5-coder:7b).
-          // The verify/confirm/clarify branch is anchored on a path/file NOUN so
-          // a genuine completion ("I fixed it, please verify the changes") does
-          // NOT match — only "verify the (correct) path/file/location" does.
-          const asksForInfo = /\b(please provide|could you (?:please )?(?:provide|share|tell|give|specify|verify|confirm|clarify)|what(?:'s| is) the (?:path|file|name|location)|which file|can you (?:provide|share|specify|tell)|provide (?:the|me) (?:the )?(?:path|file|details|more)|(?:verify|confirm|clarify) (?:the )?(?:correct |right |exact |full )?(?:path|file ?path|location|directory|filename|file name)|need (?:the|more) (?:path|info|details|context))\b/i.test(turnContent)
-          const emptyTurn = turnContent.trim().length === 0
-          // Only nudge an empty turn when NOTHING has been produced yet (a true
-          // early stall). An empty turn AFTER a real answer means the model is
-          // finished, break immediately instead of spinning slow no-op nudge
-          // iterations that keep the typing dots up long after the answer is
-          // done (David 2026-06-12: "die punkte bleiben so lange obwohl keine
-          // antwort mehr kam"). Read-only report commands (/review, /explain …)
-          // legitimately end on a text answer + an empty follow-up turn.
-          const nudgeWorthy = stalledNarration || asksForInfo || (emptyTurn && !fullContent.trim())
+          // Steckengeblieben oder fertig — drei Muster ueber denselben Text und
+          // ihre Fehlalarm-Geschichte: hooks/codex/stall-verdict.ts.
+          const { nudgeWorthy } = codexStallVerdict(turnContent, fullContent)
           if (nudgeWorthy && continueNudgesRemaining > 0) {
             continueNudgesRemaining--
             void diagLog('continue-nudge', { iter: i, remaining: continueNudgesRemaining, turnContentLen: turnContent.length })
@@ -1875,15 +1719,14 @@ export function useCodex() {
         // absolute project path, so every pre-read returned '' and every diff
         // rendered as a 100% insert — hiding exactly the deletions/overwrites
         // the user needs to see before approving a staged change.
-        const readCtx: { chatId?: string; workingDirectory?: string } =
-          workDir && workDir !== '.' ? { chatId: workspaceSlug, workingDirectory: workDir } : { chatId: workspaceSlug }
+        const readCtx = codexReadCtx(workspaceSlug, workDir)
         const oldContents = new Map<string, string>()
         await Promise.all(
           batch
             .filter((e) => (e.ac.toolName === 'file_write' || e.ac.toolName === 'file_edit') && typeof e.injectedArgs.path === 'string')
             .map(async (e) => {
               try {
-                const r = await backendCall<{ content?: string }>('fs_read', { path: e.injectedArgs.path, ...readCtx })
+                const r = await readWorkspaceFile(e.injectedArgs.path as string, readCtx)
                 oldContents.set(e.ac.id, r?.content ?? '')
               } catch {
                 oldContents.set(e.ac.id, '')
@@ -1907,146 +1750,21 @@ export function useCodex() {
             toolCallCapMs(name, args, settings),
           )
 
-        // Multi-File Stage-and-Approve (B10). When the user has codex
-        // stage mode on, file_write calls don't hit the disk — they
-        // queue in stagedChangesStore as "pending changes" the user
-        // reviews and applies (or rejects) per-file. The model still
-        // sees a synthetic success message so the loop progresses; the
-        // user is the gatekeeper for the actual disk write.
-        const stageFileWrite = async (args: ToolArgs): Promise<string> => {
-          const path = String(args.path ?? '')
-          if (!path) return 'file_write: missing path'
-          const newContent = String(args.content ?? '')
-          // Resolve against the run's workspace NOW (at stage time). Apply
-          // happens later, after this turn's finally clears the active
-          // chat/workspace context, so a relative path would otherwise route to
-          // agent-workspace/default/ instead of the real project folder. The
-          // bridge jails absolute paths to the workspace root, so the pre-read
-          // MUST pass the run's workingDirectory (as its root) — otherwise the
-          // absolute project path is rejected and the staged diff shows a 100%
-          // insert, hiding what will be overwritten. (v2.5.0 + 2.5.9 audit fix.)
-          const isAbs = /^([a-zA-Z]:[\\/]|[\\/]|\\\\)/.test(path)
-          const resolvedPath = isAbs || !workDir || workDir === '.'
-            ? path
-            : `${workDir.replace(/[\\/]+$/, '')}${workDir.includes('\\') ? '\\' : '/'}${path.replace(/^[\\/]+/, '')}`
-          const stageReadCtx: { chatId?: string; workingDirectory?: string } =
-            workDir && workDir !== '.' ? { chatId: workspaceSlug, workingDirectory: workDir } : { chatId: workspaceSlug }
-          // A prior staged entry for this path already knows the DISK state —
-          // reuse it so the reviewed diff stays disk → latest even when the
-          // model writes the same file twice in one run.
-          const priorWrite = findStagedForPath(useStagedChangesStore.getState().list(convId!), path)
-          let oldContent = ''
-          if (priorWrite) {
-            oldContent = priorWrite.oldContent
-          } else {
-            try {
-              const r = await backendCall<{ content?: string }>('fs_read', { path: resolvedPath, ...stageReadCtx })
-              oldContent = r?.content ?? ''
-            } catch {
-              // New file — leave oldContent empty so the diff renders an
-              // all-add hunk and the apply path creates the file.
-            }
-          }
-          const diff = computeUnifiedDiff(path, oldContent, newContent)
-          useStagedChangesStore.getState().stage(convId!, {
-            path,
-            resolvedPath,
-            // Capture the workspace root so Apply (which runs after the loop's
-            // finally clears the active context) can jail the write to the real
-            // project folder instead of agent-workspace/default. Undefined in
-            // sandbox mode — the per-chat sandbox is the right root there.
-            workingDirectory: workDir && workDir !== '.' ? workDir : undefined,
-            oldContent,
-            newContent,
-            diff,
-          })
-          return `Staged for review: ${path}. The user will apply or reject the change before it lands on disk.`
-        }
-
-        // Stage-mode counterpart for surgical edits: resolve old_string ->
-        // new_string against the current file NOW and stage the resulting full
-        // content, so the staged diff and the applied write are the real change
-        // (and a bad edit is reported the same way whether staged or not).
-        const stageFileEdit = async (args: ToolArgs): Promise<string> => {
-          const path = String(args.path ?? '')
-          if (!path) return 'file_edit: missing path'
-          const oldString = typeof args.old_string === 'string' ? args.old_string : ''
-          const newString = typeof args.new_string === 'string' ? args.new_string : ''
-          const isAbs = /^([a-zA-Z]:[\\/]|[\\/]|\\\\)/.test(path)
-          const resolvedPath = isAbs || !workDir || workDir === '.'
-            ? path
-            : `${workDir.replace(/[\\/]+$/, '')}${workDir.includes('\\') ? '\\' : '/'}${path.replace(/^[\\/]+/, '')}`
-          const stageReadCtx: { chatId?: string; workingDirectory?: string } =
-            workDir && workDir !== '.' ? { chatId: workspaceSlug, workingDirectory: workDir } : { chatId: workspaceSlug }
-          // Read-your-writes: chain onto the STAGED content when this path is
-          // already pending. Without this the base was re-read from DISK —
-          // which never saw the staged write — so a second edit to the same
-          // file silently clobbered the first, and an edit to a staged NEW
-          // file failed with "could not read".
-          const priorEdit = findStagedForPath(useStagedChangesStore.getState().list(convId!), path)
-          let baseContent = ''
-          let diskContent = ''
-          if (priorEdit) {
-            baseContent = priorEdit.newContent
-            diskContent = priorEdit.oldContent
-          } else {
-            try {
-              const r = await backendCall<{ content?: string; encoding?: string }>('fs_read', { path: resolvedPath, ...stageReadCtx })
-              if (r?.encoding === 'binary' || r?.encoding === 'base64') return `file_edit: cannot edit a binary file (${path}).`
-              baseContent = diskContent = r?.content ?? ''
-            } catch {
-              return `file_edit: could not read ${path}. To create a new file use file_write.`
-            }
-          }
-          const applied = applyUniqueEdit(baseContent, oldString, newString)
-          if (!applied.ok) {
-            switch (applied.reason) {
-              case 'empty_old': return 'file_edit: old_string must be non-empty. Use file_write to create a new file.'
-              case 'noop': return 'file_edit: old_string and new_string are identical, nothing to change.'
-              case 'not_found': return `file_edit: old_string not found in ${path}. Read the file and copy the exact text you want to replace.`
-              case 'not_unique': return `file_edit: old_string matches ${applied.matches} places in ${path}. Add surrounding lines so it is unique.`
-              default: return 'file_edit: failed.'
-            }
-          }
-          const newContent = applied.content ?? ''
-          // Diff and oldContent stay anchored on the DISK state, so the user
-          // reviews (and apply writes) disk → final, not staged → staged.
-          const diff = computeUnifiedDiff(path, diskContent, newContent)
-          useStagedChangesStore.getState().stage(convId!, {
-            path,
-            resolvedPath,
-            workingDirectory: workDir && workDir !== '.' ? workDir : undefined,
-            oldContent: diskContent,
-            newContent,
-            diff,
-          })
-          return `Staged for review: ${path} (surgical edit). The user will apply or reject the change before it lands on disk.`
-        }
+        // Die Ablage-Warteschlange und ALLES, was sie anfasst — die vier
+        // Zugriffe, die nur zusammen richtig sind: hooks/codex/staged-writes.ts.
+        const stagedWriter = createStagedWriter({
+          convId: convId!,
+          workDir,
+          workspaceSlug,
+          readFile: readWorkspaceFile,
+        })
 
         const dispatchTool = (name: string, args: ToolArgs, signal?: AbortSignal): Promise<string> => {
           // Stage-and-Approve follows the MODE preset, not the raw setting:
           // Ask stages every write for review, Bypass writes straight through,
           // Plan never gets here because the write tools are stripped.
           if (knobs.stageWrites) {
-            if (name === 'file_write') return stageFileWrite(args)
-            if (name === 'file_edit') return stageFileEdit(args)
-            // Read-your-writes: staged content is invisible on disk, so reads
-            // MUST be answered from the queue — otherwise the model reads the
-            // old bytes (or a not-found), concludes its write failed, and
-            // stages the same file forever (Morgan's file_read loop,
-            // 2026-07-26). The in-turn cache composes correctly: every staged
-            // write is audited as a file_write mutation, which invalidates
-            // cached reads, so a pre-stage result is never replayed.
-            const staged = convId ? useStagedChangesStore.getState().list(convId) : []
-            if (staged.length > 0) {
-              if (name === 'file_read') {
-                const hit = findStagedForPath(staged, String(args.path ?? ''))
-                if (hit) return Promise.resolve(stagedReadResult(hit))
-              }
-              if (name === 'file_list' || name === 'file_search') {
-                return withTimeout(name, args, signal).then((r) => r + stagedListingNote(staged))
-              }
-            }
+            return stagedWriter.dispatch(name, args, () => withTimeout(name, args, signal))
           }
           return withTimeout(name, args, signal)
         }
@@ -2163,31 +1881,15 @@ export function useCodex() {
           // itself re-checks. The display path checks it too instead of handing
           // whatever arrived to the differ.
           const acPath = asString(entry.injectedArgs.path)
-          let acDiff: string | undefined
-          if (entry.ac.toolName === 'file_write') {
-            // Pre-read above captured the on-disk version; a missing file
-            // yields an all-add hunk. Empty diff → omit.
-            const oldText = oldContents.get(entry.ac.id) ?? ''
-            const newText =
-              typeof entry.injectedArgs.content === 'string'
-                ? entry.injectedArgs.content
-                : ''
-            acDiff = computeUnifiedDiff(acPath ?? '', oldText, newText) || undefined
-          } else if (entry.ac.toolName === 'file_edit') {
-            // Surgical edit — the tool only received old_string/new_string, so
-            // reconstruct the new content from the pre-read + the unique
-            // replacement to attach a real diff. If the edit did not apply
-            // uniquely the executor already returned an error; skip the diff.
-            const oldText = oldContents.get(entry.ac.id) ?? ''
-            const applied = applyUniqueEdit(
-              oldText,
-              typeof entry.injectedArgs.old_string === 'string' ? entry.injectedArgs.old_string : '',
-              typeof entry.injectedArgs.new_string === 'string' ? entry.injectedArgs.new_string : '',
-            )
-            acDiff = applied.ok
-              ? computeUnifiedDiff(acPath ?? '', oldText, applied.content ?? '') || undefined
-              : undefined
-          }
+          // Der angezeigte Unterschied ist NACHGEBAUT, nicht beobachtet — die
+          // eine Stelle, die ueber eine Aenderung luegen kann:
+          // hooks/codex/tool-result-view.ts.
+          const acDiff = codexToolDiff({
+            toolName: entry.ac.toolName,
+            path: acPath,
+            oldText: oldContents.get(entry.ac.id) ?? '',
+            args: entry.injectedArgs,
+          })
           if (acDiff) entry.ac.diff = acDiff
 
           updateBlockById(entry.blockId, {
@@ -2201,22 +1903,16 @@ export function useCodex() {
                   : `Failed: ${entry.ac.toolName}`,
           })
 
-          // Codex event log parity with the old path.
+          // Codex event log parity with the old path. Welcher Eintrag —
+          // und warum ein FEHLGESCHLAGENES file_write trotzdem ein
+          // file_change bleibt: hooks/codex/tool-result-view.ts.
           const resultStr = entry.ac.result ?? entry.ac.error ?? ''
-          if (entry.ac.toolName === 'shell_execute' || entry.ac.toolName === 'code_execute') {
+          const eventKind = codexEventKind(entry.ac.toolName, isError)
+          if (eventKind) {
             codexStore.addEvent(convId, {
-              id: uuid(), type: 'terminal_output', content: resultStr, timestamp: Date.now(),
-            })
-          } else if (entry.ac.toolName === 'file_write' || entry.ac.toolName === 'file_edit') {
-            codexStore.addEvent(convId, {
-              id: uuid(), type: 'file_change', content: resultStr,
-              filePath: acPath,
-              diff: acDiff,
+              id: uuid(), type: eventKind, content: resultStr,
+              ...(eventKind === 'file_change' ? { filePath: acPath, diff: acDiff } : {}),
               timestamp: Date.now(),
-            })
-          } else if (isError) {
-            codexStore.addEvent(convId, {
-              id: uuid(), type: 'error', content: resultStr, timestamp: Date.now(),
             })
           }
         }
@@ -2447,11 +2143,8 @@ export function useCodex() {
       // The most recent chain is what the next turn actually needs; older
       // steps are summarised by the visible transcript anyway.
       const toolHistoryAll = messages.slice(messagesStartLen)
-      const HIDDEN_HISTORY_MAX = 60
-      let toolHistory = toolHistoryAll.slice(-HIDDEN_HISTORY_MAX)
-      // Never start the kept slice on an orphan tool result — strict
-      // providers 422 a result whose call fell outside the window.
-      while (toolHistory.length > 0 && toolHistory[0].role === 'tool') toolHistory = toolHistory.slice(1)
+      // Deckelung UND Waisenschnitt gehoeren zusammen: hooks/codex/hidden-history.ts.
+      const toolHistory = capHiddenToolHistory(toolHistoryAll)
       if (toolHistory.length > 0 && convId) {
         const store = useChatStore.getState()
         // Find the assistant message we just filled so we can insert BEFORE it
