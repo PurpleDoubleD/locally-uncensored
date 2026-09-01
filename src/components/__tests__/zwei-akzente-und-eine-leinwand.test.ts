@@ -45,9 +45,10 @@
  * Run: npx vitest run src/components/__tests__/zwei-akzente-und-eine-leinwand.test.ts
  */
 import { describe, it, expect } from 'vitest'
-import { readFileSync, readdirSync } from 'node:fs'
+import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { contrast, over } from './wcag-contrast'
+import { quelldateien, quelltext } from './quelldateien'
 
 const SRC = resolve(__dirname, '..', '..')
 const CSS = readFileSync(resolve(SRC, 'index.css'), 'utf8')
@@ -55,17 +56,7 @@ const nurCode = (s: string) =>
   s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1')
 const CSS_CODE = nurCode(CSS)
 
-function appDateien(dir = SRC): Array<[string, string]> {
-  const out: Array<[string, string]> = []
-  for (const e of readdirSync(dir, { withFileTypes: true })) {
-    if (e.name === '__tests__') continue
-    const p = resolve(dir, e.name)
-    if (e.isDirectory()) out.push(...appDateien(p))
-    else if (/\.tsx?$/.test(e.name)) out.push([p.slice(SRC.length + 1), readFileSync(p, 'utf8')])
-  }
-  return out
-}
-const DATEIEN = appDateien()
+const DATEIEN = quelldateien(SRC)
 const ALL = DATEIEN.map(([, s]) => s).join('\n')
 
 /** Ein Farbtoken aus index.css lesen — nicht aus dem Gedaechtnis. */
@@ -158,13 +149,12 @@ describe('die Leinwand hat einen Namen bekommen', () => {
       'components/ui/ContextMenu.tsx',
     ]
     for (const f of erwartet) {
-      const src = DATEIEN.find(([n]) => n === f)?.[1] ?? ''
-      expect(src, f).not.toBe('')
+      const src = quelltext(DATEIEN, f)
       expect(src, `${f} nimmt das Token nicht`).toContain('dark:bg-lu-canvas')
       expect(src, `${f} hat noch ein Literal`).not.toContain('dark:bg-[#141414]')
     }
     // Titlebar zeichnet zwei Varianten desselben Balkens.
-    const tb = DATEIEN.find(([n]) => n === 'components/layout/Titlebar.tsx')?.[1] ?? ''
+    const tb = quelltext(DATEIEN, 'components/layout/Titlebar.tsx')
     expect((tb.match(/dark:bg-lu-canvas/g) ?? []).length).toBe(2)
   })
 

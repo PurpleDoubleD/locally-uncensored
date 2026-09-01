@@ -47,8 +47,9 @@
  * Run: npx vitest run src/components/__tests__/die-typo-leiter-und-ihre-umgehung.test.ts
  */
 import { describe, it, expect } from 'vitest'
-import { readFileSync, readdirSync, existsSync } from 'node:fs'
+import { readFileSync, existsSync } from 'node:fs'
 import { resolve, dirname } from 'node:path'
+import { quelldateien, quelltext } from './quelldateien'
 
 const ROOT = resolve(__dirname, '..', '..', '..')
 const SRC = resolve(ROOT, 'src')
@@ -60,17 +61,7 @@ const nurCode = (s: string) =>
 const CSS_CODE = nurCode(CSS)
 
 /** Alle .ts/.tsx unter src/, rekursiv, ohne __tests__. Die App, nicht die Pruefung. */
-function appDateien(dir = SRC): Array<[string, string]> {
-  const out: Array<[string, string]> = []
-  for (const e of readdirSync(dir, { withFileTypes: true })) {
-    if (e.name === '__tests__') continue
-    const p = resolve(dir, e.name)
-    if (e.isDirectory()) out.push(...appDateien(p))
-    else if (/\.tsx?$/.test(e.name)) out.push([p.slice(SRC.length + 1), readFileSync(p, 'utf8')])
-  }
-  return out
-}
-const DATEIEN = appDateien()
+const DATEIEN = quelldateien(SRC)
 
 /** Jede arbitraere Schriftgroesse, mit ihrer Fundstellenzahl. */
 function arbitraereGroessen(): Map<string, number> {
@@ -253,7 +244,7 @@ describe('die Displaystufe traegt die Markenschrift, die schon ausgeliefert wird
   })
 
   it('die eine Call-Site der Displaystufe steht noch', () => {
-    const view = DATEIEN.find(([n]) => n === 'components/chat/ChatView.tsx')?.[1] ?? ''
+    const view = quelltext(DATEIEN, 'components/chat/ChatView.tsx')
     expect(view).toMatch(/className="t-display/)
   })
 })

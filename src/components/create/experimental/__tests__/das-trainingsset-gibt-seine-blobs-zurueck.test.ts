@@ -22,8 +22,8 @@
  * Lauf: npx vitest run src/components/create/experimental/__tests__/das-trainingsset-gibt-seine-blobs-zurueck.test.ts
  */
 import { describe, it, expect, beforeEach } from 'vitest'
-import { readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
+import { quelldateien } from '../../../__tests__/quelldateien'
 import { useCreateStore } from '../../../../stores/createStore'
 import { mediaRefFrom } from '../mediaRef'
 
@@ -120,18 +120,9 @@ describe('es gibt genau eine Stelle, die eine Slot-URL mintet', () => {
     // jede Oberfläche ihren eigenen `{ name, url, blob }` bauen darf, kommt
     // der nächste Slot ohne Freigabe daneben. `mediaRef.ts` ist die eine
     // Stelle; sein Gegenstück ist `releaseDroppedMediaRefs` im Store.
-    const root = join(__dirname, '..', '..')
-    const files: string[] = []
-    const walk = (dir: string) => {
-      for (const e of readdirSync(dir, { withFileTypes: true })) {
-        const full = join(dir, e.name)
-        if (e.isDirectory()) { if (e.name !== '__tests__') walk(full) }
-        else if (/\.tsx?$/.test(e.name)) files.push(full)
-      }
-    }
-    walk(root)
-    const offenders = files.filter((f) =>
-      /url:\s*URL\.createObjectURL/.test(readFileSync(f, 'utf8')))
-    expect(offenders.map((f) => f.slice(root.length + 1))).toEqual(['experimental/mediaRef.ts'])
+    const offenders = quelldateien(join(__dirname, '..', '..'))
+      .filter(([, inhalt]) => /url:\s*URL\.createObjectURL/.test(inhalt))
+      .map(([name]) => name)
+    expect(offenders).toEqual(['experimental/mediaRef.ts'])
   })
 })

@@ -14,8 +14,9 @@
  * und steht als solche in `ui/icon-size.ts`.
  */
 import { describe, it, expect } from 'vitest'
-import { readFileSync, readdirSync } from 'node:fs'
+import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
+import { quelldateien, quelltext } from './quelldateien'
 import {
   ICON_SM,
   ICON_MD,
@@ -31,18 +32,8 @@ const ROOT = resolve(__dirname, '..', '..', '..')
 const SRC = resolve(ROOT, 'src')
 const read = (...p: string[]) => readFileSync(resolve(SRC, ...p), 'utf8')
 
-/** Alle .tsx unter src/components, rekursiv, ohne __tests__. */
-function componentFiles(dir = resolve(SRC, 'components')): Array<[string, string]> {
-  const out: Array<[string, string]> = []
-  for (const e of readdirSync(dir, { withFileTypes: true })) {
-    if (e.name === '__tests__') continue
-    const p = resolve(dir, e.name)
-    if (e.isDirectory()) out.push(...componentFiles(p))
-    else if (e.name.endsWith('.tsx')) out.push([p.slice(SRC.length + 1), readFileSync(p, 'utf8')])
-  }
-  return out
-}
-const FILES = componentFiles()
+/** Alle .tsx unter src/components, rekursiv, ohne __tests__ — benannt ab src/. */
+const FILES = quelldateien(resolve(SRC, 'components'), { endungen: /\.tsx$/, relativZu: SRC })
 const ALL = FILES.map(([, s]) => s).join('\n')
 
 describe('die Leiter ist drei Zahlen, und sie stehen an einer Stelle', () => {
@@ -173,8 +164,7 @@ describe('die Leiter ist angewandt, wo dieses Paket hinreicht — und nur da', (
     // Titlebar und Onboarding zeichnen DENSELBEN Fensterbalken; sie hatten
     // 14 / 11 / 14 nebeneinander, in beiden Kopien.
     for (const f of ['components/layout/Titlebar.tsx', 'components/onboarding/Onboarding.tsx']) {
-      const src = FILES.find(([n]) => n === f)?.[1] ?? ''
-      expect(src, f).not.toBe('')
+      const src = quelltext(FILES, f)
       for (const glyph of ['Minus', 'Square']) {
         expect(src, `${f}: ${glyph}`).toMatch(new RegExp(`<${glyph} size=\\{ICON_SM\\}`))
       }
@@ -197,6 +187,9 @@ describe('die Leiter ist angewandt, wo dieses Paket hinreicht — und nur da', (
     // eine Leiterstufe.
     const sizes = new Set<number>()
     for (const [name, src] of FILES) {
+      // `three/` trifft nur, weil `quelldateien` die Namen auf `/` normalisiert.
+      // Mit den rohen Trennzeichen von `resolve` war dieser Filter unter Windows
+      // wirkungslos — still, denn heute steht in three/ kein ganzzahliges `size=`.
       if (name.includes('three/')) continue // three.js `size` ist keine Icon-Groesse
       for (const m of src.matchAll(/\bsize=\{(\d+)\}/g)) sizes.add(Number(m[1]))
     }

@@ -6,7 +6,68 @@ import tseslint from 'typescript-eslint'
 import { defineConfig, globalIgnores } from 'eslint/config'
 
 export default defineConfig([
-  globalIgnores(['dist', '.claude']),
+  // ── Was gebaut wurde, ist kein Quelltext ──────────────────────────────────
+  //
+  // KF-11. Ein gebautes Rust-Target enthaelt GENERIERTES JavaScript, und das
+  // hat in einer Quelltextpruefung nichts verloren. Tauris Codegen legt unter
+  // `src-tauri/target/**/out/tauri-codegen-assets/` gehashte `.js`/`.mjs` ab —
+  // keine Skripte, sondern eingebettete Assets; eslint kommt bis zum ersten
+  // Byte und meldet `Parsing error: Unexpected character`. Daneben liegen dort
+  // `_up_/dist/assets` und, nach einem Paketbau, eine ganze zweite Kopie des
+  // Frontends im App-Bundle.
+  //
+  // DER AUSLOESER IST NICHT DIE PLATTFORM, SONDERN DER BAUZUSTAND. Der Befund
+  // sah zuerst wie ein Windows-Problem aus (Mac 60, Windows 206 auf demselben
+  // Commit), war aber keines: auf dem Mac gab es zu dem Zeitpunkt bloss noch
+  // keinen Release-Build. Sobald einer da ist, meldet der Mac dieselbe Sorte
+  // Fehler in derselben Groessenordnung. Waehrend dieser Sitzung wanderte die
+  // Mac-Zahl allein durch einen nebenherlaufenden Rust-Build von 147 auf 132 —
+  // ohne dass sich eine Quelldatei geaendert haette.
+  //
+  // Ein Gate, dessen Zahl davon abhaengt, ob jemand vorher gebaut hat, ist
+  // kein Gate. `ci.yml` soll das Lint-Gate scharf schalten; dann waere es
+  // unerfuellbar gewesen, und zwar auf JEDER Maschine.
+  //
+  // AUSGESCHLOSSEN WIRD DER ORT, NICHT DIE ENDUNG. Eine Endungsliste
+  // (`**/tauri-codegen-assets/*.js`) traefe genau den heutigen Hashordner und
+  // laege beim naechsten Tauri-Update daneben. Es ist EIN Bauverzeichnis, also
+  // EIN Eintrag.
+  //
+  // UND `target` WAR NICHT ALLEIN. Nachgemessen in einem Baum, in dem diese
+  // Verzeichnisse WIRKLICH angelegt wurden (nicht an der Konfiguration
+  // gelesen): legt man in `playwright-report/`, `coverage/`, `test-results/`,
+  // `blob-report/`, `.vite/` und `.llama-build/` je eine `.js` ab, die keine
+  // ist — genau die Sorte, die Tauris Codegen produziert —, steigt `eslint .`
+  // von 45 auf 51. Ein Parsing-Fehler wird naemlich auch dann gemeldet, wenn
+  // fuer die Datei GAR KEIN Regelblock gilt: es reicht, dass eslint sie
+  // ueberhaupt aufmacht. Deshalb stehen sie hier alle, und nicht nur die eine,
+  // die zufaellig zuerst aufgefallen ist.
+  //
+  // `coverage` ist der Sonderfall in der Liste: es ist das einzige dieser
+  // Verzeichnisse, das `.gitignore` NICHT nennt. Es steht trotzdem hier, weil
+  // vitest sein Deckungsprotokoll dorthin schreibt und ein HTML-Bericht voller
+  // `.js` genau den Effekt oben ausloest.
+  //
+  // DASS DIE LISTE VOLLSTAENDIG IST, WIRD GEPRUEFT UND NICHT GEGLAUBT:
+  // `src/lib/__tests__/das-gate-bleibt-scharf.test.ts` haelt fest, dass eslint
+  // KEINE Datei begeht, die git ignoriert — auf jeder Maschine, mit dem
+  // Bauzustand, den sie gerade hat. Taucht hier je ein weiteres generiertes
+  // Verzeichnis auf, wird dieser Test rot und nennt es beim Namen, statt dass
+  // die Zahl still auseinanderlaeuft.
+  globalIgnores([
+    'dist',
+    'dist-ssr',
+    'src-tauri/target',
+    'coverage',
+    'playwright-report',
+    'blob-report',
+    'test-results',
+    'playwright/.cache',
+    '.vite',
+    '.llama-build',
+    '.preview-mobile',
+    '.claude',
+  ]),
 
   // ── Eine tote Unterdrueckung ist eine Luege ueber das, was geprueft wird ──
   //

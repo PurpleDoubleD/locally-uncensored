@@ -42,9 +42,10 @@
  * Run: npx vitest run src/components/__tests__/radius-schatten-hoehe-und-bewegung.test.ts
  */
 import { describe, it, expect } from 'vitest'
-import { readFileSync, readdirSync } from 'node:fs'
+import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { contrast, over } from './wcag-contrast'
+import { quelldateien, quelltext } from './quelldateien'
 
 const ROOT = resolve(__dirname, '..', '..', '..')
 const SRC = resolve(ROOT, 'src')
@@ -53,17 +54,7 @@ const nurCode = (s: string) =>
   s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1')
 const CSS_CODE = nurCode(CSS)
 
-function appDateien(dir = SRC): Array<[string, string]> {
-  const out: Array<[string, string]> = []
-  for (const e of readdirSync(dir, { withFileTypes: true })) {
-    if (e.name === '__tests__') continue
-    const p = resolve(dir, e.name)
-    if (e.isDirectory()) out.push(...appDateien(p))
-    else if (/\.tsx?$/.test(e.name)) out.push([p.slice(SRC.length + 1), readFileSync(p, 'utf8')])
-  }
-  return out
-}
-const DATEIEN = appDateien()
+const DATEIEN = quelldateien(SRC)
 const ALL = DATEIEN.map(([, s]) => s).join('\n')
 
 // ── Die Radiusleiter, aufgeloest wie der Browser sie aufloest ──────────
@@ -176,9 +167,9 @@ describe('EINE Radiusleiter, und keine zwei Namen auf derselben Zahl', () => {
     // Der sichtbare Teil des Befunds. Die Sidebar gehoert in diesem
     // Durchgang einem anderen Agenten, also wird sie hier GELESEN: ihre
     // 10px sind der Massstab, an den die Pane geht.
-    const side = DATEIEN.find(([n]) => n === 'components/layout/Sidebar.tsx')?.[1] ?? ''
+    const side = quelltext(DATEIEN, 'components/layout/Sidebar.tsx')
     expect(side).toContain('rounded-[10px]')
-    const shell = DATEIEN.find(([n]) => n === 'components/layout/AppShell.tsx')?.[1] ?? ''
+    const shell = quelltext(DATEIEN, 'components/layout/AppShell.tsx')
     expect(shell).toMatch(/<main className="[^"]*rounded-xl/)
     expect(effektiveLeiter().get('xl')).toBe(10)
   })
@@ -236,7 +227,7 @@ describe('ein Schatten kann im Dunkeln nichts heben — die Rechnung', () => {
 // ── D-T07: eine Hoehe, und zwar genau diese ────────────────────────────
 
 describe('die Reiter der Kopfzeile stehen auf einer benannten Stufe', () => {
-  const header = DATEIEN.find(([n]) => n === 'components/layout/Header.tsx')?.[1] ?? ''
+  const header = quelltext(DATEIEN, 'components/layout/Header.tsx')
 
   it('das Nav-Rezept nimmt --control-h-md — und nur sie', () => {
     const rezept = header.match(/const NAV_BASE = '([^']*)'/)?.[1] ?? ''

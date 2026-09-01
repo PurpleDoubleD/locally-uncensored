@@ -40,8 +40,9 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, parse } from 'node:path'
 import { containWithin, devResolveWithinJail, JailEscapeError, resolveExistingPrefix } from '../dev-fs-jail'
+import type { RealPathFn } from '../dev-fs-jail'
 
 /** Vorwärts-Schrägstriche, wie der Käfig sie sieht (auch unter Windows). */
 const s = (p: string): string => p.replace(/\\/g, '/')
@@ -52,6 +53,25 @@ let geheim = ''
 let wsLink = ''
 /** Ein Heimatverzeichnis, das mit den Testpfaden garantiert nichts zu tun hat. */
 const HOME = '/Users/kein-echtes-heim'
+
+/**
+ * Die Wurzel eines wurzel-relativen Pfades — `/` auf posix, `C:/` unter
+ * Windows.
+ *
+ * DAS IST KEINE TESTKOSMETIK, SONDERN DIE PLATTFORM. Ein Pfad wie
+ * `/gibt-es-nicht/x.txt` hat unter Windows kein Laufwerk und gehoert damit zum
+ * AKTUELLEN — `realpathSync('/')` antwortet dort `C:\`, auf macOS `/` (beides
+ * am 01.09.2026 auf beiden Maschinen nachgemessen). `resolveExistingPrefix`
+ * loest den tiefsten existierenden Vorfahren auf, und der Vorfahre `/`
+ * existiert auf beiden Systemen; es kommt also dieselbe Stelle zurueck, nur in
+ * der Schreibweise des jeweiligen Systems.
+ *
+ * Genommen wird sie von `node:path`, nicht von `node:fs` und nicht von der
+ * geprueften Datei: `parse(cwd).root` ist eine unabhaengige Auskunft darueber,
+ * wie die Wurzel des aktuellen Laufwerks heisst, und macht die Zusicherung
+ * damit nicht zum Spiegel des Codes, den sie prueft.
+ */
+const WURZEL = s(parse(process.cwd()).root)
 
 const realPath = (p: string): string => realpathSync(p)
 
@@ -153,9 +173,28 @@ describe('resolveExistingPrefix', () => {
     )
   })
 
-  it('gibt den lexikalischen Pfad zurück, wenn gar nichts existiert', () => {
+  it('löst nur den existierenden Vorfahren auf und lässt den Rest wörtlich stehen', () => {
+    // Auf beiden Systemen existiert hier GENAU EIN Vorfahre: die Wurzel. Der
+    // ganze Rest wird unverändert angehängt — kein Segment verschwindet, keins
+    // wird umgestellt, keins aufgelöst.
     expect(resolveExistingPrefix('/gibt-es-nicht/auch-nicht/x.txt', realPath)).toBe(
+      `${WURZEL}gibt-es-nicht/auch-nicht/x.txt`,
+    )
+  })
+
+  it('gibt den lexikalischen Pfad zurück, wenn wirklich gar nichts existiert', () => {
+    // Der Zweig, den der Test darüber NICHT erreicht: `segments.length === 0`,
+    // also "auch das Präfix gibt es nicht". Über das Dateisystem ist er auf
+    // keiner der beiden Maschinen erreichbar — `/` existiert auf macOS, und
+    // unter Windows löst es sich auf das aktuelle Laufwerk auf. Erreichbar ist
+    // er über den Auflöser, und der wird ohnehin hereingereicht: ein Auflöser,
+    // der IMMER wirft, ist genau "nichts existiert", auf jedem System gleich.
+    const nichtsExistiert: RealPathFn = () => { throw new Error('ENOENT') }
+    expect(resolveExistingPrefix('/gibt-es-nicht/auch-nicht/x.txt', nichtsExistiert)).toBe(
       '/gibt-es-nicht/auch-nicht/x.txt',
+    )
+    expect(resolveExistingPrefix('C:/gibt-es-nicht/x.txt', nichtsExistiert)).toBe(
+      'C:/gibt-es-nicht/x.txt',
     )
   })
 

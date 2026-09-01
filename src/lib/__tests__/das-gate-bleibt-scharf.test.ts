@@ -35,6 +35,7 @@
  */
 import { describe, it, expect, beforeAll } from 'vitest'
 import { readFileSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
 import { ESLint } from 'eslint'
@@ -168,5 +169,62 @@ describe('tsc deckt die Seite ab, die eslint hier abgibt', () => {
     const e2e = readCfg('tsconfig.e2e.json')
     expect(e2e).toContain('"e2e"')
     expect(e2e).toContain('playwright.config.ts')
+  })
+})
+
+// ── KF-11: eslint prueft Quelltext, nicht Bauabfall ───────────────────────
+
+describe('eslint begeht nichts, was gebaut wurde', () => {
+  /**
+   * Der Befund sah zuerst nach einem Plattformunterschied aus — `eslint .`
+   * meldete auf demselben Commit 60 Probleme auf dem Mac und 206 unter
+   * Windows —, war aber keiner: auf dem Mac gab es bloss noch keinen
+   * Release-Build. `eslint.config.js` schloss `src-tauri/target` nicht aus, und
+   * Tauris Codegen legt dort gehashte `.js` ab, die keine Skripte sind.
+   *
+   * DIESER TEST IST DER GRUND, WARUM DIE LISTE DORT NICHT GEGLAUBT WERDEN
+   * MUSS. Er fragt nicht die Konfiguration, sondern git: welche Dateien liegen
+   * auf DIESER Maschine, in DIESEM Bauzustand, die unversioniert und von einer
+   * Ignore-Regel gedeckt sind? Keine davon darf eslint aufmachen.
+   *
+   * Warum das die richtige Grenze ist: ein Parsing-Fehler wird auch dann
+   * gemeldet, wenn fuer die Datei gar kein Regelblock gilt — es reicht, dass
+   * eslint sie oeffnet. „Es gilt ja keine Regel" ist also kein Schutz.
+   *
+   * `node_modules` bleibt aussen vor: das ignoriert eslint von Haus aus, und
+   * es aufzuzaehlen kostet nur Zeit.
+   *
+   * WAS DIESER TEST NICHT SIEHT: ein generiertes Verzeichnis, das WEDER in
+   * `.gitignore` steht NOCH in `globalIgnores`. Es waere dann unversioniert
+   * und nicht ignoriert — git meldet es hier nicht. `coverage/` ist genau
+   * dieser Fall und steht deshalb ausdruecklich in `globalIgnores`.
+   */
+  it('keine von git ignorierte Datei landet im Lauf', async () => {
+    const ignoriert = execFileSync(
+      'git',
+      ['ls-files', '--others', '--ignored', '--exclude-standard', '--', ':!node_modules'],
+      { cwd: ROOT, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 },
+    )
+      .split('\n')
+      .filter(Boolean)
+      // Nur, was eslint ueberhaupt aufmachen wuerde.
+      .filter((p) => /\.(m|c)?[jt]sx?$/.test(p))
+
+    // Eine leere Liste waere ein gruener Test ueber nichts. Auf einer Maschine
+    // ohne jeden Build ist sie legitim leer — dann sagt der Test das, statt
+    // Deckung zu behaupten.
+    if (ignoriert.length === 0) {
+      expect(ignoriert).toEqual([])
+      return
+    }
+
+    const begangen: string[] = []
+    for (const p of ignoriert) {
+      if (!(await eslint.isPathIgnored(resolve(ROOT, p)))) begangen.push(p)
+    }
+    expect(
+      begangen.slice(0, 20),
+      `${begangen.length} generierte Dateien werden gelintet — gehoert das Verzeichnis in globalIgnores?`,
+    ).toEqual([])
   })
 })
