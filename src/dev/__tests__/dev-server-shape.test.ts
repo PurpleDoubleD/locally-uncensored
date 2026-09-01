@@ -39,6 +39,22 @@ const viteConfig = readFileSync(resolve(process.cwd(), 'vite.config.ts'), 'utf8'
   })
   .join('\n')
 
+/**
+ * Der Textausschnitt EINES Handlers.
+ *
+ * Ein Grep über die ganze Datei beantwortet „steht der Wächter irgendwo" —
+ * die Frage ist aber „steht er in DIESEM Handler". `bis` ist die nächste
+ * Marke; ohne Angabe endet der Ausschnitt an der nächsten Middleware.
+ */
+function ausschnitt(von: string, bis?: string | null): string {
+  const start = viteConfig.indexOf(von)
+  expect(start, `nicht gefunden: ${von}`).toBeGreaterThanOrEqual(0)
+  const rest = viteConfig.slice(start + von.length)
+  const marke = bis ?? "server.middlewares.use('/local-api/"
+  const ende = rest.indexOf(marke)
+  return ende < 0 ? rest : rest.slice(0, ende)
+}
+
 describe('der Request-Körper', () => {
   it('wird nirgends mehr chunkweise zu einem String addiert', () => {
     // `body += chunk` dekodiert jeden Chunk einzeln; ein Zeichen auf der
@@ -101,5 +117,74 @@ describe('der SSRF-Wächter', () => {
 
   it('lässt net.isIP das Orakel bleiben, statt es nachzubauen', () => {
     expect(viteConfig).toContain('net.isIP(value)')
+  })
+
+  it('hängt auch am Model-Download, nicht nur an den beiden Proxies', () => {
+    // DER BEFUND: `downloadFile` holte jede URL, die der Aufrufer angab, und
+    // schrieb die Antwort auf die Platte — `http://169.254.169.254/…`
+    // eingeschlossen, zwei Bildschirmseiten unter `proxy-image` /
+    // `proxy-download`, die genau dagegen geschützt sind. Der gepackte Build
+    // hat an derselben Stelle `proxy::validate_public_url(url)?`
+    // (download.rs::download_with_progress).
+    const downloadFile = ausschnitt('function downloadFile(', 'server.middlewares.use(\'/local-api/download-model\'')
+    expect(downloadFile).toContain('await assertPublicUrl(requestUrl)')
+  })
+
+  it('prüft JEDEN Weiterleitungs-Hop, nicht nur den ersten', () => {
+    // Der klassische Bypass: eine öffentliche URL antwortet mit 302 auf
+    // 169.254.169.254. Rust benutzt dafür `ssrf_safe_redirect_policy`; hier
+    // muss die Weiterleitung zurück durch `doRequest` — und damit durch den
+    // Wächter — statt an ihm vorbei.
+    const downloadFile = ausschnitt('function downloadFile(', 'server.middlewares.use(\'/local-api/download-model\'')
+    // Der Wächter steht VOR dem ersten `proto.get`, nicht dahinter.
+    const wächter = downloadFile.indexOf('await assertPublicUrl(requestUrl)')
+    expect(wächter).toBeGreaterThanOrEqual(0)
+    expect(wächter).toBeLessThan(downloadFile.indexOf('proto.get('))
+    // Und die Weiterleitung geht durch dieselbe Funktion.
+    expect(downloadFile).toMatch(/doRequest\(next, redirectCount \+ 1\)/)
+    expect(downloadFile).not.toMatch(/doRequest\(response\.headers\.location/)
+  })
+})
+
+describe('die fünf fs-Endpunkte', () => {
+  // DER BEFUND: `fs-read`, `fs-write`, `fs-list`, `fs-search` und `fs-info`
+  // prüften den Pfad nicht. `{"path":"../../.ssh/id_rsa"}` verliess den
+  // Arbeitsordner, und `fs-write` schrieb auf jeden absoluten Pfad. Die Regel
+  // selbst steht in src/lib/dev-fs-jail.ts (Port von `resolve_path` in
+  // src-tauri/src/commands/filesystem.rs), der Weg dorthin in
+  // src/dev/fs-request-path.ts — siehe fs-request-path.test.ts.
+
+  it('bauen den Pfad nicht mehr selbst zusammen', () => {
+    // Der Ausdruck, der in allen fünf Handlern stand.
+    expect(viteConfig).not.toMatch(/isAbsolute\([A-Za-z]+\)\s*\?/)
+    expect(viteConfig).not.toContain("join(os.homedir(), AGENT_WORKSPACE_DIR, filePath)")
+    expect(viteConfig).not.toContain("join(os.homedir(), AGENT_WORKSPACE_DIR, dirPath)")
+  })
+
+  it('gehen alle fünf durch den Käfig', () => {
+    const stellen = viteConfig.match(/resolveFsRequestPath\(body, os\.homedir\(\)\)/g) ?? []
+    expect(stellen.length).toBe(5)
+    for (const endpunkt of ['fs-read', 'fs-write', 'fs-list', 'fs-search', 'fs-info']) {
+      const bis = endpunkt === 'fs-info' ? "server.middlewares.use('/local-api/system-info'" : null
+      const handler = ausschnitt(`server.middlewares.use('/local-api/${endpunkt}'`, bis)
+      expect(handler, endpunkt).toContain('resolveFsRequestPath(body, os.homedir())')
+    }
+  })
+
+  it('lösen den Pfad VOR dem try auf, damit ein Ausbruch kein 200 wird', () => {
+    // fs-list und fs-search antworten in ihrem catch mit 200 und leerer
+    // Liste; läge der Käfig darin, sähe ein Ausbruchsversuch aus wie ein
+    // leeres Verzeichnis statt wie ein 403.
+    for (const endpunkt of ['fs-read', 'fs-write', 'fs-list', 'fs-search', 'fs-info']) {
+      const bis = endpunkt === 'fs-info' ? "server.middlewares.use('/local-api/system-info'" : null
+      const handler = ausschnitt(`server.middlewares.use('/local-api/${endpunkt}'`, bis)
+      expect(handler.indexOf('resolveFsRequestPath('), endpunkt).toBeLessThan(handler.indexOf('try {'))
+    }
+  })
+
+  it('lassen JailEscapeError als 403 heraus', () => {
+    // `withJsonBody` fängt, was der Handler wirft, und `failRequest` ist der
+    // Weg für die Handler, die selbst fangen.
+    expect(viteConfig).toContain("err instanceof JailEscapeError ? 403 : 400")
   })
 })

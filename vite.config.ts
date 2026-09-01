@@ -14,7 +14,7 @@ import {
   writeFileSync,
   type Dirent,
 } from 'fs'
-import { resolve, join, basename, isAbsolute } from 'path'
+import { resolve, join, basename } from 'path'
 import type { IncomingMessage, ServerResponse } from 'http'
 import https from 'https'
 import http from 'http'
@@ -43,6 +43,7 @@ import {
   parseJsonBody,
 } from './src/dev/http-body'
 import { createSsrfPolicy } from './src/dev/ssrf-policy'
+import { resolveFsRequestPath } from './src/dev/fs-request-path'
 import {
   applyConsoleRemovals,
   collectConsoleRemovals,
@@ -721,8 +722,48 @@ function comfyLauncher(): Plugin {
           const filename = basename(destPath)
           activeDownloads.set(id, { progress: 0, total: 0, speed: 0, filename, status: 'connecting' })
 
-          const doRequest = (requestUrl: string, redirectCount = 0) => {
-            if (redirectCount > 5) { promiseReject(new Error('Too many redirects')); return }
+          /** Abbruch mit sichtbarem Status — der Fortschritts-Endpunkt liest activeDownloads. */
+          const failDownload = (err: unknown) => {
+            const error = err instanceof Error ? err : new Error(errorText(err) || String(err))
+            const current = activeDownloads.get(id)
+            activeDownloads.set(id, {
+              progress: current?.progress ?? 0,
+              total: current?.total ?? 0,
+              speed: 0,
+              filename,
+              status: 'error',
+              error: error.message,
+            })
+            promiseReject(error)
+          }
+
+          const doRequest = async (requestUrl: string, redirectCount = 0) => {
+            if (redirectCount > 5) { failDownload(new Error('Too many redirects')); return }
+
+            // SSRF-WÄCHTER, GLEICHE GRENZE WIE RUST.
+            //
+            // `downloadFile` holte bis zu diesem Commit jede URL, die der
+            // Aufrufer angab, und schrieb die Antwort auf die Platte —
+            // `http://169.254.169.254/latest/meta-data/` eingeschlossen, zwei
+            // Bildschirmseiten unter den Proxies, die genau dagegen geschützt
+            // sind. Im gepackten Build geht dieselbe Operation durch
+            // `download.rs::download_with_progress`, und die Zeile dort ist
+            // `proxy::validate_public_url(url)?` — dieselbe Liste, die
+            // `assertPublicUrl` hier abbildet. Kein LAN-Sonderfall: die
+            // Rust-Seite hat auch keinen (proxy.rs sperrt 192.168.1.50
+            // nachweislich), und ein Sonderfall NUR im Dev-Server wäre wieder
+            // die schwächere Tür.
+            //
+            // JEDER HOP, nicht nur der erste: eine öffentliche URL, die auf
+            // 169.254.169.254 weiterleitet, ist der klassische Bypass. Rust
+            // benutzt dafür `ssrf_safe_redirect_policy`; hier läuft jede
+            // Weiterleitung ohnehin erneut durch diese Funktion.
+            try {
+              await assertPublicUrl(requestUrl)
+            } catch (err) {
+              failDownload(err)
+              return
+            }
 
             // Resume support (issue #51, adhney): if a partial file exists, ask
             // the server for the remaining bytes via Range instead of restarting
@@ -740,7 +781,19 @@ function comfyLauncher(): Plugin {
             const proto = requestUrl.startsWith('https') ? https : http
             proto.get(requestUrl, { headers }, (response) => {
               if (response.statusCode && response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
-                doRequest(response.headers.location, redirectCount + 1)
+                // `Location` darf relativ sein (RFC 7231). Vorher ging der
+                // rohe Wert zurück in `doRequest`, wo `startsWith('https')`
+                // ihn als http las und `http.get('/pfad')` scheiterte; gegen
+                // die aktuelle URL aufgelöst ist er eine echte URL, die der
+                // Wächter oben lesen kann.
+                let next: string
+                try {
+                  next = new URL(response.headers.location, requestUrl).toString()
+                } catch {
+                  failDownload(new Error(`Invalid redirect target: ${response.headers.location}`))
+                  return
+                }
+                void doRequest(next, redirectCount + 1).catch(failDownload)
                 return
               }
               const isPartial = response.statusCode === 206
@@ -790,7 +843,9 @@ function comfyLauncher(): Plugin {
               promiseReject(err)
             })
           }
-          doRequest(url)
+          // `doRequest` ist async und meldet jeden Abbruch selbst über
+          // `failDownload`; der Wurf hier wäre sonst ein unbehandeltes Promise.
+          void doRequest(url).catch(failDownload)
         })
       }
 
@@ -1521,15 +1576,16 @@ function comfyLauncher(): Plugin {
         })
       })
 
-      // API: FS read (unsandboxed)
+      // API: FS read — im Käfig (siehe src/dev/fs-request-path.ts)
       server.middlewares.use('/local-api/fs-read', (req, res) => {
         if (!requirePost(req, res)) return
         withJsonBody(req, res, (body) => {
+          // BEWUSST VOR dem try: ein Ausbruch ist kein Lesefehler. Er fliegt
+          // durch bis zu withJsonBody, das JailEscapeError als 403 beantwortet
+          // — der catch unten würde daraus eine 200 mit `error` machen.
+          const resolved = resolveFsRequestPath(body, os.homedir())
           try {
-            const filePath = bodyString(body, 'path') ?? ''
-            const os = require('os')
             const fs = require('fs')
-            const resolved = isAbsolute(filePath) ? filePath : join(os.homedir(), AGENT_WORKSPACE_DIR, filePath)
             const content = fs.readFileSync(resolved, 'utf8')
             res.writeHead(200, { 'Content-Type': 'application/json' })
             res.end(JSON.stringify({ content, encoding: 'utf8' }))
@@ -1588,16 +1644,17 @@ function comfyLauncher(): Plugin {
         })
       })
 
-      // API: FS write (unsandboxed)
+      // API: FS write — im Käfig (siehe src/dev/fs-request-path.ts)
       server.middlewares.use('/local-api/fs-write', (req, res) => {
         if (!requirePost(req, res)) return
         withJsonBody(req, res, (body) => {
+          // VOR dem try, und hier zählt es am meisten: dieser Endpunkt schrieb
+          // auf jeden Pfad, den der Prozess öffnen darf. Ausbruch → 403, und
+          // zwar bevor irgendein Verzeichnis angelegt wird.
+          const resolved = resolveFsRequestPath(body, os.homedir())
           try {
-            const filePath = bodyString(body, 'path') ?? ''
             const content = bodyString(body, 'content') ?? ''
-            const os = require('os')
             const fs = require('fs')
-            const resolved = isAbsolute(filePath) ? filePath : join(os.homedir(), AGENT_WORKSPACE_DIR, filePath)
             const parentDir = resolve(resolved, '..')
             if (!existsSync(parentDir)) mkdirSync(parentDir, { recursive: true })
             fs.writeFileSync(resolved, content, 'utf8')
@@ -1614,10 +1671,11 @@ function comfyLauncher(): Plugin {
       server.middlewares.use('/local-api/fs-list', (req, res) => {
         if (!requirePost(req, res)) return
         withJsonBody(req, res, (body) => {
+          // VOR dem try: der catch unten antwortet mit 200 und leerer Liste,
+          // was einen Ausbruchsversuch als „leeres Verzeichnis" tarnen würde.
+          const resolved = resolveFsRequestPath(body, os.homedir())
           try {
-            const dirPath = bodyString(body, 'path') ?? ''
             const recursive = bodyFlag(body, 'recursive')
-            const resolved = isAbsolute(dirPath) ? dirPath : join(os.homedir(), AGENT_WORKSPACE_DIR, dirPath)
             const entries: Array<{ name: string; path: string; size: number; isDir: boolean; modified: number }> = []
             // `recursive` arrived from the caller (file_list passes the model's
             // flag straight through) and was then ignored, so in dev mode a
@@ -1656,17 +1714,17 @@ function comfyLauncher(): Plugin {
       server.middlewares.use('/local-api/fs-search', (req, res) => {
         if (!requirePost(req, res)) return
         withJsonBody(req, res, (body) => {
+          // VOR dem try, aus demselben Grund wie bei fs-list: der catch unten
+          // antwortet mit 200 und leerer Trefferliste.
+          const resolved = resolveFsRequestPath(body, os.homedir())
           try {
-            const dirPath = bodyString(body, 'path') ?? ''
             const pattern = bodyString(body, 'pattern')
             if (!pattern) {
               res.writeHead(400, { 'Content-Type': 'application/json' })
               res.end(JSON.stringify({ results: [], count: 0, error: 'Missing pattern' }))
               return
             }
-            const os = require('os')
             const fs = require('fs')
-            const resolved = isAbsolute(dirPath) ? dirPath : join(os.homedir(), AGENT_WORKSPACE_DIR, dirPath)
             const re = new RegExp(pattern)
             const results: FsSearchHit[] = []
             const max = bodyNumber(body, 'max_results') ?? 50
@@ -1709,11 +1767,9 @@ function comfyLauncher(): Plugin {
       server.middlewares.use('/local-api/fs-info', (req, res) => {
         if (!requirePost(req, res)) return
         withJsonBody(req, res, (body) => {
+          const resolved = resolveFsRequestPath(body, os.homedir())
           try {
-            const filePath = bodyString(body, 'path') ?? ''
-            const os = require('os')
             const fs = require('fs')
-            const resolved = isAbsolute(filePath) ? filePath : join(os.homedir(), AGENT_WORKSPACE_DIR, filePath)
             const stat = fs.statSync(resolved)
             res.writeHead(200, { 'Content-Type': 'application/json' })
             res.end(JSON.stringify({
