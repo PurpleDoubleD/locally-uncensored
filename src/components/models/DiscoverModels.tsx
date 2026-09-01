@@ -1,7 +1,7 @@
-import { useCallback, useState, useEffect } from 'react'
+import { useCallback, useState, useEffect, useRef } from 'react'
 import { bundleIsComplete, bundleIsDownloading, bundleHasErrors } from '../../lib/bundle-state'
 import { motion } from 'framer-motion'
-import { Search, XCircle, Loader2, Sparkles, Unlock, ShieldCheck, ExternalLink, Download, CheckCircle } from 'lucide-react'
+import { Search, XCircle, Loader2, Sparkles, Unlock, ShieldCheck, ExternalLink, Download, CheckCircle, Info } from 'lucide-react'
 import { X } from 'lucide-react'
 import {
   searchHuggingFaceModels,
@@ -38,7 +38,9 @@ import { proxyImageUrl } from '../../lib/privacy'
 import { log } from '../../lib/logger'
 import {
   ModelTile, BundleTile, HardwareChip, groupModels, pickDefaultVariant, computeFit,
+  CapLegend,
 } from './ModelTiles'
+import { ICON_SM } from '../ui/icon-size'
 
 interface Props {
   category: ModelCategory
@@ -52,6 +54,165 @@ interface Props {
 // 2026-06-06) — only the labels turned human. 'fit' is new and additive:
 // it filters on the detected GPU instead of a fixed bucket.
 type SizeTier = 'all' | 'fit' | 'ultra' | 'light' | 'middle' | 'highend'
+
+// ─── D-S25 · eine Segmented-Sprache statt zwei ──────────────────────
+//
+// Der Befund: „Zwei Segmented-Sprachen 47px uebereinander: Mainstream/
+// Unfiltered rechteckig, Groessenfilter als Pills." Beide Reihen sind
+// dasselbe Bedienelement — eine Reihe, aus der genau EINE Sache aktiv ist —
+// und sahen komplett verschieden aus:
+//
+//   Reihe 1  Behaelter mit Rand, `rounded-md`-Segmente, 0.66rem fett,
+//            aktiv = weisse Flaeche + `shadow-sm`
+//   Reihe 2  freistehende `rounded-full`-Pillen, jede mit eigenem Rand,
+//            11px halbfett, aktiv = graue Flaeche + dunklerer Rand
+//
+// Dazu zwei Zustandsquellen: Reihe 1 setzte `aria-pressed` UND faerbte
+// selbst, Reihe 2 faerbte nur. Jetzt tragen beide Reihen dieselbe Spur und
+// dieselben Segmente, und der aktive Zustand kommt an BEIDEN Stellen aus
+// `aria-pressed` — `.lu-control` liest ihn (index.css). Kein Segment
+// faerbt sich mehr selbst, also kann die Optik nicht mehr neben der
+// Barrierefreiheit herlaufen.
+//
+// Nebenbei faellt hier das zweite `shadow-sm` des Screens weg (D-S24): der
+// aktive Zustand kommt aus Flaeche + Textfarbe, die auf `#141414`
+// gerechnet sind, nicht aus einem Hell-Modus-Schatten, den dort niemand
+// sieht.
+//
+// Die Spur ist bewusst KEIN neues Rezept in index.css, sondern nur der
+// Behaelter um die vorhandenen Controls: 2px Luft (`p-0.5`) und ein Radius,
+// der eine Stufe ueber dem der Segmente liegt, damit die Ecken parallel
+// laufen (`--radius-control` + 2px).
+//
+// Mitgenommen aus der Zeile, die hier vorher stand, weil die Falle bleibt:
+// ein aktives Segment darf NICHT `text-white`/`bg-gray-900` invertieren —
+// die Rettungsregel `.light .text-white` in index.css macht daraus im
+// Hellmodus Gray-900 auf Gray-900. `.lu-control` faellt nicht hinein: sein
+// aktiver Zustand ist im Hellmodus `rgb(17 24 39)` auf `rgba(0,0,0,.05)`,
+// also weder `text-white` noch eine dunkle Flaeche.
+const SEGMENT_TRACK =
+  'inline-flex items-center gap-0.5 p-0.5 rounded-[calc(var(--radius-control)+2px)] '
+  + 'bg-gray-100 dark:bg-white/[0.04] border border-gray-200 dark:border-white/[0.06] '
+  + 'flex-wrap'
+
+// ─── T-69 · Auf eine Datei warten, ohne einen Timer zu hinterlassen ──
+
+/** Wie das Warten geendet hat. Nur `complete` heisst „weitermachen". */
+export type FileWaitOutcome = 'complete' | 'paused' | 'cancelled' | 'aborted'
+
+/**
+ * Genau das, was das Warten vom Download-Store braucht: den aktuellen Stand
+ * lesen und mitbekommen, wenn er sich aendert. Absichtlich nicht der ganze
+ * Store — so laesst sich die Wartefunktion gegen einen echten zustand-Store
+ * pruefen, ohne dass der Test Tauri oder Rust braucht.
+ */
+export interface DownloadWatcher {
+  getState: () => { downloads: Record<string, DownloadProgress> }
+  subscribe: (listener: () => void) => () => void
+}
+
+/**
+ * Wie lange „der Eintrag ist noch nicht da" geduldet wird, bevor es als
+ * Fehlschlag gilt. Rust hat den Auftrag zu diesem Zeitpunkt schon
+ * angenommen (`startModelDownloadToPath` ist `await`ed durch), es fehlt nur
+ * noch der erste `refresh()` — das dauert Sekunden, nicht Minuten.
+ */
+export const FIRST_SIGHT_MS = 30_000
+
+/**
+ * Warten, bis eine Datei fertig heruntergeladen ist — als Abonnement, nicht
+ * als Timer.
+ *
+ * Der Befund (Technik-Audit, „Discovery & Downloads", T-69): der
+ * Built-in-Engine-Installpfad wartete mit einem `setInterval(…, 500)`, das
+ * `clearInterval` nur in zwei von fuenf moeglichen Ausgaengen rief —
+ * `complete` und `error`. Pausiert der Nutzer, steht der Eintrag auf
+ * `paused`; bricht er ab, verschwindet der Eintrag ganz; verlaesst er die
+ * Ansicht, ist niemand mehr da, der zuhoert. In allen drei Faellen traf der
+ * Timer keinen der beiden Zweige, lief mit 2 Hz weiter, und das Promise, auf
+ * das die Installation `await`ete, settelte nie. Pro Versuch ein Timer, und
+ * die Schleife darunter stand fuer immer.
+ *
+ * Hier gibt es keinen zweiten Timer mehr. Der Store wird von `startPolling()`
+ * ohnehin im Sekundentakt aus Rust nachgefuellt, und jedes `set()`
+ * benachrichtigt seine Abonnenten — gewartet wird also auf die Nachricht, die
+ * es schon gibt.
+ *
+ * Fuenf Ausgaenge, und jeder raeumt hinter sich auf:
+ *
+ *   `complete`      die Datei liegt auf Platte      → `'complete'`
+ *   `error`         Rust meldet den Fehlschlag      → `reject`
+ *   `paused`        der Nutzer hat angehalten       → `'paused'`
+ *   Eintrag weg     der Nutzer hat abgebrochen      → `'cancelled'`
+ *   `signal`        Ansicht weg / neuer Versuch     → `'aborted'`
+ *
+ * Warum `paused` beendet statt weiterzuwarten: die Installation verspricht
+ * „Modell laden, dann die Engine darauf starten". Ein Start von llama-server
+ * raeumt VRAM frei und wechselt das aktive Modell — das eine halbe Stunde
+ * spaeter im Hintergrund zu tun, weil der Nutzer irgendwann fortgesetzt hat,
+ * waere schlimmer als es gar nicht zu tun. Der Nutzer erfaehrt genau das
+ * (`installNotice`), statt dass die Installation still stehenbleibt.
+ *
+ * `cancelled` wird ERST gemeldet, nachdem der Eintrag einmal gesehen wurde.
+ * Zwischen dem Start des Downloads und dem ersten `refresh()` existiert er
+ * noch nicht, und „noch nicht da" ist nicht dasselbe wie „geloescht". Damit
+ * ein Eintrag, der ueberhaupt nie auftaucht, die alte Haengerei nicht durch
+ * die Hintertuer zurueckholt, hat genau dieses Fenster eine Frist —
+ * `FIRST_SIGHT_MS`, und der eine `setTimeout` dafuer wird auf jedem Ausgang
+ * geloescht.
+ */
+export function awaitDownloadedFile(
+  watcher: DownloadWatcher,
+  filename: string,
+  signal: AbortSignal,
+  firstSightMs: number = FIRST_SIGHT_MS,
+): Promise<FileWaitOutcome> {
+  return new Promise<FileWaitOutcome>((resolve, reject) => {
+    let seen = false
+    let settled = false
+    let unsubscribe: (() => void) | null = null
+    let firstSight: ReturnType<typeof setTimeout> | null = null
+
+    const settle = (finish: () => void) => {
+      if (settled) return
+      settled = true
+      if (firstSight !== null) { clearTimeout(firstSight); firstSight = null }
+      signal.removeEventListener('abort', onAbort)
+      unsubscribe?.()
+      unsubscribe = null
+      finish()
+    }
+
+    function onAbort() {
+      settle(() => resolve('aborted'))
+    }
+
+    const look = () => {
+      const d = watcher.getState().downloads[filename]
+      if (!d) {
+        // Weg, nachdem er da war = `cancel()` hat die Zeile geloescht.
+        if (seen) settle(() => resolve('cancelled'))
+        return
+      }
+      seen = true
+      if (firstSight !== null) { clearTimeout(firstSight); firstSight = null }
+      if (d.status === 'complete') settle(() => resolve('complete'))
+      else if (d.status === 'error') settle(() => reject(new Error(d.error || 'Download failed')))
+      else if (d.status === 'paused') settle(() => resolve('paused'))
+    }
+
+    if (signal.aborted) { resolve('aborted'); return }
+    signal.addEventListener('abort', onAbort)
+    firstSight = setTimeout(
+      () => settle(() => reject(new Error(`${filename} never showed up in the download list`))),
+      firstSightMs,
+    )
+    unsubscribe = watcher.subscribe(look)
+    // Der Stand von JETZT zaehlt auch: ein Abonnement allein verpasst eine
+    // Datei, die schon fertig ist.
+    look()
+  })
+}
 
 export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }: Props) {
   const [civitaiResults, setCivitaiResults] = useState<CivitAIModelResult[]>([])
@@ -245,6 +406,18 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
 
   const [installingBundle, setInstallingBundle] = useState<string | null>(null)
   const [installError, setInstallError] = useState<string | null>(null)
+  // Kein Fehler, sondern eine Auskunft: der Nutzer hat den Download angehalten
+  // oder abgebrochen, und die Installation sagt, was das fuer die Engine
+  // bedeutet. Der rote Banner darunter waere hier eine Falschaussage — Rot
+  // heisst in dieser App „kaputt oder wird geloescht" (siehe die Begruendung
+  // am `.lu-control`-Rezept in index.css).
+  const [installNotice, setInstallNotice] = useState<string | null>(null)
+  // T-69: ein Controller pro Installationsversuch. Er bricht ab, wenn die
+  // Ansicht verschwindet — AppShell haengt Models an `currentView === 'models'`
+  // (`AppShell.tsx:955`), ein Wechsel haengt sie also wirklich ab — und wenn
+  // ein neuer Versuch startet.
+  const installWaitRef = useRef<AbortController | null>(null)
+  useEffect(() => () => installWaitRef.current?.abort(), [])
   // Confirmation gate for multi-part (sharded) downloads — these sets routinely
   // run hundreds of GB across many files, so we never start them silently.
   const [confirmDownload, setConfirmDownload] = useState<{ name: string; files: HfGgufFile[]; targetDir: string; totalGB: number; note?: string } | null>(null)
@@ -592,14 +765,28 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
         // it so the freshly-added model is chat-ready without a manual switch.
         // The projector is awaited too: booting before it lands would bring the
         // model up text-only and the image button would lie.
-        const awaitFile = (fname: string) => new Promise<void>((resolve, reject) => {
-          const poll = setInterval(() => {
-            const d = dlStore.getState().downloads[fname]
-            if (d?.status === 'complete') { clearInterval(poll); resolve() }
-            else if (d?.status === 'error') { clearInterval(poll); reject(new Error(d.error || 'Download failed')) }
-          }, 500)
-        })
-        for (const f of plan) await awaitFile(f.filename)
+        //
+        // T-69: das Warten ist ein Abonnement auf den Download-Store, kein
+        // eigener Timer — siehe `awaitDownloadedFile` oben. Ein zweiter Klick
+        // bricht das Warten des ersten ab, statt zwei Warteschlangen auf
+        // dieselbe Datei zu legen.
+        installWaitRef.current?.abort()
+        const wait = new AbortController()
+        installWaitRef.current = wait
+        setInstallNotice(null)
+        for (const f of plan) {
+          const outcome = await awaitDownloadedFile(dlStore, f.filename, wait.signal)
+          if (outcome === 'complete') continue
+          // Jeder andere Ausgang ist eine Entscheidung des Nutzers (Pause,
+          // Abbruch) oder das Ende der Ansicht. Keiner davon ist ein Fehler,
+          // und keiner darf spaeter noch eine Engine hochfahren.
+          if (outcome === 'paused') {
+            setInstallNotice(`Download paused. The built-in engine keeps the model it is running — resume ${f.filename} to finish the switch.`)
+          } else if (outcome === 'cancelled') {
+            setInstallNotice('Download cancelled. The built-in engine keeps the model it is running.')
+          }
+          return
+        }
         try {
           await startBundledEngine(`${targetDir}/${realName}`)
         } catch (e) {
@@ -676,30 +863,22 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
     <div className="space-y-4">
       {/* Filter bar: Unfiltered/Mainstream + size chips + hardware chip */}
       <div className="flex items-center gap-2 flex-wrap">
-        <div className="flex p-0.5 rounded-lg bg-gray-100 dark:bg-white/[0.04] border border-gray-200 dark:border-white/[0.06]">
+        <div className={SEGMENT_TRACK} role="group" aria-label="Catalogue">
           <button
             onClick={() => setSubTab('mainstream')}
             aria-pressed={subTab === 'mainstream'}
             title="Popular models with tool calling + vision"
-            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[0.66rem] font-semibold transition-all ${
-              subTab === 'mainstream'
-                ? 'bg-white dark:bg-white/10 text-gray-900 dark:text-white shadow-sm'
-                : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
-            }`}
+            className="lu-control"
           >
-            <ShieldCheck size={11} /> Mainstream
+            <ShieldCheck size={ICON_SM} /> Mainstream
           </button>
           <button
             onClick={() => setSubTab('uncensored')}
             aria-pressed={subTab === 'uncensored'}
             title="No filters, no limits"
-            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[0.66rem] font-semibold transition-all ${
-              subTab === 'uncensored'
-                ? 'bg-white dark:bg-white/10 text-gray-900 dark:text-white shadow-sm'
-                : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
-            }`}
+            className="lu-control"
           >
-            <Unlock size={11} /> Unfiltered
+            <Unlock size={ICON_SM} /> Unfiltered
           </button>
         </div>
 
@@ -710,7 +889,7 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
 
       {/* Size chips — same buckets as the old VRAM-tier filter, plain labels */}
       {(isImage || isVideo || (isText && (uncensoredModels.length > 0 || mainstreamModels.length > 0))) && (
-        <div className="flex gap-1.5 flex-wrap">
+        <div className={SEGMENT_TRACK} role="group" aria-label="Size">
           {([
             { key: 'all' as SizeTier, label: 'All', desc: '' },
             ...(systemVRAM ? [{ key: 'fit' as SizeTier, label: 'Fits my PC', desc: `≤${systemVRAM} GB` }] : []),
@@ -722,19 +901,23 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
             <button
               key={tier.key}
               onClick={() => setVramTier(tier.key)}
-              className={`px-2.5 py-1 rounded-full text-[11px] font-medium transition-all border ${
-                vramTier === tier.key
-                  // No text-white/bg-gray-900 inversion here: the `.light .text-white`
-                  // rescue remap (index.css) would turn that into gray-900-on-gray-900.
-                  ? 'bg-gray-200 text-gray-900 dark:bg-white/15 dark:text-white border-gray-300 dark:border-white/20'
-                  : 'text-gray-500 border-gray-200 dark:border-white/[0.06] hover:text-gray-800 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-white/5'
-              }`}
+              aria-pressed={vramTier === tier.key}
+              className="lu-control"
             >
               {tier.label}
-              {tier.desc && <span className={`text-[9px] ml-1 ${vramTier === tier.key ? 'text-gray-600 dark:text-gray-400' : 'text-gray-400 dark:text-gray-500'}`}>{tier.desc}</span>}
+              {tier.desc && <span className="opacity-60 ml-1">{tier.desc}</span>}
             </button>
           ))}
         </div>
+      )}
+
+      {/* D-S22 · die Legende zu den Faehigkeitszeichen auf den Kacheln.
+          Steht einmal hier statt 53 Mal als Tooltip, den man erst findet,
+          wenn man auf einem 12px-Glyph stehenbleibt. Sie rendert aus
+          derselben `CAPABILITIES`-Tabelle wie die Kacheln (ModelTiles.tsx),
+          kann also nicht von ihnen abweichen. */}
+      {isText && (uncensoredModels.length > 0 || mainstreamModels.length > 0) && (
+        <CapLegend />
       )}
 
       {/* Install error banner */}
@@ -744,6 +927,21 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
           <span className="flex-1">{installError}</span>
           <button onClick={() => setInstallError(null)} className="text-red-400 hover:text-red-300 shrink-0">
             <X size={14} />
+          </button>
+        </div>
+      )}
+
+      {/* Install notice — T-69. Nicht rot: eine Pause ist keine Panne. */}
+      {installNotice && (
+        <div className="flex items-center gap-2 p-3 rounded-lg bg-gray-100 dark:bg-white/[0.04] border border-gray-200 dark:border-white/[0.06] text-gray-600 dark:text-gray-300 text-sm">
+          <Info size={ICON_SM} className="shrink-0" />
+          <span className="flex-1">{installNotice}</span>
+          <button
+            onClick={() => setInstallNotice(null)}
+            className="lu-control lu-control--icon shrink-0"
+            aria-label="Dismiss this notice"
+          >
+            <X size={ICON_SM} />
           </button>
         </div>
       )}
@@ -874,7 +1072,46 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
         </GlassCard>
       )}
 
-      {/* Welle 3, Listen-Ladezustand 1 von 4: „Loading models..." war ein
+      {/* ── D-S26 · „Keine Virtualisierung: 53 Karten = 1610 DOM-Knoten,
+          300 Modelle ≈ 9000." ──────────────────────────────────────────
+
+          Hier steht bewusst KEINE Virtualisierung und auch nicht das Mittel,
+          mit dem T-11 dasselbe Problem im Transkript geloest hat
+          (`content-visibility: auto` in MessageList.tsx). Beides wurde
+          gemessen, bevor es verworfen wurde.
+
+          Gezaehlt im Test (`__tests__/das-raster-zaehlt-seine-knoten.test.ts`,
+          echter Katalog durch `renderToStaticMarkup`): 53 Kacheln je Reiter,
+          rund 28 Elementknoten pro Kachel.
+
+          Gemessen in der laufenden App (Chromium, Dev-Server :5273,
+          1600×900, dreispaltig; erzwungenes Style+Layout ueber
+          `scroller.offsetHeight`, Median aus 41 Messungen):
+
+            53 Kacheln  · 1304 Knoten im Raster, 1595 auf der Seite · 0,2 ms
+           303 Kacheln  · Kacheln geklont, ≈ 7500 Knoten            · 1,1 ms
+
+          Dieselbe Messung mit `content-visibility: auto` +
+          `contain-intrinsic-size: auto 125px` auf jeder Kachel: 0,2 ms und
+          1,1 ms — unveraendert. Dafuer wuchs `scrollHeight` um rund 20 %
+          (2187 → 2637 px bzw. 11367 → 13842 px), weil die Ersatzhoehe eine
+          Schaetzung ist: der Rollbalken wuerde luegen, bis der Nutzer an
+          jeder Kachel einmal vorbeigescrollt ist.
+
+          Der Grund fuer den Unterschied zum Transkript: eine Nachrichtenblase
+          ist ein gerendertes Markdown-Dokument (Prism-Spans, KaTeX,
+          Tabellen), eine Modellkachel sind 25 Flexboxen. `content-visibility`
+          spart das Layout eines Teilbaums — hier gibt es keinen, der sich zu
+          sparen lohnt.
+
+          Und die 300 aus dem Befund sind eine Hochrechnung: gleichzeitig im
+          DOM stehen koennen heute der Katalog (53) plus die
+          HuggingFace-Suche, und die fragt mit `limit=20` (discover.ts).
+          Der Test haelt diese Obergrenze fest und wird rot, sobald der
+          Katalog aus dem gemessenen Bereich herauswaechst — dann neu messen,
+          nicht raten.
+
+          Welle 3, Listen-Ladezustand 1 von 4: „Loading models..." war ein
           Satz mittig auf 32px Hoehe, wo gleich sechs bis dreiundfuenfzig
           Kacheln stehen — die Seite sprang beim Eintreffen der Liste um
           mehrere Bildschirmhoehen. Das Skelett traegt die Rastergeometrie. */}
