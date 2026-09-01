@@ -4079,14 +4079,20 @@ mod remote_hardening_tests {
     // a builtin, so there is no `sleep` grandchild to orphan, and closing the
     // pipe or killing the child ends it at once.
     //
-    // What that costs, stated plainly: a shebang's `name()` is the interpreter
-    // ("bash" on macOS), not the script, so this process cannot impersonate a
-    // cloudflared. The positive end-to-end hit — `find_stale_tunnels` returning
-    // a real process — is therefore no longer available as a gate on this
-    // platform. What replaces it is below, and the boundary is named in the
-    // report: the name half of the matcher is covered by the exhaustive pure
-    // tests above, the argv half is covered here on real data, and
-    // `find_stale_tunnels`'s body is the composition of exactly those two.
+    // A shebang's `name()` is the interpreter ("bash" on macOS), not the
+    // script, so THAT stand-in cannot impersonate a cloudflared — it carries a
+    // real argv and a real name, which is what the three decomposed tests
+    // below need, but not the name the sweep looks for.
+    //
+    // The positive end-to-end direction gets its own stand-in, and the reason
+    // it is a different one is worth writing down: SIP kills copies of
+    // PLATFORM binaries, not copies of anything. Measured the same way, 15
+    // spawns of a copy of this crate's own (ad-hoc, linker-signed) test binary
+    // ran past a second and exited normally every time, with no SIGKILL at
+    // all. So `examples/park.rs` is compiled by the toolchain and copied under
+    // the name `cloudflared` — a real process, really named that, really
+    // publishing our port, found by the real sweep. See
+    // `the_sweep_finds_a_real_cloudflared_by_its_argv`.
 
     /// A live process with an argv we chose, that the OS will keep running.
     ///
@@ -4160,6 +4166,88 @@ mod remote_hardening_tests {
             }
             return Ok(sys);
         }
+    }
+
+    /// A live process that really is NAMED `cloudflared`, publishing `port`.
+    ///
+    /// `examples/park.rs` compiled by this same toolchain, copied under the
+    /// name the matcher reads. Ad-hoc/linker-signed rather than platform-
+    /// signed, so none of the SIGKILL story above applies to it; it blocks on
+    /// the stdin pipe this test holds, so it lives exactly as long as the test
+    /// wants and leaves nothing behind.
+    #[cfg(unix)]
+    fn live_cloudflared(port: u16) -> (tempfile::TempDir, std::process::Child) {
+        use std::process::{Command, Stdio};
+
+        // target/<profile>/deps/<test binary> -> target/<profile>/examples/park
+        let exe = std::env::current_exe().expect("current_exe");
+        let park = exe
+            .parent()
+            .and_then(|deps| deps.parent())
+            .map(|profile| profile.join("examples").join("park"))
+            .expect("no target/<profile>/ above the test binary");
+        assert!(
+            park.is_file(),
+            "{} is missing. It is `src-tauri/examples/park.rs`, which `cargo test` builds \
+             alongside the tests; if it is gone, this test is not measuring the sweep.",
+            park.display(),
+        );
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let bin = dir.path().join("cloudflared");
+        std::fs::copy(&park, &bin).expect("copy the stand-in");
+
+        let child = Command::new(&bin)
+            .args(["tunnel", "--url", &format!("http://127.0.0.1:{port}")])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("spawn the stand-in");
+        (dir, child)
+    }
+
+    /// The positive end-to-end direction, and the one T-39 depends on: a real,
+    /// live `cloudflared` publishing our port is FOUND by the sweep.
+    ///
+    /// Everything in it is real — the process, its name, its argv, the process
+    /// table, the matcher. Nothing is substituted. It is asserted on a snapshot
+    /// `checked_table` has already vouched for, so there is no clock and no
+    /// retry standing in for a guarantee.
+    #[cfg(unix)]
+    #[test]
+    fn the_sweep_finds_a_real_cloudflared_by_its_argv() {
+        // Its own port, so that nothing it asserts can depend on what the other
+        // stand-ins in this module happen to be doing at the same moment.
+        let port: u16 = 61436;
+        let (_dir, mut child) = live_cloudflared(port);
+        let pid = child.id();
+        let table = checked_table(pid);
+        let _ = child.kill();
+        let _ = child.wait();
+
+        let sys = table.unwrap_or_else(|why| panic!("{why}"));
+        let entry = sys
+            .process(sysinfo::Pid::from_u32(pid))
+            .expect("checked_table only returns a table containing this pid");
+
+        // If this ever fails the rest means nothing: the stand-in would not be
+        // impersonating a cloudflared at all.
+        assert_eq!(
+            entry.name().to_string_lossy(),
+            "cloudflared",
+            "the stand-in is not reported under the name the sweep matches on",
+        );
+        assert!(
+            find_stale_tunnels(&sys, port).contains(&pid),
+            "the sweep did not find a live cloudflared publishing {port} — this is exactly \
+             the state the sweep was in while it reported 0 killed on every start. argv={:?}",
+            crate::process_util::cmdline_of(entry),
+        );
+        assert!(
+            !find_stale_tunnels(&sys, port + 1).contains(&pid),
+            "a sweep for another port matched this tunnel",
+        );
     }
 
     /// The fifteen-month bug itself, on real data.
@@ -4264,45 +4352,6 @@ mod remote_hardening_tests {
              tidy up",
             entry.name(),
         );
-    }
-
-    /// SONDE (temporaer): ueberlebt eine Kopie eines SELBST KOMPILIERTEN
-    /// Binaries, oder toetet macOS sie wie die Kopie von /bin/sh?
-    #[cfg(unix)]
-    #[test]
-    #[ignore]
-    fn zz_selfbuilt_survives() {
-        use std::os::unix::fs::PermissionsExt;
-        use std::process::{Command, Stdio};
-        let me = std::env::current_exe().expect("current_exe");
-        let mut out = Vec::new();
-        for _ in 0..15 {
-            let dir = tempfile::tempdir().unwrap();
-            let bin = dir.path().join("cloudflared");
-            std::fs::copy(&me, &bin).unwrap();
-            std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
-            let t0 = std::time::Instant::now();
-            // Ein einzelner verschachtelter Test, der rund eine Sekunde laeuft —
-            // also weit ueber dem 95-486ms-Fenster, in dem die /bin/sh-Kopie starb.
-            let mut c = Command::new(&bin)
-                .args([
-                    "--test-threads=1",
-                    "--exact",
-                    "commands::remote::remote_hardening_tests::stopping_the_tunnel_takes_its_children_with_it",
-                ])
-                .stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null())
-                .spawn().unwrap();
-            let mut res = None;
-            for _ in 0..1200 {
-                if let Ok(Some(st)) = c.try_wait() { res = Some(format!("{}ms/{st}", t0.elapsed().as_millis())); break; }
-                std::thread::sleep(std::time::Duration::from_millis(5));
-            }
-            match res {
-                Some(r) => out.push(r),
-                None => { out.push(">6000ms/lebt noch".into()); let _ = c.kill(); let _ = c.wait(); }
-            }
-        }
-        println!("SELBST-KOMPILIERT: {out:?}");
     }
 
     #[test]
