@@ -1168,6 +1168,10 @@ pub fn start_character_training(
     let cancel = state.trainer_cancel.clone();
     let pid_slot = state.trainer_process.clone();
     let env_broken = state.trainer_env_broken.clone();
+    // T-65: the training thread outlives this `State` borrow, so resolve
+    // ComfyUI's ACTUAL address here (user-configured host/port from AppState,
+    // not a hardcoded localhost:8188) and move the verdict in.
+    let comfy_vram_target = crate::commands::process::comfy_vram_target(state.inner());
     cancel.store(false, Ordering::SeqCst);
 
     std::thread::spawn(move || {
@@ -1302,8 +1306,24 @@ pub fn start_character_training(
         // 3) the train itself — documented 12 GB combo: fp8 base + block swap
         // + gradient checkpointing + 8-bit optimizer. ComfyUI's model cache
         // would eat the same VRAM the trainer needs — ask it to let go first.
-        if crate::commands::process::free_comfyui_memory() {
-            push_log(&run, "Freed ComfyUI's cached models to make room for training.");
+        match &comfy_vram_target {
+            Ok(base) => {
+                let outcome = crate::commands::process::free_comfyui_memory_at(base);
+                if outcome.released() {
+                    push_log(&run, "Freed ComfyUI's cached models to make room for training.");
+                } else if let Some((target, why)) = outcome.not_responsible() {
+                    // Used to be a silent `false`. On a 12 GB card the user is
+                    // about to hit CUDA OOM, and "LU could not ask" is the one
+                    // sentence that explains it.
+                    push_log(
+                        &run,
+                        &format!("Did not free ComfyUI's VRAM ({target}): {why}"),
+                    );
+                }
+            }
+            Err((target, why)) => {
+                push_log(&run, &format!("Did not free ComfyUI's VRAM ({target}): {why}"));
+            }
         }
         set_status(&run, "running", &format!("Step 3/4: Training ({steps} steps). This runs for a while, live log below..."));
         let accelerate = {

@@ -827,8 +827,16 @@ fn start_bundled_engine_blocking(
     // cache for memory — llama-server with `-ngl 999` loses as a CUDA OOM
     // (RTX 5080 field report: ACE-Step → chat = crash until app restart). Ask
     // ComfyUI to drop its cache first; best-effort no-op when it isn't running.
-    if crate::commands::process::free_comfyui_memory() {
-        println!("[Engine] asked ComfyUI to free VRAM before engine start");
+    // T-65: the address comes from AppState (user-configured port/host), and a
+    // ComfyUI that is not this machine's is reported as such instead of
+    // reading like an idle one.
+    match crate::commands::process::free_comfyui_memory(state) {
+        r if r.released() => println!("[Engine] asked ComfyUI to free VRAM before engine start"),
+        r => {
+            if let Some((target, why)) = r.not_responsible() {
+                println!("[Engine] did not free ComfyUI VRAM ({target}) — {why}");
+            }
+        }
     }
 
     // Ollama fights for the same VRAM and, unlike ComfyUI, its freshly-used
@@ -836,8 +844,15 @@ fn start_bundled_engine_blocking(
     // just-active 14B loaded, this engine's own load crawled through paging and
     // blew the health budget (live repro 2026-07-31; an IDLE model gets evicted
     // fine). Evict via keep_alive:0 — Ollama reloads lazily on its next use.
-    if crate::commands::process::offload_ollama_loaded_models() {
-        println!("[Engine] asked Ollama to evict loaded models before engine start");
+    match crate::commands::process::offload_ollama_loaded_models(state) {
+        r if r.released() => {
+            println!("[Engine] asked Ollama to evict loaded models before engine start")
+        }
+        r => {
+            if let Some((target, why)) = r.not_responsible() {
+                println!("[Engine] did not evict Ollama models ({target}) — {why}");
+            }
+        }
     }
 
     let binary = resolve_engine_binary(app).ok_or_else(|| {

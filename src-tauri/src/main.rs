@@ -258,6 +258,7 @@ fn main() {
             commands::process::start_ollama,
             commands::process::start_comfyui,
             commands::process::stop_comfyui,
+            commands::process::kill_process_tree,
             commands::process::fix_comfyui_cors,
             commands::process::comfyui_status,
             commands::process::comfyui_last_output,

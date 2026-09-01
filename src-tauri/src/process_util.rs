@@ -29,6 +29,55 @@ pub fn suppress_window(cmd: &mut Command) {
     }
 }
 
+// ── Reading the process table by COMMAND LINE ───────────────────────────────
+//
+// `System::refresh_processes` does NOT fetch command lines. Its refresh kind is
+// memory + cpu + disk_usage + exe (sysinfo-0.33 `common/system.rs:296`), so
+// `Process::cmd()` comes back as an EMPTY slice for every process, and any
+// matcher that joins it silently compares against "".
+//
+// That is not a hypothetical. It cost this repo two independent bugs, and the
+// second one is the reason this helper exists rather than a third copy of the
+// same three lines:
+//
+//   * `process::find_orphaned_comfyui` (T-68) — the scan for a ComfyUI orphaned
+//     by a hard kill found nothing at all, so Stop stayed the no-op the audit
+//     described even after the adoption path was written.
+//   * `remote::kill_orphaned_tunnels` (T-39) — the startup sweep that kills a
+//     cloudflared tunnel surviving from the last run could never match, so a
+//     tunnel kept publishing the LAN server to the internet while the app's own
+//     indicator read OFF. AUDIT-COVERAGE.md recorded that finding as fixed,
+//     because the fix LOOKED like it applied.
+//
+// One of the two got repaired and the other did not, purely because nobody knew
+// they were the same line twice. So: one helper, one place to get this wrong.
+
+/// A refreshed process table whose entries actually carry their command lines.
+///
+/// Use this — never a bare `System::new()` + `refresh_processes()` — whenever
+/// the answer depends on `Process::cmd()`.
+pub fn process_table_with_cmdlines() -> sysinfo::System {
+    use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
+    let mut sys = System::new();
+    sys.refresh_processes_specifics(
+        ProcessesToUpdate::All,
+        true,
+        // `name()` stays populated by the base discovery, so a matcher that
+        // reads both the name and the argv is served by this one refresh.
+        ProcessRefreshKind::nothing().with_cmd(UpdateKind::Always),
+    );
+    sys
+}
+
+/// One process's command line as owned strings, in argv order.
+pub fn cmdline_of(process: &sysinfo::Process) -> Vec<String> {
+    process
+        .cmd()
+        .iter()
+        .map(|c| c.to_string_lossy().to_string())
+        .collect()
+}
+
 /// Spawn a command with stdout+stderr piped, console suppressed on Windows.
 pub fn spawn_piped(mut cmd: Command) -> std::io::Result<Child> {
     cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
@@ -161,6 +210,54 @@ pub fn kill_tree(child: &mut Child) -> std::io::Result<()> {
         });
     }
     Ok(())
+}
+
+/// Same escalation as [`kill_tree`], but for a pid this process does NOT own.
+///
+/// The case it exists for (T-68): LU is hard-killed, its ComfyUI child is
+/// reparented to init and survives. The next launch can identify that process
+/// but has no `Child` for it — so there is nothing to `wait()` on, and calling
+/// `waitpid` on a stranger would fail with ECHILD anyway. Everything else is
+/// the same walk: snapshot the tree while the parent links still exist,
+/// SIGTERM it, then SIGKILL whatever is still there (and still the same
+/// process, by start time) after the grace, off the caller's thread.
+pub fn kill_pid_tree(pid: u32) {
+    #[cfg(windows)]
+    {
+        let _ = Command::new("taskkill")
+            .args(["/T", "/F", "/PID", &pid.to_string()])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+    }
+    #[cfg(unix)]
+    {
+        let tree = tree_snapshot(pid);
+        for (p, _) in &tree {
+            unsafe {
+                libc::kill(*p as i32, libc::SIGTERM);
+            }
+        }
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(800));
+            use sysinfo::{Pid, ProcessesToUpdate, System};
+            let mut sys = System::new();
+            sys.refresh_processes(ProcessesToUpdate::All, true);
+            for (p, start) in tree {
+                let same = sys
+                    .process(Pid::from_u32(p))
+                    .map(|proc_| start == 0 || proc_.start_time() == start)
+                    .unwrap_or(false);
+                if same {
+                    unsafe {
+                        libc::kill(p as i32, libc::SIGKILL);
+                    }
+                }
+            }
+            // No waitpid: an adopted orphan is init's child, not ours. init
+            // reaps it.
+        });
+    }
 }
 
 /// Best-effort stop of whatever process is LISTENING on a local TCP port.
@@ -342,6 +439,75 @@ mod kill_tree_tests {
             }
             assert!(Instant::now() < deadline, "pid {pid} is still listed as {st:?}");
             std::thread::sleep(Duration::from_millis(100));
+        }
+    }
+}
+
+/// The one regression this helper exists to stop: a process table without
+/// command lines.
+///
+/// Both callers (`process::find_orphaned_comfyui`, `remote::kill_orphaned_tunnels`)
+/// match on argv, and both were silently matching against "" before this was
+/// centralised. This test is the shared guard — it fails for either of them.
+#[cfg(test)]
+mod process_table_tests {
+    use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn the_table_carries_command_lines() {
+        use std::process::{Command, Stdio};
+        // The trailing `; :` stops sh from exec'ing the single command and
+        // handing over its own argv — which would erase what is being read.
+        let marker = "lu-process-table-probe-8f3a";
+        let mut child = Command::new("/bin/sh")
+            .args(["-c", "sleep 30; :", marker, "--flag", "value"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("spawn the stand-in");
+
+        let mut seen: Option<Vec<String>> = None;
+        for _ in 0..40 {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+            let sys = process_table_with_cmdlines();
+            if let Some(p) = sys.process(sysinfo::Pid::from_u32(child.id())) {
+                let cmd = cmdline_of(p);
+                if !cmd.is_empty() {
+                    seen = Some(cmd);
+                    break;
+                }
+            }
+        }
+        let _ = child.kill();
+        let _ = child.wait();
+
+        let cmd = seen.expect(
+            "the process table came back with an EMPTY command line — \
+             refresh_processes does not fetch cmd, and every argv matcher in \
+             this repo would silently be comparing against \"\"",
+        );
+        assert!(cmd.iter().any(|a| a == marker), "{cmd:?}");
+        assert!(cmd.iter().any(|a| a == "--flag"), "{cmd:?}");
+    }
+
+    /// Nobody may quietly reintroduce a second, cmd-less refresh for an argv
+    /// match. The two known matchers must go through the helper.
+    #[test]
+    fn the_argv_matchers_share_one_refresh() {
+        const PROCESS_RS: &str = include_str!("commands/process.rs");
+        const REMOTE_RS: &str = include_str!("commands/remote.rs");
+        for (name, src, func) in [
+            ("process.rs", PROCESS_RS, "pub(crate) fn find_orphaned_comfyui"),
+            ("remote.rs", REMOTE_RS, "fn kill_orphaned_tunnels"),
+        ] {
+            let start = src.find(func).unwrap_or_else(|| panic!("{func} is gone from {name}"));
+            let body = &src[start..start + 1200];
+            assert!(
+                body.contains("process_table_with_cmdlines()"),
+                "{name}: {func} builds its own process table again"
+            );
         }
     }
 }

@@ -5370,22 +5370,39 @@ fn targets_loopback_port(text: &str, port: u16) -> bool {
 /// user believes is LAN-only, reachable from the internet, with the app's own
 /// tunnel indicator reading OFF because this process never started it.
 fn kill_orphaned_tunnels(port: u16) -> usize {
-    use sysinfo::{ProcessesToUpdate, System};
-    let mut sys = System::new();
-    sys.refresh_processes(ProcessesToUpdate::All, true);
+    // The table MUST come from this helper. Until 2026-09-01 this function
+    // built its own with `System::refresh_processes`, which does not fetch
+    // command lines — so `process.cmd()` was EMPTY, `targets_loopback_port`
+    // was handed "", and the sweep could never match a single process. It ran
+    // on every start, reported 0, and looked like it worked. The identical
+    // mistake sat in `process::find_orphaned_comfyui`; only one of the two was
+    // ever noticed, which is why the refresh now lives in one place.
+    let sys = crate::process_util::process_table_with_cmdlines();
     let mut killed = 0usize;
-    for process in sys.processes().values() {
-        let name = process.name().to_string_lossy().to_string();
-        let cmd: Vec<String> = process
-            .cmd()
-            .iter()
-            .map(|c| c.to_string_lossy().to_string())
-            .collect();
-        if is_stale_tunnel_process(&name, &cmd, port) && process.kill() {
-            killed += 1;
+    for pid in find_stale_tunnels(&sys, port) {
+        if let Some(process) = sys.process(sysinfo::Pid::from_u32(pid)) {
+            if process.kill() {
+                killed += 1;
+            }
         }
     }
     killed
+}
+
+/// The pids of every cloudflared publishing `port`, read off an already
+/// refreshed table.
+///
+/// Split from the kill so the scan can be tested against real processes
+/// without the test having to kill anything.
+fn find_stale_tunnels(sys: &sysinfo::System, port: u16) -> Vec<u32> {
+    sys.processes()
+        .iter()
+        .filter(|(_, process)| {
+            let name = process.name().to_string_lossy().to_string();
+            is_stale_tunnel_process(&name, &crate::process_util::cmdline_of(process), port)
+        })
+        .map(|(pid, _)| pid.as_u32())
+        .collect()
 }
 
 #[tauri::command]
@@ -6932,6 +6949,67 @@ mod remote_hardening_tests {
             11435
         ));
         assert!(!is_stale_tunnel_process("cloudflared", &cmd("cloudflared --version"), 11435));
+    }
+
+    /// The sweep against the REAL process table.
+    ///
+    /// The two tests around this one feed `is_stale_tunnel_process` strings and
+    /// have always passed — including for the fifteen months the sweep could
+    /// not match anything at all, because `refresh_processes` never fetched the
+    /// argv they were pretending to be. Only a real process proves the scan is
+    /// wired to real data.
+    ///
+    /// The stand-in is a COPY of `/bin/sh` named `cloudflared`: sysinfo reports
+    /// `name()` from the executed file, so a copy gets the name the matcher
+    /// requires (a symlink does not — it reports the resolved target, measured
+    /// 2026-09-01). Nothing is killed here; the test reaps its own child.
+    #[cfg(unix)]
+    #[test]
+    fn the_sweep_finds_a_real_cloudflared_by_its_argv() {
+        use std::os::unix::fs::PermissionsExt;
+        use std::process::{Command, Stdio};
+
+        let port: u16 = 61435;
+        let dir = tempfile::tempdir().expect("tempdir");
+        let bin = dir.path().join("cloudflared");
+        std::fs::copy("/bin/sh", &bin).expect("copy the stand-in");
+        std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+
+        let mut child = Command::new(&bin)
+            .args([
+                "-c",
+                "sleep 30; :",
+                "tunnel",
+                "--url",
+                &format!("http://127.0.0.1:{port}"),
+            ])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("spawn the stand-in");
+
+        let mut found = false;
+        let mut other_port = true;
+        for _ in 0..40 {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+            let sys = crate::process_util::process_table_with_cmdlines();
+            if find_stale_tunnels(&sys, port).contains(&child.id()) {
+                found = true;
+                other_port = find_stale_tunnels(&sys, port + 1).contains(&child.id());
+                break;
+            }
+        }
+        let _ = child.kill();
+        let _ = child.wait();
+
+        assert!(
+            found,
+            "the sweep did not find a live cloudflared publishing {port} — this is \
+             exactly the state the sweep was in while it reported 0 killed on \
+             every start"
+        );
+        assert!(!other_port, "a sweep for another port matched this tunnel");
     }
 
     #[test]

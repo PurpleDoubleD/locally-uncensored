@@ -260,13 +260,145 @@ mod tests {
         assert_eq!(context_length(t.to_str().unwrap()), None);
     }
 
+    // ── The one check in this file against a GGUF this module did not write ──
+    //
+    // Everything above parses bytes produced by `W`, the writer twenty lines
+    // up. That cannot catch the failure both halves share a wrong assumption
+    // about; only a file llama.cpp produced can. So this probe is worth
+    // keeping — but the way it was written, it was worth nothing:
+    //
+    //     let home = std::env::var("HOME").unwrap_or_default();
+    //     let p = format!("{home}/Library/Application Support/Locally \
+    //                      Uncensored/models/Qwen2.5-0.5B-Instruct-Q8_0.gguf");
+    //     if Path::new(&p).exists() { assert_eq!(...) }
+    //
+    // Two things were wrong with that.
+    //
+    // 1. It built the path by hand, so it was macOS-only and it named the
+    //    directory of the PRODUCTION app directly instead of going through
+    //    `os_paths`, which is the single place that knows the app directory
+    //    and, on this branch, its isolation suffix. Reading is not a violation
+    //    — but a hand-built copy of a path is how a WRITE ends up in the
+    //    user's real data later.
+    // 2. It turned itself off in silence. On every machine without that exact
+    //    file — CI, Windows, Linux, a fresh checkout — it passed while
+    //    asserting nothing, and said so nowhere. A test that quietly checks
+    //    nothing is worse than a red one: the red one gets fixed.
+    //
+    // What replaces it: the path build is pinned by a test that always runs
+    // and always asserts, and the file-dependent half announces its skip on a
+    // stream the test harness does not capture.
+
+    /// The model the built-in engine ships with. Its trained context length is
+    /// a property of the file, not of this repo.
+    const REAL_MODEL_FILE: &str = "Qwen2.5-0.5B-Instruct-Q8_0.gguf";
+    const REAL_MODEL_CONTEXT: u32 = 32768;
+
+    /// The production app's directory name.
+    ///
+    /// A literal on purpose, and the only one in this file: derived from
+    /// `APP_DISPLAY_DIR` it would follow whatever that constant becomes, and
+    /// the assertion below — that this build's directory is NOT the
+    /// production one — would then be checking itself. Same reasoning as
+    /// `NAMEN_DER_ECHTEN_APP` in `app_identity`.
+    const PRODUCTION_DISPLAY_DIR: &str = "Locally Uncensored";
+
+    /// Where a real GGUF may be found, most-owned first.
+    ///
+    /// 1. This build's own model directory, straight from `os_paths`.
+    /// 2. The production install's model directory — same parent, same
+    ///    `models` leaf, directory name without this branch's suffix. READ
+    ///    ONLY: on a dev machine that is the only place a real model is, and
+    ///    the isolated build never downloads one.
+    fn real_gguf_candidates() -> Vec<std::path::PathBuf> {
+        let own = crate::os_paths::builtin_models_dir();
+        let mut out = vec![own.join(REAL_MODEL_FILE)];
+        // <data_dir>/<APP_DISPLAY_DIR>/models -> <data_dir>/<production>/models
+        if let Some(data_dir) = own.parent().and_then(|p| p.parent()) {
+            out.push(
+                data_dir
+                    .join(PRODUCTION_DISPLAY_DIR)
+                    .join("models")
+                    .join(REAL_MODEL_FILE),
+            );
+        }
+        out
+    }
+
+    /// Always runs, always asserts: the probe looks where `os_paths` says, and
+    /// this build's own directory is not the production one.
     #[test]
-    fn real_bundled_gguf_if_present() {
-        // Best-effort against the dev machine's local test model; absent in CI.
-        let home = std::env::var("HOME").unwrap_or_default();
-        let p = format!("{home}/Library/Application Support/Locally Uncensored/models/Qwen2.5-0.5B-Instruct-Q8_0.gguf");
-        if std::path::Path::new(&p).exists() {
-            assert_eq!(super::context_length(&p), Some(32768));
+    fn the_real_gguf_probe_goes_through_the_central_path_builder() {
+        use crate::app_identity::APP_DISPLAY_DIR;
+
+        let candidates = real_gguf_candidates();
+        assert_eq!(candidates.len(), 2, "{candidates:?}");
+
+        // #1 is os_paths' own answer, not a string built here.
+        assert_eq!(
+            candidates[0],
+            crate::os_paths::builtin_models_dir().join(REAL_MODEL_FILE)
+        );
+
+        // The isolation suffix is real and this build carries it.
+        assert_ne!(
+            APP_DISPLAY_DIR, PRODUCTION_DISPLAY_DIR,
+            "this build reads and would write the production app's model directory"
+        );
+        let own_dir = candidates[0]
+            .parent()
+            .and_then(|p| p.parent())
+            .and_then(|p| p.file_name())
+            .expect("no app directory in the built path");
+        assert_eq!(own_dir, APP_DISPLAY_DIR);
+
+        // #2 differs from #1 in exactly that one component.
+        let prod_dir = candidates[1]
+            .parent()
+            .and_then(|p| p.parent())
+            .and_then(|p| p.file_name())
+            .expect("no app directory in the production path");
+        assert_eq!(prod_dir, PRODUCTION_DISPLAY_DIR);
+        assert_eq!(
+            candidates[0].parent().and_then(|p| p.parent()).and_then(|p| p.parent()),
+            candidates[1].parent().and_then(|p| p.parent()).and_then(|p| p.parent()),
+            "the two candidates are not siblings under the same data dir"
+        );
+        assert!(candidates.iter().all(|c| c.ends_with(REAL_MODEL_FILE)));
+    }
+
+    /// Parses a real GGUF when one is on this machine — and says out loud when
+    /// there is none, instead of passing in silence.
+    ///
+    /// The skip notice is written straight to `stderr` rather than through
+    /// `eprintln!`: libtest's capture swaps the sink the print macros use, so
+    /// a macro line from a PASSING test is swallowed, while a direct write to
+    /// the handle reaches the terminal. Verified on this machine, 2026-09-01.
+    #[test]
+    fn a_real_gguf_parses_or_the_run_says_why_it_could_not() {
+        let candidates = real_gguf_candidates();
+        match candidates.iter().find(|p| p.exists()) {
+            Some(path) => {
+                assert_eq!(
+                    context_length(path.to_str().expect("non-UTF-8 model path")),
+                    Some(REAL_MODEL_CONTEXT),
+                    "parsing the real model at {} gave the wrong context length",
+                    path.display()
+                );
+            }
+            None => {
+                use std::io::Write;
+                let looked: Vec<String> =
+                    candidates.iter().map(|p| p.display().to_string()).collect();
+                let _ = writeln!(
+                    std::io::stderr(),
+                    "\n  SKIPPED gguf::a_real_gguf_parses_or_the_run_says_why_it_could_not\n  \
+                     reason: no real {REAL_MODEL_FILE} on this machine, so the parser was \
+                     not checked against a file llama.cpp produced.\n  looked at:\n    {}\n  \
+                     to run it for real, download the built-in engine's model once.\n",
+                    looked.join("\n    ")
+                );
+            }
         }
     }
 }

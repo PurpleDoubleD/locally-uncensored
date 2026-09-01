@@ -2261,8 +2261,8 @@ const MIN_INSTALLER_BYTES: u64 = 1_000_000;
 /// SHA-256 of the LM Studio installer at [`LMSTUDIO_INSTALLER_URL`].
 ///
 /// That URL is version-pinned and immutable (`0.3.16-6`), so its bytes never
-/// change and a digest here would be a free integrity guarantee for a ~570 MB
-/// executable LU runs with `/S`.
+/// change and a digest here would be an integrity guarantee for an executable
+/// LU runs with `/S`.
 ///
 /// It is `None`, and it has to stay `None` until somebody fills it with a
 /// digest they measured from that exact file. A guessed or mistyped value does
@@ -2275,14 +2275,46 @@ const MIN_INSTALLER_BYTES: u64 = 1_000_000;
 /// certutil -hashfile LM-Studio-0.3.16-6-x64.exe SHA256
 /// ```
 ///
-/// Until then the size and Authenticode checks below are what stands between
-/// the user and an unverified executable.
+/// The vendor publishes no checksum to copy instead: `<url>.sha256`,
+/// `.sha256sum`, `.SHA256`, `.checksum` and the directory index all answer 404
+/// (checked 2026-09-01). So the digest can only come from the file itself, and
+/// a digest measured over the same unauthenticated channel the app downloads
+/// through is trust-on-first-use: it pins against a LATER substitution at that
+/// URL, not against a download that was already tampered with.
+///
+/// Until then the size checks and the Authenticode check below are what stands
+/// between the user and an unverified executable.
 ///
 /// Ollama's installer gets no pin at all and cannot: its URL
 /// (`ollama.com/download/OllamaSetup.exe`) always serves the current release,
 /// so its bytes change with every version. Signature + size is the whole
 /// answer available there.
 const LMSTUDIO_INSTALLER_SHA256: Option<&str> = None;
+
+/// Exact byte count of the file at [`LMSTUDIO_INSTALLER_URL`].
+///
+/// The half of the pin that CAN be established without the file: the vendor's
+/// own server reports it in one header request, so anyone can re-check it in a
+/// second instead of moving 211 MiB.
+///
+/// ```text
+/// curl -sI https://installers.lmstudio.ai/win32/x64/0.3.16-6/LM-Studio-0.3.16-6-x64.exe
+/// ```
+///
+/// Measured 2026-09-01: `content-length: 221768208`, `last-modified: Fri, 23
+/// May 2025 22:14:17 GMT`, `etag: "4c5f34448d76416730ec408b05a54270"` (32 hex
+/// chars, no `-N` part suffix — a single-part object). A `last-modified` 15
+/// months in the past under a version-pinned path is the evidence that this URL
+/// is immutable; this constant is what turns that evidence from an ASSUMPTION
+/// into something the code enforces.
+///
+/// It is deliberately much weaker than a digest — it catches a truncated or
+/// substituted transfer of a different length, not a same-length forgery — and
+/// it carries the same maintenance duty: if LM Studio ever re-uploads different
+/// bytes here, the install fails loudly instead of silently running new,
+/// unchecked bytes. That is the intended direction. `LMSTUDIO_INSTALLER_URL`
+/// and this constant have to move together.
+const LMSTUDIO_INSTALLER_BYTES: Option<u64> = Some(221_768_208);
 
 /// Hex SHA-256 of a file, streamed in chunks — a 570 MB installer must not
 /// need 570 MB of memory to be checked.
@@ -2404,21 +2436,46 @@ fn authenticode_verdict(path: &Path) -> SignatureVerdict {
     }
 }
 
+/// Is this file exactly the size the immutable URL is known to serve?
+///
+/// Only ever called for a URL whose bytes are supposed to never change. A
+/// mismatch means one of two things and both are refusals: the transfer was
+/// cut short / rewritten, or the vendor replaced a file LU treats as fixed.
+pub(crate) fn installer_exact_size_verdict(expected: u64, actual: u64, label: &str) -> Result<(), String> {
+    if expected == actual {
+        return Ok(());
+    }
+    Err(format!(
+        "The downloaded {label} installer is {actual} bytes; the version-pinned \
+         download URL is known to serve exactly {expected}. Either the transfer \
+         was altered or cut short, or the vendor replaced a file at a URL that \
+         is supposed to be immutable. LU will not run it — install {label} from \
+         the vendor's own site instead."
+    ))
+}
+
 /// Everything that has to be true before LU executes a file it downloaded:
-/// it is big enough to be an installer, it matches its pinned digest if one
-/// exists, and on Windows it carries a valid Authenticode signature.
+/// it is big enough to be an installer, it is exactly the size an immutable
+/// URL is known to serve (when there is one), it matches its pinned digest if
+/// one exists, and on Windows it carries a valid Authenticode signature.
 ///
 /// `label` names the product in the error text — the user has to know which
 /// download to fetch by hand when LU refuses.
 fn verify_downloaded_installer(
     path: &Path,
     expected_sha256: Option<&str>,
+    expected_bytes: Option<u64>,
     label: &str,
 ) -> Result<(), String> {
     let size = fs::metadata(path)
         .map_err(|e| format!("Could not stat the downloaded {label} installer: {}", os_error::english(&e)))?
         .len();
     installer_size_verdict(size)?;
+
+    if let Some(expected) = expected_bytes {
+        installer_exact_size_verdict(expected, size, label)?;
+        info!(label, bytes = size, "installer matched its pinned size");
+    }
 
     if let Some(pin) = expected_sha256 {
         let actual = sha256_file(path)?;
@@ -2525,7 +2582,7 @@ fn install_ollama_windows_impl<F: Fn(&str, &str)>(
     // OI-8: verified before it is executed. Ollama's URL always serves the
     // current release, so there is no immutable digest to pin here — the size
     // and Authenticode checks are the whole answer available.
-    if let Err(e) = verify_downloaded_installer(&installer_path, None, "Ollama") {
+    if let Err(e) = verify_downloaded_installer(&installer_path, None, None, "Ollama") {
         let _ = fs::remove_file(&installer_path);
         error!(error = %e, "refused to execute an unverified Ollama installer");
         update("error", &e);
@@ -3075,6 +3132,7 @@ pub fn install_lmstudio(state: State<'_, AppState>) -> Result<serde_json::Value,
             if let Err(e) = verify_downloaded_installer(
                 &installer_path,
                 LMSTUDIO_INSTALLER_SHA256,
+                LMSTUDIO_INSTALLER_BYTES,
                 "LM Studio",
             ) {
                 let _ = fs::remove_file(&installer_path);
@@ -4749,7 +4807,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let f = tmp.path().join("Setup.exe");
         std::fs::write(&f, b"<html>captive portal</html>").unwrap();
-        let err = verify_downloaded_installer(&f, None, "LM Studio").unwrap_err();
+        let err = verify_downloaded_installer(&f, None, None, "LM Studio").unwrap_err();
         assert!(err.to_lowercase().contains("too small"), "{err}");
     }
 
@@ -4758,10 +4816,69 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let f = tmp.path().join("Setup.exe");
         std::fs::write(&f, vec![0u8; MIN_INSTALLER_BYTES as usize + 1]).unwrap();
-        let err = verify_downloaded_installer(&f, Some("deadbeef"), "LM Studio").unwrap_err();
+        let err = verify_downloaded_installer(&f, Some("deadbeef"), None, "LM Studio").unwrap_err();
         assert!(err.contains("deadbeef"), "{err}");
         assert!(err.contains("expected") && err.contains("got"), "{err}");
         assert!(err.contains("LM Studio"), "{err}");
+    }
+
+    /// T-72 — the size pin for the immutable installer URL.
+    ///
+    /// WHAT THIS DOES NOT PROVE: that 221_768_208 is still what the vendor
+    /// serves. That is one header request away (`curl -sI <url>`), and the
+    /// constant's doc comment carries both the command and the date it was
+    /// last measured. No test can hold that for you without going to the
+    /// network on every run.
+    #[test]
+    fn a_file_of_the_wrong_length_from_the_immutable_url_is_refused() {
+        let expected = LMSTUDIO_INSTALLER_BYTES.expect("the size pin was removed");
+        let tmp = tempfile::tempdir().unwrap();
+        let f = tmp.path().join("LMStudioSetup.exe");
+
+        // Big enough to clear the generic floor, wrong for THIS url.
+        std::fs::write(&f, vec![0u8; MIN_INSTALLER_BYTES as usize + 7]).unwrap();
+        let err = verify_downloaded_installer(&f, None, Some(expected), "LM Studio").unwrap_err();
+        assert!(err.contains(&expected.to_string()), "{err}");
+        assert!(err.contains("immutable"), "{err}");
+        assert!(err.contains("LM Studio"), "{err}");
+
+        // The generic floor alone would have let it through — that is the gap
+        // this pin closes.
+        assert!(installer_size_verdict(MIN_INSTALLER_BYTES + 7).is_ok());
+    }
+
+    #[test]
+    fn the_exact_size_rule_passes_only_on_an_exact_match() {
+        assert!(installer_exact_size_verdict(221_768_208, 221_768_208, "LM Studio").is_ok());
+        assert!(installer_exact_size_verdict(221_768_208, 221_768_207, "LM Studio").is_err());
+        assert!(installer_exact_size_verdict(221_768_208, 221_768_209, "LM Studio").is_err());
+        assert!(installer_exact_size_verdict(221_768_208, 0, "LM Studio").is_err());
+    }
+
+    /// Ollama's URL always serves the current release, so pinning either its
+    /// size or its digest would break the install on every Ollama release.
+    /// Neither may be passed for it.
+    #[test]
+    fn the_moving_ollama_url_is_never_pinned() {
+        const SRC: &str = include_str!("install.rs");
+        assert!(
+            SRC.contains(concat!("verify_downloaded_installer", "(&installer_path, None, None, \"Ollama\")")),
+            "the Ollama installer path acquired a pin it cannot keep"
+        );
+    }
+
+    /// The URL and the size are one fact in two places. Moving one without the
+    /// other is the failure mode this pin introduces, so it gets its own guard.
+    #[test]
+    fn the_pinned_url_and_the_pinned_size_belong_to_the_same_version() {
+        assert!(
+            LMSTUDIO_INSTALLER_URL.contains("0.3.16-6"),
+            "the installer URL moved: re-measure LMSTUDIO_INSTALLER_BYTES with \
+             `curl -sI {LMSTUDIO_INSTALLER_URL}` and update it in the same commit"
+        );
+        // A plausible installer size, not a placeholder someone left behind.
+        let bytes = LMSTUDIO_INSTALLER_BYTES.expect("the size pin was removed");
+        assert!(bytes > MIN_INSTALLER_BYTES, "the size pin is below the generic floor");
     }
 
     #[test]

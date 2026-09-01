@@ -1432,7 +1432,18 @@ fn start_comfyui_blocking(state: &AppState) -> Result<serde_json::Value, String>
     let port = *state.comfy_port.lock().unwrap();
 
     if is_comfyui_running_on_port(port) {
-        return Ok(serde_json::json!({"status": "already_running"}));
+        // T-68: say WHOSE ComfyUI that is. "already_running" alone is what let
+        // an orphan of a hard-killed session look identical to a ComfyUI the
+        // user started — and Stop behaved as if both were untouchable.
+        let orphan = find_orphaned_comfyui(port);
+        if let Some(pid) = orphan {
+            println!("[ComfyUI] Already running on port {port} — orphan of an earlier session (pid {pid}); Stop can adopt it");
+            info!(pid = pid, port = port, "comfyui orphan found on start");
+        }
+        return Ok(serde_json::json!({
+            "status": "already_running",
+            "adoptable": orphan.is_some(),
+        }));
     }
 
     // The port probe alone misses a ComfyUI that is STARTING: it imports for
@@ -1720,6 +1731,154 @@ pub async fn stop_comfyui(app: tauri::AppHandle) -> Result<serde_json::Value, St
     .map_err(|e| format!("stop_comfyui task: {e}"))?
 }
 
+// ── T-68: the orphan a hard kill leaves behind ──────────────────────────────
+//
+// `tie_child_to_app_lifetime` prevents orphans on Windows (kill-on-close job
+// object) and the graceful shutdown path covers the normal quit. Neither
+// covers the case in the finding: LU is SIGKILLed (or the box loses power on
+// the app, or a dev session is hard-stopped), the ComfyUI child is reparented
+// to init and keeps the GPU. On the next launch `state.comfy_process` is
+// `None`, so the port probe reports "Already running", the status panel says
+// running — and Stop returned `{"status":"not_running"}` and did nothing, for
+// as long as that install lived. That is the read-only adoption the audit
+// names: LU could see the orphan and not touch it.
+//
+// The missing half is a way back to control. `find_orphaned_comfyui` looks for
+// a ComfyUI process that LU itself started, on LU's own configured port, and
+// `stop_comfyui` kills that tree instead of lying.
+
+/// Is this command line a ComfyUI that LU started on `port`?
+///
+/// Three conditions, all of them required:
+///
+/// * it is a ComfyUI (`main.py`, the only entry point LU ever launches),
+/// * it carries `--enable-cors-header`, which LU passes on EVERY start and a
+///   user-managed ComfyUI does not — the "Fix CORS" button in Settings exists
+///   precisely because a hand-started ComfyUI lacks it,
+/// * it serves exactly `port`, not a port whose number merely starts the same
+///   way (`--port 8188` must not match a ComfyUI on 81880).
+///
+/// Narrow on purpose: this decides whether LU may kill a process it did not
+/// spawn in this run. A ComfyUI the user started themselves fails the CORS
+/// test and is left alone, and Stop says so instead of killing it.
+///
+/// Pure, so the rule is testable without a process table.
+pub(crate) fn is_lu_started_comfyui(cmd: &[String], port: u16) -> bool {
+    let joined = cmd.join(" ");
+    let lower = joined.to_ascii_lowercase();
+    if !lower.contains("main.py") || !lower.contains("--enable-cors-header") {
+        return false;
+    }
+    cmdline_names_port(&lower, port)
+}
+
+/// Does this command line pass exactly `port` as `--port`?
+///
+/// `contains("--port 8188")` is also true of `--port 81880`, and this decides
+/// a kill — so the whole digit run has to equal the port. Both spellings
+/// (`--port 8188` and `--port=8188`) are accepted because argv joining is not
+/// the only way this string can be produced.
+fn cmdline_names_port(lower: &str, port: u16) -> bool {
+    let wanted = port.to_string();
+    for sep in ["--port ", "--port="] {
+        let mut rest = lower;
+        while let Some(at) = rest.find(sep) {
+            let tail = &rest[at + sep.len()..];
+            let digits: String = tail.chars().take_while(char::is_ascii_digit).collect();
+            if digits == wanted {
+                return true;
+            }
+            rest = &rest[at + sep.len()..];
+        }
+    }
+    false
+}
+
+/// The pid of an LU-started ComfyUI on `port` that this process has no handle
+/// for. `None` when nothing matches — including when the ComfyUI on that port
+/// belongs to the user.
+pub(crate) fn find_orphaned_comfyui(port: u16) -> Option<u32> {
+    // The table MUST come from this helper: a bare `refresh_processes` does not
+    // fetch command lines, and every match here would silently be against "".
+    // See the note above `process_table_with_cmdlines`.
+    let sys = crate::process_util::process_table_with_cmdlines();
+    let own = std::process::id();
+    for (pid, process) in sys.processes() {
+        let pid = pid.as_u32();
+        if pid == own {
+            continue;
+        }
+        if is_lu_started_comfyui(&crate::process_util::cmdline_of(process), port) {
+            return Some(pid);
+        }
+    }
+    None
+}
+
+// ── The same shape, one step out: a child that outlives its launcher ────────
+//
+// `tauri-plugin-shell`'s `CommandChild::kill` is `SharedChild::kill`, i.e. one
+// signal to the DIRECT child (verified in tauri-plugin-shell-2.3.5,
+// `src/process/mod.rs:78`). For an MCP server the frontend starts as
+// `npx -y <package>` (Windows: `npx.cmd`, which runs through cmd.exe), the
+// direct child is the launcher and the `node` process behind it is a
+// grandchild — so `child.kill()` reaps the shim and leaves the server running.
+//
+// That is T-68's sachverhalt one level out, so it gets T-68's machinery rather
+// than a second kill path: `process_util::kill_pid_tree` walks the tree, and
+// the command below is the door the frontend uses to reach it.
+
+/// May this app kill `pid`?
+///
+/// Only a process inside THIS app's own subtree. The pid is an argument from
+/// the frontend, and a command that kills any pid it is handed is a much
+/// bigger hole than the orphan it was meant to close — the caller could stop
+/// the user's editor, or LU itself.
+///
+/// Pure so the rule is testable without a process table.
+pub(crate) fn may_kill_pid(pid: u32, own: u32, own_descendants: &[u32]) -> Result<(), String> {
+    if pid == 0 || pid == own {
+        return Err(format!("refused: pid {pid} is this app itself"));
+    }
+    if !own_descendants.contains(&pid) {
+        return Err(format!(
+            "refused: pid {pid} is not a process this app started (it may have already \
+             exited, in which case its own children are init's now — kill the tree \
+             INSTEAD of the child, not after it)"
+        ));
+    }
+    Ok(())
+}
+
+/// Kill a process tree this app spawned, addressed by the pid of its root.
+///
+/// ORDERING, and it matters: call this INSTEAD of the shell plugin's
+/// `child.kill()`, never after it. Once the direct child is dead its own
+/// children are reparented to init and are no longer this app's descendants —
+/// the guard above will then (correctly) refuse, and the grandchild survives
+/// exactly as before.
+#[tauri::command]
+pub async fn kill_process_tree(pid: u32) -> Result<serde_json::Value, String> {
+    tokio::task::spawn_blocking(move || kill_process_tree_blocking(pid))
+        .await
+        .map_err(|e| format!("kill_process_tree task: {e}"))?
+}
+
+pub(crate) fn kill_process_tree_blocking(pid: u32) -> Result<serde_json::Value, String> {
+    use sysinfo::{ProcessesToUpdate, System};
+    let own = std::process::id();
+    let mut sys = System::new();
+    sys.refresh_processes(ProcessesToUpdate::All, true);
+    let mine = crate::commands::shell::descendants(own, &sys);
+    may_kill_pid(pid, own, &mine)?;
+
+    let tree = crate::commands::shell::descendants(pid, &sys).len() + 1;
+    println!("[Process] killing tree of pid {pid} ({tree} process(es))");
+    info!(pid = pid, processes = tree, "killing a spawned process tree");
+    crate::process_util::kill_pid_tree(pid);
+    Ok(serde_json::json!({ "killed": true, "pid": pid, "processes": tree }))
+}
+
 fn stop_comfyui_blocking(state: &AppState) -> Result<serde_json::Value, String> {
     let mut proc = state.comfy_process.lock().unwrap();
     if let Some(ref mut child) = *proc {
@@ -1741,9 +1900,53 @@ fn stop_comfyui_blocking(state: &AppState) -> Result<serde_json::Value, String> 
         *state.comfy_start_at.lock().unwrap() = None;
         println!("[ComfyUI] Stopped");
         info!(pid = pid, "comfyui stopped");
-        Ok(serde_json::json!({"status": "stopped"}))
-    } else {
-        Ok(serde_json::json!({"status": "not_running"}))
+        return Ok(serde_json::json!({"status": "stopped"}));
+    }
+    drop(proc);
+
+    // No handle. Before 2.6.7 this was the end of the function and Stop was a
+    // no-op — see the T-68 note above.
+    let host = state
+        .comfy_host
+        .lock()
+        .map(|g| g.clone())
+        .unwrap_or_else(|_| "localhost".to_string());
+    if !is_local_host(&host) {
+        // A remote ComfyUI has never been ours to stop, and saying
+        // "not_running" about a server that IS running was the same lie in a
+        // smaller size.
+        return Ok(serde_json::json!({
+            "status": "remote",
+            "host": host,
+            "message": "ComfyUI runs on another host — stop it on that machine."
+        }));
+    }
+    let port = *state.comfy_port.lock().unwrap();
+    if !is_comfyui_running_on_port(port) {
+        return Ok(serde_json::json!({"status": "not_running"}));
+    }
+
+    // Something IS serving ComfyUI on our port and it is not a child of this
+    // run. Adopt it only if LU started it (see `is_lu_started_comfyui`).
+    match find_orphaned_comfyui(port) {
+        Some(pid) => {
+            println!("[ComfyUI] Adopting orphan pid {pid} on port {port} and stopping it");
+            info!(pid = pid, port = port, "comfyui orphan adopted and stopped");
+            crate::process_util::kill_pid_tree(pid);
+            *state.comfy_start_at.lock().unwrap() = None;
+            Ok(serde_json::json!({"status": "stopped", "adopted": true, "pid": pid}))
+        }
+        None => {
+            // A ComfyUI the user runs themselves. Killing it would be LU
+            // reaching outside its own process tree; saying "not_running"
+            // would be false. Say what is actually true.
+            println!("[ComfyUI] Port {port} is served by a ComfyUI this app did not start");
+            Ok(serde_json::json!({
+                "status": "not_ours",
+                "port": port,
+                "message": "A ComfyUI this app did not start is serving that port. Stop it where you started it."
+            }))
+        }
     }
 }
 
@@ -2230,7 +2433,15 @@ pub fn auto_start_comfyui(state: &AppState) {
     let port = *state.comfy_port.lock().unwrap();
 
     if is_comfyui_running_on_port(port) {
-        println!("[ComfyUI] Already running on port {}", port);
+        // T-68: a ComfyUI on our port at launch is either the user's own or an
+        // orphan this app left behind when it was killed. Naming which one in
+        // the log is what makes a later "Stop did nothing" diagnosable.
+        match find_orphaned_comfyui(port) {
+            Some(pid) => println!(
+                "[ComfyUI] Already running on port {port} — orphan of an earlier session (pid {pid}); Stop can adopt it"
+            ),
+            None => println!("[ComfyUI] Already running on port {} (not started by this app)", port),
+        }
         return;
     }
 
@@ -2837,44 +3048,199 @@ pub(crate) fn offload_local_models_blocking(state: &AppState, include_comfyui: O
         freed.push("bundled-embed");
     }
 
+    // T-65: `not_ours` carries the backends LU did NOT free and why. Before,
+    // both of these returned a bare `false` for "nothing was loaded" and for
+    // "that address is not mine", and the caller was told the same thing in
+    // both cases. The result now says which it was.
+    let mut not_ours: Vec<serde_json::Value> = Vec::new();
+    let mut note = |backend: &str, outcome: &VramRelease| {
+        if let Some((target, why)) = outcome.not_responsible() {
+            println!("[Offload] {backend}: not this app's to free ({target}) — {why}");
+            not_ours.push(serde_json::json!({
+                "backend": backend,
+                "target": target,
+                "why": why,
+            }));
+        }
+    };
+
     // 3) Ollama — keep `serve` up (cheap, idle) but evict every loaded model.
-    if offload_ollama_loaded_models() {
+    let ollama = offload_ollama_loaded_models(state);
+    if ollama.released() {
         freed.push("ollama");
     }
+    note("ollama", &ollama);
 
     // 4) ComfyUI — free VRAM/RAM without killing the server, so the next local
     //    render just reloads the checkpoint (no slow process restart). Skipped
     //    when a local render is the caller (it keeps its own checkpoint cached).
-    if free_comfy && free_comfyui_memory() {
-        freed.push("comfyui");
+    if free_comfy {
+        let comfy = free_comfyui_memory(state);
+        if comfy.released() {
+            freed.push("comfyui");
+        }
+        note("comfyui", &comfy);
     }
 
-    println!("[Offload] released local model backends (comfyui={}): {:?}", free_comfy, freed);
-    Ok(serde_json::json!({ "offloaded": freed }))
+    println!(
+        "[Offload] released local model backends (comfyui={}): {:?}; not ours: {}",
+        free_comfy,
+        freed,
+        not_ours.len()
+    );
+    Ok(serde_json::json!({ "offloaded": freed, "notOurs": not_ours }))
+}
+
+// ── T-65: the make-room-for-VRAM step, at the address the app actually uses ──
+//
+// Both helpers below used to hardcode `http://localhost:8188` and
+// `http://localhost:11434`, so on a user-configured ComfyUI port or a
+// non-default Ollama base they asked a machine nobody was listening on. The
+// address is not a second source of truth to invent: `AppState::comfy_host` /
+// `comfy_port` (config.json, `set_comfyui_port`) and `AppState::ollama_base`
+// (config.json `ollama_base`, then `OLLAMA_HOST`, then the default — see
+// `state::load_ollama_base`) already are that source, and every other caller in
+// the app reads them. These now do too.
+//
+// The second half of the finding is the return type. `bool` made "the backend
+// let nothing go" and "LU asked an address it does not own" the same answer,
+// `false` — so a user on a custom port got the exact silence a user with an
+// idle backend got. Fixing the address without fixing that would only move the
+// silence one case further out: a ComfyUI on another machine still holds VRAM
+// that freeing cannot help with, and that has to READ as "not LU's to free",
+// not as "nothing found".
+
+/// The outcome of asking one backend to let go of its memory.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum VramRelease {
+    /// The backend answered and released something.
+    Released,
+    /// The backend answered; it was holding nothing to release.
+    NothingLoaded,
+    /// LU did not release anything and this memory is not LU's to free —
+    /// the backend is configured on another machine, or nothing answered at
+    /// the address LU owns.
+    NotResponsible {
+        /// The address that was asked (or would have been), for the log.
+        target: String,
+        why: String,
+    },
+}
+
+impl VramRelease {
+    /// Did this actually free memory? The one question the old `bool` could
+    /// answer — kept, so callers that only branch on it stay readable.
+    pub(crate) fn released(&self) -> bool {
+        matches!(self, VramRelease::Released)
+    }
+
+    /// Short reason for the log / the command result. `None` when LU was
+    /// responsible and did its part.
+    pub(crate) fn not_responsible(&self) -> Option<(&str, &str)> {
+        match self {
+            VramRelease::NotResponsible { target, why } => Some((target, why)),
+            _ => None,
+        }
+    }
+}
+
+/// Is this base URL pointed at this machine?
+///
+/// A backend on another host holds another machine's memory: asking it to
+/// unload cannot make room here, so the honest answer is "not responsible"
+/// rather than a silent no-op. Falls back to "not local" for a URL that will
+/// not parse — refusing to guess is the safe direction here.
+pub(crate) fn base_url_is_local(base: &str) -> bool {
+    match url::Url::parse(base) {
+        Ok(u) => match u.host_str() {
+            // `host_str` keeps the brackets on an IPv6 literal (`[::1]`),
+            // which `is_local_host` does not know about.
+            Some(h) => is_local_host(h.trim_start_matches('[').trim_end_matches(']')),
+            // No host at all (e.g. a bare path) — nothing to reach.
+            None => false,
+        },
+        Err(_) => false,
+    }
+}
+
+/// Where THIS machine's ComfyUI is, or why there is nothing here to free.
+///
+/// Split from the state read so the rule itself is testable without an
+/// `AppState`: everything that decides an address lives in `_for`.
+pub(crate) fn comfy_vram_target_for(host: &str, port: u16) -> Result<String, (String, String)> {
+    let base = format!("http://{}:{}", host, port);
+    if !is_local_host(host) {
+        return Err((
+            base,
+            "ComfyUI is configured on another host, so its VRAM is not this machine's to free"
+                .to_string(),
+        ));
+    }
+    Ok(base)
+}
+
+pub(crate) fn comfy_vram_target(state: &AppState) -> Result<String, (String, String)> {
+    let host = state
+        .comfy_host
+        .lock()
+        .map(|g| g.clone())
+        .unwrap_or_else(|_| "localhost".to_string());
+    let port = state.comfy_port.lock().map(|g| *g).unwrap_or(8188);
+    comfy_vram_target_for(&host, port)
+}
+
+/// Where THIS machine's Ollama is, or why there is nothing here to free.
+pub(crate) fn ollama_vram_target_for(base: &str) -> Result<String, (String, String)> {
+    if !base_url_is_local(base) {
+        return Err((
+            base.to_string(),
+            "Ollama is configured on another host, so its RAM/VRAM is not this machine's to free"
+                .to_string(),
+        ));
+    }
+    Ok(base.trim_end_matches('/').to_string())
+}
+
+pub(crate) fn ollama_vram_target(state: &AppState) -> Result<String, (String, String)> {
+    let base = state
+        .ollama_base
+        .lock()
+        .map(|g| g.clone())
+        .unwrap_or_else(|_| "http://localhost:11434".to_string());
+    ollama_vram_target_for(&base)
 }
 
 /// Evict every model Ollama currently holds in memory via `keep_alive: 0`,
 /// leaving `ollama serve` running (idle serve is cheap). Best-effort.
-pub(crate) fn offload_ollama_loaded_models() -> bool {
+///
+/// `base` comes from `AppState::ollama_base` via [`ollama_vram_target`] — see
+/// the T-65 note above for why it is not a constant here.
+pub(crate) fn offload_ollama_loaded_models_at(base: &str) -> VramRelease {
+    let unreachable = |why: &str| VramRelease::NotResponsible {
+        target: base.to_string(),
+        why: why.to_string(),
+    };
     let client = match reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_secs(2))
         .build()
     {
         Ok(c) => c,
-        Err(_) => return false,
+        Err(e) => return unreachable(&format!("no HTTP client: {e}")),
     };
     let ps = match client
-        .get("http://localhost:11434/api/ps")
+        .get(format!("{base}/api/ps"))
         .send()
         .ok()
         .and_then(|r| r.json::<serde_json::Value>().ok())
     {
         Some(v) => v,
-        None => return false,
+        None => return unreachable("nothing answered /api/ps there"),
     };
+    // Ollama answered — from here on LU IS responsible, so "no models" is
+    // NothingLoaded and not a shrug.
     let models = match ps.get("models").and_then(|m| m.as_array()) {
         Some(a) => a,
-        None => return false,
+        None => return VramRelease::NothingLoaded,
     };
     let mut any = false;
     for m in models {
@@ -2884,33 +3250,74 @@ pub(crate) fn offload_ollama_loaded_models() -> bool {
             .and_then(|n| n.as_str())
         {
             let _ = client
-                .post("http://localhost:11434/api/generate")
+                .post(format!("{base}/api/generate"))
                 .json(&serde_json::json!({ "model": name, "keep_alive": 0 }))
                 .send();
             any = true;
         }
     }
-    any
+    if any {
+        VramRelease::Released
+    } else {
+        VramRelease::NothingLoaded
+    }
 }
 
 /// Ask ComfyUI to unload checkpoints and free memory, keeping the server up so
-/// the next local render reloads on demand. Best-effort (default port 8188).
+/// the next local render reloads on demand. Best-effort.
 /// Also used by the character trainer — on a 12 GB card a cached video
 /// checkpoint next door is the difference between training and CUDA OOM.
-pub(crate) fn free_comfyui_memory() -> bool {
+///
+/// `base` comes from `AppState::comfy_host`/`comfy_port` via
+/// [`comfy_vram_target`]; the port is user-configurable and the default 8188 is
+/// only a default.
+pub(crate) fn free_comfyui_memory_at(base: &str) -> VramRelease {
     let client = match reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_secs(2))
         .build()
     {
         Ok(c) => c,
-        Err(_) => return false,
+        Err(e) => {
+            return VramRelease::NotResponsible {
+                target: base.to_string(),
+                why: format!("no HTTP client: {e}"),
+            }
+        }
     };
-    client
-        .post("http://localhost:8188/free")
+    match client
+        .post(format!("{base}/free"))
         .json(&serde_json::json!({ "unload_models": true, "free_memory": true }))
         .send()
-        .map(|r| r.status().is_success())
-        .unwrap_or(false)
+    {
+        // ComfyUI answers 200 to /free whether or not anything was cached, so
+        // there is no NothingLoaded to distinguish here — a 200 means it did
+        // what it could.
+        Ok(r) if r.status().is_success() => VramRelease::Released,
+        Ok(r) => VramRelease::NotResponsible {
+            target: base.to_string(),
+            why: format!("/free answered HTTP {}", r.status().as_u16()),
+        },
+        Err(e) => VramRelease::NotResponsible {
+            target: base.to_string(),
+            why: format!("nothing answered /free there ({e})"),
+        },
+    }
+}
+
+/// State-aware wrappers: resolve the address first, then ask. A backend the
+/// user put on another machine never gets asked and never reads as a failure.
+pub(crate) fn free_comfyui_memory(state: &AppState) -> VramRelease {
+    match comfy_vram_target(state) {
+        Ok(base) => free_comfyui_memory_at(&base),
+        Err((target, why)) => VramRelease::NotResponsible { target, why },
+    }
+}
+
+pub(crate) fn offload_ollama_loaded_models(state: &AppState) -> VramRelease {
+    match ollama_vram_target(state) {
+        Ok(base) => offload_ollama_loaded_models_at(&base),
+        Err((target, why)) => VramRelease::NotResponsible { target, why },
+    }
 }
 
 #[cfg(test)]
@@ -3111,6 +3518,445 @@ mod orphan_safety_tests {
         assert!(
             PROCESS_RS.contains("static JOB: OnceLock<isize>"),
             "the job handle must be created once and reused"
+        );
+    }
+}
+
+/// T-65 — the make-room-for-VRAM step must ask the address the user configured,
+/// and must say which of "nothing to free" / "not mine to free" happened.
+///
+/// The two `_at` helpers are exercised against a REAL HTTP server on a real
+/// loopback port (`127.0.0.1:0`, so never 8188 or 11434) — that is the whole
+/// point: a test that only ever succeeds on the default port could not tell
+/// the fix from the bug.
+#[cfg(test)]
+mod vram_release_tests {
+    use super::*;
+    use std::io::{BufRead, BufReader, Write};
+    use std::net::TcpListener;
+    use std::sync::mpsc;
+
+    /// A one-shot HTTP server on an ephemeral port. Returns the base URL and a
+    /// receiver that yields the request line + body of the first request.
+    fn one_shot(status: &'static str, body: &'static str) -> (String, mpsc::Receiver<String>) {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+        let port = listener.local_addr().unwrap().port();
+        let (tx, rx) = mpsc::channel();
+        std::thread::spawn(move || {
+            // Serve until the client is done with us; /api/ps is followed by
+            // one /api/generate per loaded model.
+            for stream in listener.incoming().take(4) {
+                let Ok(mut stream) = stream else { break };
+                let mut reader = BufReader::new(stream.try_clone().unwrap());
+                let mut request_line = String::new();
+                let _ = reader.read_line(&mut request_line);
+                let mut len = 0usize;
+                loop {
+                    let mut line = String::new();
+                    if reader.read_line(&mut line).unwrap_or(0) == 0 {
+                        break;
+                    }
+                    if let Some(v) = line.to_ascii_lowercase().strip_prefix("content-length:") {
+                        len = v.trim().parse().unwrap_or(0);
+                    }
+                    if line.trim().is_empty() {
+                        break;
+                    }
+                }
+                let mut payload = vec![0u8; len];
+                if len > 0 {
+                    use std::io::Read;
+                    let _ = reader.read_exact(&mut payload);
+                }
+                let _ = tx.send(format!(
+                    "{} | {}",
+                    request_line.trim(),
+                    String::from_utf8_lossy(&payload)
+                ));
+                let _ = write!(
+                    stream,
+                    "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                let _ = stream.flush();
+            }
+        });
+        (format!("http://127.0.0.1:{port}"), rx)
+    }
+
+    /// A port with nothing behind it. Bind it, read the port, drop the
+    /// listener — the OS will not hand it out again immediately.
+    fn dead_port() -> u16 {
+        let l = TcpListener::bind("127.0.0.1:0").expect("bind");
+        l.local_addr().unwrap().port()
+    }
+
+    #[test]
+    fn comfyui_is_asked_on_the_configured_port_not_8188() {
+        let (base, rx) = one_shot("200 OK", "{}");
+        assert!(!base.ends_with(":8188"), "the ephemeral port must not be the default");
+        assert_eq!(free_comfyui_memory_at(&base), VramRelease::Released);
+        let seen = rx.recv_timeout(std::time::Duration::from_secs(5)).expect("no request arrived");
+        assert!(seen.starts_with("POST /free "), "{seen}");
+        assert!(seen.contains("\"unload_models\":true"), "{seen}");
+    }
+
+    #[test]
+    fn ollama_is_asked_on_the_configured_base_not_11434() {
+        let (base, rx) = one_shot("200 OK", r#"{"models":[{"name":"qwen3:8b"}]}"#);
+        assert!(!base.ends_with(":11434"), "the ephemeral port must not be the default");
+        assert_eq!(offload_ollama_loaded_models_at(&base), VramRelease::Released);
+        let ps = rx.recv_timeout(std::time::Duration::from_secs(5)).expect("no /api/ps");
+        assert!(ps.starts_with("GET /api/ps "), "{ps}");
+        let evict = rx.recv_timeout(std::time::Duration::from_secs(5)).expect("no eviction");
+        assert!(evict.starts_with("POST /api/generate "), "{evict}");
+        assert!(evict.contains("\"keep_alive\":0"), "{evict}");
+        assert!(evict.contains("qwen3:8b"), "{evict}");
+    }
+
+    /// The half of the finding the address fix alone does not close: a backend
+    /// that answered and held nothing must NOT read the same as a backend LU
+    /// could not ask.
+    #[test]
+    fn nothing_loaded_and_not_ours_are_different_answers() {
+        let (base, _rx) = one_shot("200 OK", r#"{"models":[]}"#);
+        assert_eq!(offload_ollama_loaded_models_at(&base), VramRelease::NothingLoaded);
+
+        let dead = format!("http://127.0.0.1:{}", dead_port());
+        let verdict = offload_ollama_loaded_models_at(&dead);
+        let (target, why) = verdict
+            .not_responsible()
+            .unwrap_or_else(|| panic!("a dead port read as {verdict:?}"));
+        assert_eq!(target, dead);
+        assert!(!why.is_empty());
+        assert!(!verdict.released());
+
+        // Both are "did not free anything", and that is exactly why `bool`
+        // was not enough.
+        assert!(!VramRelease::NothingLoaded.released());
+        assert_ne!(VramRelease::NothingLoaded, verdict);
+    }
+
+    #[test]
+    fn a_comfyui_that_answers_with_an_error_is_not_a_success() {
+        let (base, _rx) = one_shot("500 Internal Server Error", "boom");
+        let verdict = free_comfyui_memory_at(&base);
+        assert!(!verdict.released());
+        assert!(verdict.not_responsible().unwrap().1.contains("500"), "{verdict:?}");
+    }
+
+    #[test]
+    fn a_remote_backend_is_never_asked_and_says_so() {
+        // ComfyUI on the LAN: its VRAM is another machine's.
+        let (target, why) = comfy_vram_target_for("192.168.1.50", 8188).unwrap_err();
+        assert_eq!(target, "http://192.168.1.50:8188");
+        assert!(why.contains("another host"), "{why}");
+
+        let (target, why) = ollama_vram_target_for("http://192.168.0.54:11434").unwrap_err();
+        assert_eq!(target, "http://192.168.0.54:11434");
+        assert!(why.contains("another host"), "{why}");
+    }
+
+    #[test]
+    fn a_local_backend_on_a_custom_port_resolves_to_that_port() {
+        assert_eq!(comfy_vram_target_for("localhost", 9999).unwrap(), "http://localhost:9999");
+        assert_eq!(comfy_vram_target_for("127.0.0.1", 8189).unwrap(), "http://127.0.0.1:8189");
+        assert_eq!(
+            ollama_vram_target_for("http://127.0.0.1:12345").unwrap(),
+            "http://127.0.0.1:12345"
+        );
+        // state::load_ollama_base normalises away the trailing slash, but a
+        // hand-edited config.json can still carry one and `{base}/api/ps`
+        // would then be a double slash.
+        assert_eq!(
+            ollama_vram_target_for("http://localhost:11434/").unwrap(),
+            "http://localhost:11434"
+        );
+    }
+
+    #[test]
+    fn locality_is_decided_on_the_resolved_host_not_the_string() {
+        assert!(base_url_is_local("http://localhost:11434"));
+        assert!(base_url_is_local("http://127.0.0.1:11434"));
+        assert!(base_url_is_local("http://[::1]:11434"));
+        assert!(!base_url_is_local("http://192.168.0.54:11434"));
+        assert!(!base_url_is_local("http://ollama.example.com"));
+        // A host that merely CONTAINS a local name is not local.
+        assert!(!base_url_is_local("http://localhost.evil.example"));
+        assert!(!base_url_is_local("not a url"));
+    }
+
+    /// No hardcoded default address survives in the make-room path.
+    #[test]
+    fn the_vram_path_carries_no_hardcoded_backend_address() {
+        const SRC: &str = include_str!("process.rs");
+        let start = SRC
+            .find("pub(crate) fn offload_ollama_loaded_models_at")
+            .expect("offload helper is gone");
+        let end = SRC
+            .find(concat!("#[cfg(test)]\nmod vram_release", "_tests"))
+            .expect("test module marker is gone");
+        let body = &SRC[start..end];
+        for needle in ["localhost:8188", "localhost:11434", "127.0.0.1:8188", "127.0.0.1:11434"] {
+            assert!(
+                !body.contains(needle),
+                "'{needle}' is hardcoded again in the make-room-for-VRAM path"
+            );
+        }
+    }
+}
+
+/// T-68 — the orphan of a hard-killed session, and the line between it and a
+/// ComfyUI the user runs themselves.
+///
+/// VERIFICATION LIMIT, stated here and not only in a report: the failure this
+/// closes needs a SIGKILLed LU on Linux with a live ComfyUI child. That cannot
+/// be produced on the Mac this branch is developed on — macOS never
+/// auto-starts ComfyUI (local media is MLX-only) and there is no ComfyUI
+/// install here at all. What IS tested is every part that does not need one:
+/// the classifier that decides whether LU may kill a process it did not spawn,
+/// and the process-table scan against a REAL process this test starts and then
+/// finds by its command line. The kill escalation itself and the end-to-end
+/// hard-kill sequence are unproven here.
+#[cfg(test)]
+mod comfy_adoption_tests {
+    use super::*;
+
+    fn argv(line: &str) -> Vec<String> {
+        line.split(' ').map(str::to_string).collect()
+    }
+
+    /// Exactly what `start_comfyui_blocking` spawns, in argv order.
+    fn lu_argv(port: u16) -> Vec<String> {
+        argv(&format!(
+            "/usr/bin/python3 main.py --listen 127.0.0.1 --port {port} --enable-cors-header *"
+        ))
+    }
+
+    #[test]
+    fn the_argv_this_app_actually_spawns_is_recognised() {
+        assert!(is_lu_started_comfyui(&lu_argv(8188), 8188));
+        assert!(is_lu_started_comfyui(&lu_argv(9001), 9001));
+        // …and the CPU-fallback / flash-attention variants of the same start.
+        assert!(is_lu_started_comfyui(
+            &argv("python main.py --listen 127.0.0.1 --port 8188 --enable-cors-header * --cpu"),
+            8188
+        ));
+        assert!(is_lu_started_comfyui(
+            &argv("python main.py --listen 127.0.0.1 --port 8188 --enable-cors-header * --use-flash-attention"),
+            8188
+        ));
+    }
+
+    /// The whole reason the classifier is narrow: this decides whether LU
+    /// kills a process it did not spawn.
+    #[test]
+    fn a_comfyui_the_user_started_is_never_adopted() {
+        // No --enable-cors-header: this is the shape the "Fix CORS" button in
+        // Settings exists for, i.e. a hand-started ComfyUI.
+        assert!(!is_lu_started_comfyui(
+            &argv("python main.py --listen 0.0.0.0 --port 8188"),
+            8188
+        ));
+        // ComfyUI Desktop / a launcher script — not main.py.
+        assert!(!is_lu_started_comfyui(
+            &argv("/Applications/ComfyUI.app/Contents/MacOS/ComfyUI --port 8188"),
+            8188
+        ));
+        // Not a ComfyUI at all.
+        assert!(!is_lu_started_comfyui(&argv("node server.js --port 8188"), 8188));
+        assert!(!is_lu_started_comfyui(&[], 8188));
+    }
+
+    /// A second ComfyUI, on a port that merely starts with our digits, is a
+    /// stranger. `contains("--port 8188")` would have killed it.
+    #[test]
+    fn a_neighbouring_port_is_not_our_port() {
+        // 61880 starts with the digits of 6188 — a substring test would
+        // have called this ours and killed it.
+        let neighbour = argv("python main.py --port 61880 --enable-cors-header *");
+        assert!(!is_lu_started_comfyui(&neighbour, 6188));
+        assert!(is_lu_started_comfyui(&neighbour, 61880));
+
+        let shorter = argv("python main.py --port 618 --enable-cors-header *");
+        assert!(!is_lu_started_comfyui(&shorter, 6188));
+
+        // Both spellings of the flag resolve to the same port.
+        assert!(is_lu_started_comfyui(
+            &argv("python main.py --port=8188 --enable-cors-header *"),
+            8188
+        ));
+        assert!(!is_lu_started_comfyui(
+            &argv("python main.py --port=61880 --enable-cors-header *"),
+            6188
+        ));
+    }
+
+    /// The scan runs against the real process table. A process whose argv
+    /// matches must be found by pid; the same process on another port must
+    /// not.
+    ///
+    /// Unix only: the stand-in needs a program that keeps LU's argv shape
+    /// while doing nothing, and `sh -c` is the portable way to get one. The
+    /// finding itself is a Linux/macOS one — Windows children join the
+    /// kill-on-close job object and do not orphan in the first place.
+    #[cfg(unix)]
+    #[test]
+    fn the_scan_finds_a_real_process_by_the_argv_lu_would_have_used() {
+        // The trailing `; :` matters: a single simple command makes sh exec
+        // it and hand over its argv, which would erase the very thing being
+        // matched.
+        let port: u16 = 61888;
+        let mut child = Command::new("/bin/sh")
+            .args([
+                "-c",
+                "sleep 30; :",
+                "main.py",
+                "--listen",
+                "127.0.0.1",
+                "--port",
+                &port.to_string(),
+                "--enable-cors-header",
+                "*",
+            ])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("spawn the stand-in");
+
+        // sysinfo needs the process to be in the table.
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        let found = find_orphaned_comfyui(port);
+        let other = find_orphaned_comfyui(port + 1);
+
+        let _ = child.kill();
+        let _ = child.wait();
+
+        assert_eq!(found, Some(child.id()), "the scan did not find the stand-in");
+        assert_eq!(other, None, "the scan matched a process on another port");
+    }
+
+    /// Stop must not still be the no-op the finding describes.
+    #[test]
+    fn stop_no_longer_answers_not_running_without_looking() {
+        const SRC: &str = include_str!("process.rs");
+        let start = SRC
+            .find("fn stop_comfyui_blocking")
+            .expect("stop_comfyui_blocking is gone");
+        let body = &SRC[start..];
+        let end = start + body.find("\n}\n").expect("unterminated fn");
+        let body = &SRC[start..end];
+        assert!(
+            body.contains("find_orphaned_comfyui("),
+            "stop_comfyui_blocking no longer looks for the orphan"
+        );
+        assert!(
+            body.contains("kill_pid_tree("),
+            "stop_comfyui_blocking finds the orphan and does not stop it"
+        );
+    }
+}
+
+/// A child that outlives its launcher — the `npx -y <package>` MCP server, and
+/// anything else the shell plugin starts through a shim.
+///
+/// VERIFICATION LIMIT: the Unix half is proved here against real processes.
+/// The Windows half (`taskkill /T /F`) and the `npx.cmd` → cmd.exe → node
+/// chain it has to walk are NOT exercised on this machine.
+#[cfg(test)]
+mod process_tree_kill_tests {
+    use super::*;
+
+    #[test]
+    fn only_this_apps_own_processes_may_be_killed() {
+        let own = std::process::id();
+        let mine = vec![4242u32, 4243];
+        assert!(may_kill_pid(4242, own, &mine).is_ok());
+
+        // init / the session leader / the user's editor: not ours.
+        for stranger in [1u32, 999_999, own] {
+            let err = may_kill_pid(stranger, own, &mine)
+                .expect_err("a pid outside our subtree was accepted");
+            assert!(err.starts_with("refused:"), "{err}");
+        }
+        assert!(may_kill_pid(0, own, &mine).is_err());
+
+        // The ordering trap gets named in the message, because the misuse
+        // (kill the child first, then ask for its tree) looks like a bug in
+        // this command rather than in the call order.
+        let err = may_kill_pid(4244, own, &mine).unwrap_err();
+        assert!(err.contains("INSTEAD of the child"), "{err}");
+    }
+
+    /// The whole point: the grandchild dies too. `child.kill()` from the shell
+    /// plugin would have left it running.
+    #[cfg(unix)]
+    #[test]
+    fn killing_the_launcher_takes_the_grandchild_with_it() {
+        use sysinfo::{Pid, ProcessesToUpdate, System};
+
+        // A launcher that spawns a long-lived grandchild and then waits —
+        // the shape `npx -y <pkg>` has (shim in front, real server behind).
+        let mut launcher = Command::new("/bin/sh")
+            .args(["-c", "sleep 60 & wait"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("spawn the launcher");
+        let launcher_pid = launcher.id();
+
+        let grandchild = {
+            let mut found = None;
+            for _ in 0..40 {
+                std::thread::sleep(std::time::Duration::from_millis(50));
+                let mut sys = System::new();
+                sys.refresh_processes(ProcessesToUpdate::All, true);
+                let kids = crate::commands::shell::descendants(launcher_pid, &sys);
+                if let Some(pid) = kids.first() {
+                    found = Some(*pid);
+                    break;
+                }
+            }
+            found.expect("the launcher never spawned its grandchild")
+        };
+        assert_ne!(grandchild, launcher_pid);
+
+        let out = kill_process_tree_blocking(launcher_pid).expect("the tree kill was refused");
+        assert_eq!(out["killed"], serde_json::json!(true));
+        assert!(out["processes"].as_u64().unwrap() >= 2, "{out}");
+
+        // SIGTERM goes out immediately; give the escalation room anyway.
+        let mut still_there = true;
+        for _ in 0..40 {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+            let mut sys = System::new();
+            sys.refresh_processes(ProcessesToUpdate::All, true);
+            if sys.process(Pid::from_u32(grandchild)).is_none() {
+                still_there = false;
+                break;
+            }
+        }
+        let _ = launcher.kill();
+        let _ = launcher.wait();
+        assert!(
+            !still_there,
+            "the grandchild (pid {grandchild}) outlived the kill — this is exactly the \
+             npx orphan the plugin's own kill leaves behind"
+        );
+    }
+
+    /// One kill path, not two: the command must go through the same helper the
+    /// ComfyUI adoption uses.
+    #[test]
+    fn there_is_one_tree_kill_path() {
+        const SRC: &str = include_str!("process.rs");
+        let start = SRC.find("pub(crate) fn kill_process_tree_blocking").expect("gone");
+        let body = &SRC[start..start + 1400];
+        assert!(
+            body.contains("process_util::kill_pid_tree("),
+            "kill_process_tree grew its own kill instead of using the shared one"
         );
     }
 }
