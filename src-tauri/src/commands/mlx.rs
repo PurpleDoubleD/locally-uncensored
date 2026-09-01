@@ -863,21 +863,31 @@ pub fn mlx_start(_state: &AppState, _args: &Value) -> CmdResult {
     Ok(json!({"ok": true, "port": MLX_PORT, "log": log_path.to_string_lossy()}))
 }
 
-/// Stop the MLX sidecar (the long-lived image/video server on MLX_PORT). We
-/// didn't keep a Child handle, so stop it by its listening port — the "Stop"
-/// button counterpart to `mlx_start`.
-/// FINDING (clippy paydown, 01.09.2026): this has no caller and no bridge.
-/// `media_cmds.rs` wraps `mlx_status`, `mlx_start`, `mlx_unload`, `mlx_generate`
-/// and the rest as `#[tauri::command]`s — but not this one, so the frontend
-/// cannot reach it and the "Stop" button it describes cannot exist. The only
-/// production path that actually stops the sidecar is the quit-time
-/// `kill_listeners_on_port(MLX_PORT)` in `state.rs`. Either add the wrapper or
-/// delete this; the `allow` only keeps `-D warnings` usable meanwhile.
-#[allow(dead_code)]
-pub fn mlx_stop(_state: &AppState, _args: &Value) -> CmdResult {
-    crate::process_util::kill_listeners_on_port(MLX_PORT);
-    Ok(json!({ "ok": true, "port": MLX_PORT }))
-}
+// ── REMOVED on 01.09.2026: `mlx_stop` (KF-19) ─────────────────────────────
+//
+// It was two lines — `kill_listeners_on_port(MLX_PORT)` and an `{"ok":true}` —
+// under a doc comment calling itself "the Stop button counterpart to
+// `mlx_start`". Counted before removing: no Rust caller, no
+// `#[tauri::command]` wrapper in `media_cmds.rs`, no line in `main.rs`'s
+// handler list, and no occurrence of the STRING "mlx_stop" anywhere under
+// `src/`, `dev-server/`, `e2e/` or `mobile-client/` — which is how a Tauri
+// command is actually invoked. Every other mlx entry point is wired all four
+// ways. The Stop button it described could not exist.
+//
+// Deleted rather than wired, because the need it names is already served twice
+// over and neither of those is this function:
+//
+//   * Reclaiming memory while the app runs is `mlx_unload` (bridged, and
+//     called from `src/api/mlx-image.ts`). It frees the resident model and
+//     leaves the sidecar up, which is the point of a sidecar — `mlx_status`
+//     returns `modelLoaded`/`idleSeconds` so the UI can offer exactly that.
+//   * Ending the PROCESS is the quit-time `kill_listeners_on_port(MLX_PORT)`
+//     in `state.rs::shutdown`. Same call, one line, on the path that actually
+//     runs.
+//
+// Wiring it would have meant a bridge in `media_cmds.rs`, a line in `main.rs`
+// and a caller in `src/` — a third door onto a job the other two already do,
+// and the frontend is not this agent's to change.
 
 const REQUIREMENTS_TXT: &str = include_str!("../../resources/mlx/requirements.txt");
 const SERVER_PY: &str = include_str!("../../resources/mlx/server.py");

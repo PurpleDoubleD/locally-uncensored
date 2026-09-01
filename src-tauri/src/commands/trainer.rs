@@ -2013,17 +2013,24 @@ mod shutdown_tests {
         assert_eq!(venv_create_args(VenvAction::Keep), ["-m", "venv"]);
     }
 
+    /// The probe directory is per-process now (`test_dir` puts the pid and the
+    /// thread id in the name and sweeps up on `Drop`). It used to be the FIXED
+    /// `<temp>/lu-trainer-venv-probe/python-not-an-interpreter`, deleted at the
+    /// end of the test — so a concurrent copy of this binary removed the file
+    /// between this copy's `write` and its `exists`. Measured on 01.09.2026
+    /// under six concurrent copies of the suite, ten rounds: 1 of 60 runs, and
+    /// the message it failed with — "the file is there, which is all the old
+    /// check asked" — pointed at the production code rather than at the
+    /// fixture.
     #[test]
     fn presence_alone_never_counts_as_a_working_interpreter() {
         use super::python_starts;
-        let dir = std::env::temp_dir().join("lu-trainer-venv-probe");
-        let _ = std::fs::create_dir_all(&dir);
+        let dir = crate::os_paths::test_dir("trainer-venv-probe");
         let fake = dir.join("python-not-an-interpreter");
         std::fs::write(&fake, b"pyvenv.cfg points at a home that is gone").unwrap();
         assert!(fake.exists(), "the file is there, which is all the old check asked");
         assert!(!python_starts(&fake), "but it does not run, which is the question");
         assert!(!python_starts(&dir.join("nothing-here")));
-        let _ = std::fs::remove_file(&fake);
     }
 
     #[test]

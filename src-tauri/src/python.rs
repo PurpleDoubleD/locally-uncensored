@@ -394,21 +394,31 @@ mod tests {
 
     // ── resolve_comfyui_venv_python — existence gate ────────────────────────
 
+    /// ── Why these three no longer name their own directory ──
+    ///
+    /// They used the FIXED paths `<temp>/lu-venv-test-missing`,
+    /// `…-present` and `lu-dotvenv-test-present`, and each began by deleting
+    /// its own. Every concurrent copy of this test binary used the same three,
+    /// so one copy's `remove_dir_all` landed between another's `create_dir_all`
+    /// and its `resolve_comfyui_venv_python` — the stub python was gone and the
+    /// resolver correctly answered `None`. Measured on 01.09.2026 under six
+    /// concurrent copies of the suite, ten rounds:
+    /// `resolve_returns_some_when_venv_python_exists` and
+    /// `resolve_finds_dot_venv_layout` failed 1 of 60 runs each.
+    ///
+    /// `crate::os_paths::test_dir` puts the process id and the thread id in the
+    /// name and sweeps up on `Drop`, even when an assertion panics.
     #[test]
     fn resolve_returns_none_when_venv_missing() {
-        let tmp = std::env::temp_dir().join("lu-venv-test-missing");
-        let _ = fs::remove_dir_all(&tmp);
-        fs::create_dir_all(&tmp).unwrap();
+        let tmp = crate::os_paths::test_dir("venv-missing");
         assert!(resolve_comfyui_venv_python(&tmp).is_none());
-        let _ = fs::remove_dir_all(&tmp);
     }
 
     #[test]
     fn resolve_returns_some_when_venv_python_exists() {
         // Build the exact layout `python -m venv` would produce so the
         // resolver finds it without actually invoking Python.
-        let tmp = std::env::temp_dir().join("lu-venv-test-present");
-        let _ = fs::remove_dir_all(&tmp);
+        let tmp = crate::os_paths::test_dir("venv-present");
         let inner = if cfg!(target_os = "windows") {
             tmp.join("venv").join("Scripts")
         } else {
@@ -424,15 +434,13 @@ mod tests {
         let resolved = resolve_comfyui_venv_python(&tmp);
         assert!(resolved.is_some(), "expected resolver to find {}", py.display());
         assert!(resolved.unwrap().contains("venv"));
-        let _ = fs::remove_dir_all(&tmp);
     }
 
     #[test]
     fn resolve_finds_dot_venv_layout() {
         // Issue #51 (adhney): ComfyUI installed into `.venv` (uv / modern
         // `python -m venv .venv`) must also be picked up, not just `venv`.
-        let tmp = std::env::temp_dir().join("lu-dotvenv-test-present");
-        let _ = fs::remove_dir_all(&tmp);
+        let tmp = crate::os_paths::test_dir("dotvenv-present");
         let inner = if cfg!(target_os = "windows") {
             tmp.join(".venv").join("Scripts")
         } else {
@@ -448,7 +456,6 @@ mod tests {
         let resolved = resolve_comfyui_venv_python(&tmp);
         assert!(resolved.is_some(), "expected resolver to find {}", py.display());
         assert!(resolved.unwrap().contains(".venv"));
-        let _ = fs::remove_dir_all(&tmp);
     }
 
     // ── is_real_python (Bug P14 — Microsoft Store stub filter) ──────────────

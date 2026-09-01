@@ -470,15 +470,15 @@ fn resolve_path(path: &str, chat_id: Option<&str>, working_dir: Option<&str>) ->
 
 /// True when `path` LOOKS like the workspace ROOT itself ("", ".", "./",
 /// trailing slashes) rather than a named subpath. Used to decide whether a
-/// missing directory should be auto-created as the per-chat sandbox root.
+/// missing directory answers as the empty per-chat sandbox root.
 ///
 /// A guess on the raw string, and it is wrong in both directions: it misses
 /// `"unterordner/.."` (which resolves to the root) and it claims `"  "` and
 /// `".\\"` (which resolve to ordinary files inside it, on a platform where a
 /// backslash is an ordinary character). That is affordable for its ONE caller —
-/// `fs_list`, where the answer only decides whether an empty directory gets
-/// created and a wrong guess costs nothing. It is NOT affordable for a write;
-/// see `reject_root_as_write_target`.
+/// `fs_list`, where the answer only decides whether a missing directory reads
+/// as an empty listing or as "Not a directory", and either way nothing is
+/// written. It is NOT affordable for a write; see `reject_root_as_write_target`.
 fn is_workspace_root_path(path: &str) -> bool {
     let t = path.trim().replace('\\', "/");
     let t = t.trim_end_matches('/');
@@ -739,17 +739,42 @@ pub fn fs_list(
     if !dir.is_dir() {
         // A fresh per-chat agent sandbox (~/agent-workspace/<chat_id>) may not
         // exist yet. When the model lists the workspace ROOT with a relative
-        // "." / "" path, create it so `file_list .` returns an empty listing
-        // instead of "Not a directory" — small models otherwise climb to an
-        // absolute drive-root path. Mirrors shell.rs (create_dir_all on cwd).
-        // ONLY the sandbox root is auto-created; absolute or sub paths error.
+        // "." / "" path, that is an EMPTY listing rather than "Not a directory"
+        // — small models otherwise climb to an absolute drive-root path. ONLY
+        // the sandbox root gets this answer; absolute or sub paths error.
+        //
+        // ── KF-16: this used to `create_dir_all` the root and then list it ──
+        //
+        // Same answer to the caller either way — an empty listing — so the
+        // creation was never what produced it. What it did produce was a WRITE
+        // on the read door: `fs_list` was the only one of the six that changed
+        // the disk, while `fs_read`, `fs_info`, `fs_search` and `fs_read_bytes`
+        // all report a path that is not there. This file has already paid twice
+        // for "a request that names no file caused a write" (KF-12, KF-15), and
+        // a directory is a smaller version of the same surprise.
+        //
+        // Nothing depended on it. The root is created by the first real write
+        // (`fs_write` runs `create_dir_all` over it — pinned by
+        // `an_ordinary_write_still_creates_the_root_as_a_directory`) and by
+        // `shell.rs`, which creates its cwd. So the folder still exists as soon
+        // as the agent does anything, and a caller that only LOOKS leaves no
+        // trace. The second caller makes that concrete: `ExplorerPanel.tsx`
+        // calls `fs_list` directly whenever the panel is opened, so the old
+        // behaviour put a folder in `~/<AGENT_WORKSPACE_DIR>` for every chat
+        // somebody merely glanced at.
+        //
+        // The dev-server's `/local-api/fs-list` has always answered this way —
+        // 200 with an empty list, nothing created. That was the divergence the
+        // finding names, and this is the side that moved. It is guarded from
+        // both ends: `listing_a_root_that_does_not_exist_creates_nothing` below
+        // measures this function, and
+        // `the_dev_server_answers_the_root_the_same_way` reads the dev-server's
+        // own source so the two cannot drift apart again.
         let cleaned = normalize_duplicate_drive_prefix(&path);
         if is_workspace_root_path(&cleaned) && !Path::new(&cleaned).is_absolute() {
-            let _ = fs::create_dir_all(&dir);
+            return Ok(serde_json::json!({ "entries": [], "count": 0 }));
         }
-        if !dir.is_dir() {
-            return Err(format!("Not a directory: {}", dir.display()));
-        }
+        return Err(format!("Not a directory: {}", dir.display()));
     }
 
     let mut entries: Vec<serde_json::Value> = Vec::new();
@@ -1957,20 +1982,115 @@ mod write_needs_a_target_tests {
     }
 
     /// READING the root is a legitimate request and stays one. `fs_list(".")`
-    /// on a workspace that does not exist yet still creates it as a DIRECTORY
-    /// and answers with an empty listing — the guard is on the write door only.
+    /// on a workspace that does not exist yet answers with an empty listing —
+    /// the guard is on the write door only.
+    ///
+    /// KF-16: it also creates NOTHING. This test used to assert the opposite
+    /// (`root.is_dir()` afterwards); the argument for the swap is above
+    /// `fs_list`. Both halves are asserted, so neither the answer nor the
+    /// absence of a side effect can be lost silently.
     #[test]
-    fn listing_the_root_is_still_allowed_and_still_creates_it_as_a_directory() {
+    fn listing_a_root_that_does_not_exist_creates_nothing() {
         let parent = picked("list");
-        let root = parent.join("ws");
-        let root_arg = root.to_string_lossy().to_string();
 
-        for spelling in ["", "."] {
+        for spelling in ["", ".", "./"] {
+            // A fresh root per spelling: the first call must not be able to
+            // create the directory the second one is asked about.
+            let root = parent.join(format!("ws-{}", spelling.len()));
+            let root_arg = root.to_string_lossy().to_string();
+            assert!(!root.exists(), "the fixture must not exist yet");
+
             let v = fs_list(spelling.into(), None, None, None, Some(root_arg.clone()))
                 .unwrap_or_else(|e| panic!("fs_list({spelling:?}) was refused: {e}"));
             assert_eq!(v["count"], 0);
-            assert!(root.is_dir(), "fs_list({spelling:?}) did not create the root as a directory");
+            assert_eq!(v["entries"], serde_json::json!([]));
+            assert!(
+                !root.exists(),
+                "fs_list({spelling:?}) created {} — a listing must not write",
+                root.display(),
+            );
+
+            // …and once the root IS there, the same call reads it. Without
+            // this the assertion above would also hold for a `fs_list` that
+            // answered "empty" to everything.
+            fs::create_dir_all(root.join("drin")).unwrap();
+            let v = fs_list(spelling.into(), None, None, None, Some(root_arg))
+                .unwrap_or_else(|e| panic!("fs_list({spelling:?}) was refused: {e}"));
+            assert_eq!(v["count"], 1, "the existing root did not read back");
         }
+    }
+
+    /// A NAMED subpath that is not there is still an error, not an empty
+    /// listing. The empty answer belongs to the cage root alone — otherwise a
+    /// typo in a folder name would read as "the folder is empty".
+    #[test]
+    fn a_missing_subpath_is_still_not_a_directory() {
+        let root = picked("list-sub");
+        let root_arg = root.to_string_lossy().to_string();
+        let err = fs_list("gibtsnicht".into(), None, None, None, Some(root_arg))
+            .expect_err("a missing named folder must not read as empty");
+        assert!(err.starts_with("Not a directory:"), "{err}");
+    }
+
+    /// ── The other side of the same door (KF-16) ──
+    ///
+    /// The dev-server serves the same six file operations to the same model,
+    /// and `/local-api/fs-list` has always answered the cage root with 200 and
+    /// an empty list while creating nothing. That is the answer this file now
+    /// gives too — but "both sides agree today" is what the previous divergence
+    /// also looked like, right up until one of them was maintained and the
+    /// other was not.
+    ///
+    /// So the rule is read back out of the dev-server's own source. It is the
+    /// same idiom `commands/secret.rs` uses to hold `providerStore.ts` and
+    /// `mlx-image.ts` to a rule this crate depends on. It cannot run the
+    /// handler — that is vitest's job — but it fails the moment somebody
+    /// teaches the listing route to create a directory, which is the drift
+    /// that has to be caught.
+    #[test]
+    fn the_dev_server_answers_the_root_the_same_way() {
+        const FS_ROUTES_TS: &str = include_str!("../../../dev-server/fs-routes.ts");
+
+        let route = |name: &str| -> &str {
+            let marker = format!("routes.use('/local-api/{name}'");
+            let at = FS_ROUTES_TS
+                .find(&marker)
+                .unwrap_or_else(|| panic!("dev-server has no {name} route any more"));
+            let rest = &FS_ROUTES_TS[at + marker.len()..];
+            let end = rest
+                .find("routes.use('/local-api/")
+                .unwrap_or(rest.len());
+            &rest[..end]
+        };
+
+        let list = route("fs-list");
+        // The listing walks the directory and never creates it.
+        assert!(list.contains("readdirSync"), "the listing route stopped reading the directory");
+        assert!(
+            !list.contains("mkdirSync"),
+            "the dev-server's fs-list now CREATES the directory it was asked to list. \
+             Rust's fs_list does not (see `listing_a_root_that_does_not_exist_creates_nothing`); \
+             one of the two doors has moved.",
+        );
+        // A root that is not there is an empty listing, not an error status.
+        assert!(
+            list.contains("count: entries.length"),
+            "the listing route no longer answers with the entries it collected",
+        );
+        assert!(
+            list.contains("entries: [], count: 0"),
+            "the listing route no longer falls back to an EMPTY listing",
+        );
+
+        // Negative control for the slicing itself: `mkdirSync` does appear in
+        // this file — on the WRITE door, where it belongs. Without this, a
+        // mis-sliced route would make the assertion above pass on an empty
+        // string.
+        assert!(
+            route("fs-write").contains("mkdirSync"),
+            "the write route no longer creates the parent directory — either the \
+             dev-server changed or the slicing above is picking the wrong block",
+        );
     }
 
     // ── Why the guard measures the RESOLVED path and not the string ─────────

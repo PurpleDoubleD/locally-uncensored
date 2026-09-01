@@ -672,10 +672,22 @@ pub fn get_chat_workspace_override(
 /// one gets created.
 #[tauri::command]
 pub fn list_agent_workspaces() -> Result<Vec<String>, String> {
-    let root = agent_workspace_root();
-    let entries = match fs::read_dir(&root) {
+    Ok(directory_names_in(&agent_workspace_root()))
+}
+
+/// The listing rule itself, on a root the caller names.
+///
+/// Split out of `list_agent_workspaces` because its test could not reach it:
+/// `agent_workspace_root()` is `~/<AGENT_WORKSPACE_DIR>` with no seam, so
+/// `lists_only_directory_names_sorted` had COPIED these six lines into the test
+/// module and asserted on the copy. It therefore stayed green for any change to
+/// the real function — sorting removed, files no longer filtered — and only ever
+/// measured that `read_dir` works. One function, called by the command and by
+/// the test, is what makes the test's headline true.
+fn directory_names_in(root: &std::path::Path) -> Vec<String> {
+    let entries = match fs::read_dir(root) {
         Ok(e) => e,
-        Err(_) => return Ok(Vec::new()),
+        Err(_) => return Vec::new(),
     };
     let mut names: Vec<String> = entries
         .flatten()
@@ -683,7 +695,7 @@ pub fn list_agent_workspaces() -> Result<Vec<String>, String> {
         .filter_map(|e| e.file_name().to_str().map(|s| s.to_string()))
         .collect();
     names.sort();
-    Ok(names)
+    names
 }
 
 /// Human byte size for tool messages. Mirrors formatBytes in builtin-tools.ts
@@ -702,43 +714,50 @@ fn format_bytes(bytes: u64) -> String {
     }
 }
 
+/// ── Why these two no longer share a directory with every other copy ────────
+///
+/// `lists_only_directory_names_sorted` used the FIXED path
+/// `<temp>/lu-test-agent-workspace-listing`, and it began by deleting it. Every
+/// concurrent copy of this test binary used the same one, so one copy's
+/// `remove_dir_all` ran between another's `create_dir_all` and its `read_dir`.
+/// Measured on 01.09.2026 under the apparatus the finding was raised in — the
+/// whole suite run three times over, ten rounds — it failed 5 of 30 runs, always
+/// with a short list (`["alpha-aabbcc"]` instead of both names): a stranger had
+/// swept the directory mid-test.
+///
+/// `crate::os_paths::test_dir` is the house answer and predates this test by
+/// several commits — the name carries the process id and the thread id, and the
+/// `Drop` sweeps up even when an assertion panics. Nothing else changes.
 #[cfg(test)]
 mod workspace_listing_tests {
+    use super::directory_names_in;
     use std::fs;
 
     /// The listing rule the frontend's fallback search depends on: folder
     /// names, directories only, sorted, and a plain file is not a workspace.
+    ///
+    /// Asserts on the PRODUCTION function now, not on a copy of its body.
     #[test]
     fn lists_only_directory_names_sorted() {
-        let root = std::env::temp_dir().join("lu-test-agent-workspace-listing");
-        let _ = fs::remove_dir_all(&root);
+        let root = crate::os_paths::test_dir("agent-workspace-listing");
         fs::create_dir_all(root.join("zeta-5e61db")).unwrap();
         fs::create_dir_all(root.join("alpha-aabbcc")).unwrap();
         fs::write(root.join("loose.txt"), b"not a workspace").unwrap();
 
-        let entries = fs::read_dir(&root).unwrap();
-        let mut names: Vec<String> = entries
-            .flatten()
-            .filter(|e| e.file_type().map(|t| t.is_dir()).unwrap_or(false))
-            .filter_map(|e| e.file_name().to_str().map(|s| s.to_string()))
-            .collect();
-        names.sort();
-
-        assert_eq!(names, vec!["alpha-aabbcc".to_string(), "zeta-5e61db".to_string()]);
-        let _ = fs::remove_dir_all(&root);
+        assert_eq!(
+            directory_names_in(&root),
+            vec!["alpha-aabbcc".to_string(), "zeta-5e61db".to_string()],
+        );
     }
 
     /// Negative control: a root that does not exist is an empty list, not an
     /// error, so a fresh install never sees a failure here.
     #[test]
     fn missing_root_is_empty_not_an_error() {
-        let root = std::env::temp_dir().join("lu-test-agent-workspace-absent");
-        let _ = fs::remove_dir_all(&root);
-        let listed: Vec<String> = match fs::read_dir(&root) {
-            Ok(e) => e.flatten().filter_map(|x| x.file_name().to_str().map(|s| s.to_string())).collect(),
-            Err(_) => Vec::new(),
-        };
-        assert!(listed.is_empty());
+        let parent = crate::os_paths::test_dir("agent-workspace-absent");
+        let never_created = parent.join("nicht-da");
+        assert!(!never_created.exists(), "the fixture must not exist");
+        assert!(directory_names_in(&never_created).is_empty());
     }
 }
 

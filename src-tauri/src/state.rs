@@ -568,7 +568,12 @@ impl AppState {
         // drops the Child handle — the sidecar outlives individual renders and
         // is addressed over loopback — so quitting used to orphan the venv
         // Python forever (observed live: LU gone, server.py still resident).
-        // Kill it by its listening port, same mechanism as the Stop button.
+        // Kill it by its listening port. This is the ONLY thing that stops the
+        // sidecar process; `mlx_unload` (the control the UI does have) frees the
+        // resident model and leaves the server up. The line used to say "same
+        // mechanism as the Stop button" — there was no Stop button, and the
+        // `mlx_stop` that described one had no bridge and no caller (KF-19,
+        // removed 01.09.2026).
         #[cfg(target_os = "macos")]
         {
             crate::process_util::kill_listeners_on_port(crate::commands::mlx::MLX_PORT);

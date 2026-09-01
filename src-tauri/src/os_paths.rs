@@ -340,140 +340,55 @@ pub fn find_lms_cli() -> Option<PathBuf> {
     which::which("lms").ok()
 }
 
-/// macOS Spotlight lookup for an app bundle by its on-disk name (e.g.
-/// "LM Studio.app"). Finds installs buried in deep or hidden folders that PATH
-/// and the fixed /Applications check miss — people drop apps in the weirdest
-/// nested places. No-op (None) off macOS.
-fn spotlight_app(fs_name: &str) -> Option<PathBuf> {
-    #[cfg(target_os = "macos")]
-    {
-        let out = std::process::Command::new("mdfind")
-            .arg(format!("kMDItemFSName == '{fs_name}'"))
-            .output()
-            .ok()?;
-        String::from_utf8_lossy(&out.stdout)
-            .lines()
-            .map(|l| PathBuf::from(l.trim()))
-            .find(|p| p.exists())
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        let _ = fs_name;
-        None
-    }
-}
-
-/// Locate the LM Studio app bundle anywhere on disk: the standard install dirs
-/// first, then Spotlight for hidden / deeply-nested installs.
-pub fn find_lmstudio_app() -> Option<PathBuf> {
-    for p in [
-        PathBuf::from("/Applications/LM Studio.app"),
-        home().join("Applications").join("LM Studio.app"),
-    ] {
-        if p.exists() {
-            return Some(p);
-        }
-    }
-    spotlight_app("LM Studio.app")
-}
-
-/// Is LM Studio installed anywhere — the `lms` CLI or the app bundle?
-/// FINDING (clippy paydown, 01.09.2026): nothing in this repository calls this —
-/// not the Rust side, not a `#[tauri::command]` wrapper, not the frontend. It is
-/// kept rather than deleted because deleting a detection helper is a product
-/// decision, not a lint decision; the `allow` is here so the rest of the crate
-/// can run under `-D warnings` while that decision is pending. Wire it or drop
-/// it, but do not leave it in this state indefinitely.
-#[allow(dead_code)]
-pub fn lmstudio_installed() -> bool {
-    find_lms_cli().is_some() || find_lmstudio_app().is_some()
-}
-
-/// Locate the Ollama app bundle anywhere on disk (fixed dirs, then Spotlight).
-pub fn find_ollama_app() -> Option<PathBuf> {
-    for p in [
-        PathBuf::from("/Applications/Ollama.app"),
-        home().join("Applications").join("Ollama.app"),
-    ] {
-        if p.exists() {
-            return Some(p);
-        }
-    }
-    spotlight_app("Ollama.app")
-}
-
-/// Locate the `ollama` CLI binary: PATH, common prefixes, then inside a
-/// discovered Ollama.app bundle.
-pub fn find_ollama_bin() -> Option<PathBuf> {
-    if let Ok(p) = which::which("ollama") {
-        return Some(p);
-    }
-    for c in [
-        "/opt/homebrew/bin/ollama",
-        "/usr/local/bin/ollama",
-        "/usr/bin/ollama",
-    ] {
-        let p = PathBuf::from(c);
-        if p.exists() {
-            return Some(p);
-        }
-    }
-    if let Some(app) = find_ollama_app() {
-        for rel in [
-            "Contents/Resources/ollama",
-            "Contents/MacOS/Ollama",
-            "Contents/MacOS/ollama",
-        ] {
-            let p = app.join(rel);
-            if p.exists() {
-                return Some(p);
-            }
-        }
-    }
-    None
-}
-
-/// Is Ollama installed anywhere — CLI binary or app bundle?
-/// FINDING (clippy paydown, 01.09.2026): nothing in this repository calls this —
-/// not the Rust side, not a `#[tauri::command]` wrapper, not the frontend. It is
-/// kept rather than deleted because deleting a detection helper is a product
-/// decision, not a lint decision; the `allow` is here so the rest of the crate
-/// can run under `-D warnings` while that decision is pending. Wire it or drop
-/// it, but do not leave it in this state indefinitely.
-#[allow(dead_code)]
-pub fn ollama_installed() -> bool {
-    find_ollama_bin().is_some() || find_ollama_app().is_some()
-}
-
-/// Reasonable places to look for an existing ComfyUI install.
-/// FINDING (clippy paydown, 01.09.2026): nothing in this repository calls this —
-/// not the Rust side, not a `#[tauri::command]` wrapper, not the frontend. It is
-/// kept rather than deleted because deleting a detection helper is a product
-/// decision, not a lint decision; the `allow` is here so the rest of the crate
-/// can run under `-D warnings` while that decision is pending. Wire it or drop
-/// it, but do not leave it in this state indefinitely.
-#[allow(dead_code)]
-pub fn comfyui_search_roots() -> Vec<PathBuf> {
-    let mut out = Vec::new();
-    let h = home();
-    out.push(h.clone());
-    out.push(h.join("Desktop"));
-    out.push(h.join("Documents"));
-    out.push(h.join("Downloads"));
-    if cfg!(target_os = "windows") {
-        if let Ok(user_profile) = std::env::var("USERPROFILE") {
-            out.push(PathBuf::from(user_profile.clone()).join("StabilityMatrix"));
-            out.push(PathBuf::from(user_profile).join("Packages"));
-        }
-    }
-    out
-}
+// ── REMOVED on 01.09.2026: the second engine-detection apparatus (KF-19) ──
+//
+// Gone from here: `lmstudio_installed`, `ollama_installed`,
+// `comfyui_search_roots`, and the three helpers that only they kept alive —
+// `find_lmstudio_app`, `find_ollama_app`, `find_ollama_bin` and
+// `spotlight_app` (the `mdfind` lookup, whose only two callers were the two
+// `find_*_app` functions).
+//
+// The three named ones were counted before removing: no Rust caller, no
+// `#[tauri::command]` wrapper, no line in `main.rs`, and no occurrence of the
+// NAME as a string anywhere under `src/`, `dev-server/`, `e2e/` or
+// `mobile-client/`. The three helpers had exactly one caller each, and that
+// caller was one of the three.
+//
+// They are not a gap: every question they answered is already answered on a
+// path that runs, and by different code — which is the whole point of the
+// finding.
+//
+//   * "Is Ollama there?" — the production paths call `Command::new("ollama")`
+//     straight off PATH (`process.rs::start_ollama` / `auto_start_ollama`), and
+//     the installer probes with `which ollama`
+//     (`commands/install/ollama.rs`). Neither ever consulted
+//     `find_ollama_bin`'s richer search (Homebrew prefixes, the app bundle's
+//     three internal layouts, Spotlight).
+//   * "Is LM Studio there?" — `commands/install/lmstudio.rs::lmstudio_lms_path`,
+//     which handles the Windows layouts itself and delegates to
+//     `find_lms_cli` (kept, and still called) everywhere else.
+//   * "Where might ComfyUI be?" — `process.rs::find_comfyui_path`, which keeps
+//     its own, longer and actually maintained list of roots: the env var, the
+//     config file, the fixed locations, a depth-7 home scan, then the drive
+//     roots. `comfyui_search_roots` listed four home folders plus
+//     `%USERPROFILE%\StabilityMatrix` and `…\Packages` — the wrong shape for
+//     Stability Matrix, which nests as `StabilityMatrix\Packages\ComfyUI`, and
+//     nobody noticed because nobody called it.
+//
+// Wiring them instead would have meant choosing WHICH of the two detections
+// each question gets — the very fork this finding is about — and the callers
+// that would have to change are in `src/`.
 
 /// Default ComfyUI install target — where install_comfyui will drop the
 /// portable bundle on Windows / clone the repo on macOS+Linux.
-/// Only the path-inventory test in `app_identity.rs` calls this today — no
-/// production caller is left, so it is dead in the `bin` target and alive in the
-/// `test` one. Same standing decision as the helpers above.
+///
+/// The `allow` here is NOT the standing "decide later" the block above just
+/// removed, and the difference is the whole point of KF-19: this function HAS a
+/// caller — `alle_abgeleiteten_pfade` in `app_identity.rs`, which asserts that
+/// no path this build derives points into the real app's directories. It is
+/// therefore alive in the `test` target and dead only in the `bin` one, and
+/// `dead_code` cannot see across the two. Remove the caller and this becomes a
+/// deletion like the others.
 #[allow(dead_code)]
 pub fn default_comfyui_dir() -> PathBuf {
     data_dir().join("ComfyUI")

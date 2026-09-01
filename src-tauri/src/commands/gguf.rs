@@ -219,43 +219,62 @@ mod tests {
         }
     }
 
-    fn tmp(name: &str) -> std::path::PathBuf {
-        let dir = std::env::temp_dir().join("lu-gguf-tests");
-        std::fs::create_dir_all(&dir).unwrap();
-        dir.join(name)
+    /// A directory these fixtures own for the length of one test.
+    ///
+    /// It used to be the FIXED `<temp>/lu-gguf-tests/`, with the fixture names
+    /// fixed too (`ok.gguf`, `reversed.gguf`, …). Every concurrent copy of this
+    /// test binary therefore wrote the same files, and `W::write_to` opens with
+    /// `File::create` — which TRUNCATES. One copy truncating `reversed.gguf`
+    /// while another was parsing it is a header that ends mid-field, and
+    /// `context_length` correctly answers `None`.
+    ///
+    /// Measured on 01.09.2026 under three concurrent copies of the whole suite,
+    /// ten rounds: `context_key_before_architecture_still_resolves` failed 2 of
+    /// 30 and `reads_context_length_behind_skipped_values` 1 of 30, both with
+    /// `left: None`. Nothing about the parser was wrong — the file under it was
+    /// being rewritten mid-read.
+    ///
+    /// `test_dir` carries the process id and the thread id in the name and
+    /// sweeps itself up on `Drop`. The returned guard has to stay in scope: the
+    /// directory is removed when it is dropped.
+    fn fixtures(tag: &str) -> crate::os_paths::TestDir {
+        crate::os_paths::test_dir(&format!("gguf-{tag}"))
     }
 
     #[test]
     fn reads_context_length_behind_skipped_values() {
+        let dir = fixtures("skipped");
         let mut w = W::new(4);
         w.str_field("general.name", "unit test model");
         w.arr_str_field("tokenizer.ggml.tokens", &["a", "b", "c"]);
         w.str_field("general.architecture", "qwen2");
         w.u32_field("qwen2.context_length", 32768);
-        let p = tmp("ok.gguf");
+        let p = dir.join("ok.gguf");
         w.write_to(&p);
         assert_eq!(context_length(p.to_str().unwrap()), Some(32768));
     }
 
     #[test]
     fn context_key_before_architecture_still_resolves() {
+        let dir = fixtures("reversed");
         let mut w = W::new(2);
         w.u32_field("llama.context_length", 8192);
         w.str_field("general.architecture", "llama");
-        let p = tmp("reversed.gguf");
+        let p = dir.join("reversed.gguf");
         w.write_to(&p);
         assert_eq!(context_length(p.to_str().unwrap()), Some(8192));
     }
 
     #[test]
     fn garbage_missing_and_truncated_files_are_none() {
-        let p = tmp("garbage.gguf");
+        let dir = fixtures("garbage");
+        let p = dir.join("garbage.gguf");
         std::fs::write(&p, b"MZ\x90definitely not a gguf").unwrap();
         assert_eq!(context_length(p.to_str().unwrap()), None);
         assert_eq!(context_length("/nonexistent/nope.gguf"), None);
 
         // Valid magic, then the file just ends mid-header.
-        let t = tmp("truncated.gguf");
+        let t = dir.join("truncated.gguf");
         std::fs::write(&t, b"GGUF\x03\x00\x00\x00").unwrap();
         assert_eq!(context_length(t.to_str().unwrap()), None);
     }

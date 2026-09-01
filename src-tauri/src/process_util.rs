@@ -128,6 +128,16 @@ fn tree_snapshot(root: u32) -> Vec<(u32, u64)> {
         .collect()
 }
 
+/// How long a SIGTERM'd tree is given before the SIGKILL goes out.
+///
+/// A named constant because it is the subject of
+/// `the_call_does_not_block_for_the_grace_period`: the whole point of the
+/// detached thread below is that the CALLER never spends this. It was written
+/// twice, once per escalation path, and a change to one of the two would have
+/// been silent.
+#[cfg(unix)]
+const KILL_GRACE: std::time::Duration = std::time::Duration::from_millis(800);
+
 /// Recursive process-tree kill: SIGTERM the whole tree now, SIGKILL whatever
 /// is left after a grace. Windows delegates the walk to `taskkill /T /F`.
 ///
@@ -180,7 +190,7 @@ pub fn kill_tree(child: &mut Child) -> std::io::Result<()> {
             }
         }
         std::thread::spawn(move || {
-            std::thread::sleep(std::time::Duration::from_millis(800));
+            std::thread::sleep(KILL_GRACE);
             let survivors = {
                 use sysinfo::{Pid, ProcessesToUpdate, System};
                 let mut sys = System::new();
@@ -239,7 +249,7 @@ pub fn kill_pid_tree(pid: u32) {
             }
         }
         std::thread::spawn(move || {
-            std::thread::sleep(std::time::Duration::from_millis(800));
+            std::thread::sleep(KILL_GRACE);
             use sysinfo::{Pid, ProcessesToUpdate, System};
             let mut sys = System::new();
             sys.refresh_processes(ProcessesToUpdate::All, true);
@@ -374,12 +384,25 @@ mod kill_tree_tests {
             .spawn()
             .expect("spawn sh");
         let pid = child.id();
-        std::thread::sleep(Duration::from_millis(400));
 
-        let mut sys = sysinfo::System::new();
-        sys.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
-        let kids = crate::commands::shell::descendants(pid, &sys);
-        assert!(!kids.is_empty(), "sh spawned nothing — test setup is wrong");
+        // Waits for the CONDITION — sh has actually forked — with a ceiling,
+        // instead of guessing 400 ms at it. The old fixed sleep made the
+        // "test setup is wrong" assertion below a load measurement: on a busy
+        // machine sh simply had not got there yet.
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let kids = loop {
+            let mut sys = sysinfo::System::new();
+            sys.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
+            let kids = crate::commands::shell::descendants(pid, &sys);
+            if !kids.is_empty() {
+                break kids;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "sh spawned nothing in 10s — test setup is wrong",
+            );
+            std::thread::sleep(Duration::from_millis(50));
+        };
 
         kill_tree(&mut child).expect("kill_tree");
 
@@ -391,6 +414,27 @@ mod kill_tree_tests {
     /// `video_cancel` holds the `video_process` mutex for the duration of this
     /// call and the progress poll waits on the same mutex, so a blocking grace
     /// froze the window. The kill must be ordered, not awaited.
+    ///
+    /// ── Why there is no stopwatch in here any more ──
+    ///
+    /// It used to time the call and assert `took < 400 ms`. That number is not
+    /// the grace and it is not a property of the code: the unavoidable work
+    /// inside `kill_tree` is `tree_snapshot`, which enumerates the ENTIRE
+    /// process table, and how long that takes belongs to the machine and to
+    /// whatever else is running on it. Measured on 01.09.2026 under six
+    /// concurrent copies of the suite — every one of them walking the process
+    /// table too — it failed 17 of 18 runs. The kill was ordered, not awaited,
+    /// in all 18; the enumeration was simply slower than the budget.
+    ///
+    /// So the question is asked without a clock. `kill_tree` hands the grace,
+    /// the SIGKILL and the final `waitpid` to a detached thread. The `waitpid`
+    /// is the LAST of those, and until it runs the child is our unreaped
+    /// zombie, which is a pid `kill(pid, 0)` can still address. An
+    /// implementation that awaited the grace would return AFTER that thread had
+    /// finished, and the pid would be gone. One signal-0, no wall clock, no
+    /// budget to blow — and it fails for exactly the regression this test
+    /// exists to catch (put `thread::sleep(KILL_GRACE)` back in the caller's
+    /// path and the child is reaped before the assertion runs).
     #[test]
     fn the_call_does_not_block_for_the_grace_period() {
         let mut child = Command::new("sh")
@@ -401,13 +445,35 @@ mod kill_tree_tests {
             .spawn()
             .expect("spawn sh");
         let pid = child.id();
-        std::thread::sleep(Duration::from_millis(200));
 
-        let started = Instant::now();
+        // Self-check instead of a settle sleep: wait for the CONDITION that the
+        // stand-in is a live process carrying the argv this test chose, with a
+        // ceiling. A `sh` that died on the spot would otherwise be killed as a
+        // corpse and every assertion below would still pass. `checked_table`
+        // owns the ceiling and the retry, including the one for a child that is
+        // in the table but has not finished `exec` yet.
+        let table = crate::test_support::checked_table(pid).unwrap_or_else(|why| panic!("{why}"));
+        let argv = crate::process_util::cmdline_of(
+            table
+                .process(sysinfo::Pid::from_u32(pid))
+                .expect("checked_table only returns a table containing this pid"),
+        );
+        assert!(
+            argv.join(" ").contains("sleep"),
+            "the stand-in is not the sleeper this test spawned: {argv:?}",
+        );
+
         kill_tree(&mut child).expect("kill_tree");
-        let took = started.elapsed();
 
-        assert!(took < Duration::from_millis(400), "kill_tree blocked for {took:?}");
+        // Still ours, still unreaped → the detached thread has not reached its
+        // `waitpid` yet → this call cannot have waited for the grace.
+        let still_ours = unsafe { libc::kill(pid as i32, 0) } == 0;
+        assert!(
+            still_ours,
+            "kill_tree returned only after the escalation thread had already \
+             reaped pid {pid} — it waited out the {KILL_GRACE:?} grace",
+        );
+
         wait_until_gone(&[pid], Duration::from_secs(5));
     }
 

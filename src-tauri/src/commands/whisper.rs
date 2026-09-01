@@ -718,20 +718,84 @@ mod dead_server_tests {
         assert!(ws.has_exited());
     }
 
+    /// One go at the failure: a lingering stand-in, killed and reaped, then a
+    /// take sent into its pipe. Returns `(has_exited, the send's answer)`.
+    ///
+    /// It runs on its own thread and the caller waits with a ceiling, because
+    /// of the one way this can come out neither dead nor alive — see the
+    /// test below.
+    fn attempt_a_send_into_a_killed_server(
+    ) -> Option<(bool, Result<serde_json::Value, String>)> {
+        let (done, answer) = mpsc::channel();
+        std::thread::spawn(move || {
+            // `_tx` stays in here: dropping it would disconnect the response
+            // channel, which is a different failure than the one under test.
+            let (mut ws, _tx) = server_around(spawn_lingering());
+            if let Some(child) = ws.process.as_mut() {
+                let _ = child.kill();
+                let _ = child.wait();
+            }
+            let exited = ws.has_exited();
+            let out = ws.send_command(&json!({ "action": "transcribe", "path": "/tmp/x.wav" }));
+            ws.stop();
+            let _ = done.send((exited, out));
+        });
+        // A write into a pipe with no reader fails in microseconds. Anything
+        // that is still going after five seconds is parked on `send_command`'s
+        // 60 s response timeout, i.e. the write SUCCEEDED.
+        answer.recv_timeout(std::time::Duration::from_secs(5)).ok()
+    }
+
     /// The whole failure, at the wire: kill the server the way the box did,
     /// then send a take into it.
+    ///
+    /// ── Why this retries, and what it is retrying past ──
+    ///
+    /// The old body did one attempt on this thread and asserted on it. Measured
+    /// on 01.09.2026 under six concurrent copies of the suite it failed 8 of 60
+    /// runs, every one of them with the same message: `[dead pipe] Whisper
+    /// transcription timed out`. The write into the killed server's stdin had
+    /// SUCCEEDED, and the test then sat out the full 60 s response timeout — a
+    /// single run took 61 s because of it.
+    ///
+    /// What is MEASURED is that the write succeeded: the server was killed and
+    /// reaped, so its own copy of the read end was closed, and a write into a
+    /// pipe with no reader cannot succeed. Somebody else was holding it.
+    ///
+    /// The mechanism that fits is macOS having no `pipe2`. The standard library
+    /// says so in its own source: on every platform without that syscall it
+    /// creates the pipe with `pipe()` and sets close-on-exec in a SECOND step,
+    /// so a `fork`+`exec` on another thread inside that window inherits the raw
+    /// descriptor. This suite spawns stand-ins constantly, six copies of it six
+    /// times as often, and that is exactly the load at which this appeared.
+    /// Whatever the stranger is, it is not ours and this test cannot close it.
+    ///
+    /// So it retries with a FRESH stand-in, bounded, instead of asserting that
+    /// the first one came out right. Every assertion below is unchanged and
+    /// runs on an attempt that produced an answer — a green run still means the
+    /// write failed and the message was ours.
     #[test]
     fn sending_into_a_killed_server_fails_in_english_and_is_recognised_as_a_dead_pipe() {
-        let (mut ws, _tx) = server_around(spawn_lingering());
-        if let Some(child) = ws.process.as_mut() {
-            let _ = child.kill();
-            let _ = child.wait();
-        }
-        assert!(ws.has_exited());
-
-        let err = ws
-            .send_command(&json!({ "action": "transcribe", "path": "/tmp/x.wav" }))
-            .expect_err("writing into a dead pipe must fail");
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+        let mut parked = 0usize;
+        let err = loop {
+            match attempt_a_send_into_a_killed_server() {
+                Some((exited, out)) => {
+                    assert!(exited, "the killed server did not read as gone");
+                    break out.expect_err("writing into a dead pipe must fail");
+                }
+                None => {
+                    parked += 1;
+                    assert!(
+                        std::time::Instant::now() < deadline,
+                        "{parked} attempts in a row wrote into the killed server's pipe \
+                         without failing. Something other than the server is holding the \
+                         READ end — on macOS a concurrent spawn can inherit it, because \
+                         the pipe is not created close-on-exec in one step.",
+                    );
+                }
+            }
+        };
 
         // The message is ours all the way through. The operating system's own
         // sentence for this is German on a German Windows; none of these
@@ -750,7 +814,6 @@ mod dead_server_tests {
             "unexpected shape: {}",
             err
         );
-        ws.stop();
     }
 
     #[test]

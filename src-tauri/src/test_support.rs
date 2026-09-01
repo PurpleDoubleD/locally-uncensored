@@ -382,6 +382,21 @@ pub(crate) fn park_binary() -> PathBuf {
 /// caller only ever asserts on a snapshot that passed. Between the check and the
 /// assertion there is no clock, no syscall and no other thread — the assertions
 /// are a pure function of data already in hand.
+///
+/// ── The third check, added 01.09.2026 ──
+///
+/// `pid` must also CARRY ITS COMMAND LINE. Both callers exist to assert on argv,
+/// and being listed is not the same as being readable: on macOS the argv of
+/// another process comes from a separate `KERN_PROCARGS2` read, and a child that
+/// has forked but not finished `exec` is in the table with an EMPTY `cmd()`.
+/// Measured under six concurrent copies of the suite, ten rounds:
+/// `the_call_does_not_block_for_the_grace_period` failed 2 of 60 runs on exactly
+/// that — `argv=[]` for a `sleep 40` that was perfectly alive a moment later.
+///
+/// Putting it here rather than in each caller is deliberate: the other caller,
+/// `the_scan_finds_a_real_process_by_the_argv_lu_would_have_used`, has the same
+/// window and had simply not been unlucky yet. A table whose subject has no argv
+/// is not a table this function should hand out.
 #[cfg(unix)]
 pub(crate) fn checked_table(pid: u32) -> Result<sysinfo::System, String> {
     use std::time::{Duration, Instant};
@@ -389,11 +404,13 @@ pub(crate) fn checked_table(pid: u32) -> Result<sysinfo::System, String> {
     let deadline = Instant::now() + Duration::from_secs(10);
     let mut attempts = 0usize;
     let mut blind = 0usize;
+    let mut speechless = 0usize;
     loop {
         if Instant::now() >= deadline {
             return Err(format!(
                 "no usable process table in 10s ({attempts} attempts, {blind} of them \
-                 without this test's own process in them). That is the TEST ENVIRONMENT, \
+                 without this test's own process in them, {speechless} with pid {pid} \
+                 listed but carrying no command line). That is the TEST ENVIRONMENT, \
                  not the code under test."
             ));
         }
@@ -408,8 +425,12 @@ pub(crate) fn checked_table(pid: u32) -> Result<sysinfo::System, String> {
             blind += 1;
             continue;
         }
-        if sys.process(sysinfo::Pid::from_u32(pid)).is_none() {
+        let Some(subject) = sys.process(sysinfo::Pid::from_u32(pid)) else {
             blind += 1;
+            continue;
+        };
+        if crate::process_util::cmdline_of(subject).is_empty() {
+            speechless += 1;
             continue;
         }
         return Ok(sys);

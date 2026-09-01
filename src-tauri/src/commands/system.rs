@@ -81,7 +81,21 @@ fn screenshot_blocking() -> Result<serde_json::Value, String> {
     // bridge (remote.rs). Overlapping calls read each other's half-written PNG,
     // or one deleted the file the other was about to read ("Read screenshot: no
     // such file"), or a caller simply got the other one's screen.
-    let tmp = std::env::temp_dir().join(format!("lu-screenshot-{}.png", uuid::Uuid::new_v4()));
+    //
+    // The PROCESS id joined the uuid on 01.09.2026. The uuid alone already made
+    // the name unique; what it did not do is say WHOSE the file is. The temp
+    // directory is shared by every process on the machine — a second LU, an
+    // older build, three copies of the test suite — so neither an operator
+    // finding a leftover `lu-screenshot-*.png` nor
+    // `every_screenshot_gets_its_own_temp_file` could tell a file this process
+    // made from a stranger's. That test counted the whole directory and failed
+    // 5 of 30 runs under three concurrent suites (measured, 01.09.2026) because
+    // ANOTHER copy had a capture in flight across its two counts.
+    let tmp = std::env::temp_dir().join(format!(
+        "lu-screenshot-{}-{}.png",
+        std::process::id(),
+        uuid::Uuid::new_v4()
+    ));
     let captured = capture_screen_to(&tmp)
         .and_then(|()| std::fs::read(&tmp).map_err(|e| format!("Read screenshot: {}", os_error::english(&e))));
     // Always — the old code returned early on a read error and left a full
@@ -700,27 +714,52 @@ mod tests {
     /// Two callers reach the screenshot tool (agent + phone bridge). A fixed
     /// temp name meant they clobbered each other; the name must differ per call
     /// and the file must be gone afterwards.
+    ///
+    /// ── Why the count is now over THIS process only ──
+    ///
+    /// It used to count every `lu-screenshot-*` in the shared temp directory,
+    /// before and after, and assert the two numbers matched. That is a question
+    /// about the MACHINE, not about this call: measured on 01.09.2026 under
+    /// three concurrent copies of the suite it failed 5 of 30 runs with
+    /// `left: 0, right: 1` — a second copy's capture was in flight between the
+    /// two counts, and this test reported it as "screenshot left a temp file
+    /// behind". `screenshot_blocking` puts the process id in the name, so the
+    /// prefix below matches only files this process could have written.
     #[test]
     fn every_screenshot_gets_its_own_temp_file() {
         let seen: std::collections::HashSet<String> = (0..50)
-            .map(|_| format!("lu-screenshot-{}.png", uuid::Uuid::new_v4()))
+            .map(|_| format!("lu-screenshot-{}-{}.png", std::process::id(), uuid::Uuid::new_v4()))
             .collect();
         assert_eq!(seen.len(), 50);
 
+        // Ours, and nobody else's — a concurrent copy of this binary has a
+        // different pid and its files do not match this prefix.
+        let mine = format!("lu-screenshot-{}-", std::process::id());
+        let ours = || {
+            std::fs::read_dir(std::env::temp_dir())
+                .unwrap()
+                .filter_map(|e| e.ok())
+                .filter(|e| e.file_name().to_string_lossy().starts_with(&mine))
+                .count()
+        };
+
         // The capture fails on this platform, but the temp file must still be
         // cleaned up rather than left behind on the early return.
-        let before = std::fs::read_dir(std::env::temp_dir())
-            .unwrap()
-            .filter_map(|e| e.ok())
-            .filter(|e| e.file_name().to_string_lossy().starts_with("lu-screenshot-"))
-            .count();
+        let before = ours();
         let _ = screenshot_blocking();
-        let after = std::fs::read_dir(std::env::temp_dir())
-            .unwrap()
-            .filter_map(|e| e.ok())
-            .filter(|e| e.file_name().to_string_lossy().starts_with("lu-screenshot-"))
-            .count();
+        let after = ours();
         assert_eq!(before, after, "screenshot left a temp file behind");
+        // Self-check: the prefix the count filters on has to be the one
+        // `screenshot_blocking` actually writes. Without this, moving the pid
+        // out of the name again would leave both counts at 0 for the wrong
+        // reason and this test would pass while looking at nothing.
+        const SRC: &str = include_str!("system.rs");
+        let at = SRC.find("fn screenshot_blocking").expect("screenshot_blocking is gone");
+        let body = &SRC[at..at + SRC[at..].find("\n}\n").expect("unterminated fn")];
+        assert!(
+            body.contains(r#""lu-screenshot-{}-{}.png""#) && body.contains("std::process::id()"),
+            "screenshot_blocking no longer builds the name this test filters on:\n{body}",
+        );
     }
 
     /// PowerShell single-quoted strings escape `'` by doubling it, and treat a
