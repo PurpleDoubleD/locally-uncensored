@@ -360,13 +360,13 @@ export function Sidebar() {
               schrumpft um 4 px (36->32), der Fussknopf waechst um 4 px
               (36->40). Die 33 px des LAN/Internet-Waehlers gehen auf 40, weil
               er im selben Slot steht wie die Aktion, die er ersetzt. */}
-          <div className="flex items-center gap-[2.5px] px-2.5 pt-2.5 pb-1.25">
+          <div className="flex items-center gap-[2.5px] px-2.5 pt-2.5 pb-1.25 text-[12px]">
             {/* Chat tab */}
             <button
               onClick={() => { setChatMode('lu'); setActiveConversation(null); setView('chat'); setDispatchPicker(false) }}
               title="Chat"
               aria-label="Chat"
-              className={`flex items-center gap-1.25 justify-center px-2.5 h-[var(--control-h-md)] rounded-[5px] text-[12px] font-medium transition-all flex-1 ${
+              className={`flex items-center gap-1.25 justify-center px-2.5 h-[var(--control-h-md)] rounded-[5px] font-medium transition-all flex-1 min-w-0 ${
                 !isCodingMode && !isRemoteMode
                   ? 'bg-gray-200 dark:bg-white/10 text-gray-900 dark:text-white border border-gray-300 dark:border-white/15'
                   : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-white/5 border border-transparent'
@@ -382,7 +382,7 @@ export function Sidebar() {
               onClick={() => { setChatMode('codex'); setActiveConversation(null); setView('chat'); setDispatchPicker(false) }}
               title="Code"
               aria-label="Code"
-              className={`flex items-center gap-1.25 justify-center px-2.5 h-[var(--control-h-md)] rounded-[5px] text-[12px] font-medium transition-all flex-1 ${
+              className={`flex items-center gap-1.25 justify-center px-2.5 h-[var(--control-h-md)] rounded-[5px] font-medium transition-all flex-1 min-w-0 ${
                 isCodingMode
                   ? 'bg-gray-200 dark:bg-white/10 text-gray-900 dark:text-white border border-gray-300 dark:border-white/15'
                   : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-white/5 border border-transparent'
@@ -392,18 +392,70 @@ export function Sidebar() {
               <span>Code</span>
             </button>
 
-            {/* Remote tab */}
+            {/* Remote tab — D-S04: der dritte Reiter trug sein Wort nur in
+                `title` und `aria-label`, sichtbar war ein Radio-Icon allein.
+                Neben zwei beschrifteten Geschwistern ist das kein dritter
+                Reiter, sondern ein Raetsel an derselben Stelle: Maus und
+                Screenreader bekamen „Remote" zu lesen, das Auge nicht.
+
+                Der Reiter ist jetzt in JEDEM Stueck die Kopie der beiden
+                anderen — dieselbe Klassenkette (ihm fehlte der Abstand
+                zwischen Icon und Wort), dieselbe Icon-Groesse (14 -> 11), derselbe
+                `<span>`, und `title` wie `aria-label` bleiben, weil Chat und
+                Code sie auch tragen. Kein Sonderfall heisst: auch nicht in
+                die andere Richtung.
+
+                Und `min-w-0`, an ALLEN DREI. Das ist die Klasse, ohne die
+                dieser Befund die Geometrie der Zeile mitgenommen haette:
+                `flex-1` ist `flex: 1 1 0%`, aber die Vorgabe `min-width:auto`
+                laesst ein Flex-Kind nicht unter seine Inhaltsbreite. Solange
+                der dritte Reiter nur ein Icon trug, lag jeder Inhalt unter dem
+                freien Mass und alle drei waren gleich breit. Ein Wort, das
+                laenger ist als „Chat"/„Code", kippt das.
+
+                Gemessen am Dev-Server (Chromium, Sidebar 250 CSS-px,
+                --ui-scale 1,15), Breiten in GERENDERTEN px:
+
+                  Reiterleiste innen                     264,50
+                  davon zwei Abstaende (2 x 2,5 CSS)       5,75
+                  bleibt fuer drei Reiter                258,75
+
+                  ohne `min-w-0`   Chat 82,64  Code 82,64  Remote 93,47
+                  mit  `min-w-0`   Chat 86,25  Code 86,25  Remote 86,25
+
+                Die Schriftgroesse steht seit D-S04 EINMAL am Behaelter der
+                drei statt dreimal in den Reitern. Sie war ohnehin an allen
+                dreien dieselbe Aussage; ein Elternteil, das die Typo seiner
+                Kinder setzt, ist die kuerzere und die richtige Stelle. (Was
+                mich hinschauen liess, war der Zaehler in
+                `die-typo-leiter-und-ihre-umgehung.test.ts`: er liest .tsx
+                OHNE Kommentare zu strippen und deckelt die arbitraeren
+                Schriftgroessen bei 1009. Der dritte Reiter haette eine
+                dritte Fundstelle hinzugefuegt; eine am Behaelter macht aus
+                den dreien eine. Gemessen: 1009 -> 1008.)
+
+                86,25 ist genau das Mass, das alle drei schon vorher hatten.
+                Mit `min-w-0` ist D-S04 also eine reine Beschriftung ohne
+                Nebenwirkung auf das Raster; ohne sie haette der dritte Reiter
+                seinen Geschwistern je 3,61 px abgenommen.
+
+                Und es klemmt nichts: unter `min-w-0` steht der Span auf seiner
+                natuerlichen Breite (50,08 px, Schrumpfung 0), einzeilig
+                (Hoehe 20,69 px), und der Reiter meldet `scrollWidth` 73 =
+                `clientWidth` 73, also keinen Ueberlauf. `truncate` waere hier
+                eine Abkuerzung ohne Anlass. */}
             <button
               onClick={() => { setChatMode('remote'); setActiveConversation(dispatchedConversationId); setView('chat') }}
               title="Remote"
               aria-label="Remote"
-              className={`flex items-center justify-center px-2.5 h-[var(--control-h-md)] rounded-[5px] font-medium transition-all flex-1 ${
+              className={`flex items-center gap-1.25 justify-center px-2.5 h-[var(--control-h-md)] rounded-[5px] font-medium transition-all flex-1 min-w-0 ${
                 isRemoteMode
                   ? 'bg-gray-200 dark:bg-white/10 text-gray-900 dark:text-white border border-gray-300 dark:border-white/15'
                   : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-white/5 border border-transparent'
               }`}
             >
-              <Radio size={14} />
+              <Radio size={11} />
+              <span>Remote</span>
             </button>
           </div>
 
@@ -553,7 +605,46 @@ export function Sidebar() {
           </div>
 
           {/* Conversations */}
-          <div className="flex-1 overflow-y-auto px-[7.5px] pt-1.25 space-y-px scrollbar-thin">
+          <div className="flex-1 overflow-y-auto px-[7.5px] pt-1.25 scrollbar-thin">
+            {/**
+              * KF-8 — die Liste sagt jetzt, dass sie eine Liste ist.
+              *
+              * Gemessen war die Tab-Reihenfolge ab dem Suchfeld:
+              *   Rename chat, Delete chat, Rename chat, Delete chat, New Chat
+              * Die ZEILEN kamen nicht vor. Die Zeile war ein `<div>` mit
+              * `onClick`, ohne Rolle und ohne `tabIndex` — wer mit der
+              * Tastatur arbeitet, konnte jeden Chat umbenennen und loeschen,
+              * aber keinen einzigen OEFFNEN. Die zerstoerenden Aktionen waren
+              * erreichbar, die harmlose nicht.
+              *
+              * WARUM `listbox`/`option` UND NICHT `role="button"`.
+              * Fachlich ist die Zeile eine Auswahl aus einer Liste, kein
+              * Knopf: genau eine ist aktiv, und `aria-selected` sagt das
+              * endlich maschinenlesbar — bisher war „aktiv" nur eine
+              * Hintergrundfarbe.
+              * Und `role="button"` waere hier nachweislich eine Falle. Ein
+              * frischer Chat heisst `'New Chat'` (chatStore.createConversation),
+              * also traegt die Zeile denselben zugaenglichen Namen wie die
+              * Primaeraktion am Fuss. Jeder `getByRole('button', { name:
+              * /New Chat/i })` — u.a. `e2e/support/ui.ts`, das JEDER Spec
+              * benutzt — haette ab der ersten leeren Unterhaltung zwei
+              * Treffer und damit eine strict-mode-Verletzung. `option` ist
+              * nicht bloss das Ausweichen davor, es ist die richtige Rolle;
+              * dass es die Locator scharf laesst, ist die Zugabe.
+              *
+              * Die Zeile ist ein echter `<button>` MIT `role="option"` — das
+              * Muster, das `models/ModelTiles.tsx` schon faehrt. Vom Element
+              * kommen Tab-Stop, Enter und Leertaste ohne eine Zeile
+              * Tastatur-Code; die Rolle sagt, was es bedeutet. Ein
+              * `tabIndex={0}` an einem `<div>` haette Enter/Leertaste selbst
+              * nachbauen muessen.
+              *
+              * Die beiden Aktionsknoepfe bleiben GESCHWISTER der Option, nicht
+              * ihre Kinder: `<button>` in `<button>` ist ungueltiges HTML, und
+              * der Browser zerlegt es. Dadurch steht die Reihenfolge in der
+              * Zeile von selbst richtig — Zeile, Umbenennen, Loeschen.
+              */}
+            <div role="listbox" aria-label="Conversations" className="space-y-px">
             {filtered.map((conv) => {
               // Der Marker der abgesetzten Remote-Zeile — dieselbe Bedingung
               // stand dreimal in dieser Zeile (Punkt, QR-Knopf, und ab jetzt
@@ -575,10 +666,11 @@ export function Sidebar() {
                     ? 'bg-gray-200 dark:bg-white/[0.06] text-gray-900 dark:text-white'
                     : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-white/[0.03] hover:text-gray-800 dark:hover:text-gray-200'
                 }`}
-                onClick={() => {
-                  setActiveConversation(conv.id)
-                  setView('chat')
-                }}
+                /* Das `onClick` sitzt seit KF-8 an der Option darunter, nicht
+                   mehr hier: sonst zaehlte jeder Klick doppelt. Der
+                   Rechtsklick bleibt an der ZEILE, damit er wie bisher ueber
+                   der ganzen Zeile aufgeht — auch ueber den Aktionsknoepfen,
+                   die keine Kinder der Option sind. */
                 onContextMenu={(e) => {
                   e.preventDefault()
                   setRowMenu({ id: conv.id, x: e.clientX, y: e.clientY })
@@ -599,7 +691,15 @@ export function Sidebar() {
                       <button onClick={(e) => { e.stopPropagation(); setEditingId(null) }} className="text-gray-500"><X size={14} /></button>
                     </div>
                   ) : (
-                    <div className="flex items-center gap-[7.5px] min-w-0">
+                    <button
+                      role="option"
+                      aria-selected={conv.id === activeConversationId}
+                      onClick={() => {
+                        setActiveConversation(conv.id)
+                        setView('chat')
+                      }}
+                      className="flex items-center gap-[7.5px] min-w-0 w-full text-left cursor-pointer"
+                    >
                       {qrMarker && (
                         <span className="w-[7.5px] h-[7.5px] rounded-full bg-green-400 shrink-0" />
                       )}
@@ -645,7 +745,7 @@ export function Sidebar() {
                           Fokus sitzt dann in der Leiste, also im GESCHWISTER,
                           und nur die Zeile sieht beide. */}
                       <span className="text-[10px] text-gray-600 shrink-0 group-hover:opacity-0 group-focus-within:opacity-0 transition-opacity">{conv.date}</span>
-                    </div>
+                    </button>
                   )}
                 </div>
                 {editingId !== conv.id && (
@@ -729,7 +829,19 @@ export function Sidebar() {
                       * Leiste wuerde ihn beim Hovern verdecken. Diese eine Zeile
                       * behaelt deshalb den reservierten Platz.
                       */}
-                    <div className={`${qrMarker ? '' : 'absolute right-0 top-1/2 -translate-y-1/2 pointer-events-none group-hover:pointer-events-auto focus-within:pointer-events-auto'} flex items-center gap-[2.5px] opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity`}>
+                    {/* Die `group-`Zwillinge kamen mit KF-8 dazu. Seither ist
+                        die ZEILE selbst ein Tab-Stop, und ihr Fokus sitzt in
+                        der Option — also im GESCHWISTER dieser Leiste, wo das
+                        blosse `focus-within` ihn nicht sieht. Ohne sie haette
+                        Tab auf die Zeile das Datum ausgeblendet (der Span
+                        haengt an `group-focus-within`) und nichts an seine
+                        Stelle gesetzt. Jetzt tut der Fokus auf der Zeile
+                        genau das, was das Ueberfahren tut, und zeigt einem
+                        Tastaturnutzer im selben Moment, was zwei Tabs weiter
+                        auf ihn wartet. Die beiden alten `focus-within`
+                        bleiben: sie gelten, wenn der Fokus IN der Leiste
+                        steht, und nur sie halten sie dann offen. */}
+                    <div className={`${qrMarker ? '' : 'absolute right-0 top-1/2 -translate-y-1/2 pointer-events-none group-hover:pointer-events-auto focus-within:pointer-events-auto group-focus-within:pointer-events-auto'} flex items-center gap-[2.5px] opacity-0 group-hover:opacity-100 focus-within:opacity-100 group-focus-within:opacity-100 transition-opacity`}>
                       <button
                         onClick={(e) => { e.stopPropagation(); setEditingId(conv.id); setEditTitle(conv.title) }}
                         title="Rename chat"
@@ -752,6 +864,7 @@ export function Sidebar() {
               </div>
               )
             })}
+            </div>
 
             {filtered.length === 0 && (
               <p className="text-center text-gray-600 text-[12px] py-7.5">
@@ -827,10 +940,31 @@ export function Sidebar() {
                 )}
               </AnimatePresence>
             ) : (
+              /* D-S03 — die Primaeraktion der Spalte wiegt jetzt mehr als
+                  die Auswahl darueber.
+                  Vorher trug dieser Knopf die neutrale Haut der Liste: eine
+                  graue Flaeche mit grauem Rand, deren Ruhezustand
+                  (`bg-gray-50 dark:bg-white/[0.03]`) blasser war als der
+                  Hover-Zustand einer beliebigen Chatzeile und blasser als
+                  die AKTIVE Zeile (`bg-gray-200 dark:bg-white/[0.06]`). Die
+                  eine Aktion, die den Bereich weiterbringt, stand damit
+                  optisch unter der Auswahl, die schon getroffen ist.
+                  Kein neues Rezept und keine neue Farbe: `.lu-primary` ist
+                  das EINE Primaer-Rezept des Hauses (index.css) — Flaeche,
+                  Textfarbe, Rand und `font-weight: 500` kommen von dort, und
+                  mit ihm der eigene Fokusring, den die Hausregel per
+                  `:not(.lu-primary)` ausdruecklich freilaesst. Deshalb
+                  fallen hier `font-medium` und die vier Graustufen-Klassen
+                  weg statt ueberschrieben zu werden.
+                  Die GEOMETRIE bleibt, wo sie war: `--control-h-lg` ist laut
+                  index.css das Mass des „primary Create button", und D-S17
+                  hat den Fussknopf genau darauf gestellt. `.lu-control` waere
+                  hier falsch — das Rezept setzt `--control-h-sm` (26 px), das
+                  Mass der Composer-Werkzeugleiste. */
               <button
                 onClick={handleNewChat}
                 title={activeModel ? 'Start a new chat' : 'Pick or install a model first'}
-                className="w-full flex items-center justify-center gap-[7.5px] px-[12.5px] h-[var(--control-h-lg)] rounded-[8px] text-[13px] font-medium bg-gray-50 dark:bg-white/[0.03] hover:bg-gray-100 dark:hover:bg-white/[0.05] text-gray-800 dark:text-gray-200 border border-gray-200 dark:border-white/[0.06] hover:border-gray-300 dark:hover:border-white/[0.1] transition-all"
+                className="lu-primary w-full flex items-center justify-center gap-[7.5px] px-[12.5px] h-[var(--control-h-lg)] rounded-[8px] text-[13px] transition-all"
               >
                 <Plus size={15} />
                 <span>New Chat</span>
