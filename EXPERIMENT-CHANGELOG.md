@@ -1419,3 +1419,9 @@ früherer Lauf mitten in einen Abschnitt geschrieben hatte, und eine
 Tabellenkopfzeile mit fünf Spalten über Zeilen mit sieben. Dazu vier Zellen, in
 denen ein unmaskiertes `|` die Tabelle zerriss — sichtbar erst, als jede Zeile
 maschinell auf ihre Spaltenzahl geprüft wurde.
+
+## Windows nachgemessen: das kleine Fenster steht auch dort mittig (`94f1d1f5`, Doku)
+
+Auf der Windows-Maschine, Release-Build, in Session 1 gestartet und über `user32` gemessen: ein sichtbares Fenster, 640×640 sichtbar plus 8 px unsichtbarer DWM-Rand, auf dem Primärmonitor zentriert (Arbeitsbereich-Mitte 960,520, Fenstermitte 968,524 — die 8 px sind der Rand, den tao mitzählt). Kein `WS_MAXIMIZEBOX`, kein `WS_SIZEBOX`: der Doppelklick auf die Ziehfläche kann nichts maximieren. Die dunkle Fläche deckt das transparente Fenster ohne Ecken; oben rechts Minimieren und Schließen, kein Maximieren. Zweiter Start bleibt ein Prozess, nach Beenden null. Drei der vier offenen Windows-Fragen aus `be2e3849` sind damit beantwortet; das geteilte `localStorage` beider Webviews wartet auf den Klick bis zur Übergabe.
+
+Vorher war Windows an genau einer Testdatei rot: `host-window.test.ts`, die neue Wache des Fenster-Pakets, verglich Pfade mit `\` gegen `/` — der dritte Fund derselben Ursache (KF-10, KF-10c, jetzt KF-10d). Fix beim Einsammeln, an einer Stelle; Windows danach grün.
