@@ -198,18 +198,20 @@ export function AccountPanel() {
           <button
             type="submit"
             disabled={busy || !email || !password}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded text-[0.7rem] font-medium bg-gray-900 text-white dark:bg-white dark:text-gray-900 disabled:opacity-40 hover:opacity-90 transition-opacity"
+            className="lu-primary flex items-center gap-1.5 px-3 py-1.5 rounded text-[0.7rem] disabled:opacity-40 transition-colors"
           >
             {busy ? <Loader2 size={11} className="animate-spin" /> : (
-              /* Monogram, not the stock cloud glyph. The button is dark on light
-                 and light on dark, so the invert flips the other way here. */
+              /* Monogram, not the stock cloud glyph. Der Knopf traegt jetzt in
+                 BEIDEN Modi die Akzentflaeche mit dunklem Text (.lu-primary),
+                 also muss das Monogramm auch in beiden Modi dunkel sein —
+                 vorher kippte es mit dem Modus, weil der Knopf das tat. */
               <img
                 src="/LU-monogram-bw.png"
                 alt=""
                 width={12}
                 height={12}
                 draggable={false}
-                className="shrink-0 select-none invert-0 dark:invert"
+                className="shrink-0 select-none invert"
               />
             )}
             {mode === 'signin' ? 'Sign in' : 'Create account'}

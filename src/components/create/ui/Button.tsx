@@ -35,11 +35,13 @@ const SIZE_PX: Record<Size, string> = {
 }
 const ICON_SIZE: Record<Size, number> = { sm: 13, md: 14, lg: 16 }
 
-// Matches the live app exactly: the primary action (Generate) is a neutral
-// white-translucent button — the app uses NO loud accent fill. Emphasis comes
-// from the icon + size, not colour.
+// Die Primaeraktion traegt das gemeinsame Rezept `.lu-primary` (index.css) —
+// Flaeche, Textfarbe, Hover, Fokusring und disabled liegen dort, an genau
+// einer Stelle, geteilt mit AccountPanel (Sign in) und ChatInput (Send).
+// Vorher stand hier ein eigenes Graustufen-Rezept, das die wichtigste Aktion
+// des Bildschirms wie eine Nebenaktion aussehen liess.
 const VARIANT: Record<Variant, string> = {
-  primary: 'bg-gray-900 text-white dark:bg-white/10 dark:text-white hover:bg-gray-700 dark:hover:bg-white/15 font-medium',
+  primary: 'lu-primary',
   secondary: 'bg-white/10 text-gray-100 hover:bg-white/15',
   ghost: 'bg-transparent text-gray-400 hover:text-white hover:bg-white/8',
   danger: 'bg-red-500/15 text-red-500 dark:text-red-400 hover:bg-red-500/25',

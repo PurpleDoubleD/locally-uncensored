@@ -449,7 +449,7 @@ export function ChatView() {
         {/* RAG Panel */}
         <AnimatePresence>
           {ragPanelOpen && activeConversationId && (
-            <ErrorBoundary fallbackClassName="w-[280px] shrink-0 h-full border-l border-white/5 bg-[#363636] flex flex-col items-center justify-center p-6 gap-3">
+            <ErrorBoundary fallbackClassName="w-[280px] shrink-0 h-full border-l border-gray-200 dark:border-white/5 bg-white dark:bg-lu-overlay flex flex-col items-center justify-center p-6 gap-3">
               <RAGPanel conversationId={activeConversationId} onClose={() => setRagPanelOpen(false)} />
             </ErrorBoundary>
           )}
@@ -464,7 +464,7 @@ export function ChatView() {
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: 12 }}
             transition={{ duration: 0.18 }}
-            className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[120] px-4 py-2 rounded-lg bg-[#262626] border border-green-500/30 text-green-400 text-[0.7rem] shadow-xl max-w-[min(90vw,520px)] truncate"
+            className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[120] px-4 py-2 rounded-lg bg-white dark:bg-lu-panel border border-green-600/40 dark:border-green-500/30 text-green-700 dark:text-green-400 text-[0.7rem] shadow-xl max-w-[min(90vw,520px)] truncate"
           >
             {exportToast}
           </motion.div>

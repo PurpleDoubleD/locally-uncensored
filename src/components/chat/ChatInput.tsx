@@ -521,7 +521,7 @@ export function ChatInput({ onSend, onStop, isGenerating, pendingApproval, onApp
               <motion.button
                 onClick={handleSend}
                 disabled={(!input.trim() && images.length === 0) || isTranscribing}
-                className="w-full h-full flex items-center justify-center rounded-md bg-white/8 text-gray-300 hover:bg-white/12 disabled:opacity-20 disabled:cursor-not-allowed transition-all"
+                className="lu-primary w-full h-full flex items-center justify-center rounded-md disabled:opacity-40 transition-colors"
                 whileTap={{ scale: 0.9 }}
                 aria-label="Send message"
               >

@@ -43,6 +43,18 @@
   --color-lu-accent-soft: rgba(160, 148, 248, 0.14);
   --color-lu-accent-ring: rgba(160, 148, 248, 0.55);
 
+  /* ── Primaeraktion: Text auf der Akzentflaeche ──
+     Gemessen (WCAG 2.1 relative Luminanz):
+       #a094f8 (Ruhe)  gegen #111827 → 6.83:1   (AA Fliesstext, AAA gross)
+       #b1a6ff (Hover) gegen #111827 → 8.25:1
+       #a094f8          gegen #ffffff → 2.60:1  ← weisser Text faellt durch,
+     deshalb traegt die Akzentflaeche DUNKLEN Text, in beiden Modi gleich.
+     --color-lu-accent-edge ist die Kante fuer den Hellmodus: die Flaeche
+     selbst steht nur 2.60:1 gegen Weiss, die Kante schafft 3.37:1 und
+     erfuellt damit 1.4.11 (Nicht-Text-Kontrast) fuer die Buttongrenze. */
+  --color-lu-on-accent: #111827;
+  --color-lu-accent-edge: #8b7cf0;
+
   /* ── Motion — eine benannte Leiter statt verstreuter Zahlen ──
      Dauer und Kurve standen bisher als Literale in den Komponenten. Erhoben
      wurde, was tatsächlich benutzt wird (framer-motion + Tailwind, Stand 2.6.7):
@@ -454,6 +466,49 @@ input[type="range"]::-webkit-slider-thumb {
 .lu-focus-ring:focus-visible {
   outline: 1px solid rgba(96, 165, 250, 0.6);
   outline-offset: 1px;
+}
+
+/* ──────────────────────────────────────────────────────────────────
+   .lu-primary — DAS Primaer-Rezept. Genau einmal definiert, benutzt von
+   allen drei Primaeraktionen der App:
+     • create/ui/Button.tsx      (Variante `primary`, u.a. Generate)
+     • auth/AccountPanel.tsx     (Sign in / Create account)
+     • chat/ChatInput.tsx        (Send)
+   Vorher waren das drei getrennte Graustufen-Rezepte (`bg-gray-900`,
+   `dark:bg-white/10`, `bg-white/8`) — die wichtigste Aktion des Bildschirms
+   sah aus wie eine beliebige Nebenaktion.
+
+   Farbe kommt ausschliesslich aus dem @theme-Block, kein Literal hier.
+   Der Zustand `disabled` entsaettigt die Flaeche zusaetzlich zum Dimmen,
+   damit er nicht als die aktive Variante durchgeht; die Call-Sites bringen
+   ihr eigenes `disabled:opacity-*` mit, das sich damit addiert.
+   Fokus: 2px Ring mit 2px Abstand, damit er auf dem HINTERGRUND liegt und
+   nicht auf der Akzentflaeche — dunkel im Hellmodus, weiss im Dunkelmodus.
+   Er ueberschreibt den globalen 1px-Ring (Spezifitaet 0,2,0 vs 0,1,1).
+   ───────────────────────────────────────────────────────────────── */
+.lu-primary {
+  background-color: var(--color-lu-accent);
+  color: var(--color-lu-on-accent);
+  border: 1px solid var(--color-lu-accent);
+  font-weight: 500;
+}
+.light .lu-primary { border-color: var(--color-lu-accent-edge); }
+
+.lu-primary:hover:not(:disabled) {
+  background-color: var(--color-lu-accent-hover);
+  border-color: var(--color-lu-accent-hover);
+}
+
+.lu-primary:focus-visible {
+  outline: 2px solid var(--color-lu-on-accent);
+  outline-offset: 2px;
+}
+.dark .lu-primary:focus-visible { outline-color: white; }
+
+.lu-primary:disabled {
+  filter: grayscale(1);
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 /* Checkerboard backing so transparent (background-removed) PNGs don't read
