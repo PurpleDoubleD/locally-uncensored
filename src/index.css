@@ -1,4 +1,82 @@
-@import "tailwindcss";
+/* ── Was Tailwind nach Klassen durchsucht ──────────────────────────────
+   Ohne diese vier Zeilen liest Tailwind 4 das GANZE Projektverzeichnis als
+   Text und macht aus jedem Wort, das wie eine Klasse aussieht, eine Regel im
+   ausgelieferten Bundle: Markdown im Wurzelverzeichnis, die Website unter
+   docs/, die Kommentare des Rust-Backends unter src-tauri/, jede Testdatei.
+
+   Am 01.09.2026 an echten Builds nachgemessen, im A/B/A-Muster gegen
+   denselben Quellstand: der Arbeitsbaum bewegte sich unter der Messung, und
+   ein Diff aus zwei Laeufen ohne Kontrolllauf haette fremde Aenderungen
+   mitgezaehlt — beim ersten Anlauf tat er das auch und schrieb drei Regeln
+   dieser Zeile hier zu, die von woanders kamen.
+
+     Automatik    173380 Bytes roh / 23258 gzip · 1865 Regeln · 1426 Klassen
+     diese Regel  171517 Bytes roh / 22919 gzip · 1833 Regeln · 1396 Klassen
+     ─────────────────────────────────────────────────────────────────────
+     weg            1863 Bytes roh (1,07%) / 339 gzip (1,46%) · 30 Klassen
+
+   Verlustkontrolle: keine einzige Klasse kommt hinzu, die Menge ist eine
+   echte Teilmenge. Vier der dreissig haben ihre einzige Fundstelle
+   ausserhalb von src/, die uebrigen stehen (auch) in einer Testdatei. Die
+   Aufteilung haengt an der Reihenfolge der Sonden und ist deshalb keine
+   Zuordnung — `active:scale-[0.97]` etwa steht in der Audit-Tabelle UND in
+   einem Testkommentar; wer nur eine der beiden Quellen abschaltet, sieht die
+   Klasse weiterhin. Das ist der Grund, warum hier keine Ausschlussliste
+   steht: zwei Quellen, und man pflegt nur eine.
+
+   (Kein Glob in diesem Kommentar: die Zeichenfolge Stern-Stern-Schraegstrich
+   enthaelt das Kommentarende und hat diese Datei beim Aufschreiben genau
+   einmal zerlegt. Der Glob selbst steht unten im Code, wo er hingehoert.)
+
+   Keine einzige davon hatte eine Call-Site. `active:scale-[0.97]` stand als
+   Beispiel in einer Audit-Tabelle, `max-w-[760px]` ausgerechnet in der
+   Beschreibung ihrer eigenen Entfernung, `[hhhh:hhhh]` in einem Kommentar
+   ueber GPU-IDs, `isolate` im englischen Fliesstext eines Blogeintrags. Aus
+   den Platzhaltern `bg-[#...]` und `text-[…]` in Testkommentaren wurden
+   Regeln mit buchstaeblich `#...` und `…` als Wert. Die Zahl ist klein, die
+   Regel dahinter nicht: eine Klasse wurde ausgeliefert, weil jemand ueber
+   sie GESCHRIEBEN hat.
+
+   Und es war nicht nur totes Gewicht. `.active\:scale-\[0\.97\]:active`
+   endet auf dieselbe Zeichenfolge wie die Press-Hausregel weiter unten und
+   stand im Bundle VOR ihr — der Test, der die Kaskade prueft, hat vier
+   Monate lang die Utility gemessen und die Hausregel gemeldet.
+
+   Keine Ausschlussliste nach Endungen (`@source not "*.md"` muesste jede
+   neue Prosa-Endung nachpflegen und uebersieht docs/ und src-tauri/
+   ohnehin), sondern die positive Regel und eine Ausnahme, die keine
+   Pflegeliste ist, sondern eine Definition:
+
+     · Die App ist `index.html` plus `src/`. Was Klassen traegt, steht dort.
+     · `__tests__` sind Pruefungen UEBER die App, nicht die App. Genau so
+       zaehlt es dieses Haus schon: `componentFiles()` in
+       fokusring-und-press.test.ts ueberspringt `__tests__`, wenn es
+       Call-Sites sucht. Der Nebeneffekt ist beabsichtigt: ein Test darf ueber
+       eine Klasse schreiben, ohne sie zu erzeugen.
+
+   DIESE Datei steht bewusst nicht in der Ausschlussliste. Tailwind scannt
+   das Stylesheet, das es selbst verarbeitet, ohnehin nicht — nachgemessen:
+   `@source not "./index.css"` ergab ein BYTE-IDENTISCHES Bundle, und keine
+   der oben genannten Klassen aus diesem Kommentar taucht darin auf. Eine
+   Zeile, die nichts tut, aber so aussieht, als tue sie etwas, waere genau
+   der Fehler, um den es hier geht.
+
+   Wer eine Frontend-Quelle ausserhalb von `src/` anlegt, traegt sie hier
+   nach — sonst fehlen ihre Klassen still. NICHT gemeint ist `mobile-client/`:
+   die Handy-Seite laedt dieses Bundle nicht, sie bringt ihr eigenes
+   `styles.css` mit eigenen Klassennamen mit. Sie hier einzutragen wuerde
+   fremde Woerter in unser CSS holen, ohne ihr zu helfen.
+
+   Bewacht von
+   keine-klasse-aus-prosa.test.ts: es haelt jede Utility des gebauten
+   Bundles gegen genau diese Quellen und wird rot, wenn eine ohne
+   Fundstelle dasteht — in beide Richtungen, also auch, wenn der Scan zu
+   eng wird.
+   ────────────────────────────────────────────────────────────────────── */
+@import "tailwindcss" source(none);
+@source "../index.html";
+@source "./";
+@source not "./**/__tests__/**";
 
 @custom-variant dark (&:where(.dark, .dark *));
 

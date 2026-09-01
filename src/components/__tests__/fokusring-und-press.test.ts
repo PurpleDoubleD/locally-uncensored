@@ -22,7 +22,7 @@
  * 3%-Druck an einem sehr breiten Knopf stoert.
  */
 import { describe, it, expect } from 'vitest'
-import { readFileSync, readdirSync, existsSync } from 'node:fs'
+import { readFileSync, readdirSync, existsSync, statSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { contrast, over } from './wcag-contrast'
 
@@ -238,15 +238,83 @@ describe('Punkt 2 — das Press-Feedback ist eine Regel, keine 489 Call-Sites', 
 // `@layer utilities` schlagen — auch die 67 `outline-none`-Fundstellen, die
 // den Ring bisher einzeln abgeschaltet haben. Genau hier ist die
 // Spezifitaetsfalle beim letzten Mal aufgefallen.
+//
+// ── 01.09.2026: WARUM DIESER BLOCK VIER MONATE LANG NICHTS GESAGT HAT ──
+//
+// Zwei Fehler, die einzeln harmlos aussehen und zusammen unsichtbar waren.
+//
+// 1. `describe.skipIf(builtCss === null)`. Ohne `dist/` verschwand der ganze
+//    Block lautlos aus dem Lauf — und `npx vitest run` BAUT NICHT. Wer nicht
+//    vorher `vite build` fuhr, bekam gruen fuer vier Pruefungen, die nie
+//    stattgefunden haben. Ein `skipIf`, das niemand sieht, ist kein
+//    Ueberspringen, es ist eine falsche Zusage. Jetzt sagt ein Waechter, der
+//    IMMER laeuft, warum der Block ausfaellt — derselbe Weg wie
+//    `gguf::a_real_gguf_parses_or_the_run_says_why_it_could_not` und die
+//    benannten Toepfe in `bundle-size-drift.live.test.ts`.
+//
+// 2. Die Nadel `':active{scale:.97}'` war zu kurz. Diese Zeichenfolge stand
+//    ZWEIMAL im Bundle: als Ende der Tailwind-Utility
+//    `.active\:scale-\[0\.97\]:active` INNERHALB des utilities-Layers, und
+//    als Ende der Hausregel dahinter. `indexOf` fand die erste, und der Test
+//    meldete "die Hausregel liegt im Utilities-Layer" ueber eine Regel, die
+//    richtig stand. Die Utility hatte nicht einmal eine Call-Site — sie
+//    entstand aus einer Zeile Fliesstext in AUDIT-COVERAGE.md, weil Tailwind
+//    das ganze Projektverzeichnis als Text las (siehe der Scan-Bereich am
+//    Kopf von index.css und `keine-klasse-aus-prosa.test.ts`).
+//
+// Dagegen zweierlei: die Press-Nadel traegt jetzt den ganzen Selektorkopf,
+// und JEDE Nadel wird gegen ALLE ihre Treffer geprueft statt gegen den
+// ersten. Eine Nadel, die zwei verschiedene Regeln nicht unterscheiden kann,
+// faellt damit auf, statt stillschweigend die falsche zu messen.
 const DIST = resolve(ROOT, 'dist', 'assets')
-const builtCss = (() => {
-  if (!existsSync(DIST)) return null
+const BAUBEFEHL = 'rm -rf dist && npx vite build'
+
+/**
+ * Das gebaute CSS — oder der Grund, warum es hier keins gibt.
+ *
+ * Auch „veraltet" zaehlt als „keins": ein Lauf gegen ein `dist/`, das aelter
+ * ist als `index.css`, meldet gruen fuer einen Zustand, den die Quelle nicht
+ * mehr hat. Genau darauf ist beim Nachpruefen dieses Befundes schon jemand
+ * hereingefallen.
+ */
+const gebaut: { css: string | null; grund: string } = (() => {
+  if (!existsSync(DIST)) return { css: null, grund: `es gibt kein ${DIST}` }
   const f = readdirSync(DIST).find((n) => n.startsWith('index-') && n.endsWith('.css'))
-  return f ? readFileSync(resolve(DIST, f), 'utf8') : null
+  if (!f) return { css: null, grund: `in ${DIST} liegt kein index-*.css` }
+  const datei = resolve(DIST, f)
+  const gebautAm = statSync(datei).mtimeMs
+  const quelleAm = statSync(resolve(SRC, 'index.css')).mtimeMs
+  if (gebautAm < quelleAm) {
+    const sekunden = Math.round((quelleAm - gebautAm) / 1000)
+    return { css: null, grund: `${f} ist ${sekunden}s AELTER als src/index.css — das Bundle kennt die Quelle nicht, die hier geprueft werden soll` }
+  }
+  return { css: readFileSync(datei, 'utf8'), grund: '' }
 })()
 
-describe.skipIf(builtCss === null)('im gebauten CSS, nicht nur in der Quelle', () => {
-  const css = builtCss ?? ''
+describe('der Beweis am gebauten CSS findet ueberhaupt statt', () => {
+  it('es liegt ein frisch gebautes index-*.css bereit — sonst steht hier, warum nicht', (ctx) => {
+    if (gebaut.css !== null) {
+      // Nicht bloss „nicht null": ein leeres Bundle waere derselbe stille
+      // Ausfall in gruen.
+      expect(gebaut.css.length, 'das gebaute CSS ist verdaechtig kurz').toBeGreaterThan(1000)
+      return
+    }
+    const meldung =
+      `\n  UEBERSPRUNGEN: die vier Pruefungen am gebauten CSS in fokusring-und-press.test.ts\n` +
+      `  Grund: ${gebaut.grund}\n` +
+      `  Was damit UNGEPRUEFT bleibt: ob Fokusring und Press-Regel im ausgelieferten\n` +
+      `  Bundle wirklich ausserhalb von @layer utilities landen. Die Quelle allein\n` +
+      `  beweist das nicht.\n` +
+      `  Dagegen: ${BAUBEFEHL}\n`
+    // Zwei Wege, damit es keiner uebersieht: der Report zeigt den Grund am
+    // uebersprungenen Test, `stderr` zeigt ihn im Terminal.
+    process.stderr.write(meldung)
+    ctx.skip(gebaut.grund)
+  })
+})
+
+describe.skipIf(gebaut.css === null)('im gebauten CSS, nicht nur in der Quelle', () => {
+  const css = gebaut.css ?? ''
 
   /** Ende des `@layer utilities`-Blocks: alles danach ist ungeschichtet. */
   const utilitiesEnd = (() => {
@@ -264,12 +332,54 @@ describe.skipIf(builtCss === null)('im gebauten CSS, nicht nur in der Quelle', (
     expect(utilitiesEnd).toBeGreaterThan(0)
   })
 
-  it('Fokusring und Press-Regel stehen ausserhalb jedes @layer', () => {
-    for (const needle of [':focus-visible:not([tabindex="-1"]):not(.lu-primary)', ':active{scale:.97}']) {
-      const at = css.indexOf(needle)
-      expect(at, `${needle} fehlt im gebauten CSS`).toBeGreaterThan(0)
-      expect(at, `${needle} liegt im Utilities-Layer`).toBeGreaterThan(utilitiesEnd)
+  /** Jede Stelle, an der die Nadel im Bundle steht — nicht nur die erste. */
+  const alleTreffer = (nadel: RegExp): number[] =>
+    [...css.matchAll(new RegExp(nadel.source, nadel.flags.includes('g') ? nadel.flags : nadel.flags + 'g'))].map((m) => m.index)
+
+  /**
+   * Der Selektorkopf der Press-Hausregel, so wie er WIRKLICH im Bundle steht.
+   *
+   * Die Anfuehrungszeichen um `button` und `true` wirft der Minifier weg
+   * (gemessen am gebauten CSS, nicht geraten) — sie sind hier optional, damit
+   * der Test nicht die eine oder die andere Schreibweise raet. Was NICHT
+   * optional ist, ist der Kopf selbst: er ist der einzige Unterschied
+   * zwischen der Hausregel und einer Utility, die auf dieselben achtzehn
+   * Zeichen endet.
+   */
+  const PRESS = /:is\(button,\s*\[role=['"]?button['"]?\]\):not\(:disabled\):not\(\[aria-disabled=['"]?true['"]?\]\):active\{scale:\.97\}/
+  const FOKUSRING = /:focus-visible:not\(\[tabindex="-1"\]\):not\(\.lu-primary\)/
+
+  it('Fokusring und Press-Regel stehen ausserhalb jedes @layer — an JEDER Fundstelle', () => {
+    for (const [name, nadel] of [['Fokusring', FOKUSRING], ['Press-Regel', PRESS]] as const) {
+      const treffer = alleTreffer(nadel)
+      expect(treffer.length, `${name} (${nadel.source}) fehlt im gebauten CSS`).toBeGreaterThan(0)
+      // Alle, nicht der erste. Genau hier hat der Test bisher danebengegriffen.
+      for (const at of treffer) {
+        expect(at, `${name}: eine Fundstelle liegt im Utilities-Layer (${at} < ${utilitiesEnd})`).toBeGreaterThan(utilitiesEnd)
+      }
     }
+  })
+
+  it('die Press-Nadel trifft die Hausregel und sonst nichts', () => {
+    // Der eigentliche Lehrsatz des Befundes vom 01.09.2026: eine Nadel, die
+    // Hausregel und Utility nicht auseinanderhalten kann, misst frueher oder
+    // spaeter die falsche. Es gibt genau EINE Press-Hausregel in index.css —
+    // also darf es genau EINEN Treffer geben.
+    expect(alleTreffer(PRESS)).toHaveLength(1)
+  })
+
+  it('keine Utility endet auf dieselben Zeichen wie die Press-Hausregel', () => {
+    // Die kurze Nadel von frueher, bewusst behalten: sie darf im ganzen
+    // Bundle nur noch da stehen, wo auch die Hausregel steht. Taucht sie
+    // oefter auf, hat wieder jemand `active:scale-[0.97]` erzeugt — durch
+    // eine Call-Site (dann gehoert sie geloescht, die Hausregel deckt es ab)
+    // oder durch Prosa im Scan-Bereich (siehe keine-klasse-aus-prosa.test.ts).
+    const kurz = alleTreffer(/:active\{scale:\.97\}/)
+    expect(
+      kurz,
+      `':active{scale:.97}' steht ${kurz.length}x im Bundle @ ${kurz.join(', ')} — erwartet: nur die Hausregel`,
+    ).toHaveLength(1)
+    expect(kurz[0]).toBeGreaterThan(utilitiesEnd)
   })
 
   it('die Ausnahme des Primaer-Rezepts steht nach der Hausregel und ist ungeschichtet', () => {
