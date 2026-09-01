@@ -328,6 +328,27 @@ export function ChatView() {
                       GoalBar, GroupCostHint). Vor dem ersten Inhalt bleiben
                       zwei Baender.
 
+                      ZWEITER DURCHGANG (01.09.2026): zwei ist die Zahl, und
+                      das ist eine Entscheidung, keine Restschuld. Gemessen im
+                      laufenden Fenster (Farben aus getComputedStyle):
+                      Fensterrahmen, Titlebar und Header tragen DIESELBE
+                      Flaeche — hell #e5e7eb, dunkel #141414 —, ohne Kante und
+                      ohne Schatten dazwischen; der Kontrast zwischen Header
+                      und Rahmen ist 1.00:1 in beiden Modi. Es liegen also
+                      nicht zwei Streifen uebereinander, sondern ein
+                      durchgehender Fenstergrund, auf dem die gerundete Pane
+                      (#ffffff / #1e1e1e) liegt. Der Schritt von 2 auf 1 waere
+                      ein DOM-Schritt ohne Bildschirmwirkung — und im Browser
+                      ist es ohnehin nur EIN Streifen, weil die Titlebar
+                      ausserhalb von Tauri `null` rendert.
+
+                      Bewacht wird nicht die Entscheidung, sondern ihre
+                      Voraussetzung: `chat/__tests__/zwei-baender-sind-eine-
+                      flaeche.test.ts` faellt, sobald einer der beiden
+                      Streifen eine eigene Flaeche, eine Kante oder einen
+                      Schatten bekommt. Dann sind es wieder zwei sichtbare
+                      Baender und die Frage ist neu zu stellen.
+
                       Ausdruecklich NICHT in den Composer hinein: `composerAbove`
                       rendert INNERHALB der Promptbox (ChatInput.tsx:318), und
                       „das promptfenster ist ueberfuellt" ist eine stehende

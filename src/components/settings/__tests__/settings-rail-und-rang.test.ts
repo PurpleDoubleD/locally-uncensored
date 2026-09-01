@@ -23,7 +23,7 @@
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { contrast, over } from '../../__tests__/wcag-contrast'
+import { contrast, over, rgbToHex } from '../../__tests__/wcag-contrast'
 import { sectionAnchorId, sectionsFor, type SettingsSectionFlags } from '../settings-nav'
 import type { SettingsTab } from '../../../lib/settings-reset'
 
@@ -47,11 +47,35 @@ const PAL = {
   gray200: '#e5e7eb',
   gray400: '#9ca3af',
   gray500: '#6b7280',
+  gray700: '#374151',
   gray900: '#111827',
   red400: '#f87171',
   red600: '#dc2626',
   accent: '#a094f8',
   accentEdge: '#8b7cf0',
+}
+
+/**
+ * Was der Browser wirklich malt — abgelesen, nicht abgeleitet.
+ *
+ * Alle Werte am 01.09.2026 am laufenden Dev-Server (Port 5273, Chromium) aus
+ * `getComputedStyle` genommen und, wo Tailwind 4 in `oklch()` rechnet, ueber
+ * eine 1x1-Canvas nach sRGB aufgeloest. Zwei Abweichungen von dem, was die
+ * Rechnungen dieser Datei bis hierher angenommen haben, und beide sind fuer
+ * D-S29 entscheidend:
+ *
+ *   1. Die Settings-Pane ist #1e1e1e, nicht #202020. `<main>` traegt
+ *      `bg-white dark:bg-[#1e1e1e]`; #202020 kommt in der Kette ueber dem
+ *      Reset-Block nirgends vor.
+ *   2. Tailwind 4 liefert red-400 als #ff6467 und red-600 als #e7000b. Die
+ *      #f87171 / #dc2626 oben sind die v3-Werte; sie stehen weiter in PAL,
+ *      weil andere Zeilen dieser Datei sie als historische Zahl zitieren.
+ */
+const GEMESSEN = {
+  paneDark: '#1e1e1e',   // <main> im Dunkelmodus
+  paneLight: '#ffffff',  // <main> im Hellmodus
+  red400: '#ff6467',     // Tailwind 4
+  red600: '#e7000b',     // Tailwind 4
 }
 
 // ── D-S27 / D-S48 — die Spalte haengt an etwas ────────────────────────────
@@ -66,6 +90,36 @@ describe('D-S27 / D-S48: die Inhaltsspalte schwebt nicht mehr frei', () => {
     // 640px Content daneben, linksbuendig".
     expect(SRC).toMatch(/w-\[200px\]/)
     expect(SRC).toMatch(/max-w-\[640px\]/)
+  })
+
+  it('D-S48: der Rest des Fensters wird verteilt, nicht rechts abgeladen', () => {
+    // Der offene Teil von D-S48. Die Spaltenbreite war richtig und bleibt
+    // unangetastet; falsch war, WO der uebrige Raum lag — vollstaendig rechts.
+    //
+    // Gemessen am laufenden Dev-Server (Port 5273, Chromium, Sidebar zu,
+    // --ui-scale 1.15, gerenderte px; Leerraum = Abstand zwischen Pane-Rand
+    // und der ersten bzw. letzten Spalte):
+    //
+    //   Fenster   vorher links / rechts     nachher links / rechts
+    //    1280 px      36,8 / 231,2            134,0 / 134,0
+    //    1440 px      36,8 / 391,2            214,0 / 214,0
+    //    1920 px      36,8 / 871,2            454,0 / 454,0
+    //
+    // Zentriert wird das PAAR aus Rail und Inhalt. Der Inhalt allein mittig
+    // waere wieder die freischwebende Spalte aus D-S27 — deshalb sitzt
+    // `justify-center` auf der Zeile, die beide enthaelt, und nicht an der
+    // Spalte.
+    const zeile = SRC.match(/<div className="flex[^"]*px-4 py-4 lg:px-8">/)?.[0] ?? ''
+    expect(zeile, 'Die Layoutzeile von Rail und Inhalt wurde nicht gefunden').not.toBe('')
+    expect(zeile).toContain('justify-center')
+
+    // NEGATIVKONTROLLE: nicht die Spalte selbst wurde zentriert. `mx-auto` an
+    // der Inhaltsspalte waere die Rueckkehr zu D-S27, und ihre Breite bleibt
+    // ein Deckel, kein Sollwert.
+    const spalte = SRC.match(/<div className="min-w-0 [^"]*max-w-\[640px\]"/)?.[0] ?? ''
+    expect(spalte, 'Die Inhaltsspalte wurde nicht gefunden').not.toBe('')
+    expect(spalte).not.toContain('mx-auto')
+    expect(spalte).toContain('min-w-0')
   })
 
   it('die Rail ist eine benannte Navigation und klebt beim Scrollen', () => {
@@ -292,15 +346,50 @@ describe('D-S29: die gefaehrlichere Reset-Aktion sieht anders aus', () => {
 
   it('die Gefahrfarbe traegt Text UND Kante durch WCAG', () => {
     // Text: AA braucht 4.5:1. Kante: 1.4.11 (Nicht-Text) braucht 3:1.
-    // red-600 #dc2626 auf Weiss = 4.83:1, red-400 #f87171 auf #202020 = 5.89:1.
+    //
+    // Zwei Rechnungen, und die zweite ist die massgebliche. Die erste sind die
+    // v3-Werte, mit denen dieser Befund geschlossen wurde (red-600 #dc2626 auf
+    // Weiss 4.83:1, red-400 #f87171 auf #202020 5.89:1) — sie stehen hier
+    // weiter, damit die alte Zahl nicht spurlos verschwindet.
     expect(contrast(PAL.red600, PAL.white)).toBeCloseTo(4.83, 2)
     expect(contrast(PAL.red400, PAL.appDark)).toBeCloseTo(5.89, 2)
-    expect(contrast(PAL.red600, PAL.white)).toBeGreaterThanOrEqual(4.5)
-    expect(contrast(PAL.red400, PAL.appDark)).toBeGreaterThanOrEqual(4.5)
+    // Die zweite sind die GEMESSENEN: Tailwind 4 malt red-600 als #e7000b und
+    // red-400 als #ff6467, und die Pane darunter ist #1e1e1e / #ffffff. Beide
+    // bleiben ueber AA, aber der helle Wert liegt mit 4.77:1 naeher an der
+    // Grenze als die 4.83:1 vermuten liessen.
+    expect(contrast(GEMESSEN.red600, GEMESSEN.paneLight)).toBeCloseTo(4.77, 2)
+    expect(contrast(GEMESSEN.red400, GEMESSEN.paneDark)).toBeCloseTo(5.77, 2)
+    expect(contrast(GEMESSEN.red600, GEMESSEN.paneLight)).toBeGreaterThanOrEqual(4.5)
+    expect(contrast(GEMESSEN.red400, GEMESSEN.paneDark)).toBeGreaterThanOrEqual(4.5)
     // Der scharf gestellte Zustand ist eine gefuellte Flaeche: Weiss auf
-    // red-600 = 4.83:1, dieselbe Rechnung von der anderen Seite.
-    expect(contrast(PAL.white, PAL.red600)).toBeGreaterThanOrEqual(4.5)
+    // red-600, dieselbe Rechnung von der anderen Seite.
+    expect(contrast(PAL.white, GEMESSEN.red600)).toBeGreaterThanOrEqual(4.5)
     expect(SRC).toContain("'bg-red-600 border-red-600 text-white font-medium'")
+  })
+
+  it('der SCHARFE tab-weite Knopf ist in BEIDEN Modi lesbar — er war es hell nicht', () => {
+    // Der zweite offene Teil von D-S29, und er stand in keiner Zeile der
+    // Matrix: `text-red-400` ohne hellen Gegenpart. Gemessen im laufenden
+    // Fenster, Farben aus getComputedStyle:
+    //
+    //   scharf dunkel  #ff6467 auf #1e1e1e   5.77:1   ✓
+    //   scharf hell    #ff6467 auf #ffffff   2.89:1   ✗   <- das war der Fehler
+    //
+    // Der Knopf war also ausgerechnet dann unter AA, wenn er gefaehrlich
+    // geworden war. Jetzt dasselbe Rotpaar wie der Gefahrknopf daneben.
+    expect(contrast(GEMESSEN.red400, GEMESSEN.paneLight)).toBeCloseTo(2.89, 2)
+    expect(contrast(GEMESSEN.red400, GEMESSEN.paneLight)).toBeLessThan(4.5)
+
+    const block = resetBlock()
+    expect(block).toContain("armed === 'section' ? 'text-red-600 dark:text-red-400 font-medium'")
+    // Und der Hover des ruhenden Zustands machte denselben Fehler.
+    expect(block).toContain("'text-gray-500 hover:text-red-600 dark:hover:text-red-400'")
+    expect(block).not.toMatch(/'text-red-400 font-medium'/)
+    expect(block).not.toMatch(/'text-gray-500 hover:text-red-400'/)
+
+    // Kein drittes Rotrezept: der scharfe Zustand benutzt genau das Paar, das
+    // der Gefahrknopf darunter schon fuehrt.
+    expect(block).toContain('dark:border-red-400 dark:text-red-400')
   })
 
   it('NEGATIVKONTROLLE: das alte Grau war im Dunkelmodus unlesbar — 2.16:1', () => {
@@ -357,16 +446,57 @@ describe('D-S30: Zustand und Aktion tragen nicht mehr dieselbe Flaeche', () => {
     expect(contrast(PAL.white, over(PAL.accent, PAL.appDark, 0.14))).toBeGreaterThanOrEqual(4.5)
   })
 
-  it('OFFEN, ausdruecklich: der tab-weite Reset-Link bleibt im Dunkelmodus bei 3.37:1', () => {
-    // `text-gray-500` ohne dark:-Gegenstueck. Die Klasse ist in
-    // src/lib/__tests__/reset-arming-is-visible.test.ts woertlich gepinnt
-    // (fremde Datei, nicht Teil dieses Pakets) — sie hier zu aendern hiesse,
-    // jenen Test zu brechen oder zu entschaerfen. Der Wert steht deshalb als
-    // gemessene, offene Luecke da, nicht als stille.
-    expect(SRC).toContain("'text-gray-500 hover:text-red-400'")
+  it('GESCHLOSSEN, nachgemessen: der ruhende Reset-Link traegt beide Modi durch AA', () => {
+    // Diese Zusicherung stand bis zum 01.09.2026 anders herum da: „OFFEN,
+    // ausdruecklich: der tab-weite Reset-Link bleibt im Dunkelmodus bei
+    // 3.37:1", und sie pinnte `'text-gray-500 hover:text-red-400'` samt
+    // `contrast(gray-500, #202020) < 4.5`.
+    //
+    // Beide Haelften waren aus KLASSENNAMEN gerechnet, und beide sind falsch:
+    //
+    //   - Der Grund ist nicht #202020. Der Link sitzt in `<main>`, und das
+    //     traegt `bg-white dark:bg-[#1e1e1e]`. #202020 kommt in der Kette
+    //     darueber nicht vor.
+    //   - `text-gray-500` erreicht den Browser nicht. Der Rescue-Layer in
+    //     index.css ist ungeschichtet und schlaegt die Utility: dunkel auf
+    //     gray-400, hell auf gray-700.
+    //
+    // Deshalb wird der Wert hier nicht mehr behauptet, sondern AUS index.css
+    // gelesen und gegen die gemessene Pane gerechnet. Faellt die
+    // Rescue-Regel weg, faellt dieser Test — und nicht der Kontrast still.
+    const rescue = (mode: 'light' | 'dark', utility: string) => {
+      const m = CSS.match(new RegExp(`\\.${mode} \\.${utility} \\{ color: (rgb\\([^)]*\\)); \\}`))
+      if (!m) throw new Error(`Rescue-Regel .${mode} .${utility} fehlt in index.css`)
+      return rgbToHex(m[1])
+    }
+    const dunkel = rescue('dark', 'text-gray-500')
+    const hell = rescue('light', 'text-gray-500')
+    expect(dunkel).toBe(PAL.gray400)
+    expect(hell).toBe(PAL.gray700)
+
+    // Gemessen im laufenden Fenster, Farben aus getComputedStyle:
+    //   dunkel #9ca3af auf #1e1e1e   6.57:1
+    //   hell   #374151 auf #ffffff  10.31:1
+    expect(contrast(dunkel, GEMESSEN.paneDark)).toBeCloseTo(6.57, 2)
+    expect(contrast(hell, GEMESSEN.paneLight)).toBeCloseTo(10.31, 2)
+    expect(contrast(dunkel, GEMESSEN.paneDark)).toBeGreaterThanOrEqual(4.5)
+    expect(contrast(hell, GEMESSEN.paneLight)).toBeGreaterThanOrEqual(4.5)
+
+    // Die Klasse steht weiter in der Datei — was sich geaendert hat, ist der
+    // Hover daneben (siehe D-S29), nicht das Grau.
+    expect(SRC).toContain("'text-gray-500 hover:text-red-600 dark:hover:text-red-400'")
+
+    // NEGATIVKONTROLLE: die Rechnung, die zu der 3.37:1 fuehrte, ist die
+    // Rechnung aus Klassennamen. Sie stimmt als Arithmetik und trifft nur
+    // keine Farbe, die je auf dem Schirm stand — genau deshalb steht sie hier
+    // als Kontrolle und nicht mehr als Befund.
+    expect(contrast(PAL.gray500, PAL.appDark)).toBeCloseTo(3.37, 2)
     expect(contrast(PAL.gray500, PAL.appDark)).toBeLessThan(4.5)
-    expect(contrast(PAL.gray500, PAL.white)).toBeGreaterThanOrEqual(4.5)
-    // Der neue Hinweistext daneben ist dagegen in beiden Modi lesbar.
-    expect(contrast(PAL.gray400, PAL.appDark)).toBeGreaterThanOrEqual(4.5)
+    expect(dunkel).not.toBe(PAL.gray500)
+
+    // Der Hinweistext daneben faehrt auf derselben Regel: `dark:text-gray-600`
+    // wird ebenfalls auf gray-400 gehoben.
+    expect(rescue('dark', 'text-gray-600')).toBe(PAL.gray400)
+    expect(contrast(PAL.gray400, GEMESSEN.paneDark)).toBeGreaterThanOrEqual(4.5)
   })
 })

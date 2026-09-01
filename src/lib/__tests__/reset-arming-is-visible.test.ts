@@ -46,8 +46,32 @@ describe('the reset button is armed visibly, which is why it stays as it is', ()
   })
 
   it('and the armed button turns red and heavier, not only wordier', () => {
+    // 2026-09-01, D-S29 second pass — this line was rewritten ON PURPOSE, and
+    // this note is the reason, because a guard that is quietly adjusted while
+    // fixing the thing it guards has stopped being a guard.
+    //
+    // What it used to pin, verbatim:
+    //   armed === 'section' ? 'text-red-400 font-medium'
+    //                       : 'text-gray-500 hover:text-red-400'
+    //
+    // `text-red-400` carried no light-mode counterpart. Measured in the running
+    // window (Chromium, colours from getComputedStyle, oklch resolved through a
+    // 1x1 canvas — Tailwind 4 renders red-400 as #ff6467, not the #f87171 the
+    // older calculations in this repo assume):
+    //
+    //   armed, dark   #ff6467 on #1e1e1e   5.77:1   passes AA
+    //   armed, light  #ff6467 on #ffffff   2.89:1   FAILS AA (4.5:1)
+    //
+    // So the control was below AA exactly once it had become dangerous. It now
+    // carries the same red pair the "Reset all settings" button beside it
+    // already used (red-600 light / red-400 dark), and the hover of the resting
+    // state got the same treatment for the same reason.
+    //
+    // What this test checks is UNCHANGED in kind and in strength: both branches
+    // are still pinned as whole literals, so red-plus-medium cannot be traded
+    // away for a relabel. Only the literals moved.
     expect(settingsPage).toMatch(
-      /armed === 'section' \? 'text-red-400 font-medium' : 'text-gray-500 hover:text-red-400'/,
+      /armed === 'section' \? 'text-red-600 dark:text-red-400 font-medium' : 'text-gray-500 hover:text-red-600 dark:hover:text-red-400'/,
     )
   })
 

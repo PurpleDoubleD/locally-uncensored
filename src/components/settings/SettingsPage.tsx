@@ -1089,18 +1089,50 @@ function ResetSection({ tab }: { tab: SettingsTab }) {
           Textlinks nebeneinander, von denen einer sehr viel mehr loescht.
           Die gefaehrlichere traegt jetzt eine eigene Form (umrandete
           Gefahrfarbe statt Textlink), eine eigene Zeile und einen Satz, der
-          den Unterschied benennt. Gerechnet (WCAG 2.1): red-600 #dc2626 auf
-          Weiss 4.83:1, red-400 #f87171 auf #202020 5.89:1 — Text UND Kante,
-          also auch 1.4.11 (3:1) fuer die Umrandung erfuellt. Vorher stand
-          "Reset all settings" im Dunkelmodus auf gray-600 = 2.16:1, war also
-          ausgerechnet die unlesbarere der beiden.
-          Der Textlink darueber bleibt Zeile fuer Zeile so, wie er war:
-          src/lib/__tests__/reset-arming-is-visible.test.ts pinnt seine
-          Klassen woertlich. */}
+          den Unterschied benennt — Text UND Kante durch WCAG, also auch
+          1.4.11 (3:1) fuer die Umrandung. Vorher stand "Reset all settings"
+          im Dunkelmodus auf gray-600, war also ausgerechnet die unlesbarere
+          der beiden.
+
+          ZWEITER DURCHGANG (01.09.2026), und er hat den Rest des Befundes
+          umgedreht. Die Matrix fuehrte hier eine offene Luecke: „der
+          tab-weite Reset-Link steht im Dunkelmodus weiter auf 3.37:1". Diese
+          Zahl war aus KLASSENNAMEN gerechnet — gray-500 #6b7280 auf einem
+          angenommenen #202020. Im laufenden Fenster (Chromium, Farben aus
+          getComputedStyle, oklch ueber eine 1x1-Canvas aufgeloest) steht
+          nichts davon:
+
+            Grund unter dem Link  #1e1e1e (die Settings-Pane), nicht #202020
+            Ruhe dunkel  gray-500 -> #9ca3af    6.57:1   ✓ AA
+            Ruhe hell    gray-500 -> #374151   10.31:1   ✓ AA
+
+          Der Rescue-Layer (index.css:867/873) hebt `.dark .text-gray-500`
+          auf gray-400 und `.light .text-gray-500` auf gray-700 — die Luecke
+          war zu, bevor dieser Durchgang begann.
+
+          Was NICHT zu war und in keiner Zeile stand: der SCHARFE Zustand
+          desselben Knopfs. `text-red-400` ohne hellen Gegenpart, und
+          red-400 heisst in Tailwind 4 #ff6467, nicht das #f87171 der
+          Rechnungen von damals:
+
+            scharf dunkel #ff6467 auf #1e1e1e   5.77:1   ✓ AA
+            scharf hell   #ff6467 auf #ffffff   2.89:1   ✗ unter 4.5:1
+
+          Also genau die Umkehrung des Ausgangsbefundes: gefaehrlich wird der
+          Knopf erst mit dem ersten Klick, und ab da war er im Hellmodus der
+          unlesbarere. Er traegt jetzt dasselbe Rotpaar wie der Gefahrknopf
+          darunter (red-600 hell / red-400 dunkel), kein drittes Rezept;
+          dasselbe gilt fuer den Hover, der vorher denselben Fehler machte.
+
+          Die Klassen dieses Knopfs sind woertlich gepinnt, und zwar in einer
+          FREMDEN Datei: src/lib/__tests__/reset-arming-is-visible.test.ts.
+          Deren Farbzeile ist mitgezogen worden — bewusst, im Bericht
+          benannt, und mit demselben Biss wie vorher (voller Literalvergleich
+          beider Zweige). */}
       <button
         onClick={() => handleClick('section')}
         className={`flex items-center gap-1.5 text-[0.65rem] transition-colors ${
-          armed === 'section' ? 'text-red-400 font-medium' : 'text-gray-500 hover:text-red-400'
+          armed === 'section' ? 'text-red-600 dark:text-red-400 font-medium' : 'text-gray-500 hover:text-red-600 dark:hover:text-red-400'
         }`}
       >
         <RotateCcw size={11} />
@@ -1187,8 +1219,29 @@ export function SettingsPage() {
           Fensterbreite); darunter bleibt die waagerechte Tab-Leiste, weil
           200 + 640 in einem 900px-Fenster mit Sidebar nicht nebeneinander
           passen — und bei 900px sah der Screen laut Audit ohnehin besser aus
-          als bei 1600px. */}
-      <div className="flex gap-6 px-4 py-4 lg:px-8">
+          als bei 1600px.
+
+          D-S48, zweiter Durchgang: `justify-center`. Die Spaltenbreite bleibt
+          unangetastet — die Zeilenlaenge war laut Audit richtig, und ein
+          Inhalt, der mit dem Fenster mitwaechst, waere ein anderer, nicht
+          behobener Befund. Falsch war nur die VERTEILUNG des Rests: er stand
+          vollstaendig rechts. Gemessen im laufenden Fenster (Chromium,
+          Dev-Server auf 5273, Sidebar zu, --ui-scale 1.15, gerenderte px,
+          Leerraum zwischen Pane-Rand und erster/letzter Spalte):
+
+            Fenster   vorher links / rechts     nachher links / rechts
+             1280 px      36,8 / 231,2            134,0 / 134,0
+             1440 px      36,8 / 391,2            214,0 / 214,0
+             1920 px      36,8 / 871,2            454,0 / 454,0
+
+          Zentriert wird das PAAR aus Rail und Inhalt, nicht der Inhalt
+          allein — sonst haenge die Spalte wieder frei in der Mitte, und
+          genau das war D-S27. Sie haengt weiterhin an der Rail, das Paar
+          steht jetzt nur mittig im verfuegbaren Raum. Ueberlaufsicher: unter
+          `lg` faellt die Rail auf `display:none` und der Inhalt hat
+          `min-w-0` — es bleibt kein freier Raum uebrig, den `justify-center`
+          verteilen koennte, und die Zeile bricht nicht nach links aus. */}
+      <div className="flex justify-center gap-6 px-4 py-4 lg:px-8">
         <nav
           aria-label="Settings sections"
           className="hidden lg:flex w-[200px] shrink-0 flex-col gap-4 sticky top-4 self-start max-h-[calc(100vh-6rem)] overflow-y-auto scrollbar-thin"
