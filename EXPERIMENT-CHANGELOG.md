@@ -270,13 +270,13 @@ vor dem Verlassen des Rechners).
 |---|---|---|---|
 | Typfehler | 118 | **0** | 0 |
 | Importzyklen | 11 (Audit: 9) | **0** | 0 |
-| Boot-Chunk | 2016 kB | **732 kB** | < 800 |
+| Boot-Chunk | 2016 kB | **731,8 kB** | < 800 |
 | `INEFFECTIVE_DYNAMIC_IMPORT` | 11 | **0** | 0 |
 | `react-hooks/*` | 47 | **0** | 0 |
-| eslint gesamt | 1040 | 948 | — |
-| `no-explicit-any` | 827 | 564 | < 100 |
-| vitest Mac | 5405 | **6755 / 0 rot / 3 übersprungen** | — |
-| vitest Windows | 8 rot | **6755 / 0 rot / 3 übersprungen** | — |
+| eslint gesamt | 1040 | **188** | — |
+| `no-explicit-any` | 827 | **57** ✓ | < 100 |
+| vitest Mac | 5405 | **7061 / 0 rot / 3 übersprungen** | — |
+| vitest Windows | 8 rot | (Stand `ba9557df`: 6755 / 0 rot) | — |
 | cargo test Mac | 438 | **729 / 0 rot / 3 ignoriert** | — |
 | cargo test Windows | 15 rot, 11 ignoriert | **715 / 0 rot / 3 ignoriert** | — |
 
@@ -346,3 +346,70 @@ optional deklarierte Felder; fünf Fixtures bauten `id: 'builtin'` als
 einzeln durch einen Regressionstest festgenagelt** — die bestehenden Tests
 bleiben grün, wenn man den Fix zurücknimmt. Das ist als eigener Auftrag
 nachgezogen.
+
+## Was das Typisieren wirklich eingebracht hat
+
+Fünf Pakete haben `no-explicit-any` von 827 auf 57 gebracht — der Audit-Zielwert
+(< 100) ist erreicht. Die Zahl ist aber nicht der Ertrag. Der Ertrag sind **21
+echte Fehler**, die dabei herausfielen, weil ein `any` genau dort steht, wo
+jemand aufgehört hat nachzudenken. Die schwersten:
+
+- **Eine unlesbare Zeile im Memory-Blob löschte alle Erinnerungen, dauerhaft.**
+  zustand fängt einen werfenden `migrate` im `.catch` von `persist`, bricht die
+  Hydration ab und ruft `set()` nie — der Store bleibt auf `entries: []`, und der
+  nächste gewöhnliche Schreibvorgang persistiert diese Leere über den Blob.
+  `migrateV2toV3` ist die Migration, die jeder 2.5.x-Nutzer beim Upgrade fährt.
+- **`rag.ts` legte `undefined` in ein `number[][]` — und persistierte es.** Die
+  Wache in `cosineSimilarity` ist laut eigenem Kommentar für den *leeren* Vektor
+  geschrieben, nicht für `undefined`. Antwortet der Embeddings-Server mit weniger
+  Zeilen als Eingaben, bekommt der Schwanz `embedding: undefined`, das wird
+  gespeichert, und jede spätere Frage an das Dokument wirft — bis der Nutzer die
+  Datei entfernt und neu ablegt.
+- **Ein `tool_calls`-Eintrag ohne `function` riss den ganzen Agentenzug ab.** Der
+  `TypeError` flog innerhalb der NDJSON-Schleife, aber außerhalb des `try`, das
+  nur `JSON.parse` abdeckt.
+- **Ein einzelner kaputter CivitAI-Eintrag** riss per `item.name.toLowerCase()`
+  in den äußeren catch — alle 20 Treffer verschwanden.
+
+Das wiederkehrende Muster über das ganze Projekt: **zwei Pfade, die dasselbe tun
+sollen, und nur einer wurde gepflegt.** Vordergrund/Hintergrund bei der Shell,
+Streaming/nicht-Streaming bei Ollama, Erfolgs-/Reparaturzweig bei
+`safeParseArgs`. Gefunden wird das zuverlässig nur, wenn man die beiden Pfade
+*gegeneinander* testet statt jeden für sich.
+
+## Der Dev-Server war die größte offene Tür
+
+`vite.config.ts` ist keine Konfigurationsdatei, sondern ein Server mit 2.471
+Zeilen und — bis `25408c8a` — null Tests. Und er ist nicht bloß Werkzeug:
+`setup.sh:155` und `start.bat:10` starten `npm run dev` als Laufzeit des
+Nutzers. Bedient wird er nicht von Menschen, sondern **vom Modell**:
+`backendCall` schickt dieselben Argumente im Tauri-Build an Rust und im
+Dev-Modus an `/local-api/…`.
+
+Sieben Befunde, darunter: ein einziger POST mit kaputtem JSON tötete den Prozess
+(live nachgewiesen, `GET /` danach `000`); Pfad-Traversal in vier schreibenden
+Endpunkten (`path.join` normalisiert `..` klaglos weg — es ist keine Grenze);
+Shell-Injektion über `execSync(\`git clone "${repo_url}"\`)`; und ein
+SSRF-Wächter, der auf die *Schreibweise* prüfte statt auf die Adresse —
+`0:0:0:0:0:ffff:127.0.0.1` ist gültiges IPv6, erreicht nachweislich localhost,
+und keine der beiden Regexen traf.
+
+## Die eine harte Shell-Sperre war dreifach umgehbar
+
+Das Tool-Schema verspricht, `git commit --no-verify` werde abgelehnt. Tatsächlich
+ließ sich die Sperre auf drei Wegen abstreifen: mit `background: true` (der
+Rückgabepunkt lag vier Zeilen vor der Prüfung), über den zurückgezogenen Namen
+`shell_execute_background` (der lief per `runRetiredTool` direkt am Prüfer
+vorbei), und durch **irgendein Kommando davor** (`rejectShellCommand` fragte
+`commandKind`, und das meldet die Art dessen, was zuerst kommt).
+
+Beim Schließen kam ein vierter Weg dazu, den niemand vorgegeben hatte: die
+**Zeilenfortsetzung**. `git commit -m x \` + Umbruch + `--no-verify` ist für die
+Shell ein Kommando; ohne Backslash-Behandlung wird der Umbruch zum Trenner und
+das Flag landet in einem eigenen Segment.
+
+Die Segmentierung ist jetzt anführungszeichen-bewusst, und die Sicherheitsregel
+steht als Kommentar an der Funktion: *Zusammenfassen ist harmlos, Auftrennen ist
+die Umgehung* — bei unbalancierten Anführungszeichen wird deshalb auf die
+Ganzzeilen-Prüfung zurückgefallen. Bewusst offen und als `toBeNull()` im
+Testfile festgehalten: ein Wort vor `git` (`sudo`, `GIT_DIR=x`).
