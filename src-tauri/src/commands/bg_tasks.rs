@@ -1045,8 +1045,10 @@ mod cwd_default_tests {
     /// the model started "in the project" ran somewhere else.
     #[tokio::test]
     async fn a_task_without_an_explicit_cwd_lands_in_the_workspace() {
-        let ws = std::env::temp_dir().join(format!("lu-bg-ws-{}", std::process::id()));
-        std::fs::create_dir_all(&ws).unwrap();
+        // `os_paths::test_dir` statt eines handgebauten `temp_dir().join(…)`:
+        // das Aufräumen hängt am `Drop` und läuft auch dann, wenn das
+        // `assert!` unten panickt — die letzte Zeile des Tests tat das nicht.
+        let ws = crate::os_paths::test_dir("bg-ws");
 
         let start = shell_task_start_impl(&super::a_task_that_prints_its_directory(json!({
             "working_directory": ws.to_string_lossy(),
@@ -1060,16 +1062,15 @@ mod cwd_default_tests {
             same_directory(&seen, &ws),
             "background task did not start in the workspace: reported {seen:?}, wanted {ws:?}",
         );
-        let _ = std::fs::remove_dir_all(&ws);
     }
 
     /// An explicit cwd from the caller still wins over the derived default.
     #[tokio::test]
     async fn an_explicit_cwd_still_wins() {
-        let a = std::env::temp_dir().join(format!("lu-bg-a-{}", std::process::id()));
-        let b = std::env::temp_dir().join(format!("lu-bg-b-{}", std::process::id()));
-        std::fs::create_dir_all(&a).unwrap();
-        std::fs::create_dir_all(&b).unwrap();
+        // Siehe oben: beide Verzeichnisse räumen sich beim Verlassen selbst
+        // ab, auch über die drei `assert!` hinweg.
+        let a = crate::os_paths::test_dir("bg-a");
+        let b = crate::os_paths::test_dir("bg-b");
 
         let start = shell_task_start_impl(&super::a_task_that_prints_its_directory(json!({
             "cwd": b.to_string_lossy(),
@@ -1086,8 +1087,6 @@ mod cwd_default_tests {
         );
         // Negative control: the folder that must NOT have won.
         assert!(!same_directory(&seen, &a), "the task ran in the fallback {a:?}");
-        let _ = std::fs::remove_dir_all(&a);
-        let _ = std::fs::remove_dir_all(&b);
     }
 }
 

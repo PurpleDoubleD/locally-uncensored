@@ -57,6 +57,46 @@ export function asStringArray(v: unknown): string[] {
   return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []
 }
 
+// ── Streamed tool-call accumulators ────────────────────────────
+
+/**
+ * Which accumulator slot a streamed tool-call block belongs to when the server
+ * left out the `index` that is supposed to identify it.
+ *
+ * Both streaming protocols in this file number their tool-call blocks, and
+ * both are served by things that do not: OpenAI-compatible servers omit
+ * `index` on a tool_call delta, Anthropic-compatible proxies (LiteLLM,
+ * claude-relay-server) omit it on `content_block_start`. The rule is the same
+ * on both, which is why this lives here and not twice in two providers:
+ *
+ *   an event carrying an id  → the slot already holding that id, else a new one
+ *   an event carrying none   → the slot currently being filled
+ *
+ * It maps onto both wire formats because both put the id on the event that
+ * OPENS a call and leave it off the ones that continue it — OpenAI on the
+ * first delta, Anthropic on `content_block_start`.
+ *
+ * Reading a missing index as an assertion instead was a real outage on both
+ * sides: `set(undefined)` opened a block under a key no lookup would ever
+ * produce, and the whole tool call went out with `{}` arguments.
+ *
+ * Limit, and the same one on both providers: a stream that omits BOTH the
+ * index and the id can only be read as one call at a time. A second block
+ * opened that way continues the first instead of starting its own.
+ */
+export function keyForUnindexedBlock<T extends { id: string }>(
+  accum: ReadonlyMap<number, T>,
+  id?: string,
+): number {
+  if (id) {
+    for (const [key, call] of accum) {
+      if (call.id === id) return key
+    }
+    return accum.size
+  }
+  return Math.max(0, accum.size - 1)
+}
+
 // ── Ollama: /api/chat ──────────────────────────────────────────
 
 /**

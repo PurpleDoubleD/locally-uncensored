@@ -24,8 +24,8 @@ import { localFetch, localFetchStream, isPrivateOrLanHost, isDirectFetchAllowed,
 import { ensureBuiltinEngineAlive, explainDeadEngine, explainEngineTransportMessage, isManagedBuiltinSlot } from '../builtin-ensure'
 import { applyTemplateContract } from './normalize-system'
 import {
-  parseOpenAIStreamChunk, parseOpenAIChatResponse,
-  prop, asString, asNumber, asBoolean, asRecordArray,
+  parseOpenAIStreamChunk, parseOpenAIChatResponse, keyForUnindexedBlock,
+  isRecord, prop, asString, asNumber, asBoolean, asRecordArray,
 } from './wire'
 
 // Transport routing lives in the `useLocalProxy` getter (below) plus the shared
@@ -41,7 +41,7 @@ import {
 // declared here as two hand-rolled interfaces asserted onto `JSON.parse` and
 // `res.json()`, and both said things the code itself knew to be false: the
 // tool-call delta declared `index: number` as required while the accumulator
-// right below it falls back to `keyForUnindexedDelta` precisely because
+// right below it falls back to `keyForUnindexedBlock` precisely because
 // servers omit it, and `choices` was typed as a one-element tuple.
 
 /**
@@ -219,25 +219,6 @@ const catalogContext = new Map<string, number>()
 
 /** Ceiling for the optional metadata probes — see `probeInit`. */
 const CONTEXT_PROBE_TIMEOUT_MS = 2500
-
-/**
- * Which accumulator slot a tool-call delta without an `index` belongs to. The
- * field is required by the OpenAI spec but several compatible servers omit it.
- * A delta carrying a fresh id opens the next slot; anything else continues the
- * call currently being filled.
- */
-function keyForUnindexedDelta(
-  accum: Map<number, { id: string; name: string; args: string }>,
-  id?: string,
-): number {
-  if (id) {
-    for (const [key, call] of accum) {
-      if (call.id === id) return key
-    }
-    return accum.size
-  }
-  return Math.max(0, accum.size - 1)
-}
 
 /**
  * Flat token cost charged for one inline image during prompt estimation.
@@ -752,7 +733,7 @@ export class OpenAIProvider implements ProviderClient {
         // Accumulate streamed tool calls
         if (choice.delta?.tool_calls) {
           for (const tc of choice.delta.tool_calls) {
-            const key = tc.index ?? keyForUnindexedDelta(toolCallAccum, tc.id)
+            const key = tc.index ?? keyForUnindexedBlock(toolCallAccum, tc.id)
             const existing = toolCallAccum.get(key)
             if (existing) {
               // id and name do NOT always arrive in the first delta — several
@@ -1257,22 +1238,27 @@ export class OpenAIProvider implements ProviderClient {
 
   /**
    * A tool call's `arguments` is a JSON *string* on the wire and the caller is
-   * a language model, so nothing guarantees it decodes to an object. The
-   * happy path used to return whatever JSON.parse produced under a
+   * a language model, so nothing guarantees it decodes to an object. The happy
+   * path used to return whatever JSON.parse produced under a
    * `Record<string, any>` annotation — `"null"` therefore handed `null` to
-   * every downstream `args.foo` read, and `"[1,2]"` / `"42"` handed on a
-   * value with none of the promised keys. Both branches now apply the same
-   * object check the repair branch always had.
+   * every downstream `args.foo` read, and `"[1,2]"` / `"42"` handed on a value
+   * with none of the promised keys.
+   *
+   * Both branches now go through `isRecord`, and that is deliberately NOT the
+   * check the repair branch used to have: `typeof [] === 'object'`, so
+   * `parsed && typeof parsed === 'object'` let an ARRAY through — the very
+   * `"[1,2]"` this comment named as covered while it was not. Arrays and null
+   * are rejected here; only something indexable by name leaves.
    */
   private safeParseArgs(args: string): Record<string, unknown> {
     try {
       const parsed: unknown = JSON.parse(args)
-      if (parsed && typeof parsed === 'object') return parsed as Record<string, unknown>
+      if (isRecord(parsed)) return parsed
     } catch {
       // fall through to the repair path below
     }
     const repaired: unknown = repairJson(args)
-    return repaired && typeof repaired === 'object' ? repaired as Record<string, unknown> : {}
+    return isRecord(repaired) ? repaired : {}
   }
 
   // ── Error parsing ────────────────────────────────────────────

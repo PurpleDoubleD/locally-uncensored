@@ -22,7 +22,8 @@ import {
   hostnameOf, ensureProxyAllowsHost,
 } from '../backend'
 import {
-  parseAnthropicStreamEvent, parseAnthropicMessageResponse, isRecord, prop, asString,
+  parseAnthropicStreamEvent, parseAnthropicMessageResponse, keyForUnindexedBlock,
+  isRecord, prop, asString,
 } from './wire'
 
 // ── Anthropic API Types ────────────────────────────────────────
@@ -403,13 +404,20 @@ export class AnthropicProvider implements ProviderClient {
           case 'content_block_start': {
             // `index` keys the accumulator that content_block_delta later
             // appends to. It used to be read through a non-null assertion, so
-            // an event without one silently opened a block under the key
-            // `undefined` — and every delta then looked it up under a real
-            // number and found nothing, dropping the whole tool call. Skipping
-            // the block is the same outcome the lookup already produced, minus
-            // the poisoned map entry.
-            if (data.content_block?.type === 'tool_use' && data.index !== undefined) {
-              toolUseBlocks.set(data.index, {
+            // an event without one opened a block under the key `undefined`,
+            // and a delta that DID carry an index found nothing there — the
+            // tool call went out with `{}` arguments.
+            //
+            // Proxies that omit the field are the reason this provider needs a
+            // rule rather than an assertion (see messagesUrl). Skipping the
+            // block was not that rule: it fixed the mixed stream and broke the
+            // consistent one, where start and deltas BOTH leave the index out
+            // and the old code — accidentally, both sides keyed on `undefined`
+            // — got the call through intact. `keyForUnindexedBlock` is the
+            // rule, and it is the same one the OpenAI accumulator uses.
+            if (data.content_block?.type === 'tool_use') {
+              const key = data.index ?? keyForUnindexedBlock(toolUseBlocks, data.content_block.id)
+              toolUseBlocks.set(key, {
                 id: data.content_block.id || '',
                 name: data.content_block.name || '',
                 input: '',
@@ -427,8 +435,11 @@ export class AnthropicProvider implements ProviderClient {
               // Claude Extended Thinking stream — route to `thinking` so the
               // ThinkingBlock UI picks it up (same field as Ollama's native).
               yield { content: '', thinking: delta.thinking, done: false }
-            } else if (dtype === 'input_json_delta' && delta?.partial_json && data.index !== undefined) {
-              const block = toolUseBlocks.get(data.index)
+            } else if (dtype === 'input_json_delta' && delta?.partial_json) {
+              // Ohne `index` ist es das Fragment des Blocks, der gerade
+              // gefuellt wird — dieselbe Regel wie oben, dieselbe Funktion.
+              const key = data.index ?? keyForUnindexedBlock(toolUseBlocks)
+              const block = toolUseBlocks.get(key)
               if (block) block.input += delta.partial_json
             }
             break
@@ -690,11 +701,13 @@ export class AnthropicProvider implements ProviderClient {
       // `input` is JSON text assembled from input_json_delta fragments. It can
       // decode to a non-object (a truncated stream, or a model that emitted
       // `null`) — the old annotation promised a Record and would have handed
-      // `null` straight to the tool dispatcher.
+      // `null` straight to the tool dispatcher. `isRecord` and not a bare
+      // `typeof … === 'object'`: that one is true for an array too, so `[1,2]`
+      // would still have arrived as "the arguments".
       let args: Record<string, unknown> = {}
       try {
         const parsed: unknown = JSON.parse(block.input)
-        if (parsed && typeof parsed === 'object') args = parsed as Record<string, unknown>
+        if (isRecord(parsed)) args = parsed
       } catch { /* empty */ }
 
       calls.push({

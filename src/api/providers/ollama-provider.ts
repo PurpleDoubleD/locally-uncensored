@@ -15,8 +15,7 @@ import { parseNDJSONStream } from '../stream'
 import { idleAbortGuard, isStreamIdleTimeout, STREAM_IDLE_TIMEOUT_MS } from '../stream-idle'
 import { repairToolCallArgs, extractToolCallsFromContent } from '../../lib/tool-call-repair'
 import { applyTemplateContract } from './normalize-system'
-import type { OllamaWireToolCall } from './wire'
-import { isRecord, prop, asString, asNumber, asRecordArray } from './wire'
+import { parseOllamaChatChunk, isRecord, prop, asString, asNumber, asRecordArray } from './wire'
 
 // ── Ollama-specific types ──────────────────────────────────────
 
@@ -52,20 +51,14 @@ export interface OllamaChatRequest {
   think?: boolean
 }
 
-interface OllamaChatChunk {
-  message?: { content?: string; thinking?: string; tool_calls?: OllamaWireToolCall[] }
-  done?: boolean
-  // Why generation ended ('stop' | 'length' | 'load' | …), final chunk only.
-  done_reason?: string
-  // Server-reported timing in the final done:true chunk (Bug M v2.4.7).
-  // Ollama returns nanoseconds; we convert to ms before yielding upstream.
-  eval_count?: number          // tokens the model produced
-  eval_duration?: number       // generation phase in nanoseconds
-  prompt_eval_count?: number   // tokens in the prompt (unused for tps)
-  prompt_eval_duration?: number
-  total_duration?: number
-  load_duration?: number
-}
+// Was auf dieser Route ZURUECKKOMMT, liegt als `OllamaChatChunk` in ./wire,
+// hinter `parseOllamaChatChunk`. Hier stand dieselbe Form ein zweites Mal —
+// als Typargument an `parseNDJSONStream`, also als BEHAUPTUNG ueber
+// `JSON.parse`, mit drei Feldern (`prompt_eval_duration`, `total_duration`,
+// `load_duration`), die diese Datei nie gelesen hat. Die sieben, die sie
+// liest, kommen jetzt geprueft aus dem Parser. Dass das ueberhaupt auffiel:
+// `tool_calls` wurde direkt `.map`-t, ein Server, der dort kein Array
+// schickt, riss die ganze Stream-Schleife mit einem TypeError auf.
 
 interface OllamaModelEntry {
   name: string
@@ -218,18 +211,20 @@ export class OllamaProvider implements ProviderClient {
       })
 
       try {
-        for await (const chunk of parseNDJSONStream<OllamaChatChunk>(res, {
+        for await (const raw of parseNDJSONStream<unknown>(res, {
           idleMs: STREAM_IDLE_TIMEOUT_MS,
           onIdle: guard.abort,
         })) {
           if (options?.signal?.aborted) break
+          const chunk = parseOllamaChatChunk(raw)
 
           // Mid-stream `{"error":"..."}` line (runner crash, OOM) inside an
           // HTTP-200 stream — surface it instead of yielding a silent empty
-          // chat turn (rikki Discord 2026-06-10, Win11 proxy path).
-          const errLine = (chunk as { error?: unknown }).error
-          if (typeof errLine === 'string' && errLine) {
-            throw new Error(`Ollama: ${errLine}`)
+          // chat turn (rikki Discord 2026-06-10, Win11 proxy path). `error`
+          // kommt als `string | undefined` aus dem Parser, der `typeof`-Test
+          // von frueher sass auf einem `unknown` aus einer Typzusicherung.
+          if (chunk.error) {
+            throw new Error(`Ollama: ${chunk.error}`)
           }
 
           // `arguments` arrives as `unknown` from the wire because Ollama is

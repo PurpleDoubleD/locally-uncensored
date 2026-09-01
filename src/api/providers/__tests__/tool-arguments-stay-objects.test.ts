@@ -1,8 +1,8 @@
 /**
  * Ein Tool-Call traegt seine `arguments` als JSON-TEXT ueber die Leitung, und
  * geschrieben hat den Text ein Sprachmodell. `JSON.parse` liefert darum nicht
- * zwingend ein Objekt: `"null"` und `"42"` sind gueltiges JSON und beide kein
- * `Record<string, …>`.
+ * zwingend ein Objekt: `"null"`, `"42"` und `"[1,2]"` sind alle gueltiges JSON
+ * und alle drei kein `Record<string, …>`.
  *
  * Vor 0e740f60 prueften beide Provider das nur im REPARATURZWEIG. Der
  * Erfolgszweig gab zurueck, was `JSON.parse` produziert hatte, unter einer
@@ -121,6 +121,20 @@ describe('openai-provider hands on an object even when the model sent none', () 
     expect(args).toEqual({})
   })
 
+  // `typeof [] === 'object'`: der erste Anlauf des Fixes pruefte genau das und
+  // liess ein Array durch — der Fall, den sein eigener Kommentar als abgedeckt
+  // benannte. `isRecord` weist Arrays und `null` ab.
+  it('turns a "[1,2]" arguments payload into an empty object', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(openAIToolCallResponse('[1,2]')))
+
+    const result = await new OpenAIProvider(openAIConfig())
+      .chatWithTools('gpt-4o', [{ role: 'user', content: 'read it' }], [])
+
+    const args = onlyCall(result.toolCalls).function.arguments
+    expectPlainObject(args)
+    expect(args).toEqual({})
+  })
+
   it('still passes a real object through untouched', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
       openAIToolCallResponse('{"path":"README.md"}'),
@@ -184,6 +198,21 @@ describe('anthropic-provider hands on an object even when the model sent none', 
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(sse([
       'event: content_block_start\ndata: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_1","name":"file_read"}}\n\n',
       'event: content_block_delta\ndata: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"42"}}\n\n',
+      'event: message_stop\ndata: {"type":"message_stop"}\n\n',
+    ])))
+
+    const chunks = await drain(new AnthropicProvider(anthropicConfig())
+      .chatStream('claude-sonnet-4-20250514', [{ role: 'user', content: 'read it' }]))
+
+    const args = onlyCall(chunks.flatMap(c => c.toolCalls ?? [])).function.arguments
+    expectPlainObject(args)
+    expect(args).toEqual({})
+  })
+
+  it('turns tool input that decodes to an array into an empty object', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(sse([
+      'event: content_block_start\ndata: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_1","name":"file_read"}}\n\n',
+      'event: content_block_delta\ndata: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"[1,2]"}}\n\n',
       'event: message_stop\ndata: {"type":"message_stop"}\n\n',
     ])))
 
