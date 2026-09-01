@@ -695,11 +695,19 @@ async function executeShellExecute(
     return 'Refused: this turn is read-only (/review, Code-Review Mode or Plan mode). Only inspection commands run here: git status/log/diff/show/blame, ls, cat, pwd. One command, no chaining.'
   }
 
-  if (args.background) return executeShellExecuteBg({ command, cwd: args.cwd }, run, abort)
-
   // The one refusal that stays hard after the merge: --no-verify on a commit.
+  // VOR der Hintergrund-Weiche: die Sperre gilt dem KOMMANDO, nicht der
+  // Betriebsart. Stand sie darunter, streifte ein Modell sie durch simples
+  // Anhaengen von `background: true` ab — eine harte Sperre, die man mit einem
+  // Flag abwaehlt, ist keine.
   const refusal = rejectShellCommand(command)
   if (refusal) return refusal
+
+  // `shell` muss mit: das Backend leitet die Argumentform seit ba9557df aus dem
+  // Shell-NAMEN ab (shell::shell_argv), das Durchreichen ist also folgenlos
+  // richtig. `stdin`, `args` und `timeout` bleiben absichtlich draussen — die
+  // kennt StartArgs auf der Rust-Seite gar nicht.
+  if (args.background) return executeShellExecuteBg({ command, cwd: args.cwd, shell: args.shell }, run, abort)
 
   // An explicit timeout wins; otherwise a recognised test run keeps the old
   // run_tests budget (300 s) instead of the shell default.
@@ -787,11 +795,29 @@ async function executeShellExecuteBg(
   signal?: AbortSignal,
 ): Promise<string> {
   const { bgStart, bgKill } = await import('../agents/bg-tasks')
+  const command = argString(args, 'command')
+  // ZWEITER Eingang derselben Sperre. executeShellExecute prueft schon vor der
+  // Hintergrund-Weiche, aber der zurueckgezogene Name `shell_execute_background`
+  // laeuft ueber runRetiredTool DIREKT hierher und sieht executeShellExecute nie
+  // — dort waere `--no-verify` sonst weiterhin frei. Doppelt geprueft auf dem
+  // Hauptpfad, das ist ein Regex und der Preis fuer eine Sperre ohne Hintertuer.
+  // Whitespace ist kein Schlupfloch: commandKind() trimmt selbst, ein
+  // ungetrimmtes `command` aus dem Redirect wird also genauso erkannt.
+  const { rejectShellCommand } = await import('../../lib/shell-command-classify')
+  const refusal = rejectShellCommand(command)
+  if (refusal) return refusal
   // Thread the chat context through, or the task starts in LU's own directory
   // instead of the workspace the foreground shell tool uses.
   const { id } = await bgStart({
-    command: argString(args, 'command'),
+    command,
     cwd: argOptString(args, 'cwd'),
+    // Das Schema bewirbt `shell` fuer BEIDE Pfade; der Hintergrundpfad hat es
+    // bisher stillschweigend weggeworfen, ein `{shell:"bash", background:true}`
+    // lief in der Plattform-Default-Shell. `argOptString` statt des vorderen
+    // `args.shell || null`: fuer einen echten String identisch, aber es filtert
+    // Nicht-Strings raus, die der Bridge sonst als Deserialisierungsfehler um
+    // die Ohren fliegen — und `bgStart` nimmt ohnehin nur `string | undefined`.
+    shell: argOptString(args, 'shell'),
     ...chatCtx(run),
   })
   // A detached task outlives the turn that started it BY DESIGN, but it must
