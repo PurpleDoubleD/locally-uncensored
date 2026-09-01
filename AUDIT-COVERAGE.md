@@ -16,7 +16,7 @@ Zeile für Zeile: welcher Audit-Befund ist im Branch `experiment/audits-komplett
 
 ## 1. Bilanz
 
-Gemessen am HEAD `51732e63`. Die Zählung des Audits („12 kritisch, 34 hoch, 30 mittel, 2 niedrig") meint die **CONFIRMED**-Befunde; die Befundtabelle §4b hat 85 Zeilen, weil 7 als *unbewiesen* markierte dazukommen (1 kritisch, 3 hoch, 3 mittel). Diese Matrix führt alle 85.
+Gemessen am HEAD `b3f0f786`. Die Zählung des Audits („12 kritisch, 34 hoch, 30 mittel, 2 niedrig") meint die **CONFIRMED**-Befunde; die Befundtabelle §4b hat 85 Zeilen, weil 7 als *unbewiesen* markierte dazukommen (1 kritisch, 3 hoch, 3 mittel). Diese Matrix führt alle 85.
 
 ### Technik-Audit — 85 Befunde
 
@@ -38,17 +38,17 @@ Gezählt sind §3 (10 Amateur-Signale), §4 (49 Screen-Bullets), §5 (13 Token-Z
 
 | Status | Signale | Screens (49) | Tokens (13) | **gesamt** |
 |---|---|---|---|---|
-| umgesetzt | 9 | 20 | 4 | **33** |
+| umgesetzt | 10 | 31 | 4 | **45** |
 | teilweise | 0 | 5 | 3 | **8** |
 | war schon behoben | 0 | 2 | 0 | **2** |
-| **OFFEN** | **3** | **22** | **6** | **31** |
+| **OFFEN** | **2** | **11** | **6** | **19** |
 
 Verifikationsgrad, Design: der Anteil `per Test` ist von 12 auf über 30 gestiegen, weil jedes Paket seit dem letzten Stand Sonden mitbringen musste. Was **nicht** per Test geht, ist jede DOM-Messung des Audits (Pixelabstände, Spaltenbreiten): der Testlauf hat keinen Renderer (`environment: 'node'`). Bewiesen ist dort jeweils die benannte **Ursache**, nicht die Zahl — außer wo ausdrücklich „Live-Messung" steht, dann lief ein echter Dev-Server.
 
 
 ### Das Gesamtbild in einem Satz
 
-Der Technik-Audit ist zu **94 %** umgesetzt und in seinen beiden schweren Klassen vollständig (50 von 50); vom Rest sind zwei Positionen nicht meine Entscheidung. Der Design-Audit steht bei 45 % ganz und 11 % halb. „Ausnahmslos" stimmt für den Technik-Audit inzwischen fast und für den Design-Audit noch nicht — und ich sage das lieber hier, als es in einer Zahl zu verstecken.
+Der Technik-Audit ist zu **94 %** umgesetzt und in seinen beiden schweren Klassen vollständig (50 von 50); von den drei verbliebenen Positionen sind zwei nicht meine Entscheidung. Der Design-Audit steht bei **61 % ganz und 11 % halb** — bei der letzten Aufnahme waren es 25 %. „Ausnahmslos" stimmt für den Technik-Audit inzwischen fast und für den Design-Audit noch nicht, und ich sage das lieber hier, als es in einer Zahl zu verstecken.
 
 > **Stand der Messung.** Alles unten ist am committeten HEAD gemessen. Im Arbeitsbaum liegen zum Zeitpunkt dieser Aufnahme uncommittete Änderungen von drei parallel arbeitenden Agenten (Chat/Header-Design, Persistenz-Rennen, Tailwind-Scan); sie sind hier **nicht** eingerechnet.
 
@@ -181,6 +181,19 @@ Die Befundtabelle §4b ist nicht das ganze Audit. Sechs der zehn **Amateur-Signa
 
 ---
 
+### 2.5 Was bei der Kontrolle zusätzlich aufgefallen ist
+
+Zwei Befunde, die in **keinem** der beiden Audits stehen. Ich habe sie beim Nachmessen gefunden, nicht beim Lesen — sie stehen hier, weil ein Deckungsdokument, das nur die Aufgabenliste abhakt, genau die Blindheit hätte, die es anprangert.
+
+| ID | Was | Fundstelle | Status | Anmerkung |
+|---|---|---|---|---|
+| KF-1 | Der Beenden-Pfad erreicht jeden Daemon außer dem Tunnel | `state.rs:462` | **OFFEN** | `AppState::shutdown_subprocesses` ist 115 Zeilen lang und erwähnt `remote`, `RemoteServer`, `tunnel` oder `cloudflared` **kein einziges Mal** — am HEAD `63294828` von mir nachgezählt. Ollama, ComfyUI, llama-server, der Embeddings-Server, der Trainer und der MLX-Sidecar stehen dort; der Tunnel hängt allein an `impl Drop for RemoteServer`. Der Kommentar über der Funktion begründet selbst, warum das nicht reicht: Tauri v2 führt `Drop for AppState` nicht zuverlässig aus — genau deshalb existiert der explizite Pfad. Dies ist die zweite Hälfte von T-39, siehe Abschnitt 5. |
+| KF-2 | Prosa erzeugt ausgeliefertes CSS | `AUDIT-COVERAGE.md:301` → `dist/assets/index-*.css` | in Arbeit | Tailwind 4 scannt das Projektverzeichnis als Text, `.md` eingeschlossen. Eine Erwähnung von `active:scale-[0.97]` **in diesem Dokument** erzeugte die Utility `.active\:scale-\[0\.97\]` im ausgelieferten Bundle, obwohl keine einzige Komponente die Klasse benutzt. Bewiesen mit zwei echten Builds: Erwähnung ersetzt → Utility weg, Dateihash ändert sich; Kontrollprobe mit denselben Erwähnungen aus `index.css` entfernt → Build byte-identisch, der CSS-Kommentar war es also nicht. **Der Schaden ist doppelt:** totes CSS im Produkt, und der erste Treffer von `indexOf(':active{scale:.97}')` war diese Utility statt der Hausregel — `fokusring-und-press.test.ts` maß damit die falsche Regel. |
+
+**Wie KF-2 vier Monate unentdeckt bleiben konnte:** `fokusring-und-press.test.ts:248` trägt `describe.skipIf(builtCss === null)` und liest aus `dist/assets`. Wo kein `dist/` steht, schaltet sich der ganze Block **still** ab. Das ist der dritte Fall desselben Musters in diesem Projekt (nach `gguf.rs:264` und `bundle-size-drift.live.test.ts`) — und ich bin selbst einmal darauf hereingefallen: ein Lauf war grün gegen ein `dist/`, das aus einer früheren Sonde stammte und nicht mehr zum Quelltext passte. Seitdem gilt für mich: **vor jedem Testlauf, der gebautes CSS liest, `rm -rf dist && npx vite build`.**
+
+---
+
 ## 3. Design-Audit
 
 Der Design-Audit vergibt keine IDs. Vergeben sind hier: **D-A1…D-A10** (§3, die 10 Amateur-Signale), **D-S01…D-S49** (§4, Screen für Screen, in Dateireihenfolge), **D-T01…D-T13** (§5, Token-Diff), **D-W1-1…D-W3-11** (§6, die drei Wellen), **D-E1** (§7 „Die eine Sache“) und **D-X1** (die eine Korrektur im Anhang).
@@ -197,7 +210,7 @@ Der Design-Audit vergibt keine IDs. Vergeben sind hier: **D-A1…D-A10** (§3, d
 | D-A6 | Die Hauptnavigation ist Text, kein Ziel | `Header.tsx:157/174/310` | umgesetzt | `bcec642b` | nur Review | Ein `NAV_BASE` (`Header.tsx:147`): `h-7 px-2 rounded-md text-[0.68rem]`, aktiv als Fläche. |
 | D-A7 | Streaming ist kein eigener Zustand | `MessageBubble.tsx:442`, `WorkingAnchor.tsx:37` | umgesetzt | `bcec642b` + `3883eaa8` | per Test (`src/components/chat/__tests__/der-caret-ist-reines-css.test.ts`) | Caret als CSS-`::after` mit `@keyframes` (kein Timer, kein neues Prop); Aktionsleiste beim Streamen aus; Anker in der Measure-Spalte. **Zwei bewusste Abweichungen, beide im Code begründet:** Gate auf `!isStreaming` statt auf `(!isLast \|\| !!message.usage)` (ein Backend ohne `usage` verlöre die Leiste sonst dauerhaft), Blink 300/300 ms statt 133/133 (3,76 Hz liegt an der Schwelle von WCAG 2.3.1). |
 | D-A8 | Der primäre Button ist auf drei Screens grau | `create/ui/Button.tsx:43`, `auth/AccountPanel.tsx:164`, `ChatInput.tsx:455` | umgesetzt | `f336b91e` | per Test (`src/components/__tests__/primary-recipe.test.ts` rechnet den WCAG-Kontrast aus den echten Tokens) | `.lu-primary` an genau einer Stelle definiert, benutzt von allen drei. **Rest:** `Onboarding.tsx:795` hat sein eigenes `primaryBtn` und erbt das Rezept nicht (siehe D-S36). |
-| D-A9 | Die Marke erscheint vier Mal in vier Größen | `Titlebar.tsx:59/71`, `Header.tsx:227`, `CloudSwitch.tsx:52`, `ChatView.tsx:159`, `Onboarding.tsx:790` | **OFFEN** (1 von 3 Teilen) | `c77682a2` | per Test (`src/components/layout/__tests__/titlebar-monogramm.test.ts` — deckt nur die Titlebar) | Erledigt: die Titlebar nimmt `/LU-monogram.svg`. Offen: **neun** weitere Einbindungen laden weiter das 512×512-PNG (`Header.tsx:214` 33px, `ChatView.tsx:185` 46px, `MessageBubble.tsx:209`, `CodexView.tsx:261`, `ChatInput.tsx:491`, `AccountPanel.tsx:209`, `CloudSwitch`), das Titlebar-Monogramm wurde nicht gestrichen, und auf dem Welcome-Screen steht weiterhin kein Zeichen. |
+| D-A9 | Die Marke erscheint vier Mal in vier Größen | `Titlebar.tsx:59/71`, `Header.tsx:227`, `CloudSwitch.tsx:52`, `ChatView.tsx:159`, `Onboarding.tsx:790` | umgesetzt | `b3f0f786` | per Test (`das-zeichen-ist-vektor.test.ts`) + eigene Sonde | `brand.ts` mit `MONOGRAM`/`MONOGRAM_INVERT`, alle Einbindungen ziehen daraus; Header 33px → 20px. Es waren **zehn**, nicht neun: der Test durchsucht `src/components/**`, statt eine Liste abzuhaken, und fand `CloudGateModal.tsx:71`, das im Audit nicht steht. Der Test verbietet ausdrücklich die Behauptung „spart Platz" — er liest die echten Dateigrößen (SVG 11.179 B > PNG 3.219 B) und rechnet stattdessen die Rasterzahlen nach. **Offen:** die Titlebar trägt weiterhin ihre eigene Kopie der Pfadkonstante, weil `titlebar-monogramm.test.ts:44-52` den Literalpfad wörtlich festnagelt — eine Doppelung, die der Agent meldet statt sie zu verstecken. Meine eigene Sonde: eine Einbindung zurück auf den PNG-Pfad → 4 rot. |
 | D-A10 | Elf Icons ohne Label als Hauptnavigation von Create | `intents.ts:33-154`, `IntentBar.tsx:88` | **OFFEN** | — | nur Review | `IntentBar.tsx:87` unverändert: nicht-selektierte Labels auf `max-w-0 opacity-0 px-0`. Die `short`-Labels liegen weiter ungenutzt im Datenmodell. |
 | D-E1 | §7 „Die eine Sache“: eine gemeinsame Messgröße | = D-A1 | umgesetzt | `bcec642b` | per Test (siehe D-A1) | Der als stärkstes Signal des Audits benannte Punkt (4 von 6 Prüfern unabhängig) ist der eine Design-Befund, der vollständig gelandet ist. |
 | D-X1 | Anhang-Korrektur: `big.dot = 'bg-red-400/80'` | `ModelTiles.tsx:32` | umgesetzt | `3883eaa8` | nur Review | `orange-500/80` und „Runs on CPU, slower“ statt „Too big for your GPU“ — die Leiter bleibt emerald → amber → orange. |
@@ -207,26 +220,26 @@ Der Design-Audit vergibt keine IDs. Vergeben sind hier: **D-A1…D-A10** (§3, d
 | ID | Kurztitel | Fundstelle laut Audit | Status | Commit | Verifikationsgrad | Anmerkung |
 |---|---|---|---|---|---|---|
 | D-S01 | Kein Composer im leeren Chat | `ChatView.tsx:330` | umgesetzt | `bcec642b` | nur Review | Eine `ChatInput`-Instanz außerhalb der `AnimatePresence` (`ChatView.tsx:366-368`), beide Zweige teilen sie. |
-| D-S02 | Empty-State ohne Titel und CTA | `ChatView.tsx:159/162` | **OFFEN** | — | nur Review | `ChatView.tsx:185-189` unverändert: 46px-PNG auf `opacity-20` plus bedingt „Select a model above.“ Kein Titel, keine Subline, kein Primärbutton. |
+| D-S02 | Empty-State ohne Titel und CTA | `ChatView.tsx:159/162` | umgesetzt | `b3f0f786` | per Test (`die-eingangsseite-hat-eine-tuer.test.ts`) | Landeblock statt 46px-PNG auf `opacity-20`: Zeichen (SVG, 56px), `t-display`-Titel, zustandsabhängige Subline, an den Composer gebunden (`justify-end`, `--lu-measure`), damit beide als eine Einheit lesen. **Nebenbefund:** „Select a model *above*." war falsch — der Modellwähler ist mit dem Umbau vom 2026-07-11 in den Composer gezogen und öffnet nach oben; der Text zeigte seither in die falsche Richtung. **Bewusster Widerspruch zum Audit:** der geforderte Primärbutton kommt nur, wenn kein Modell installiert ist. Als das Audit maß, hatte dieser Screen gar kein Eingabefeld (D-S01); heute *ist* der Composer die Primäraktion, ein zweiter Knopf daneben wäre die Doppelung, die dasselbe Audit an vier Stellen rügt. |
 | D-S03 | „New Chat“ schwächer als die aktive Zeile | `Sidebar.tsx:593` | **OFFEN** | — | nur Review | `Sidebar.tsx:675-682`, Klassenkette byte-identisch zu `base/`. |
 | D-S04 | Dritter Modus-Tab ohne Label | `Sidebar.tsx:290` | **OFFEN** | — | nur Review | `Sidebar.tsx:360-373`: Radio-Icon, „Remote“ steht nur in `title`/`aria-label`. |
-| D-S05 | 1237×850px tote Fläche | `ChatView` | **OFFEN** | — | nicht verifizierbar hier (Messung am DOM) | Ursache nur halb weg: der Composer ist da (D-S01), die Fläche darüber ist unverändert leer (`ChatView.tsx:176-190`). |
-| D-S06 | Zwei Kontextanzeigen in zwei Notationen | `ChatView.tsx:189/192` | **OFFEN** | — | nur Review | `ChatView.tsx:211` (`TokenCounter`, „32/8.2k“) und `:214` (`ContextDropdown`, „ctx 8K“) stehen beide noch. |
-| D-S07 | Aktionsleiste nicht hover-gated | `MessageBubble.tsx:442` | **OFFEN** | — | nur Review | `MessageBubble.tsx:474` gatet auf `!isStreaming` — das schließt D-A7, nicht diesen Bullet. Der Kommentar bei `:467` nennt „always visible but subtle“ ausdrücklich als Absicht; drei Icons stehen weiterhin unter **jeder** fertigen Nachricht. |
-| D-S08 | Zwei Avatar-Systeme | `MessageBubble.tsx:195-206` | **OFFEN** | — | nur Review | `:196-211` unverändert: Assistent rahmenlos, User als gerahmte Box. |
+| D-S05 | 1237×850px tote Fläche | `ChatView` | umgesetzt | `b3f0f786` | per Test | = D-S02. Die Leerfläche selbst (1237×850px) ist hier nicht messbar; gefüllt und verankert ist sie. |
+| D-S06 | Zwei Kontextanzeigen in zwei Notationen | `ChatView.tsx:189/192` | umgesetzt | `b3f0f786` | per Test + Live-Messung + eigene Sonde | Der Füllstand **ist** die Beschriftung des Fensterwählers geworden — der Messwert sitzt auf dem Regler, der ihn bewegt. Die Feinheit, die leicht schiefgeht: der Cloud-Zweig gibt `<>{children}</>` zurück, nicht `null`, sonst hätte das Zusammenlegen den Füllstand auf Cloud-Modellen mitgenommen. **Meine eigene Sonde darauf:** `null` eingesetzt → 1 rot, und der Test heißt danach. |
+| D-S07 | Aktionsleiste nicht hover-gated | `MessageBubble.tsx:442` | umgesetzt | `b3f0f786` | per Test + Live-Messung (`getComputedStyle`) | Hover- und Fokus-gated. Das war **erst möglich, seit `f2650788`** ein Kontextmenü über dieselben Handler anbietet — vorher wäre Verstecken ein Funktionsverlust gewesen. Ein Test macht genau diesen zweiten Weg zur Bedingung des Versteckens. Drei Fallen einzeln geregelt: kein `hidden`/`absolute` (die Leiste behält ihren Layoutplatz, weil ein Protokoll, das bei jeder Mausbewegung umbricht, schlimmer ist), `group-focus-within` (sonst fokussierbar und unsichtbar), und die eigene Rückmeldung hält sie offen. Kosten, offen benannt: ohne Zeiger (Touch) gibt es weder Hover noch Rechtsklick. |
+| D-S08 | Zwei Avatar-Systeme | `MessageBubble.tsx:195-206` | umgesetzt | `b3f0f786` | per Test | `avatar-slot.ts` — ein Chip für beide Sprecher, benutzt von Chat und Code. Es waren **drei** Fassungen, nicht zwei: `CodexView.tsx:252` hielt eine eigene 20px-Variante ohne Rahmen. |
 | D-S09 | Think-Pill trägt die Fokusring-Farbe | `ChatInput.tsx:417`, `index.css:308` | umgesetzt | `8198495f` + `c77682a2` | per Test (`composer-grammar.test.ts`) | Think ist neutral über `aria-pressed`; der Fokusring liegt jetzt auf dem Akzent statt auf Blau — die Doppelbedeutung ist an beiden Enden aufgelöst. |
 | D-S10 | DOM-Reihenfolge Text → Aktionen → Status | `MessageList.tsx:102-104` | umgesetzt | `bcec642b` | nur Review | Die Reihenfolge ist unverändert (`MessageList.tsx:169-171`), aber der Konflikt ist weg: die Aktionsleiste rendert während des Streamens nicht mehr, der Status steht also nicht mehr unter Buttons. |
-| D-S11 | `WorkingAnchor` ist im Standbild Fließtext | `WorkingAnchor.tsx:38` | **OFFEN** | — | nur Review | `WorkingAnchor.tsx:51-52`: nur das Padding wurde auf `pl-11` gezogen (Spaltenausrichtung, D-A7). Wort, Schriftgröße und Shimmer sind identisch. |
+| D-S11 | `WorkingAnchor` ist im Standbild Fließtext | `WorkingAnchor.tsx:38` | umgesetzt | `b3f0f786` | per Test (Kontrast nachgerechnet) | Chip mit Kante und Radius, pulsierender Punkt über die vorhandene `.lu-band-dot` (kein zweites Motion-Rezept), `.t-control` statt eigener Zahl, `lu-hud-num` statt handgeschriebenem `font-mono tabular-nums`. **Alle drei tragenden Merkmale wirken ohne Bewegung** — das war der Kern des Befundes („im Standbild"). `role="status"` + `aria-live="polite"`, Uhr und Punkt `aria-hidden`, sonst spricht die Ansage im 250-ms-Takt. Punktfarbe nachgerechnet: `#a094f8` auf `gray-50` = 2,49:1 zu wenig, deshalb hell die Kantenfarbe `#8b7cf0` = 3,22:1. |
 | D-S12 | Stop-Button trägt Rot | `ChatInput.tsx:445` | umgesetzt | `8198495f` | per Test (`composer-grammar.test.ts:262`) | `.lu-control` neutral; Auffindbarkeit läuft über `data-active` statt über die Fehlerfarbe. Die Begründung („Stop ist der Normalabschluss“) steht in `index.css:600`. |
 | D-S13 | Paperclip und Mic auf `opacity-20` | `ChatInput.tsx:383` | umgesetzt | `8198495f` | per Test (`composer-grammar.test.ts:335`) | `.lu-control:disabled { opacity: .4 }` (`index.css:759-762`). |
 | D-S14 | Doppelte Kürzung des Titels | `Sidebar.tsx:465` | **OFFEN** | — | nur Review | `Sidebar.tsx:557`: `truncate(conv.title, 30)` **und** CSS-`truncate` unverändert. |
 | D-S15 | Hover-Icons behalten ihren Layoutplatz | `Sidebar.tsx:486` | **OFFEN** | — | nur Review | `Sidebar.tsx:578`: `opacity-0 group-hover:opacity-100`, kein `absolute`/`hidden`. |
 | D-S16 | 698 von 899px Sidebarhöhe leer | `Sidebar.tsx:593` | **OFFEN** | — | nicht verifizierbar hier (Messung) | Struktur und Position der Primäraktion unverändert (`Sidebar.tsx:318`, `:675`). |
 | D-S17 | Vier Control-Höhen auf 250px Breite | `Sidebar.tsx`, `index.css:68-70` | **OFFEN** | — | nur Review | Kein `--control-h-*` in der Sidebar (`:514`, `:557`, `:331`, `:678`); die Tokens wurden nur im Composer neu erschlossen. |
-| D-S18 | Drei Bänder vor dem ersten Inhalt | `ChatView.tsx:181` | **OFFEN** | — | nur Review | `Titlebar.tsx:94` (h-8), `Header.tsx:193` (h-10), `ChatView.tsx:200` — alle drei stehen. |
-| D-S19 | Rechts 9 Elemente, Center-Slot leer | `Header.tsx:231/288-372` | **OFFEN** | — | nur Review | Der Center-Slot wurde mit `bcec642b` in den Flow geholt (`Header.tsx:227`), bleibt aber praktisch leer; rechts unverändert `gap-2.5` (`:265`). |
-| D-S20 | Overflow-Breakpoint `lg` oder `xl` je nach View | `Header.tsx:296-299` | **OFFEN** | — | nur Review | `Header.tsx:284-285`, `:310-311` unverändert view-abhängig. |
-| D-S21 | Das Overflow-Menü ist kein Menü | `Header.tsx:341-342` | **OFFEN** (teilweise) | `bcec642b` | nur Review | Padding und Hover-Fläche kamen mit dem Nav-Rezept (`navClass`, `Header.tsx:322-345`). `role="menu"`/`role="menuitem"` fehlen weiterhin — 0 `role=`-Treffer in der Datei, während `Sidebar.tsx:615` es korrekt hat. |
+| D-S18 | Drei Bänder vor dem ersten Inhalt | `ChatView.tsx:181` | **teilweise** | `b3f0f786` | per Test | Das dritte Band ist unter das Transkript gezogen, zu den anderen Sitzungsanzeigen — nichts darin gehört zur nächsten Nachricht. Vor dem ersten Inhalt bleiben **zwei** statt drei. **Offen bleibt** der Schritt von 2 auf 1: er hieße Titlebar und Header verschmelzen und damit Fensterknöpfe und macOS-Ampel-Einzug verlegen. Die Titlebar rendert außerhalb von Tauri `null`, war also weder im Browser sichtbar noch ohne Tauri-Build prüfbar. Blind an der Fensterchrome zu operieren wäre ein echtes Regressionsrisiko für einen kosmetischen Gewinn. |
+| D-S19 | Rechts 9 Elemente, Center-Slot leer | `Header.tsx:231/288-372` | umgesetzt | `b3f0f786` | per Test (`die-kopfzeile-hat-eine-regel.test.ts`) | Die sechs Navigationsziele in den Center-Slot, in ein echtes `<nav aria-label="Main">`. Rechts stehen genau **vier** Dinge, und alle vier zeigen oder schalten einen Zustand. Der Slot ist damit auf jeder View gefüllt. Nebenbei fällt die eigentliche Gefahr: die Ziele standen **viermal** als JSX (`textNav`, `dropdownNav`, zwei Compare-Fassungen), `appMode !== 'cloud'` viermal als Bedingung — jetzt eine `NAV_TARGETS`-Liste und ein Filter, Leiste und Menü können nicht mehr auseinanderlaufen. Nimmt zwei `eslint`-Fehler mit (`setView(view as any)`). |
+| D-S20 | Overflow-Breakpoint `lg` oder `xl` je nach View | `Header.tsx:296-299` | umgesetzt | `b3f0f786` | per Test | Ein Breakpoint (`lg`) für beide Views, `isCreateView` ist weg. Möglich, **weil** die Leiste jetzt überall gleich voll ist — ihr Umbruch kann nicht mehr von ihrem Inhalt abhängen. |
+| D-S21 | Das Overflow-Menü ist kein Menü | `Header.tsx:341-342` | umgesetzt | `b3f0f786` | per Test | `role=menu`/`menuitem`, `aria-haspopup`/`-expanded`/`-current`, wanderndes `tabIndex`, Pfeile/Home/End, Escape über `isTopDialog`, Fokusrückgabe an den Auslöser — aus denselben Bausteinen (`ui/dialog-a11y`), die `ui/ContextMenu.tsx` benutzt. Kein drittes Muster. |
 | D-S22 | Vier Glyphen im selben Slot ohne Legende | `ModelTiles.tsx:65-84` | umgesetzt | `d006b7ed` | per Test (`vier-glyphen-ein-chip-ein-schatten.test.ts`) | Vier gleich große, gleich graue Glyphen im selben Slot sind keine Information. Jetzt ein benannter Chip statt vier Rätsel. |
 | D-S23 | Quant-Dropdown sieht aus wie der Größen-Chip | `ModelTiles.tsx:213` vs. `:56` | umgesetzt | `d006b7ed` | per Test (dieselbe Datei) | Auswahl und Anzeige tragen nicht mehr dieselbe Klassenkette — was klickbar ist, sieht klickbar aus. |
 | D-S24 | 53× „Get“ trägt `shadow-sm` | `ModelTiles.tsx:269` | umgesetzt | `d006b7ed` | per Test (dieselbe Datei) | Ein Schatten statt 53. |
@@ -247,12 +260,12 @@ Der Design-Audit vergibt keine IDs. Vergeben sind hier: **D-A1…D-A10** (§3, d
 | D-S39 | Nackter Punkt statt Icon in Schritt 3 | `Onboarding.tsx:1231` | **teilweise** | `51732e63` | per Test | `ImageIcon` in `bg-lu-accent-soft`, mit `ICON_LG` statt einer neuen Zahl, damit die Sperrklinke in `icon-leiter.test.ts` (≤ 19 distinkte `size={n}`) nicht steigt. **Offen:** der zweite Teil des Audit-Bullets („vier Buttons in vier Behandlungen") war nicht Teil dieses Punkts — zwei der vier laufen jetzt über `.lu-primary`, die anderen zwei nicht. |
 | D-S40 | Der Send-Glyph verschwindet im Hellmodus | `ChatInput.tsx:455`, `index.css:374` | umgesetzt | `f336b91e` | per Test (`primary-recipe.test.ts:110`, rechnet den Kontrast) | `ChatInput.tsx:535` trägt `.lu-primary`: Akzentfläche mit dunklem Text in beiden Modi. |
 | D-S41 | `hover:text-white` ohne `dark:`-Prefix | `ChatInput.tsx:383`, `create/ui/Button.tsx:45` | war schon behoben | vor `10bfa0d7` | nur Review | Der `.light`-Rescue-Layer (`index.css:509-510`, `:524`) steht byte-gleich schon in `base/src/index.css:370-371`, `:385`. Rest: die `ghost`-Variante in `create/ui/Button.tsx` trägt die Klassen weiterhin roh und lebt vom Rescue-Layer. |
-| D-S42 | Hellmodus hat keine Ebenen | `AppShell.tsx:804`, `:812` | **OFFEN** | — | nur Review | `AppShell.tsx:927`, `:948` unverändert gegenüber `base/`:827/835. |
+| D-S42 | Hellmodus hat keine Ebenen | `AppShell.tsx:804`, `:812` | umgesetzt | `b3f0f786` | per Test (Kontrast gerechnet) + Live-Messung am Fenster | **Der Befund stimmte im Ergebnis und daneben in der Begründung.** Nachgemessen war der Stufenabstand in beiden Modi fast gleich (dunkel 1,105:1 / hell 1,100:1). Gefehlt hat die **Kante**: hell 1,008:1 gegen dunkel 1,271:1 — vierunddreißigmal schwächer. Eine Pane ohne Stufe *und* ohne Kante liegt nicht auf der Leinwand, sie ist die Leinwand. Leinwand auf `gray-200`: Pane 1,100 → **1,238:1** (von mir unabhängig nachgerechnet: 1,2378), der unangetastete Ring gewinnt mit auf 1,134:1. **Dabei gefunden:** die aktive Nav-Pille war hell `bg-gray-100` auf einer `bg-gray-100`-Leiste = **1,000:1** — D-A6 („aktiv als Fläche") galt im Hellmodus nie. |
 | D-S43 | Think-Pill ≈ 2,3:1 auf Weiß | `ChatInput.tsx:417` | umgesetzt | `8198495f` | per Test (`composer-grammar.test.ts:420`) | Aktiv-Zustand hell ist `rgba(0,0,0,.05)` + gray-900 (`index.css:735-742`). |
 | D-S44 | Create-Wurzel setzt `text-gray-200` ohne `dark:` | `CreateExperimental.tsx:134` | umgesetzt | `f336b91e` | per Test (`primary-recipe.test.ts:157`) | `:196` jetzt `text-gray-900 dark:text-gray-200` — an der Wurzel korrigiert, nicht im Rescue-Layer nachgefangen. |
 | D-S45 | Composer bricht bei 900px in zwei Zeilen | `ChatInput.tsx:378` | war schon behoben | vor `10bfa0d7` | nur Review | `base/src/components/chat/ChatInput.tsx:400` trägt bereits `flex flex-nowrap` samt Kommentar „It used to be flex-wrap“. |
 | D-S46 | 407px nutzbare Eingabebreite von 900px | `Sidebar`, `ChatInput.tsx:246` | **OFFEN** (teilweise) | `bcec642b` | nicht verifizierbar hier (Messung) | Der Composer-Anteil ist weg (`--lu-measure` statt `max-w-[70%]`), die Sidebar bleibt fix (200px × `zoom:1.25`, `Sidebar.tsx:318-320`). |
-| D-S47 | Kebab-Regel ist nicht erkennbar | `Header.tsx` | **OFFEN** | — | nur Review | `Header.tsx:265-285`: CloudSwitch, DownloadBadge und Theme stehen weiterhin außerhalb der Klappgruppe. |
+| D-S47 | Kebab-Regel ist nicht erkennbar | `Header.tsx` | umgesetzt | `b3f0f786` | per Test | Das Kebab steht jetzt bei dem, was es aufnimmt. Die Regel ist an der Anordnung ablesbar statt nur gedacht: was in der Nav-Gruppe steht, ist ein Ziel und klappt zusammen; was rechts steht, ist ein Zustand und klappt nie — der Test verlangt, dass die rechte Gruppe kein `lg:` trägt. |
 | D-S48 | Settings skaliert nach oben nicht | `SettingsPage.tsx:1297` | **teilweise** | `51732e63` | per Live-Messung | Was jetzt mitskaliert, ist die Navigation. Die **Inhaltsspalte wächst bewusst nicht** mit dem Fenster — die Zeilenlänge war laut Audit richtig. Bei 1440px bleiben 413px Leere rechts, statt 2 × 412 verteilt. |
 | D-S49 | Kein einziger Schriftgrößen-Breakpoint | app-weit | **OFFEN** | — | nur Review | 0 Treffer für `(sm\|md\|lg\|xl\|2xl):text-` in `base/` wie in `head/`. |
 
@@ -317,6 +330,7 @@ Die Wellen sind Fixes, keine eigenen Befunde; sie stehen hier, weil der Auftrag 
 | T-75 | Der Mobile-Client bleibt ein Rust-Rohstring, unsichtbar für `tsc`/`eslint`/`vitest`. `remote.rs` ist dabei von 6.304 auf 7.405 Zeilen gewachsen. | 8 |
 | T-60 | OAuth-Loopback: `state`-Nonce fehlt. Jede offene Seite kann per Top-Level-Navigation eine laufende Anmeldung beenden und den Fehlertext wählen. **Nur serverseitig zu schließen** — die Änderung an Supabases `uri_allow_list` steht dem Eigentümer zu, nicht mir. | 4 |
 | T-76 | Create-Dateislots geben ihre Blob-URLs nie frei. | 2 |
+| KF-1 | Der Beenden-Pfad (`state.rs:462`) erreicht jeden Daemon außer dem Tunnel — **von mir bei der Kontrolle gefunden**, in keinem Audit. Zweite Hälfte von T-39. | 2 |
 | T-72 | *(halb)* Größe und Authenticode sind gepinnt; der SHA-256 der Installer-URL fehlt. Die echte Prüfsumme verlangt einen Windows-Rechner oder einen 211-MiB-Download — **beides habe ich nicht autorisiert.** | 5 |
 
 ### 4.2 Technik-Nachtrag — 2 offene Positionen
@@ -326,23 +340,21 @@ Die Wellen sind Fixes, keine eigenen Befunde; sie stehen hier, weil der Auftrag 
 | ZB-7 | `vite.config.ts` ist **2.486 Zeilen** (Audit maß 2.466, Ziel < 100). Die Guards sind extrahiert und getestet, der Dev-Server steckt weiter in der Build-Konfiguration. |
 | AS-10 | Lint ist weiterhin kein Gate (`ci.yml`: `Lint (non-gating — pre-existing debt)`). Die Schuld dahinter ist stark abgetragen, der Befund — „ein dauerhaft rotes Gate ist kein Gate" — steht. |
 
-### 4.3 Design — 32 offene und 8 halbe Befunde
+### 4.3 Design — 19 offene und 8 halbe Befunde
 
 *Aus der Haupttabelle abgeleitet, Stand dieses Commits. Diese Liste war zweimal veraltet, solange sie von Hand geführt wurde.*
 
-**Amateur-Signale (§3) (3):**
+**Amateur-Signale (§3) (2):**
 
 | ID | Was offen ist | |
 |---|---|---|
 | D-A4 | Der Platzhalter ist heller als der eingegebene Text |  |
-| D-A9 | Die Marke erscheint vier Mal in vier Größen |  |
 | D-A10 | Elf Icons ohne Label als Hauptnavigation von Create |  |
 
-**Token-Zeilen (§5) (10):**
+**Token-Zeilen (§5) (9):**
 
 | ID | Was offen ist | |
 |---|---|---|
-| D-T01 | `html font-size` |  |
 | D-T03 | Schrift Display |  |
 | D-T04 | Type-Scale |  |
 | D-T05 | Akzent |  |
@@ -353,35 +365,24 @@ Die Wellen sind Fixes, keine eigenen Befunde; sie stehen hier, weil der Auftrag 
 | D-T11 | Motion | halb |
 | D-T13 | Platzhalter |  |
 
-**Screen-Bullets (§4) (27):**
+**Screen-Bullets (§4) (16):**
 
 | ID | Was offen ist | |
 |---|---|---|
-| D-S02 | Empty-State ohne Titel und CTA |  |
 | D-S03 | „New Chat“ schwächer als die aktive Zeile |  |
 | D-S04 | Dritter Modus-Tab ohne Label |  |
-| D-S05 | 1237×850px tote Fläche |  |
-| D-S06 | Zwei Kontextanzeigen in zwei Notationen |  |
-| D-S07 | Aktionsleiste nicht hover-gated |  |
-| D-S08 | Zwei Avatar-Systeme |  |
-| D-S11 | `WorkingAnchor` ist im Standbild Fließtext |  |
 | D-S14 | Doppelte Kürzung des Titels |  |
 | D-S15 | Hover-Icons behalten ihren Layoutplatz |  |
 | D-S16 | 698 von 899px Sidebarhöhe leer |  |
 | D-S17 | Vier Control-Höhen auf 250px Breite |  |
-| D-S18 | Drei Bänder vor dem ersten Inhalt |  |
-| D-S19 | Rechts 9 Elemente, Center-Slot leer |  |
-| D-S20 | Overflow-Breakpoint `lg` oder `xl` je nach View |  |
-| D-S21 | Das Overflow-Menü ist kein Menü | halb |
+| D-S18 | Drei Bänder vor dem ersten Inhalt | halb |
 | D-S29 | Zwei gleich aussehende Reset-Textlinks | halb |
 | D-S31 | Banner und Empty-State widersprechen sich |  |
 | D-S32 | QUALITY/ASPECT zentriert über linksbündigem Prompt |  |
 | D-S33 | „Neg“ sieht aus wie ein zweiter Platzhalter |  |
 | D-S34 | Rechte 45px-Leiste mit zwei unbeschrifteten Icons |  |
 | D-S39 | Nackter Punkt statt Icon in Schritt 3 | halb |
-| D-S42 | Hellmodus hat keine Ebenen |  |
 | D-S46 | 407px nutzbare Eingabebreite von 900px | halb |
-| D-S47 | Kebab-Regel ist nicht erkennbar |  |
 | D-S48 | Settings skaliert nach oben nicht | halb |
 | D-S49 | Kein einziger Schriftgrößen-Breakpoint |  |
 
@@ -395,8 +396,10 @@ Die Verteilung ist kein Zufall. Der Technik-Audit ist in beiden schweren Klassen
 
 Ich habe gezielt danach gesucht. Was ich **nicht** gefunden habe: einen Fall, in dem eine Commit-Nachricht einen Befund als behoben meldet, den der Code überhaupt nicht anfasst. Die Nachrichten in diesem Branch sind ungewöhnlich präzise — mehrere benennen von sich aus Abweichungen vom Audit (`3883eaa8`: Blink 300/300 statt 133/133 wegen WCAG 2.3.1), korrigierte Audit-Zahlen (`c77682a2`: 489 statt 462 Buttons, 19 statt 9 Icon-Größen) oder Fundstellen, die schon vorher behoben waren (`f336b91e`: 2 von 6). Was ich gefunden habe, sind **sechs Überschriften, die breiter sind als ihr Rumpf**, und zwei Stellen, an denen die Erzählung hinter dem Code zurückbleibt.
 
-**1. `7de75b95` — „Tunnel überlebt die App nicht mehr“, aber auf macOS/Linux tut er es weiterhin.**
-Der Sweep beim Start schließt die eigentliche Gefahr (stille Republikation der neuen Sitzung). Der Kill beim Beenden hängt an `impl Drop for RemoteServer` (`remote.rs:5275`) — und der Doc-Kommentar direkt darüber sagt es selbst: *„Tauri v2 does not reliably drop managed state on `app.exit(0)`, which is why `AppState` has an explicit shutdown path — but that path lives outside this module and does not reach the tunnel.“* `main.rs:625` ruft bei `RunEvent::Exit` nur `state.shutdown_subprocesses()`, und darin kommt der Tunnel nicht vor (Ollama, Engine, Embeddings, ComfyUI — kein `cloudflared`). Auf Windows fängt das Job-Objekt es ab, auf Unix erst der nächste Start. Der Code ist ehrlich, die Überschrift nicht.
+**1. `7de75b95` — „Tunnel überlebt die App nicht mehr", und der Sweep tat es damals nicht.**
+Zwei Hälften, und beide stimmten damals nicht. Die erste ist seit `c5773322` echt zu: der startseitige Sweep konnte vorher **nie etwas töten**, weil `sysinfo` ohne `.with_cmd()` keine Kommandozeilen liefert und der Matcher damit immer `false` ergab; jetzt baut `process_util::process_table_with_cmdlines()` die Tabelle für alle Aufrufer an einer Stelle, und eine Sonde auf diese eine Zeile färbt drei Tests rot.
+
+Die zweite Hälfte steht **weiterhin offen**, und ich habe sie am HEAD `63294828` selbst nachgemessen: `AppState::shutdown_subprocesses` (`state.rs:462`) ist 115 Zeilen lang und erwähnt `remote`, `RemoteServer`, `tunnel` oder `cloudflared` **kein einziges Mal**. Der Kill beim Beenden hängt damit weiter allein an `impl Drop for RemoteServer` — und die Datei über der Funktion begründet selbst, warum das nicht reicht: Tauri v2 führt `Drop for AppState` nicht zuverlässig aus, genau deshalb existiert der explizite Pfad. Jeder andere Daemon steht dort; der Tunnel nicht. **Das ist ein offener Befund, kein Formulierungsproblem** — er ist als eigene Position vergeben.
 
 **2. `c77682a2` — „Icon-Leiter“ ist die Strichstärken-Korrektur, nicht die Leiter.**
 `src/components/ui/icon-size.ts` definiert `ICON_SM/MD/LG = 12/16/20` und schreibt daneben: *„Umgesetzt wird das NICHT hier und nicht an 668 Call-Sites.“* Am HEAD stehen weiterhin **19 verschiedene `size=`-Werte** zwischen 7 und 36 — exakt so viele wie in `base/`; die häufigsten sind 11 (149×), 10 (117×) und 12 (115×). Geliefert ist `<LucideProvider absoluteStrokeWidth strokeWidth={…}>` an der Wurzel, was die *Strichstärke* vereinheitlicht. Das ist wertvoll und war der schwerere Teil — aber der Audit-Befund „9 Icon-Größen auf einem Screen“ ist offen.
