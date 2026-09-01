@@ -2,8 +2,18 @@ import './index.css'
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { mountFatalError } from './lib/fatal-error'
+import { installMcpShutdown } from './api/mcp/shutdown'
 
 const rootEl = document.getElementById('root')!
+
+// T-53: external MCP servers are child processes this page owns, and nothing
+// took them down when the page went away — a reload orphaned them for the rest
+// of the app's life. Wired here, not in a component effect: the listeners
+// belong to the page, not to a mount, and they must be standing before
+// anything can connect a server. Cheap by construction — `external-client`
+// imports the shell plugin lazily inside connect(), so this adds two listeners
+// and no Tauri runtime to the boot chunk.
+installMcpShutdown()
 
 // Bug D (surfingbird1010): a throw while a persisted store hydrates from corrupt
 // data (D1 corrupt chat-settings / D2 migrate throw / D5 locked IndexedDB) fires

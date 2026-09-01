@@ -108,6 +108,55 @@ const EMPTY_INPUT_SCHEMA: MCPToolDefinition['inputSchema'] = {
   required: [],
 }
 
+/**
+ * Every client that currently owns a live server process (T-53).
+ *
+ * The only other place a connected client was ever held is a `Map` private to
+ * `components/settings/MCPServerSettings.tsx:9`. That map dies with the module
+ * — a webview reload empties it — and nothing outside that component could
+ * ever reach it, so "disconnect everything" was not expressible anywhere in
+ * the app. The set lives HERE, next to the spawn, on purpose: a client that
+ * starts a process registers itself in the same method that starts it, so a
+ * future second caller of `connect()` cannot forget to enrol. That is the
+ * difference between one path and two.
+ *
+ * Membership is exactly "has a child process": added when `connect()` has a
+ * spawned child, removed by `disconnect()`, by the process's own `close`
+ * event, and on a failed handshake.
+ */
+const liveClients = new Set<MCPExternalClient>()
+
+/** How many external MCP server processes this app currently owns. */
+export function liveExternalServerCount(): number {
+  return liveClients.size
+}
+
+/**
+ * Disconnect every connected external MCP server. The ONE cleanup path —
+ * `api/mcp/shutdown.ts` decides when it runs, this decides what it does.
+ *
+ * Resolves to the number of clients it took down. Never rejects: one server
+ * that will not die must not stop the next one, and the caller is usually a
+ * page-unload handler where a rejection is an unhandled one.
+ *
+ * The catch below is a guarantee, not a currently reachable branch —
+ * `disconnect()` swallows its own `kill()` failure ("Process may already be
+ * dead") and today has no other way to throw. It is here so that the contract
+ * survives a future `disconnect()` that does, and no test claims to exercise
+ * it.
+ */
+export async function disconnectAllExternalServers(): Promise<number> {
+  const clients = [...liveClients]
+  await Promise.all(clients.map(async (c) => {
+    try {
+      await c.disconnect()
+    } catch (err) {
+      log.warn('[MCP] a server did not disconnect cleanly', { err: String(err) })
+    }
+  }))
+  return clients.length
+}
+
 export class MCPExternalClient {
   /**
    * The Child that spawn() hands back — owns stdin and kill(). The Command
@@ -188,6 +237,8 @@ export class MCPExternalClient {
           const wasConnected = this.connected
           this.connected = false
           this.child = null
+          // The process is gone: nothing left for a shutdown sweep to kill.
+          liveClients.delete(this)
           this.rejectAllPending('Server process exited')
           // A crash, an OOM kill, a server that quits on a bad config: the
           // tools it registered are dead weight from this moment on, and the
@@ -208,6 +259,11 @@ export class MCPExternalClient {
       }
       if (!this.child) throw spawnError
       this.connected = true
+      // Enrolled the moment a process exists, not once the handshake is
+      // through: a server that spawns and then hangs in `initialize` is
+      // exactly the one a shutdown has to be able to kill. The catch below
+      // removes it again if the handshake fails outright.
+      liveClients.add(this)
 
       // Initialize the MCP connection
       await this.sendRequest('initialize', {
@@ -248,6 +304,7 @@ export class MCPExternalClient {
         try { await this.child.kill() } catch { /* already gone */ }
         this.child = null
       }
+      liveClients.delete(this)
       throw new Error(`Failed to connect to MCP server "${this.config.name}": ${err instanceof Error ? err.message : String(err)}`)
     }
   }
@@ -275,6 +332,9 @@ export class MCPExternalClient {
   async disconnect() {
     this.closingOnPurpose = true
     this.connected = false
+    // Out of the shutdown sweep first: a disconnect that is itself running
+    // inside the sweep must not be reachable a second time.
+    liveClients.delete(this)
     this.rejectAllPending('Disconnecting')
     if (this.child) {
       try {

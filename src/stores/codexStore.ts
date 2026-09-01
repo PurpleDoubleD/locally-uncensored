@@ -84,6 +84,13 @@ interface CodexState {
   initThread: (conversationId: string, workingDir: string) => string
   addEvent: (conversationId: string, event: CodexEvent) => void
   setThreadStatus: (conversationId: string, status: CodexThread['status']) => void
+  /**
+   * Everything this store holds under one conversation id, dropped in one
+   * `set()`. Called by `chatStore.dropConversationSideState` when the chat is
+   * deleted — see the comment on the implementation for why all FIVE maps go
+   * and not just `threads`.
+   */
+  dropConversation: (conversationId: string) => void
 }
 
 /** Drop one key from a record without leaving an undefined hole behind. */
@@ -212,6 +219,39 @@ export const useCodexStore = create<CodexState>()(
             },
           }
         }),
+
+      /**
+       * The chat is gone; so is everything this store filed under its id.
+       *
+       * FIVE maps, not one. `threads` is the expensive one — a thread carries
+       * an event ring of up to CODEX_EVENT_LOG_MAX entries, and each entry is
+       * either an UNTRUNCATED terminal result (the 60k cap in useCodex applies
+       * to what goes back to the model, not to what is stored here) or a full
+       * unified diff. That is tens of megabytes held for a chat that no longer
+       * exists, and no id left to prove it is an orphan.
+       *
+       * The other four maps are small, and one of them is the reason this is
+       * not merely bookkeeping: `modeByConversation` is the ONE part of the
+       * mode slice that is persisted (see `partialize` below), so a deleted
+       * chat's Ask/Bypass/Plan pick used to survive every restart from then on.
+       * That is the difference between leaking until the next start and leaking
+       * for good. `threads` has its own second cost: its status keeps voting in
+       * `lib/run-idle.ts` for as long as the entry exists, so a chat deleted
+       * mid-run could leave a thread at 'running' and defer every idle-gated
+       * dialog for the rest of the session.
+       *
+       * One `set()` so a subscriber can never observe the conversation half
+       * removed, and `omit` returns the same object when the key is absent, so
+       * deleting a chat that never touched the Coding Agent is free.
+       */
+      dropConversation: (conversationId) =>
+        set((state) => ({
+          threads: omit(state.threads, conversationId),
+          modeByConversation: omit(state.modeByConversation, conversationId),
+          parkedModeByConversation: omit(state.parkedModeByConversation, conversationId),
+          prePlanModeByConversation: omit(state.prePlanModeByConversation, conversationId),
+          planApprovalByConversation: omit(state.planApprovalByConversation, conversationId),
+        })),
     }),
     {
       // Persist key kept as 'locally-uncensored-codex' for storage

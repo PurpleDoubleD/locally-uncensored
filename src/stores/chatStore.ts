@@ -12,6 +12,7 @@ import { useRAGStore } from './ragStore'
 import { useTodoStore } from './todoStore'
 import { usePermissionStore } from './permissionStore'
 import { useStagedChangesStore } from './stagedChangesStore'
+import { useCodexStore } from './codexStore'
 import { log } from '../lib/logger'
 import { isRecord, prop } from '../types/json-guards'
 
@@ -47,9 +48,27 @@ export function migratePersistedChat(state: unknown): unknown {
  * Deleting a chat used to remove exactly one row — the one in `conversations` —
  * and leave five other stores holding that id forever. Nothing ever collects
  * them, because the id is the only thing that could prove they are orphans and
- * the id is what was just thrown away. The RAG side is the expensive one: its
- * 768-float embedding vectors stay in IndexedDB AND keep being exported to
- * rag_chunks_backup.json every 30 s for the lifetime of the installation.
+ * the id is what was just thrown away.
+ *
+ * Two of the five are expensive, for different reasons:
+ *
+ *  - RAG: its 768-float embedding vectors stay in IndexedDB AND keep being
+ *    exported to rag_chunks_backup.json every 30 s for the lifetime of the
+ *    installation.
+ *  - codex: a Coding-Agent thread carries an event ring of up to 500 entries,
+ *    and each entry is either an UNTRUNCATED terminal result (the 60k cap in
+ *    useCodex applies to what goes back to the model, not to what is stored)
+ *    or a full unified diff — tens of megabytes for a chat that is gone. Its
+ *    status also keeps voting in `lib/run-idle.ts`, so a chat deleted mid-run
+ *    could leave a thread stuck at 'running' and defer every idle-gated dialog
+ *    for the rest of the session. And `codexStore.modeByConversation` is
+ *    PERSISTED, which is the difference between leaking until the next restart
+ *    and leaking for good.
+ *
+ * The list below ran with FOUR entries while this comment said five (and the
+ * one below it said "the other four") — codex was the missing step, and the
+ * mismatch between the two numbers was the only sign of it. Number and list
+ * are now the same thing; keep them that way.
  *
  * Each store is its own try/catch: one of them failing must not leave the other
  * four uncleaned, and none of them may stop the chat from being deleted.
@@ -62,6 +81,7 @@ export function dropConversationSideState(id: string): void {
     ['todos', () => useTodoStore.getState().clearTodos(id)],
     ['permissions', () => usePermissionStore.getState().clearConversationOverrides(id)],
     ['staged-changes', () => useStagedChangesStore.getState().clear(id)],
+    ['codex', () => useCodexStore.getState().dropConversation(id)],
   ]
   for (const [what, run] of steps) {
     try { run() } catch (err) {
