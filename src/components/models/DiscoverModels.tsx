@@ -17,6 +17,7 @@ import { getMaxVramGb, getTotalRamGb, bundleVramNeedGb } from '../../lib/hardwar
 import { openExternal } from '../../api/backend'
 import { useModels } from '../../hooks/useModels'
 import { useDownloadStore } from '../../stores/downloadStore'
+import { CivitaiResultsSkeleton, ModelGridSkeleton } from '../layout/ViewSkeletons'
 import { useProviderStore } from '../../stores/providerStore'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { useModelStore } from '../../stores/modelStore'
@@ -861,7 +862,9 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
             </div>
           )}
 
-          {civitaiSearching && <div className="text-center py-4 text-gray-500 text-sm">Searching CivitAI...</div>}
+          {/* Listen-Ladezustand 2 von 4 — dieselbe Begruendung eine Karte
+              weiter oben, nur mit der Zeilengeometrie der Trefferliste. */}
+          {civitaiSearching && <CivitaiResultsSkeleton />}
           {!civitaiSearching && civitaiSearched && civitaiResults.length === 0 && (
             <div className="text-center py-4 text-[11px] text-gray-500 leading-relaxed">
               No matches for "{civitaiQuery}". Try a broader query, or add your CivitAI API key
@@ -871,8 +874,12 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
         </GlassCard>
       )}
 
+      {/* Welle 3, Listen-Ladezustand 1 von 4: „Loading models..." war ein
+          Satz mittig auf 32px Hoehe, wo gleich sechs bis dreiundfuenfzig
+          Kacheln stehen — die Seite sprang beim Eintreffen der Liste um
+          mehrere Bildschirmhoehen. Das Skelett traegt die Rastergeometrie. */}
       {loading ? (
-        <div className="text-center py-8 text-gray-500">Loading models...</div>
+        <ModelGridSkeleton />
       ) : isText ? (
         <>
           {/* Start here — derived picks for the active tab */}

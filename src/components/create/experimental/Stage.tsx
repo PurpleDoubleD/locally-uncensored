@@ -6,6 +6,7 @@ import { useCreateExp } from './CreateContext'
 import { INTENT_MAP } from './intents'
 import { GeneratingView, ResultView } from './OutputView'
 import { EmptyState } from '../ui/EmptyState'
+import { ICON_STROKE_MARK } from '../../ui/icon-size'
 import { Button } from '../ui/Button'
 import { cn } from '../ui/cn'
 import { loadImageRef } from './loadImage'
@@ -251,8 +252,8 @@ function InputSlot() {
         >
           {loading ? <Loader2 className="animate-spin text-lu-accent" size={30} /> : (
             meta.id === 'removebg'
-              ? <Scissors className="text-lu-accent drop-shadow-[0_0_7px_var(--color-lu-accent-ring)]" size={30} strokeWidth={1.5} />
-              : <UploadCloud className="text-lu-accent drop-shadow-[0_0_7px_var(--color-lu-accent-ring)]" size={30} strokeWidth={1.5} />
+              ? <Scissors className="text-lu-accent drop-shadow-[0_0_7px_var(--color-lu-accent-ring)]" size={30} strokeWidth={ICON_STROKE_MARK} />
+              : <UploadCloud className="text-lu-accent drop-shadow-[0_0_7px_var(--color-lu-accent-ring)]" size={30} strokeWidth={ICON_STROKE_MARK} />
           )}
           <div className="text-center">
             <div className="t-title text-gray-300">{meta.id === 'removebg' ? 'Drop an image to cut out' : meta.id === 'animate' ? 'Drop an image to animate' : 'Drop an image to edit'}</div>

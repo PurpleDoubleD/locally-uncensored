@@ -18,6 +18,7 @@ import { lmStudioSlotUpdate, adoptionReplacesBuiltinEngine } from '../../lib/lms
 import { nextProbeDelayMs } from '../../lib/probe-backoff'
 import { noChatBackendEnabled } from '../../lib/provider-visibility'
 import { cloudTeaserModels } from '../../lib/cloud-teaser-models'
+import { ModelPickerSkeleton } from '../layout/ViewSkeletons'
 import type { AIModel } from '../../types/models'
 
 // ── Local-mode cloud discovery (2.5.8): an "LU Cloud" section at the list's
@@ -505,6 +506,15 @@ export interface ModelSelectorProps {
 export function ModelSelector({ openUpward = false, surface = 'chat' }: ModelSelectorProps = {}) {
   const { models, activeModel, setActiveModel, fetchModels } = useModels()
   const isModelLoading = useModelStore((s) => s.isModelLoading)
+  // Welle 3, Listen-Ladezustand 3 von 4 — und der einzige, den es vorher gar
+  // nicht gab. `inventoryLoaded` ist die Frage „ist ueberhaupt schon einmal
+  // eine Modellliste hier gelandet"; sie steht seit dem Zaehler-Nachschlag
+  // (2026-08-29) im Store, aus genau demselben Grund: bis dahin darf man
+  // keine Zahl und keine Leermeldung zeigen, sondern nur eine Ladeanzeige.
+  // Ohne sie ging der Waehler direkt von leer auf Liste — und „leer" rendert
+  // hier als „No models available", also als Aussage ueber die Maschine
+  // statt ueber den Ladezustand.
+  const inventoryLoaded = useModelStore((s) => s.inventoryLoaded)
   // G20: useModels hides every local model while the app is in Cloud mode.
   // Deliberate, but the picker never SAID so, and the silence reads as "my
   // local models are gone" (it cost a whole repro round on 2026-08-07).
@@ -884,7 +894,8 @@ export function ModelSelector({ openUpward = false, surface = 'chat' }: ModelSel
 
             {/* Scrollable model list */}
             <div className="py-1 max-h-[280px] overflow-y-auto scrollbar-thin">
-              {textModels.length === 0 && (
+              {!inventoryLoaded && textModels.length === 0 && <ModelPickerSkeleton />}
+              {inventoryLoaded && textModels.length === 0 && (
                 <div className="px-2.5 py-3 text-center">
                   <p className="text-[0.65rem] text-gray-600">No models available</p>
                   {/* An empty picker after the user switched the last backend

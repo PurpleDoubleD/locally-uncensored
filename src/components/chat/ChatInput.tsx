@@ -1,5 +1,4 @@
 import { useState, useRef, useEffect, useCallback, type ReactNode } from 'react'
-import { motion } from 'framer-motion'
 import { Send, Square, Paperclip, X, Brain, Terminal } from 'lucide-react'
 import { matchAgentCommands, type AgentCommand } from '../../lib/agent-commands'
 import { VoiceButton } from './VoiceButton'
@@ -510,9 +509,14 @@ export function ChatInput({ onSend, onStop, isGenerating, pendingApproval, onApp
               in place while a run is in flight, exactly as the Chat surface has
               always done, and because the box is sized rather than padded the
               row height cannot move between the two states. */}
+          {/* Send und Stop hatten hier je ein `whileTap` aus framer-motion —
+              zwei von den sechs, die der Audit als „6 von 462" zaehlt. Der
+              Druck steht jetzt als eine Regel in index.css und laeuft ueber
+              die `transition` von `.lu-control` weich aus; die beiden
+              Knoepfe brauchen framer-motion dafuer nicht mehr. */}
           <div className="shrink-0 w-[26px] h-[26px]" data-testid="composer-send-slot">
             {isGenerating ? (
-              <motion.button
+              <button
                 onClick={onStop}
                 // Neutral, nicht rot: Stop ist der Normalabschluss und die
                 // haeufigste Aktion waehrend eines Streams. `data-active`
@@ -520,21 +524,19 @@ export function ChatInput({ onSend, onStop, isGenerating, pendingApproval, onApp
                 // auffindbar bleibt, ohne die Fehlerfarbe zu tragen.
                 data-active="true"
                 className="lu-control lu-control--icon w-full h-full"
-                whileTap={{ scale: 0.9 }}
                 aria-label="Stop generation"
               >
                 <Square size={13} />
-              </motion.button>
+              </button>
             ) : (
-              <motion.button
+              <button
                 onClick={handleSend}
                 disabled={(!input.trim() && images.length === 0) || isTranscribing}
                 className="lu-control lu-control--icon lu-primary w-full h-full"
-                whileTap={{ scale: 0.9 }}
                 aria-label="Send message"
               >
                 <Send size={13} />
-              </motion.button>
+              </button>
             )}
           </div>
         </div>

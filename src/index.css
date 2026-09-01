@@ -337,16 +337,118 @@ input[type="range"]::-webkit-slider-thumb {
   background-repeat: repeat-y;
 }
 
-/* Refined focus ring — thin, neutral blue (web companion), replaces the
-   browser default. Limited to clickable elements; inputs/textareas get their
-   focus affordance from their own border-color change (adding an outline
-   there reads as a doubled "Windows accent ring"). */
-:is(button, a):focus-visible {
-  outline: 1px solid rgba(96, 165, 250, 0.6);
-  outline-offset: 1px;
+/* ─────────────────────────────────────────────────────────────────────
+   DER Fokusring. Eine Regel, 2px, Akzentfarbe, auf allem, was Fokus
+   bekommen kann — Eingabefelder ausdruecklich eingeschlossen.
+
+   Vorher standen hier drei Aussagen nebeneinander, und alle drei waren
+   falsch (Audit §5, Token-Diff „Fokusring"):
+     • `1px solid rgba(96,165,250,.6)` — zu duenn fuer WCAG 2.2 SC 2.4.13
+       (mindestens 2 CSS-Pixel Staerke) und in einer Fremdfarbe, die die
+       App sonst nur als Think-Pill kennt.
+     • nur `button, a` — role-basierte Controls (Create, Workflows) blieben
+       aussen vor und mussten `.lu-focus-ring` von Hand dazuschreiben.
+     • `:is(input, textarea, select) { outline: none }` — der Fokus im
+       Eingabefeld haing allein an einer Randfarbe, die 67 Call-Sites mit
+       `focus:outline-none` ohnehin selbst gesetzt haben.
+
+   Gerechnet (WCAG 2.1, 1.4.11 verlangt 3:1 gegen die UMGEBUNG; der Ring
+   liegt wegen `outline-offset: 2px` auf der Flaeche HINTER dem Control,
+   also gegen diese gerechnet). Vorher → nachher, Flaeche fuer Flaeche:
+
+     Flaeche                        alt(1px,#60a5fa/.6)   neu
+     dunkel #1e1e1e  App-Grund            3.22:1        6.42:1  (#a094f8)
+     dunkel #141414  Fenster/Titlebar     3.36:1        7.09:1
+     dunkel #252525  Composer-Leiste      3.08:1        5.90:1
+     dunkel #262626  Panel                3.05:1        5.83:1
+     dunkel #2d2d2d  Karte/Hover          2.90:1  ✗     5.30:1
+     dunkel #363636  Overlay/Dropdown     2.68:1  ✗     4.65:1
+     hell   #ffffff  Blatt/Overlay        1.71:1  ✗     3.37:1  (#8b7cf0)
+     hell   #f9fafb  Composer-Leiste      1.68:1  ✗     3.22:1
+     hell   #f3f4f6  Fenstergrund         1.63:1  ✗     3.06:1
+
+   Der ALTE Ring fiel im gesamten Hellmodus durch (1.63–1.71:1) und auf den
+   beiden obersten dunklen Flaechen ebenfalls. Das war kein Schoenheits-,
+   sondern ein Barrierefreiheitsfehler.
+
+   Warum im Hellmodus die KANTE und nicht der Akzent: die Akzentflaeche
+   selbst steht gegen Weiss nur 2.60:1 (gegen den Fenstergrund #f3f4f6 sogar
+   2.36:1) und faellt damit durch 1.4.11. `--color-lu-accent-edge` ist genau
+   dafuer da und schafft 3.06–3.37:1. Dieselbe Aufteilung wie beim
+   Primaer-Rezept und beim Aufnahme-Puls: Akzent im Dunkeln, Kante im Hellen.
+
+   Warum `:not(.lu-primary)`: DAS ist die Spezifitaetsfalle dieses Hauses.
+   `.light :focus-visible:not([tabindex='-1'])` waere 0,3,0 und wuerde
+   `.lu-primary:focus-visible` (0,2,0) schlagen — der Senden-Knopf haette
+   im Hellmodus still seinen invertierten Ring verloren. Der Akzentring auf
+   der Akzentflaeche kommt auf 1.00:1, deshalb traegt `.lu-primary` unten
+   den umgekehrten Ring (17.74:1 hell / 16.67:1 dunkel). Die Ausnahme steht
+   deshalb AN der Regel, nicht als Gegengewicht mit mehr Spezifitaet.
+
+   Warum `:not([tabindex='-1'])`: der Dialog-Rahmen (`ui/Modal.tsx`) ist
+   `tabIndex={-1}` und bekommt beim Oeffnen programmatisch Fokus. Chromium
+   laesst `:focus-visible` dort greifen, sobald zuvor die Tastatur im Spiel
+   war — ohne diese Klammer bekaeme der ganze Dialog einen Akzentrahmen.
+   Programmatischer Fokus ist kein Tastaturfokus; genau das steht hier.
+
+   Die Regel ist UNGESCHICHTET und schlaegt damit jede Tailwind-Utility
+   (`@layer utilities`) unabhaengig von der Spezifitaet — auch die 67
+   `outline-none`-Fundstellen, die den Ring bisher einzeln abgeschaltet
+   haben. Deshalb muss keine davon angefasst werden.
+   ───────────────────────────────────────────────────────────────────── */
+:focus-visible:not([tabindex='-1']):not(.lu-primary) {
+  outline: 2px solid var(--color-lu-accent);
+  outline-offset: 2px;
 }
-:is(input, textarea, select):focus-visible {
-  outline: none;
+.light :focus-visible:not([tabindex='-1']):not(.lu-primary) {
+  outline-color: var(--color-lu-accent-edge);
+}
+
+/* ─────────────────────────────────────────────────────────────────────
+   Press-Feedback — EINE Regel statt 489 Call-Sites.
+
+   Der Audit zaehlt „6 von 462 Buttons haben Press-Feedback". Nachgezaehlt
+   am Stand 3883eaa8: 489 Knoepfe (481 `<button>` + 8 `<motion.button>`),
+   davon 6 mit `whileTap` aus framer-motion und 0 mit `active:scale`. Ein
+   Knopf ohne Press-Zustand fuehlt sich an, als haette der Klick nicht
+   stattgefunden — das ist die haeufigste Rueckmeldung der App und sie fehlt
+   an 483 Stellen.
+
+   Warum hier und nicht an den Call-Sites: `active:scale-[0.97]` an 483
+   className-Strings ist dieselbe Krankheit, die der Audit diagnostiziert
+   (378 verschiedene Button-Klassen bei 462 Knoepfen). Eine ungeschichtete
+   Regel sagt dasselbe einmal.
+
+   Warum `scale:` und nicht `transform:` — Tailwind v4 benutzt die
+   Einzel-Properties (`scale-[1.04]` baut `scale:1.04`, nicht `transform`).
+   Ein `transform` hier wuerde `translate-*`/`rotate-*` an derselben
+   Stelle ueberschreiben; `scale` komponiert daneben.
+
+   Warum KEIN Uebergang an dieser Regel: `transition-property` ist EINE
+   Liste, kein additives Feld. Eine globale Regel, die `scale` ergaenzt,
+   muesste die Liste ersetzen — und damit die bewusst gesetzten
+   `transition-colors` / `transition-all` / `duration-*` an allen 489
+   Call-Sites gleich mit. Der Druck folgt dem Finger deshalb ohne Verzoegerung
+   (genau das tut `active:scale-[0.97]` an den 55 Stellen mit
+   `transition-colors` auch, denn die Liste dort kennt `scale` nicht).
+   Wo ein Rezept seine eigene `transition` BESITZT — `.lu-control` weiter
+   unten —, steht `scale` in dieser Liste und der Druck laeuft weich aus.
+   Das ist der Unterschied zwischen einer Regel, die fremde Entscheidungen
+   respektieren muss, und einem Rezept, dem die Entscheidung gehoert.
+
+   `:disabled` und `aria-disabled` sind ausgenommen: ein Knopf, der nicht
+   reagiert, darf auch nicht so tun.
+
+   Und „Bewegung reduzieren" schaltet den Druck NICHT ab. Die Regel weiter
+   unten haelt an, was Dauerbewegung ist (Shimmer, pulsierende Punkte), und
+   laesst stehen, was Rueckmeldung ist (Ladekringel, Skelett-Puls). Drei
+   Prozent auf der Stelle, nur solange der Finger unten ist, sind
+   vestibulaer nichts — abgeschaltet waere der Knopf wieder der, der sich
+   anfuehlt, als haette der Klick nicht stattgefunden, und genau fuer die
+   Gruppe, die am wenigsten davon hat.
+   ───────────────────────────────────────────────────────────────────── */
+:is(button, [role='button']):not(:disabled):not([aria-disabled='true']):active {
+  scale: 0.97;
 }
 
 /* Status readouts (token counters, version strings, t/s, VRAM) in mono
@@ -460,13 +562,13 @@ input[type="range"]::-webkit-slider-thumb {
 .t-label   { font-size: var(--text-label);   line-height: var(--text-label-lh);   font-weight: var(--text-label-fw); letter-spacing: 0.08em; text-transform: uppercase; }
 .t-mono    { font-size: var(--text-mono); font-variant-numeric: tabular-nums; font-family: ui-monospace, 'JetBrains Mono', 'SF Mono', Menlo, monospace; }
 
-/* Focus affordance for Create controls that opt in via `.lu-focus-ring`
-   (buttons/anchors already get the global ring above; this also covers
-   div/role-based controls). Matches the global focus outline exactly. */
-.lu-focus-ring:focus-visible {
-  outline: 1px solid rgba(96, 165, 250, 0.6);
-  outline-offset: 1px;
-}
+/* `.lu-focus-ring` stand hier und ist ersatzlos gestrichen (Audit §5:
+   „9 redundante Nutzungen"). Sie war die Kopie der globalen Regel fuer
+   Controls, die keine `<button>`/`<a>` sind — seit der Fokusring oben an
+   `:focus-visible` haengt statt an einer Elementliste, deckt er genau diese
+   Faelle mit ab. Eine Klasse, die nichts hinzufuegt, ist eine Klasse, die
+   irgendwann auseinanderlaeuft: die alte Kopie hier trug noch den 1px-Ring,
+   als der globale schon 2px gehabt haette. */
 
 /* ──────────────────────────────────────────────────────────────────
    .lu-control — DAS neutrale Control-Rezept der Composer-Leiste.
@@ -538,10 +640,16 @@ input[type="range"]::-webkit-slider-thumb {
   font-weight: 500;
   line-height: 1;
   white-space: nowrap;
+  /* `scale` steht hier, weil dieses Rezept seine `transition` BESITZT — die
+     globale Press-Regel weiter oben darf die Liste an 489 fremden
+     Call-Sites nicht ersetzen, hier gibt es keine fremde Liste. Ergebnis:
+     der Druck in der Prompt-Zeile laeuft weich aus statt zurueckzuspringen.
+     Dieselben 120 ms wie Hover und Farbe, keine fuenfte Dauer. */
   transition:
     background-color var(--motion-fast) var(--motion-ease),
     border-color var(--motion-fast) var(--motion-ease),
-    color var(--motion-fast) var(--motion-ease);
+    color var(--motion-fast) var(--motion-ease),
+    scale var(--motion-fast) var(--motion-ease);
 }
 /* Ueberall dort, wo die neutrale HAUT gesetzt wird, steht `:not(.lu-primary)`.
    Grund: Send traegt beide Klassen (`.lu-control .lu-control--icon
@@ -638,10 +746,13 @@ input[type="range"]::-webkit-slider-thumb {
   border-color: var(--color-lu-accent-ring);
 }
 
-.lu-control:focus-visible {
-  outline: 2px solid var(--color-lu-accent-ring);
-  outline-offset: 2px;
-}
+/* Der eigene Fokusring dieses Rezepts ist gestrichen. Er trug
+   `--color-lu-accent-ring`, also den halbdurchsichtigen Akzent bei 55 %,
+   und der kommt ueber der Composer-Leiste auf 2.78:1 (dunkel) und 1.60:1
+   (hell) — beides unter den 3:1 aus WCAG 1.4.11. Dieselbe Rechnung, aus der
+   weiter oben der Aufnahme-Puls die VOLLE Kante bekommen hat, gilt hier:
+   das Rezept nimmt jetzt den Ring des Hauses (6.42:1 / 3.37:1) statt einen
+   eigenen, schwaecheren. Ohne Regel greift die globale von oben. */
 
 /* Deaktiviert heisst gedimmt, nicht defekt: Paperclip und Mikrofon standen
    auf `opacity-20` und lasen sich als kaputt (Audit §4, Chat streamend). */
@@ -666,7 +777,12 @@ input[type="range"]::-webkit-slider-thumb {
    ihr eigenes `disabled:opacity-*` mit, das sich damit addiert.
    Fokus: 2px Ring mit 2px Abstand, damit er auf dem HINTERGRUND liegt und
    nicht auf der Akzentflaeche — dunkel im Hellmodus, weiss im Dunkelmodus.
-   Er ueberschreibt den globalen 1px-Ring (Spezifitaet 0,2,0 vs 0,1,1).
+   Das ist die EINE dokumentierte Ausnahme vom Hausring: der Akzentring auf
+   der Akzentflaeche kaeme auf 1.00:1. Die Ausnahme wird nicht durch mehr
+   Spezifitaet erkaempft, sondern steht als `:not(.lu-primary)` an der
+   Hausregel selbst (siehe dort) — sonst haette der Hellmodus-Zweig mit
+   0,3,0 diese Regel mit 0,2,0 still geschlagen.
+   Gemessen: #111827 auf Weiss = 17.74:1, Weiss auf #1e1e1e = 16.67:1.
    ───────────────────────────────────────────────────────────────── */
 .lu-primary {
   background-color: var(--color-lu-accent);

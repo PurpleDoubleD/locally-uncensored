@@ -47,6 +47,7 @@ import { useAgentModeStore } from '../../stores/agentModeStore'
 import { FEATURE_FLAGS } from '../../lib/constants'
 import { MemorySettings } from './MemorySettings'
 import { ChatBackupSettings } from './ChatBackupSettings'
+import { ImportScanSkeleton } from '../layout/ViewSkeletons'
 import { RemoteAccessSettings } from './RemoteAccessSettings'
 import { RemoteAccessDocs } from './RemoteAccessDocs'
 import { HardwareSettings } from './HardwareSettings'
@@ -367,7 +368,12 @@ function ImportLocalModels() {
         {scanning ? 'Scanning…' : 'Scan for local models'}
       </button>
       {errors.scan && <div className="text-[0.6rem] text-red-400">{errors.scan}</div>}
-      {candidates !== null && !errors.scan && (
+      {/* Welle 3, Listen-Ladezustand 4 von 4: waehrend des Scans stand hier
+          nichts — der Knopf sagte „Scanning…" und darunter blieb es leer, bis
+          die Liste da war und den Rest der Sektion nach unten schob. Das
+          Skelett haelt den Platz, den die Kandidatenzeilen einnehmen. */}
+      {scanning && <ImportScanSkeleton />}
+      {candidates !== null && !errors.scan && !scanning && (
         candidates.length === 0 ? (
           <div className="text-[0.6rem] text-gray-500">No importable models found. Looked in the Ollama store and the LM Studio models folder.</div>
         ) : (

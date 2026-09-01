@@ -4,6 +4,7 @@ import { useUIStore, type CloudTeaserTarget } from '../../../stores/uiStore'
 import { isIntentLocked, visibleIntents } from './intents'
 import { isMlxImageHost } from '../../../api/mlx-image'
 import { cn } from '../ui/cn'
+import { ICON_MD } from '../../ui/icon-size'
 
 // Pure-CSS expand: no Framer layout projection anywhere, so nothing can snap or
 // jitter on settle. The label opens via a `max-width` transition (collapses
@@ -58,7 +59,7 @@ export function IntentBar() {
                 : setIntent(meta.id)
             }
             className={cn(
-              'relative flex items-center h-9 rounded-full border lu-focus-ring transition-[background-color,border-color,box-shadow,color] duration-200',
+              'relative flex items-center h-9 rounded-full border transition-[background-color,border-color,box-shadow,color] duration-200',
               EASE,
               selected
                 ? 'bg-white/[0.11] border-white/20 shadow-sm text-white'
@@ -68,7 +69,7 @@ export function IntentBar() {
             )}
           >
             <span className="grid place-items-center w-9 h-9 shrink-0">
-              <Icon size={16} strokeWidth={selected ? 2 : 1.75} />
+              <Icon size={ICON_MD} />
             </span>
             {locked && (
               // Brighter, theme-aware cloud tag: violet-300/80 was near
@@ -76,7 +77,6 @@ export function IntentBar() {
               <Cloud
                 size={11}
                 className="absolute top-0.5 right-0.5 text-violet-500 dark:text-violet-200"
-                strokeWidth={2.4}
                 aria-hidden
               />
             )}

@@ -239,7 +239,7 @@ export function Select({
           aria-expanded={open}
           className={cn(
             't-control inline-flex w-full items-center justify-between gap-2 px-2.5',
-            'rounded-[var(--radius-control)] transition-colors lu-focus-ring',
+            'rounded-[var(--radius-control)] transition-colors',
             'bg-white/[0.04] border border-white/[0.08]',
             'hover:border-white/15 text-gray-200',
             controlHeight,

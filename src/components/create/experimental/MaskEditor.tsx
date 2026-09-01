@@ -326,7 +326,7 @@ function ToolBtn({ active, icon: Icon, label, onClick }: { active: boolean; icon
       title={label}
       aria-label={label}
       aria-pressed={active}
-      className={cn('h-[var(--control-h-md)] aspect-square inline-flex items-center justify-center rounded-[6px] transition-colors lu-focus-ring', active ? 'bg-white/[0.16] text-white border border-white/30 shadow-sm' : 'text-gray-500 hover:text-gray-200 hover:bg-white/[0.04]')}
+      className={cn('h-[var(--control-h-md)] aspect-square inline-flex items-center justify-center rounded-[6px] transition-colors', active ? 'bg-white/[0.16] text-white border border-white/30 shadow-sm' : 'text-gray-500 hover:text-gray-200 hover:bg-white/[0.04]')}
     >
       <Icon size={15} />
     </button>

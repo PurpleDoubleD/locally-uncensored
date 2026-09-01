@@ -6,6 +6,7 @@ import { useSettingsStore } from '../../stores/settingsStore'
 import { useProviderStore } from '../../stores/providerStore'
 import { ONBOARDING_MODELS, ONBOARDING_EMBED_MODEL } from '../../lib/constants'
 import { PROVIDER_PRESETS } from '../../api/providers/types'
+import { ICON_SM } from '../ui/icon-size'
 import { detectLocalBackends, type DetectedBackend } from '../../lib/backend-detector'
 import { detectProviderModelPath, startModelDownloadToPath } from '../../api/discover'
 import { useDownloadStore } from '../../stores/downloadStore'
@@ -813,9 +814,9 @@ export function Onboarding() {
       {/* Drag region + window controls */}
       {isTauri && (
         <div data-tauri-drag-region className="fixed top-0 left-0 right-0 h-8 z-50 flex items-center justify-end select-none">
-          <button onClick={handleMinimize} className={winBtn} aria-label="Minimize"><Minus size={14} strokeWidth={1.5} /></button>
-          <button onClick={handleMaximize} className={winBtn} aria-label="Maximize"><Square size={11} strokeWidth={1.5} /></button>
-          <button onClick={handleClose} className={`${winBtn} hover:bg-red-500 hover:text-white`} aria-label="Close"><XIcon size={14} strokeWidth={1.5} /></button>
+          <button onClick={handleMinimize} className={winBtn} aria-label="Minimize"><Minus size={ICON_SM} /></button>
+          <button onClick={handleMaximize} className={winBtn} aria-label="Maximize"><Square size={ICON_SM} /></button>
+          <button onClick={handleClose} className={`${winBtn} hover:bg-red-500 hover:text-white`} aria-label="Close"><XIcon size={ICON_SM} /></button>
         </div>
       )}
 

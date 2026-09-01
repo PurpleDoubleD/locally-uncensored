@@ -2,6 +2,7 @@
 import { motion } from 'framer-motion'
 import type { LucideIcon } from 'lucide-react'
 import { Button } from './Button'
+import { ICON_STROKE_MARK } from '../../ui/icon-size'
 
 interface Action {
   label: string
@@ -46,7 +47,7 @@ export function EmptyState({ icon: Icon, logoSrc, title, description, action, se
               animate={{ opacity: [0.28, tone === 'accent' ? 0.6 : 0.42, 0.28], scale: [0.9, 1.06, 0.9] }}
               transition={{ duration: 3.2, repeat: Infinity, ease: 'easeInOut' }}
             />
-            <Icon size={36} strokeWidth={1.5} className="relative text-lu-accent drop-shadow-[0_0_8px_var(--color-lu-accent-ring)]" />
+            <Icon size={36} strokeWidth={ICON_STROKE_MARK} className="relative text-lu-accent drop-shadow-[0_0_8px_var(--color-lu-accent-ring)]" />
           </div>
         )}
         <div className="space-y-1.5">

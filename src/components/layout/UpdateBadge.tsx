@@ -4,6 +4,7 @@ import { ArrowUpCircle, Download, RefreshCw, RotateCcw, X, Loader2 } from 'lucid
 import { useUpdateStore, initUpdateChecker } from '../../stores/updateStore'
 import { formatBytes } from '../../lib/formatters'
 import { isTauri } from '../../api/backend'
+import { ICON_LG } from '../ui/icon-size'
 
 export function UpdateBadge() {
   const {
@@ -81,9 +82,9 @@ export function UpdateBadge() {
       >
         <span className="relative">
           {isDownloading || isInstalling ? (
-            <Loader2 size={20} strokeWidth={1.8} className="animate-spin" />
+            <Loader2 size={ICON_LG} className="animate-spin" />
           ) : (
-            <ArrowUpCircle size={20} strokeWidth={1.8} />
+            <ArrowUpCircle size={ICON_LG} />
           )}
           {/* Status dot */}
           <span className={`absolute top-0 right-0 w-2.5 h-2.5 rounded-full ${

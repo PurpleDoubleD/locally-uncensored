@@ -193,7 +193,7 @@ function WorkflowsModalInner() {
         <div className="px-5 pt-4 pb-3 border-b border-gray-200 dark:border-white/[0.06]">
           <button
             onClick={() => setHelpOpen(false)}
-            className="flex items-center gap-2 text-gray-400 hover:text-gray-200 transition-colors lu-focus-ring rounded-md"
+            className="flex items-center gap-2 text-gray-400 hover:text-gray-200 transition-colors rounded-md"
           >
             <ArrowLeft size={14} />
             <span className="t-title text-gray-900 dark:text-gray-200">How it works</span>

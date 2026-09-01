@@ -1,5 +1,4 @@
 import { useEffect, useRef } from "react"
-import { motion } from "framer-motion"
 import { Mic, MicOff, Loader2 } from "lucide-react"
 import { useVoice } from "../../hooks/useVoice"
 import { useVoiceStore } from "../../stores/voiceStore"
@@ -141,20 +140,20 @@ export function VoiceButton({ onTranscript, onInterim, onRecordingChange, disabl
   // text-blue-400`) — dieselbe Farbe, die auch der Fokusring fuehrt.
   if (isTranscribing) {
     return (
-      <motion.button
+      <button
         disabled
         aria-busy="true"
         className="lu-control lu-control--icon"
         aria-label="Transcribing audio"
       >
         <Loader2 size={14} className="animate-spin" />
-      </motion.button>
+      </button>
     )
   }
 
   return (
     <div className="relative shrink-0">
-      <motion.button
+      <button
         onClick={handleClick}
         disabled={disabled}
         // Das Mikrofon war bis hierher die einzige eigene Formsprache der
@@ -166,12 +165,11 @@ export function VoiceButton({ onTranscript, onInterim, onRecordingChange, disabl
         className="lu-control lu-control--icon"
         aria-pressed={isRecording}
         data-voice-button
-        whileTap={{ scale: 0.9 }}
         aria-label={isRecording ? "Stop recording" : "Start voice input"}
       >
         {isRecording && <span className="lu-control__pulse" aria-hidden="true" />}
         <Mic size={14} />
-      </motion.button>
+      </button>
       {sttError && (
         <div
           role="alert"

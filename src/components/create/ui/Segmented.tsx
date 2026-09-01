@@ -48,7 +48,7 @@ export function Segmented<T extends string>({ options, value, onChange, size = '
               if (e.key === 'ArrowRight' || e.key === 'ArrowDown') { e.preventDefault(); move(1) }
             }}
             className={cn(
-              'relative t-control inline-flex items-center justify-center gap-1.5 px-2.5 rounded-[6px] transition-colors lu-focus-ring',
+              'relative t-control inline-flex items-center justify-center gap-1.5 px-2.5 rounded-[6px] transition-colors',
               h,
               selected ? 'text-white' : 'text-gray-500 hover:text-gray-300',
             )}

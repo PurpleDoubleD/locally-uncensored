@@ -1,5 +1,4 @@
 
-import { motion } from 'framer-motion'
 import { Loader2 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { cn } from './cn'
@@ -53,17 +52,21 @@ export function Button({
   title, ariaLabel, type = 'button', active = false,
 }: Props) {
   const isDisabled = disabled || loading
+  // Der Druck kommt aus der Hausregel in index.css (`:active { scale: .97 }`),
+  // nicht aus einem `whileTap` an diesem Knopf. Beides zugleich waere
+  // 0,96 x 0,97 = 0,93, also ein doppelter Druck — und framer-motion
+  // schriebe dafuer bei jedem Klick ein inline-Transform, das der
+  // Compositor ohnehin allein kann.
   return (
-    <motion.button
+    <button
       type={type}
       title={title}
       aria-label={ariaLabel ?? title}
       aria-busy={loading || undefined}
       onClick={onClick}
       disabled={isDisabled}
-      whileTap={isDisabled ? undefined : { scale: 0.96 }}
       className={cn(
-        't-control inline-flex items-center justify-center select-none transition-colors lu-focus-ring rounded-[var(--radius-control)]',
+        't-control inline-flex items-center justify-center select-none transition-colors rounded-[var(--radius-control)]',
         SIZE_H[size],
         iconOnly ? 'aspect-square' : SIZE_PX[size],
         VARIANT[variant],
@@ -75,6 +78,6 @@ export function Button({
       {loading ? <Loader2 size={ICON_SIZE[size]} className="animate-spin" />
         : Icon ? <Icon size={ICON_SIZE[size]} /> : null}
       {!iconOnly && children}
-    </motion.button>
+    </button>
   )
 }
