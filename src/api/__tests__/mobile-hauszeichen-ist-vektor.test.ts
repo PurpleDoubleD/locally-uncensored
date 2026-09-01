@@ -17,12 +17,16 @@
  *
  * Gemessen, nicht vermutet: der Remote-Server liefert KEINE Datei aus
  * `mobile-client/` aus. `src-tauri/src/mobile_page.rs` baut aus den sechs
- * Quelldateien EINE HTML-Seite, `build.rs` bettet sie ein, und der Router in
- * `src-tauri/src/commands/remote.rs` kennt genau eine Bildroute
- * (`/LU-monogram-white.png` → `include_bytes!("../../../public/…")`). Es gibt
+ * Quelldateien EINE HTML-Seite und `build.rs` bettet sie ein. Als das hier
+ * geschrieben wurde, kannte der Router in `src-tauri/src/commands/remote.rs`
+ * genau EINE Bildroute (`/LU-monogram-white.png` →
+ * `include_bytes!("../../../public/…")`); seit KF-33 kennt er KEINE mehr —
+ * mit dem Vektor im Dokument hatte sie keinen Aufrufer mehr und ist samt
+ * Datei gegangen (Wache: `keine-bildroute-ohne-aufrufer.test.ts`). Es gibt
  * kein `ServeDir`, keinen statischen Zweig, und der Fallback ist ein 302 auf
  * `/mobile`. Ein `<img src="/LU-monogram.svg">` haette also nichts geladen,
- * sondern die Anmeldeseite als Bild angefordert.
+ * sondern die Anmeldeseite als Bild angefordert — und wuerde es heute erst
+ * recht nicht.
  *
  * Der Vektor liegt deshalb IM Dokument. Das kostet die Seite die Pfaddaten
  * einmal und spart ihr dafuer eine HTTP-Anfrage; die vier Anzeigestellen

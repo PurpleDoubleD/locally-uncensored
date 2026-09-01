@@ -47,18 +47,59 @@ export interface RepairedJson {
 }
 
 /**
+ * How many JSON decode steps an argument value is worth.
+ *
+ * Producers serialise the argument object into a JSON string, and some of
+ * them do it TWICE — the string gets encoded again on its way through a
+ * proxy. Each successful decode of a JSON string yields a strictly shorter
+ * string, so the peeling terminates on its own; the bound is belt and braces
+ * and stops adversarial input from buying more than four parses.
+ *
+ * The number is shared with the mobile client on purpose
+ * (`mobile-client/agent-core.js`, `for(var layer = 0; layer < 4; layer++)`):
+ * with a different cap the two sides would agree on one and two layers and
+ * disagree at five, which is the kind of split nobody notices until it bites.
+ */
+const MAX_ARG_ENCODING_LAYERS = 4
+
+/**
+ * Decode ONE JSON string wrapper: `'"{\"a\":1}"'` → `'{"a":1}'`.
+ *
+ * `undefined` means "this text is not a JSON string literal" — either it does
+ * not parse at all, or it parses to something that is not a string, in which
+ * case there is nothing left to peel and the caller is already done.
+ */
+function unwrapJsonStringLayer(text: string): string | undefined {
+  const trimmed = text.trim()
+  if (!trimmed) return undefined
+  let parsed: unknown
+  try { parsed = JSON.parse(trimmed) } catch { return undefined }
+  return typeof parsed === 'string' ? parsed : undefined
+}
+
+/**
  * An `arguments` / `parameters` value, reduced to an object or nothing.
  *
  * The string branch is not cosmetic: OpenAI-shaped producers serialise the
  * argument object into a JSON STRING, and every consumer of this module reads
  * `parsed.arguments.something` straight away. Resolving it here is the same
  * normalisation `repairToolCallArgs` performs one level up.
+ *
+ * It is a LOOP for the same reason that one is (KF-32, measured 01.09.2026):
+ * a single `tryRepair` on a double-encoded value hands back a string, this
+ * function then returned `undefined`, and `asRepairedJson` deleted the field —
+ * so `{"name":"file_write","arguments":"\"{\\\"path\\\":\\\"a.txt\\\"}\""}`
+ * repaired to `{ name: 'file_write' }` with the arguments silently gone.
  */
 function argumentObject(v: unknown): Record<string, unknown> | undefined {
   if (isRecord(v)) return v
-  if (typeof v === 'string') {
-    const inner = tryRepair(v)
+  if (typeof v !== 'string') return undefined
+  let text = v
+  for (let layer = 0; layer < MAX_ARG_ENCODING_LAYERS; layer++) {
+    const inner = tryRepair(text)
     if (isRecord(inner)) return inner
+    if (typeof inner !== 'string') return undefined
+    text = inner
   }
   return undefined
 }
@@ -288,8 +329,30 @@ export function repairToolCallArgs(args: unknown): Record<string, unknown> {
   // reads for the same reason spelled out on asRepairedJson.
   if (Array.isArray(args)) return args as unknown as Record<string, unknown>
   if (typeof args === 'string') {
-    const parsed = repairJson(args)
-    if (parsed) return parsed
+    // Peel the JSON wrappers one layer at a time.
+    //
+    // The ordinary shape is `'{"path":"a.txt"}'` and `repairJson` resolves it
+    // on the first pass. The other one models really send is that string
+    // ENCODED AGAIN — `'"{\"path\":\"a.txt\"}"'` — and until 01.09.2026 this
+    // function answered `{}` for it (KF-32). It looked like it could not
+    // happen: `repairJson` parses, so surely it parses a JSON string too. It
+    // does — and gets a STRING back. `asRepairedJson` turns everything that is
+    // neither array nor record into `null`, the remaining candidates choke on
+    // the escapes, the name regex finds nothing, and `{}` comes out. Feeding
+    // the decoded string back through the repair is the whole fix; the mobile
+    // client got the same one in `b133160b`.
+    //
+    // Order matters: repair FIRST, peel only when the repair came up empty.
+    // That keeps every input that already worked on exactly the path it took
+    // before, so this can only turn a `{}` into an object, never the reverse.
+    let text = args
+    for (let layer = 0; layer < MAX_ARG_ENCODING_LAYERS; layer++) {
+      const parsed = repairJson(text)
+      if (parsed) return parsed
+      const inner = unwrapJsonStringLayer(text)
+      if (inner === undefined) return {}
+      text = inner
+    }
   }
   return {}
 }

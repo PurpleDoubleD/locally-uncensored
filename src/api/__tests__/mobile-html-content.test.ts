@@ -122,8 +122,9 @@ describe('mobile page › no third-party requests (Bug #5)', () => {
  *
  * Jetzt verlangt der Pin die Vektorfassung und VERBIETET das Raster. Der Weg
  * dorthin ist ein <symbol> in index.html plus vier <use>: der Remote-Server
- * liefert keine Datei aus mobile-client/ aus (er baut eine Seite und haelt
- * genau eine Bildroute), ein <img src="/LU-monogram.svg"> waere also ein 404.
+ * liefert keine Datei aus mobile-client/ aus — er baut EINE Seite und hielt
+ * daneben genau eine Bildroute, die seit KF-33 auch weg ist, weil sie
+ * niemand mehr rief. Ein <img src="/LU-monogram.svg"> waere also ein 404.
  */
 describe('mobile page › LU branding assets', () => {
   // Kommentare raus — die Begruendungen NENNEN den alten Rasterpfad.

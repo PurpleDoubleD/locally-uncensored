@@ -26,15 +26,24 @@
  * einmal auf dem Weg, auf dem der Client sie wirklich bekommt (der gezaeunte
  * ```json-Block, den kleine Modelle statt `tool_calls` schicken).
  *
- * ## Gemessener Unterschied zum Desktop (kein Fehler DIESER Datei)
+ * ## Der Desktop hat nachgezogen (KF-32)
  *
- * `src/lib/tool-call-repair.ts` hat denselben Defekt und behaelt ihn: gemessen
- * am 01.09.2026 gibt `repairToolCallArgs(JSON.stringify('{"path":"a.txt"}'))`
- * dort `{}` zurueck, weil `repairJson` eine geparste Skalar-Zeichenkette ueber
- * `asRepairedJson` zu `null` macht und nie ein zweites Mal parst. Mobile ist
- * damit an dieser Stelle jetzt BESSER als Desktop. Das steht hier als
- * Messwert und nicht als Zusicherung — ein `expect(desktop(...)).toEqual({})`
- * waere wieder ein Pin auf einen Fehler.
+ * Hier stand bis dahin dieser Messwert:
+ *
+ *   „`src/lib/tool-call-repair.ts` hat denselben Defekt und behaelt ihn:
+ *    gemessen am 01.09.2026 gibt `repairToolCallArgs(JSON.stringify(
+ *    '{"path":"a.txt"}'))` dort `{}` zurueck, weil `repairJson` eine geparste
+ *    Skalar-Zeichenkette ueber `asRepairedJson` zu `null` macht und nie ein
+ *    zweites Mal parst. Mobile ist damit an dieser Stelle jetzt BESSER als
+ *    Desktop."
+ *
+ * Das gilt nicht mehr. Der Desktop traegt die Lagen jetzt in derselben
+ * Schleife ab, mit demselben Deckel von vier Dekodierschritten, und hat dafuer
+ * eine eigene Wache mit denselben Faellen:
+ * `src/lib/__tests__/desktop-doppelt-kodierte-werkzeugargumente.test.ts`.
+ * Wer den Deckel auf einer Seite verstellt, macht die beiden Wachen zu
+ * Nachbarn, die verschiedene Dinge behaupten — der Deckel gehoert auf beiden
+ * Seiten geaendert oder auf keiner.
  *
  * Lauf: npx vitest run src/api/__tests__/mobile-doppelt-kodierte-werkzeugargumente.test.ts
  */

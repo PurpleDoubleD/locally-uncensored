@@ -284,7 +284,6 @@ async fn auth_middleware(
 
     // Public routes:
     //   • /mobile                       — the self-contained landing page
-    //   • /LU-monogram-white.png         — the single branding asset
     //   • /remote-api/auth               — where the client trades a passcode for a JWT
     //   • /remote-api/status             — minimal liveness ping {status:"ok"}
     //   • /                              — 302 redirect to /mobile
@@ -3248,12 +3247,19 @@ fn build_router(state: RemoteState) -> Router {
     // React SPA — `mobile_landing` is self-contained, and serving the full
     // desktop bundle over the tunnel would leak source code (Bug #14).
     // Root `/` and any unknown path redirect to `/mobile`.
+    //
+    // There is no image route. There used to be exactly one, serving a
+    // 512x512 brand raster out of `public/`, and the mobile page pulled it in
+    // four times. Both callers went away — `0b9c0f66` moved the desktop to
+    // `public/LU-monogram.svg`, `b133160b` moved the phone to an inline
+    // <symbol>/<use> carrying the same path data — so the route, its handler
+    // and the file went with them. The page needs no binary asset at all now;
+    // that is why serving one page is enough.
     let app = Router::new()
         .merge(api_routes)
         .merge(proxy_routes)
         .merge(mobile)
         .route("/", get(redirect_to_mobile))
-        .route("/LU-monogram-white.png", get(mobile_monogram))
         .fallback(redirect_to_mobile);
 
     app.layer(middleware::from_fn_with_state(state.clone(), auth_middleware))
@@ -3267,19 +3273,6 @@ async fn redirect_to_mobile() -> Response {
         .header(header::LOCATION, "/mobile")
         .body(Body::empty())
         .unwrap_or_else(|_| StatusCode::FOUND.into_response())
-}
-
-/// Serve the LU monogram PNG embedded in the desktop public/ dir.
-/// This is the only binary asset the mobile page needs — bundle it
-/// at compile time so we never depend on `dist/` being present.
-async fn mobile_monogram() -> Response {
-    const MONOGRAM: &[u8] = include_bytes!("../../../public/LU-monogram-white.png");
-    Response::builder()
-        .status(StatusCode::OK)
-        .header(header::CONTENT_TYPE, "image/png")
-        .header(header::CACHE_CONTROL, "public, max-age=86400")
-        .body(Body::from(MONOGRAM))
-        .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
 }
 
 #[cfg(test)]

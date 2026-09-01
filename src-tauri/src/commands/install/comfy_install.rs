@@ -39,12 +39,41 @@ use super::git::{windows_git_install_hint, windows_git_probe, WindowsGitState};
 use super::CREATE_NO_WINDOW;
 
 // ── Disk-pressure pre-flight (Bug #1 — techx69 100%-busy-drive hang) ────────
+//
+// FREE SPACE IS THE ONLY THING MEASURED HERE, and that is deliberate. The doc
+// comment below used to promise a second check as well — "or its pending I/O
+// queue suggests sustained 100% utilisation" — which no version of this
+// function ever performed (KF-28, read at HEAD 01.09.2026). Three reasons it
+// stays that way rather than being built:
+//
+//   * Nothing consumes such a verdict. The one caller (`install_comfyui`)
+//     pushes whatever string comes back into the install log and starts the
+//     install regardless — it does not gate, retry or choose a drive. A
+//     queue reading would produce a second sentence and change nothing.
+//   * The busy-drive case in Bug #1 is answered somewhere else entirely, and
+//     was already when this comment was written: the install became
+//     CANCELLABLE (`state.comfyui_install_cancel`, polled between steps and
+//     inside the pip retry loop, killing the live git/pip child). That is
+//     what turned the 45-minute hang into something a user can leave. A
+//     pre-flight guess about the drive is no substitute for a stop button.
+//   * There is no reading to take. `sysinfo` 0.33 exposes `Disk::usage()` →
+//     `DiskUsage`, which is four byte counters (read/written, total and
+//     since-last-refresh). No queue depth, no utilisation percentage, on any
+//     platform. Deriving "100% busy" from two byte deltas would be a guess
+//     wearing a number.
+//
+// `disk_pressure_doc_matches_body` at the bottom of this file holds the two
+// halves together, in both directions: promise without probe is red, and so
+// is probe without promise. The "why not" lives up here, in a plain comment,
+// so that the doc comment below can say only what the function does.
 
-/// Return a human-readable warning when the target install drive is short
-/// on free space (<5 GB — ComfyUI + PyTorch wheels need ~5 GB) or its
-/// pending I/O queue suggests sustained 100% utilisation. Best-effort —
-/// returns None if sysinfo can't get reliable data, so we never block a
-/// well-meaning install over a probing flake.
+/// Return a human-readable warning when the target install drive is short on
+/// free space — under 5 GB, since ComfyUI plus the PyTorch wheels need about
+/// that much. That is the whole check; a drive with room comes back `None`.
+///
+/// Best-effort in the other direction too: `None` when `sysinfo` lists no
+/// mount point that is a prefix of `target_dir`, so a probing flake never
+/// blocks a well-meaning install.
 fn check_install_disk_pressure(target_dir: &Path) -> Option<String> {
     use sysinfo::Disks;
     let disks = Disks::new_with_refreshed_list();
@@ -626,4 +655,108 @@ mod tests {
         assert!(comfy_install_looks_finished(real.path()));
     }
 
+}
+
+/// KF-28: der Doc-Kommentar über `check_install_disk_pressure` darf nur
+/// versprechen, was der Rumpf auch tut.
+///
+/// Er versprach zwei Prüfungen — „<5 GB frei" UND „or its pending I/O queue
+/// suggests sustained 100% utilisation". Die zweite gab es nie; der Rumpf
+/// prüft `available_space()` und gibt danach `None` zurück. Die Überschrift
+/// des Blocks nennt sogar den Anlass (Bug #1, 100%-busy-drive), also genau
+/// den Fall, den die erfundene Hälfte abzufangen schien.
+///
+/// Diese Wache liest den Quelltext und vergleicht die beiden Hälften
+/// miteinander, in BEIDE Richtungen: ein Versprechen ohne Prüfung ist rot,
+/// eine Prüfung ohne Versprechen ebenso. Wer die Queue-Prüfung eines Tages
+/// wirklich baut, wird hier daran erinnert, den Kommentar mitzunehmen —
+/// und wer nur den Kommentar aufhübscht, kommt nicht durch.
+#[cfg(test)]
+mod disk_pressure_doc_matches_body {
+    /// Die eigene Quelle. `include_str!` statt eines Laufzeit-Pfades, damit
+    /// der Test nicht davon abhängt, aus welchem Verzeichnis `cargo test`
+    /// gestartet wurde.
+    const SOURCE: &str = include_str!("comfy_install.rs");
+
+    const SIGNATURE: &str = "fn check_install_disk_pressure";
+
+    /// Die `///`-Zeilen unmittelbar über der Signatur.
+    fn doc_comment() -> String {
+        let lines: Vec<&str> = SOURCE.lines().collect();
+        let at = lines
+            .iter()
+            .position(|l| l.contains(SIGNATURE) && !l.trim_start().starts_with("//"))
+            .expect("check_install_disk_pressure steht noch in dieser Datei");
+        let mut doc: Vec<&str> = Vec::new();
+        for line in lines[..at].iter().rev() {
+            let t = line.trim_start();
+            if !t.starts_with("///") {
+                break;
+            }
+            doc.push(t.trim_start_matches("///").trim());
+        }
+        doc.reverse();
+        doc.join(" ").to_lowercase()
+    }
+
+    /// Der Rumpf: ab der Signatur bis zur schließenden Klammer in Spalte 0.
+    fn body() -> String {
+        let lines: Vec<&str> = SOURCE.lines().collect();
+        let at = lines
+            .iter()
+            .position(|l| l.contains(SIGNATURE) && !l.trim_start().starts_with("//"))
+            .expect("check_install_disk_pressure steht noch in dieser Datei");
+        let end = lines[at..]
+            .iter()
+            .position(|l| *l == "}")
+            .expect("die Funktion wird in Spalte 0 geschlossen");
+        lines[at..=at + end].join("\n")
+    }
+
+    /// Sagt der Kommentar eine Warteschlangen- oder Auslastungsprüfung zu?
+    fn doc_promises_queue(doc: &str) -> bool {
+        ["i/o queue", "queue", "utilisation", "utilization", "busy"]
+            .iter()
+            .any(|w| doc.contains(w))
+    }
+
+    /// Steht im Rumpf irgendetwas, das eine solche Prüfung sein könnte?
+    /// `sysinfo`-0.33 kennt dafür nur `Disk::usage()` → `DiskUsage`, und das
+    /// sind Byte-Zähler seit dem letzten Refresh, keine Warteschlangenlänge.
+    fn body_probes_queue(body: &str) -> bool {
+        ["usage()", "DiskUsage", "read_bytes", "written_bytes"]
+            .iter()
+            .any(|w| body.contains(w))
+    }
+
+    #[test]
+    fn the_comment_promises_exactly_what_the_body_checks() {
+        let doc = doc_comment();
+        let body = body();
+
+        // Der Teil, der wahr ist und wahr bleiben soll.
+        assert!(
+            body.contains("available_space()"),
+            "der Rumpf prüft den freien Platz nicht mehr — dann stimmt auch \
+             der erste Satz des Kommentars nicht mehr"
+        );
+        assert!(
+            doc.contains("free space") || doc.contains("5 gb"),
+            "der Kommentar sagt den freien Platz nicht mehr an, den der Rumpf prüft"
+        );
+
+        // Und die eigentliche Aussage.
+        assert_eq!(
+            doc_promises_queue(&doc),
+            body_probes_queue(&body),
+            "Kommentar und Rumpf sind auseinander: der Kommentar {} von einer \
+             Warteschlangen-/Auslastungsprüfung, der Rumpf {}. Beide Hälften \
+             gehören zusammen geändert — und das „warum nicht\" steht im \
+             Blockkommentar über der Funktion, nicht im Doc-Kommentar, damit \
+             eine Absage nicht wie eine Zusage aussieht.\n\n\
+             Kommentar:\n{doc}\n",
+            if doc_promises_queue(&doc) { "spricht" } else { "spricht NICHT" },
+            if body_probes_queue(&body) { "enthält eine" } else { "enthält KEINE" },
+        );
+    }
 }

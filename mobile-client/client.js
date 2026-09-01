@@ -112,7 +112,7 @@ import {
   //
   // Warum <use> und kein <img src="/LU-monogram.svg">: der Remote-Server
   // liefert keine Dateien aus mobile-client/ aus. Er baut EINE Seite
-  // (src-tauri/src/mobile_page.rs) und haelt daneben genau eine Bildroute,
+  // (src-tauri/src/mobile_page.rs) und hielt daneben bis KF-33 genau eine Bildroute (jetzt keine),
   // `/LU-monogram-white.png`. Ein SVG-Pfad waere ein 404 gewesen. Inline
   // gebraucht die Seite gar keine Route mehr.
   //
