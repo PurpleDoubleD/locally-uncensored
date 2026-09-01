@@ -178,6 +178,64 @@ pub(crate) fn settle(a: &Arc<AtomicBool>, b: &Arc<AtomicBool>, max: std::time::D
     }
 }
 
+/// The command line a shell wants for "run this one string as a command": the
+/// program to spawn, and the arguments to hand it.
+///
+/// ONE copy, because there used to be two. The foreground `shell_execute`
+/// derived the argument form from the shell's NAME; the background
+/// `shell_task_start` derived it from the PLATFORM alone and gave PowerShell's
+/// `-NoProfile -NonInteractive -Command` to whatever program the caller had
+/// named. A background task with `shell: "cmd"` — a value the tool schema
+/// advertises — therefore became `cmd -NoProfile -NonInteractive -Command
+/// <command>`, which cmd.exe rejects flag by flag; `shell: "bash"` fared no
+/// better. Only one of the two copies was ever repaired, which is the entire
+/// argument for there being a single function: the same shell must produce the
+/// same command line whether the task runs in the foreground or the background.
+///
+/// `windows` is a parameter rather than a `cfg!` inside the body so that BOTH
+/// platforms' argument forms can be asserted from either platform's test run —
+/// the Windows form is precisely the half no Mac or Linux run would otherwise
+/// ever look at.
+///
+/// `command` stays ONE argument. It is never folded into the flag string, so
+/// nothing inside it can close the argument and open a second command.
+pub(crate) fn shell_argv(
+    windows: bool,
+    shell: Option<&str>,
+    command: &str,
+) -> (String, Vec<String>) {
+    let shell_bin = shell
+        .map(str::to_string)
+        .unwrap_or_else(|| default_shell(windows).to_string());
+    let name = shell_bin.to_lowercase();
+    let mut args: Vec<String> = if windows && name.contains("powershell") {
+        vec![
+            "-NoProfile".into(),
+            "-NonInteractive".into(),
+            "-Command".into(),
+        ]
+    } else if windows && name.contains("cmd") {
+        vec!["/C".into()]
+    } else {
+        // Every POSIX shell — and, on Windows, anything else the caller names,
+        // `pwsh` included. Unchanged from what the foreground path has always
+        // done with a name it does not recognise.
+        vec!["-c".into()]
+    };
+    args.push(command.to_string());
+    (shell_bin, args)
+}
+
+/// The shell a caller gets when it names none: PowerShell on Windows, bash
+/// everywhere else. This is the path every user is on today.
+pub(crate) fn default_shell(windows: bool) -> &'static str {
+    if windows {
+        "powershell"
+    } else {
+        "bash"
+    }
+}
+
 #[tauri::command]
 #[allow(non_snake_case)]
 pub async fn shell_execute(
@@ -208,24 +266,13 @@ fn shell_execute_sync(
     working_directory: Option<String>,
 ) -> Result<serde_json::Value, String> {
     let timeout_ms = timeout.unwrap_or(120_000);
-    let shell_bin = shell.unwrap_or_else(|| {
-        if cfg!(target_os = "windows") {
-            "powershell".to_string()
-        } else {
-            "bash".to_string()
-        }
-    });
+    // Shell name in, program + argument form out — the same function the
+    // background twin in bg_tasks.rs calls, so the two cannot drift apart.
+    let (shell_bin, shell_args) =
+        shell_argv(cfg!(target_os = "windows"), shell.as_deref(), &command);
 
     let mut cmd = Command::new(&shell_bin);
-
-    // Build shell command
-    if cfg!(target_os = "windows") && shell_bin.to_lowercase().contains("powershell") {
-        cmd.arg("-NoProfile").arg("-NonInteractive").arg("-Command").arg(&command);
-    } else if cfg!(target_os = "windows") && shell_bin.to_lowercase().contains("cmd") {
-        cmd.arg("/C").arg(&command);
-    } else {
-        cmd.arg("-c").arg(&command);
-    }
+    cmd.args(&shell_args);
 
     // Append extra args
     if let Some(extra_args) = args {
@@ -332,6 +379,114 @@ fn shell_execute_sync(
                 std::thread::sleep(std::time::Duration::from_millis(50));
             }
             Err(e) => return Err(format!("Wait error: {}", e)),
+        }
+    }
+}
+
+/// The argument form, asserted for both platforms from either platform.
+///
+/// `shell_argv` takes `windows` as a parameter precisely so this module can
+/// pin the Windows command lines on a Mac and the Unix ones on Windows. The
+/// bug that made the function necessary lived in the Windows half and was
+/// therefore invisible to every non-Windows test run there had ever been.
+#[cfg(test)]
+mod shell_dialect_tests {
+    use super::shell_argv;
+
+    const WINDOWS: bool = true;
+    const UNIX: bool = false;
+    const CMD: &str = "echo hi";
+
+    fn argv(windows: bool, shell: Option<&str>) -> (String, Vec<String>) {
+        shell_argv(windows, shell, CMD)
+    }
+
+    fn args_of(windows: bool, shell: &str) -> Vec<String> {
+        argv(windows, Some(shell)).1
+    }
+
+    fn powershell_form() -> Vec<String> {
+        vec![
+            "-NoProfile".to_string(),
+            "-NonInteractive".to_string(),
+            "-Command".to_string(),
+            CMD.to_string(),
+        ]
+    }
+
+    fn cmd_form() -> Vec<String> {
+        vec!["/C".to_string(), CMD.to_string()]
+    }
+
+    fn posix_form() -> Vec<String> {
+        vec!["-c".to_string(), CMD.to_string()]
+    }
+
+    /// The path every user is on today — no `shell` named at all. Windows gets
+    /// PowerShell with `-Command`, Unix gets bash with `-c`, exactly as before
+    /// the two branches were merged into one function.
+    #[test]
+    fn the_default_shell_is_unchanged_on_both_platforms() {
+        assert_eq!(
+            argv(WINDOWS, None),
+            ("powershell".to_string(), powershell_form()),
+        );
+        assert_eq!(argv(UNIX, None), ("bash".to_string(), posix_form()));
+    }
+
+    /// On Windows the form follows the name, including a full path to the
+    /// binary and the `.exe` suffix — the spellings a caller actually sends.
+    #[test]
+    fn windows_gets_the_form_of_the_shell_it_was_named() {
+        for ps in [
+            "powershell",
+            "PowerShell",
+            "powershell.exe",
+            r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe",
+        ] {
+            assert_eq!(args_of(WINDOWS, ps), powershell_form(), "{ps}");
+        }
+        for c in ["cmd", "CMD", "cmd.exe", r"C:\Windows\System32\cmd.exe"] {
+            assert_eq!(args_of(WINDOWS, c), cmd_form(), "{c}");
+        }
+        // The two the background path used to break outright.
+        for posix in ["bash", "sh", r"C:\Program Files\Git\bin\bash.exe"] {
+            assert_eq!(args_of(WINDOWS, posix), posix_form(), "{posix}");
+        }
+    }
+
+    /// PowerShell's flags are a Windows-only dialect. A `powershell` named on
+    /// a Mac is a POSIX-style invocation like everything else there.
+    #[test]
+    fn unix_never_gets_windows_flags() {
+        for shell in ["bash", "sh", "zsh", "/bin/sh", "powershell", "cmd"] {
+            assert_eq!(args_of(UNIX, shell), posix_form(), "{shell}");
+        }
+    }
+
+    /// The program is the shell the caller named, never a rewritten one.
+    #[test]
+    fn the_program_is_the_shell_that_was_named() {
+        assert_eq!(argv(WINDOWS, Some("cmd.exe")).0, "cmd.exe");
+        assert_eq!(argv(UNIX, Some("/bin/zsh")).0, "/bin/zsh");
+    }
+
+    /// No shell injection: the command travels as ONE argument, byte for byte,
+    /// and never gets concatenated onto a flag. Quotes, `&&`, semicolons and
+    /// newlines inside it are the shell's problem to parse, not a way to add a
+    /// second argument to the shell's own command line.
+    #[test]
+    fn the_command_stays_a_single_argument() {
+        let nasty = "echo \"a\" && whoami ; echo 'b'\nrm -rf /";
+        for (windows, shell, flags) in [
+            (WINDOWS, "powershell", 3usize),
+            (WINDOWS, "cmd", 1),
+            (WINDOWS, "bash", 1),
+            (UNIX, "bash", 1),
+        ] {
+            let (_, args) = shell_argv(windows, Some(shell), nasty);
+            assert_eq!(args.len(), flags + 1, "{shell} on windows={windows}");
+            assert_eq!(args.last().map(String::as_str), Some(nasty));
         }
     }
 }

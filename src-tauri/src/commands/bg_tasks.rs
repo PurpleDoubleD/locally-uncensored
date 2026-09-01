@@ -139,11 +139,10 @@ fn sweep_isolation() -> std::sync::MutexGuard<'static, ()> {
 ///
 /// Windows: no `shell` at all, i.e. the PowerShell this module spawns by
 /// default and therefore the shell a real background task actually runs
-/// there, with `ping` as the child that outlives the test. Git Bash is
-/// deliberately not asked for: `shell_task_start_impl` builds PowerShell's
-/// argument form for whatever program it is given on Windows, so a POSIX
-/// shell would be handed `-NoProfile -NonInteractive -Command` and would never
-/// run the command at all.
+/// there, with `ping` as the child that outlives the test. Git Bash is still
+/// deliberately not asked for — not because it would be mis-invoked any more
+/// (the argument form follows the shell name now), but because a Git Bash
+/// install is not something a Windows test run may assume.
 #[cfg(test)]
 fn a_task_that_starts_a_child() -> Value {
     if cfg!(target_os = "windows") {
@@ -277,21 +276,18 @@ pub(crate) async fn shell_task_start_impl(args: &Value) -> CmdResult {
     }
 
     let id = Uuid::new_v4().to_string();
-    let (program, args_vec) = if cfg!(target_os = "windows") {
-        let shell = a.shell.unwrap_or_else(|| "powershell".into());
-        (
-            shell,
-            vec![
-                "-NoProfile".into(),
-                "-NonInteractive".into(),
-                "-Command".into(),
-                a.command.clone(),
-            ],
-        )
-    } else {
-        let shell = a.shell.unwrap_or_else(|| "bash".into());
-        (shell, vec!["-c".into(), a.command.clone()])
-    };
+    // The argument form follows the SHELL, not the platform. This file used to
+    // decide it here, on its own, and always built PowerShell's form on
+    // Windows — so a caller-named `cmd` or `bash` was handed
+    // `-NoProfile -NonInteractive -Command` and never ran the command at all.
+    // The foreground twin already derived it from the shell name; both now ask
+    // the same function, so a task started in the background and the same task
+    // run in the foreground produce the identical command line.
+    let (program, args_vec) = crate::commands::shell::shell_argv(
+        cfg!(target_os = "windows"),
+        a.shell.as_deref(),
+        &a.command,
+    );
 
     let mut cmd = TokioCommand::new(&program);
     cmd.args(&args_vec);
@@ -1092,5 +1088,164 @@ mod cwd_default_tests {
         assert!(!same_directory(&seen, &a), "the task ran in the fallback {a:?}");
         let _ = std::fs::remove_dir_all(&a);
         let _ = std::fs::remove_dir_all(&b);
+    }
+}
+
+/// The background task and its foreground twin, held against each other.
+///
+/// They are the same tool with two lifetimes: `shell_execute` waits,
+/// `shell_execute` with `background: true` hands back a task id. A caller that
+/// names a shell must get that shell, invoked the same way, on either path.
+/// They drifted apart once — this file built PowerShell's argument form for
+/// every program on Windows while the foreground built it from the shell's
+/// name — and the drift was invisible to every non-Windows test run.
+#[cfg(test)]
+mod foreground_parity_tests {
+    use super::*;
+
+    /// A shell that is deliberately NOT the platform default, so the `shell`
+    /// field is actually exercised rather than skipped.
+    ///
+    /// Windows: `cmd`, the exact value that used to be handed
+    /// `-NoProfile -NonInteractive -Command` and fail. Unix: `sh`, which is
+    /// not the `bash` default and is present on every machine this runs on.
+    fn a_named_shell() -> &'static str {
+        if cfg!(target_os = "windows") {
+            "cmd"
+        } else {
+            "sh"
+        }
+    }
+
+    /// One line, one word of output, and the same source text in cmd.exe and
+    /// in a POSIX shell — so the assertion is about the invocation, not about
+    /// a dialect difference in the command itself.
+    const TOKEN: &str = "lu-parity-7f3a";
+
+    fn the_command() -> String {
+        format!("echo {TOKEN}")
+    }
+
+    /// A directory both runs can start in, so neither path has to fall back to
+    /// the per-chat workspace and touch the user's home.
+    fn a_directory() -> std::path::PathBuf {
+        let d = std::env::temp_dir().join(format!("lu-parity-{}", std::process::id()));
+        std::fs::create_dir_all(&d).expect("temp dir");
+        d
+    }
+
+    async fn what_the_foreground_printed(dir: &std::path::Path) -> (String, i64) {
+        let out = crate::commands::shell::shell_execute(
+            the_command(),
+            None,
+            Some(dir.to_string_lossy().to_string()),
+            Some(20_000),
+            Some(a_named_shell().to_string()),
+            None,
+            None,
+            None,
+        )
+        .await
+        .expect("the foreground shell tool ran");
+        (
+            out["stdout"].as_str().unwrap_or_default().trim().to_string(),
+            out["exitCode"].as_i64().unwrap_or(-1),
+        )
+    }
+
+    async fn what_the_background_printed(dir: &std::path::Path) -> (String, i64) {
+        let start = shell_task_start_impl(&json!({
+            "command": the_command(),
+            "shell": a_named_shell(),
+            "cwd": dir.to_string_lossy(),
+        }))
+        .await
+        .expect("the background task started");
+        let id = start["id"].as_str().expect("id").to_string();
+        for _ in 0..200 {
+            let st = shell_task_status_impl(&json!({ "id": id })).await.expect("status");
+            if !st["running"].as_bool().unwrap_or(true) {
+                return (
+                    st["output_tail"].as_str().unwrap_or_default().trim().to_string(),
+                    st["exit_code"].as_i64().unwrap_or(-1),
+                );
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+        panic!("the background task never finished");
+    }
+
+    /// The behavioural half: same shell, same command, same result.
+    ///
+    /// On Windows this fails outright without the shared argument builder —
+    /// `cmd -NoProfile -NonInteractive -Command echo …` prints cmd.exe's usage
+    /// complaint and never echoes the token. On Unix it holds `sh` to the same
+    /// contract on both paths, which is the property that has to keep holding
+    /// for the Windows one to stay true.
+    ///
+    /// The isolation guard is a plain `Mutex` held across the awaits below, on
+    /// purpose and like every other test here that stands up a live task: it is
+    /// what keeps the shutdown-sweep tests from killing this task's child
+    /// mid-run. There is nothing to deadlock against — the lock is only ever
+    /// taken by tests, never by the code under test.
+    #[allow(clippy::await_holding_lock)]
+    #[tokio::test]
+    async fn a_named_shell_behaves_the_same_in_the_background_as_in_the_foreground() {
+        let _isolation = super::sweep_isolation();
+        let dir = a_directory();
+
+        let (foreground, fg_code) = what_the_foreground_printed(&dir).await;
+        let (background, bg_code) = what_the_background_printed(&dir).await;
+
+        // Both really ran — without this the assertion below would also pass
+        // on two empty strings, i.e. on two equally broken paths.
+        assert!(
+            foreground.contains(TOKEN),
+            "the foreground shell tool printed {foreground:?} with shell {:?}",
+            a_named_shell(),
+        );
+        assert!(
+            background.contains(TOKEN),
+            "the background task printed {background:?} with shell {:?} — \
+             the shell it was given was invoked with the wrong argument form",
+            a_named_shell(),
+        );
+        assert_eq!(
+            foreground, background,
+            "the same command in the same shell came out differently on the two paths",
+        );
+        assert_eq!((fg_code, bg_code), (0, 0), "one of the two paths failed");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The structural half: this file must not grow a second copy of the
+    /// branch. The behavioural test above can only observe ONE shell per
+    /// platform per run; a re-inlined branch that breaks a different shell
+    /// would slip past it, and that is exactly how the original bug survived.
+    ///
+    /// Scoped to this file on purpose: `system.rs` and `install.rs` also spawn
+    /// PowerShell with these flags, but they hardcode PowerShell for scripts of
+    /// their own and never take a shell from a caller, so they are not twins of
+    /// anything and are none of this test's business.
+    #[test]
+    fn the_background_path_builds_no_shell_flags_of_its_own() {
+        const BG_TASKS_RS: &str = include_str!("bg_tasks.rs");
+        // Split out of one string rather than written as separate literals:
+        // a list of quoted flags would itself be the quoted flag this test
+        // searches for, and the test would trip over its own source.
+        for flag in "-NoProfile -NonInteractive -Command /C -c".split(' ') {
+            let literal = format!("{:?}", flag);
+            assert!(
+                !BG_TASKS_RS.contains(&literal),
+                "bg_tasks.rs builds the shell argument {flag} itself again — \
+                 that branch belongs in shell::shell_argv, which the foreground \
+                 path uses too",
+            );
+        }
+        assert!(
+            BG_TASKS_RS.contains("shell::shell_argv("),
+            "the background path no longer goes through the shared argument builder",
+        );
     }
 }
