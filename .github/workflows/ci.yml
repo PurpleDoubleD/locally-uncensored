@@ -44,13 +44,26 @@ jobs:
       - name: Install npm dependencies
         run: npm ci
 
-      # Historical debt: the repo carries ~170 files of pre-existing lint
-      # errors (unused test vars, no-explicit-any in old suites) that predate
-      # 2.5.7 — lint has been red since April. Keep it visible but non-gating
-      # until the debt is paid down; tsc + vitest + build are the real gates.
-      - name: Lint (non-gating — pre-existing debt)
+      # AS-10. Der Audit-Befund war nicht "es gibt Lint-Fehler", sondern
+      # "Lint ist kein Gate": seit April stand hier `continue-on-error: true`,
+      # und ein Schritt, der nicht scheitern kann, misst nichts. Die Schuld
+      # dahinter ist jetzt bezahlt — `eslint .` meldet ueber 1080 Dateien
+      # 0 Fehler und 0 Warnungen, und zwar OHNE neue `eslint-disable`: die
+      # Regeln stehen scharf, der Code hat sich bewegt.
+      #
+      # Zwei Dinge mussten dafuer zusammenkommen, und beide sind nachgemessen:
+      # (1) KF-11 — ein gebautes `src-tauri/target` schleuste generiertes
+      #     JavaScript in die Pruefung und machte das Ergebnis davon abhaengig,
+      #     OB jemand vorher gebaut hatte. Ohne den `globalIgnores`-Eintrag
+      #     waere dieses Gate auf jeder Maschine mit Release-Build rot und auf
+      #     einem frischen Klon gruen — schlimmer als ein Plattformunterschied,
+      #     weil es sich auf derselben Maschine aendert. Gegengeprueft: auf
+      #     einer Maschine MIT Release-Build (87 Codegen-Assets im Baum) meldet
+      #     `npm run lint` weiterhin 0.
+      # (2) Die letzten 45 Meldungen aus `src/components` sind gefallen, nicht
+      #     stillgestellt.
+      - name: Lint
         run: npm run lint
-        continue-on-error: true
 
       - name: Type check
         run: npm run typecheck
