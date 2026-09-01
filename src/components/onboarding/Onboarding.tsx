@@ -1,12 +1,12 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useReducer } from 'react'
 import { withInstallerOutput, withDetail } from '../../lib/error-text'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Minus, Square, X as XIcon, ArrowRight, Download, Check, ChevronRight, Loader2, RefreshCw, ExternalLink, FolderOpen, Cpu } from 'lucide-react'
+import { Minus, Square, X as XIcon, ArrowRight, Download, Check, ChevronRight, Loader2, RefreshCw, ExternalLink, FolderOpen, Cpu, Image as ImageIcon } from 'lucide-react'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { useProviderStore } from '../../stores/providerStore'
 import { ONBOARDING_MODELS, ONBOARDING_EMBED_MODEL } from '../../lib/constants'
 import { PROVIDER_PRESETS } from '../../api/providers/types'
-import { ICON_SM } from '../ui/icon-size'
+import { ICON_SM, ICON_LG } from '../ui/icon-size'
 import { detectLocalBackends, type DetectedBackend } from '../../lib/backend-detector'
 import { detectProviderModelPath, startModelDownloadToPath } from '../../api/discover'
 import { useDownloadStore } from '../../stores/downloadStore'
@@ -21,6 +21,10 @@ import { startBundledEngine, startBundledEmbed } from '../../api/engine'
 import { BUILTIN_BACKEND_ID, classifyOnboardingBackend, resolveOnboardingBackend } from '../../lib/onboarding-backend'
 import { version as currentVersion } from '../../../package.json'
 import { useReleaseNotesStore } from '../../stores/releaseNotesStore'
+import { wizardProgress, workStepsFor, type Step } from './wizard-steps'
+import {
+  installerReducer, IDLE_INSTALLER, isRunning, isReady, elapsedSeconds, formatElapsed, lastLog,
+} from './installer-state'
 
 // Bug (h): the dedicated 'theme' onboarding step was removed because users
 // kept ending up on Light by accident, and the project standard is "dark
@@ -31,8 +35,10 @@ import { useReleaseNotesStore } from '../../stores/releaseNotesStore'
 // `nomic-embed-text` (~274 MB) before completing onboarding so Document
 // Chat / RAG works out of the box. The step shows a Skip button and
 // auto-skips entirely when the user already has any embedding model on disk.
-type Step = 'welcome' | 'backends' | 'comfyui' | 'models' | 'embeddings' | 'done'
-const STEP_ORDER: Step[] = ['welcome', 'backends', 'comfyui', 'models', 'embeddings', 'done']
+// D-S35: `Step` und die Schrittfolge liegen jetzt in ./wizard-steps.ts —
+// zusammen mit der Unterscheidung zwischen einem Bildschirm und einem
+// Arbeitsschritt, die dieser Datei bisher fehlte. Der Typ wird hier
+// re-exportiert, damit die 60 Fundstellen unten unveraendert bleiben.
 const isTauri = typeof window !== 'undefined' && !!(window as any).__TAURI_INTERNALS__
 
 /* ── Local backend info for the "nothing found" state ──────── */
@@ -82,14 +88,14 @@ export function Onboarding() {
   // instead of "ComfyUI detected, Continue".
   const [comfyDetecting, setComfyDetecting] = useState(false)
   const [comfyFound, setComfyFound] = useState<{ found: boolean; path?: string; complete?: boolean } | null>(null)
-  const [comfyInstalling, setComfyInstalling] = useState(false)
-  const [comfyInstallLogs, setComfyInstallLogs] = useState<string[]>([])
-  const [comfyInstallError, setComfyInstallError] = useState('')
+  // AS-09: hier standen acht `useState` fuer EINE Zustandsmaschine —
+  // installing, logs, error, downloadProgress, downloadTotal, downloadSpeed
+  // plus installStartTime und elapsed weiter unten. Dieselbe Maschine fuehrten
+  // Ollama, LM Studio und der Python-Installer je noch einmal. Sie steht jetzt
+  // in ./installer-state.ts, einmal und geprueft.
+  const [comfyInstall, comfyDo] = useReducer(installerReducer, IDLE_INSTALLER)
   const [comfyPathInput, setComfyPathInput] = useState('')
   const [comfyReady, setComfyReady] = useState(false)
-  const [comfyDownloadProgress, setComfyDownloadProgress] = useState(0)
-  const [comfyDownloadTotal, setComfyDownloadTotal] = useState(0)
-  const [comfyDownloadSpeed, setComfyDownloadSpeed] = useState(0)
   // Bug #3 (ninjastic2008 v2.4.3): multi-install disambiguation. When
   // `detect_all_comfyui_installs` returns more than one hit the user picks
   // explicitly instead of LU auto-picking the first scan match. Picking
@@ -109,12 +115,10 @@ export function Onboarding() {
   // pre-flight runs `python_check`; if Python is missing we kick off
   // `install_python` (winget Python.Python.3.12) and poll its status here
   // before re-firing `install_comfyui`.
-  const [pythonInstalling, setPythonInstalling] = useState(false)
-  const [pythonInstallLogs, setPythonInstallLogs] = useState<string[]>([])
-  const [pythonInstallError, setPythonInstallError] = useState('')
-  const [, setPythonReady] = useState(false)
-  const [pythonStartTime, setPythonStartTime] = useState<number | null>(null)
-  const [pythonElapsed, setPythonElapsed] = useState(0)
+  // Dieselbe Maschine. `setPythonReady` war dabei ein Schreibzugriff ohne
+  // Leser (`const [, setPythonReady]`) — im Reducer ist „fertig" eine Phase,
+  // also gibt es den toten Halbzustand nicht mehr.
+  const [pythonInstall, pythonDo] = useReducer(installerReducer, IDLE_INSTALLER)
   const [systemVRAM, setSystemVRAM] = useState<number | null>(null)
   // Default the active sub-tab to whichever category actually has entries.
   // The previous fixed 'uncensored' default broke the onboarding starter card
@@ -129,33 +133,17 @@ export function Onboarding() {
     ? 'uncensored'
     : 'mainstream'
   const [modelSubTab, setModelSubTab] = useState<'uncensored' | 'mainstream'>(initialSubTab)
-  const [installStartTime, setInstallStartTime] = useState<number | null>(null)
-  const [elapsed, setElapsed] = useState(0)
+  // Ollama und LM Studio — der Kommentar hier sagte es vorher selbst:
+  // „same shape as Ollama". Zwanzig `useState` fuer zweimal dieselbe Maschine.
+  const [ollama, ollamaDo] = useReducer(installerReducer, IDLE_INSTALLER)
+  const [lmstudio, lmstudioDo] = useReducer(installerReducer, IDLE_INSTALLER)
 
-  // Ollama install state
-  const [ollamaInstalling, setOllamaInstalling] = useState(false)
-  const [ollamaStatus, setOllamaStatus] = useState('')
-  const [ollamaProgress, setOllamaProgress] = useState(0)
-  const [ollamaTotal, setOllamaTotal] = useState(0)
-  const [ollamaSpeed, setOllamaSpeed] = useState(0)
-  const [ollamaLogs, setOllamaLogs] = useState<string[]>([])
-  const [ollamaError, setOllamaError] = useState('')
-  const [ollamaReady, setOllamaReady] = useState(false)
-  const [ollamaStartTime, setOllamaStartTime] = useState<number | null>(null)
-  const [ollamaElapsed, setOllamaElapsed] = useState(0)
-
-  // LM Studio install state — same shape as Ollama; both can show their
-  // own progress card if the user picks both. In practice they pick one.
-  const [lmstudioInstalling, setLmstudioInstalling] = useState(false)
-  const [lmstudioStatus, setLmstudioStatus] = useState('')
-  const [lmstudioProgress, setLmstudioProgress] = useState(0)
-  const [lmstudioTotal, setLmstudioTotal] = useState(0)
-  const [lmstudioSpeed, setLmstudioSpeed] = useState(0)
-  const [lmstudioLogs, setLmstudioLogs] = useState<string[]>([])
-  const [lmstudioError, setLmstudioError] = useState('')
-  const [lmstudioReady, setLmstudioReady] = useState(false)
-  const [lmstudioStartTime, setLmstudioStartTime] = useState<number | null>(null)
-  const [lmstudioElapsed, setLmstudioElapsed] = useState(0)
+  // Der EINE Takt fuer alle vier Anzeigen. `elapsed` war viermal ein eigener
+  // `useState` mit einem eigenen `setInterval`, obwohl es nichts anderes ist
+  // als `jetzt − startedAt`. Gespeichert wird jetzt nur noch das „jetzt",
+  // gerechnet wird beim Rendern (elapsedSeconds in ./installer-state.ts).
+  const [now, setNow] = useState(() => Date.now())
+  const secondsOf = (startedAt: number | null) => elapsedSeconds(startedAt, now)
   // Set when LM Studio is installed on the box but its embedded server is
   // not currently listening on :1234. Surfaces a "Start LM Studio server"
   // primary action instead of pushing the user through a redundant 570 MB
@@ -199,13 +187,13 @@ export function Onboarding() {
     const providers = useProviderStore.getState().providers
 
     // Decide which backend the download has to feed. selectedBackend (set in
-    // the backends step) is the strongest signal; ollamaReady covers the
+    // the backends step) is the strongest signal; isReady(ollama) covers the
     // "we just installed Ollama in-app" path; final fallback is the first
     // detected backend, defaulting to ollama. The earlier code wrote a raw
     // .gguf into `~/.ollama/models` regardless — Ollama ignores files placed
     // there directly, which is the root cause of the "downloaded model
     // never appears" bug reported on Discord and GH discussion #35.
-    const targetBackend = resolveOnboardingBackend(selectedBackend, ollamaReady, detectedBackends)
+    const targetBackend = resolveOnboardingBackend(selectedBackend, isReady(ollama), detectedBackends)
     const kind = classifyOnboardingBackend(targetBackend)
     const useBuiltinPath = kind === 'builtin'
     const useOllamaPath = kind === 'ollama'
@@ -498,7 +486,7 @@ export function Onboarding() {
   // the bundled path too. Branching on isManagedBuiltinActive() dead-ended
   // LM Studio users on a machine that has no Ollama by explicit choice.
   const embedsViaBundled =
-    classifyOnboardingBackend(resolveOnboardingBackend(selectedBackend, ollamaReady, detectedBackends)) !== 'ollama'
+    classifyOnboardingBackend(resolveOnboardingBackend(selectedBackend, isReady(ollama), detectedBackends)) !== 'ollama'
 
   // Probe whether an embedding model is already present. For the built-in
   // engine (P5) and openai-compat backends we scan the app models dir via
@@ -598,35 +586,20 @@ export function Onboarding() {
 
   const showRecommendedBadge = existingModelCount === 0
 
-  // Elapsed timer for ComfyUI installation
+  // EIN Takt fuer alle vier Installer statt vier Intervallen (AS-09). Er
+  // laeuft nur, solange ueberhaupt einer laeuft, und er speichert die Uhr,
+  // nicht die vier daraus abgeleiteten Sekundenzaehler.
+  //
+  // Der Python-Fall ist der, der die Laufzeit ueberhaupt sichtbar macht
+  // (P14): winget zieht den Python-3.12-Installer (~30 MB) und faehrt ihn
+  // still durch — an einem normalen Anschluss 30–60 s, an einem langsamen
+  // ein paar Minuten.
+  const anyStartedAt = comfyInstall.startedAt ?? ollama.startedAt ?? lmstudio.startedAt ?? pythonInstall.startedAt
   useEffect(() => {
-    if (!installStartTime) return
-    const timer = setInterval(() => setElapsed(Math.floor((Date.now() - installStartTime) / 1000)), 1000)
+    if (anyStartedAt === null) return
+    const timer = setInterval(() => setNow(Date.now()), 1000)
     return () => clearInterval(timer)
-  }, [installStartTime])
-
-  // Elapsed timer for Ollama installation
-  useEffect(() => {
-    if (!ollamaStartTime) return
-    const timer = setInterval(() => setOllamaElapsed(Math.floor((Date.now() - ollamaStartTime) / 1000)), 1000)
-    return () => clearInterval(timer)
-  }, [ollamaStartTime])
-
-  // Elapsed timer for LM Studio installation
-  useEffect(() => {
-    if (!lmstudioStartTime) return
-    const timer = setInterval(() => setLmstudioElapsed(Math.floor((Date.now() - lmstudioStartTime) / 1000)), 1000)
-    return () => clearInterval(timer)
-  }, [lmstudioStartTime])
-
-  // Elapsed timer for Python installation (P14). winget pulls the Python
-  // 3.12 installer (~30 MB) and runs it silently; on a typical home
-  // connection this is ~30–60 s, but slow links can take a few minutes.
-  useEffect(() => {
-    if (!pythonStartTime) return
-    const timer = setInterval(() => setPythonElapsed(Math.floor((Date.now() - pythonStartTime) / 1000)), 1000)
-    return () => clearInterval(timer)
-  }, [pythonStartTime])
+  }, [anyStartedAt])
 
   /** Der Auto-Scan laeuft einmal pro Mount, sobald der comfyui-Schritt erreicht
    *  ist. Ref statt State: der Wert steuert keinen Render, sondern verhindert
@@ -678,10 +651,10 @@ export function Onboarding() {
             try {
               await backendCall('set_comfyui_path', { path: only.path })
             } catch (e) {
-              setComfyInstallError(withDetail(
+              comfyDo({ type: 'warn', error: withDetail(
                 `LU found ComfyUI at ${only.path} but could not save that location. Starting it may not work; set the path by hand below.`,
                 e,
-              ))
+              ) })
             }
             return
           }
@@ -715,14 +688,14 @@ export function Onboarding() {
     // and start_comfyui keeps using the old one. The lines below close the
     // dialog and report "found", so a swallowed failure here leaves the wizard
     // confidently showing a choice that was never made.
-    setComfyInstallError('')
+    comfyDo({ type: 'warn', error: '' })
     try {
       await backendCall('set_comfyui_path', { path: choice.path })
     } catch (e) {
-      setComfyInstallError(withDetail(
+      comfyDo({ type: 'warn', error: withDetail(
         `Could not switch ComfyUI to ${choice.path}. LU will keep using the location it had — try the pick again, or enter the path by hand below.`,
         e,
-      ))
+      ) })
       return
     }
     setComfyFound({ found: true, path: choice.path, complete: choice.complete })
@@ -743,18 +716,12 @@ export function Onboarding() {
       // Treat as "not available" and continue to install.
     }
 
-    setPythonInstalling(true)
-    setPythonInstallError('')
-    setPythonInstallLogs(['Installing Python 3.12 via winget…'])
-    setPythonStartTime(Date.now())
-    setPythonElapsed(0)
+    pythonDo({ type: 'start', at: Date.now(), log: 'Installing Python 3.12 via winget…' })
 
     try {
       await backendCall('install_python')
     } catch (err) {
-      setPythonInstalling(false)
-      setPythonStartTime(null)
-      setPythonInstallError(err instanceof Error ? err.message : 'Python install failed to start')
+      pythonDo({ type: 'fail', error: err instanceof Error ? err.message : 'Python install failed to start' })
       return false
     }
 
@@ -762,19 +729,14 @@ export function Onboarding() {
       const poll = setInterval(async () => {
         try {
           const status: any = await backendCall('install_python_status')
-          setPythonInstallLogs(status.logs || [])
+          pythonDo({ type: 'progress', status: status.status, logs: status.logs || [] })
           if (status.status === 'complete' || status.status === 'already_installed') {
             clearInterval(poll)
-            setPythonInstalling(false)
-            setPythonReady(true)
-            setPythonStartTime(null)
+            pythonDo({ type: 'ready' })
             resolve(true)
           } else if (status.status === 'error') {
             clearInterval(poll)
-            setPythonInstalling(false)
-            setPythonStartTime(null)
-            const lastLog = status.logs?.[status.logs.length - 1] || ''
-            setPythonInstallError(withInstallerOutput('Installing Python did not finish.', lastLog))
+            pythonDo({ type: 'fail', error: withInstallerOutput('Installing Python did not finish.', lastLog(status.logs)) })
             resolve(false)
           }
         } catch { /* keep polling */ }
@@ -792,9 +754,17 @@ export function Onboarding() {
       : 0
 
   // Shared button styles
-  const primaryBtn = `mx-auto flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[0.7rem] font-medium transition-all ${
-    isDark ? 'bg-white text-black hover:bg-gray-200' : 'bg-gray-900 text-white hover:bg-gray-800'
-  }`
+  //
+  // D-S36: `primaryBtn` war `bg-white text-black hover:bg-gray-200` (dunkel)
+  // bzw. `bg-gray-900 text-white hover:bg-gray-800` (hell). Der Hover machte
+  // den Knopf also DUNKLER als seinen Ruhezustand — im Screenshot des Audits
+  // liest Schritt 2 deshalb als deaktiviert. Das Rezept dafuer existiert seit
+  // f336b91e genau einmal, in index.css als `.lu-primary`, und rechnet seinen
+  // Kontrast nach (#a094f8 auf #111827 = 6.83:1 in Ruhe, #b1a6ff auf #111827
+  // = 8.25:1 im Hover — der Hover wird HELLER, nicht dunkler). Er hatte das
+  // Onboarding nur nie erreicht; AUDIT-COVERAGE fuehrt das unter D-A8 als
+  // ausdruecklichen Rest. Kein eigenes Rezept hier, sondern jenes.
+  const primaryBtn = 'lu-primary mx-auto flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[0.7rem] transition-all'
   const secondaryBtn = `mx-auto flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[0.7rem] font-medium transition-all ${
     isDark ? 'bg-white/10 text-white hover:bg-white/15' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
   }`
@@ -804,13 +774,22 @@ export function Onboarding() {
   const handleClose = async () => { const { getCurrentWindow } = await import('@tauri-apps/api/window'); getCurrentWindow().close() }
   const winBtn = 'inline-flex items-center justify-center w-[46px] h-8 transition-colors text-gray-400 hover:text-gray-200'
 
-  // Mac never visits 'comfyui' (see nextStepAfterBackends) — drop it from the
-  // dots too so the indicator doesn't show a step the user will never see.
-  const visibleStepOrder = isMacOS() ? STEP_ORDER.filter((s) => s !== 'comfyui') : STEP_ORDER
-  const stepIndex = visibleStepOrder.indexOf(step)
+  // D-S35: Mac ueberspringt 'comfyui' (siehe nextStepAfterBackends). Der
+  // Anzeiger zaehlt ausserdem nur noch die ARBEITSSCHRITTE — Willkommen ist
+  // ein Titelbild, Fertig eine Bestaetigung. Die Rechnung dazu steht in
+  // ./wizard-steps.ts und ist dort geprueft.
+  const workSteps = workStepsFor(isMacOS())
+  const progressNow = wizardProgress(step, isMacOS())
 
   return (
-    <div className={`h-screen w-screen flex items-center justify-center p-4 ${bgClass}`}>
+    // D-S38: vorher `items-center` auf einem h-screen-Kasten PLUS ein
+    // `fixed top-10`-Anzeiger. Die Punkte klebten damit an der Titelleiste
+    // (y=46), der Inhalt hing in der Fenstermitte (y=340) — 294px Niemandsland
+    // dazwischen, und die Punkte lasen als Teil des Fensterrahmens statt als
+    // Teil des Assistenten. Jetzt steht der Anzeiger IM Fluss, direkt ueber
+    // der Karte, und der Abstand ist der `gap` einer Spalte statt der Rest
+    // einer Zentrierung.
+    <div className={`h-screen w-screen flex flex-col items-center justify-center gap-5 p-4 ${bgClass}`}>
       {/* Drag region + window controls */}
       {isTauri && (
         <div data-tauri-drag-region className="fixed top-0 left-0 right-0 h-8 z-50 flex items-center justify-end select-none">
@@ -820,11 +799,19 @@ export function Onboarding() {
         </div>
       )}
 
-      {/* Step indicator dots */}
-      <div className="fixed top-10 left-1/2 -translate-x-1/2 z-40 flex gap-1.5">
-        {visibleStepOrder.map((s, i) => (
-          <div key={s} className={`w-1.5 h-1.5 rounded-full transition-colors ${i <= stepIndex ? (isDark ? 'bg-white' : 'bg-gray-900') : (isDark ? 'bg-white/15' : 'bg-gray-300')}`} />
-        ))}
+      {/* Step indicator — Punkte UND Text. Sechs anonyme Punkte konnten die
+          Frage „wie viele noch?" nicht beantworten; „Step 2 of 4 · Model"
+          kann es. Die Hoehe ist fest, damit ein Schrittwechsel die Karte
+          darunter nicht verschiebt. */}
+      <div className="h-8 flex flex-col items-center justify-end gap-1.5" aria-live="polite">
+        {progressNow && (<>
+          <div className="flex gap-1.5">
+            {workSteps.map((s, i) => (
+              <div key={s.step} className={`w-1.5 h-1.5 rounded-full transition-colors ${i < progressNow.filled ? (isDark ? 'bg-white' : 'bg-gray-900') : (isDark ? 'bg-white/15' : 'bg-gray-300')}`} />
+            ))}
+          </div>
+          <p className={`text-[0.6rem] ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>{progressNow.caption}</p>
+        </>)}
       </div>
 
       <AnimatePresence mode="wait">
@@ -837,7 +824,22 @@ export function Onboarding() {
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -20 }}
           >
-            <h1 className="text-base font-semibold">LU <span className="font-normal opacity-60">by LU Labs</span></h1>
+            {/* D-S37: war `text-base` = 1rem — die Willkommens-Ueberschrift
+                der App genau so gross wie ein Settings-Label. Soll laut Audit
+                28px/34px/600.
+                Warum `1.5rem` und keine feste px-Zahl: die 28px des Audits
+                sind eine MESSUNG am gerenderten Fenster, und das Wurzelmass
+                der App wird gerade umgestellt (D-A3, anderes Paket). Beide
+                Regime ergeben fuer 1.5rem dasselbe, weil 18,4 = 16 × 1,15:
+                  alt   1.5 × 18,4px                = 27,6 gerenderte px
+                  neu   1.5 × 16px × --ui-scale 1,15 = 27,6 gerenderte px
+                Zeilenhoehe 1,21 → 33,4px (Soll 34). Eine px-Angabe waere im
+                neuen Regime durch `zoom` auf 32,2px gelaufen.
+                Der Zusatz „by LU Labs" bleibt eine Stufe kleiner, damit die
+                Groesse dem Namen gehoert und nicht der ganzen Zeile. */}
+            <h1 className="text-[1.5rem] leading-[1.21] font-semibold tracking-tight">
+              LU <span className="text-[0.75rem] font-normal opacity-60 align-middle">by LU Labs</span>
+            </h1>
             <p className={`text-[0.75rem] leading-relaxed ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
               Private, local AI chat that works right away. No extra software to install. No servers, no tracking, everything stays on your machine.
             </p>
@@ -975,7 +977,7 @@ export function Onboarding() {
                 </p>
 
                 {/* Ollama ready state */}
-                {ollamaReady && (
+                {isReady(ollama) && (
                   <div className={`p-3 rounded-lg border ${isDark ? 'bg-green-500/10 border-green-500/20' : 'bg-green-50 border-green-200'}`}>
                     <div className="flex items-center gap-2 justify-center">
                       <Check size={14} className="text-green-400" />
@@ -988,28 +990,26 @@ export function Onboarding() {
                     Studio is on the box and just needs starting; pushing
                     Ollama in that situation is just noise and forces a
                     second 200 MB download. */}
-                {!ollamaInstalling && !ollamaReady && !lmstudioOfflineDetected && (
+                {!isRunning(ollama) && !isReady(ollama) && !lmstudioOfflineDetected && (
                   <button
                     onClick={async () => {
-                      setOllamaInstalling(true)
-                      setOllamaError('')
-                      setOllamaStartTime(Date.now())
-                      setOllamaElapsed(0)
+                      ollamaDo({ type: 'start', at: Date.now() })
                       try {
                         await backendCall('install_ollama')
                         const poll = setInterval(async () => {
                           try {
                             const s: any = await backendCall('install_ollama_status')
-                            setOllamaStatus(s.status || '')
-                            setOllamaLogs(s.logs || [])
-                            setOllamaProgress(s.download_progress || 0)
-                            setOllamaTotal(s.download_total || 0)
-                            setOllamaSpeed(s.download_speed || 0)
+                            ollamaDo({
+                              type: 'progress',
+                              status: s.status || '',
+                              logs: s.logs || [],
+                              received: s.download_progress || 0,
+                              total: s.download_total || 0,
+                              speed: s.download_speed || 0,
+                            })
                             if (s.status === 'complete') {
                               clearInterval(poll)
-                              setOllamaInstalling(false)
-                              setOllamaReady(true)
-                              setOllamaStartTime(null)
+                              ollamaDo({ type: 'ready' })
                               // Lock the model-download flow onto Ollama so
                               // GGUFs go through `ollama pull` (which produces
                               // a usable model) instead of a raw .gguf write
@@ -1017,61 +1017,54 @@ export function Onboarding() {
                               setSelectedBackend('ollama')
                             } else if (s.status === 'error') {
                               clearInterval(poll)
-                              setOllamaInstalling(false)
-                              setOllamaStartTime(null)
-                              const lastLog = s.logs?.[s.logs.length - 1] || ''
-                              setOllamaError(withInstallerOutput('Installing Ollama did not finish.', lastLog))
+                              ollamaDo({ type: 'fail', error: withInstallerOutput('Installing Ollama did not finish.', lastLog(s.logs)) })
                             }
                           } catch { /* keep polling */ }
                         }, 1000)
                       } catch (err) {
-                        setOllamaInstalling(false)
-                        setOllamaStartTime(null)
-                        setOllamaError(err instanceof Error ? err.message : 'Installation failed')
+                        ollamaDo({ type: 'fail', error: err instanceof Error ? err.message : 'Installation failed' })
                       }
                     }}
-                    className={`w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg text-[0.7rem] font-medium transition-all ${
-                      isDark ? 'bg-white text-black hover:bg-gray-200' : 'bg-gray-900 text-white hover:bg-gray-800'
-                    }`}
+                    className="lu-primary w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg text-[0.7rem] transition-all"
                   >
                     <Download size={14} /> Install Ollama
                   </button>
                 )}
 
                 {/* Install progress */}
-                {ollamaInstalling && (
+                {isRunning(ollama) && (
                   <div className={`p-3 rounded-lg border ${cardClass} text-left`}>
                     <div className="flex items-center justify-between mb-2">
                       <div className="flex items-center gap-2">
                         <Loader2 size={14} className="animate-spin text-blue-400" />
                         <span className="text-[0.7rem] font-medium">
-                          {ollamaStatus === 'downloading' ? 'Downloading Ollama...' :
-                           ollamaStatus === 'installing' ? 'Installing Ollama...' :
-                           ollamaStatus === 'starting' ? 'Starting Ollama...' :
+                          {ollama.status === 'downloading' ? 'Downloading Ollama...' :
+                           ollama.status === 'installing' ? 'Installing Ollama...' :
+                           ollama.status === 'starting' ? 'Starting Ollama...' :
                            'Setting up Ollama...'}
                         </span>
                       </div>
                       <span className={`text-[0.55rem] font-mono ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>
-                        {Math.floor(ollamaElapsed / 60)}:{String(ollamaElapsed % 60).padStart(2, '0')}
+                        {formatElapsed(secondsOf(ollama.startedAt))}
                       </span>
                     </div>
                     {/* Download progress bar */}
-                    {ollamaStatus === 'downloading' && ollamaTotal > 0 && (
+                    {ollama.status === 'downloading' && ollama.total > 0 && (
                       <div className="space-y-1">
-                        <ProgressBar progress={(ollamaProgress / ollamaTotal) * 100} />
+                        <ProgressBar progress={(ollama.received / ollama.total) * 100} />
                         <div className="flex justify-between">
                           <span className={`text-[0.55rem] ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>
-                            {formatBytes(ollamaProgress)} / {formatBytes(ollamaTotal)}
+                            {formatBytes(ollama.received)} / {formatBytes(ollama.total)}
                           </span>
                           <span className={`text-[0.55rem] ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>
-                            {ollamaSpeed > 0 ? `${formatBytes(ollamaSpeed)}/s` : ''}
+                            {ollama.speed > 0 ? `${formatBytes(ollama.speed)}/s` : ''}
                           </span>
                         </div>
                       </div>
                     )}
                     {/* Log lines */}
                     <div className={`text-[0.55rem] font-mono mt-1 max-h-16 overflow-y-auto space-y-0.5 ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>
-                      {ollamaLogs.slice(-4).map((log, i) => (
+                      {ollama.logs.slice(-4).map((log, i) => (
                         <p key={i}>{log}</p>
                       ))}
                     </div>
@@ -1079,12 +1072,12 @@ export function Onboarding() {
                 )}
 
                 {/* Error */}
-                {ollamaError && (
-                  <p className="text-[0.65rem] text-red-400 whitespace-pre-line">{ollamaError}</p>
+                {ollama.error && (
+                  <p className="text-[0.65rem] text-red-400 whitespace-pre-line">{ollama.error}</p>
                 )}
 
                 {/* LM Studio ready */}
-                {lmstudioReady && (
+                {isReady(lmstudio) && (
                   <div className={`p-3 rounded-lg border ${isDark ? 'bg-green-500/10 border-green-500/20' : 'bg-green-50 border-green-200'}`}>
                     <div className="flex items-center gap-2 justify-center">
                       <Check size={14} className="text-green-400" />
@@ -1100,28 +1093,26 @@ export function Onboarding() {
                     command handle it; the Rust side detects the existing
                     install and skips straight to bootstrap+server-start
                     instead of re-downloading. */}
-                {!lmstudioInstalling && !lmstudioReady && !ollamaInstalling && !ollamaReady && (
+                {!isRunning(lmstudio) && !isReady(lmstudio) && !isRunning(ollama) && !isReady(ollama) && (
                   <button
                     onClick={async () => {
-                      setLmstudioInstalling(true)
-                      setLmstudioError('')
-                      setLmstudioStartTime(Date.now())
-                      setLmstudioElapsed(0)
+                      lmstudioDo({ type: 'start', at: Date.now() })
                       try {
                         await backendCall('install_lmstudio')
                         const poll = setInterval(async () => {
                           try {
                             const s: any = await backendCall('install_lmstudio_status')
-                            setLmstudioStatus(s.status || '')
-                            setLmstudioLogs(s.logs || [])
-                            setLmstudioProgress(s.download_progress || 0)
-                            setLmstudioTotal(s.download_total || 0)
-                            setLmstudioSpeed(s.download_speed || 0)
+                            lmstudioDo({
+                              type: 'progress',
+                              status: s.status || '',
+                              logs: s.logs || [],
+                              received: s.download_progress || 0,
+                              total: s.download_total || 0,
+                              speed: s.download_speed || 0,
+                            })
                             if (s.status === 'complete') {
                               clearInterval(poll)
-                              setLmstudioInstalling(false)
-                              setLmstudioReady(true)
-                              setLmstudioStartTime(null)
+                              lmstudioDo({ type: 'ready' })
                               // Wire the OpenAI-compat provider to LM Studio so
                               // /v1/chat/completions calls hit the right port,
                               // and route GGUF downloads through the LM-Studio
@@ -1136,23 +1127,18 @@ export function Onboarding() {
                               })
                             } else if (s.status === 'error') {
                               clearInterval(poll)
-                              setLmstudioInstalling(false)
-                              setLmstudioStartTime(null)
-                              const lastLog = s.logs?.[s.logs.length - 1] || ''
-                              setLmstudioError(withInstallerOutput('Installing LM Studio did not finish.', lastLog))
+                              lmstudioDo({ type: 'fail', error: withInstallerOutput('Installing LM Studio did not finish.', lastLog(s.logs)) })
                             }
                           } catch { /* keep polling */ }
                         }, 1000)
                       } catch (err) {
-                        setLmstudioInstalling(false)
-                        setLmstudioStartTime(null)
-                        setLmstudioError(err instanceof Error ? err.message : 'Installation failed')
+                        lmstudioDo({ type: 'fail', error: err instanceof Error ? err.message : 'Installation failed' })
                       }
                     }}
-                    className={`w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-[0.7rem] font-medium transition-all ${
+                    className={`w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-[0.7rem] transition-all ${
                       lmstudioOfflineDetected
-                        ? (isDark ? 'bg-white text-black hover:bg-gray-200' : 'bg-gray-900 text-white hover:bg-gray-800')
-                        : (isDark ? 'bg-white/10 text-white hover:bg-white/15' : 'bg-gray-100 text-gray-700 hover:bg-gray-200')
+                        ? 'lu-primary'
+                        : `font-medium ${isDark ? 'bg-white/10 text-white hover:bg-white/15' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`
                     }`}
                   >
                     <Download size={14} />
@@ -1163,47 +1149,47 @@ export function Onboarding() {
                 )}
 
                 {/* LM Studio install progress */}
-                {lmstudioInstalling && (
+                {isRunning(lmstudio) && (
                   <div className={`p-3 rounded-lg border ${cardClass} text-left`}>
                     <div className="flex items-center justify-between mb-2">
                       <div className="flex items-center gap-2">
                         <Loader2 size={14} className="animate-spin text-purple-400" />
                         <span className="text-[0.7rem] font-medium">
-                          {lmstudioStatus === 'downloading' ? 'Downloading LM Studio...' :
-                           lmstudioStatus === 'installing' ? 'Installing LM Studio...' :
-                           lmstudioStatus === 'starting' ? 'Starting LM Studio server...' :
+                          {lmstudio.status === 'downloading' ? 'Downloading LM Studio...' :
+                           lmstudio.status === 'installing' ? 'Installing LM Studio...' :
+                           lmstudio.status === 'starting' ? 'Starting LM Studio server...' :
                            'Setting up LM Studio...'}
                         </span>
                       </div>
                       <span className={`text-[0.55rem] font-mono ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>
-                        {Math.floor(lmstudioElapsed / 60)}:{String(lmstudioElapsed % 60).padStart(2, '0')}
+                        {formatElapsed(secondsOf(lmstudio.startedAt))}
                       </span>
                     </div>
-                    {lmstudioStatus === 'downloading' && lmstudioTotal > 0 && (
+                    {lmstudio.status === 'downloading' && lmstudio.total > 0 && (
                       <div className="space-y-1">
-                        <ProgressBar progress={(lmstudioProgress / lmstudioTotal) * 100} />
+                        <ProgressBar progress={(lmstudio.received / lmstudio.total) * 100} />
                         <div className="flex justify-between">
                           <span className={`text-[0.55rem] ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>
-                            {formatBytes(lmstudioProgress)} / {formatBytes(lmstudioTotal)}
+                            {formatBytes(lmstudio.received)} / {formatBytes(lmstudio.total)}
                           </span>
                           <span className={`text-[0.55rem] ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>
-                            {lmstudioSpeed > 0 ? `${formatBytes(lmstudioSpeed)}/s` : ''}
+                            {lmstudio.speed > 0 ? `${formatBytes(lmstudio.speed)}/s` : ''}
                           </span>
                         </div>
                       </div>
                     )}
                     <div className={`text-[0.55rem] font-mono mt-1 max-h-16 overflow-y-auto space-y-0.5 ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>
-                      {lmstudioLogs.slice(-4).map((log, i) => (
+                      {lmstudio.logs.slice(-4).map((log, i) => (
                         <p key={i}>{log}</p>
                       ))}
                     </div>
                   </div>
                 )}
 
-                {lmstudioError && (
+                {lmstudio.error && (
                   <p role="alert" className="text-[0.65rem] text-red-400 whitespace-pre-line">
-                    {lmstudioError}
-                    {lmstudioError.toLowerCase().includes('didn\'t come up') && (
+                    {lmstudio.error}
+                    {lmstudio.error.toLowerCase().includes('didn\'t come up') && (
                       <button
                         // Level (c): this button lives INSIDE the error it is
                         // meant to clear, and the click wipes that error on the
@@ -1212,12 +1198,14 @@ export function Onboarding() {
                         // dud this file can produce. Put the outcome back into
                         // the same line the button came from.
                         onClick={() => {
-                          setLmstudioError('')
+                          // `warn`, nicht `fail`: hier laeuft keine
+                          // Installation, es wird nur ein Server angestossen.
+                          lmstudioDo({ type: 'warn', error: '' })
                           backendCall('start_lmstudio_server').catch((e) => {
-                            setLmstudioError(withDetail(
+                            lmstudioDo({ type: 'warn', error: withDetail(
                               'The LM Studio server did not start. Open LM Studio and start its local server from the Developer tab, then continue here.',
                               e,
-                            ))
+                            ) })
                           })
                         }}
                         className={`block mt-1 ${secondaryBtn}`}
@@ -1229,7 +1217,7 @@ export function Onboarding() {
                 )}
 
                 {/* Other alternatives collapsed */}
-                {!ollamaInstalling && !ollamaReady && (
+                {!isRunning(ollama) && !isReady(ollama) && (
                   <details className={`text-left ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
                     <summary className={`text-[0.6rem] cursor-pointer hover:underline ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>
                       Other backends
@@ -1260,17 +1248,17 @@ export function Onboarding() {
                 )}
 
                 <div className="flex items-center justify-center gap-2 pt-1">
-                  {!ollamaInstalling && !lmstudioInstalling && !ollamaReady && !lmstudioReady && (
+                  {!isRunning(ollama) && !isRunning(lmstudio) && !isReady(ollama) && !isReady(lmstudio) && (
                     <button onClick={runDetection} className={secondaryBtn}>
                       <RefreshCw size={12} /> Re-Scan
                     </button>
                   )}
-                  {(ollamaReady || lmstudioReady || (!ollamaInstalling && !lmstudioInstalling)) && (
+                  {(isReady(ollama) || isReady(lmstudio) || (!isRunning(ollama) && !isRunning(lmstudio))) && (
                     <button
                       onClick={() => setStep(nextStepAfterBackends())}
-                      className={(ollamaReady || lmstudioReady) ? primaryBtn : `${secondaryBtn} opacity-60`}
+                      className={(isReady(ollama) || isReady(lmstudio)) ? primaryBtn : `${secondaryBtn} opacity-60`}
                     >
-                      {(ollamaReady || lmstudioReady) ? <>Continue <ArrowRight size={14} /></> : <>Skip for now <ChevronRight size={12} /></>}
+                      {(isReady(ollama) || isReady(lmstudio)) ? <>Continue <ArrowRight size={14} /></> : <>Skip for now <ChevronRight size={12} /></>}
                     </button>
                   )}
                 </div>
@@ -1292,7 +1280,15 @@ export function Onboarding() {
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -20 }}
           >
-            <div className="w-3 h-3 rounded-full bg-purple-400 mx-auto" />
+            {/* D-S39: hier stand ein nackter 13,8px-Punkt in `bg-purple-400`
+                — im Screenshot des Audits nicht von einem fehlgeschlagenen
+                Icon-Load zu unterscheiden. Jetzt das Zeichen, um das es auf
+                diesem Schritt geht, auf der Leiterstufe ICON_LG (20px, siehe
+                ui/icon-size.ts) in einer weichen Akzentflaeche — dieselbe
+                Behandlung, die `Loader2` zwei Zeilen weiter unten bekommt. */}
+            <div className="mx-auto w-9 h-9 rounded-full bg-lu-accent-soft flex items-center justify-center">
+              <ImageIcon size={ICON_LG} className="text-lu-accent" />
+            </div>
             <h2 className="text-base font-semibold">Image & Video Generation</h2>
             <p className={`text-[0.7rem] ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
               Generate images and videos right from the app. We'll set everything up for you.
@@ -1360,7 +1356,7 @@ export function Onboarding() {
 
             {/* Found AND complete (a working install). The carcass case
                 is handled in the install-options block below. */}
-            {comfyFound?.found && comfyFound.complete !== false && !comfyInstalling && (
+            {comfyFound?.found && comfyFound.complete !== false && !isRunning(comfyInstall) && (
               <div className={`p-3 rounded-lg border ${isDark ? 'bg-green-500/10 border-green-500/20' : 'bg-green-50 border-green-200'}`}>
                 <div className="flex items-center gap-2 justify-center">
                   <Check size={14} className="text-green-400" />
@@ -1374,7 +1370,7 @@ export function Onboarding() {
                 P14: a found-but-incomplete dir is the ComfyUI carcass case;
                 the same install button restarts the flow (Python pre-flight
                 + git pull + pip install). */}
-            {comfyFound && (!comfyFound.found || comfyFound.complete === false) && !comfyInstalling && !pythonInstalling && !comfyReady && (
+            {comfyFound && (!comfyFound.found || comfyFound.complete === false) && !isRunning(comfyInstall) && !isRunning(pythonInstall) && !comfyReady && (
               <div className="space-y-2">
                 {comfyFound.found && comfyFound.complete === false && (
                   <div className={`p-2.5 rounded-lg border ${isDark ? 'bg-amber-500/10 border-amber-500/20' : 'bg-amber-50 border-amber-200'} text-left`}>
@@ -1392,26 +1388,25 @@ export function Onboarding() {
                     const pythonOk = await ensurePythonInstalled()
                     if (!pythonOk) return
 
-                    setComfyInstalling(true)
-                    setComfyInstallError('')
-                    setComfyInstallLogs(['Starting ComfyUI installation...'])
-                    setInstallStartTime(Date.now())
-                    setElapsed(0)
+                    comfyDo({ type: 'start', at: Date.now(), log: 'Starting ComfyUI installation...' })
                     try {
                       await backendCall('install_comfyui')
                       // Poll installation status
                       const poll = setInterval(async () => {
                         try {
                           const status: any = await backendCall('install_comfyui_status')
-                          setComfyInstallLogs(status.logs || [])
-                          setComfyDownloadProgress(status.download_progress || 0)
-                          setComfyDownloadTotal(status.download_total || 0)
-                          setComfyDownloadSpeed(status.download_speed || 0)
+                          comfyDo({
+                            type: 'progress',
+                            status: status.status,
+                            logs: status.logs || [],
+                            received: status.download_progress || 0,
+                            total: status.download_total || 0,
+                            speed: status.download_speed || 0,
+                          })
                           if (status.status === 'complete' || status.status === 'done') {
                             clearInterval(poll)
-                            setComfyInstalling(false)
+                            comfyDo({ type: 'ready' })
                             setComfyReady(true)
-                            setInstallStartTime(null)
                             // Auto-start ComfyUI.
                             //
                             // Level (b): the install DID finish, which is what
@@ -1421,36 +1416,30 @@ export function Onboarding() {
                             try {
                               await backendCall('start_comfyui')
                             } catch (e) {
-                              setComfyInstallError(withDetail(
+                              // `warn`, nicht `fail`: die Installation IST
+                              // durch — nur der Start danach nicht.
+                              comfyDo({ type: 'warn', error: withDetail(
                                 'ComfyUI is installed but did not start. You can start it from Settings → ComfyUI later; the rest of the setup is unaffected.',
                                 e,
-                              ))
+                              ) })
                             }
                           } else if (status.status === 'cancelled') {
                             // Bug #1: install cancelled by user, close the
                             // progress card and surface the install options
                             // again so they can retry or pick another drive.
                             clearInterval(poll)
-                            setComfyInstalling(false)
-                            setInstallStartTime(null)
-                            setComfyInstallError('Install cancelled.')
+                            comfyDo({ type: 'fail', error: 'Install cancelled.' })
                           } else if (status.status === 'error') {
                             clearInterval(poll)
-                            setComfyInstalling(false)
-                            setInstallStartTime(null)
-                            const lastLog = status.logs?.[status.logs.length - 1] || ''
-                            setComfyInstallError(withInstallerOutput('Installing ComfyUI did not finish.', lastLog))
+                            comfyDo({ type: 'fail', error: withInstallerOutput('Installing ComfyUI did not finish.', lastLog(status.logs)) })
                           }
                         } catch { /* keep polling */ }
                       }, 2000)
                     } catch (err) {
-                      setComfyInstalling(false)
-                      setComfyInstallError(err instanceof Error ? err.message : 'Installation failed')
+                      comfyDo({ type: 'fail', error: err instanceof Error ? err.message : 'Installation failed' })
                     }
                   }}
-                  className={`w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-[0.7rem] font-medium transition-all ${
-                    isDark ? 'bg-white text-black hover:bg-gray-200' : 'bg-gray-900 text-white hover:bg-gray-800'
-                  }`}
+                  className="lu-primary w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-[0.7rem] transition-all"
                 >
                   <Download size={14} /> Install ComfyUI (Recommended)
                 </button>
@@ -1494,13 +1483,13 @@ export function Onboarding() {
                           try {
                             await backendCall('start_comfyui')
                           } catch (e) {
-                            setComfyInstallError(withDetail(
+                            comfyDo({ type: 'warn', error: withDetail(
                               'The path was saved, but ComfyUI did not start from it. Check that the folder holds a complete ComfyUI install, then start it from Settings → ComfyUI.',
                               e,
-                            ))
+                            ) })
                           }
                         } catch (err) {
-                          setComfyInstallError(err instanceof Error ? err.message : 'Invalid path')
+                          comfyDo({ type: 'warn', error: err instanceof Error ? err.message : 'Invalid path' })
                         }
                       }}
                       className={primaryBtn}
@@ -1517,7 +1506,7 @@ export function Onboarding() {
                 installer. Sits ABOVE the ComfyUI install card so the user
                 can see the dependency chain (Python → ComfyUI) when both
                 run back-to-back from a single click. */}
-            {pythonInstalling && (
+            {isRunning(pythonInstall) && (
               <div className={`p-3 rounded-lg border ${cardClass} text-left`}>
                 <div className="flex items-center justify-between mb-2">
                   <div className="flex items-center gap-2">
@@ -1525,40 +1514,40 @@ export function Onboarding() {
                     <span className="text-[0.7rem] font-medium">Installing Python 3.12...</span>
                   </div>
                   <span className={`text-[0.55rem] font-mono ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>
-                    {Math.floor(pythonElapsed / 60)}:{String(pythonElapsed % 60).padStart(2, '0')}
+                    {formatElapsed(secondsOf(pythonInstall.startedAt))}
                   </span>
                 </div>
                 <p className={`text-[0.55rem] mb-2 ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>
                   ComfyUI needs Python to run pip. We're installing it via winget, about 30 MB and 30 to 60 s on a typical connection.
                 </p>
                 <div className={`text-[0.55rem] font-mono max-h-24 overflow-y-auto space-y-0.5 ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>
-                  {pythonInstallLogs.slice(-6).map((log, i) => (
+                  {pythonInstall.logs.slice(-6).map((log, i) => (
                     <p key={i}>{log}</p>
                   ))}
                 </div>
               </div>
             )}
-            {pythonInstallError && !pythonInstalling && (
-              <p className="text-[0.65rem] text-red-400 whitespace-pre-line">{pythonInstallError}</p>
+            {pythonInstall.error && !isRunning(pythonInstall) && (
+              <p className="text-[0.65rem] text-red-400 whitespace-pre-line">{pythonInstall.error}</p>
             )}
 
             {/* Installing progress */}
-            {comfyInstalling && (
+            {isRunning(comfyInstall) && (
               <div className={`p-3 rounded-lg border ${cardClass} text-left`}>
                 <div className="flex items-center justify-between mb-2">
                   <div className="flex items-center gap-2">
                     <Loader2 size={14} className="animate-spin text-purple-400" />
                     <span className="text-[0.7rem] font-medium">
-                      {comfyInstallLogs.some(l => l.toLowerCase().includes('cancel')) ? 'Cancelling ComfyUI install…' : 'Installing ComfyUI...'}
+                      {comfyInstall.logs.some(l => l.toLowerCase().includes('cancel')) ? 'Cancelling ComfyUI install…' : 'Installing ComfyUI...'}
                     </span>
                   </div>
                   <div className="flex items-center gap-2">
                     <span className={`text-[0.55rem] font-mono ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>
-                      {Math.floor(elapsed / 60)}:{String(elapsed % 60).padStart(2, '0')}
+                      {formatElapsed(secondsOf(comfyInstall.startedAt))}
                       {/* Bug #1: rolling ETA from download bytes when known. */}
-                      {comfyDownloadSpeed > 0 && comfyDownloadTotal > 0 && comfyDownloadProgress < comfyDownloadTotal && (() => {
-                        const remaining = comfyDownloadTotal - comfyDownloadProgress
-                        const etaSec = Math.round(remaining / Math.max(1, comfyDownloadSpeed))
+                      {comfyInstall.speed > 0 && comfyInstall.total > 0 && comfyInstall.received < comfyInstall.total && (() => {
+                        const remaining = comfyInstall.total - comfyInstall.received
+                        const etaSec = Math.round(remaining / Math.max(1, comfyInstall.speed))
                         const m = Math.floor(etaSec / 60)
                         const s = etaSec % 60
                         return ` • ETA ${m}:${String(s).padStart(2, '0')}`
@@ -1571,14 +1560,14 @@ export function Onboarding() {
                         // download. If the call fails the progress bar keeps
                         // filling and the button looks broken — and the user is
                         // still paying for the bandwidth.
-                        setComfyInstallError('')
+                        comfyDo({ type: 'warn', error: '' })
                         try {
                           await backendCall('cancel_comfyui_install')
                         } catch (e) {
-                          setComfyInstallError(withDetail(
+                          comfyDo({ type: 'warn', error: withDetail(
                             'The install could not be cancelled and is still running. Try Cancel once more; if it keeps going, closing LU stops the download.',
                             e,
-                          ))
+                          ) })
                         }
                       }}
                       className={`text-[0.55rem] px-1.5 py-[1px] rounded border transition-colors ${
@@ -1593,27 +1582,27 @@ export function Onboarding() {
                   </div>
                 </div>
                 {/* Disk pressure warning (push from Rust side) */}
-                {comfyInstallLogs.some(l => l.startsWith('⚠')) && (
+                {comfyInstall.logs.some(l => l.startsWith('⚠')) && (
                   <div className={`text-[0.55rem] mb-2 px-2 py-1 rounded ${isDark ? 'bg-amber-500/10 text-amber-300' : 'bg-amber-50 text-amber-800'}`}>
-                    {comfyInstallLogs.find(l => l.startsWith('⚠'))}
+                    {comfyInstall.logs.find(l => l.startsWith('⚠'))}
                   </div>
                 )}
                 {/* Download progress bar (shown during download phase) */}
-                {comfyInstallLogs.some(l => l.includes('Downloading')) && comfyDownloadTotal > 0 && (
+                {comfyInstall.logs.some(l => l.includes('Downloading')) && comfyInstall.total > 0 && (
                   <div className="space-y-1 mb-2">
-                    <ProgressBar progress={comfyDownloadTotal > 0 ? (comfyDownloadProgress / comfyDownloadTotal) * 100 : 0} />
+                    <ProgressBar progress={comfyInstall.total > 0 ? (comfyInstall.received / comfyInstall.total) * 100 : 0} />
                     <div className="flex justify-between">
                       <span className={`text-[0.55rem] ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>
-                        {formatBytes(comfyDownloadProgress)} / {formatBytes(comfyDownloadTotal)}
+                        {formatBytes(comfyInstall.received)} / {formatBytes(comfyInstall.total)}
                       </span>
                       <span className={`text-[0.55rem] ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>
-                        {comfyDownloadSpeed > 0 ? `${formatBytes(comfyDownloadSpeed)}/s` : ''}
+                        {comfyInstall.speed > 0 ? `${formatBytes(comfyInstall.speed)}/s` : ''}
                       </span>
                     </div>
                   </div>
                 )}
                 <div className={`text-[0.55rem] font-mono max-h-24 overflow-y-auto space-y-0.5 ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>
-                  {comfyInstallLogs.slice(-8).map((log, i) => (
+                  {comfyInstall.logs.slice(-8).map((log, i) => (
                     <p key={i}>{log}</p>
                   ))}
                 </div>
@@ -1621,8 +1610,8 @@ export function Onboarding() {
             )}
 
             {/* Error */}
-            {comfyInstallError && (
-              <p role="alert" className="text-[0.65rem] text-red-400 whitespace-pre-line">{comfyInstallError}</p>
+            {comfyInstall.error && (
+              <p role="alert" className="text-[0.65rem] text-red-400 whitespace-pre-line">{comfyInstall.error}</p>
             )}
 
             {/* Ready state */}
@@ -1647,7 +1636,7 @@ export function Onboarding() {
                   Continue <ArrowRight size={14} />
                 </button>
               )}
-              {!comfyInstalling && !pythonInstalling && (!comfyFound?.found || comfyFound.complete === false) && !comfyReady && (
+              {!isRunning(comfyInstall) && !isRunning(pythonInstall) && (!comfyFound?.found || comfyFound.complete === false) && !comfyReady && (
                 <>
                   <button
                     onClick={() => {
@@ -1787,9 +1776,7 @@ export function Onboarding() {
               {selectedModels.length > 0 && !isDownloading ? (
                 <button
                   onClick={handleDownloadSelected}
-                  className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-[0.7rem] font-medium transition-all ${
-                    isDark ? 'bg-white text-black hover:bg-gray-200' : 'bg-gray-900 text-white hover:bg-gray-800'
-                  }`}
+                  className="lu-primary flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-[0.7rem] transition-all"
                 >
                   <Download size={14} /> Install {selectedModels.length} model{selectedModels.length > 1 ? 's' : ''}
                 </button>

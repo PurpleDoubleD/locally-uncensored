@@ -1,48 +1,24 @@
-import { useState, useEffect, useCallback, useRef, type ReactNode, type ChangeEvent } from 'react'
+import { useState, useEffect, useRef, type ReactNode, type ChangeEvent } from 'react'
 import { withInstallerOutput, withDetail } from '../../lib/error-text'
-import { ArrowLeft, RotateCcw, Sun, Moon, Volume2, Check, X, Loader2, Shield, ChevronRight, GraduationCap, Lock, Sliders, Plug, Bot, Phone, User, Download, Mic } from 'lucide-react'
+import { ArrowLeft, RotateCcw, Sun, Moon, Check, Loader2, Shield, ChevronRight, GraduationCap, Lock, Sliders, Plug, Bot, Phone, User, Download, AlertTriangle } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { SETTINGS_TAB_RESET_KEYS, type SettingsTab } from '../../lib/settings-reset'
 import { armedScopeFor, type ResetArm, type ResetArmScope } from '../../lib/reset-arming'
+import { sectionAnchorId, sectionsFor, type SettingsSectionFlags } from './settings-nav'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { usePermissionStore } from '../../stores/permissionStore'
 import { useUIStore } from '../../stores/uiStore'
 import { SliderControl } from './SliderControl'
+import { InlineToggle } from './InlineToggle'
+import { SpeechSettings } from './SpeechSettings'
 import { LogFileSettings } from './LogFileSettings'
 import { PersonaPanel } from '../personas/PersonaPanel'
 import { AccountPanel } from '../auth/AccountPanel'
 import { useVoiceStore } from '../../stores/voiceStore'
-import { checkWhisperAvailable, checkTtsAvailable, downloadPiperVoice, listInstalledPiperVoices } from '../../api/voice'
 import { downloadSuffix } from '../../lib/formatters'
 
-// Curated local neural (Piper) voices the user can pick. Selecting one not yet
-// on disk downloads it (~63 MB). Ids match rhasspy/piper-voices.
-const PIPER_VOICES: { id: string; label: string }[] = [
-  { id: 'en_US-lessac-medium', label: 'Lessac, US, neutral' },
-  { id: 'en_US-amy-medium', label: 'Amy, US, female' },
-  { id: 'en_US-ryan-high', label: 'Ryan, US, male (high)' },
-  { id: 'en_US-hfc_female-medium', label: 'HFC, US, female' },
-  { id: 'en_GB-alba-medium', label: 'Alba, UK, female' },
-  { id: 'en_GB-northern_english_male-medium', label: 'Northern, UK, male' },
-]
-
-// MiniMax Speech-02 system voices for the hosted cloud TTS. The server route
-// (/api/voice/tts) forwards the id verbatim as voice_id and only validates the
-// character set; default is Wise_Woman.
-const CLOUD_TTS_VOICES: { id: string; label: string }[] = [
-  { id: 'Wise_Woman', label: 'Wise Woman, default' },
-  { id: 'Calm_Woman', label: 'Calm Woman' },
-  { id: 'Lively_Girl', label: 'Lively Girl' },
-  { id: 'Lovely_Girl', label: 'Lovely Girl' },
-  { id: 'Sweet_Girl_2', label: 'Sweet Girl' },
-  { id: 'Friendly_Person', label: 'Friendly Person' },
-  { id: 'Deep_Voice_Man', label: 'Deep Voice Man' },
-  { id: 'Casual_Guy', label: 'Casual Guy' },
-  { id: 'Patient_Man', label: 'Patient Man' },
-  { id: 'Determined_Man', label: 'Determined Man' },
-  { id: 'Elegant_Man', label: 'Elegant Man' },
-  { id: 'Young_Knight', label: 'Young Knight' },
-]
+// AS-09: PIPER_VOICES und CLOUD_TTS_VOICES sind mit dem Abschnitt, der sie
+// benutzt, nach ./SpeechSettings.tsx gezogen.
 import { useAgentModeStore } from '../../stores/agentModeStore'
 import { FEATURE_FLAGS } from '../../lib/constants'
 import { MemorySettings } from './MemorySettings'
@@ -146,12 +122,20 @@ function Section({ title, children, defaultOpen = false }: { title: string; chil
   const [open, setOpen] = useState(defaultOpen)
   const [animating, setAnimating] = useState(false)
   return (
-    <div className="border-b border-gray-100 dark:border-white/[0.04]">
+    // D-S27: `id` + `scroll-mt` machen die Sektion zum Sprungziel der Rail.
+    // Der Abstand nach oben haelt den Kopf unter dem klebenden Seitenkopf.
+    <div id={sectionAnchorId(title)} className="scroll-mt-16 border-b border-gray-100 dark:border-white/[0.04]">
       <button
         onClick={() => { setOpen(!open); setAnimating(true) }}
         className="w-full flex items-center justify-between py-2.5 group"
       >
-        <span className="text-[0.65rem] font-semibold uppercase tracking-[0.15em] text-gray-600 dark:text-gray-500 group-hover:text-gray-800 dark:group-hover:text-gray-300 transition-colors">
+        {/* D-S28: zwoelfmal 11,96px/600 uppercase gray-500 war kein Rang,
+            sondern zwoelfmal dieselbe Betonung — und im Dunkelmodus mit
+            3.37:1 (gray-500 #6b7280 auf #202020) unter WCAG AA. Der Kopf ist
+            jetzt eine echte Ueberschrift auf der Stufe darunter: 0.82rem =
+            15,1px bei 18,4px Wurzelmass, Satzstellung statt Versalien,
+            17.74:1 hell / 13.16:1 dunkel. Den Rang traegt die Rail. */}
+        <span className="text-[0.82rem] font-semibold text-gray-900 dark:text-gray-200 group-hover:text-black dark:group-hover:text-white transition-colors">
           {title}
         </span>
         <ChevronRight size={12} className={`text-gray-400 transition-transform duration-200 ${open ? 'rotate-90' : ''}`} />
@@ -207,25 +191,6 @@ function Disclosure({ label, children, defaultOpen = false }: { label: string; c
           </motion.div>
         )}
       </AnimatePresence>
-    </div>
-  )
-}
-
-// ── Inline Toggle ───────────────────────────────────────────────
-
-function InlineToggle({ label, enabled, onChange, icon }: { label: string; enabled: boolean; onChange: () => void; icon?: ReactNode }) {
-  return (
-    <div className="flex items-center justify-between py-0.5">
-      <div className="flex items-center gap-1.5">
-        {icon}
-        <span className="text-[0.7rem] text-gray-700 dark:text-gray-400">{label}</span>
-      </div>
-      <button
-        onClick={onChange}
-        className={`relative w-7 h-3.5 rounded-full transition-colors ${enabled ? 'bg-green-500' : 'bg-gray-300 dark:bg-gray-700'}`}
-      >
-        <span className={`absolute top-0.5 left-0.5 w-2.5 h-2.5 rounded-full bg-white transition-transform ${enabled ? 'translate-x-3.5' : ''}`} />
-      </button>
     </div>
   )
 }
@@ -1072,25 +1037,43 @@ function ResetSection({ tab }: { tab: SettingsTab }) {
   }
 
   return (
-    <div className="pt-3 pb-6 space-y-1.5">
-      <div className="flex items-center gap-3">
-        <button
-          onClick={() => handleClick('section')}
-          className={`flex items-center gap-1.5 text-[0.65rem] transition-colors ${
-            armed === 'section' ? 'text-red-400 font-medium' : 'text-gray-500 hover:text-red-400'
-          }`}
-        >
-          <RotateCcw size={11} />
-          {armed === 'section' ? `Click again to reset ${tabLabel}` : `Reset ${tabLabel} to defaults`}
-        </button>
+    <div className="pt-3 pb-6 space-y-2.5">
+      {/* D-S29: die beiden Reset-Aktionen sahen gleich aus — zwei graue
+          Textlinks nebeneinander, von denen einer sehr viel mehr loescht.
+          Die gefaehrlichere traegt jetzt eine eigene Form (umrandete
+          Gefahrfarbe statt Textlink), eine eigene Zeile und einen Satz, der
+          den Unterschied benennt. Gerechnet (WCAG 2.1): red-600 #dc2626 auf
+          Weiss 4.83:1, red-400 #f87171 auf #202020 5.89:1 — Text UND Kante,
+          also auch 1.4.11 (3:1) fuer die Umrandung erfuellt. Vorher stand
+          "Reset all settings" im Dunkelmodus auf gray-600 = 2.16:1, war also
+          ausgerechnet die unlesbarere der beiden.
+          Der Textlink darueber bleibt Zeile fuer Zeile so, wie er war:
+          src/lib/__tests__/reset-arming-is-visible.test.ts pinnt seine
+          Klassen woertlich. */}
+      <button
+        onClick={() => handleClick('section')}
+        className={`flex items-center gap-1.5 text-[0.65rem] transition-colors ${
+          armed === 'section' ? 'text-red-400 font-medium' : 'text-gray-500 hover:text-red-400'
+        }`}
+      >
+        <RotateCcw size={11} />
+        {armed === 'section' ? `Click again to reset ${tabLabel}` : `Reset ${tabLabel} to defaults`}
+      </button>
+      <div className="flex items-start gap-2.5">
         <button
           onClick={() => handleClick('all')}
-          className={`flex items-center gap-1.5 text-[0.6rem] transition-colors ${
-            armed === 'all' ? 'text-red-400 font-medium' : 'text-gray-600 dark:text-gray-600 hover:text-red-400'
+          className={`shrink-0 inline-flex items-center gap-1.5 px-2 py-1 rounded-md border text-[0.6rem] transition-colors ${
+            armed === 'all'
+              ? 'bg-red-600 border-red-600 text-white font-medium'
+              : 'border-red-600 text-red-600 hover:bg-red-600/10 dark:border-red-400 dark:text-red-400 dark:hover:bg-red-400/10'
           }`}
         >
+          <AlertTriangle size={11} />
           {armed === 'all' ? 'Click again to reset everything' : 'Reset all settings'}
         </button>
+        <p className="text-[0.55rem] text-gray-500 dark:text-gray-400 leading-snug pt-1">
+          Every tab, not just {tabLabel}.
+        </p>
       </div>
       {done && (
         <div className="flex items-center gap-1.5 text-[0.6rem] text-emerald-500">
@@ -1110,22 +1093,6 @@ export function SettingsPage() {
   // app-managed built-in engine (same gate as the send-path self-heal).
   const builtinManaged = useProviderStore((s) => !!s.providers.openai?.enabled && s.providers.openai?.managed === true)
   const { setView } = useUIStore()
-  const voiceSettings = useVoiceStore()
-  const [whisperStatus, setWhisperStatus] = useState<{ available: boolean; backend: string | null; error?: string } | null>(null)
-  const [whisperLoading, setWhisperLoading] = useState(true)
-  // §24.9 — in-app faster-whisper install. `installing` drives the spinner;
-  // `whisperInstallError` shows the last failure under the badge.
-  const [whisperInstalling, setWhisperInstalling] = useState(false)
-  const [whisperInstallError, setWhisperInstallError] = useState<string | null>(null)
-  // Neural TTS (Piper) install state — mirrors the whisper installer.
-  const [ttsStatus, setTtsStatus] = useState<{ available: boolean } | null>(null)
-  const [ttsLoading, setTtsLoading] = useState(true)
-  const [ttsInstalling, setTtsInstalling] = useState(false)
-  const [ttsInstallError, setTtsInstallError] = useState<string | null>(null)
-  // Piper voice picker state.
-  const [installedVoices, setInstalledVoices] = useState<string[]>([])
-  const [voiceBusy, setVoiceBusy] = useState(false)
-  const [voiceError, setVoiceError] = useState<string | null>(null)
   // Where the navigation that opened this page wanted to land. Read ONCE, at
   // mount, and held for this mount's whole life: `defaultOpen` below is an
   // initial value, so a focus that vanished from the store on the next render
@@ -1151,181 +1118,110 @@ export function SettingsPage() {
   }, [tab])
 
 
-  // The three probes are stabilised with useCallback ON PURPOSE, not for
-  // speed: the mount effect below has to list them as dependencies, and a
-  // function rebuilt on every render would re-run the effect on every render.
-  // `voiceSettings` is `useVoiceStore()` — the WHOLE store, so it changes on
-  // every store write, including the writes these probes make themselves.
-  // Reaching for the actions through selectors instead keeps the closures
-  // pinned to values that never change: zustand defines its actions once in
-  // create(), so setSttAvailable/setTtsAvailable are the same references for
-  // the life of the store.
-  const setSttAvailable = useVoiceStore((s) => s.setSttAvailable)
-  const setTtsAvailable = useVoiceStore((s) => s.setTtsAvailable)
-
-  const refreshWhisper = useCallback(() => {
-    setWhisperLoading(true)
-    return checkWhisperAvailable()
-      .then((s) => {
-        setWhisperStatus(s)
-        // Drive the mic button's availability from the same probe so it lights
-        // up immediately after the in-app install — no restart needed.
-        setSttAvailable(!!s.available)
-      })
-      .finally(() => setWhisperLoading(false))
-  }, [setSttAvailable])
-
-  const refreshTts = useCallback(() => {
-    setTtsLoading(true)
-    // Read the voice at call time rather than closing over it. It is what
-    // every caller already means — handlePickVoice sets the new voice and
-    // then asks "is TTS available now?", which is a question about the NEW
-    // voice — and it keeps this callback free of a dependency that changes.
-    return checkTtsAvailable(useVoiceStore.getState().piperVoice)
-      .then((s) => {
-        setTtsStatus(s)
-        // Same as STT: drive the read-aloud button availability from this probe
-        // so it lights up right after the in-app install.
-        setTtsAvailable(!!s.available)
-      })
-      .finally(() => setTtsLoading(false))
-  }, [setTtsAvailable])
-
-  const refreshVoices = useCallback(
-    () =>
-      listInstalledPiperVoices()
-        .then(setInstalledVoices)
-        // Level (a): silent on purpose. This only fills the voice DROPDOWN. If
-        // the list cannot be read the dropdown stays on its last contents and
-        // every real action here — picking a voice, downloading one — reports
-        // its own failure through setVoiceError below. A second message for
-        // "the list did not refresh" would be noise on a screen that already
-        // says what went wrong.
-        .catch(() => {}),
-    [],
-  )
-
-  useEffect(() => {
-    void refreshWhisper()
-    void refreshTts()
-    void refreshVoices()
-  }, [refreshWhisper, refreshTts, refreshVoices])
-
-  // §24.9 — kick off the faster-whisper install, poll its status, then
-  // re-check availability so the badge flips ✗ → ✓ without a restart.
-  const handleInstallWhisper = async () => {
-    if (whisperInstalling) return
-    setWhisperInstallError(null)
-    setWhisperInstalling(true)
-    try {
-      await backendCall('install_whisper')
-      // Poll install status until it leaves "installing" (cap ~10 min — a
-      // model download on a slow link can be lengthy; pip itself is quick).
-      const start = Date.now()
-      // eslint-disable-next-line no-constant-condition
-      while (true) {
-        await new Promise((r) => setTimeout(r, 2000))
-        let s: { status?: string; error?: string } = {}
-        try {
-          s = await backendCall<{ status?: string; error?: string }>('install_whisper_status')
-        } catch { /* transient — keep polling */ }
-        if (s.status === 'complete') break
-        if (s.status === 'error') {
-          setWhisperInstallError(withInstallerOutput('Installing speech to text did not finish.', s.error))
-          break
-        }
-        if (Date.now() - start > 600_000) {
-          setWhisperInstallError('Install is taking unusually long, check the logs / try again.')
-          break
-        }
-      }
-    } catch (e) {
-      setWhisperInstallError(e instanceof Error ? e.message : String(e))
-    } finally {
-      setWhisperInstalling(false)
-      await refreshWhisper()
-    }
-  }
-
-  // Install Piper neural TTS (pip + voice download) the same end-user way as
-  // whisper, polling install_tts_status until done, then re-checking the badge.
-  const handleInstallTts = async () => {
-    if (ttsInstalling) return
-    setTtsInstallError(null)
-    setTtsInstalling(true)
-    try {
-      await backendCall('install_tts')
-      const start = Date.now()
-      // eslint-disable-next-line no-constant-condition
-      while (true) {
-        await new Promise((r) => setTimeout(r, 2000))
-        let s: { status?: string; error?: string } = {}
-        try {
-          s = await backendCall<{ status?: string; error?: string }>('install_tts_status')
-        } catch { /* transient — keep polling */ }
-        if (s.status === 'complete') break
-        if (s.status === 'error') {
-          setTtsInstallError(withInstallerOutput('Installing read aloud did not finish.', s.error))
-          break
-        }
-        if (Date.now() - start > 600_000) {
-          setTtsInstallError('Install is taking unusually long, check the logs / try again.')
-          break
-        }
-      }
-    } catch (e) {
-      setTtsInstallError(e instanceof Error ? e.message : String(e))
-    } finally {
-      setTtsInstalling(false)
-      await refreshTts()
-    }
-  }
-
-  // Pick a Piper voice. If it isn't on disk yet, download it (~63 MB), then
-  // re-check the installed list + TTS availability. The selection is applied
-  // optimistically (so the dropdown reflects the pick) but REVERTED if the
-  // download fails — otherwise piperVoice pointed at a missing model and every
-  // read fell back to the Windows SAPI voice (#77, ElBiggus).
-  const handlePickVoice = async (id: string) => {
-    setVoiceError(null)
-    const prev = voiceSettings.piperVoice
-    voiceSettings.setPiperVoice(id)
-    if (installedVoices.includes(id)) return
-    setVoiceBusy(true)
-    try {
-      await downloadPiperVoice(id)
-      await refreshVoices()
-      await refreshTts()
-    } catch (e) {
-      voiceSettings.setPiperVoice(prev)
-      setVoiceError(e instanceof Error ? e.message : String(e))
-    } finally {
-      setVoiceBusy(false)
-    }
+  // D-S27: die Bedingungen, unter denen einzelne Sektionen ueberhaupt
+  // erscheinen, stehen ab hier EINMAL — die Rail liest sie ueber
+  // sectionsFor(), das JSX weiter unten benutzt dieselben Ausdruecke.
+  const sectionFlags: SettingsSectionFlags = {
+    gpuPicker: !isMlxImageHost(),
+    builtinExpert: builtinManaged,
+    comfyui: !isMlxImageHost(),
+    agentMode: FEATURE_FLAGS.AGENT_MODE,
+    agentWorkflows: FEATURE_FLAGS.AGENT_WORKFLOWS,
+    mediaTimeouts: settings.appMode !== 'cloud' && !isMlxImageHost(),
   }
 
   return (
     <div className="h-full overflow-y-auto scrollbar-thin">
-      <div className="max-w-lg mx-auto px-4 py-4">
-        {/* Header */}
-        <div className="flex items-center gap-2 mb-4">
+      {/* D-S27 / D-S48: vorher `max-w-lg mx-auto` — eine 552px-Spalte, die in
+          der Fenstermitte schwebte und bei 1600px links und rechts je ~524px
+          Leere stehen liess. Die Zeilenlaenge war richtig, die Aufhaengung
+          nicht. Jetzt: 200px-Rail links, Inhalt linksbuendig daneben, gedeckelt
+          auf 640px (Soll des Audits). Die Rail erscheint ab `lg` (1024px
+          Fensterbreite); darunter bleibt die waagerechte Tab-Leiste, weil
+          200 + 640 in einem 900px-Fenster mit Sidebar nicht nebeneinander
+          passen — und bei 900px sah der Screen laut Audit ohnehin besser aus
+          als bei 1600px. */}
+      <div className="flex gap-6 px-4 py-4 lg:px-8">
+        <nav
+          aria-label="Settings sections"
+          className="hidden lg:flex w-[200px] shrink-0 flex-col gap-4 sticky top-4 self-start max-h-[calc(100vh-6rem)] overflow-y-auto scrollbar-thin"
+        >
+          <div className="flex items-center gap-2">
+            <button onClick={() => setView('chat')} className="p-1 rounded hover:bg-gray-200 dark:hover:bg-white/5 text-gray-500 hover:text-gray-900 dark:hover:text-white transition-colors" aria-label="Back to chat">
+              <ArrowLeft size={16} />
+            </button>
+            {/* D-S28: die Spitze der Leiter. 1.15rem = 21,2px bei 18,4px
+                Wurzelmass — eine Stufe der 12/13/15/17/21/28-Skala des
+                Audits, und endlich groesser als ein Sektionskopf. */}
+            <h1 className="text-[1.15rem] font-semibold leading-tight text-gray-900 dark:text-gray-100">Settings</h1>
+          </div>
+
+          <div className="flex flex-col gap-0.5">
+            {SETTINGS_TABS.map(t => (
+              <div key={t.id}>
+                {/* D-S30: Zustand und Aktion trugen dieselbe Flaeche
+                    (`bg-gray-200 dark:bg-white/10` hier wie am Upload-Knopf).
+                    Der ausgewaehlte Tab spricht jetzt die Zustandssprache:
+                    Akzentflaeche + Akzentkante links. Aktionen behalten die
+                    neutrale graue Flaeche. Gerechnet: die Kante
+                    #8b7cf0 auf Weiss 3.37:1 und #a094f8 auf #202020 6.27:1 —
+                    beide ueber den 3:1 aus WCAG 1.4.11 fuer Nicht-Text. */}
+                <button
+                  onClick={() => setTab(t.id)}
+                  aria-current={tab === t.id ? 'page' : undefined}
+                  className={`w-full inline-flex items-center gap-1.5 pl-2 pr-2.5 py-1.5 rounded-md text-[0.7rem] font-medium border-l-2 transition-colors ${
+                    tab === t.id
+                      ? 'bg-lu-accent-soft border-l-lu-accent-edge dark:border-l-lu-accent text-gray-900 dark:text-white'
+                      : 'border-l-transparent text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/[0.04]'
+                  }`}
+                >
+                  {t.icon}
+                  {t.label}
+                </button>
+                {tab === t.id && (
+                  <ul className="mt-1 mb-1 ml-[0.6rem] border-l border-gray-200 dark:border-white/[0.08]">
+                    {sectionsFor(t.id, sectionFlags).map(title => (
+                      <li key={title}>
+                        <a
+                          href={`#${sectionAnchorId(title)}`}
+                          className="block pl-3 pr-1 py-[3px] text-[0.62rem] leading-snug text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 transition-colors"
+                        >
+                          {title}
+                        </a>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            ))}
+          </div>
+        </nav>
+
+        <div className="min-w-0 w-full max-w-[640px]">
+        {/* Header — nur unterhalb von `lg`; ab da traegt die Rail Titel und
+            Zurueck-Knopf. */}
+        <div className="lg:hidden flex items-center gap-2 mb-4">
           <button onClick={() => setView('chat')} className="p-1 rounded hover:bg-gray-200 dark:hover:bg-white/5 text-gray-500 hover:text-gray-900 dark:hover:text-white transition-colors">
             <ArrowLeft size={16} />
           </button>
-          <h1 className="text-[0.8rem] font-semibold text-gray-800 dark:text-gray-200">Settings</h1>
+          <h1 className="text-[1.15rem] font-semibold leading-tight text-gray-900 dark:text-gray-100">Settings</h1>
         </div>
 
         {/* P5: top-level tabs. Sticky so the user can switch tabs from
-            anywhere in a long Section without scrolling back up. */}
-        <div className="sticky top-0 z-10 -mx-4 px-4 pb-2 mb-2 bg-white/80 dark:bg-[#202020]/80 backdrop-blur supports-[backdrop-filter]:bg-white/60 dark:supports-[backdrop-filter]:bg-[#202020]/60 border-b border-gray-100 dark:border-white/[0.06]">
+            anywhere in a long Section without scrolling back up. Ab `lg`
+            uebernimmt die Rail diese Aufgabe — zwei gleichzeitig sichtbare
+            Navigationen fuer dieselbe Sache waeren genau der Befund, den
+            D-S27 beschreibt. */}
+        <div className="lg:hidden sticky top-0 z-10 -mx-4 px-4 pb-2 mb-2 bg-white/80 dark:bg-[#202020]/80 backdrop-blur supports-[backdrop-filter]:bg-white/60 dark:supports-[backdrop-filter]:bg-[#202020]/60 border-b border-gray-100 dark:border-white/[0.06]">
           <div className="flex items-center gap-1 overflow-x-auto scrollbar-thin">
             {SETTINGS_TABS.map(t => (
               <button
                 key={t.id}
                 onClick={() => setTab(t.id)}
+                aria-current={tab === t.id ? 'page' : undefined}
                 className={`shrink-0 inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-[0.65rem] font-medium transition-colors ${
                   tab === t.id
-                    ? 'bg-gray-200 dark:bg-white/10 text-gray-900 dark:text-white'
+                    ? 'bg-lu-accent-soft ring-1 ring-lu-accent-edge dark:ring-lu-accent text-gray-900 dark:text-white'
                     : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-white/[0.04]'
                 }`}
               >
@@ -1383,13 +1279,19 @@ export function SettingsPage() {
             </button>
           </Section>
           <Section title="Appearance">
+            {/* D-S30, zweite Haelfte des Befundes: „Dark" (ein ZUSTAND) und
+                „Upload" in AvatarSetting (eine AKTION) trugen beide
+                `bg-gray-200 dark:bg-white/10`. Zustand spricht ab hier
+                ueberall dieselbe Sprache wie der aktive Tab — Akzentflaeche
+                mit Akzentkante — und die neutrale graue Flaeche bleibt den
+                Aktionen. */}
             <div className="flex items-center justify-between">
               <span className="text-[0.7rem] text-gray-700 dark:text-gray-400">Theme</span>
               <div className="flex gap-1">
                 <button
                   onClick={() => updateSettings({ theme: 'light' })}
                   className={`flex items-center gap-1 px-2 py-1 rounded text-[0.65rem] transition-colors ${
-                    settings.theme === 'light' ? 'bg-gray-200 dark:bg-white/10 text-gray-900 dark:text-white' : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
+                    settings.theme === 'light' ? 'bg-lu-accent-soft ring-1 ring-lu-accent-edge dark:ring-lu-accent text-gray-900 dark:text-white' : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
                   }`}
                 >
                   <Sun size={11} /> Light
@@ -1397,7 +1299,7 @@ export function SettingsPage() {
                 <button
                   onClick={() => updateSettings({ theme: 'dark' })}
                   className={`flex items-center gap-1 px-2 py-1 rounded text-[0.65rem] transition-colors ${
-                    settings.theme === 'dark' ? 'bg-gray-200 dark:bg-white/10 text-gray-900 dark:text-white' : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
+                    settings.theme === 'dark' ? 'bg-lu-accent-soft ring-1 ring-lu-accent-edge dark:ring-lu-accent text-gray-900 dark:text-white' : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
                   }`}
                 >
                   <Moon size={11} /> Dark
@@ -1718,178 +1620,7 @@ export function SettingsPage() {
         {/* ── Voice & Remote tab ────────────────────────── */}
         {tab === 'voice-remote' && (<>
           <Section title="Speech" defaultOpen>
-            {settings.appMode === 'cloud' ? (<>
-              {/* Cloud mode: dictation + read-aloud are hosted on lu-labs.ai —
-                  honest copy (audio leaves the machine, metered), no local
-                  install buttons, and a picker for the hosted MiniMax voice. */}
-              <p className="text-[0.55rem] text-gray-500 leading-snug">
-                Cloud mode: dictation and read-aloud run on lu-labs.ai (hosted Whisper speech-to-text + MiniMax text-to-speech) and are metered against your credits. No local installs needed.
-              </p>
-              <InlineToggle label="Enable read-aloud" enabled={voiceSettings.ttsEnabled} onChange={() => voiceSettings.updateVoiceSettings({ ttsEnabled: !voiceSettings.ttsEnabled })} icon={<Volume2 size={11} className="text-gray-500" />} />
-              {voiceSettings.ttsEnabled && (
-                <InlineToggle label="Auto-read new responses" enabled={voiceSettings.autoReadAloud} onChange={() => voiceSettings.updateVoiceSettings({ autoReadAloud: !voiceSettings.autoReadAloud })} icon={<Volume2 size={11} className="text-gray-500" />} />
-              )}
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-[0.7rem] text-gray-500">Voice</span>
-                <select
-                  value={voiceSettings.cloudTtsVoice}
-                  onChange={(e) => voiceSettings.updateVoiceSettings({ cloudTtsVoice: e.target.value })}
-                  className="max-w-[210px] px-1.5 py-0.5 rounded bg-transparent border border-white/8 text-[0.65rem] text-gray-300 focus:outline-none"
-                >
-                  {CLOUD_TTS_VOICES.map((v) => (
-                    <option key={v.id} value={v.id}>{v.label}</option>
-                  ))}
-                </select>
-              </div>
-            </>) : (<>
-            <p className="text-[0.55rem] text-gray-500 leading-snug">
-              Voice runs 100% locally, no cloud. Each engine is a one-time local install.
-            </p>
-
-            {/* Speech-to-Text — faster-whisper (powers the microphone / dictation) */}
-            <div className="flex items-center gap-2 text-[0.65rem]">
-              <span className="flex items-center gap-1.5">
-                {whisperLoading
-                  ? <Loader2 size={11} className="animate-spin text-gray-500" />
-                  : whisperStatus?.available ? <Check size={11} className="text-green-500" /> : <X size={11} className="text-red-500" />}
-                <Mic size={11} className="text-gray-400" />
-                <span className="text-gray-700 dark:text-gray-200 font-medium">Speech-to-Text</span>
-                <span className="text-gray-500">faster-whisper</span>
-              </span>
-              {!whisperLoading && whisperStatus && !whisperStatus.available && (
-                <button
-                  onClick={() => void handleInstallWhisper()}
-                  disabled={whisperInstalling}
-                  className="ml-auto inline-flex items-center gap-1 px-2 py-0.5 rounded text-[0.6rem] font-medium bg-blue-500/15 text-blue-400 border border-blue-500/30 hover:bg-blue-500/25 transition-colors disabled:opacity-50"
-                  title="Download + install faster-whisper so the microphone works"
-                >
-                  {whisperInstalling ? <Loader2 size={9} className="animate-spin" /> : <Download size={9} />}
-                  {whisperInstalling ? 'Installing…' : 'Download & Install'}
-                </button>
-              )}
-            </div>
-            {whisperInstallError && (
-              <p className="text-[0.55rem] text-red-400/90 leading-snug">{whisperInstallError}</p>
-            )}
-            {!whisperLoading && whisperStatus && !whisperStatus.available && !whisperInstalling && !whisperInstallError && (
-              <p className="text-[0.55rem] text-gray-500 leading-snug">
-                Required for the microphone. Installs faster-whisper into LU's Python; first run also downloads a small model.
-              </p>
-            )}
-
-            {/* Text-to-Speech, Piper neural (read responses aloud) */}
-            <div className="flex items-center gap-2 text-[0.65rem] pt-1">
-              <span className="flex items-center gap-1.5">
-                {ttsLoading
-                  ? <Loader2 size={11} className="animate-spin text-gray-500" />
-                  : ttsStatus?.available ? <Check size={11} className="text-green-500" /> : <X size={11} className="text-red-500" />}
-                <Volume2 size={11} className="text-gray-400" />
-                <span className="text-gray-700 dark:text-gray-200 font-medium">Text-to-Speech</span>
-                <span className="text-gray-500">Piper neural</span>
-              </span>
-              {!ttsLoading && ttsStatus && !ttsStatus.available && (
-                <button
-                  onClick={() => void handleInstallTts()}
-                  disabled={ttsInstalling}
-                  className="ml-auto inline-flex items-center gap-1 px-2 py-0.5 rounded text-[0.6rem] font-medium bg-blue-500/15 text-blue-400 border border-blue-500/30 hover:bg-blue-500/25 transition-colors disabled:opacity-50"
-                  title="Download + install Piper neural TTS + a voice (~63 MB)"
-                >
-                  {ttsInstalling ? <Loader2 size={9} className="animate-spin" /> : <Download size={9} />}
-                  {ttsInstalling ? 'Installing…' : 'Download & Install'}
-                </button>
-              )}
-            </div>
-            {ttsInstallError && (
-              <p className="text-[0.55rem] text-red-400/90 leading-snug">{ttsInstallError}</p>
-            )}
-            {/* #77: read-aloud silently fell back to the system voice while this
-                row showed a healthy green check — surface the recorded reason. */}
-            {voiceSettings.ttsMode === 'piper' && voiceSettings.ttsFallbackReason && (
-              <p className="text-[0.55rem] text-amber-400/90 leading-snug">
-                {voiceSettings.ttsFallbackReason} If an antivirus quarantined Piper, whitelist it or reinstall the voice below.
-              </p>
-            )}
-            {!ttsLoading && ttsStatus && !ttsStatus.available && !ttsInstalling && !ttsInstallError && (
-              <p className="text-[0.55rem] text-gray-500 leading-snug">
-                Required for read-aloud. Installs Piper + a neural voice locally (~63 MB).
-              </p>
-            )}
-
-            <InlineToggle label="Enable read-aloud" enabled={voiceSettings.ttsEnabled} onChange={() => voiceSettings.updateVoiceSettings({ ttsEnabled: !voiceSettings.ttsEnabled })} icon={<Volume2 size={11} className="text-gray-500" />} />
-            {/* Auto-read is a SEPARATE opt-in (default OFF). The toggle above only
-                surfaces the per-message Speaker button; this one also reads each
-                finished response aloud (#77, ElBiggus, the old single toggle was
-                labelled "Read responses aloud" but never auto-read). */}
-            {voiceSettings.ttsEnabled && (
-              <InlineToggle label="Auto-read new responses" enabled={voiceSettings.autoReadAloud} onChange={() => voiceSettings.updateVoiceSettings({ autoReadAloud: !voiceSettings.autoReadAloud })} icon={<Volume2 size={11} className="text-gray-500" />} />
-            )}
-            {/* Neural voice picker (Piper), replaces the old Microsoft/browser
-                voices (David 2026-06-06). Picking one not yet on disk downloads
-                it (~63 MB). Browser-only rate/pitch knobs dropped, they didn't
-                apply to Piper. */}
-            <div className="flex items-center justify-between gap-2">
-              <span className="text-[0.7rem] text-gray-500 flex items-center gap-1">
-                Voice {voiceBusy && <Loader2 size={10} className="animate-spin text-gray-500" />}
-              </span>
-              <select
-                value={voiceSettings.piperVoice}
-                onChange={(e) => void handlePickVoice(e.target.value)}
-                disabled={voiceBusy}
-                className="max-w-[210px] px-1.5 py-0.5 rounded bg-transparent border border-white/8 text-[0.65rem] text-gray-300 focus:outline-none disabled:opacity-50"
-              >
-                {PIPER_VOICES.map((v) => (
-                  <option key={v.id} value={v.id}>
-                    {v.label}{installedVoices.includes(v.id) ? '' : ', download'}
-                  </option>
-                ))}
-              </select>
-            </div>
-            {voiceBusy && <p className="text-[0.55rem] text-gray-500 leading-snug">Downloading voice (~63 MB)…</p>}
-            {voiceError && <p className="text-[0.55rem] text-red-400/90 leading-snug">{voiceError}</p>}
-
-            {/* TTS engine — bundled Piper, or an external OpenAI-compatible HTTP
-                endpoint like Kokoro-FastAPI (GitHub #58). */}
-            <div className="flex items-center justify-between gap-2 pt-1">
-              <span className="text-[0.7rem] text-gray-500">Engine</span>
-              <div className="flex items-center gap-1 text-[0.6rem]">
-                {(['piper', 'external'] as const).map((m) => (
-                  <button
-                    key={m}
-                    onClick={() => voiceSettings.updateVoiceSettings({ ttsMode: m })}
-                    className={
-                      'px-2 py-0.5 rounded border transition-colors ' +
-                      (voiceSettings.ttsMode === m
-                        ? 'bg-gray-200 dark:bg-white/15 text-gray-900 dark:text-white border-gray-300 dark:border-white/20'
-                        : 'text-gray-500 border-white/8 hover:text-gray-300')
-                    }
-                  >
-                    {m === 'piper' ? 'Piper neural' : 'External HTTP'}
-                  </button>
-                ))}
-              </div>
-            </div>
-            {voiceSettings.ttsMode === 'external' && (
-              <div className="space-y-1.5">
-                <input
-                  value={voiceSettings.externalTtsUrl}
-                  onChange={(e) => voiceSettings.updateVoiceSettings({ externalTtsUrl: e.target.value })}
-                  placeholder="http://localhost:8880/v1/audio/speech"
-                  spellCheck={false}
-                  className="w-full px-2 py-1 rounded bg-transparent border border-white/8 text-[0.65rem] text-gray-300 placeholder-gray-600 focus:outline-none focus:border-white/20"
-                />
-                <input
-                  value={voiceSettings.externalTtsVoice}
-                  onChange={(e) => voiceSettings.updateVoiceSettings({ externalTtsVoice: e.target.value })}
-                  placeholder="voice name (e.g. af_bella, alloy)"
-                  spellCheck={false}
-                  className="w-full px-2 py-1 rounded bg-transparent border border-white/8 text-[0.65rem] text-gray-300 placeholder-gray-600 focus:outline-none focus:border-white/20"
-                />
-                <p className="text-[0.55rem] text-gray-500 leading-snug">
-                  Any OpenAI-compatible TTS endpoint (e.g. Kokoro-FastAPI). Used for read-aloud instead of Piper. Stays on your machine when the endpoint is local.
-                </p>
-              </div>
-            )}
-            </>)}
+            <SpeechSettings />
           </Section>
 
           <Section title="Remote Access">
@@ -1904,6 +1635,7 @@ export function SettingsPage() {
 
         {/* ── Reset (GitHub #59: per-tab scope + confirm + feedback) ── */}
         <ResetSection tab={tab} />
+        </div>
       </div>
     </div>
   )
