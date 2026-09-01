@@ -16,7 +16,7 @@ Zeile für Zeile: welcher Audit-Befund ist im Branch `experiment/audits-komplett
 
 ## 1. Bilanz
 
-Gemessen am HEAD `b3f0f786`. Die Zählung des Audits („12 kritisch, 34 hoch, 30 mittel, 2 niedrig") meint die **CONFIRMED**-Befunde; die Befundtabelle §4b hat 85 Zeilen, weil 7 als *unbewiesen* markierte dazukommen (1 kritisch, 3 hoch, 3 mittel). Diese Matrix führt alle 85.
+Gemessen am HEAD `287903aa`. Die Zählung des Audits („12 kritisch, 34 hoch, 30 mittel, 2 niedrig") meint die **CONFIRMED**-Befunde; die Befundtabelle §4b hat 85 Zeilen, weil 7 als *unbewiesen* markierte dazukommen (1 kritisch, 3 hoch, 3 mittel). Diese Matrix führt alle 85.
 
 ### Technik-Audit — 85 Befunde
 
@@ -38,17 +38,18 @@ Gezählt sind §3 (10 Amateur-Signale), §4 (49 Screen-Bullets), §5 (13 Token-Z
 
 | Status | Signale | Screens (49) | Tokens (13) | **gesamt** |
 |---|---|---|---|---|
-| umgesetzt | 10 | 31 | 4 | **45** |
-| teilweise | 0 | 5 | 3 | **8** |
+| umgesetzt | 10 | 35 | 4 | **49** |
+| teilweise | 0 | 4 | 3 | **7** |
+| begründet abgelehnt | 0 | 2 | 0 | **2** |
 | war schon behoben | 0 | 2 | 0 | **2** |
-| **OFFEN** | **2** | **11** | **6** | **19** |
+| **OFFEN** | **2** | **6** | **6** | **14** |
 
 Verifikationsgrad, Design: der Anteil `per Test` ist von 12 auf über 30 gestiegen, weil jedes Paket seit dem letzten Stand Sonden mitbringen musste. Was **nicht** per Test geht, ist jede DOM-Messung des Audits (Pixelabstände, Spaltenbreiten): der Testlauf hat keinen Renderer (`environment: 'node'`). Bewiesen ist dort jeweils die benannte **Ursache**, nicht die Zahl — außer wo ausdrücklich „Live-Messung" steht, dann lief ein echter Dev-Server.
 
 
 ### Das Gesamtbild in einem Satz
 
-Der Technik-Audit ist zu **94 %** umgesetzt und in seinen beiden schweren Klassen vollständig (50 von 50); von den drei verbliebenen Positionen sind zwei nicht meine Entscheidung. Der Design-Audit steht bei **61 % ganz und 11 % halb** — bei der letzten Aufnahme waren es 25 %. „Ausnahmslos" stimmt für den Technik-Audit inzwischen fast und für den Design-Audit noch nicht, und ich sage das lieber hier, als es in einer Zahl zu verstecken.
+Der Technik-Audit ist zu **94 %** umgesetzt und in seinen beiden schweren Klassen vollständig (50 von 50); von den drei verbliebenen Positionen sind zwei nicht meine Entscheidung. Der Design-Audit steht bei **67 % ganz, 10 % halb und 3 % begründet abgelehnt** — bei der ersten Aufnahme waren es 25 %. Offen sind noch 14. „Ausnahmslos" stimmt für den Technik-Audit inzwischen fast; beim Design-Audit sage ich lieber die Zahl als ein Wort.
 
 > **Stand der Messung.** Alles unten ist am committeten HEAD gemessen. Im Arbeitsbaum liegen zum Zeitpunkt dieser Aufnahme uncommittete Änderungen von drei parallel arbeitenden Agenten (Chat/Header-Design, Persistenz-Rennen, Tailwind-Scan); sie sind hier **nicht** eingerechnet.
 
@@ -232,10 +233,10 @@ Der Design-Audit vergibt keine IDs. Vergeben sind hier: **D-A1…D-A10** (§3, d
 | D-S11 | `WorkingAnchor` ist im Standbild Fließtext | `WorkingAnchor.tsx:38` | umgesetzt | `b3f0f786` | per Test (Kontrast nachgerechnet) | Chip mit Kante und Radius, pulsierender Punkt über die vorhandene `.lu-band-dot` (kein zweites Motion-Rezept), `.t-control` statt eigener Zahl, `lu-hud-num` statt handgeschriebenem `font-mono tabular-nums`. **Alle drei tragenden Merkmale wirken ohne Bewegung** — das war der Kern des Befundes („im Standbild"). `role="status"` + `aria-live="polite"`, Uhr und Punkt `aria-hidden`, sonst spricht die Ansage im 250-ms-Takt. Punktfarbe nachgerechnet: `#a094f8` auf `gray-50` = 2,49:1 zu wenig, deshalb hell die Kantenfarbe `#8b7cf0` = 3,22:1. |
 | D-S12 | Stop-Button trägt Rot | `ChatInput.tsx:445` | umgesetzt | `8198495f` | per Test (`composer-grammar.test.ts:262`) | `.lu-control` neutral; Auffindbarkeit läuft über `data-active` statt über die Fehlerfarbe. Die Begründung („Stop ist der Normalabschluss“) steht in `index.css:600`. |
 | D-S13 | Paperclip und Mic auf `opacity-20` | `ChatInput.tsx:383` | umgesetzt | `8198495f` | per Test (`composer-grammar.test.ts:335`) | `.lu-control:disabled { opacity: .4 }` (`index.css:759-762`). |
-| D-S14 | Doppelte Kürzung des Titels | `Sidebar.tsx:465` | **OFFEN** | — | nur Review | `Sidebar.tsx:557`: `truncate(conv.title, 30)` **und** CSS-`truncate` unverändert. |
-| D-S15 | Hover-Icons behalten ihren Layoutplatz | `Sidebar.tsx:486` | **OFFEN** | — | nur Review | `Sidebar.tsx:578`: `opacity-0 group-hover:opacity-100`, kein `absolute`/`hidden`. |
-| D-S16 | 698 von 899px Sidebarhöhe leer | `Sidebar.tsx:593` | **OFFEN** | — | nicht verifizierbar hier (Messung) | Struktur und Position der Primäraktion unverändert (`Sidebar.tsx:318`, `:675`). |
-| D-S17 | Vier Control-Höhen auf 250px Breite | `Sidebar.tsx`, `index.css:68-70` | **OFFEN** | — | nur Review | Kein `--control-h-*` in der Sidebar (`:514`, `:557`, `:331`, `:678`); die Tokens wurden nur im Composer neu erschlossen. |
+| D-S14 | Doppelte Kürzung des Titels | `Sidebar.tsx:465` | umgesetzt | `287903aa` | per Test + Live-Messung | **Die JS-Kürzung hat nie ein Zeichen entfernt.** Gemessen: die Titelbox ist 118,02 gerenderte px breit, darin passen 14 Zeichen; 30 Zeichen bräuchten 229,27 px. Sie wartete auf eine doppelt so breite Spalte, die es nie gab. Der schwerere Grund für ihren Ausbau ist ein anderer: `truncate(t, 30)` schreibt drei echte Punkte **in den Text** — Kopieren, Vorlesen und `title=` bekamen den beschnittenen String. Jetzt steht der volle Titel im `title`-Attribut; einen Tooltip gab es dort vorher gar nicht. |
+| D-S15 | Hover-Icons behalten ihren Layoutplatz | `Sidebar.tsx:486` | umgesetzt | `287903aa` | per Test (beide Seiten gepinnt) + Live-Messung | Die Leiste belegte dauerhaft 62,66 gerenderte px (= 54,5 CSS-px, die „~55px" des Audits bestätigt) und bestimmte mit ihren 26-px-Knöpfen die Zeilenhöhe — die Zeile war so hoch wie etwas, das man 99 % der Zeit nicht sieht. Jetzt `absolute`. **Der Unterschied zu D-S07 ist die Achse, nicht die Meinung:** dort belegt die Leiste *Höhe* in einem scrollenden Protokoll, hier *Breite* in einer Zeile mit fester Höhe (gemessen 32 px in Ruhe, bei Hover und bei Fokus). Ein Test hält **beide** Seiten fest, damit die zwei Dateien nicht unbemerkt aufeinander zulaufen. `absolute` statt `hidden`, weil `display:none` nicht fokussierbar ist und das Kontextmenü der Zeile nur am Zeiger hängt. Ergebnis: Titelbox 118,02 → **180,67** px, **14 → 22 Zeichen**. |
+| D-S16 | 698 von 899px Sidebarhöhe leer | `Sidebar.tsx:593` | **begründet abgelehnt** | `287903aa` | per Live-Messung | Leere Fläche 592,9 px = **71 % der Sidebar-Höhe** bei 0 Konversationen — der Befund stimmt. Aber die Leere ist eine Funktion der Historienlänge, nicht des Layouts: 15 Zeilen füllten die Spalte vorher, **17** nachher (Zeilenhöhe 36 → 32 aus D-S17). Geprüft und verworfen: die Primäraktion nach oben zu holen kostet gemessen **null Pixel** (die Liste ist `flex-1` zwischen zwei festen Blöcken) — es gäbe also keine Messung, die die eine Position von der anderen unterscheidet, nur eine Konvention. Eine Verschiebung wäre eine Geschmacksentscheidung im Gewand eines Fixes; Zusatzsektionen wären Füllstoff. **Kein Test**, weil ein Test auf eine Nicht-Änderung ohne Fix grün bliebe und nichts bewiese. Gemeldet, nicht geändert: im Erstlauf navigiert die einzige Aktion 594 px unter „No conversations" bei fehlendem Modell **weg** in die Modellansicht. |
+| D-S17 | Vier Control-Höhen auf 250px Breite | `Sidebar.tsx`, `index.css:68-70` | umgesetzt | `287903aa` | per Test (exakte Stufe) + Live-Messung + eigene Sonde | **Es waren fünf Höhen, nicht vier** (26/30/31/33/36) — zwei davon nebeneinander in derselben Reiterzeile. Jetzt zwei benannte Stufen, keine fünfte erfunden. Zuordnung nach **Bedeutung**, nicht nach nächstem Zahlenwert: `sm` (26) ist das Maß der Composer-Werkzeugleiste und kommt in dieser Spalte nicht vor; dass der Remote-Reiter zufällig schon auf 26 stand, war kein Argument. Meine eigene Sonde: das Suchfeld auf die falsche, aber ebenfalls *benannte* Stufe → 2 rot. Die Tests nageln die exakte Stufe fest, nicht nur die Abwesenheit roher Höhen — einer heißt wörtlich „und nur sie". |
 | D-S18 | Drei Bänder vor dem ersten Inhalt | `ChatView.tsx:181` | **teilweise** | `b3f0f786` | per Test | Das dritte Band ist unter das Transkript gezogen, zu den anderen Sitzungsanzeigen — nichts darin gehört zur nächsten Nachricht. Vor dem ersten Inhalt bleiben **zwei** statt drei. **Offen bleibt** der Schritt von 2 auf 1: er hieße Titlebar und Header verschmelzen und damit Fensterknöpfe und macOS-Ampel-Einzug verlegen. Die Titlebar rendert außerhalb von Tauri `null`, war also weder im Browser sichtbar noch ohne Tauri-Build prüfbar. Blind an der Fensterchrome zu operieren wäre ein echtes Regressionsrisiko für einen kosmetischen Gewinn. |
 | D-S19 | Rechts 9 Elemente, Center-Slot leer | `Header.tsx:231/288-372` | umgesetzt | `b3f0f786` | per Test (`die-kopfzeile-hat-eine-regel.test.ts`) | Die sechs Navigationsziele in den Center-Slot, in ein echtes `<nav aria-label="Main">`. Rechts stehen genau **vier** Dinge, und alle vier zeigen oder schalten einen Zustand. Der Slot ist damit auf jeder View gefüllt. Nebenbei fällt die eigentliche Gefahr: die Ziele standen **viermal** als JSX (`textNav`, `dropdownNav`, zwei Compare-Fassungen), `appMode !== 'cloud'` viermal als Bedingung — jetzt eine `NAV_TARGETS`-Liste und ein Filter, Leiste und Menü können nicht mehr auseinanderlaufen. Nimmt zwei `eslint`-Fehler mit (`setView(view as any)`). |
 | D-S20 | Overflow-Breakpoint `lg` oder `xl` je nach View | `Header.tsx:296-299` | umgesetzt | `b3f0f786` | per Test | Ein Breakpoint (`lg`) für beide Views, `isCreateView` ist weg. Möglich, **weil** die Leiste jetzt überall gleich voll ist — ihr Umbruch kann nicht mehr von ihrem Inhalt abhängen. |
@@ -264,10 +265,10 @@ Der Design-Audit vergibt keine IDs. Vergeben sind hier: **D-A1…D-A10** (§3, d
 | D-S43 | Think-Pill ≈ 2,3:1 auf Weiß | `ChatInput.tsx:417` | umgesetzt | `8198495f` | per Test (`composer-grammar.test.ts:420`) | Aktiv-Zustand hell ist `rgba(0,0,0,.05)` + gray-900 (`index.css:735-742`). |
 | D-S44 | Create-Wurzel setzt `text-gray-200` ohne `dark:` | `CreateExperimental.tsx:134` | umgesetzt | `f336b91e` | per Test (`primary-recipe.test.ts:157`) | `:196` jetzt `text-gray-900 dark:text-gray-200` — an der Wurzel korrigiert, nicht im Rescue-Layer nachgefangen. |
 | D-S45 | Composer bricht bei 900px in zwei Zeilen | `ChatInput.tsx:378` | war schon behoben | vor `10bfa0d7` | nur Review | `base/src/components/chat/ChatInput.tsx:400` trägt bereits `flex flex-nowrap` samt Kommentar „It used to be flex-wrap“. |
-| D-S46 | 407px nutzbare Eingabebreite von 900px | `Sidebar`, `ChatInput.tsx:246` | **OFFEN** (teilweise) | `bcec642b` | nicht verifizierbar hier (Messung) | Der Composer-Anteil ist weg (`--lu-measure` statt `max-w-[70%]`), die Sidebar bleibt fix (200px × `zoom:1.25`, `Sidebar.tsx:318-320`). |
+| D-S46 | 407px nutzbare Eingabebreite von 900px | `Sidebar`, `ChatInput.tsx:246` | umgesetzt | `287903aa` | per Live-Messung | **Meine Notiz war veraltet.** Ich hatte „Sidebar fix bei 200px × `zoom:1.25`" geführt; das `zoom` ist mit `c7076fca` weg, gemessen ist `zoom === "1"`. Die **407 px sind heute 527,75 px** bei 900 px Fenster. Ab ~1150 px liegt der Composer an seinem Entwurfsdeckel und die Sidebar kostet ihn **nichts** — Tauris Standardfenster ist 1280×800, also genau dieser Fall. Bleibt bewusst so: eine fensterabhängige Sidebarbreite wäre ein zweiter Maßstab neben `--ui-scale`, derselbe Fehler wie in D-S49. |
 | D-S47 | Kebab-Regel ist nicht erkennbar | `Header.tsx` | umgesetzt | `b3f0f786` | per Test | Das Kebab steht jetzt bei dem, was es aufnimmt. Die Regel ist an der Anordnung ablesbar statt nur gedacht: was in der Nav-Gruppe steht, ist ein Ziel und klappt zusammen; was rechts steht, ist ein Zustand und klappt nie — der Test verlangt, dass die rechte Gruppe kein `lg:` trägt. |
 | D-S48 | Settings skaliert nach oben nicht | `SettingsPage.tsx:1297` | **teilweise** | `51732e63` | per Live-Messung | Was jetzt mitskaliert, ist die Navigation. Die **Inhaltsspalte wächst bewusst nicht** mit dem Fenster — die Zeilenlänge war laut Audit richtig. Bei 1440px bleiben 413px Leere rechts, statt 2 × 412 verteilt. |
-| D-S49 | Kein einziger Schriftgrößen-Breakpoint | app-weit | **OFFEN** | — | nur Review | 0 Treffer für `(sm\|md\|lg\|xl\|2xl):text-` in `base/` wie in `head/`. |
+| D-S49 | Kein einziger Schriftgrößen-Breakpoint | app-weit | **begründet abgelehnt** | `287903aa` | per Test (Wache) + Live-Messung | Layout-Breakpoints beantworten „passt es noch" — 38 davon stehen im Code. Schriftgrößen-Breakpoints beantworten „wie groß", und das beantwortet seit `c7076fca` `--ui-scale` an genau einer Stelle. Gemessen: bei 900 px Fensterbreite trifft `matchMedia('(min-width: 768px)')` zu, während ein Kasten **innerhalb** `#root` 783 CSS-px breit ist (900 / 1,15) — der `md:`-Schalter feuert bei 783 statt 768, und der Versatz ist exakt `--ui-scale`. Zwei Regler, und der Nutzer sähe das Produkt. Der Test ist eine **Wache, keine Sonde**; dass sie zubeißt, ist gezeigt (`md:text-[15px]` eingeschmuggelt → genau ein roter Test). |
 
 ### 3.3 Design-Token-Diff (§5, 13 Zeilen)
 
@@ -340,9 +341,9 @@ Die Wellen sind Fixes, keine eigenen Befunde; sie stehen hier, weil der Auftrag 
 | ZB-7 | `vite.config.ts` ist **2.486 Zeilen** (Audit maß 2.466, Ziel < 100). Die Guards sind extrahiert und getestet, der Dev-Server steckt weiter in der Build-Konfiguration. |
 | AS-10 | Lint ist weiterhin kein Gate (`ci.yml`: `Lint (non-gating — pre-existing debt)`). Die Schuld dahinter ist stark abgetragen, der Befund — „ein dauerhaft rotes Gate ist kein Gate" — steht. |
 
-### 4.3 Design — 19 offene und 8 halbe Befunde
+### 4.3 Design — 14 offene und 7 halbe Befunde
 
-*Aus der Haupttabelle abgeleitet, Stand dieses Commits. Diese Liste war zweimal veraltet, solange sie von Hand geführt wurde.*
+*Aus der Haupttabelle abgeleitet, Stand dieses Commits. Zwei Positionen (D-S16, D-S49) stehen nicht hier: sie sind **begründet abgelehnt**, also entschieden — nachzulesen mit Messung an ihrer Zeile.*
 
 **Amateur-Signale (§3) (2):**
 
@@ -365,16 +366,12 @@ Die Wellen sind Fixes, keine eigenen Befunde; sie stehen hier, weil der Auftrag 
 | D-T11 | Motion | halb |
 | D-T13 | Platzhalter |  |
 
-**Screen-Bullets (§4) (16):**
+**Screen-Bullets (§4) (10):**
 
 | ID | Was offen ist | |
 |---|---|---|
 | D-S03 | „New Chat“ schwächer als die aktive Zeile |  |
 | D-S04 | Dritter Modus-Tab ohne Label |  |
-| D-S14 | Doppelte Kürzung des Titels |  |
-| D-S15 | Hover-Icons behalten ihren Layoutplatz |  |
-| D-S16 | 698 von 899px Sidebarhöhe leer |  |
-| D-S17 | Vier Control-Höhen auf 250px Breite |  |
 | D-S18 | Drei Bänder vor dem ersten Inhalt | halb |
 | D-S29 | Zwei gleich aussehende Reset-Textlinks | halb |
 | D-S31 | Banner und Empty-State widersprechen sich |  |
@@ -382,9 +379,7 @@ Die Wellen sind Fixes, keine eigenen Befunde; sie stehen hier, weil der Auftrag 
 | D-S33 | „Neg“ sieht aus wie ein zweiter Platzhalter |  |
 | D-S34 | Rechte 45px-Leiste mit zwei unbeschrifteten Icons |  |
 | D-S39 | Nackter Punkt statt Icon in Schritt 3 | halb |
-| D-S46 | 407px nutzbare Eingabebreite von 900px | halb |
 | D-S48 | Settings skaliert nach oben nicht | halb |
-| D-S49 | Kein einziger Schriftgrößen-Breakpoint |  |
 
 ### 4.4 Was daran auffällt
 
