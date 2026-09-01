@@ -2473,15 +2473,6 @@ export function useCodex() {
         }
       }
 
-      // ── Memory extraction (parity with Chat + Agent) ────────────────
-      // After the turn lands a final answer, run the lightweight extractor
-      // on the (user, assistant) pair so long-term preferences / facts get
-      // remembered in Codex too. The extractor has its own autoExtractEnabled
-      // guard + rate-limit + short-response skip, so we just fire-and-forget.
-      if (convId && fullContent) {
-        void extractMemoriesFromPair(instruction, fullContent, convId).catch(() => {})
-      }
-
       // Plan mode finished: put the plan up for approval (plan C1, blocker
       // S7). The card carries the FULL answer, the concrete commands and
       // target paths, not the todo titles: the plan is a function of untrusted
@@ -2525,6 +2516,20 @@ export function useCodex() {
         },
         [flushChatPersist, flushStagedPersist],
       )
+
+      // ── Memory extraction (parity with Chat + Agent) ────────────────
+      // After the turn lands a final answer, run the lightweight extractor
+      // on the (user, assistant) pair so long-term preferences / facts get
+      // remembered in Codex too. The extractor has its own autoExtractEnabled
+      // guard + rate-limit + short-response skip, so we just fire-and-forget.
+      //
+      // BELOW the turn end, which is where Chat and Agent have always had it
+      // and where Code did not: it used to run in the statement above, so the
+      // extractor's synchronous prologue ran before this turn's write had
+      // started. Fire-and-forget or not, nothing gets to go first.
+      if (convId && fullContent) {
+        void extractMemoriesFromPair(instruction, fullContent, convId).catch(() => {})
+      }
 
       // The per-batch bump above only fires when a batch RETURNS. A user who
       // aborts mid-run (David 2026-07-31: files on disk, panel still showing

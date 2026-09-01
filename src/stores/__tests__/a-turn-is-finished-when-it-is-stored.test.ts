@@ -176,6 +176,65 @@ describe('a turn is finished when it is stored', () => {
   })
 })
 
+const HOOKS = ['useChat', 'useCodex', 'useAgentChat'] as const
+type Hook = (typeof HOOKS)[number]
+
+/**
+ * A hook's source with comments removed. Load-bearing, and it cost a red run
+ * to learn: the comments at these very call sites QUOTE the shape that is
+ * forbidden ("the statement the old `void flushChatPersist()` occupied"), so a
+ * check that reads the whole file finds the explanation instead of the code.
+ * The same trap is documented in components/__tests__/fokusring-und-press.test.ts,
+ * which strips comments for the same reason.
+ */
+function hookCode(hook: Hook): string {
+  const raw = readFileSync(new URL(`../../hooks/${hook}.ts`, import.meta.url), 'utf8')
+  return raw.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '')
+}
+
+interface TurnEndBlock {
+  /** "useChat/sendMessage" — the hook and the useCallback it lives in. */
+  name: string
+  /** The `finally { … }` body, comments already gone. */
+  block: string
+  /** Offset of `endTurnDurably(` inside `block`. */
+  flushAt: number
+}
+
+/**
+ * Every `finally` block that ends a turn, found by walking out from the
+ * `endTurnDurably(` call to the enclosing `finally {` and matching its braces.
+ * Brace counting is honest here because the blocks contain no string literal
+ * with an unbalanced brace — the template literals in the loop drivers all
+ * close their own `${…}`. If that ever stops being true this throws rather
+ * than quietly measuring the wrong region, which is the failure mode a guard
+ * is allowed to have.
+ */
+function turnEndBlocks(hook: Hook): TurnEndBlock[] {
+  const code = hookCode(hook)
+  const out: TurnEndBlock[] = []
+  for (const call of code.matchAll(/endTurnDurably\(/g)) {
+    const finallyAt = code.lastIndexOf('finally', call.index)
+    if (finallyAt < 0) throw new Error(`${hook}: endTurnDurably outside any finally block`)
+    const open = code.indexOf('{', finallyAt)
+    let depth = 0
+    let close = -1
+    for (let i = open; i < code.length; i++) {
+      if (code[i] === '{') depth++
+      else if (code[i] === '}' && --depth === 0) { close = i; break }
+    }
+    if (close < 0) throw new Error(`${hook}: unbalanced finally block`)
+    let owner: string = hook
+    for (const cb of code.slice(0, finallyAt).matchAll(/const\s+(\w+)\s*=\s*useCallback/g)) {
+      owner = `${hook}/${cb[1]}`
+    }
+    out.push({ name: owner, block: code.slice(open, close + 1), flushAt: call.index - open })
+  }
+  return out
+}
+
+const TURN_ENDS = HOOKS.flatMap(turnEndBlocks)
+
 /**
  * The pattern guard, and the reason it is here at all.
  *
@@ -196,18 +255,8 @@ describe('a turn is finished when it is stored', () => {
 describe('all three chat hooks end a turn the same way', () => {
   const hooks = ['useChat', 'useCodex', 'useAgentChat'] as const
 
-  /**
-   * Source with comments removed. Load-bearing, and it cost a red run to
-   * learn: the comments at these very call sites QUOTE the shape that is
-   * forbidden ("the statement the old `void flushChatPersist()` occupied"),
-   * so a check that reads the whole file finds the explanation instead of the
-   * code. The same trap is documented in components/__tests__/
-   * fokusring-und-press.test.ts, which strips comments for the same reason.
-   */
-  const strip = (s: string) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '')
-
   for (const hook of hooks) {
-    const code = strip(readFileSync(new URL(`../../hooks/${hook}.ts`, import.meta.url), 'utf8'))
+    const code = hookCode(hook)
 
     it(`${hook} routes its turn end through the shared contract`, () => {
       expect(code).toContain('endTurnDurably(')
@@ -232,4 +281,110 @@ describe('all three chat hooks end a turn the same way', () => {
       }
     })
   }
+})
+
+/**
+ * WHERE the call sits, not only THAT it is awaited.
+ *
+ * The awaited version of this contract has one silent way to lose: move
+ * `endTurnDurably` further down its block. It still awaits, every existing
+ * test still passes, and the write simply starts later. That is not a
+ * hypothetical — it is the regress this fix already made once and measured:
+ * with the call below the TTS and memory blocks the write began about 5 ms
+ * after the paint and e2e/chat-streaming-persist.spec.ts went from never
+ * losing a turn to three runs in ten. `flushes.map(f => f())` runs
+ * SYNCHRONOUSLY, and that is where serialise-and-put happens, so every
+ * statement above the call is time the write is not yet running.
+ *
+ * Two rules, because there are two ways to be late:
+ *
+ *   1. The write must start before the block starts anything ELSE. Enforced
+ *      against a named list of jobs, not against "any call" — the cheap state
+ *      resets a turn end does (clearing an aborter, nulling a ref, dropping a
+ *      loading flag) may sit above the call in any order, and reordering them
+ *      must stay green. Only work that TAKES time or SETS SOMETHING GOING
+ *      counts.
+ *   2. Nothing may be awaited before it. An `await` above the call hands the
+ *      event loop the turn while the answer is still only in memory, which is
+ *      strictly worse than any of the jobs in rule 1. This one needs no list.
+ *
+ * Rule 1 has an honest limit, stated here rather than discovered later: it
+ * catches the call moving DOWN past work that already exists, not a NEW kind
+ * of slow call being inserted above it. The list below is what makes it
+ * concrete, so a third test keeps the list from rotting into a no-op.
+ *
+ * Known and deliberate: the /loop drivers in useCodex and useAgentChat call
+ * `addMessage` AFTER the flush, so a loop-halt line rides the next coalescing
+ * window instead of this turn's write. That predates this contract and is not
+ * what these rules are about; it would need a second flush per turn, only in
+ * the loop case.
+ */
+describe('the turn end starts the write before it starts anything else', () => {
+  /**
+   * Jobs a turn end sets going once the turn is over. Each one either takes
+   * real time or hands control to something that does — none of them may be
+   * the reason the write has not started yet.
+   */
+  const STARTS_WORK: ReadonlyArray<{ call: string; why: string }> = [
+    { call: 'autoSpeak(', why: 'speaks the finished answer — synthesis, and it is allowed to be slow' },
+    { call: 'extractAndSave(', why: 'runs the memory extractor, which is a model call' },
+    { call: 'extractMemoriesFromPair(', why: 'runs the same memory extractor on the agent surfaces' },
+    { call: 'drainApprovals(', why: 'resolves pending approval promises, which resumes whatever was awaiting them' },
+    { call: 'bumpFileTreeVersion(', why: 'makes the Explorer re-read the working tree' },
+    { call: 'setTimeout(', why: 'is the /loop driver arming the next pass' },
+    { call: 'useAgentLoopStore.getState().start(', why: 'registers the next loop pass in the UI' },
+  ]
+
+  // `endAgentRun` is deliberately NOT on the list: it assigns two fields and
+  // returns (api/agent-context.ts). useCodex closes the run before the flush
+  // and useAgentChat after it, and neither costs the write anything — pinning
+  // that difference would be pinning noise.
+
+  it('all four turn ends were found and parsed', () => {
+    expect(TURN_ENDS.map((b) => b.name)).toEqual([
+      'useChat/runGroupRound',
+      'useChat/sendMessage',
+      'useCodex/sendInstruction',
+      'useAgentChat/sendAgentMessage',
+    ])
+  })
+
+  for (const { name, block, flushAt } of TURN_ENDS) {
+    it(`${name}: the write starts before every job this block sets going`, () => {
+      for (const { call, why } of STARTS_WORK) {
+        for (const found of block.matchAll(new RegExp(call.replace(/[.()[\]$^*+?\\|{}]/g, '\\$&'), 'g'))) {
+          expect(
+            found.index,
+            `${name}: \`${call}\` runs BEFORE endTurnDurably. It ${why}, so the ` +
+            'turn would be waiting on it before its own write even starts. Move ' +
+            'the endTurnDurably call back above it — see stores/durability.ts.',
+          ).toBeGreaterThan(flushAt)
+        }
+      }
+    })
+
+    it(`${name}: nothing is awaited before the write`, () => {
+      const firstAwait = block.search(/\bawait\s/)
+      expect(firstAwait, `${name}: the finally block awaits nothing at all`).toBeGreaterThan(-1)
+      expect(
+        firstAwait,
+        `${name}: something is awaited before endTurnDurably. Every await above ` +
+        'it is the event loop getting the turn while the answer is still only in ' +
+        'memory. The write goes first.',
+      ).toBe(flushAt - 'await '.length)
+    })
+  }
+
+  it('the list of jobs that must wait still describes this codebase', () => {
+    // A list entry naming something that no longer exists guards nothing, and
+    // it would rot in silence. If a job below really is gone, delete its line.
+    const all = HOOKS.map(hookCode).join('\n')
+    for (const { call } of STARTS_WORK) {
+      expect(
+        all.includes(call),
+        `\`${call}\` is on the must-wait list but appears in none of the three ` +
+        'hooks any more. Drop the entry, or the list is protecting nothing.',
+      ).toBe(true)
+    }
+  })
 })

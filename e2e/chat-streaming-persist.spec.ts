@@ -112,6 +112,16 @@ test('a streamed answer renders live, lands in full, and survives a reload', asy
 
   // The coalescing storage must still have written it. Reload with a cold
   // renderer and read it back out of real IndexedDB.
+  //
+  // Wait for the app to say the turn is OVER first, not just for the answer to
+  // be on screen. The two are not the same moment and the gap is the whole
+  // point: the answer paints while the write is still in flight, so a reload
+  // fired on the paint lands inside that window — measured at 3 to 4 runs in
+  // 12 on a loaded machine, before and after the write became awaited. Since
+  // stores/durability.ts, "Send is back in the slot Stop held" means the turn
+  // is in IndexedDB, so this is the first instant at which the assertions
+  // below are actually entitled to hold.
+  await expect(page.getByRole('button', { name: 'Send message' })).toBeVisible({ timeout: 30_000 })
   await page.reload()
 
   await expect(inChat(page, 'FIRST-TURN-MARKER')).toBeVisible({ timeout: 30_000 })

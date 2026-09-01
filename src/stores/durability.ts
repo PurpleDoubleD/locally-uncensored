@@ -55,6 +55,12 @@
  * `finally` blocks (past the TTS and memory blocks) pushed the START of the
  * write about 5 ms past the paint and took the reload race from never to three
  * runs in ten. Awaiting late is free; starting late is not.
+ *
+ * That paragraph used to be the whole enforcement, which is this project's
+ * standing failure: a rule that lives only in prose while the code is free to
+ * break it. It is a gate now. stores/__tests__/a-turn-is-finished-when-it-is-
+ * stored.test.ts reads all four `finally` blocks and fails if the call sits
+ * below anything that takes time, or if anything is awaited above it.
  */
 import { log } from '../lib/logger'
 import { flushChatPersist } from './chatStore'
