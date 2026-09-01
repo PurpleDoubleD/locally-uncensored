@@ -413,3 +413,87 @@ steht als Kommentar an der Funktion: *Zusammenfassen ist harmlos, Auftrennen ist
 die Umgehung* — bei unbalancierten Anführungszeichen wird deshalb auf die
 Ganzzeilen-Prüfung zurückgefallen. Bewusst offen und als `toBeNull()` im
 Testfile festgehalten: ein Wort vor `git` (`sudo`, `GIT_DIR=x`).
+
+## Windows: startklar, und wie ich das gegen meine eigene Messmethode belegt habe
+
+Am Commit `c77682a2` auf der echten Maschine (`lu-box`), nicht kreuzkompiliert:
+
+| Stufe | Ergebnis |
+|---|---|
+| `cargo test` | 715 grün, 0 rot, 3 ignoriert |
+| `npm run tauri build` | **Exit 0** — MSI 28.475.360 B, NSIS-Setup 15.912.155 B |
+| Updater-Artefakte | 0 |
+| App-Start | Session 1, WebView2-Familie 1 Kind + 5 Enkel, Log ohne Fehler |
+| Echte Nutzerdaten | 661 Dateien, kein Byte geändert |
+
+Drei Fehlschlüsse lagen auf dem Weg, und alle drei kamen von der Messung, nicht
+vom Produkt.
+
+**Zwei Updater-Zips im Bundle-Ordner.** Meine Kontrollfrage („müssen 0 sein")
+schlug an. Die Zeitstempel klärten es: MSI 13:56:46, EXE 13:57:29, beide Zips
+`12:57:42` — dieselbe Sekunde, eine Stunde früher. Reste aus einem Build vor dem
+Entfernen von `createUpdaterArtifacts`. Ein Build, der Updater-Artefakte
+erzeugt, schreibt sie unmittelbar nach ihrer Quelle, nicht 43 Sekunden davor.
+
+**„Die App startet nicht."** Das Log sagte zweimal
+`failed to create webview: HRESULT(0x80070578) Ungültiges Fensterhandle`. Der
+Grund war meine SSH-Sitzung: sie läuft in **Session 0**, die keinen
+interaktiven Desktop hat. Gegenprobe: die nachweislich funktionierende echte App
+in Session 1 meldet von dort aus ebenfalls `MainWindowTitle=''` und
+`MainWindowHandle=0` — das Fensterhandle ist als Beweismittel aus Session 0
+heraus wertlos. Über eine einmalige geplante Aufgabe in Session 1 gestartet,
+liefert derselbe Build die vollständige WebView2-Prozessfamilie und ein Log ohne
+Fehlerzeile. Es ist derselbe Fallentyp wie `osascript` auf dem Mac: erst die
+Methode verdächtigen, dann das Produkt.
+
+**„Der Experiment-Build fasst die echten Daten an."** Nach dem Start hatten sich
+vier Dateien der echten Installation bewegt. Kontrolllauf ohne das Experiment:
+drei davon bewegen sich von allein. Die vierte,
+`EBWebView\Default\Preferences`, lag elf Stunden still und schrieb dann zweimal
+in Folge wenige Sekunden nach dem Experiment-Start — reproduzierbar, zwei von
+zwei. Der Inhaltsvergleich entschied es: **11.031 Byte vorher, 11.031 Byte
+nachher, `-eq` True.** Chromium schreibt `Preferences` atomar über Temp+Rename,
+das setzt den Zeitstempel neu, ohne ein Byte zu ändern; ausgelöst davon, dass
+ein neues Fenster den Fokus nimmt. Keine Datei kam hinzu, keine verschwand,
+keine änderte ihre Größe.
+
+Was das belegt und was nicht: **kein Byte der echten Nutzerdaten hat sich
+geändert.** Welcher Prozess den Rename ausgeführt hat, ließe sich nur mit einem
+Dateisystem-Tracer zeigen — die Wirkung ist nachweislich null. Nebenbei ist die
+echte App über den gesamten Zeitraum durchgelaufen, seit dem 31.08. 12:29:35,
+ohne Neustart.
+
+Der Pfadbau selbst ist zentral abgesichert: `os_paths.rs` greift ausschließlich
+auf `APP_CONFIG_DIR` und `APP_DISPLAY_DIR` zu, beide `concat!(…,
+branch_dir_suffix!())`. Auf der Platte sind es drei getrennte Orte —
+`Roaming\Locally Uncensored-experiment`,
+`Local\com.purpledoubled.locally-uncensored.experiment` (WebView2) und
+`Local\lu-labs-experiment` (Logs). Auch `tauri-plugin-single-instance` trennt
+sauber: Mutex-, Klassen- und Fenstername entstehen ungekürzt als `{identifier}-sim`
+/ `-sic` / `-siw`.
+
+Auf der Windows-Maschine ist nichts zurückgeblieben: die einmalige Aufgabe ist
+gelöscht, die Hilfsdateien entfernt, kein Experiment-Prozess läuft.
+
+## Ein Test, der sich still abschaltet, ist schlimmer als ein roter
+
+Beim Nachprüfen des Fokusring-Pakets fiel eine Differenz auf: im Hauptbaum 7240
+grüne Tests, im sauberen Prüfbaum 7236 — bei identischer Gesamtzahl. Die
+Ursache ist `describe.skipIf(builtCss === null)` in
+`src/components/__tests__/fokusring-und-press.test.ts:248`. Der Block prüft die
+stärkere Hälfte des Beweises am **gebauten** CSS: dass beide Fokusregeln
+ungeschichtet landen und damit jede Tailwind-Utility aus `@layer utilities`
+schlagen. Wo kein `dist/` liegt, verschwindet er lautlos.
+
+Dazu kam, dass das `dist/` im Hauptbaum von 04:36 stammte, der Commit von
+04:41. Die grüne Meldung stützte sich also auf ein Artefakt, das älter war als
+der Commit, den es belegen sollte.
+
+Konsequenz für das Verfahren, nicht für den Code: im Prüfbaum wird ab jetzt
+**erst gebaut, dann getestet**. Danach laufen in dieser Datei 30 statt 26 Tests.
+
+Denselben Mechanismus gibt es ein zweites Mal, in Rust:
+`gguf.rs:264 real_bundled_gguf_if_present` liest bei Vorhandensein ein
+Modell aus dem Verzeichnis der **echten** App und tut sonst nichts — lesend,
+also keine Isolationsverletzung, aber dieselbe stille Selbstabschaltung. Steht
+als offener Posten.
