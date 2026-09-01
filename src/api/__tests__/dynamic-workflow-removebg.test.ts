@@ -17,6 +17,7 @@ vi.mock('../comfyui-nodes', async (importOriginal) => {
 
 import { buildDynamicWorkflow, WorkflowUnavailableError } from '../dynamic-workflow'
 import { getAllNodeInfo } from '../comfyui-nodes'
+import { classTypes, nodeAt, nodeOf } from './graph-test-support'
 
 // A realistic ComfyUI-RMBG "RMBG" node: one IMAGE connection (`image`) plus a
 // handful of widgets, including a `background` combo whose "Alpha" option yields
@@ -62,14 +63,14 @@ describe('buildDynamicWorkflow — local background removal (RMBG cutout)', () =
 
   it('builds a self-contained LoadImage → RMBG → SaveImage graph', async () => {
     const wf = await buildDynamicWorkflow(removebgParams)
-    const types = Object.values(wf).map((n: any) => n.class_type).sort()
+    const types = classTypes(wf).sort()
     expect(types).toEqual(['LoadImage', 'RMBG', 'SaveImage'])
 
     const loadId = Object.keys(wf).find((k) => wf[k].class_type === 'LoadImage')!
     const rmbgId = Object.keys(wf).find((k) => wf[k].class_type === 'RMBG')!
-    const load = wf[loadId] as any
-    const rmbg = wf[rmbgId] as any
-    const save = Object.values(wf).find((n: any) => n.class_type === 'SaveImage') as any
+    const load = nodeAt(wf, loadId)!
+    const rmbg = nodeAt(wf, rmbgId)!
+    const [, save] = nodeOf(wf, 'SaveImage')!
 
     // Source image loaded; RMBG.image wired to it; all other widgets defaulted.
     expect(load.inputs.image).toBe('photo.png')

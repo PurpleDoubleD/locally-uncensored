@@ -27,6 +27,8 @@ import { buildDynamicWorkflow, videoDecodeNode } from '../dynamic-workflow'
 import { getAllNodeInfo } from '../comfyui-nodes'
 import { buildSDXLImgWorkflow } from '../comfyui'
 import { localFetch } from '../backend'
+import { classTypes, nodeOf } from './graph-test-support'
+import { linkTarget, nodeInput } from '../../types/comfy-graph'
 
 const NSFW_WAN14B = 'nsfw_wan_14b_e15_q4_k.gguf'
 const WAN22_5B_GGUF = 'wan2_2_ti2v_5b_q8.gguf'
@@ -69,11 +71,8 @@ const videoParams = {
   frames: 9, fps: 16,
 }
 
-type WfNode = { class_type: string; inputs: Record<string, any> }
-const nodeOf = (wf: Record<string, any>, klass: string): [string, WfNode] | undefined =>
-  (Object.entries(wf) as [string, WfNode][]).find(([, n]) => n.class_type === klass)
-const classTypes = (wf: Record<string, any>): string[] =>
-  Object.values(wf as Record<string, WfNode>).map(n => n.class_type)
+// nodeOf/nodesOf/classTypes leben in graph-test-support.ts — siehe dort, warum
+// eine Graph-Fixture als ComfyApiGraph statt als Record<string, any> gelesen wird.
 
 describe('videoDecodeNode', () => {
   it('emits VAEDecodeTiled with ALL four tiling fields (the live validator refuses omitted required-with-default inputs)', () => {
@@ -100,7 +99,9 @@ describe('generic wan video builder (the catalog GGUF path customers hit)', () =
     expect(tiled![1].inputs.tile_size).toBe(256)
     expect(classTypes(wf)).not.toContain('VAEDecode')
     const saver = nodeOf(wf, 'VHS_VideoCombine') ?? nodeOf(wf, 'SaveAnimatedWEBP')
-    expect(saver![1].inputs.images[0]).toBe(tiled![0])
+    // linkTarget beweist zusaetzlich, dass `images` ueberhaupt eine Kante ist —
+    // `inputs.images[0]` haette bei einem Literal still `undefined` geliefert.
+    expect(linkTarget(nodeInput(saver![1], 'images'))).toBe(tiled![0])
   })
   it('keeps plain VAEDecode on a core without the tiled node', async () => {
     serveComfy(BASE_NODES)

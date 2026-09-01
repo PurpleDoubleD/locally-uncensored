@@ -3,8 +3,9 @@ import { makeInTurnCacheLookup } from '../in-turn-cache'
 import { useToolAuditStore, AUDIT_FULL_RESULT_MAX_CHARS } from '../../../stores/toolAuditStore'
 import { stableArgsHash } from '../block-helpers'
 import type { ExecutionRequest } from '../tool-executor'
+import type { ToolArgs } from '../../mcp/types'
 
-const req = (id: string, toolName: string, args: Record<string, any>): ExecutionRequest => ({
+const req = (id: string, toolName: string, args: ToolArgs): ExecutionRequest => ({
   id, toolName, args,
 })
 
@@ -221,7 +222,7 @@ describe('in-turn-cache — todo_write', () => {
     useToolAuditStore.getState().clearAll()
   })
 
-  const recordDone = (toolName: string, args: Record<string, any>, at: number, result: string) => {
+  const recordDone = (toolName: string, args: ToolArgs, at: number, result: string) => {
     const s = useToolAuditStore.getState()
     const id = s.record({ convId: 'c1', toolCallId: `prior-${toolName}-${at}`, toolName, args, startedAt: at })
     s.complete(id, { status: 'completed', completedAt: at + 10, resultPreview: result })

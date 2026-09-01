@@ -4,6 +4,7 @@ import type { ProviderId } from "./providers/types"
 import { log } from "../lib/logger"
 import { waitForModelsVisible } from "../lib/bundle-install"
 import type { DownloadProgress } from "../types/downloads"
+import { asNumber, asRecordArray, asString, isRecord, prop, propPath } from "../types/json-guards"
 import type { DiscoverModel, ModelBundle } from "./model-bundles"
 import {
   CUSTOM_NODE_REGISTRY,
@@ -1492,15 +1493,24 @@ export async function searchCivitaiModels(
     // lifts the per-IP rate limit. Falls back to anon access if no key is set.
     const url = `https://${host}/api/v1/models?${params}${apiKey ? `&token=${encodeURIComponent(apiKey)}` : ''}`
     const text = await fetchExternal(url)
-    const data = JSON.parse(text)
-    const items: any[] = data.items ?? []
+    const data: unknown = JSON.parse(text)
+    // CivitAI's catalogue, not ours: `items` is walked with the boundary
+    // guards, and a single malformed entry now yields a partly-empty CARD
+    // instead of throwing out of the `.map` and losing all twenty results to
+    // the catch below.
+    const items = asRecordArray(prop(data, 'items'))
 
     return items.map((item) => {
-      const version = item.modelVersions?.[0]
-      const file = version?.files?.[0]
-      const thumb = version?.images?.[0]?.url
-      const downloadUrl = version?.downloadUrl ?? file?.downloadUrl
-      const sizeKB = file?.sizeKB ?? 0
+      const version = asRecordArray(prop(item, 'modelVersions'))[0]
+      const file = asRecordArray(prop(version, 'files'))[0]
+      const thumb = asString(propPath(asRecordArray(prop(version, 'images'))[0], 'url'))
+      const downloadUrl = asString(prop(version, 'downloadUrl')) ?? asString(prop(file, 'downloadUrl'))
+      const sizeKB = asNumber(prop(file, 'sizeKB')) ?? 0
+      const itemName = asString(prop(item, 'name'))
+      const itemId = asNumber(prop(item, 'id')) ?? 0
+      const stats = prop(item, 'stats')
+      const downloadCount = asNumber(prop(stats, 'downloadCount'))
+      const creator = asString(propPath(item, 'creator', 'username'))
 
       // Determine subfolder based on model type
       let subfolder = 'checkpoints'
@@ -1508,22 +1518,23 @@ export async function searchCivitaiModels(
       else if (type === 'VAE') subfolder = 'vae'
       else if (type === 'TextualInversion') subfolder = 'embeddings'
       // Check if it's a diffusion model (FLUX, Wan, etc.)
-      const name = item.name?.toLowerCase() || ''
+      const name = (itemName ?? '').toLowerCase()
       if (name.includes('flux') || name.includes('wan') || name.includes('hunyuan')) {
         subfolder = 'diffusion_models'
       }
 
-      const filename = file?.name || `${item.name?.replace(/[^a-zA-Z0-9._-]/g, '_')}.safetensors`
+      const filename = asString(prop(file, 'name'))
+        || `${(itemName ?? '').replace(/[^a-zA-Z0-9._-]/g, '_')}.safetensors`
 
       const descParts: string[] = []
-      const rawDesc = (item.description ?? '').replace(/<[^>]*>/g, '').trim()
+      const rawDesc = (asString(prop(item, 'description')) ?? '').replace(/<[^>]*>/g, '').trim()
       if (rawDesc) descParts.push(rawDesc.slice(0, 120))
-      if (item.stats?.downloadCount) descParts.push(`${item.stats.downloadCount.toLocaleString()} downloads`)
-      if (item.creator?.username) descParts.push(`by ${item.creator.username}`)
+      if (downloadCount) descParts.push(`${downloadCount.toLocaleString()} downloads`)
+      if (creator) descParts.push(`by ${creator}`)
 
       return {
-        id: item.id,
-        name: item.name || `Model #${item.id}`,
+        id: itemId,
+        name: itemName || `Model #${itemId}`,
         description: descParts.join(' · '),
         type: type,
         thumbnailUrl: thumb,
@@ -1531,9 +1542,11 @@ export async function searchCivitaiModels(
         filename,
         subfolder,
         sizeGB: sizeKB > 0 ? Math.round(sizeKB / 1024 / 1024 * 10) / 10 : undefined,
-        stats: item.stats ? { downloads: item.stats.downloadCount || 0, likes: item.stats.thumbsUpCount || 0 } : undefined,
-        creator: item.creator?.username,
-        sourceUrl: `https://${host}/models/${item.id}`,
+        stats: isRecord(stats)
+          ? { downloads: downloadCount ?? 0, likes: asNumber(prop(stats, 'thumbsUpCount')) ?? 0 }
+          : undefined,
+        creator,
+        sourceUrl: `https://${host}/models/${itemId}`,
       }
     })
   } catch (err) {

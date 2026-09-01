@@ -50,6 +50,7 @@ import {
 import { phaseForExecutingNode, phaseForProgressStep } from '../lib/render-phase-labels'
 import { buildDynamicWorkflow, buildLocalOpWorkflow, checkVideoOutputCapability } from '../api/dynamic-workflow'
 import { getAllNodeInfo, clearNodeCache } from '../api/comfyui-nodes'
+import { apiNodes, type ComfyApiGraph, type ComfyExecutionMessage, type ComfyHistoryEntry } from '../types/comfy-graph'
 import { restartComfyForNewNodes } from '../api/comfy-restart'
 import { installCustomNodes } from '../api/discover'
 import { checkPromptSafety, SAFETY_BLOCK_MESSAGE } from '../lib/render/safety'
@@ -70,6 +71,21 @@ import {
   getVideoStatus, listVideoModels, generateVideo, getVideoProgress, cancelVideo,
   buildMlxVideoModels, mlxVideoModelIdFor, readVideoAsBlobUrl,
 } from '../api/mlx-video'
+
+/**
+ * The `[event, payload]` pairs of a `/history` status entry.
+ *
+ * `ComfyHistoryEntry` DECLARES `messages` as those pairs, but `getHistory`
+ * only checks that the entry is an object — so the array-ness is a claim about
+ * ComfyUI's JSON, not a fact. Four call sites below used to run `.find` on it
+ * straight from a `[string, any][]` annotation; one non-array `messages` field
+ * would have thrown out of the render-polling loop and left the Create tab
+ * stuck on "Generating…" with no error.
+ */
+function historyMessages(entry: ComfyHistoryEntry | null): [string, ComfyExecutionMessage][] {
+  const raw = entry?.status?.messages
+  return Array.isArray(raw) ? raw : []
+}
 
 export function useCreate() {
   const [connected, setConnected] = useState<boolean | null>(null)
@@ -843,7 +859,7 @@ export function useCreate() {
         ...(clipSkip > 0 ? { clipSkip } : {}),
       }
 
-      let workflow: Record<string, any> = {}
+      let workflow: ComfyApiGraph = {}
       let builderUsed: 'dynamic' | 'legacy' | 'custom' = 'dynamic'
 
       // ── Specialized-lane graphs: stage the media inputs in ComfyUI's input
@@ -904,7 +920,7 @@ export function useCreate() {
       // Check for custom workflow assignment — but verify it's compatible with the model
       let customWf = localOp ? null : useWorkflowStore.getState().getWorkflowForModel(activeModel, imageModelType)
       if (customWf) {
-        const wfNodes = Object.values(customWf.workflow).map((n: any) => n.class_type)
+        const wfNodes = apiNodes(customWf.workflow).map(([, n]) => n.class_type)
         const needsUnet = imageModelType === 'flux' || imageModelType === 'flux2' || imageModelType === 'zimage' || imageModelType === 'wan' || imageModelType === 'hunyuan'
         const hasUnet = wfNodes.includes('UNETLoader')
         const hasCheckpoint = wfNodes.includes('CheckpointLoaderSimple')
@@ -1088,10 +1104,11 @@ export function useCreate() {
 
       // Build node ID → class_type map from workflow for phase detection
       const nodeClassMap = new Map<string, string>()
-      for (const [nodeId, node] of Object.entries(workflow)) {
-        if (node && typeof node === 'object' && 'class_type' in node) {
-          nodeClassMap.set(nodeId, (node as any).class_type)
-        }
+      // `apiNodes` IS the "is this an object with a class_type" test, and it
+      // hands back the class name already narrowed to a string — the old
+      // version wrote a non-string class_type into a Map<string, string>.
+      for (const [nodeId, node] of apiNodes(workflow)) {
+        nodeClassMap.set(nodeId, node.class_type)
       }
 
       // Ask which device ComfyUI is on while the render is still healthy: both
@@ -1167,9 +1184,9 @@ export function useCreate() {
                 cleanup()
                 useCreateStore.getState().setProgressPhase('complete')
                 setProgress(95, 'Fetching results...')
-                const messages: [string, any][] = history.status?.messages ?? []
-                const startMsg = messages.find(([t]: [string, any]) => t === 'execution_start')
-                const endMsg = messages.find(([t]: [string, any]) => t === 'execution_success')
+                const messages = historyMessages(history)
+                const startMsg = messages.find(([t]) => t === 'execution_start')
+                const endMsg = messages.find(([t]) => t === 'execution_success')
                 const comfyTime = startMsg?.[1]?.timestamp && endMsg?.[1]?.timestamp
                   ? ((endMsg[1].timestamp - startMsg[1].timestamp) / 1000).toFixed(1) : null
                 setProgress(100, 'Complete!')
@@ -1200,8 +1217,8 @@ export function useCreate() {
               } else if (statusStr === 'error') {
                 completionHandled = true
                 cleanup()
-                const msgs = history.status?.messages ?? []
-                const errEntry = msgs.find(([t]: [string, any]) => t === 'execution_error')?.[1]
+                const msgs = historyMessages(history)
+                const errEntry = msgs.find(([t]) => t === 'execution_error')?.[1]
                 const raw = errEntry?.exception_message || 'ComfyUI execution error'
                 const hint = comfyErrorHint(errEntry?.node_type, errEntry?.exception_type, String(raw))
                 reject(new Error(hint ? `${raw}\n\n${hint}` : raw))
@@ -1261,7 +1278,7 @@ export function useCreate() {
                 // Fetch history to get output files
                 getHistory(promptId).then(history => {
                   if (!history) { setError('No history found after completion.'); resolve(); return }
-                  const messages: [string, any][] = history.status?.messages ?? []
+                  const messages = historyMessages(history)
                   const startMsg = messages.find(([t]) => t === 'execution_start')
                   const endMsg = messages.find(([t]) => t === 'execution_success')
                   const comfyTime = startMsg?.[1]?.timestamp && endMsg?.[1]?.timestamp
@@ -1295,7 +1312,7 @@ export function useCreate() {
                 cleanup()
                 const msg = event.data.exception_message || 'Unknown ComfyUI error'
                 const nodeType = event.data.node_type ? ` (${event.data.node_type})` : ''
-                const hint = comfyErrorHint(event.data.node_type, (event.data as any).exception_type, msg)
+                const hint = comfyErrorHint(event.data.node_type, event.data.exception_type, msg)
                 reject(new Error(msg.trim() + nodeType + (hint ? `\n\n${hint}` : '')))
                 break
               }
@@ -1365,7 +1382,7 @@ export function useCreate() {
 
               if (history.status?.completed) {
                 if (pollRef.current) clearInterval(pollRef.current)
-                const messages: [string, any][] = history.status?.messages ?? []
+                const messages = historyMessages(history)
                 const startMsg = messages.find(([t]) => t === 'execution_start')
                 const endMsg = messages.find(([t]) => t === 'execution_success')
                 const comfyTime = startMsg?.[1]?.timestamp && endMsg?.[1]?.timestamp
@@ -1397,7 +1414,7 @@ export function useCreate() {
                 resolve()
               } else if (history.status?.status_str === 'error') {
                 if (pollRef.current) clearInterval(pollRef.current)
-                const messages: [string, any][] = history.status?.messages ?? []
+                const messages = historyMessages(history)
                 const errorEntry = messages.find(([t]) => t === 'execution_error')
                 const errMsg = errorEntry?.[1]?.exception_message
                   || errorEntry?.[1]?.message

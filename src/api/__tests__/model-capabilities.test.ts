@@ -8,12 +8,16 @@ vi.mock('../backend', () => ({
   localFetch: (...a: unknown[]) => localFetch(...a),
 }))
 
-import { getModelCapabilities, clearNodeCache, type ModelCapabilities } from '../comfyui-nodes'
+import { getModelCapabilities, clearNodeCache, type ModelCapabilities, type NodeMetadata } from '../comfyui-nodes'
 import { clampOrReject, enumReject, videoFrameReject } from '../vram-handoff'
 
 // Tuple shape mirrors real ComfyUI /object_info: [enumList, {}] for enums,
 // ['INT'|'FLOAT', {default,min,max,step}] for numeric inputs.
-const OBJECT_INFO: Record<string, any> = {
+// Nur der Teil von NodeMetadata, den diese Tests fuettern — `output` &co. liest
+// getModelCapabilities nicht. Als Pick deklariert statt als `any`: benennt
+// ComfyUI (oder unser Parser) `input.required` um, faellt das hier auf, statt
+// still leere Capabilities zu erzeugen.
+const OBJECT_INFO: Record<string, Pick<NodeMetadata, 'input'>> = {
   KSampler: { input: { required: {
     sampler_name: [['euler', 'dpmpp_2m', 'uni_pc'], {}],
     scheduler: [['normal', 'karras'], {}],
@@ -34,7 +38,7 @@ const OBJECT_INFO: Record<string, any> = {
   } } },
 }
 
-const okJson = (payload: any) => ({ ok: true, status: 200, json: async () => payload })
+const okJson = (payload: unknown) => ({ ok: true, status: 200, json: async () => payload })
 
 beforeEach(() => {
   clearNodeCache() // also clears the capability cache (hooked)

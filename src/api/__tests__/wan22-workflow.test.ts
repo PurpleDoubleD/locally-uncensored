@@ -29,6 +29,8 @@ import { categorizeNodes, getAllNodeInfo, type CategorizedNodes } from '../comfy
 import { classifyModel, isI2VModel, isT2VCapable, findMatchingVAE } from '../comfyui'
 import { localFetch } from '../backend'
 import { resolveI2VResolution } from '../vram-handoff'
+import { nodeOf, nodesOf } from './graph-test-support'
+import { inputNumber } from '../../types/comfy-graph'
 
 // Minimal /object_info for a ComfyUI that can run Wan 2.2 5B.
 const WAN22_NODES = {
@@ -53,11 +55,8 @@ const wan22Params = {
   frames: 49, fps: 24,
 }
 
-type WfNode = { class_type: string; inputs: Record<string, any> }
-const nodeOf = (wf: Record<string, any>, klass: string): [string, WfNode] | undefined =>
-  (Object.entries(wf) as [string, WfNode][]).find(([, n]) => n.class_type === klass)
-const nodesOf = (wf: Record<string, any>, klass: string): [string, WfNode][] =>
-  (Object.entries(wf) as [string, WfNode][]).filter(([, n]) => n.class_type === klass)
+// nodeOf/nodesOf/classTypes leben in graph-test-support.ts — siehe dort, warum
+// eine Graph-Fixture als ComfyApiGraph statt als Record<string, any> gelesen wird.
 
 describe('classifyModel — Wan 2.2 vs 2.1', () => {
   it('classifies the TI2V-5B file as wan22', () => {
@@ -176,9 +175,15 @@ describe('buildDynamicWorkflow — Wan 2.2 graph', () => {
   it('snaps off-grid duration + dims (120 frames → 121, 1000×570 → /32)', async () => {
     const wf = await buildDynamicWorkflow({ ...wan22Params, frames: 120, width: 1000, height: 570 } as never)
     const latent = nodeOf(wf, 'Wan22ImageToVideoLatent')![1]
-    expect(latent.inputs.length).toBe(121)
-    expect(latent.inputs.width % 32).toBe(0)
-    expect(latent.inputs.height % 32).toBe(0)
+    expect(inputNumber(latent, 'length')).toBe(121)
+    // Erst nachweisen, dass es die Zahl ueberhaupt gibt: `undefined % 32` ist
+    // NaN und ein fehlender Input duerfte nicht wie ein Rest von 0 aussehen.
+    const width = inputNumber(latent, 'width')
+    const height = inputNumber(latent, 'height')
+    expect(width).toBeGreaterThan(0)
+    expect(height).toBeGreaterThan(0)
+    expect(width! % 32).toBe(0)
+    expect(height! % 32).toBe(0)
   })
 
   it('produces a video output node (VHS preferred when present)', async () => {

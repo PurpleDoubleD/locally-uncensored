@@ -53,6 +53,8 @@ import { PlanStaleness, planStalenessSteer } from '../lib/plan-staleness'
 import { planResumeAnchor } from '../lib/plan-resume'
 import { useTodoStore } from '../stores/todoStore'
 import { httpStatusOf } from '../lib/http-status'
+import { asString, errorText, prop } from '../types/json-guards'
+import type { ToolArgs } from '../api/mcp/types'
 import { CREDITS_EXHAUSTED_MESSAGE } from '../lib/credits-exhausted'
 import { streamOllamaChatWithTools } from '../lib/ollama-stream-tools'
 import { extractToolCallsWithRanges, stripRanges } from '../lib/tool-call-repair'
@@ -709,7 +711,9 @@ export function useCodex() {
           // Carry over tool_calls from hidden assistant messages so the
           // model sees the full tool-call chain from previous turns
           // (continue capability, parity with original Codex CLI).
-          if (m.tool_calls) msg.tool_calls = m.tool_calls as any
+          // types/chat.Message.tool_calls and providers/types.ToolCall declare
+          // the identical shape, so the assertion never bridged anything.
+          if (m.tool_calls) msg.tool_calls = m.tool_calls
           // Carry the tool-result linkage across turns too. ed99f82 sets
           // tool_call_id on role:'tool' messages INSIDE the loop, but the
           // persist+rebuild round-trip below dropped it — so the SECOND user
@@ -1241,14 +1245,14 @@ export function useCodex() {
                 },
               )
               void diagLog('streamWithTools-ok', { iter: i, contentLen: turn.content?.length || 0, toolCallsCount: turn.toolCalls?.length || 0 })
-            } catch (thinkErr: any) {
+            } catch (thinkErr) {
               void diagLog('streamWithTools-catch', {
                 iter: i,
                 status: httpStatusOf(thinkErr),
-                messageHead: (thinkErr?.message || String(thinkErr)).slice(0, 400),
-                name: thinkErr?.name,
+                messageHead: errorText(thinkErr).slice(0, 400),
+                name: asString(prop(thinkErr, 'name')),
               })
-              if (httpStatusOf(thinkErr) === 400 || thinkErr?.message?.includes('does not support thinking')) {
+              if (httpStatusOf(thinkErr) === 400 || errorText(thinkErr).includes('does not support thinking')) {
                 turn = await streamWithTools(
                   modelToUse, sendMessages, tools,
                   { temperature: 0.1, thinking: undefined, maxTokens: chatOptions.maxTokens, contextWindow: numCtx, signal: abort.signal },
@@ -1349,8 +1353,8 @@ export function useCodex() {
             }
             try {
               turn = await streamProviderTurn(provider, modelToUse, sendMessages, streamOpts, liveContent, liveThinking)
-            } catch (thinkErr: any) {
-              if (thinkErr?.message?.includes('does not support thinking') || httpStatusOf(thinkErr) === 400) {
+            } catch (thinkErr) {
+              if (errorText(thinkErr).includes('does not support thinking') || httpStatusOf(thinkErr) === 400) {
                 turn = await streamProviderTurn(provider, modelToUse, sendMessages, { ...streamOpts, thinking: undefined as unknown as boolean }, liveContent, () => {})
               } else {
                 throw thinkErr
@@ -1471,12 +1475,12 @@ export function useCodex() {
           )
           try {
             hermesTurn = await runHermes(hermesOpts)
-          } catch (thinkErr: any) {
+          } catch (thinkErr) {
             // Same downgrade the native branch carries: an old Ollama build or
             // an endpoint that predates the knob answers 400, and the run must
             // survive that instead of ending on it.
             if (hermesOpts.thinking !== undefined
-              && (thinkErr?.message?.includes('does not support thinking') || httpStatusOf(thinkErr) === 400)) {
+              && (errorText(thinkErr).includes('does not support thinking') || httpStatusOf(thinkErr) === 400)) {
               hermesTurn = await runHermes({ ...hermesOpts, thinking: undefined as unknown as boolean })
             } else {
               throw thinkErr
@@ -1786,7 +1790,7 @@ export function useCodex() {
           })
         }
 
-        type BatchEntry = { tc: typeof toolCalls[number]; ac: AgentToolCall; blockId: string; injectedArgs: Record<string, any> }
+        type BatchEntry = { tc: typeof toolCalls[number]; ac: AgentToolCall; blockId: string; injectedArgs: ToolArgs }
         const batch: BatchEntry[] = []
         budget.addToolCalls(toolCalls.length)
         anyToolExecuted = true
@@ -1891,7 +1895,7 @@ export function useCodex() {
         // race only exists so a tool whose timer never fires cannot hold the
         // loop forever — and the timer is cleared when the tool wins (B10),
         // instead of parking a live closure for up to 615 s per call.
-        const withTimeout = (name: string, args: Record<string, any>, signal?: AbortSignal) =>
+        const withTimeout = (name: string, args: ToolArgs, signal?: AbortSignal) =>
           raceWithToolTimeout(
             // The run's Stop travels all the way INTO the tool now (audit M1).
             // Before, the signal stopped at the batch scheduler: a shell command
@@ -1908,7 +1912,7 @@ export function useCodex() {
         // reviews and applies (or rejects) per-file. The model still
         // sees a synthetic success message so the loop progresses; the
         // user is the gatekeeper for the actual disk write.
-        const stageFileWrite = async (args: Record<string, any>): Promise<string> => {
+        const stageFileWrite = async (args: ToolArgs): Promise<string> => {
           const path = String(args.path ?? '')
           if (!path) return 'file_write: missing path'
           const newContent = String(args.content ?? '')
@@ -1962,7 +1966,7 @@ export function useCodex() {
         // new_string against the current file NOW and stage the resulting full
         // content, so the staged diff and the applied write are the real change
         // (and a bad edit is reported the same way whether staged or not).
-        const stageFileEdit = async (args: Record<string, any>): Promise<string> => {
+        const stageFileEdit = async (args: ToolArgs): Promise<string> => {
           const path = String(args.path ?? '')
           if (!path) return 'file_edit: missing path'
           const oldString = typeof args.old_string === 'string' ? args.old_string : ''
@@ -2018,7 +2022,7 @@ export function useCodex() {
           return `Staged for review: ${path} (surgical edit). The user will apply or reject the change before it lands on disk.`
         }
 
-        const dispatchTool = (name: string, args: Record<string, any>, signal?: AbortSignal): Promise<string> => {
+        const dispatchTool = (name: string, args: ToolArgs, signal?: AbortSignal): Promise<string> => {
           // Stage-and-Approve follows the MODE preset, not the raw setting:
           // Ask stages every write for review, Bypass writes straight through,
           // Plan never gets here because the write tools are stripped.
@@ -2048,7 +2052,7 @@ export function useCodex() {
 
         const results = await executeParallel(requests, {
           getTool: (name) => toolRegistry.resolveExecutable(name),
-          execute: (name: string, args: Record<string, any>, _run, signal) => {
+          execute: (name: string, args: ToolArgs, _run, signal) => {
             // A create tool the gate had closed still reaches the registry, so
             // the run self-heals: this call runs, and the next step offers the
             // schemas instead of pretending the capability is gone.
@@ -2154,6 +2158,10 @@ export function useCodex() {
           // update so the ToolCallBlock itself can render it (audit D5; the
           // diff used to live only on the Codex event log, so the Agent view
           // showed raw text where a change view belonged).
+          // `path` is model output, not a promise — the same value the tool
+          // itself re-checks. The display path checks it too instead of handing
+          // whatever arrived to the differ.
+          const acPath = asString(entry.injectedArgs.path)
           let acDiff: string | undefined
           if (entry.ac.toolName === 'file_write') {
             // Pre-read above captured the on-disk version; a missing file
@@ -2163,7 +2171,7 @@ export function useCodex() {
               typeof entry.injectedArgs.content === 'string'
                 ? entry.injectedArgs.content
                 : ''
-            acDiff = computeUnifiedDiff(entry.injectedArgs.path, oldText, newText) || undefined
+            acDiff = computeUnifiedDiff(acPath ?? '', oldText, newText) || undefined
           } else if (entry.ac.toolName === 'file_edit') {
             // Surgical edit — the tool only received old_string/new_string, so
             // reconstruct the new content from the pre-read + the unique
@@ -2176,7 +2184,7 @@ export function useCodex() {
               typeof entry.injectedArgs.new_string === 'string' ? entry.injectedArgs.new_string : '',
             )
             acDiff = applied.ok
-              ? computeUnifiedDiff(entry.injectedArgs.path, oldText, applied.content ?? '') || undefined
+              ? computeUnifiedDiff(acPath ?? '', oldText, applied.content ?? '') || undefined
               : undefined
           }
           if (acDiff) entry.ac.diff = acDiff
@@ -2201,7 +2209,7 @@ export function useCodex() {
           } else if (entry.ac.toolName === 'file_write' || entry.ac.toolName === 'file_edit') {
             codexStore.addEvent(convId, {
               id: uuid(), type: 'file_change', content: resultStr,
-              filePath: entry.injectedArgs.path,
+              filePath: acPath,
               diff: acDiff,
               timestamp: Date.now(),
             })
@@ -2377,18 +2385,23 @@ export function useCodex() {
       })
 
     } catch (err) {
+      // A caught value is whatever was thrown. `err as any` let five reads
+      // straight through it, including a `.name` read with no optional chain
+      // that would itself have thrown on a `throw null`. The guards answer
+      // undefined for a non-object instead.
+      const errName = asString(prop(err, 'name'))
+      const code = asString(prop(err, 'code'))
       void diagLog('outer-catch', {
-        name: (err as Error)?.name,
-        message: (err as Error)?.message?.slice(0, 400),
+        name: errName,
+        message: errorText(err).slice(0, 400),
         status: httpStatusOf(err),
       })
-      if ((err as Error).name !== 'AbortError') {
-        const e = err as any
+      if (errName !== 'AbortError') {
         const parts: string[] = []
-        if (e?.code) parts.push(`[${e.code}]`)
-        const status = httpStatusOf(e)
+        if (code) parts.push(`[${code}]`)
+        const status = httpStatusOf(err)
         if (status) parts.push(`HTTP ${status}`)
-        parts.push(e?.message || String(err) || 'Coding Agent error')
+        parts.push(errorText(err) || String(err) || 'Coding Agent error')
         const msg = parts.join(' ')
         // Surface common causes so the user can see WHY it failed instead of
         // a bare "Connection error" — previously we only printed `.message`,
@@ -2396,7 +2409,7 @@ export function useCodex() {
         let hint = ''
         if (/Failed to fetch|NetworkError|net::ERR/i.test(msg)) {
           hint = '\n\nHint: the Ollama server is unreachable. Is `ollama serve` running on localhost:11434?'
-        } else if (e?.code === 'tools_unsupported' || /does not support tools|tool.*not.*support/i.test(msg)) {
+        } else if (code === 'tools_unsupported' || /does not support tools|tool.*not.*support/i.test(msg)) {
           markToolsUnsupported(modelToUse)
           hint = '\n\nHint: this model does not support tool calling, so Code mode cannot use it. Pick a model that supports tool calling (Qwen 3, Llama 3.1+, Gemma 4) or an LU Cloud model shown with the tools badge.'
         } else if (/timed out/i.test(msg)) {
@@ -2404,7 +2417,7 @@ export function useCodex() {
         }
         // An empty wallet is not a crash and no retry fixes it. Replace the
         // status-code line with the plain explanation the other surfaces use.
-        if (e?.code === 'credits_exhausted') {
+        if (code === 'credits_exhausted') {
           loopHalt = 'out of credits'
           fullContent += `\n\n${CREDITS_EXHAUSTED_MESSAGE}\n\nThe work finished so far stays in this chat. Once you top up, send a new message naming only what is still left.`
           useChatStore.getState().updateMessageContent(convId, assistantMsg.id, fullContent)
@@ -2450,7 +2463,7 @@ export function useCodex() {
             content: tm.content || '',
             timestamp: Date.now(),
             hidden: true,
-            tool_calls: tm.tool_calls as any,
+            tool_calls: tm.tool_calls,
             // Persist the tool-result linkage so the next turn's history
             // builder can replay it — without this, follow-up turns 422 on
             // lu-cloud (see types/chat.ts Message.tool_call_id, Bug 4).

@@ -102,6 +102,7 @@ vi.mock('../comfyui-ws', () => ({
 
 import { decideUnload, vramHandoffGenerate, pollGone, resolveClip, resolveModelName, resolveI2VResolution, comfyErrorHint, requestGenerationCancel, resolveTunables, __resetGenerationStateForTests } from '../vram-handoff'
 import { useSettingsStore } from '../../stores/settingsStore'
+import type { ModelCapabilities } from '../comfyui-nodes'
 
 const GB = 1024 * 1024 * 1024
 
@@ -865,23 +866,28 @@ describe('vramHandoffGenerate — Stop / cancel gating', () => {
 //    and the chat-gen IMAGE path must use per-architecture defaults (Flux cfg 1,
 //    SDXL cfg 7 / dpmpp_2m) instead of one hardcoded cfg 7 for everything. ──
 describe('resolveTunables — honors the model default over the generic caps default', () => {
-  const caps = {
+  // Als ModelCapabilities deklariert, nicht als `any`: die Fixture hatte
+  // `modelType` gar nicht, und der Cast hat genau das verdeckt. `VramHandoffArgs`
+  // wiederum ist durchgehend optional plus Index-Signatur — die drei
+  // `as any` an den Argumenten unten waren nie noetig.
+  const caps: ModelCapabilities = {
+    modelType: 'wan',
     cfgRange: { default: 8.0, min: 0, max: 100 },
     stepsRange: { default: 20, min: 1, max: 200 },
     usesKSampler: true,
     availableSamplers: ['euler', 'dpmpp_2m'],
     availableSchedulers: ['normal', 'karras'],
-  } as any
+  }
 
   it('no user value + caps present → MODEL default (Wan 30/6.0), NOT the generic caps 20/8.0', () => {
-    const t = resolveTunables({ prompt: 'x' } as any, caps, { steps: 30, cfg: 6.0, sampler: 'euler', scheduler: 'normal' })
+    const t = resolveTunables({ prompt: 'x' }, caps, { steps: 30, cfg: 6.0, sampler: 'euler', scheduler: 'normal' })
     expect(t.cfg).toBe(6.0)
     expect(t.steps).toBe(30)
     expect(t.reject).toBeNull()
   })
 
   it('explicit in-range user value still applies', () => {
-    const t = resolveTunables({ prompt: 'x', cfg: 4, steps: 40 } as any, caps, { steps: 30, cfg: 6.0, sampler: 'euler', scheduler: 'normal' })
+    const t = resolveTunables({ prompt: 'x', cfg: 4, steps: 40 }, caps, { steps: 30, cfg: 6.0, sampler: 'euler', scheduler: 'normal' })
     expect(t.cfg).toBe(4)
     expect(t.steps).toBe(40)
     expect(t.reject).toBeNull()
@@ -889,7 +895,7 @@ describe('resolveTunables — honors the model default over the generic caps def
 
   it('explicit OUT-of-range user value is still rejected against the caps range', () => {
     const tight = { ...caps, stepsRange: { default: 20, min: 1, max: 30 } }
-    const t = resolveTunables({ prompt: 'x', steps: 999 } as any, tight, { steps: 30, cfg: 6.0, sampler: 'euler', scheduler: 'normal' })
+    const t = resolveTunables({ prompt: 'x', steps: 999 }, tight, { steps: 30, cfg: 6.0, sampler: 'euler', scheduler: 'normal' })
     expect(t.reject).toMatch(/steps/i)
   })
 })

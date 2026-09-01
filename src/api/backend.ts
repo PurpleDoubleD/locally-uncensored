@@ -9,6 +9,7 @@
  */
 
 import { log } from "../lib/logger";
+import { prop } from "../types/json-guards";
 import { shouldLogRepeat } from "../lib/probe-backoff";
 
 // Hosts whose proxy failure has already been logged, host -> timestamp. Keeps
@@ -28,8 +29,11 @@ export function isTauri(): boolean {
   // Check both so the app keeps working across both versions (and also
   // during the migration window when people might be on either).
   if (typeof window === "undefined") return false;
-  const w = window as any;
-  return !!(w.__TAURI_INTERNALS__ || w.__TAURI__);
+  // Neither global is in the DOM lib, so reading them off `window` needed an
+  // assertion. `prop` answers `undefined` for a missing key without claiming
+  // anything about the container — the same probe, checked.
+  const w: unknown = window;
+  return !!(prop(w, "__TAURI_INTERNALS__") || prop(w, "__TAURI__"));
 }
 
 /** True when the host OS is macOS. The frontend `dist` is shared across the
@@ -435,10 +439,10 @@ async function proxyStreamChunked(url: string, method: string, body?: string, he
 /**
  * Call a backend command. Routes to Tauri invoke() or Vite fetch() automatically.
  */
-export async function backendCall<T = any>(
+export async function backendCall<T = unknown>(
   command: string,
   args?: Record<string, unknown>,
-  options?: { method?: string; body?: any; headers?: Record<string, string> }
+  options?: { method?: string; body?: BodyInit; headers?: Record<string, string> }
 ): Promise<T> {
   if (isTauri()) {
     const invoke = await getInvoke();

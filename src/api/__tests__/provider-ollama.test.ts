@@ -20,6 +20,7 @@ vi.mock('../backend', () => ({
 
 import { OllamaProvider } from '../providers/ollama-provider'
 import { localFetch } from '../backend'
+import { asProviderError } from './provider-test-support'
 
 const mockLocalFetch = localFetch as ReturnType<typeof vi.fn>
 
@@ -124,11 +125,12 @@ describe('OllamaProvider', () => {
       try {
         await provider.listModels()
         expect.fail('Should have thrown')
-      } catch (e: any) {
+      } catch (e) {
         expect(e).toBeInstanceOf(ProviderError)
-        expect(e.provider).toBe('ollama')
-        expect(e.code).toBe('network')
-        expect(e.status).toBe(500)
+        const err = asProviderError(e)
+        expect(err.provider).toBe('ollama')
+        expect(err.code).toBe('network')
+        expect(err.status).toBe(500)
       }
     })
   })
@@ -557,10 +559,11 @@ describe('OllamaProvider', () => {
           [],
         )
         expect.fail('Should have thrown')
-      } catch (e: any) {
+      } catch (e) {
         expect(e).toBeInstanceOf(ProviderError)
-        expect(e.provider).toBe('ollama')
-        expect(e.status).toBe(404)
+        const err = asProviderError(e)
+        expect(err.provider).toBe('ollama')
+        expect(err.status).toBe(404)
       }
     })
 
@@ -577,9 +580,10 @@ describe('OllamaProvider', () => {
           [],
         )
         expect.fail('Should have thrown')
-      } catch (e: any) {
+      } catch (e) {
         expect(e).toBeInstanceOf(ProviderError)
-        expect(e.message).toBe('model "xyz" not found')
+        const err = asProviderError(e)
+        expect(err.message).toBe('model "xyz" not found')
       }
     })
 
@@ -596,9 +600,10 @@ describe('OllamaProvider', () => {
           [],
         )
         expect.fail('Should have thrown')
-      } catch (e: any) {
+      } catch (e) {
         expect(e).toBeInstanceOf(ProviderError)
-        expect(e.message).toBe('Tool calling failed')
+        const err = asProviderError(e)
+        expect(err.message).toBe('Tool calling failed')
       }
     })
 
@@ -611,10 +616,11 @@ describe('OllamaProvider', () => {
       try {
         await provider.listModels()
         expect.fail('Should have thrown')
-      } catch (e: any) {
+      } catch (e) {
         expect(e).toBeInstanceOf(ProviderError)
-        expect(e.provider).toBe('ollama')
-        expect(e.status).toBe(503)
+        const err = asProviderError(e)
+        expect(err.provider).toBe('ollama')
+        expect(err.status).toBe(503)
       }
     })
   })

@@ -8,6 +8,8 @@ import { describe, it, expect, vi } from 'vitest'
 import { AnthropicProvider } from '../providers/anthropic-provider'
 import { ProviderError } from '../providers/types'
 import type { ProviderConfig } from '../providers/types'
+import type { MessagesBody } from '../providers/anthropic-provider'
+import { asProviderError, sentJson } from './provider-test-support'
 
 function makeConfig(overrides: Partial<ProviderConfig> = {}): ProviderConfig {
   return {
@@ -121,7 +123,10 @@ describe('AnthropicProvider', () => {
         [],
       )
 
-      const body = JSON.parse(fetchSpy.mock.calls[0][1]?.body as string)
+      // Als MessagesBody gelesen, nicht als `any`: benennt der Provider ein
+      // Feld um, hoert die Zusicherung auf zu kompilieren, statt still gegen
+      // `undefined` zu vergleichen.
+      const body = sentJson<MessagesBody>(fetchSpy.mock.calls)
       // 2.6.6 A8: the system prompt now rides in a block array so it can carry
       // a cache_control breakpoint. Placement itself is pinned in
       // providers/__tests__/anthropic-cache-control.test.ts.
@@ -129,7 +134,12 @@ describe('AnthropicProvider', () => {
         { type: 'text', text: 'You are helpful.', cache_control: { type: 'ephemeral' } },
       ])
       expect(body.messages).toEqual([{ role: 'user', content: 'Hi' }])
-      expect(body.messages.find((m: any) => m.role === 'system')).toBeUndefined()
+      // Und ausdruecklich: keine system-Rolle im Array — genau dieser Regress
+      // (der System-Turn bleibt in `messages` stehen) ist der Grund fuer den
+      // Test. `String(...)` liest den LAUFZEIT-Wert; der Typ sagt schon
+      // `'user' | 'assistant'`, und ein Vergleich damit waere nur eine
+      // Wiederholung der Deklaration.
+      expect(body.messages.map((m) => String(m.role))).not.toContain('system')
       vi.restoreAllMocks()
     })
 
@@ -154,11 +164,11 @@ describe('AnthropicProvider', () => {
         }],
       )
 
-      const body = JSON.parse(fetchSpy.mock.calls[0][1]?.body as string)
+      const body = sentJson<MessagesBody>(fetchSpy.mock.calls)
       expect(body.tools).toHaveLength(1)
-      expect(body.tools[0].name).toBe('web_search')
-      expect(body.tools[0].description).toBe('Search')
-      expect(body.tools[0].input_schema).toBeDefined()
+      expect(body.tools?.[0].name).toBe('web_search')
+      expect(body.tools?.[0].description).toBe('Search')
+      expect(body.tools?.[0].input_schema).toBeDefined()
       vi.restoreAllMocks()
     })
 
@@ -198,10 +208,11 @@ describe('AnthropicProvider', () => {
       try {
         await provider.chatWithTools('claude-sonnet-4-20250514', [{ role: 'user', content: 'hi' }], [])
         expect.fail('Should throw')
-      } catch (e: any) {
+      } catch (e) {
         expect(e).toBeInstanceOf(ProviderError)
-        expect(e.code).toBe('auth')
-        expect(e.provider).toBe('anthropic')
+        const err = asProviderError(e)
+        expect(err.code).toBe('auth')
+        expect(err.provider).toBe('anthropic')
       }
       vi.restoreAllMocks()
     })
@@ -218,9 +229,10 @@ describe('AnthropicProvider', () => {
       try {
         await provider.chatWithTools('claude-sonnet-4-20250514', [{ role: 'user', content: 'hi' }], [])
         expect.fail('Should throw')
-      } catch (e: any) {
+      } catch (e) {
         expect(e).toBeInstanceOf(ProviderError)
-        expect(e.code).toBe('rate_limit')
+        const err = asProviderError(e)
+        expect(err.code).toBe('rate_limit')
       }
       vi.restoreAllMocks()
     })
@@ -233,9 +245,10 @@ describe('AnthropicProvider', () => {
       try {
         await provider.chatWithTools('claude-sonnet-4-20250514', [{ role: 'user', content: 'hi' }], [])
         expect.fail('Should throw')
-      } catch (e: any) {
+      } catch (e) {
         expect(e).toBeInstanceOf(ProviderError)
-        expect(e.code).toBe('overloaded')
+        const err = asProviderError(e)
+        expect(err.code).toBe('overloaded')
       }
       vi.restoreAllMocks()
     })

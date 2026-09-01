@@ -8,12 +8,14 @@ import {
   APPROVE_ALL,
 } from '../tool-executor'
 import type { AgentToolCall } from '../../../types/agent-mode'
+import type { JsonSchema } from '../args-validator'
+import type { ToolArgs } from '../../mcp/types'
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
 
 const makeRuntime = (
   overrides: Partial<ExecutorRuntime> & {
-    tools?: Record<string, { inputSchema?: any; executor: (args: any) => Promise<string> }>
+    tools?: Record<string, { inputSchema?: JsonSchema; executor: (args: ToolArgs) => Promise<string> }>
   } = {}
 ): ExecutorRuntime => {
   const tools = overrides.tools ?? {}
@@ -21,7 +23,7 @@ const makeRuntime = (
     getTool: overrides.getTool ?? ((name: string) => (name in tools ? { name, inputSchema: tools[name].inputSchema } : undefined)),
     execute:
       overrides.execute ??
-      (async (name: string, args: Record<string, any>) => {
+      (async (name: string, args: ToolArgs) => {
         if (!(name in tools)) throw new Error(`no executor for ${name}`)
         return tools[name].executor(args)
       }),
@@ -34,7 +36,7 @@ const makeRuntime = (
   }
 }
 
-const req = (id: string, toolName: string, args: Record<string, any> = {}): ExecutionRequest => ({
+const req = (id: string, toolName: string, args: ToolArgs = {}): ExecutionRequest => ({
   id,
   toolName,
   args,
@@ -102,11 +104,11 @@ describe('tool-executor — parallelism', () => {
     const runtime = makeRuntime({
       tools: {
         shell_execute: {
-          executor: async (args: any) => {
-            order.push(`start:${args.tag}`)
+          executor: async (args) => {
+            order.push(`start:${String(args.tag)}`)
             await sleep(30)
-            order.push(`end:${args.tag}`)
-            return `done:${args.tag}`
+            order.push(`end:${String(args.tag)}`)
+            return `done:${String(args.tag)}`
           },
         },
       },
@@ -128,10 +130,10 @@ describe('tool-executor — parallelism', () => {
     const runtime = makeRuntime({
       tools: {
         file_write: {
-          executor: async (args: any) => {
-            order.push(`start:${args.path}`)
+          executor: async (args) => {
+            order.push(`start:${String(args.path)}`)
             await sleep(30)
-            order.push(`end:${args.path}`)
+            order.push(`end:${String(args.path)}`)
             return 'ok'
           },
         },

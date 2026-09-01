@@ -18,7 +18,15 @@ import { resolve } from 'node:path'
 type BuiltinTool = {
   name: string
   description: string
-  inputSchema: { properties: Record<string, any>; required: string[] }
+  inputSchema: {
+    /**
+     * Nur die NAMEN werden gebraucht — der Quelltext-Scan unten setzt fuer
+     * jeden Namen ein leeres Objekt ein. `unknown` sagt genau das; `any` hat
+     * eine Schema-Form behauptet, die hier nie existiert hat.
+     */
+    properties: Record<string, unknown>
+    required: string[]
+  }
 }
 
 // Import the desktop source of truth. Kept as a `require` to avoid pulling the

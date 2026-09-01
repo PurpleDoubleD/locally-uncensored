@@ -24,12 +24,23 @@ import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
 
-const calls: { url: string; init?: any }[] = []
-let queueFixture: any = {}
+/**
+ * Was der Mock mitschneidet, hat eine Form: `localFetch`'s eigenes
+ * Options-Objekt (backend.ts). Als `any` gelesen haette ein umbenanntes
+ * `method`/`body` hier still `undefined` ergeben — und jede `posted()`-Zeile
+ * unten waere leer und gruen geblieben.
+ */
+type LocalFetchInit = Parameters<typeof import('../backend').localFetch>[1]
+
+/** ComfyUI `/queue`: zwei Listen von `[num, promptId, prompt, extra, outputs]`. */
+type QueueFixture = { queue_running: unknown[]; queue_pending: unknown[] }
+
+const calls: { url: string; init?: LocalFetchInit }[] = []
+let queueFixture: QueueFixture = { queue_running: [], queue_pending: [] }
 
 vi.mock('../backend', () => ({
   comfyuiUrl: (p: string) => p,
-  localFetch: vi.fn(async (url: string, init?: any) => {
+  localFetch: vi.fn(async (url: string, init?: LocalFetchInit) => {
     calls.push({ url, init })
     if (url === '/queue' && (!init || !init.method)) {
       return { ok: true, json: async () => queueFixture }
@@ -50,7 +61,8 @@ const read = (rel: string) => readFileSync(resolve(here, rel), 'utf8')
 const entry = (id: string) => [0, id, {}, {}, []]
 const posted = () => calls.filter((c) => c.init?.method === 'POST')
 // /interrupt is a bodyless POST; only the /queue posts carry JSON.
-const bodies = () => posted().filter((c) => c.init?.body).map((c) => JSON.parse(c.init.body))
+const bodies = (): Record<string, unknown>[] =>
+  posted().flatMap((c) => (typeof c.init?.body === 'string' ? [JSON.parse(c.init.body)] : []))
 
 beforeEach(() => {
   calls.length = 0
@@ -96,7 +108,7 @@ describe('abandonPrompt — one job, by id', () => {
 
   it('a dead ComfyUI is survivable — Stop must never throw at the user', async () => {
     const { localFetch } = await import('../backend')
-    ;(localFetch as any).mockRejectedValue(new Error('ECONNREFUSED'))
+    vi.mocked(localFetch).mockRejectedValue(new Error('ECONNREFUSED'))
     await expect(abandonPrompt('ours')).resolves.toBeUndefined()
   })
 })

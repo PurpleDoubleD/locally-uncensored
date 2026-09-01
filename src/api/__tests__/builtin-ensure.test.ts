@@ -26,7 +26,7 @@ vi.mock('../../stores/settingsStore', () => ({
 
 const backendCall = vi.fn()
 vi.mock('../backend', () => ({
-  backendCall: (...args: any[]) => backendCall(...args),
+  backendCall: (...args: unknown[]) => backendCall(...args),
 }))
 
 import { ensureBuiltinEngineAlive } from '../builtin-ensure'

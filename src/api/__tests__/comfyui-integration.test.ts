@@ -6,6 +6,7 @@
 
 import { getVideoBundles, getImageBundles, CUSTOM_NODE_REGISTRY } from '../discover'
 import { classifyModel, MODEL_TYPE_DEFAULTS, COMPONENT_REGISTRY as COMFYUI_REGISTRY } from '../comfyui'
+import type { ModelType } from '../comfyui'
 import { determineStrategy } from '../dynamic-workflow'
 import type { CategorizedNodes, AvailableModels } from '../comfyui-nodes'
 
@@ -59,7 +60,11 @@ describe('Full Pipeline: Bundle → Strategy for all 14 video bundles', () => {
       const workflow = bundle.workflow
 
       // 3. Map workflow to ModelType for strategy detection
-      const workflowToModelType: Record<string, string> = {
+      // Als Record<string, ModelType> deklariert: die Werte werden gleich an
+      // determineStrategy gereicht, und ein Tippfehler in dieser Tabelle war
+      // bisher nur zur Laufzeit sichtbar — der Cast am Aufruf hat ihn genau
+      // dort durchgelassen.
+      const workflowToModelType: Record<string, ModelType> = {
         wan: 'wan', wan22: 'wan22', hunyuan: 'hunyuan', ltx: 'ltx', animatediff: 'sd15',
         cogvideo: 'cogvideo', framepack: 'framepack', svd: 'svd',
         mochi: 'mochi', cosmos: 'cosmos', pyramidflow: 'pyramidflow', allegro: 'allegro',
@@ -71,7 +76,7 @@ describe('Full Pipeline: Bundle → Strategy for all 14 video bundles', () => {
       // were pulled on 2026-07-24 (their builders emitted node class names no
       // wrapper registers), so every bundle that is still listed here has to
       // resolve to a real strategy. No carve-outs.
-      const result = determineStrategy(modelType as any, true, allNodesAvailable(), defaultModels)
+      const result = determineStrategy(modelType, true, allNodesAvailable(), defaultModels)
       expect(result.strategy).not.toBe('unavailable')
     })
   }
@@ -220,7 +225,7 @@ describe('Full Pipeline: Image bundle → Strategy for ERNIE-Image', () => {
   })
 
   it('ERNIE-Image Turbo has valid strategy when all nodes available', () => {
-    const result = determineStrategy('ernie_image' as any, false, allNodesAvailable(), defaultModels)
+    const result = determineStrategy('ernie_image', false, allNodesAvailable(), defaultModels)
     expect(result.strategy).toBe('unet_ernie_image')
   })
 })

@@ -25,6 +25,29 @@ import { fileURLToPath } from 'node:url'
 import { executeParallel, APPROVE_ALL, type ExecutorRuntime } from '../tool-executor'
 import { ToolRegistry } from '../../mcp/tool-registry'
 import type { MCPToolDefinition } from '../../mcp/types'
+import type { AgentRunContext } from '../../agent-context'
+
+/**
+ * Ein Run-Kontext, in dem nur `abortSignal` etwas aussagt.
+ *
+ * Vorher stand hier `{ abortSignal } as any`. Das hat nicht nur den Typ
+ * abgeschaltet, es hat auch die Frage verdeckt, ob ein Kontext ohne `token`
+ * und `workspace` ueberhaupt einer ist — bekommt AgentRunContext ein weiteres
+ * Pflichtfeld, faellt es jetzt hier auf statt still `undefined` zu sein.
+ */
+function runWithSignal(abortSignal: AbortSignal): AgentRunContext {
+  return {
+    token: 'abort-test-run',
+    chatId: null,
+    conversationId: null,
+    workspace: null,
+    artifactMode: false,
+    readOnlyShellTurn: false,
+    mode: null,
+    artifacts: [],
+    abortSignal,
+  }
+}
 
 const tool = (name: string) => ({ name })
 
@@ -62,7 +85,7 @@ describe('executeParallel — the run\'s Stop reaches the tool', () => {
         id: '1',
         toolName: 'file_read',
         args: {},
-        run: { abortSignal: ctrl.signal } as any,
+        run: runWithSignal(ctrl.signal),
       }],
       mkRuntime({ execute: async (_n, _a, _r, signal) => { seen = signal; return 'done' } }),
     )
@@ -158,7 +181,7 @@ describe('ToolRegistry.execute — the signal keeps travelling', () => {
     const ctrl = new AbortController()
     let seen: AbortSignal | undefined
     registry.registerBuiltin(def('file_read'), async (_a, _r, signal) => { seen = signal; return 'x' })
-    await registry.execute('file_read', {}, 1, { abortSignal: ctrl.signal } as any)
+    await registry.execute('file_read', {}, 1, runWithSignal(ctrl.signal))
     expect(seen).toBe(ctrl.signal)
   })
 

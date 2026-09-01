@@ -27,7 +27,8 @@ import { settleThinking } from '../../lib/thinking-stripper'
 // Einstiegspunkte dieser Datei hängen am `delegate_task`-Executor, den erst
 // registerBuiltinTools() verdrahtet.
 import { toolRegistry } from '../mcp/tool-registry'
-import type { MCPToolDefinition } from '../mcp/types'
+import type { MCPToolDefinition, ToolArgs } from '../mcp/types'
+import type { ChatMessage } from '../providers/types'
 import type { AgentToolCall } from '../../types/agent-mode'
 import type { ApprovalEntry } from '../../lib/approval-queue'
 import {
@@ -308,7 +309,9 @@ export async function defaultSubAgentRunner(
     function: { name: t.name, description: t.description, parameters: t.inputSchema },
   }))
 
-  const messages: any[] = [
+  // The sub-agent's own conversation — data this file writes, so it gets the
+  // declared type `provider.chatWithTools` reads rather than a guard.
+  const messages: ChatMessage[] = [
     {
       role: 'system',
       content: buildSubAgentSystemPrompt(),
@@ -356,7 +359,7 @@ export async function defaultSubAgentRunner(
       requests,
       {
         getTool: (name) => registry.resolveExecutable(name),
-        execute: (name: string, args: Record<string, any>, callRun?: AgentRunContext) =>
+        execute: (name: string, args: ToolArgs, callRun?: AgentRunContext) =>
           registry.execute(name, args, 1, callRun),
         explainError: (toolName, err) => explainToolError(toolName, err),
         // The three gates the nested loop used to run without.
@@ -395,8 +398,8 @@ export async function defaultSubAgentRunner(
  */
 export function buildDelegateExecutor(
   runner: SubAgentRunner = defaultSubAgentRunner
-): (args: Record<string, any>, run?: AgentRunContext) => Promise<string> {
-  return async (args: Record<string, any>, run?: AgentRunContext) => {
+): (args: ToolArgs, run?: AgentRunContext) => Promise<string> {
+  return async (args: ToolArgs, run?: AgentRunContext) => {
     if (_inFlight >= SUB_AGENT_MAX_PARALLEL) {
       return `Error: Maximum sub-agent concurrency (${SUB_AGENT_MAX_PARALLEL}) reached. Wait for a running sub-agent to finish, or continue the task yourself.`
     }

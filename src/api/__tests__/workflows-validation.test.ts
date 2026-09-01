@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { validateWorkflowJson, extractSearchTerms, autoDetectParameterMap, injectParameters, getBuiltinTemplates, parseImportedWorkflow, } from '../workflows'
-import type { ModelType } from '../comfyui'
+import type { ModelType, VideoParams } from '../comfyui'
 
 describe('workflows — pure functions', () => {
   // ─── validateWorkflowJson ───
@@ -121,7 +121,10 @@ it('injects LU dimensions into a legacy ImageResizeKJv2 workflow', async () => {
 })
 
   describe('injectParameters — source image', () => {
-    const videoParams = {
+    // Als VideoParams deklariert statt am Aufruf gecastet: fehlte hier ein
+    // Pflichtfeld, hat der Cast es durchgelassen und die Injektion lief gegen
+    // eine unvollstaendige Eingabe.
+    const videoParams: VideoParams = {
       model: 'wan2.2_i2v.safetensors',
       prompt: 'gentle camera movement',
       negativePrompt: '',
@@ -153,7 +156,7 @@ it('injects LU dimensions into a legacy ImageResizeKJv2 workflow', async () => {
       const result = await injectParameters(
         workflow,
         parameterMap,
-        videoParams as any,
+        videoParams,
         'wan' as ModelType,
       )
 
@@ -180,7 +183,7 @@ it('injects LU dimensions into a legacy ImageResizeKJv2 workflow', async () => {
       const result = await injectParameters(
         workflow,
         {},
-        videoParams as any,
+        videoParams,
         'wan' as ModelType,
       )
 

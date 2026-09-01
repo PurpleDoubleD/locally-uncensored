@@ -5,6 +5,7 @@
 
 import { toolRegistry, DEFAULT_PERMISSIONS } from './mcp'
 import type { AgentToolDef, OllamaTool } from '../types/agent-mode'
+import type { ToolArgs } from './mcp/types'
 
 // ── Legacy exports (delegate to new registry) ─────────────────
 
@@ -35,7 +36,7 @@ export function getToolPermission(name: string): 'auto' | 'confirm' {
 /** @deprecated Use toolRegistry.execute(name, args) */
 export async function executeAgentTool(
   name: string,
-  args: Record<string, any>
+  args: ToolArgs
 ): Promise<string> {
   return toolRegistry.execute(name, args)
 }

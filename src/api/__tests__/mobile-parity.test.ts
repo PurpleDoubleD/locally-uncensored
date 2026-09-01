@@ -51,11 +51,27 @@ function transformUserMessageWithCaveman(msg: ChatMessage, caveman: CavemanMode,
   return { ...msg, content: CAVEMAN_REMINDERS[caveman] + '\n' + msg.content }
 }
 
-function buildOllamaBody(model: string, messages: ChatMessage[], opts: { thinking?: boolean } = {}) {
+/**
+ * Der Koerper, den die mobile Seite an Ollamas `/api/chat` schickt.
+ *
+ * Deklariert statt `any`: die Zusicherungen unten pruefen, dass `think` NICHT
+ * gesetzt ist und dass `options.num_gpu` fehlt — auf einem `any` ist
+ * "nicht gesetzt" von "das Feld heisst inzwischen anders" nicht zu
+ * unterscheiden.
+ */
+type MobileOllamaBody = {
+  model: string
+  messages: ChatMessage[]
+  stream: true
+  options: { num_gpu?: number }
+  think?: boolean
+}
+
+function buildOllamaBody(model: string, messages: ChatMessage[], opts: { thinking?: boolean } = {}): MobileOllamaBody {
   // v2.4.6 Bug L: dropped hardcoded num_gpu:99 (was forcing all layers to GPU
   // on every request, killing 8 GB-VRAM laptop chat speed). Ollama
   // auto-decides layer placement based on free VRAM now.
-  const body: any = { model, messages, stream: true, options: {} }
+  const body: MobileOllamaBody = { model, messages, stream: true, options: {} }
   if (opts.thinking === true && isThinkingCompatible(model)) body.think = true
   return body
 }

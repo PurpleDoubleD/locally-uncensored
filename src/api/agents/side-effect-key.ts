@@ -35,9 +35,11 @@
  *     provides no win and competes for the GPU + the VRAM hand-off.
  */
 
+import type { ToolArgs } from '../mcp/types'
+
 export function deriveSideEffectKey(
   toolName: string,
-  args: Record<string, any>
+  args: ToolArgs
 ): string | undefined {
   switch (toolName) {
     case 'file_write':

@@ -18,7 +18,10 @@ export type ComfyWSEvent =
   | { type: 'progress'; data: { value: number; max: number; prompt_id: string } }
   | { type: 'executed'; data: { node: string; prompt_id: string } }
   | { type: 'execution_complete'; data: { prompt_id: string } }
-  | { type: 'execution_error'; data: { prompt_id: string; exception_message?: string; node_type?: string } }
+  // `exception_type` is on the wire (ComfyUI sends the Python class name next
+  // to the message) and comfyErrorHint reads it; it was simply missing here,
+  // so the one caller reached it through a cast.
+  | { type: 'execution_error'; data: { prompt_id: string; exception_message?: string; node_type?: string; exception_type?: string } }
   | { type: 'execution_cached'; data: { prompt_id: string; nodes: string[] } }
 
 export type ComfyWSListener = (event: ComfyWSEvent) => void

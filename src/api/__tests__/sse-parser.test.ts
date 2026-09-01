@@ -9,6 +9,23 @@ import {
   parseSSEStream, parseSSEJsonStream, parseSSEWithEvents, SSEMalformedDataError,
 } from '../sse'
 
+/**
+ * Verengung auf den Fehler, den der Parser wirklich wirft.
+ *
+ * `let caught: any` hat drei Felder von einem Wert gelesen, ueber den nichts
+ * feststand — und wenn nichts geworfen worden waere, haetten `caught.raw` &
+ * Co. still `undefined` geliefert. Der `instanceof`-Test hier ist dieselbe
+ * Pruefung wie das `toBeInstanceOf` daneben, nur so, dass TypeScript sie sieht.
+ */
+function asMalformed(e: unknown): SSEMalformedDataError {
+  if (!(e instanceof SSEMalformedDataError)) {
+    throw new Error(
+      `expected an SSEMalformedDataError, got: ${e instanceof Error ? `${e.name}: ${e.message}` : String(e)}`,
+    )
+  }
+  return e
+}
+
 // Helper: create a Response from a string
 function mockResponse(text: string): Response {
   const encoder = new TextEncoder()
@@ -210,10 +227,10 @@ describe('parseSSEJsonStream', () => {
   // delivered; the junk itself is now named.
   it('surfaces malformed JSON instead of swallowing it', async () => {
     const res = mockResponse('data: {"valid":true}\n\ndata: not-json\n\ndata: {"also":true}\n\n')
-    const items: any[] = []
-    let caught: any
+    const items: { valid?: boolean }[] = []
+    let caught: unknown
     try {
-      for await (const item of parseSSEJsonStream<any>(res)) {
+      for await (const item of parseSSEJsonStream<{ valid?: boolean }>(res)) {
         items.push(item)
       }
     } catch (e) {
@@ -222,30 +239,35 @@ describe('parseSSEJsonStream', () => {
     expect(items).toHaveLength(1)
     expect(items[0].valid).toBe(true)
     expect(caught).toBeInstanceOf(SSEMalformedDataError)
-    expect(caught.raw).toBe('not-json')
-    expect(caught.message).toContain('not-json')
+    const malformed = asMalformed(caught)
+    expect(malformed.raw).toBe('not-json')
+    expect(malformed.message).toContain('not-json')
   })
 
   it('names the event a malformed payload arrived under', async () => {
     const res = mockResponse('event: error\ndata: <html>502 Bad Gateway</html>\n\n')
-    let caught: any
+    let caught: unknown
     try {
-      for await (const _ of parseSSEJsonStream<any>(res)) { /* drain */ }
+      for await (const _ of parseSSEJsonStream<unknown>(res)) { /* drain */ }
     } catch (e) {
       caught = e
     }
     expect(caught).toBeInstanceOf(SSEMalformedDataError)
-    expect(caught.event).toBe('error')
-    expect(caught.code).toBe('sse_malformed_data')
+    const malformed = asMalformed(caught)
+    expect(malformed.event).toBe('error')
+    expect(malformed.code).toBe('sse_malformed_data')
   })
 
   it('stops at [DONE]', async () => {
     const res = mockResponse('data: {"a":1}\n\ndata: [DONE]\n\ndata: {"b":2}\n\n')
     const items = []
-    for await (const item of parseSSEJsonStream<any>(res)) {
+    for await (const item of parseSSEJsonStream<{ a?: number; b?: number }>(res)) {
       items.push(item)
     }
     expect(items).toHaveLength(1)
+    // Und es ist die ERSTE, nicht irgendeine: `[DONE]` schneidet ab, es
+    // ueberspringt nicht.
+    expect(items[0].a).toBe(1)
   })
 })
 
@@ -256,12 +278,12 @@ describe('parseSSEWithEvents', () => {
       'event: content_block_delta\ndata: {"delta":{"text":"hi"}}\n\n'
     )
     const items = []
-    for await (const item of parseSSEWithEvents<any>(res)) {
+    for await (const item of parseSSEWithEvents<{ type?: string; delta?: { text?: string } }>(res)) {
       items.push(item)
     }
     expect(items).toHaveLength(2)
     expect(items[0].event).toBe('message_start')
     expect(items[1].event).toBe('content_block_delta')
-    expect(items[1].data.delta.text).toBe('hi')
+    expect(items[1].data.delta?.text).toBe('hi')
   })
 })

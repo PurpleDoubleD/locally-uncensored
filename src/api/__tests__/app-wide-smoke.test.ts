@@ -73,8 +73,10 @@ describe('MODEL_TYPE_DEFAULTS — completeness', () => {
   })
 
   it('every defaults entry has steps, width, height', () => {
-    for (const type of allTypes) {
-      const d = (MODEL_TYPE_DEFAULTS as any)[type]
+    // Object.entries statt Object.keys + Index: `keys` liefert `string[]`, und
+    // genau diese Luecke hat der Cast zugekleistert. Entries reicht den Wert
+    // schon getippt herein.
+    for (const [type, d] of Object.entries(MODEL_TYPE_DEFAULTS)) {
       expect(d.steps, `${type} missing steps`).toBeGreaterThan(0)
       expect(d.width, `${type} missing width`).toBeGreaterThan(0)
       expect(d.height, `${type} missing height`).toBeGreaterThan(0)
@@ -82,8 +84,7 @@ describe('MODEL_TYPE_DEFAULTS — completeness', () => {
   })
 
   it('every defaults entry has a sampler and scheduler', () => {
-    for (const type of allTypes) {
-      const d = (MODEL_TYPE_DEFAULTS as any)[type]
+    for (const [type, d] of Object.entries(MODEL_TYPE_DEFAULTS)) {
       expect(d.sampler, `${type} missing sampler`).toBeTruthy()
       expect(d.scheduler, `${type} missing scheduler`).toBeTruthy()
     }

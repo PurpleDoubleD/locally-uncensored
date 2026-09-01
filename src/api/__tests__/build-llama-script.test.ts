@@ -3,6 +3,7 @@ import { execFileSync } from 'node:child_process'
 import { resolve, join } from 'node:path'
 import { existsSync, statSync, mkdtempSync, rmSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
+import { asNumber, prop } from '../../types/json-guards'
 import { bashInterpreter } from './bash-interpreter'
 
 // P0: unit-test the pure functions of scripts/build-llama.sh by sourcing it
@@ -41,8 +42,12 @@ function callFn(fn: string, ...args: string[]): { code: number; out: string } {
       { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] },
     )
     return { code: 0, out: out.trim() }
-  } catch (e: any) {
-    return { code: e.status ?? 1, out: String(e.stdout ?? '').trim() }
+  } catch (e) {
+    // execFileSync throws an Error carrying `status` and `stdout`; both are
+    // read through the boundary guards rather than off an `any`, so a throw
+    // that is NOT that error reads as exit 1 with no output instead of
+    // silently producing `undefined ?? 1`.
+    return { code: asNumber(prop(e, 'status')) ?? 1, out: String(prop(e, 'stdout') ?? '').trim() }
   }
 }
 

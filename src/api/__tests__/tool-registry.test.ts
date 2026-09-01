@@ -138,9 +138,12 @@ describe('getOllamaTools', () => {
   it('does not include permission field (Ollama format excludes it)', () => {
     const ollamaTools = getOllamaTools()
     for (const tool of ollamaTools) {
-      // The permission field should not leak into the Ollama format
-      expect((tool as any).permission).toBeUndefined()
-      expect((tool.function as any).permission).toBeUndefined()
+      // The permission field should not leak into the Ollama format.
+      // `in` statt `(tool as any).permission === undefined`: der Cast hat die
+      // Frage "gibt es den Schluessel" in "ist der Wert undefined" verwandelt,
+      // und ein durchgereichtes `permission: undefined` waere gruen gewesen.
+      expect('permission' in tool).toBe(false)
+      expect('permission' in tool.function).toBe(false)
     }
   })
 })

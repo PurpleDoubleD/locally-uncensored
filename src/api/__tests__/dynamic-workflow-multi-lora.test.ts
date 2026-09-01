@@ -25,6 +25,8 @@ import {
   resolveLoraNames,
 } from '../dynamic-workflow'
 import { getAllNodeInfo } from '../comfyui-nodes'
+import { nodeOf, nodesOf, type BuiltNode } from './graph-test-support'
+import type { ComfyApiGraph } from '../../types/comfy-graph'
 
 const INSTALLED = ['pixel-art-xl.safetensors', 'detail-tweaker.safetensors', 'styles/ghibli_v2.safetensors']
 
@@ -47,9 +49,7 @@ const baseParams = {
   steps: 20, cfgScale: 7, width: 1024, height: 1024, seed: 42, batchSize: 1,
 }
 
-type LoraNode = { class_type: string; inputs: Record<string, unknown> }
-const loraNodesOf = (wf: Record<string, any>): [string, LoraNode][] =>
-  Object.entries(wf).filter(([, n]) => (n as LoraNode).class_type === 'LoraLoader') as [string, LoraNode][]
+const loraNodesOf = (wf: ComfyApiGraph): [string, BuiltNode][] => nodesOf(wf, 'LoraLoader')
 
 describe('normalizeLoraList', () => {
   it('passes arrays through (trimmed, empties dropped)', () => {
@@ -133,10 +133,10 @@ describe('buildDynamicWorkflow — LoRA chaining', () => {
     expect(first.inputs.strength_model).toBe(1.0)
     expect(second.inputs.strength_model).toBe(0.5)
     // Sampler consumes the LAST LoRA's model output.
-    const sampler = Object.values(wf).find((n: any) => n.class_type === 'KSampler') as LoraNode
+    const [, sampler] = nodeOf(wf, 'KSampler')!
     expect(sampler.inputs.model).toEqual([secondId, 0])
     // Text encoding consumes the LAST LoRA's clip output (slot 1).
-    const encoders = Object.values(wf).filter((n: any) => n.class_type === 'CLIPTextEncode') as LoraNode[]
+    const encoders = nodesOf(wf, 'CLIPTextEncode').map(([, n]) => n)
     for (const enc of encoders) expect(enc.inputs.clip).toEqual([secondId, 1])
   })
 

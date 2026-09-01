@@ -2,6 +2,25 @@ import { v4 as uuid } from "uuid"
 import type { DocumentMeta, TextChunk, RAGContext, VectorSearchResult } from "../types/rag"
 import { ollamaUrl, localFetch } from "./backend"
 import { isManagedBuiltinActive, embedBaseUrl, bundledEmbedStatus, ensureBundledEmbedAlive } from "./engine"
+import { asNumber, errorText, prop } from "../types/json-guards"
+
+/**
+ * One embedding row's vector, or `[]`.
+ *
+ * The number sibling of json-guards' `asStringArray`, kept local because rag.ts
+ * is its only caller. All-or-nothing on purpose: a vector with a hole in it is
+ * not a shorter vector, it is not a vector, and silently shortening one would
+ * defeat the dimension check in cosineSimilarity.
+ */
+function asNumberArray(v: unknown): number[] {
+  if (!Array.isArray(v)) return []
+  const out: number[] = []
+  for (const x of v) {
+    if (typeof x !== "number" || !Number.isFinite(x)) return []
+    out.push(x)
+  }
+  return out
+}
 
 export async function extractText(file: File): Promise<string> {
   const ext = file.name.split(".").pop()?.toLowerCase()
@@ -66,7 +85,11 @@ async function extractTextFromPDF(file: File): Promise<string> {
   for (let i = 1; i <= doc.numPages; i++) {
     const page = await doc.getPage(i)
     const textContent = await page.getTextContent()
-    pages.push(textContent.items.map((item: any) => item.str).join(" "))
+    // `items` mixes TextItem (has `str`) with TextMarkedContent (has not).
+    // Mapping the marked-content entries to '' keeps the joined spacing
+    // identical to the old `item.str` read, which produced `undefined` there
+    // and `join` rendered that as the empty string anyway.
+    pages.push(textContent.items.map((item) => ("str" in item ? item.str : "")).join(" "))
   }
   return pages.join("\n\n")
 }
@@ -188,23 +211,26 @@ async function embedViaBuiltin(texts: string[], model: string): Promise<number[]
   if (!res.ok) {
     let detail = ""
     try {
-      const body = await res.json()
-      detail = body?.error?.message || body?.error || ""
+      const body: unknown = await res.json()
+      // errorText covers both shapes this used to spell out by hand: a plain
+      // string error and an `{ message }` object.
+      detail = errorText(prop(body, "error"))
     } catch { /* ignore parse errors */ }
     throw new Error(
       `Embedding failed (HTTP ${res.status}): ${detail || "the built-in embeddings server may still be loading"}`
     )
   }
 
-  const data = await res.json()
+  const data: unknown = await res.json()
   // OpenAI shape: { data: [{ embedding: number[], index }] }. Sort by index so
   // the vectors line up with the input order even if the server reorders them.
-  if (!data?.data || !Array.isArray(data.data)) {
+  const rows = prop(data, "data")
+  if (!rows || !Array.isArray(rows)) {
     throw new Error("Unexpected response from the built-in /v1/embeddings endpoint")
   }
-  return [...data.data]
-    .sort((a: any, b: any) => (a.index ?? 0) - (b.index ?? 0))
-    .map((d: any) => d.embedding as number[])
+  return [...rows]
+    .sort((a, b) => (asNumber(prop(a, "index")) ?? 0) - (asNumber(prop(b, "index")) ?? 0))
+    .map((d) => asNumberArray(prop(d, "embedding")))
 }
 
 /** Ollama `/api/embed` — the legacy/Advanced path (unchanged). */
@@ -224,8 +250,12 @@ async function embedViaOllama(texts: string[], model: string): Promise<number[][
   if (!res.ok) {
     let detail = ""
     try {
-      const body = await res.json()
-      detail = body?.error || ""
+      const body: unknown = await res.json()
+      // Must end up a STRING: `detail.includes` two lines down threw a
+      // TypeError whenever the error field was an object (an OpenAI-shaped
+      // proxy in front of Ollama sends `{ error: { message } }`), and the
+      // "run: ollama pull …" hint the user needs never got built.
+      detail = errorText(prop(body, "error"))
     } catch { /* ignore parse errors */ }
 
     if (res.status === 404 || detail.includes("not found")) {
@@ -238,11 +268,12 @@ async function embedViaOllama(texts: string[], model: string): Promise<number[][
     )
   }
 
-  const data = await res.json()
-  if (!data.embeddings || !Array.isArray(data.embeddings)) {
+  const data: unknown = await res.json()
+  const embeddings = prop(data, "embeddings")
+  if (!embeddings || !Array.isArray(embeddings)) {
     throw new Error("Unexpected response from Ollama /embed endpoint")
   }
-  return data.embeddings
+  return embeddings.map(asNumberArray)
 }
 
 export function cosineSimilarity(a: number[], b: number[]): number {
@@ -349,7 +380,12 @@ export async function indexDocument(
     id: uuid(),
     documentId: docId,
     content,
-    embedding: embeddings[index],
+    // A server that answers with FEWER rows than it was given inputs leaves the
+    // tail undefined here, and `TextChunk.embedding` promises number[]. The
+    // undefined then reached cosineSimilarity, whose `!a.length` guard throws
+    // on it — so every later query against that document died with a raw
+    // TypeError. Empty is the failure state the ranking is built to absorb.
+    embedding: embeddings[index] ?? [],
     index,
   }))
 

@@ -15,8 +15,9 @@ import { makeInTurnCacheLookup } from '../in-turn-cache'
 import { useToolAuditStore } from '../../../stores/toolAuditStore'
 import { stableArgsHash } from '../block-helpers'
 import type { ExecutionRequest } from '../tool-executor'
+import type { ToolArgs } from '../../mcp/types'
 
-const req = (id: string, toolName: string, args: Record<string, any>): ExecutionRequest => ({
+const req = (id: string, toolName: string, args: ToolArgs): ExecutionRequest => ({
   id, toolName, args,
 })
 

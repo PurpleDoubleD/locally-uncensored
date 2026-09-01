@@ -21,24 +21,34 @@ const src = readFileSync(
   resolve(dirname(fileURLToPath(import.meta.url)), '../useAgentChat.ts'), 'utf8',
 ).replace(/\r\n/g, '\n')
 
+// Wie der Fehlertext gelesen wird, ist Implementierung; DASS er hinter dem
+// `thinking !== undefined` steht, ist die Eigenschaft. Die Pins nennen darum
+// beide Schreibweisen — die alte `thinkErr?.message?.includes` und die
+// heutige `errorText(thinkErr).includes` —, damit ein Rueckbau auf die
+// ungeprüfte Variante hier genauso auffliegt wie ein Entfernen der Wache.
+const READS_THE_MESSAGE = "(?:errorText\\(thinkErr\\)|thinkErr\\?\\.message\\?)"
+
+function guardedDowngrade(optionsVar: string): RegExp {
+  return new RegExp(
+    `if \\(${optionsVar}\\.thinking !== undefined\\n\\s+&& \\(${READS_THE_MESSAGE}\\.includes\\('does not support thinking'\\)`,
+  )
+}
+
 describe('both branches check before they resend', () => {
   it('the ollama branch guards on the value it would drop', () => {
-    expect(src).toContain(
-      "if (chatOptions.thinking !== undefined\n" +
-      "                  && (thinkErr?.message?.includes('does not support thinking')",
-    )
+    expect(src).toMatch(guardedDowngrade('chatOptions'))
   })
 
   it('the provider branch guards on its own', () => {
-    expect(src).toContain(
-      "if (streamOpts.thinking !== undefined\n" +
-      "                  && (thinkErr?.message?.includes('does not support thinking')",
-    )
+    expect(src).toMatch(guardedDowngrade('streamOpts'))
   })
 
   it('no unguarded downgrade is left anywhere in the file', () => {
     const unguarded = src.match(
-      /(?<!undefined\s*\n\s*&& \()if \(thinkErr\?\.message\?\.includes\('does not support thinking'\)/g,
+      new RegExp(
+        `(?<!undefined\\s*\\n\\s*&& \\()if \\(${READS_THE_MESSAGE}\\.includes\\('does not support thinking'\\)`,
+        'g',
+      ),
     )
     expect(unguarded).toBeNull()
   })

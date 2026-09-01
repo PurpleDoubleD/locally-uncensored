@@ -29,7 +29,7 @@ vi.mock('../../stores/settingsStore', () => ({
 
 const backendCall = vi.fn()
 vi.mock('../backend', () => ({
-  backendCall: (...args: any[]) => backendCall(...args),
+  backendCall: (...args: unknown[]) => backendCall(...args),
 }))
 
 import { ensureBuiltinEngineAlive, builtinReloadNeeded } from '../builtin-ensure'
@@ -104,13 +104,13 @@ describe('the send-time gate enforces which model is loaded', () => {
     // another model got "ready" back without its model ever being loaded.
     let releaseFirst!: () => void
     const firstSwap = new Promise<void>((r) => (releaseFirst = r))
-    backendCall.mockImplementation(async (cmd: string, args?: any) => {
+    backendCall.mockImplementation(async (cmd: string, args?: Record<string, unknown>) => {
       if (cmd === 'bundled_engine_status') {
         return { running: true, healthy: true, model_path: GEMMA.path }
       }
       if (cmd === 'list_bundled_models') return { models: [GEMMA, HERMES] }
       if (cmd === 'swap_bundled_model') {
-        if (args.modelPath === HERMES.path) await firstSwap
+        if (args?.modelPath === HERMES.path) await firstSwap
         return { status: 'started' }
       }
       throw new Error(`unexpected command ${cmd}`)

@@ -46,6 +46,7 @@
 
 import { backendCall, ollamaUrl, localFetch, isOllamaLocal, isWindows } from './backend'
 import type { ComfyApiGraph } from '../types/comfy-graph'
+import { asNumber, asRecordArray, asString, prop } from '../types/json-guards'
 import { listRunningModels, loadModel, unloadModel } from './ollama'
 import { startBundledEngine } from './engine'
 import { useSettingsStore } from '../stores/settingsStore'
@@ -221,10 +222,12 @@ async function getResidentModels(): Promise<ResidentModel[]> {
     // phase from inheriting the proxy's 5-min default if Ollama is wedged.
     const res = await localFetch(ollamaUrl('/ps'), { timeoutMs: 8_000 })
     if (!res.ok) return []
-    const data = await res.json()
-    return (data.models || []).map((m: any) => ({
-      name: m.name || m.model || '',
-      sizeVram: typeof m.size_vram === 'number' ? m.size_vram : 0,
+    const data: unknown = await res.json()
+    return asRecordArray(prop(data, 'models')).map((m) => ({
+      // `||`, not `??`: an empty `name` has to fall through to `model` the way
+      // it always did.
+      name: asString(m.name) || asString(m.model) || '',
+      sizeVram: asNumber(m.size_vram) ?? 0,
     }))
   } catch {
     return []
@@ -1588,10 +1591,14 @@ async function pollAndExtract(promptId: string, prompt: string, kindLabel: strin
         // Pull the richest detail ComfyUI gives us: an execution_error carries
         // node_type + exception_type + exception_message (the plain `message`
         // field is usually empty for node errors — David 2026-06-11, FramePack).
-        const errEntry = history.status.messages?.find((m: any) => m?.[0] === 'execution_error')?.[1]
+        // ComfyHistoryEntry DECLARES `messages` as pairs; getHistory only
+        // checked that the entry is an object, so the array-ness is tested
+        // here rather than assumed by a `?.find` that would throw on a string.
+        const messages = Array.isArray(history.status.messages) ? history.status.messages : []
+        const errEntry = messages.find((m) => m?.[0] === 'execution_error')?.[1]
         const rawMsg = errEntry?.exception_message
-          || history.status.messages?.map((m: any) => m?.[1]?.message).filter(Boolean).join(' | ')
-          || history.status.messages?.[0]?.[1]?.message
+          || messages.map((m) => m?.[1]?.message).filter(Boolean).join(' | ')
+          || messages[0]?.[1]?.message
           || 'Unknown ComfyUI error'
         const hint = comfyErrorHint(errEntry?.node_type, errEntry?.exception_type, String(rawMsg))
         return `${kindLabel} generation failed: ${rawMsg}${hint ? `\n\n${hint}` : ''}`

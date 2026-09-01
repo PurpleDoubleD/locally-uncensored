@@ -58,7 +58,7 @@ vi.mock('../../mcp/tool-registry', () => ({
   toolRegistry: {
     getAll: () => [SHELL_DEF],
     resolveExecutable: (name: string) => (name === 'shell_execute' ? SHELL_DEF : undefined),
-    execute: (...args: any[]) => toolExecute(...(args as [])),
+    execute: (...args: unknown[]) => toolExecute(...(args as [])),
     getPermissionLevelWithOverrides: () => permLevel,
   },
 }))
@@ -81,7 +81,9 @@ import {
   defaultSubAgentRunner,
   _getDepth,
   _setDepth,
+  type SubAgentRunner,
 } from '../sub-agent'
+import type { ChatMessage } from '../../providers/types'
 import { AgentBudget } from '../budget'
 import type { AgentRunContext } from '../../agent-context'
 import { dequeueApproval, headApproval, resetApprovals } from '../../../lib/approval-queue'
@@ -118,7 +120,11 @@ describe('sub-agent — buildDelegateExecutor', () => {
   })
 
   it('invokes runner with trimmed goal + context + fresh budget', async () => {
-    const runner = vi.fn(async (goal: string, context: string, { budget }: any) => {
+    // Der Runner wird mit der exportierten Signatur getippt: haette der
+    // Aufrufer `budget` eines Tages anders benannt, waere `{ budget }: any`
+    // still `undefined` gewesen und `budget.snapshot()` erst zur Laufzeit
+    // geplatzt — mit einer Meldung ueber `undefined`, nicht ueber den Vertrag.
+    const runner: SubAgentRunner = vi.fn(async (goal, context, { budget }) => {
       expect(goal).toBe('do the thing')
       expect(context).toBe('background notes')
       expect(budget.snapshot()).toEqual({
@@ -255,8 +261,18 @@ function scriptOneToolCall(): void {
     .mockResolvedValueOnce({ content: 'done', toolCalls: [] })
 }
 
-/** The message array the sub-agent sent on its Nth provider turn (0-based). */
-const messagesOfTurn = (n: number): any[] => chatWithTools.mock.calls[n][1] as any[]
+/**
+ * The message array the sub-agent sent on its Nth provider turn (0-based).
+ *
+ * Typed as the provider's own `ChatMessage[]`. The assertion is sound because
+ * `chatWithTools` DECLARES that parameter as `ChatMessage[]` (providers/types)
+ * and this mock stands in for exactly that call — a `vi.fn()` records its
+ * arguments as `any`, which is the only reason a name has to be put back on
+ * them here. As `any[]` the reads below could not tell a missing `content`
+ * from an empty one.
+ */
+const messagesOfTurn = (n: number): ChatMessage[] =>
+  chatWithTools.mock.calls[n][1] as ChatMessage[]
 const lastToolMessage = (n: number): string => {
   const msgs = messagesOfTurn(n)
   return String(msgs[msgs.length - 1]?.content ?? '')

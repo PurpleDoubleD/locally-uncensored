@@ -12,12 +12,23 @@ import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
 
-const calls: { url: string; init?: any }[] = []
-let queueFixture: any = {}
+/**
+ * Was der Mock mitschneidet, hat eine Form: `localFetch`'s eigenes
+ * Options-Objekt (backend.ts). Als `any` gelesen haette ein umbenanntes
+ * `method`/`body` hier still `undefined` ergeben — und jede `posted()`-Zeile
+ * unten waere leer und gruen geblieben.
+ */
+type LocalFetchInit = Parameters<typeof import('../backend').localFetch>[1]
+
+/** ComfyUI `/queue`: zwei Listen von `[num, promptId, prompt, extra, outputs]`. */
+type QueueFixture = { queue_running: unknown[]; queue_pending: unknown[] }
+
+const calls: { url: string; init?: LocalFetchInit }[] = []
+let queueFixture: QueueFixture = { queue_running: [], queue_pending: [] }
 
 vi.mock('../backend', () => ({
   comfyuiUrl: (p: string) => p,
-  localFetch: vi.fn(async (url: string, init?: any) => {
+  localFetch: vi.fn(async (url: string, init?: LocalFetchInit) => {
     calls.push({ url, init })
     if (url === '/queue' && (!init || !init.method)) {
       return { ok: true, json: async () => queueFixture }
@@ -49,7 +60,11 @@ describe('sweepOrphanedLuJobs', () => {
     const cleaned = await sweepOrphanedLuJobs(CLIENT_ID)
     expect(cleaned).toBe(3)
     const del = calls.find((c) => c.url === '/queue' && c.init?.method === 'POST')
-    expect(JSON.parse(del!.init.body)).toEqual({ delete: ['pen1', 'pen2'] })
+    // Erst nachweisen, dass der POST ueberhaupt einen Koerper trug: ohne das
+    // waere ein weggefallener Body ein `JSON.parse(undefined)`-Absturz statt
+    // einer Aussage — und mit `?.` waere er still `undefined` gewesen.
+    expect(typeof del?.init?.body).toBe('string')
+    expect(JSON.parse(String(del?.init?.body))).toEqual({ delete: ['pen1', 'pen2'] })
     expect(calls.some((c) => c.url === '/interrupt')).toBe(true)
   })
 
@@ -71,7 +86,7 @@ describe('sweepOrphanedLuJobs', () => {
 
   it('returns 0 on an unreachable queue instead of throwing', async () => {
     const { localFetch } = await import('../backend')
-    ;(localFetch as any).mockRejectedValueOnce(new Error('down'))
+    vi.mocked(localFetch).mockRejectedValueOnce(new Error('down'))
     expect(await sweepOrphanedLuJobs(CLIENT_ID)).toBe(0)
   })
 })

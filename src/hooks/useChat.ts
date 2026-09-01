@@ -37,6 +37,9 @@ import { builtinReloadNeeded, ensureBuiltinEngineAlive } from "../api/builtin-en
 import { emptyAnswerExplanation } from "../lib/answer-notes"
 import { log } from "../lib/logger"
 import { CREDITS_EXHAUSTED_MESSAGE } from '../lib/credits-exhausted'
+import { httpStatusOf } from '../lib/http-status'
+import { errorText } from '../types/json-guards'
+import { ProviderError } from '../api/providers/types'
 
 /**
  * Pull the most recent media generation (image/video) out of an assistant
@@ -702,7 +705,7 @@ export function useChat() {
       async function* createStreamWithFallback() {
         try {
           yield* provider.chatStream(modelId, messages, chatOpts)
-        } catch (err: any) {
+        } catch (err) {
           if (isTooManyMessagesError(err)) {
             let trimmed = halveHistory(messages)
             for (let attempt = 0; trimmed; attempt++) {
@@ -710,14 +713,19 @@ export function useChat() {
                 log.info('chat.too_many_messages_retry', { sent: trimmed.length, attempt })
                 yield* provider.chatStream(modelId, trimmed, chatOpts)
                 return
-              } catch (retryErr: any) {
+              } catch (retryErr) {
                 if (!isTooManyMessagesError(retryErr) || attempt >= TOO_MANY_MESSAGES_MAX_HALVINGS) throw retryErr
                 trimmed = halveHistory(trimmed)
               }
             }
             throw err
           }
-          if (useThinking !== undefined && (err?.message?.includes('does not support thinking') || err?.status === 400 || err?.status === 422)) {
+          // `httpStatusOf` replaces the hand-rolled `err?.status` read: it is
+          // the helper the other two loops already use, and it also accepts the
+          // `statusCode` spelling — one more error shape now reaches the
+          // downgrade instead of ending the turn.
+          const status = httpStatusOf(err)
+          if (useThinking !== undefined && (errorText(err).includes('does not support thinking') || status === 400 || status === 422)) {
             yield* provider.chatStream(modelId, messages, { ...chatOpts, thinking: undefined })
           } else {
             throw err
@@ -919,11 +927,14 @@ export function useChat() {
         // can call the same translation without re-implementing it.
         syncOllamaHealthFromError(err)
 
-        const errorMsg = (err as any).code === 'auth' || (err as any).code === 'signed_out'
-          ? (err as Error).message
-          : (err as any).code === 'rate_limit'
-            ? (err as Error).message
-            : `Error: ${(err as Error).message || 'Connection failed'}`
+        // The codes that already carry a finished sentence for the user. They
+        // live on ProviderError, so this is a real `instanceof` narrowing
+        // instead of three casts through `any` onto whatever was thrown.
+        const code = err instanceof ProviderError ? err.code : undefined
+        const rawMessage = err instanceof Error ? err.message : ''
+        const errorMsg = code === 'auth' || code === 'signed_out' || code === 'rate_limit'
+          ? rawMessage
+          : `Error: ${rawMessage || 'Connection failed'}`
         // Bug B3 round 2: a refusal that produced nothing at all gets its own
         // English sentence, not the template's raw Jinja trace.
         const sendRefusal = explainSendRefusal(err)

@@ -21,6 +21,7 @@ import type { AgentRunContext } from '../agent-context'
 import { deriveSideEffectKey } from './side-effect-key'
 import { validateToolArgs, formatValidationErrors, type JsonSchema } from './args-validator'
 import { stableArgsHash } from './block-helpers'
+import type { ToolArgs } from '../mcp/types'
 
 export interface ExecutorToolDef {
   name: string
@@ -33,7 +34,7 @@ export interface ExecutionRequest {
   /** Tool name — must be registered in the executor's runtime. */
   toolName: string
   /** Raw args from the LLM. */
-  args: Record<string, any>
+  args: ToolArgs
   /** Optional parent id for sub-agent lineage. */
   parentToolCallId?: string
   /**
@@ -56,7 +57,7 @@ export interface ExecutionResult {
   /** Human-readable retry hint (filled by Phase 7 error-hints module). */
   errorHint?: string
   /** Validated + coerced args that were actually dispatched. */
-  dispatchedArgs: Record<string, any>
+  dispatchedArgs: ToolArgs
   argsHash: string
   sideEffectKey?: string
   startedAt: number
@@ -83,7 +84,7 @@ export interface ExecutionResult {
  */
 export type ExecutorFn = (
   name: string,
-  args: Record<string, any>,
+  args: ToolArgs,
   run?: AgentRunContext,
   signal?: AbortSignal,
 ) => Promise<string>
@@ -137,7 +138,7 @@ export type AuditHook =
       kind: 'start'
       id: string
       toolName: string
-      args: Record<string, any>
+      args: ToolArgs
       argsHash: string
       parentToolCallId?: string
       startedAt: number
@@ -300,7 +301,7 @@ async function runSingle(
       const schemaStr = required.length
         ? required
             .map((k) => {
-              const s = (props as Record<string, any>)[k]
+              const s = props[k]
               const typ = s && typeof s === 'object' ? (s.type || 'any') : 'any'
               return `${k}: ${typ}`
             })

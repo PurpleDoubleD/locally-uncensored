@@ -80,6 +80,8 @@ import { useTodoStore } from '../stores/todoStore'
 import { platformPromptLine, hostClockLine } from '../lib/host-platform'
 import { explainSendRefusal } from '../lib/template-refusal'
 import { httpStatusOf, isTerminalModelError, retryDelayMs } from '../lib/http-status'
+import { asString, errorText, prop } from '../types/json-guards'
+import type { ToolArgs } from '../api/mcp/types'
 import { CREDITS_EXHAUSTED_MESSAGE } from '../lib/credits-exhausted'
 
 // ── Hook ──────────────────────────────────────────────────────
@@ -443,7 +445,7 @@ export function useAgentChat() {
           const { context: ragContext } = await retrieveContext(userContent, chunks, ragState.embeddingModel)
           if (ragContext.chunks.length > 0) {
             const contextBlock = ragContext.chunks
-              .map((c: any, i: number) => `[Source ${i + 1}]\n${c.content}`)
+              .map((c, i) => `[Source ${i + 1}]\n${c.content}`)
               .join('\n\n')
             // Retrieval is the most volatile thing in the whole prompt:
             // every turn pulls different chunks. In front of the persona it
@@ -1013,11 +1015,11 @@ export function useAgentChat() {
                   },
                 )
                 break
-              } catch (thinkErr: any) {
+              } catch (thinkErr) {
                 // G22: OUR image attachment on a model that cannot see. Strip
                 // it to its text fallback and retry — the run must survive a
                 // wrong vision guess. A user-attached image stays untouched.
-                if (isMultimodalUnsupportedError(String(thinkErr?.message ?? '')) && stripVisionFeedbackMessages(agentMessages)) {
+                if (isMultimodalUnsupportedError(errorText(thinkErr)) && stripVisionFeedbackMessages(agentMessages)) {
                   // The send copy carries the same attachment; strip it there
                   // too or the retry resends exactly what just failed.
                   stripVisionFeedbackMessages(sendMessages)
@@ -1031,7 +1033,7 @@ export function useAgentChat() {
                 // resent a byte-identical request and charged the user for a
                 // 400 twice (review 2026-08-14).
                 if (chatOptions.thinking !== undefined
-                  && (thinkErr?.message?.includes('does not support thinking') || httpStatusOf(thinkErr) === 400)) {
+                  && (errorText(thinkErr).includes('does not support thinking') || httpStatusOf(thinkErr) === 400)) {
                   turn = await streamOllamaChatWithTools(
                     modelToUse,
                     sendMessages,
@@ -1055,11 +1057,11 @@ export function useAgentChat() {
                 // Retry ONLY transient failures. A deterministic client error
                 // (context overflow, empty wallet) repeats itself, so it has to
                 // surface at once instead of costing the user two backoffs.
-                const transient = thinkErr?.name !== 'AbortError' && !isTerminalModelError(thinkErr)
+                const transient = asString(prop(thinkErr, 'name')) !== 'AbortError' && !isTerminalModelError(thinkErr)
                 if (transient && connRetries < 2) {
                   connRetries++
                   const wait = retryDelayMs(thinkErr, connRetries)
-                  log.warn('agent.model_call_retry', { attempt: connRetries, waitMs: wait, err: String(thinkErr?.message || thinkErr) })
+                  log.warn('agent.model_call_retry', { attempt: connRetries, waitMs: wait, err: errorText(thinkErr) })
                   announceWait(thinkErr, wait)
                   await new Promise((r) => setTimeout(r, wait))
                   continue
@@ -1108,11 +1110,11 @@ export function useAgentChat() {
               try {
                 turn = await streamProviderTurn(provider, modelToUse, sendMessages, streamOpts, onLiveContent, onLiveThinking)
                 break
-              } catch (thinkErr: any) {
+              } catch (thinkErr) {
                 // G22 parity with the Ollama branch: heal a wrong vision
                 // guess instead of ending the run (R20 witness: LM Studio,
                 // gemma-3-4b-it-abliterated, text-only conversion).
-                if (isMultimodalUnsupportedError(String(thinkErr?.message ?? '')) && stripVisionFeedbackMessages(agentMessages)) {
+                if (isMultimodalUnsupportedError(errorText(thinkErr)) && stripVisionFeedbackMessages(agentMessages)) {
                   stripVisionFeedbackMessages(sendMessages)
                   visionRefused = true
                   log.warn('agent.vision_feedback_healed', { model: modelToUse, provider: providerId })
@@ -1124,15 +1126,15 @@ export function useAgentChat() {
                 // resent a byte-identical request and charged the user for a
                 // 400 twice (review 2026-08-14).
                 if (streamOpts.thinking !== undefined
-                  && (thinkErr?.message?.includes('does not support thinking') || httpStatusOf(thinkErr) === 400)) {
+                  && (errorText(thinkErr).includes('does not support thinking') || httpStatusOf(thinkErr) === 400)) {
                   turn = await streamProviderTurn(provider, modelToUse, sendMessages, { ...streamOpts, thinking: undefined as unknown as boolean }, onLiveContent, () => {})
                   break
                 }
-                const transient = thinkErr?.name !== 'AbortError' && !isTerminalModelError(thinkErr)
+                const transient = asString(prop(thinkErr, 'name')) !== 'AbortError' && !isTerminalModelError(thinkErr)
                 if (transient && connRetries < 2) {
                   connRetries++
                   const wait = retryDelayMs(thinkErr, connRetries)
-                  log.warn('agent.model_call_retry', { attempt: connRetries, provider: providerId, waitMs: wait, err: String(thinkErr?.message || thinkErr) })
+                  log.warn('agent.model_call_retry', { attempt: connRetries, provider: providerId, waitMs: wait, err: errorText(thinkErr) })
                   announceWait(thinkErr, wait)
                   await new Promise((r) => setTimeout(r, wait))
                   continue
@@ -1233,12 +1235,12 @@ export function useAgentChat() {
           )
           try {
             hermesTurn = await runHermes(hermesOpts)
-          } catch (thinkErr: any) {
+          } catch (thinkErr) {
             // Same downgrade the native branches carry: an old Ollama build or
             // an endpoint that predates the knob answers 400, and the run must
             // survive that instead of ending on it.
             if (hermesOpts.thinking !== undefined
-              && (thinkErr?.message?.includes('does not support thinking') || httpStatusOf(thinkErr) === 400)) {
+              && (errorText(thinkErr).includes('does not support thinking') || httpStatusOf(thinkErr) === 400)) {
               hermesTurn = await runHermes({ ...hermesOpts, thinking: undefined as unknown as boolean })
             } else {
               throw thinkErr
@@ -1736,7 +1738,7 @@ export function useAgentChat() {
           // Timeout backstop shared with Codex (audit B9): before this the
           // Agent loop had NO ceiling around a tool call, so one hung tool
           // wedged the whole run with no way out but a restart.
-          execute: (name: string, args: Record<string, any>, callRun?: AgentRunContext, signal?: AbortSignal) =>
+          execute: (name: string, args: ToolArgs, callRun?: AgentRunContext, signal?: AbortSignal) =>
             raceWithToolTimeout(
               // The run's Stop travels into the tool itself (audit M1), not
               // just to the batch scheduler.
