@@ -38,8 +38,7 @@ import { builtinReloadNeeded, ensureBuiltinEngineAlive } from "../api/builtin-en
 import { emptyAnswerExplanation } from "../lib/answer-notes"
 import { log } from "../lib/logger"
 import { CREDITS_EXHAUSTED_MESSAGE } from '../lib/credits-exhausted'
-import { httpStatusOf } from '../lib/http-status'
-import { errorText } from '../types/json-guards'
+import { shouldDowngradeThinking } from './codex/thinking-downgrade'
 import { ProviderError } from '../api/providers/types'
 
 /**
@@ -726,12 +725,19 @@ export function useChat() {
             }
             throw err
           }
-          // `httpStatusOf` replaces the hand-rolled `err?.status` read: it is
-          // the helper the other two loops already use, and it also accepts the
-          // `statusCode` spelling — one more error shape now reaches the
-          // downgrade instead of ending the turn.
-          const status = httpStatusOf(err)
-          if (useThinking !== undefined && (errorText(err).includes('does not support thinking') || status === 400 || status === 422)) {
+          // The ONE place that answers "must thinking be downgraded?" —
+          // hooks/codex/thinking-downgrade.ts. It reads the status through
+          // `httpStatusOf`, so the `statusCode` spelling of the Ollama
+          // streaming path reaches the downgrade too instead of ending the
+          // turn.
+          //
+          // The 422 this line used to carry alone is IN there now, not lost:
+          // it is DeepInfra's bad-parameter status coming through the LU Cloud
+          // proxy, and it arrives on `provider.chatStream` — the very call
+          // below, and the one `streamProviderTurn` makes for the agent and
+          // codex paths. So it was never a peculiarity of this transport, it
+          // was missing from the others. See that module's "DIE 422-FRAGE".
+          if (shouldDowngradeThinking(useThinking, err)) {
             yield* provider.chatStream(modelId, messages, { ...chatOpts, thinking: undefined })
           } else {
             throw err

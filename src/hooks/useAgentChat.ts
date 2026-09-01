@@ -81,6 +81,7 @@ import { useTodoStore } from '../stores/todoStore'
 import { platformPromptLine, hostClockLine } from '../lib/host-platform'
 import { explainSendRefusal } from '../lib/template-refusal'
 import { httpStatusOf, isTerminalModelError, retryDelayMs } from '../lib/http-status'
+import { shouldDowngradeThinking } from './codex/thinking-downgrade'
 import { asString, errorText, prop } from '../types/json-guards'
 import type { ToolArgs } from '../api/mcp/types'
 import { CREDITS_EXHAUSTED_MESSAGE } from '../lib/credits-exhausted'
@@ -1028,13 +1029,15 @@ export function useAgentChat() {
                   log.warn('agent.vision_feedback_healed', { model: modelToUse })
                   continue
                 }
-                // Only worth a second attempt if there is something to drop.
-                // useChat guards the same downgrade with `useThinking !==
-                // undefined` (useChat.ts:560); without it the agent path
-                // resent a byte-identical request and charged the user for a
-                // 400 twice (review 2026-08-14).
-                if (chatOptions.thinking !== undefined
-                  && (errorText(thinkErr).includes('does not support thinking') || httpStatusOf(thinkErr) === 400)) {
+                // The ONE place that answers "must thinking be downgraded?" —
+                // codex/thinking-downgrade.ts. It carries both halves: the
+                // error shape (400/422, or the model saying so) and the guard
+                // that there is something to drop at all. Passing this
+                // branch's OWN options keeps that guard real; a hardcoded
+                // `true` would opt out of it through the back door and resend
+                // a byte-identical request, charging the user twice (review
+                // 2026-08-14).
+                if (shouldDowngradeThinking(chatOptions.thinking, thinkErr)) {
                   turn = await streamOllamaChatWithTools(
                     modelToUse,
                     sendMessages,
@@ -1121,13 +1124,13 @@ export function useAgentChat() {
                   log.warn('agent.vision_feedback_healed', { model: modelToUse, provider: providerId })
                   continue
                 }
-                // Only worth a second attempt if there is something to drop.
-                // useChat guards the same downgrade with `useThinking !==
-                // undefined` (useChat.ts:560); without it the agent path
-                // resent a byte-identical request and charged the user for a
-                // 400 twice (review 2026-08-14).
-                if (streamOpts.thinking !== undefined
-                  && (errorText(thinkErr).includes('does not support thinking') || httpStatusOf(thinkErr) === 400)) {
+                // Same one place as the Ollama branch above. This is also the
+                // transport where the 422 lives: `streamProviderTurn` calls
+                // provider.chatStream, and DeepInfra behind the LU Cloud proxy
+                // answers a bad parameter with 422 rather than 400. That
+                // number used to be in useChat.ts only, so this branch ended
+                // the whole run where plain chat just retried.
+                if (shouldDowngradeThinking(streamOpts.thinking, thinkErr)) {
                   turn = await streamProviderTurn(provider, modelToUse, sendMessages, { ...streamOpts, thinking: undefined as unknown as boolean }, onLiveContent, () => {})
                   break
                 }
@@ -1237,11 +1240,11 @@ export function useAgentChat() {
           try {
             hermesTurn = await runHermes(hermesOpts)
           } catch (thinkErr) {
-            // Same downgrade the native branches carry: an old Ollama build or
-            // an endpoint that predates the knob answers 400, and the run must
-            // survive that instead of ending on it.
-            if (hermesOpts.thinking !== undefined
-              && (errorText(thinkErr).includes('does not support thinking') || httpStatusOf(thinkErr) === 400)) {
+            // Same downgrade the native branches carry, from the same one
+            // place: an old Ollama build or an endpoint that predates the knob
+            // answers 400 (DeepInfra: 422), and the run must survive that
+            // instead of ending on it.
+            if (shouldDowngradeThinking(hermesOpts.thinking, thinkErr)) {
               hermesTurn = await runHermes({ ...hermesOpts, thinking: undefined as unknown as boolean })
             } else {
               throw thinkErr

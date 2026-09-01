@@ -25,6 +25,46 @@ import { errorText } from '../../types/json-guards'
  * Frage auch ein `throw null` — das ist der Grund, warum sie hier so und nicht
  * ueber `(e as Error).message` gestellt wird.
  *
+ * ── DER ZWEITE SCHNITT: useAgentChat.ts UND useChat.ts (KF-21b) ─────────────
+ *
+ * Ausserhalb von useCodex.ts standen noch vier weitere Kopien: drei woertlich
+ * gleiche in useAgentChat.ts (Ollama-, Provider- und Hermes-Zweig, alle drei
+ * mit der Zusatzbedingung, nachgetragen 2026-08-14) und eine in useChat.ts,
+ * die als EINZIGE auch auf 422 prueft. Beide Dateien rufen jetzt hierher.
+ *
+ * ── DIE 422-FRAGE: ANBIETER-EIGENART, NICHT TRANSPORT-EIGENART ──────────────
+ *
+ * Der 422 war die gefaehrliche Stelle beim Zusammenziehen: eine Bedingung, die
+ * nur EINE Kopie trug. Wer nur zaehlt, ebnet sie ein und verliert sie still.
+ * Nachgemessen ist sie kein Sonderfall von useChat.ts:
+ *
+ *  1. WOHER er kommt. 422 ist DeepInfras Status fuer einen schlechten
+ *     Parameter; der LU-Cloud-Proxy reicht 400 UND 422 absichtlich durch,
+ *     damit der Abstieg drinnen ueberhaupt greifen kann. Genau so steht es an
+ *     der Quelle: api/providers/openai-provider.ts, `sendChat` — dort
+ *     behandelt `refused()` beide Nummern als EINE Klasse.
+ *  2. WEN er erreicht. Der 422 verlaesst diesen Anbieter ueber
+ *     `provider.chatStream` — und das ist derselbe eine Aufruf, den useChat.ts
+ *     direkt macht und den `streamProviderTurn` (lib/provider-stream.ts) fuer
+ *     den Provider- und den Hermes-Zweig von useAgentChat.ts und useCodex.ts
+ *     macht. Es ist kein anderer Transport, es ist DERSELBE.
+ *  3. WAS er kostet, wo er nicht vorkommt. Die reinen Ollama-Zweige rufen
+ *     `streamOllamaChatWithTools`; Ollama antwortet 400, nie 422. Die Nummer
+ *     dazuzunehmen aendert dort also nichts.
+ *
+ * Also gehoert der 422 in die gemeinsame Fehlerform und gilt ab jetzt fuer
+ * alle: die drei Zweige von useCodex.ts und die drei von useAgentChat.ts haben
+ * ihn dazugewonnen, useChat.ts behaelt ihn. Die umgekehrte Wahl — 422 als
+ * lokale Eigenheit in useChat.ts stehen lassen — waere gegen den Befund:
+ * derselbe Anbieter haette auf dem Agentenpfad weiter den ganzen Lauf beendet,
+ * wo er im Chat nur eine Wiederholung kostet.
+ *
+ * Zur Trennschaerfe: 422 ist so breit wie 400 ("schlechte Anfrage"), kann also
+ * auch etwas anderes meinen als den Denk-Schalter. Der Preis dafuer ist genau
+ * eine zusaetzliche Anfrage — derselbe Preis, den 400 hier seit jeher hat —,
+ * und die Zusatzbedingung unten deckelt ihn: ohne angefragten Denkmodus wird
+ * gar nicht erst wiederholt.
+ *
  * ── DIE ZUSATZBEDINGUNG: FEHLER IN DEN ANDEREN BEIDEN, NICHT HERMES-EIGENART ─
  *
  * Der erste Schnitt hat nur die FEHLERFORM hierher geholt und die dritte
@@ -37,12 +77,14 @@ import { errorText } from '../../types/json-guards'
  *     Byte die Anfrage, die eben gescheitert ist: eine zweite Absage, auf dem
  *     Wolkenpfad eine zweite Abrechnung, fuer den Nutzer eine zweite Wartezeit.
  *     Sie kann per Konstruktion nicht helfen.
- *  2. useChat.ts fragt seit jeher `useThinking !== undefined &&` vor genau
- *     diesem Abstieg (heute Zeile 734).
+ *  2. useChat.ts fragte seit jeher `useThinking !== undefined &&` vor genau
+ *     diesem Abstieg — heute reicht es denselben Wert als `requestedThinking`
+ *     hierher (useChat.ts:740).
  *  3. useAgentChat.ts hat die Bedingung nach der Durchsicht vom 2026-08-14 in
  *     ALLE drei Zweige nachgetragen, mit ebendieser Begruendung im Kommentar
  *     ("resent a byte-identical request and charged the user for a 400 twice");
- *     hooks/__tests__/agent-think-downgrade.test.ts haelt sie dort fest.
+ *     hooks/__tests__/agent-think-downgrade.test.ts haelt sie dort fest — heute
+ *     an den drei Aufrufen mit uebergebener Option.
  *
  * Also: keine Besonderheit von Hermes, sondern eine Luecke im Ollama- und im
  * OpenAI-Zweig von useCodex.ts. Sie wird beim Zusammenziehen NICHT
@@ -51,7 +93,11 @@ import { errorText } from '../../types/json-guards'
  * "muss der Denkmodus herabgestuft werden?" beantwortet wird.
  */
 export function isThinkingUnsupportedError(err: unknown): boolean {
-  return httpStatusOf(err) === 400 || errorText(err).includes('does not support thinking')
+  const status = httpStatusOf(err)
+  // 400 und 422 sind hier EINE Klasse — siehe den Modulkopf, Abschnitt
+  // "DIE 422-FRAGE". Dieselbe Paarung steht an der Quelle des 422, in
+  // openai-provider.ts `sendChat`.
+  return status === 400 || status === 422 || errorText(err).includes('does not support thinking')
 }
 
 /**
