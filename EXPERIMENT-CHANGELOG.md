@@ -293,9 +293,11 @@ der Typecheck monatelang gar nichts geprüft hat.
 
 ### Ehrlich offen
 
-- **`no-explicit-any` steht bei 564**, Audit-Ziel < 100. Provider-Schicht und
-  MCP-/Workflow-Schicht sind durch; der Rest liegt in Komponenten, Stores und
-  den grossen Test-Fixtures.
+- **`no-explicit-any`**: Audit-Ziel < 100 ist erreicht. Diese Zeile stand
+  zwischenzeitlich auf „564" und widersprach damit der Tabelle weiter oben,
+  die „57" nannte — ein Stand, der nach dem Typisieren nie nachgezogen wurde.
+  Nachgemessen am HEAD: **42** (`npx eslint src e2e`). Beide alten Zahlen waren
+  falsch; die Zeile wird ab jetzt mitgemessen statt fortgeschrieben.
 - **16 e2e-Tests sind flaky** — sie bestehen nur im Retry. **Nicht von uns:**
   am unveränderten Ausgangsstand `10bfa0d7` fallen dieselben Tests mit
   identischer Meldung um (in einem separaten Arbeitsbaum gegengeprüft). Der
