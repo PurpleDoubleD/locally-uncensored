@@ -1425,3 +1425,11 @@ maschinell auf ihre Spaltenzahl geprüft wurde.
 Auf der Windows-Maschine, Release-Build, in Session 1 gestartet und über `user32` gemessen: ein sichtbares Fenster, 640×640 sichtbar plus 8 px unsichtbarer DWM-Rand, auf dem Primärmonitor zentriert (Arbeitsbereich-Mitte 960,520, Fenstermitte 968,524 — die 8 px sind der Rand, den tao mitzählt). Kein `WS_MAXIMIZEBOX`, kein `WS_SIZEBOX`: der Doppelklick auf die Ziehfläche kann nichts maximieren. Die dunkle Fläche deckt das transparente Fenster ohne Ecken; oben rechts Minimieren und Schließen, kein Maximieren. Zweiter Start bleibt ein Prozess, nach Beenden null. Drei der vier offenen Windows-Fragen aus `be2e3849` sind damit beantwortet; das geteilte `localStorage` beider Webviews wartet auf den Klick bis zur Übergabe.
 
 Vorher war Windows an genau einer Testdatei rot: `host-window.test.ts`, die neue Wache des Fenster-Pakets, verglich Pfade mit `\` gegen `/` — der dritte Fund derselben Ursache (KF-10, KF-10c, jetzt KF-10d). Fix beim Einsammeln, an einer Stelle; Windows danach grün.
+
+## Drei eigene Reste geschlossen: Doppel-Dekodierung im Desktop, verwaiste Bildroute, ein ehrlicher Kommentar (`89ecb1c0`)
+
+Der Desktop hatte denselben Fehler, den der Mobile-Client in `b133160b` losgeworden war: ein doppelt kodiertes Werkzeugargument ist gültiges JSON, der erste Parse gelingt, und `repairToolCallArgs` gab `{}` zurück. Eine Lage tiefer verlor `argumentObject` das `arguments`-Feld still. Jetzt dieselbe Schleife auf beiden Seiten mit demselben Deckel, und die Reihenfolge ist so gewählt, dass die Änderung nur ein `{}` in ein Objekt verwandeln kann, nie umgekehrt. Fünfzehn Fälle, acht davon vor dem Fix rot.
+
+`/LU-monogram-white.png` hatte seit dem Inline-SVG keinen Aufrufer mehr, nachgewiesen per grep über Build-Skript, Seitenbauer, Konfiguration und Icons. Route, Handler und Datei sind weg; die Wache pinnt, dass es keine Bildroute und kein `include_bytes!` aus `public/` mehr gibt, und prüft gegen, dass die SVG-Marke noch da ist.
+
+`check_install_disk_pressure` versprach eine I/O-Warteschlangen-Prüfung, die weder der Rumpf leistet noch `sysinfo` messen kann noch ein Aufrufer braucht. Der Kommentar sagt jetzt, was der Rumpf tut, und eine Rust-Wache hält Doc und Rumpf zusammen.
