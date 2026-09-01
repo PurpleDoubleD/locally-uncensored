@@ -5,6 +5,12 @@ mod app_identity;
 mod commands;
 mod crash_report;
 mod install_state;
+// Assembles the mobile client page from mobile-client/ — the same code
+// build.rs runs, compiled in again here so `cargo test` can re-derive the
+// page and compare it with the embedded one. Nothing at runtime needs it:
+// remote.rs embeds the finished page with include_str!.
+#[cfg(test)]
+mod mobile_page;
 mod os_error;
 mod os_paths;
 mod private_tmp;

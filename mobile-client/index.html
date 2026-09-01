@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name='theme-color' content='#0e0e0e'>
+<title>AI Terminal</title>
+<meta name="apple-mobile-web-app-title" content="AI Terminal">
+<!-- Bug #5: no third-party requests. System fonts only, inline SVG icons. -->
+<!-- Bug #6: restrictive CSP. Self origin only. Inline styles/scripts are
+     required because the whole page is a single Rust string; data: images
+     cover base64 thumbnails; we also need base64 for the QR code JS. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; font-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'">
+<style>
+/*@@LU_STYLES@@*/
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+//@@LU_SCRIPT@@
+</script>
+</body>
+</html>
