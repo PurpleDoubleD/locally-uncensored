@@ -1,6 +1,7 @@
 import { useRef, useState, useCallback } from "react"
 import { v4 as uuid } from "uuid"
-import { useChatStore, flushChatPersist } from "../stores/chatStore"
+import { useChatStore } from "../stores/chatStore"
+import { endTurnDurably } from "../stores/durability"
 import { useModelStore } from "../stores/modelStore"
 import { useSettingsStore } from "../stores/settingsStore"
 import { useRAGStore } from "../stores/ragStore"
@@ -316,11 +317,16 @@ export function useChat() {
         await runGroupTurn(convId, model, models, abort)
       }
     } finally {
-      setIsGenerating(false)
-      useGenerationStore.getState().setGenerating(convId, false)
       useGenerationStore.getState().clearAborter(convId)
       abortRef.current = null
-      void flushChatPersist()
+      // The round is over, so it goes on disk BEFORE the app says so. Same
+      // contract as the single-model turn below and as the Agent and Coding
+      // runs — see stores/durability.ts for the measurement that made the
+      // order matter.
+      await endTurnDurably(() => {
+        setIsGenerating(false)
+        useGenerationStore.getState().setGenerating(convId, false)
+      })
     }
   }, [])
 
@@ -980,18 +986,32 @@ export function useChat() {
         }
       }
     } finally {
-      setIsGenerating(false)
-      useGenerationStore.getState().setGenerating(convId, false)
       useGenerationStore.getState().clearAborter(convId)
       setIsLoadingModel(false)
       useModelStore.getState().setIsModelLoading(false)
       abortRef.current = null
 
-      // The turn is done, so put it on disk now. Persistence is coalesced while
-      // tokens stream (2.6.3 — see coalescedStorage), and an IndexedDB write
-      // cannot finish during unload, so THIS is the point that makes a finished
-      // answer durable, not the pagehide handler.
-      void flushChatPersist()
+      // The turn is done, so it goes on disk — and only then does the app say
+      // it is done. Persistence is coalesced while tokens stream (2.6.3 — see
+      // coalescedStorage), and an IndexedDB write cannot finish during unload,
+      // so THIS is the point that makes a finished answer durable, not the
+      // pagehide handler. It used to fire the write and announce the turn
+      // finished in the same breath, which under load meant announcing it
+      // ~300 ms early; stores/durability.ts carries the measurement.
+      //
+      // Position matters as much as the await, and cost a regression to learn:
+      // moving this call below the TTS and memory blocks pushed the START of
+      // the write ~5 ms past the paint, and the reload race in
+      // e2e/chat-streaming-persist.spec.ts went from never to 3 runs in 10.
+      // The write begins in the same statement it always began in; the only
+      // thing that changed is that the announcement now waits for it.
+      //
+      // The answer itself is already painted, so what waits here is the Stop
+      // button turning back into Send, not the text.
+      await endTurnDurably(() => {
+        setIsGenerating(false)
+        useGenerationStore.getState().setGenerating(convId, false)
+      })
 
       // Auto-read the finished response when the user opted in (#77, ElBiggus).
       // Default OFF and additionally gated on ttsEnabled; getState() (not the

@@ -4,6 +4,7 @@ import { useCodexStore } from '../stores/codexStore'
 import { useModelStore } from '../stores/modelStore'
 import { useSettingsStore } from '../stores/settingsStore'
 import { useChatStore, flushChatPersist } from '../stores/chatStore'
+import { endTurnDurably } from '../stores/durability'
 import { getProviderForModel, getProviderIdFromModel } from '../api/providers'
 import { markToolsUnsupported } from '../api/tool-capability'
 import { toolRegistry } from '../api/mcp'
@@ -2495,8 +2496,6 @@ export function useCodex() {
         })
       }
 
-      setIsRunning(false)
-      useGenerationStore.getState().setGenerating(convId, false)
       useGenerationStore.getState().clearAborter(convId)
       runningRef.current = false
       abortRef.current = null
@@ -2506,15 +2505,26 @@ export function useCodex() {
       endAgentRun(run)
 
       // The turn is done, including the hidden tool history inserted above, so
-      // put it on disk now. Persistence is coalesced while the run streams
-      // (2.6.3 — see coalescedStorage), and losing the tool chain would cost
-      // the next turn its context, not just the transcript.
-      void flushChatPersist()
-      // Same reasoning for the approval queue: what is still pending is work
-      // the user paid for and has not seen land yet. It has to be on disk
-      // before the app can be closed or updated (2026-08-11).
-      void flushStagedPersist()
-      codexStore.setThreadStatus(convId, 'idle')
+      // it goes on disk BEFORE the app reports the run finished. Persistence is
+      // coalesced while the run streams (2.6.3 — see coalescedStorage), and
+      // losing the tool chain would cost the next turn its context, not just
+      // the transcript.
+      //
+      // The staged-changes queue rides along for the same reason: what is still
+      // pending there is work the user paid for and has not seen land yet, and
+      // it has to be on disk before the app can be closed or updated
+      // (2026-08-11). Both are awaited together, under one deadline —
+      // stores/durability.ts has the measurement, including why this stays in
+      // the statement the old `void flushChatPersist()` occupied instead of
+      // moving to the bottom of the block.
+      await endTurnDurably(
+        () => {
+          setIsRunning(false)
+          useGenerationStore.getState().setGenerating(convId, false)
+          codexStore.setThreadStatus(convId, 'idle')
+        },
+        [flushChatPersist, flushStagedPersist],
+      )
 
       // The per-batch bump above only fires when a batch RETURNS. A user who
       // aborts mid-run (David 2026-07-31: files on disk, panel still showing

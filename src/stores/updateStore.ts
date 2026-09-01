@@ -8,6 +8,7 @@ import { isTauri, backendCall, openExternal } from '../api/backend'
 import { stopBundledEngine, stopBundledEmbed } from '../api/engine'
 import { flushChatPersist } from './chatStore'
 import { flushStagedPersist } from './stagedChangesStore'
+import { settledOrTimedOut } from './durability'
 // Static on purpose. The next thing that happens after this is called is an
 // installer overwriting the binary, which is the worst imaginable moment to be
 // fetching a chunk off disk for the first time.
@@ -34,22 +35,12 @@ const UPDATE_SETTLE_MS = 250
  *  not worth waiting for forever. */
 const UPDATE_FLUSH_TIMEOUT_MS = 10_000
 
-/**
- * Resolve when `work` resolves, or after `ms`, whichever comes first, and
- * never reject. The caller wants to know it may proceed, not what happened.
- *
- * Exported for the test: a flush that never settles is not something a store
- * can be talked into from the outside.
- */
-export function settledOrTimedOut(work: Promise<unknown>, ms: number): Promise<'settled' | 'timeout'> {
-  return new Promise((resolve) => {
-    const timer = setTimeout(() => resolve('timeout'), ms)
-    work.then(
-      () => { clearTimeout(timer); resolve('settled') },
-      () => { clearTimeout(timer); resolve('settled') },
-    )
-  })
-}
+// `settledOrTimedOut` used to be defined here. It moved to ./durability when
+// the end of a chat turn needed the same deadline, because a second copy of
+// "wait, but not forever" is exactly how two paths that should agree stop
+// agreeing. Still re-exported under the old name: this is where its test and
+// every existing reader look for it.
+export { settledOrTimedOut } from './durability'
 
 // ── Types ─────────────────────────────────────────────────────
 

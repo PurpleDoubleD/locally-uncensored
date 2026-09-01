@@ -18,7 +18,8 @@ import { requestGenerationCancel } from '../api/vram-handoff'
 import { resolveWorkspace } from '../api/agents/workspace-resolve'
 import { useAgentModeStore } from '../stores/agentModeStore'
 import { streamOllamaChatWithTools } from '../lib/ollama-stream-tools'
-import { useChatStore, flushChatPersist } from '../stores/chatStore'
+import { useChatStore } from '../stores/chatStore'
+import { endTurnDurably } from '../stores/durability'
 import { useGenerationStore } from '../stores/generationStore'
 import { useModelStore } from '../stores/modelStore'
 import { useSettingsStore } from '../stores/settingsStore'
@@ -2201,8 +2202,6 @@ export function useAgentChat() {
         }
       }
     } finally {
-      setIsAgentRunning(false)
-      useGenerationStore.getState().setGenerating(convId, false)
       useGenerationStore.getState().clearAborter(convId)
       runningRef.current = false
       abortRef.current = null
@@ -2217,11 +2216,18 @@ export function useAgentChat() {
           capturedArtifacts.map((a) => ({ id: uuid(), name: a.name, content: a.content, mime: a.mime })),
         )
       }
-      // The run is done, including the artifacts attached just above, so put it
-      // on disk now. Persistence is coalesced while the run streams (2.6.3 —
-      // see coalescedStorage); an agent turn is long and its blocks are big, so
-      // this is where the result becomes durable.
-      void flushChatPersist()
+      // The run is done, including the artifacts attached just above, so it
+      // goes on disk — and only THEN does the app report the run finished.
+      // Persistence is coalesced while the run streams (2.6.3 — see
+      // coalescedStorage); an agent turn is long and its blocks are big, so
+      // this is where the result becomes durable. Same contract as Chat and
+      // Code; stores/durability.ts carries the measurement, including why the
+      // call stays in the statement the old `void flushChatPersist()` occupied
+      // rather than moving to the bottom of the block.
+      await endTurnDurably(() => {
+        setIsAgentRunning(false)
+        useGenerationStore.getState().setGenerating(convId, false)
+      })
       // Drop the per-run workspace scope so standalone tool calls from
       // other tabs don't accidentally land in this chat's folder. Only when
       // this run still owns the shared mirror, so a Coding run that outlives
