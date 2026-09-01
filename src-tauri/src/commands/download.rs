@@ -1594,12 +1594,10 @@ pub async fn download_model_to_path(
                     if let Ok(mut dl) = downloads_arc.lock() {
                         dl.remove(&id_clone);
                     }
-                } else {
-                    if let Ok(mut dl) = downloads_arc.lock() {
-                        if let Some(p) = dl.get_mut(&id_clone) {
-                            p.status = "error".to_string();
-                            p.error = Some(e.clone());
-                        }
+                } else if let Ok(mut dl) = downloads_arc.lock() {
+                    if let Some(p) = dl.get_mut(&id_clone) {
+                        p.status = "error".to_string();
+                        p.error = Some(e.clone());
                     }
                 }
             }

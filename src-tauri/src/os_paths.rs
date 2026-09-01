@@ -236,7 +236,7 @@ fn scan_python_subdirs(base: &std::path::Path) -> Option<PathBuf> {
                 && e.file_name().to_string_lossy().to_lowercase().starts_with("python")
         })
         .collect();
-    dirs.sort_by(|a, b| b.file_name().cmp(&a.file_name()));
+    dirs.sort_by_key(|e| std::cmp::Reverse(e.file_name()));
     for dir in dirs {
         let exe = dir.path().join("python.exe");
         if exe.exists() && verify_python_path(&exe.to_string_lossy()) {
@@ -317,6 +317,9 @@ mod python_candidate_tests {
 /// 1. Post-bootstrap install (`~/.lmstudio/bin/lms`)
 /// 2. Pre-bootstrap (Windows package layout)
 /// 3. PATH
+// Its only caller (install/lmstudio.rs) delegates here on everything but
+// Windows; on Windows the function was dead and clippy -D warnings said so.
+#[cfg(not(target_os = "windows"))]
 pub fn find_lms_cli() -> Option<PathBuf> {
     let ext = if cfg!(target_os = "windows") { ".exe" } else { "" };
     let post = home().join(".lmstudio").join("bin").join(format!("lms{ext}"));

@@ -275,6 +275,10 @@ pub fn kill_pid_tree(pid: u32) {
 /// itself (so there's no `Child` handle to kill) — the MLX sidecar and the
 /// Ollama server. Only the listener is targeted (`-sTCP:LISTEN`), so the
 /// bridge's own client connections to that port aren't hit.
+// Gated like its only caller (state.rs, app quit): on Windows and Linux the
+// function had no caller and a unix-only body, and `-D warnings` on the
+// Windows CI row rejected it as dead. The gate says where it is alive.
+#[cfg(target_os = "macos")]
 pub fn kill_listeners_on_port(port: u16) {
     #[cfg(unix)]
     {
@@ -517,6 +521,9 @@ mod kill_tree_tests {
 /// centralised. This test is the shared guard — it fails for either of them.
 #[cfg(test)]
 mod process_table_tests {
+    // Only the unix test below reads anything from the parent; on Windows the
+    // import was the one thing in this module clippy could see — and rejected.
+    #[cfg(unix)]
     use super::*;
 
     #[cfg(unix)]

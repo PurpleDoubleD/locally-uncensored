@@ -329,6 +329,9 @@ pub(crate) fn worker_descendants_of(root: u32) -> Vec<u32> {
 /// kernel does not assign a bound port to a second `bind(0)`, so two concurrent
 /// copies of a test cannot draw the same number. Keep the listener in scope for
 /// as long as the number has to stay yours.
+// The one test that draws a port this way is `#[cfg(unix)]`; on Windows the
+// helper was dead and clippy -D warnings rejected it.
+#[cfg(unix)]
 pub(crate) fn reserved_port() -> (u16, std::net::TcpListener) {
     let listener = std::net::TcpListener::bind("127.0.0.1:0")
         .expect("the loopback interface refused an ephemeral port");

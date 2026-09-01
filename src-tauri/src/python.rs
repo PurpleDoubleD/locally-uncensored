@@ -271,11 +271,11 @@ fn scan_python_subdirs(base: &Path, label: &str) -> Option<String> {
     let mut dirs: Vec<_> = entries
         .filter_map(|e| e.ok())
         .filter(|e| {
-            e.file_type().ok().map_or(false, |ft| ft.is_dir())
+            e.file_type().ok().is_some_and(|ft| ft.is_dir())
                 && e.file_name().to_string_lossy().to_lowercase().starts_with("python")
         })
         .collect();
-    dirs.sort_by(|a, b| b.file_name().cmp(&a.file_name()));
+    dirs.sort_by_key(|e| std::cmp::Reverse(e.file_name()));
     for dir in dirs {
         let exe = dir.path().join("python.exe");
         if exe.exists() {
