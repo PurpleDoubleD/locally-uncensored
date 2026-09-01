@@ -289,7 +289,7 @@ Der Design-Audit vergibt keine IDs. Vergeben sind hier: **D-A1…D-A10** (§3, d
 | D-T10 | Fokusring | 1px, Inputs `outline:none` | umgesetzt | `c77682a2` | per Test (`src/components/__tests__/fokusring-und-press.test.ts`, WCAG-Kontrast gerechnet) | 2px Akzent, `outline-offset: 2px`, Inputs eingeschlossen; `.lu-focus-ring` samt neun Call-Sites gelöscht. Die Ausnahme `:not(.lu-primary)` ist gerechnet begründet (Akzent auf Akzent = 1,00:1). |
 | D-T11 | Motion | 18 Dauern, 4 Springs, `transition-all` 66× | **OFFEN** (teilweise) | `c5901d0c` | nur Review | Vier Tokens (`--motion-fast/base/slow/ease`, `index.css:72-75`), Modal und ToggleSwitch migriert (`components/ui/motion.ts`). Offen: `Drawer.tsx:59` und `Segmented.tsx:60` tragen weiter eigene Springs (420/40, 500/38) — 2 von 4 ersetzt. `transition-all` 66 → 59. |
 | D-T12 | `prefers-reduced-motion` | 0× in `src/` | umgesetzt | `c5901d0c` | per Test (`der-caret-ist-reines-css.test.ts` prüft die Ausnahme) | CSS-Regel (`index.css:928-969`) **plus** `<MotionConfig reducedMotion="user">` (`App.tsx:68`), weil framer-motion an der Kaskade vorbei animiert. `animation-iteration-count: 1`, Spinner und Caret ausgenommen. |
-| D-T13 | Platzhalter | `gray-200` dark / `gray-800` light | **OFFEN** | — | nur Review | `index.css:501-502` byte-gleich mit dem Audit-Zitat (= D-A4). |
+| D-T13 | Platzhalter | `gray-200` dark / `gray-800` light | umgesetzt | `cebf5c08` | per Test (Kontrast in beide Richtungen) | Dieselbe Zeile wie D-A4, dort geschlossen: hell war der Platzhalter **exakt so stark wie der Text** (beide 14,68:1), jetzt 7,56:1 / 6,78:1, und keine Fassung fällt unter 4,5:1. |
 
 ### 3.4 Der Politur-Pfad (§6, drei Wellen)
 
