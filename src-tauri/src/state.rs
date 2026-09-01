@@ -449,7 +449,8 @@ const CREATE_NO_WINDOW: u32 = 0x08000000;
 use std::os::windows::process::CommandExt;
 
 impl AppState {
-    /// Kill every subprocess we spawned (ComfyUI, Ollama, Claude Code, Whisper).
+    /// Kill every subprocess we spawned (the Cloudflare tunnel, ComfyUI,
+    /// Ollama, Claude Code, Whisper).
     ///
     /// Live testing on 2026-05-25 showed that Tauri v2's `app.exit(0)` returns
     /// from the run loop on Windows WITHOUT actually dropping the managed
@@ -460,6 +461,42 @@ impl AppState {
     /// from every quit path instead so kj103x's Ollama-orphan stays fixed even
     /// when Tauri's destructor chain skips us.
     pub fn shutdown_subprocesses(&self) {
+        // The Cloudflare quick tunnel — FIRST, and it is the only entry here
+        // whose position in the list is an argument rather than an accident.
+        //
+        // Why it belongs here at all: this method exists because Tauri v2 may
+        // skip our destructors, and every other daemon was moved into it for
+        // that reason. The tunnel was left hanging on `Drop for RemoteServer`
+        // alone, i.e. on precisely the mechanism this method exists to work
+        // around. A survivor is not a resource leak like a stray Ollama — it
+        // keeps a public `*.trycloudflare.com` address pointed at
+        // 127.0.0.1:11435, and the next launch binds that same port, so the
+        // stranger's tunnel silently serves the new session while
+        // `tunnel_status` reports the tunnel as off (T-39).
+        //
+        // Why first: while the tunnel is up, the internet still reaches the
+        // remote server on 11435, which proxies through to Ollama and ComfyUI
+        // — the daemons the rest of this method is in the middle of killing.
+        // Closing the door before emptying the rooms behind it costs nothing
+        // (nothing below depends on the tunnel), and last would hold the door
+        // open across every blocking call in here: the `taskkill ... .output()`
+        // waits on Windows and the `lsof` shell-out for the MLX port on macOS.
+        //
+        // `shutdown_tunnel` take()s the slot, like every branch below, so the
+        // Drop pass that may still follow has nothing left to fire at; and it
+        // goes through `kill_tree`, so a cloudflared that spawned children
+        // leaves no orphans. A poisoned lock is recovered rather than skipped
+        // — unlike every other slot here, silently leaving this one alive is a
+        // security event, and taking an `Option<Child>` out of the struct
+        // cannot observe a broken invariant.
+        {
+            let mut remote = self
+                .remote
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            remote.shutdown_tunnel();
+        }
+
         if let Ok(mut proc) = self.ollama_process.lock() {
             // take(), not a borrow: leaving the pid in the slot let the Drop
             // pass below fire a second taskkill at it.
@@ -658,6 +695,96 @@ mod shutdown_tests {
         assert!(state.ollama_process.lock().unwrap().is_none());
         assert!(state.comfy_process.lock().unwrap().is_none());
         assert!(state.trainer_process.lock().unwrap().is_none());
+    }
+
+    /// A pid can outlive the SIGTERM by a scheduler tick; polling is the
+    /// honest form of "it died", asserting straight away is a race.
+    fn dies_within(pid: u32, budget: std::time::Duration) -> bool {
+        let deadline = std::time::Instant::now() + budget;
+        while std::time::Instant::now() < deadline {
+            if !alive(pid) {
+                return true;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        !alive(pid)
+    }
+
+    /// A stand-in for the cloudflared quick tunnel, parked in the slot the
+    /// real one lives in.
+    fn park_a_tunnel(state: &AppState) -> u32 {
+        let child = sleeper();
+        let pid = child.id();
+        state.remote.lock().unwrap().tunnel_child = Some(child);
+        assert!(alive(pid), "the stand-in tunnel was not running to begin with");
+        pid
+    }
+
+    /// KF-1. Every other daemon is killed from this method because Tauri v2
+    /// may skip `Drop`; the tunnel was left hanging on `Drop for RemoteServer`
+    /// alone, i.e. on exactly the mechanism this method exists to replace. A
+    /// survivor keeps a public *.trycloudflare.com address pointed at
+    /// 127.0.0.1:11435, and the next launch binds that port (T-39).
+    #[test]
+    fn shutdown_takes_the_tunnel_with_it() {
+        let state = AppState::new();
+        let pid = park_a_tunnel(&state);
+
+        state.shutdown_subprocesses();
+
+        assert!(
+            dies_within(pid, std::time::Duration::from_secs(5)),
+            "the TUNNEL survived the explicit quit path (KF-1)",
+        );
+    }
+
+    /// Separate property, separate test: the slot has to be EMPTY afterwards.
+    /// `Drop for AppState` runs `shutdown_subprocesses` again and the managed
+    /// state's own `Drop for RemoteServer` may follow it — a second kill would
+    /// go through `kill_tree`, whose snapshot includes the root, at a pid the
+    /// kernel is free to have recycled by then.
+    #[test]
+    fn shutdown_empties_the_tunnel_slot_so_a_second_pass_finds_nothing() {
+        let state = AppState::new();
+        let pid = park_a_tunnel(&state);
+
+        state.shutdown_subprocesses();
+
+        assert!(
+            state.remote.lock().unwrap().tunnel_pid().is_none(),
+            "the tunnel slot still holds pid {pid} — the Drop pass will kill it a second time",
+        );
+    }
+
+    /// Third property: the kill is a TREE kill. `cloudflared` is spawned
+    /// through `spawn_piped` and may have children of its own; a plain
+    /// `Child::kill` would reap the root and leave them adopted by init, which
+    /// is the same orphan one level down.
+    #[test]
+    #[cfg(unix)]
+    fn shutdown_takes_the_tunnels_children_with_it() {
+        let state = AppState::new();
+
+        let mut cmd = std::process::Command::new(crate::test_support::posix_shell());
+        cmd.arg("-c").arg("sleep 30 & sleep 30");
+        let child = crate::process_util::spawn_piped(cmd).expect("spawn a tunnel stand-in");
+        let pid = child.id();
+        std::thread::sleep(std::time::Duration::from_millis(400));
+
+        let mut sys = sysinfo::System::new();
+        sys.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
+        let kids = crate::commands::shell::descendants(pid, &sys);
+        assert!(!kids.is_empty(), "the stand-in spawned nothing — test setup is wrong");
+
+        state.remote.lock().unwrap().tunnel_child = Some(child);
+        state.shutdown_subprocesses();
+
+        for p in kids.iter().copied().chain(std::iter::once(pid)) {
+            assert!(
+                dies_within(p, std::time::Duration::from_secs(5)),
+                "{p} survived the quit path — the tunnel was killed, not its tree",
+            );
+        }
     }
 
     /// Quitting with nothing running must not panic or block.

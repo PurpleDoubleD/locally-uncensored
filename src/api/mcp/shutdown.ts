@@ -4,10 +4,11 @@
  *
  * ── What already cleans up, and what does not ────────────────────────────
  *
- * `AppState::shutdown_subprocesses()` (`src-tauri/src/state.rs:462`) kills the
- * children RUST spawned and tracks in AppState: Ollama, ComfyUI, the bundled
- * llama-server and embeddings server, the MLX video subprocess and image
- * sidecar, the LoRA trainer, the installer child trees, whisper. External MCP
+ * `AppState::shutdown_subprocesses()` (`src-tauri/src/state.rs`) kills the
+ * children RUST spawned and tracks in AppState: the Cloudflare quick tunnel,
+ * Ollama, ComfyUI, the bundled llama-server and embeddings server, the MLX
+ * video subprocess and image sidecar, the LoRA trainer, the installer child
+ * trees, whisper. External MCP
  * servers are none of those — they are spawned from the frontend through
  * `@tauri-apps/plugin-shell`, land in the PLUGIN's child map, and never appear
  * in AppState. So this file does not duplicate that function; the two have an
@@ -48,13 +49,26 @@
  *
  * ── What this cannot promise ─────────────────────────────────────────────
  *
- * `child.kill()` is an async IPC call. An unload handler cannot await, so the
- * request is posted and the page goes away; the Rust side normally receives it
- * because the post is synchronous, but nothing here can prove the process was
- * reaped. And the plugin's kill is a kill of the DIRECT child only — for
- * `npx -y some-mcp-server` (or `npx.cmd` on Windows) that is the launcher, and
- * the node process it forked is not in any tree walk. Closing that needs a
- * `kill_tree` on the Rust side, which is out of scope here.
+ * The kill is an async IPC call. An unload handler cannot await, so the request
+ * is posted and the page goes away; the Rust side normally receives it because
+ * the post is synchronous, but nothing here can prove the process was reaped.
+ *
+ * The tree kill this paragraph used to call out of reach is not: `c5773322`
+ * added `process_util::kill_pid_tree` and `4c7bf748` put a `kill_process_tree`
+ * command in front of it, guarded by `may_kill_pid` so only this app's own
+ * subtree can be addressed. `external-client.ts` calls it in
+ * `killServerProcess` INSTEAD of the plugin's `child.kill()` — never after,
+ * because the direct child's death reparents its children to init and the
+ * guard then (correctly) refuses. So the `npx -y some-mcp-server` case, where
+ * the launcher is the direct child and the real `node` server is a grandchild,
+ * is covered on the path this file drives.
+ *
+ * What remains unpromised is the fallback: outside Tauri, against a Rust side
+ * older than `c5773322`, or when the guard refuses because the process already
+ * exited on its own, `external-client.ts` falls back to the plugin's kill of
+ * the DIRECT child and logs that it did. That kill is one signal to one
+ * process (`tauri-plugin-shell` 2.3.5, `src/process/mod.rs:78`), so a server
+ * that forked its own processes can still leave them behind there.
  */
 import { disconnectAllExternalServers } from './external-client'
 

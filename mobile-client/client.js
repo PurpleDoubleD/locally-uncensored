@@ -1500,7 +1500,6 @@ import {
     msgs.push(mkMsg('assistant', ''));
 
     inp.value='';inp.style.height='auto';
-    var sentImages = pendingImages.slice();
     pendingImages = [];
     renderAttachments();
 

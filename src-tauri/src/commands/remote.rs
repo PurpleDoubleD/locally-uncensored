@@ -2237,6 +2237,25 @@ impl RemoteServer {
     pub fn tunnel_pid(&self) -> Option<u32> {
         self.tunnel_child.as_ref().map(|c| c.id())
     }
+
+    /// End the tunnel and empty its slot. The one entry point for "the app is
+    /// going away", shared by `Drop` below and by
+    /// `AppState::shutdown_subprocesses`, which is the path that actually runs
+    /// on a quit.
+    ///
+    /// `take()` and not a borrow, for the same reason every slot in
+    /// `state.rs` takes: the two callers can BOTH fire on one quit (the
+    /// explicit shutdown, then Tauri dropping the managed state if it happens
+    /// to). A second pass must find nothing. It is not a harmless repeat —
+    /// `kill_tree`'s snapshot includes the root, so the second call would
+    /// SIGTERM/SIGKILL a pid that the kernel is free to have handed to a
+    /// stranger in between, and on Windows `taskkill /T /F` would take that
+    /// stranger's whole tree.
+    pub fn shutdown_tunnel(&mut self) {
+        if let Some(child) = self.tunnel_child.take() {
+            kill_tunnel_child(child);
+        }
+    }
 }
 
 /// Kill and reap the tunnel process.
@@ -2321,19 +2340,26 @@ fn kill_registered_tunnel(remote: &std::sync::Mutex<RemoteServer>, pid: u32) {
     }
 }
 
-/// Last line of defence for the public tunnel.
+/// Belt-and-suspenders for the public tunnel, exactly like `Drop for AppState`.
 ///
-/// Tauri v2 does not reliably drop managed state on `app.exit(0)`, which is
-/// why `AppState` has an explicit shutdown path — but that path lives outside
-/// this module and does not reach the tunnel. On the quit paths where Drop
-/// DOES run, this closes the tunnel; on Windows the kill-on-close job object
-/// (`tie_child_to_app_lifetime`) covers the rest, and on Unix a hard kill is
-/// caught by the startup sweep in `start_remote_server`.
+/// This used to be the tunnel's ONLY quit path, and that was the gap: Tauri v2
+/// does not reliably drop managed state on `app.exit(0)`, which is why
+/// `AppState::shutdown_subprocesses` exists and why every other daemon —
+/// Ollama, ComfyUI, the bundled llama-server, the embeddings server, the MLX
+/// sidecar, the trainer — is listed there. The tunnel was not, so on the quit
+/// paths where Tauri skipped our destructors a `cloudflared` survived and kept
+/// publishing `*.trycloudflare.com` at 127.0.0.1:11435 — the port the NEXT
+/// launch binds, which hands the survivor the new session while the app's own
+/// indicator reads OFF. That is the core of T-39.
+///
+/// `shutdown_subprocesses` now takes the tunnel with it, so this Drop covers
+/// only the remaining "Tauri DID run our destructor" case and finds an empty
+/// slot whenever the explicit path got there first. On Windows the
+/// kill-on-close job object (`tie_child_to_app_lifetime`) covers a hard kill,
+/// and on Unix the startup sweep in `start_remote_server` is the second line.
 impl Drop for RemoteServer {
     fn drop(&mut self) {
-        if let Some(child) = self.tunnel_child.take() {
-            kill_tunnel_child(child);
-        }
+        self.shutdown_tunnel();
     }
 }
 
@@ -4249,6 +4275,38 @@ mod remote_hardening_tests {
                 "{p} survived the tunnel stop",
             );
         }
+    }
+
+    /// KF-1, as a pure decision — no process, no signal, every platform.
+    ///
+    /// The runtime proof lives in `state.rs` and needs a stand-in child; this
+    /// one only asks whether the explicit quit path reaches for the tunnel
+    /// slot at all, which is the whole of the bug: `shutdown_subprocesses`
+    /// listed every other daemon and named the tunnel nowhere, so the tunnel
+    /// depended on `Drop`, the very thing that method exists because Tauri
+    /// does not reliably run. Cheap guard against a refactor quietly dropping
+    /// the one line again — the same shape as trainer.rs's guard, for the same
+    /// reason.
+    #[test]
+    fn the_explicit_quit_path_reaches_the_tunnel() {
+        let state_rs = include_str!("../state.rs");
+        let shutdown = &state_rs[state_rs
+            .find("pub fn shutdown_subprocesses")
+            .expect("shutdown_subprocesses is gone")..];
+        let shutdown = &shutdown[..shutdown
+            .find("\nimpl Drop for AppState")
+            .expect("the end of the shutdown impl block")];
+        assert!(
+            shutdown.contains("shutdown_tunnel()"),
+            "shutdown_subprocesses no longer kills the cloudflared tunnel (KF-1)",
+        );
+        // ...and it must take the slot, not borrow it: `Drop for AppState`
+        // calls this method a second time and the managed `RemoteServer`'s own
+        // Drop may follow, at a pid that may have been recycled.
+        assert!(
+            production_code().contains("self.tunnel_child.take()"),
+            "the tunnel is no longer taken out of its slot, so a second pass re-kills its pid",
+        );
     }
 
     #[test]

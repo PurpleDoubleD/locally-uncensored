@@ -129,9 +129,9 @@ import { stripNonCanonicalTags } from './personas.js'
   function isSystemPromptEcho(content){
     if(!content) return false;
     var head = String(content).trim().slice(0, 240);
-    if(/^(hello[!,\.]?\s+|hi[!,\.]?\s+|hey[!,\.]?\s+)?(i['’]?m|i am|you are)\s+((the\s+)?coding\s+agent|an autonomous|the agent|an? ai)/i.test(head)) return true;
+    if(/^(hello[!,.]?\s+|hi[!,.]?\s+|hey[!,.]?\s+)?(i['’]?m|i am|you are)\s+((the\s+)?coding\s+agent|an autonomous|the agent|an? ai)/i.test(head)) return true;
     if(/^(i am|i['’]m)\s+ready\s+to\s+(receive|assist|help)/i.test(head)) return true;
-    if(/^(hello|hi|hey)[!,\.]?\s+i['’]?m\s+ready/i.test(head)) return true;
+    if(/^(hello|hi|hey)[!,.]?\s+i['’]?m\s+ready/i.test(head)) return true;
     return false;
   }
 
