@@ -788,3 +788,135 @@ Und ich habe eine Mutationssonde gefahren, die eine mehrzeilige Aufrufstelle
 mittendurch geschnitten hat. Der Bau brach, `cargo test` gab keine
 Ergebniszeile aus, und die Sonde maß nichts. Aufgefallen ist es nur, weil ich
 auf die Zeile *nach* dem Ergebnis geschaut habe.
+
+## Das Gate ist scharf, und Windows misst dasselbe wie der Mac
+
+Zwei Sätze, die dieses Projekt lange nicht sagen konnte, stimmen seit dieser
+Runde. Beide waren teurer, als sie klingen — und beide sind an einer Stelle
+gescheitert, an der ich selbst falsch gemessen hatte.
+
+**„Lint ist ein Gate."** Der Audit-Befund AS-10 hieß nie „es gibt
+Lint-Fehler". Er hieß: der Schritt trägt `continue-on-error: true`, und ein
+Schritt, der nicht scheitern kann, misst nichts. Beides ist jetzt weg. `eslint
+.` läuft über 1080 Dateien und meldet 0 Fehler, 0 Warnungen — ohne ein einziges
+neues `eslint-disable`; im letzten Paket sind sogar vier `as any` *gefallen*
+und stehen jetzt als Begründung im Kommentar, welche Prüfung sie verdeckt
+hatten. In keinem der vier Workflows steht noch eine Ausnahmeklausel.
+
+Dass das Gate beißt, ist nachgemessen und nicht behauptet: eine Datei mit
+`let z: any = 1` im Baum → exit 1, Datei weg → exit 0.
+
+**Die Voraussetzung dafür war ein Befund, den ich zuerst falsch gedeutet
+habe.** eslint las das gebaute Rust-Target mit — Tauris gehashte Codegen-
+Assets, die kein Quelltext sind. Meine erste Deutung: ein Plattformunterschied
+(Mac 60 Meldungen, Windows 206). Falsch. Der Auslöser ist, **ob ein
+Release-Build existiert**. Nachdem ich auf beiden Maschinen ein Paket gebaut
+hatte, meldete auch der Mac über 100 Fehler aus demselben Ort. Das ist
+schlimmer als ein Plattformunterschied, weil es sich auf *derselben* Maschine
+ändert: grün auf einem frischen Klon, rot nach dem ersten Bau, ohne dass eine
+Quelldatei sich unterscheidet. Ein Gate, das man unter dieser Bedingung scharf
+schaltet, wird zur Zufallsmünze. Gegengeprüft unter genau der auslösenden
+Bedingung — 87 Codegen-Assets im Baum —: weiterhin 0.
+
+**„Auf Windows startklar."** Acht Tests waren dort rot, plus neun weitere, die
+ich beim Nachsehen fand. Es waren zwei Gruppen mit zwei verschiedenen Ursachen,
+und beide sind lehrreicher als der Fix.
+
+Die erste Gruppe verglich Pfade und bekam unter Windows `\` statt `/`. Fünf
+hand-kopierte Dateiwanderer sind durch **einen** geteilten ersetzt. Der neue
+**wirft**, wenn er eine Datei nicht findet, statt `?? ''` zurückzugeben — denn
+ein Test, der einen leeren String liest und dann `expect(...).not.toMatch(...)`
+sagt, ist grün, ohne irgendetwas geprüft zu haben.
+
+Die zweite Gruppe war grün — **aus dem falschen Grund**. `os.tmpdir()` liegt
+unter Windows in `$HOME\AppData\Local\Temp`, und `AppData` steht in der
+Sperrliste des Datei-Käfigs. Das *erste* Tor lehnte also die Wurzel mit 403 ab,
+lange bevor irgendein Pfad geprüft war. Fünf Fälle, die einen 403 erwarteten,
+bekamen ihren 403 — nur nicht den, über den ihre Überschrift redet. Kein
+Produktbefund: derselbe Request mit einem Heim, das die Kulisse nicht enthält,
+antwortet auf derselben Maschine mit 200 und dem Dateiinhalt.
+
+Die Reparatur zieht nicht die Kulisse an einen anderen Ort, sondern das
+**Heimatverzeichnis** mit: `HOME` und `USERPROFILE` zeigen für die Dauer *einer*
+Anfrage auf ein Wegwerf-Heim. Damit liegt der Arbeitsordner per Konstruktion im
+Normalfall, für den der Käfig geschrieben ist — keine Plattform-Fallunter-
+scheidung, kein `skipIf`, auf beiden Maschinen dieselbe Aussage. Und das Heim
+ist **Pflichtargument und steht vorne**: in der Vorgängerfassung war es das
+dritte, optionale, drei Aufrufstellen ließen es weg, und genau diese drei waren
+rot. Ein Pflichtargument lässt sich nicht vergessen; der Compiler zählt mit.
+
+Ergebnis, auf der echten Maschine gemessen, am selben Commit: **Windows 544
+Testdateien, 8006 bestanden, 5 übersprungen** — Ziffer für Ziffer dasselbe wie
+auf dem Mac. Dazu `tsc` 0, `eslint` 0, `madge` 0 Zyklen, `cargo test` 768
+bestanden bei 0 Fehlschlägen (die Differenz zu den 790 des Macs sind
+plattformbedingte Tests, die es dort nicht gibt).
+
+## Die größte Datei des Projekts, und wie man beweist, dass man nichts kaputt gemacht hat
+
+`install.rs` hatte 5918 Zeilen. Das Audit verlangt unter seiner dritten Welle,
+die großen Dateien zu zerlegen; bei vier anderen war das geschehen, hier war
+die Datei stattdessen um 1331 Zeilen **gewachsen** — die Fehlerbehebungen der
+letzten Wochen hatten Code hinzugefügt, und danach hatte niemand aufgeräumt.
+
+Geschnitten wurde nach **geteiltem Zustand**, nicht nach Themen. Drei Gruppen
+fielen dabei heraus: das Werkzeug, das alle Installationswege teilen; ComfyUI,
+dessen drei Aufträge sich *ein* Verzeichnis teilen; und je ein Modul pro
+fremdem Produkt mit eigenem Zustandsobjekt. Größte Einzeldatei danach: 821
+Zeilen.
+
+Interessant ist nicht der Schnitt, sondern der **Beweis**. Bei einer reinen
+Verschiebung ist die einzige Frage: hat sich unterwegs Verhalten geändert? Ein
+Diff beantwortet das nicht — er zeigt tausende bewegte Zeilen. Ein
+Multimengen-Vergleich aller Codezeilen (Kommentare und Leerzeilen heraus)
+beantwortet es: von **4187 Codezeilen weichen genau 12 ab**. Es sind der alte
+Sammel-Import, eine Konstante, die in die Fassade wandert, neun
+Sichtbarkeitsaufweitungen auf `pub(super)`, wo eine Naht einen Helfer von
+seinem Nutzer trennt, und ein `include_str!`-Pfad. Die 230 hinzugekommenen
+Zeilen sind ausnahmslos `use`-Anweisungen, `cfg`-Attribute, `mod tests {` und
+schließende Klammern. Kein Rumpf, keine Zeichenkette, kein Bezeichner sonst.
+
+Dazu die Mengenvergleiche in beide Richtungen: `#[tauri::command]` 23 → 23,
+`#[test]` 121 → 121, `#[ignore]` 2 → 2, `#[allow(...)]` 7 → 7. Und eine Sonde,
+dass die Fassade wirklich trägt: den Re-Export auskommentiert → 2
+Übersetzungsfehler, wieder eingesetzt → 0.
+
+## Ein Tastaturnutzer konnte löschen, aber nicht öffnen
+
+Die Chatzeile war ein `<div>` mit `onClick`, ohne Rolle, ohne `tabIndex`. Die
+Knöpfe *in* der Zeile — Umbenennen, Löschen — waren erreichbar, die Zeile
+selbst nicht. Gemessene Tab-Reihenfolge ab dem Suchfeld: `Rename, Delete,
+Rename, Delete, New Chat`. Wer mit der Tastatur arbeitet, konnte also die
+zerstörerischen Aktionen ausführen und die harmlose nicht.
+
+Die Reparatur hatte eine Falle, vor der der Befund ausdrücklich gewarnt hatte:
+ein neues `role="button"` an der Zeile hätte die e2e-Locator mehrdeutig
+gemacht. Und zwar nicht theoretisch — `chatStore.ts:189` nennt einen frischen
+Chat wörtlich `New Chat`, also hätte `getByRole('button', { name: /New Chat/i })`
+zwei Treffer gehabt, auch der in `e2e/support/ui.ts`, über den *jeder* Spec
+seine Chats anlegt. Die Zeile ist fachlich ohnehin keine Schaltfläche, sondern
+eine Auswahl aus einer Liste; sie ist jetzt `role="option"` in einem
+`role="listbox"`. Die Aktionsknöpfe bleiben Geschwister, weil ein `<button>`
+in einem `<button>` ungültiges HTML wäre.
+
+Der neue Wächter **misst** die Reihenfolge über `document.activeElement`,
+statt sie zu behaupten. Sonde: `role="option"` entfernt → 3 von 18 Fällen rot;
+wieder da → 18 grün.
+
+## Eine veraltete Matrix ist teurer als eine unvollständige
+
+Drei Zeilen der Befundmatrix standen auf „OFFEN", obwohl der beschriebene
+Zustand seit Commits nicht mehr existierte: der Display-Slot war besetzt, die
+Befehlspalette gebaut, die Kontextmenüs da. Zweimal hätte ich beinahe Arbeit
+vergeben, die längst getan war; einmal habe ich es getan und einen Agenten
+losgeschickt, der nach eigener Messung zurückkam und meldete, es sei nichts zu
+tun.
+
+Bei D-T03 war der Fehler ganz meiner. Ich hatte `grep grotesk` auf
+`public/fonts/` laufen lassen und aus dem leeren Ergebnis geschlossen, die
+Display-Schrift fehle. Sie liegt dort unter `woff2/` mit Hash-Namen — sechs
+Blöcke, Gewicht 500 und 700, je latin, latin-ext und vietnamesisch. Ein leerer
+`grep` ist kein Beweis; er ist erst einmal nur ein leerer `grep`.
+
+Das ist dasselbe Muster wie überall in diesem Projekt, eine Ebene höher: zwei
+Beschreibungen desselben Sachverhalts, von denen nur eine gepflegt wurde. Die
+Matrix führt seitdem eine Spalte „gemessen wie" nicht als Zierde.
