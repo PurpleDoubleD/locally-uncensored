@@ -461,41 +461,32 @@ impl AppState {
     /// from every quit path instead so kj103x's Ollama-orphan stays fixed even
     /// when Tauri's destructor chain skips us.
     pub fn shutdown_subprocesses(&self) {
-        // The Cloudflare quick tunnel — FIRST, and it is the only entry here
-        // whose position in the list is an argument rather than an accident.
+        // The Cloudflare quick tunnel — FIRST, and the position is an
+        // argument, not an accident. `the_tunnel_is_the_first_thing_the_quit_path_kills`
+        // (remote.rs) holds this line here; moving it turns that test red.
         //
-        // Why it belongs here at all: this method exists because Tauri v2 may
-        // skip our destructors, and every other daemon was moved into it for
-        // that reason. The tunnel was left hanging on `Drop for RemoteServer`
-        // alone, i.e. on precisely the mechanism this method exists to work
-        // around. A survivor is not a resource leak like a stray Ollama — it
-        // keeps a public `*.trycloudflare.com` address pointed at
-        // 127.0.0.1:11435, and the next launch binds that same port, so the
-        // stranger's tunnel silently serves the new session while
+        // Why it belongs in this method at all: the method exists because
+        // Tauri v2 may skip our destructors, and every other daemon was moved
+        // into it for that reason. The tunnel was left hanging on
+        // `Drop for RemoteServer` alone, i.e. on precisely the mechanism this
+        // method exists to work around. A survivor is not a resource leak like
+        // a stray Ollama — it keeps a public `*.trycloudflare.com` address
+        // pointed at 127.0.0.1:11435, and the next launch binds that same
+        // port, so the stranger's tunnel silently serves the new session while
         // `tunnel_status` reports the tunnel as off (T-39).
         //
-        // Why first: while the tunnel is up, the internet still reaches the
+        // Why FIRST: while the tunnel is up, the internet still reaches the
         // remote server on 11435, which proxies through to Ollama and ComfyUI
         // — the daemons the rest of this method is in the middle of killing.
-        // Closing the door before emptying the rooms behind it costs nothing
-        // (nothing below depends on the tunnel), and last would hold the door
-        // open across every blocking call in here: the `taskkill ... .output()`
-        // waits on Windows and the `lsof` shell-out for the MLX port on macOS.
+        // Every branch below is a blocking call (the `taskkill … .output()`
+        // waits on Windows, the `lsof` shell-out for the MLX port on macOS, a
+        // process-table walk for the trainer and the installer trees), so
+        // "last" would hold that door open across all of them. Nothing below
+        // depends on the tunnel, so first costs nothing.
         //
-        // `shutdown_tunnel` take()s the slot, like every branch below, so the
-        // Drop pass that may still follow has nothing left to fire at; and it
-        // goes through `kill_tree`, so a cloudflared that spawned children
-        // leaves no orphans. A poisoned lock is recovered rather than skipped
-        // — unlike every other slot here, silently leaving this one alive is a
-        // security event, and taking an `Option<Child>` out of the struct
-        // cannot observe a broken invariant.
-        {
-            let mut remote = self
-                .remote
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            remote.shutdown_tunnel();
-        }
+        // The kill itself takes the slot and walks the tree; see
+        // `remote::shutdown_tunnel`.
+        crate::commands::remote::shutdown_tunnel(&self.remote);
 
         if let Ok(mut proc) = self.ollama_process.lock() {
             // take(), not a borrow: leaving the pid in the slot let the Drop

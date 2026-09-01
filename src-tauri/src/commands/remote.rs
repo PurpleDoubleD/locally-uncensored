@@ -2363,6 +2363,23 @@ impl Drop for RemoteServer {
     }
 }
 
+/// The quit path's door to the tunnel: lock the shared slot and end what is in
+/// it. Same shape as `install::kill_installer_children()` — the caller in
+/// `state.rs` names one thing and this module owns how it dies.
+///
+/// A poisoned lock is recovered rather than skipped. Every other slot in
+/// `shutdown_subprocesses` uses `if let Ok(..)` and gives up on a poisoned
+/// mutex; for those the cost is a leaked local daemon. Here it is a public
+/// address left pointing at this machine, and taking an `Option<Child>` out of
+/// the struct cannot observe a half-updated invariant, so there is nothing to
+/// protect by giving up.
+pub fn shutdown_tunnel(remote: &std::sync::Mutex<RemoteServer>) {
+    remote
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .shutdown_tunnel();
+}
+
 /// Best-effort: open the LAN port in Windows Firewall so phones on the same
 /// network can actually reach the remote server. Adding a firewall rule needs
 /// admin, so this silently no-ops for a non-elevated per-user install (that
@@ -4034,65 +4051,258 @@ mod remote_hardening_tests {
         assert!(!is_stale_tunnel_process("cloudflared", &cmd("cloudflared --version"), 11435));
     }
 
-    /// The sweep against the REAL process table.
+    // ── the sweep against the REAL process table ────────────────────────────
+    //
+    // The pure tests above feed `is_stale_tunnel_process` hand-written strings
+    // and have always passed — including for the fifteen months the sweep could
+    // not match anything at all, because `refresh_processes` never fetched the
+    // argv they were pretending to be. Something has to read real data.
+    //
+    // ── 01.09.2026: why the stand-in changed ──
+    //
+    // It used to be a COPY of `/bin/sh` named `cloudflared`, which is the only
+    // way to get a live process whose `name()` is what the matcher wants. That
+    // stand-in was reported failing twice under a full rebuild, and measuring
+    // it explains why: **macOS SIGKILLs it.** An exec'd copy of a SIP platform
+    // binary lived 95–486 ms across 15 measured spawns (mean ~250 ms) and was
+    // then killed by the kernel, every single time — `sleep 30` was never
+    // reached. The old test slept 50 ms and then took a process-table snapshot,
+    // so it was racing the kernel inside a window of a few hundred
+    // milliseconds. Idle it won; under load it did not, because the first
+    // snapshot alone costs ~280 ms when 18 test threads contend for it
+    // (measured). Once the window closed, the remaining 39 iterations scanned
+    // for a corpse and the test reported "the sweep did not find a live
+    // cloudflared" — blaming the sweep for the kernel's decision.
+    //
+    // So the stand-in is now a shebang script, which the OS keeps running
+    // indefinitely: `/bin/sh` reading from a pipe this test holds. It blocks in
+    // a builtin, so there is no `sleep` grandchild to orphan, and closing the
+    // pipe or killing the child ends it at once.
+    //
+    // What that costs, stated plainly: a shebang's `name()` is the interpreter
+    // ("bash" on macOS), not the script, so this process cannot impersonate a
+    // cloudflared. The positive end-to-end hit — `find_stale_tunnels` returning
+    // a real process — is therefore no longer available as a gate on this
+    // platform. What replaces it is below, and the boundary is named in the
+    // report: the name half of the matcher is covered by the exhaustive pure
+    // tests above, the argv half is covered here on real data, and
+    // `find_stale_tunnels`'s body is the composition of exactly those two.
+
+    /// A live process with an argv we chose, that the OS will keep running.
     ///
-    /// The two tests around this one feed `is_stale_tunnel_process` strings and
-    /// have always passed — including for the fifteen months the sweep could
-    /// not match anything at all, because `refresh_processes` never fetched the
-    /// argv they were pretending to be. Only a real process proves the scan is
-    /// wired to real data.
-    ///
-    /// The stand-in is a COPY of `/bin/sh` named `cloudflared`: sysinfo reports
-    /// `name()` from the executed file, so a copy gets the name the matcher
-    /// requires (a symlink does not — it reports the resolved target, measured
-    /// 2026-09-01). Nothing is killed here; the test reaps its own child.
+    /// Returns the child plus the tempdir that has to outlive it.
     #[cfg(unix)]
-    #[test]
-    fn the_sweep_finds_a_real_cloudflared_by_its_argv() {
+    fn live_stand_in(port: u16) -> (tempfile::TempDir, std::process::Child) {
         use std::os::unix::fs::PermissionsExt;
         use std::process::{Command, Stdio};
 
-        let port: u16 = 61435;
         let dir = tempfile::tempdir().expect("tempdir");
-        let bin = dir.path().join("cloudflared");
-        std::fs::copy("/bin/sh", &bin).expect("copy the stand-in");
-        std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+        let script = dir.path().join("cloudflared");
+        // `read` is a shell builtin: the process blocks in it without forking,
+        // so nothing is left behind when this test drops the pipe.
+        std::fs::write(&script, "#!/bin/sh\nread ignored\n").expect("write the stand-in");
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).expect("chmod");
 
-        let mut child = Command::new(&bin)
-            .args([
-                "-c",
-                "sleep 30; :",
-                "tunnel",
-                "--url",
-                &format!("http://127.0.0.1:{port}"),
-            ])
-            .stdin(Stdio::null())
+        let child = Command::new(&script)
+            .args(["tunnel", "--url", &format!("http://127.0.0.1:{port}")])
+            .stdin(Stdio::piped())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .spawn()
             .expect("spawn the stand-in");
+        (dir, child)
+    }
 
-        let mut found = false;
-        let mut other_port = true;
-        for _ in 0..40 {
-            std::thread::sleep(std::time::Duration::from_millis(50));
-            let sys = crate::process_util::process_table_with_cmdlines();
-            if find_stale_tunnels(&sys, port).contains(&child.id()) {
-                found = true;
-                other_port = find_stale_tunnels(&sys, port + 1).contains(&child.id());
-                break;
+    /// A process table that has PROVEN itself, or the reason it could not.
+    ///
+    /// The check is an invariant that cannot be false when the enumeration
+    /// worked: this very process is running, so a table without it was not read
+    /// at all. That is not a theoretical concern — sysinfo-0.33.1's macOS
+    /// `refresh_processes_specifics` takes its pids from `get_proc_list()`, and
+    /// when that returns `None` (its second `proc_listallpids` filling the
+    /// buffer the first one sized) the function returns 0 and leaves the list
+    /// untouched, so a fresh `System` comes back EMPTY with no error anywhere.
+    ///
+    /// Retrying is therefore not hope: every retry is gated on a check, and the
+    /// caller only ever asserts on a snapshot that passed. Between the check
+    /// and the assertion there is no clock, no syscall and no other thread —
+    /// the assertions are a pure function of data already in hand.
+    #[cfg(unix)]
+    fn checked_table(pid: u32) -> Result<sysinfo::System, String> {
+        use std::time::{Duration, Instant};
+        let me = sysinfo::Pid::from_u32(std::process::id());
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let mut attempts = 0usize;
+        let mut blind = 0usize;
+        loop {
+            if Instant::now() >= deadline {
+                return Err(format!(
+                    "no usable process table in 10s ({attempts} attempts, {blind} of them \
+                     without this test's own process in them). That is the TEST ENVIRONMENT, \
+                     not the sweep."
+                ));
             }
+            if attempts > 0 {
+                // Paces retries so a pathological environment does not spin a
+                // core. It is not what makes the result correct — the checks
+                // below are.
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            attempts += 1;
+            let sys = crate::process_util::process_table_with_cmdlines();
+            if sys.process(me).is_none() {
+                blind += 1;
+                continue;
+            }
+            if sys.process(sysinfo::Pid::from_u32(pid)).is_none() {
+                blind += 1;
+                continue;
+            }
+            return Ok(sys);
         }
+    }
+
+    /// The fifteen-month bug itself, on real data.
+    ///
+    /// `refresh_processes` does not fetch command lines, so `Process::cmd()`
+    /// came back EMPTY for every process and every matcher was silently handed
+    /// "". `process_table_with_cmdlines` exists to prevent that, and this is
+    /// the only test that can tell whether it does: a live process whose argv
+    /// this test chose, read back out of the real table.
+    #[cfg(unix)]
+    #[test]
+    fn the_process_table_really_carries_a_live_process_argv() {
+        let port: u16 = 61435;
+        let (_dir, mut child) = live_stand_in(port);
+        let pid = child.id();
+        let table = checked_table(pid);
         let _ = child.kill();
         let _ = child.wait();
 
+        let sys = table.unwrap_or_else(|why| panic!("{why}"));
+        let entry = sys
+            .process(sysinfo::Pid::from_u32(pid))
+            .expect("checked_table only returns a table containing this pid");
+        let argv = crate::process_util::cmdline_of(entry);
+
         assert!(
-            found,
-            "the sweep did not find a live cloudflared publishing {port} — this is \
-             exactly the state the sweep was in while it reported 0 killed on \
-             every start"
+            !argv.is_empty(),
+            "the process table carries NO command line for a live process — this is the \
+             state every argv matcher in this repo was silently in for fifteen months",
         );
-        assert!(!other_port, "a sweep for another port matched this tunnel");
+        assert!(
+            argv.iter().any(|a| a.contains(&format!("127.0.0.1:{port}"))),
+            "the argv came back but not the one this test spawned: {argv:?}",
+        );
+    }
+
+    /// The port half of the matcher, fed from the real table rather than from a
+    /// string this test wrote.
+    ///
+    /// This is the join that was broken: `find_stale_tunnels` hands
+    /// `cmdline_of(process)` to `is_stale_tunnel_process`, which joins it and
+    /// asks `targets_loopback_port`. With an empty argv that join is "" and the
+    /// answer is always false.
+    #[cfg(unix)]
+    #[test]
+    fn the_port_matcher_reads_the_argv_the_table_actually_returns() {
+        let port: u16 = 61435;
+        let (_dir, mut child) = live_stand_in(port);
+        let pid = child.id();
+        let table = checked_table(pid);
+        let _ = child.kill();
+        let _ = child.wait();
+
+        let sys = table.unwrap_or_else(|why| panic!("{why}"));
+        let argv = crate::process_util::cmdline_of(
+            sys.process(sysinfo::Pid::from_u32(pid)).expect("checked"),
+        );
+        let joined = argv.join(" ");
+
+        assert!(
+            targets_loopback_port(&joined, port),
+            "the port matcher does not see the port in an argv read off the real table: {joined:?}",
+        );
+        assert!(
+            !targets_loopback_port(&joined, port + 1),
+            "a sweep for the neighbouring port matched this argv: {joined:?}",
+        );
+        // And the composition the sweep actually performs, with the one field
+        // this platform will not let a stand-in carry substituted in: had this
+        // real argv belonged to a process NAMED cloudflared, the sweep would
+        // have taken it. The name half is covered exhaustively by
+        // `only_a_cloudflared_pointed_at_our_port_is_swept` above.
+        assert!(
+            is_stale_tunnel_process("cloudflared", &argv, port),
+            "a real cloudflared with this real argv would not have been swept: {argv:?}",
+        );
+    }
+
+    /// The direction that can hurt a user: the sweep runs before the bind, on
+    /// processes the user may well have started themselves, and it must leave
+    /// every one of them alone. Asserted against a REAL live process that
+    /// mentions our port and is not a cloudflared.
+    #[cfg(unix)]
+    #[test]
+    fn the_sweep_leaves_a_live_stranger_on_our_port_alone() {
+        let port: u16 = 61435;
+        let (_dir, mut child) = live_stand_in(port);
+        let pid = child.id();
+        let table = checked_table(pid);
+        let _ = child.kill();
+        let _ = child.wait();
+
+        let sys = table.unwrap_or_else(|why| panic!("{why}"));
+        let entry = sys
+            .process(sysinfo::Pid::from_u32(pid))
+            .expect("checked_table only returns a table containing this pid");
+
+        assert!(
+            !find_stale_tunnels(&sys, port).contains(&pid),
+            "the sweep would have killed a live process that publishes our port but is not a \
+             cloudflared (name={:?}) — before the bind, on a machine that is not ours to \
+             tidy up",
+            entry.name(),
+        );
+    }
+
+    /// SONDE (temporaer): ueberlebt eine Kopie eines SELBST KOMPILIERTEN
+    /// Binaries, oder toetet macOS sie wie die Kopie von /bin/sh?
+    #[cfg(unix)]
+    #[test]
+    #[ignore]
+    fn zz_selfbuilt_survives() {
+        use std::os::unix::fs::PermissionsExt;
+        use std::process::{Command, Stdio};
+        let me = std::env::current_exe().expect("current_exe");
+        let mut out = Vec::new();
+        for _ in 0..15 {
+            let dir = tempfile::tempdir().unwrap();
+            let bin = dir.path().join("cloudflared");
+            std::fs::copy(&me, &bin).unwrap();
+            std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
+            let t0 = std::time::Instant::now();
+            // Ein einzelner verschachtelter Test, der rund eine Sekunde laeuft —
+            // also weit ueber dem 95-486ms-Fenster, in dem die /bin/sh-Kopie starb.
+            let mut c = Command::new(&bin)
+                .args([
+                    "--test-threads=1",
+                    "--exact",
+                    "commands::remote::remote_hardening_tests::stopping_the_tunnel_takes_its_children_with_it",
+                ])
+                .stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null())
+                .spawn().unwrap();
+            let mut res = None;
+            for _ in 0..1200 {
+                if let Ok(Some(st)) = c.try_wait() { res = Some(format!("{}ms/{st}", t0.elapsed().as_millis())); break; }
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+            match res {
+                Some(r) => out.push(r),
+                None => { out.push(">6000ms/lebt noch".into()); let _ = c.kill(); let _ = c.wait(); }
+            }
+        }
+        println!("SELBST-KOMPILIERT: {out:?}");
     }
 
     #[test]
@@ -4277,6 +4487,27 @@ mod remote_hardening_tests {
         }
     }
 
+    /// The body of `AppState::shutdown_subprocesses`, code lines only.
+    ///
+    /// Comment lines are dropped because the assertions below look for words
+    /// like `kill` and `.lock(`, and the prose in that method is full of them.
+    /// Only whole-line comments are stripped, so no string literal is touched.
+    fn shutdown_body() -> String {
+        let state_rs = include_str!("../state.rs");
+        let from = state_rs
+            .find("pub fn shutdown_subprocesses")
+            .expect("state.rs no longer has a shutdown_subprocesses");
+        let body = &state_rs[from..];
+        let to = body
+            .find("\nimpl Drop for AppState")
+            .expect("state.rs no longer ends the shutdown impl with Drop for AppState");
+        body[..to]
+            .lines()
+            .filter(|l| !l.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
     /// KF-1, as a pure decision — no process, no signal, every platform.
     ///
     /// The runtime proof lives in `state.rs` and needs a stand-in child; this
@@ -4289,15 +4520,8 @@ mod remote_hardening_tests {
     /// reason.
     #[test]
     fn the_explicit_quit_path_reaches_the_tunnel() {
-        let state_rs = include_str!("../state.rs");
-        let shutdown = &state_rs[state_rs
-            .find("pub fn shutdown_subprocesses")
-            .expect("shutdown_subprocesses is gone")..];
-        let shutdown = &shutdown[..shutdown
-            .find("\nimpl Drop for AppState")
-            .expect("the end of the shutdown impl block")];
         assert!(
-            shutdown.contains("shutdown_tunnel()"),
+            shutdown_body().contains("remote::shutdown_tunnel(&self.remote)"),
             "shutdown_subprocesses no longer kills the cloudflared tunnel (KF-1)",
         );
         // ...and it must take the slot, not borrow it: `Drop for AppState`
@@ -4307,6 +4531,50 @@ mod remote_hardening_tests {
             production_code().contains("self.tunnel_child.take()"),
             "the tunnel is no longer taken out of its slot, so a second pass re-kills its pid",
         );
+    }
+
+    /// The tunnel goes FIRST, and that is a promise, not a comment.
+    ///
+    /// ── Why this is a source test and not a runtime one ──
+    ///
+    /// "Died first" is not observable here without a race. Every kill in
+    /// `shutdown_subprocesses` is issued microseconds after the previous one,
+    /// and they are not even the same signal: the tunnel gets SIGTERM through
+    /// `kill_tree` (SIGKILL only after an 800 ms grace), while Ollama and
+    /// ComfyUI get `Child::kill`, which is SIGKILL immediately. So the daemon
+    /// killed SECOND routinely reaches the reaper FIRST. A test that watched
+    /// wall-clock death order would assert the opposite of the property, and
+    /// flakily at that. The property is about the order the kills are ISSUED,
+    /// and the source is where that order lives.
+    ///
+    /// ── What is asserted, and why it is not brittle ──
+    ///
+    /// Not "the tunnel is on line N", and not a list of the other daemons in
+    /// order — both would go red for a harmless reshuffle. Only this: nothing
+    /// is killed, and no other slot is even locked, BEFORE the tunnel. That is
+    /// exactly the property the ordering argument rests on (the door is shut
+    /// before the rooms behind it are emptied) and nothing more. Reordering
+    /// the daemons below the tunnel, renaming a slot, or adding a log line in
+    /// front all stay green; moving the tunnel down does not.
+    #[test]
+    fn the_tunnel_is_the_first_thing_the_quit_path_kills() {
+        let body = shutdown_body();
+        let at = body
+            .find("remote::shutdown_tunnel(&self.remote)")
+            .expect("the quit path does not kill the tunnel at all — see the test above");
+        let before = &body[..at];
+
+        for forbidden in [".lock(", "kill", ".stop("] {
+            assert!(
+                !before.contains(forbidden),
+                "`{forbidden}` appears in shutdown_subprocesses BEFORE the tunnel is closed.\n\
+                 The tunnel has to go first: while it is up, the internet still reaches the \n\
+                 remote server on 11435, which proxies to the very daemons this method is \n\
+                 killing. Every branch below it blocks (taskkill, lsof, process-table walks), \n\
+                 so anything moved in front of it holds that door open for the whole of it.\n\
+                 Offending prefix:\n{before}"
+            );
+        }
     }
 
     #[test]
