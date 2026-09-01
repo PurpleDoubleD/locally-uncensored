@@ -841,8 +841,7 @@ mod workspace_override_tests {
     #[test]
     fn a_folder_that_was_never_picked_cannot_be_made_a_workspace() {
         let state = AppState::new();
-        let dir = std::env::temp_dir().join(format!("lu-unpicked-{}", std::process::id()));
-        let _ = fs::create_dir_all(&dir);
+        let dir = crate::os_paths::test_dir("unpicked");
         let s = dir.to_string_lossy().to_string();
 
         let got = set_chat_workspace_override_impl("__remote__", Some(&s), &state);
@@ -855,7 +854,6 @@ mod workspace_override_tests {
             crate::commands::filesystem::validate_workspace_root(&dir).is_err(),
             "the refused call still added the folder to the allowlist",
         );
-        let _ = fs::remove_dir_all(&dir);
     }
 
     /// The real flow: the user picks a folder in the native dialog (which is
@@ -864,8 +862,7 @@ mod workspace_override_tests {
     #[test]
     fn a_picked_project_folder_is_stored_and_trusted_afterwards() {
         let state = AppState::new();
-        let dir = std::env::temp_dir().join(format!("lu-ovr-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&dir);
+        let dir = crate::os_paths::test_dir("ovr");
         let s = dir.to_string_lossy().to_string();
         // `system::pick_folder` does this for real; the dialog cannot run here.
         crate::commands::filesystem::allow_root_for_test(&dir);
@@ -873,7 +870,7 @@ mod workspace_override_tests {
         set_chat_workspace_override_impl("__remote__", Some(&s), &state).expect("accepted");
         assert_eq!(
             state.chat_workspace_overrides.lock().unwrap().get("__remote__"),
-            Some(&dir),
+            Some(&dir.to_path_buf()),
         );
         assert!(dir.is_dir(), "the folder was not created");
         assert!(crate::commands::filesystem::validate_workspace_root(&dir).is_ok());
@@ -881,6 +878,5 @@ mod workspace_override_tests {
         // Clearing still works and takes the entry with it.
         set_chat_workspace_override_impl("__remote__", None, &state).expect("cleared");
         assert!(state.chat_workspace_overrides.lock().unwrap().is_empty());
-        let _ = fs::remove_dir_all(&dir);
     }
 }

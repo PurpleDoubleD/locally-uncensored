@@ -453,3 +453,90 @@ pub fn comfyui_search_roots() -> Vec<PathBuf> {
 pub fn default_comfyui_dir() -> PathBuf {
     data_dir().join("ComfyUI")
 }
+
+// ── Testwurzeln ───────────────────────────────────────────────────────────
+
+/// Basis für die Wegwerf-Verzeichnisse der Tests.
+///
+/// Unter macOS/Linux ist das weiterhin `std::env::temp_dir()`: dort liegt temp
+/// bei `/var/folders/…` bzw. `/tmp`, also ausserhalb von `$HOME` — nichts
+/// ändert sich.
+///
+/// Unter WINDOWS darf es `std::env::temp_dir()` NICHT sein, und das ist der
+/// ganze Grund, warum diese Funktion existiert. Dort ist temp
+/// `%LOCALAPPDATA%\Temp` == `C:\Users\<user>\AppData\Local\Temp`, und `AppData`
+/// steht in `commands::filesystem::forbidden_root_prefixes()` als PRÄFIX auf
+/// der Sperrliste — darunter liegen Browserprofile, Token und Zugangsdaten,
+/// und genau die zu sperren ist der Zweck der Wurzel-Härtung. Damit ist jede
+/// Testwurzel unter `temp_dir()` "Not an allowed workspace folder", und
+/// `allow_root_for_test` paniert, bevor der Test überhaupt anfängt. Die Regel
+/// ist richtig, der ORT der Testverzeichnisse war es nicht — wer das hier auf
+/// `temp_dir()` zurückdreht, macht 15 Windows-Tests wieder rot.
+///
+/// Der Ersatz ist das `target`-Verzeichnis der Kiste: es liegt im Repo (also
+/// im Benutzerprofil, aber NICHT unter `AppData` — von der Regel ausdrücklich
+/// erlaubt, weil `forbidden_exact_roots()` `C:\Users` und `$HOME` nur EXAKT
+/// sperrt), ist beschreibbar, gitignoriert und gehört ohnehin zum Build.
+/// Echte Nutzerverzeichnisse (`Documents`, `Desktop`) kommen nicht in Frage:
+/// Tests schreiben nicht dorthin, wo der Nutzer arbeitet.
+#[cfg(test)]
+pub(crate) fn test_scratch_root() -> PathBuf {
+    #[cfg(windows)]
+    {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("target")
+            .join("lu-test-scratch")
+    }
+    #[cfg(not(windows))]
+    {
+        std::env::temp_dir()
+    }
+}
+
+/// Ein Wegwerf-Testverzeichnis, das sich beim Verlassen selbst wieder abräumt.
+///
+/// Der Aufräum-Schritt hängt am `Drop`, nicht an einer letzten Zeile im Test:
+/// ein `let _ = fs::remove_dir_all(…)` am Ende läuft bei einem gescheiterten
+/// `assert!` nie, und unter `target/` bliebe der Rest liegen.
+#[cfg(test)]
+#[derive(Debug)]
+pub(crate) struct TestDir(PathBuf);
+
+#[cfg(test)]
+impl std::ops::Deref for TestDir {
+    type Target = std::path::Path;
+    fn deref(&self) -> &std::path::Path {
+        &self.0
+    }
+}
+
+#[cfg(test)]
+impl AsRef<std::path::Path> for TestDir {
+    fn as_ref(&self) -> &std::path::Path {
+        &self.0
+    }
+}
+
+#[cfg(test)]
+impl Drop for TestDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+/// Legt ein frisches, leeres Testverzeichnis unter [`test_scratch_root`] an.
+///
+/// Der Name trägt Prozess-ID und ThreadId — dieselbe Machart wie die
+/// `lu-…-<pid>-<thread>`-Namen, die im Bestand schon so gebaut waren —, damit
+/// parallel laufende Tests sich nicht in dasselbe Verzeichnis setzen.
+#[cfg(test)]
+pub(crate) fn test_dir(tag: &str) -> TestDir {
+    let thread: String = format!("{:?}", std::thread::current().id())
+        .chars()
+        .filter(|c| c.is_ascii_digit())
+        .collect();
+    let path = test_scratch_root().join(format!("lu-{}-{}-{}", tag, std::process::id(), thread));
+    let _ = std::fs::remove_dir_all(&path);
+    std::fs::create_dir_all(&path).expect("Testverzeichnis anlegen");
+    TestDir(path)
+}

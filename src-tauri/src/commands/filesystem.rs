@@ -932,6 +932,7 @@ pub async fn save_binary_file_dialog(
 #[cfg(test)]
 mod tests {
     use super::{allow_root_for_test, is_workspace_root_path, normalize_to_existing_style, resolve_path};
+    use crate::os_paths::test_dir;
     use std::path::Path;
 
     // ── #11: fs_write preserves the existing file's EOL + BOM convention ──
@@ -947,8 +948,7 @@ mod tests {
     fn write_atomic_replaces_and_leaves_no_debris() {
         use super::write_atomic;
         use std::fs;
-        let dir = std::env::temp_dir().join(format!("lu-atomic-{}", std::process::id()));
-        let _ = fs::create_dir_all(&dir);
+        let dir = test_dir("atomic");
         let target = dir.join("notes.txt");
         fs::write(&target, b"old").unwrap();
 
@@ -964,7 +964,6 @@ mod tests {
             .filter(|n| n != "notes.txt")
             .collect();
         assert!(leftovers.is_empty(), "left behind: {:?}", leftovers);
-        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -1088,11 +1087,31 @@ mod tests {
     // selections past MAX_PATH. The root then carries the verbatim prefix while
     // the candidate is stripped of it — before the symmetric win_compare_key
     // fix, a legitimately-picked folder failed containment. ────────────────
+
+    /// Der Pick, den diese vier Tests voraussetzen: rfd liefert die Wurzel in
+    /// der Verbatim-Form, und GENAU die landet auf der Erlaubnisliste.
+    ///
+    /// Das stand hier vorher nicht — die Tests lebten davon, dass
+    /// `absolute_path_inside_working_dir_is_allowed` vorher lief und dabei
+    /// `D:/Projects/site` eingetragen hatte. Eine Reihenfolge-Abhängigkeit
+    /// zwischen Tests, und `absolute_op_under_verbatim_root_is_allowed` steht
+    /// alphabetisch VOR dem Eintragenden: dieser eine Test war deshalb auf
+    /// Windows zuverlässig rot ("only a folder you chose in LU's folder
+    /// picker"), die anderen drei nur zufällig grün. Jeder Test trägt seine
+    /// Wurzel jetzt selbst ein.
+    #[cfg(windows)]
+    fn pick_verbatim_root() -> &'static str {
+        const ROOT: &str = r"\\?\D:\Projects\site";
+        allow_root_for_test(Path::new(ROOT)); // stands in for the native dialog
+        ROOT
+    }
+
     #[cfg(windows)]
     #[test]
     fn verbatim_prefixed_root_allows_browsing_itself() {
         // FileTree browse passes path == workingDirectory == the picked folder.
-        let got = resolve_path(r"\\?\D:\Projects\site", Some("c"), Some(r"\\?\D:\Projects\site"))
+        let root = pick_verbatim_root();
+        let got = resolve_path(root, Some("c"), Some(root))
             .expect("verbatim root must contain itself");
         let s = got.to_string_lossy().to_lowercase().replace('\\', "/");
         assert!(s.ends_with("d:/projects/site"), "got: {}", s);
@@ -1101,7 +1120,7 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn relative_path_under_verbatim_root_is_allowed() {
-        let got = resolve_path("src/main.rs", Some("c"), Some(r"\\?\D:\Projects\site"))
+        let got = resolve_path("src/main.rs", Some("c"), Some(pick_verbatim_root()))
             .expect("relative op under a verbatim root must resolve");
         let s = got.to_string_lossy().to_lowercase().replace('\\', "/");
         assert!(s.ends_with("d:/projects/site/src/main.rs"), "got: {}", s);
@@ -1111,7 +1130,7 @@ mod tests {
     #[test]
     fn absolute_op_under_verbatim_root_is_allowed() {
         // The agent addresses files with plain absolute paths; the root is verbatim.
-        let got = resolve_path(r"D:\Projects\site\README.md", Some("c"), Some(r"\\?\D:\Projects\site"))
+        let got = resolve_path(r"D:\Projects\site\README.md", Some("c"), Some(pick_verbatim_root()))
             .expect("plain absolute inside a verbatim root must be allowed");
         let s = got.to_string_lossy().to_lowercase().replace('\\', "/");
         assert!(s.ends_with("d:/projects/site/readme.md"), "got: {}", s);
@@ -1120,9 +1139,12 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn verbatim_root_still_rejects_escape() {
-        // Normalizing the prefix must not weaken the jail.
-        assert!(resolve_path(r"..\..\secret.txt", Some("c"), Some(r"\\?\D:\Projects\site")).is_err());
-        assert!(resolve_path(r"C:\Windows\System32\x.txt", Some("c"), Some(r"\\?\D:\Projects\site")).is_err());
+        // Normalizing the prefix must not weaken the jail. Die Wurzel ist hier
+        // eingetragen, damit die Ablehnung aus der Umschliessungsprüfung kommt
+        // und nicht schon daraus, dass niemand den Ordner gepickt hat.
+        let root = pick_verbatim_root();
+        assert!(resolve_path(r"..\..\secret.txt", Some("c"), Some(root)).is_err());
+        assert!(resolve_path(r"C:\Windows\System32\x.txt", Some("c"), Some(root)).is_err());
     }
 }
 
@@ -1195,8 +1217,7 @@ mod jail_adversarial_tests {
     #[test]
     fn a_glob_pattern_cannot_walk_out_of_the_workspace() {
         use std::fs;
-        let base = std::env::temp_dir().join(format!("lu-globjail-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&base);
+        let base = crate::os_paths::test_dir("globjail");
         let ws = base.join("workspace");
         fs::create_dir_all(&ws).unwrap();
         fs::write(base.join("secret.txt"), b"private").unwrap();
@@ -1224,7 +1245,6 @@ mod jail_adversarial_tests {
         let ok = fs_list(".".into(), None, Some("*.txt".into()), None, wd).expect("glob");
         assert_eq!(ok["count"], 1);
         assert!(ok.to_string().contains("inside.txt"));
-        let _ = fs::remove_dir_all(&base);
     }
 }
 
@@ -1292,14 +1312,12 @@ mod workspace_root_guard_tests {
     /// when the structural rules would have refused it.
     #[test]
     fn a_folder_the_user_picked_is_trusted() {
-        let odd = std::env::temp_dir().join(format!("lu-picked-{}", std::process::id()));
-        let _ = fs::create_dir_all(&odd);
+        let odd = crate::os_paths::test_dir("picked");
         allow_root_for_test(&odd);
         let root = odd.to_string_lossy().to_string();
         assert!(resolve_path("notes.md", None, Some(&root)).is_ok());
         // Registering a root does NOT widen the jail inside it.
         assert!(resolve_path("../elsewhere.md", None, Some(&root)).is_err());
-        let _ = fs::remove_dir_all(&odd);
     }
 
     /// filesystem.rs kept its own copy of the chat-id sanitiser, and that copy
@@ -1325,13 +1343,11 @@ mod workspace_root_guard_tests {
     /// files, and the symlink hardening must not break that.
     #[test]
     fn a_file_that_does_not_exist_yet_still_resolves() {
-        let ws = std::env::temp_dir().join(format!("lu-newfile-{}", std::process::id()));
-        let _ = fs::create_dir_all(&ws);
+        let ws = crate::os_paths::test_dir("newfile");
         allow_root_for_test(&ws);
         let root = ws.to_string_lossy().to_string();
         let got = resolve_path("deep/new/dir/notes.md", None, Some(&root)).expect("new path");
         assert!(got.ends_with("deep/new/dir/notes.md"), "got: {got:?}");
-        let _ = fs::remove_dir_all(&ws);
     }
 
     /// Lexical normalization believes the path string. A symlink inside the
@@ -1340,8 +1356,7 @@ mod workspace_root_guard_tests {
     #[test]
     #[cfg(unix)]
     fn a_symlink_pointing_out_of_the_workspace_is_refused() {
-        let base = std::env::temp_dir().join(format!("lu-symjail-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&base);
+        let base = crate::os_paths::test_dir("symjail");
         let ws = base.join("workspace");
         let outside = base.join("outside");
         fs::create_dir_all(&ws).unwrap();
@@ -1365,8 +1380,6 @@ mod workspace_root_guard_tests {
         fs::write(inner.join("ok.txt"), b"fine").unwrap();
         std::os::unix::fs::symlink(&inner, ws.join("alias")).unwrap();
         assert!(resolve_path("alias/ok.txt", None, Some(&root)).is_ok());
-
-        let _ = fs::remove_dir_all(&base);
     }
 }
 
@@ -1382,8 +1395,10 @@ mod workspace_root_guard_tests {
 mod workspace_allowlist_tests {
     use super::*;
 
-    fn unique(tag: &str) -> PathBuf {
-        std::env::temp_dir().join(format!("lu-allow-{}-{}-{:?}", tag, std::process::id(), std::thread::current().id()))
+    use crate::os_paths::{TestDir, test_dir};
+
+    fn unique(tag: &str) -> TestDir {
+        test_dir(&format!("allow-{tag}"))
     }
 
     #[test]
@@ -1411,13 +1426,11 @@ mod workspace_allowlist_tests {
     #[test]
     fn a_folder_the_user_picked_in_the_dialog_becomes_a_root() {
         let dir = unique("picked");
-        let _ = fs::create_dir_all(&dir);
         assert!(check_workspace_root(&dir).is_err(), "the test root was allowed before the pick");
         allow_root_for_test(&dir);
         assert!(check_workspace_root(&dir).is_ok(), "a picked folder was refused");
         // Subfolders of a picked root are roots too — the same project.
         assert!(check_workspace_root(&dir.join("packages").join("api")).is_ok());
-        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -1447,7 +1460,6 @@ mod workspace_allowlist_tests {
     fn a_tampered_allowlist_file_cannot_grant_what_a_dialog_could_not() {
         // The file is data, not authority.
         let dir = unique("file");
-        let _ = fs::create_dir_all(&dir);
         let file = dir.join("workspace-roots.json");
         let home = dirs::home_dir().unwrap_or_default();
         let good = dir.join("project");
@@ -1462,7 +1474,6 @@ mod workspace_allowlist_tests {
 
         let loaded = load_roots_from(&file);
         assert_eq!(loaded, vec![lexical_normalize(&good)], "a forbidden root survived the read");
-        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -1471,24 +1482,20 @@ mod workspace_allowlist_tests {
         // and sends it again on the next launch. An in-memory allowlist would
         // refuse it and demand a fresh pick on every single start.
         let dir = unique("restart");
-        let _ = fs::create_dir_all(&dir);
         let file = dir.join("workspace-roots.json");
         let project = dir.join("site");
         save_roots_to(&file, &[lexical_normalize(&project)]);
         assert_eq!(load_roots_from(&file), vec![lexical_normalize(&project)]);
-        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]
     fn a_missing_or_corrupt_allowlist_file_is_an_empty_allowlist() {
         // Fail CLOSED: no file, or garbage in it, must not mean "allow anything".
         let dir = unique("corrupt");
-        let _ = fs::create_dir_all(&dir);
         assert!(load_roots_from(&dir.join("nope.json")).is_empty());
         let file = dir.join("workspace-roots.json");
         fs::write(&file, b"{ not json").unwrap();
         assert!(load_roots_from(&file).is_empty());
-        let _ = fs::remove_dir_all(&dir);
     }
 }
 
@@ -1548,10 +1555,8 @@ mod binary_read_tests {
     use super::*;
     use std::fs;
 
-    fn ws(tag: &str) -> PathBuf {
-        let d = std::env::temp_dir().join(format!("lu-fsread-{}-{}", tag, std::process::id()));
-        let _ = fs::remove_dir_all(&d);
-        fs::create_dir_all(&d).unwrap();
+    fn ws(tag: &str) -> crate::os_paths::TestDir {
+        let d = crate::os_paths::test_dir(&format!("fsread-{tag}"));
         allow_root_for_test(&d); // stands in for the user picking this folder
         d
     }
@@ -1576,7 +1581,6 @@ mod binary_read_tests {
         assert_eq!(v["encoding"], "binary");
         assert_eq!(v["bytes"], 5);
         assert!(v.get("content").is_none(), "the payload must not be shipped");
-        let _ = fs::remove_dir_all(&dir);
     }
 
     #[tokio::test]
@@ -1590,7 +1594,6 @@ mod binary_read_tests {
 
         assert_eq!(v["encoding"], "utf8");
         assert_eq!(v["content"], "hallo\nwelt\n");
-        let _ = fs::remove_dir_all(&dir);
     }
 
     /// The whole point: cost must not scale with the file any more.
@@ -1610,7 +1613,6 @@ mod binary_read_tests {
         assert_eq!(v["bytes"], 8 * 1024 * 1024_u64);
         assert!(v.get("content").is_none());
         assert!(took < std::time::Duration::from_millis(200), "took {took:?}");
-        let _ = fs::remove_dir_all(&dir);
     }
 }
 
@@ -1621,10 +1623,8 @@ mod explorer_byte_read_tests {
     use super::*;
     use std::fs;
 
-    fn ws(tag: &str) -> PathBuf {
-        let d = std::env::temp_dir().join(format!("lu-fsbytes-{}-{}", tag, std::process::id()));
-        let _ = fs::remove_dir_all(&d);
-        fs::create_dir_all(&d).unwrap();
+    fn ws(tag: &str) -> crate::os_paths::TestDir {
+        let d = crate::os_paths::test_dir(&format!("fsbytes-{tag}"));
         allow_root_for_test(&d); // stands in for the user picking this folder
         d
     }
@@ -1649,7 +1649,6 @@ mod explorer_byte_read_tests {
             .decode(v["base64"].as_str().unwrap())
             .unwrap();
         assert_eq!(decoded, raw);
-        let _ = fs::remove_dir_all(&dir);
     }
 
     /// The jail, from both directions: a `..` climb and an absolute path that
@@ -1657,7 +1656,9 @@ mod explorer_byte_read_tests {
     #[test]
     fn bytes_outside_the_workspace_are_refused() {
         let dir = ws("outside");
-        let secret = dir.parent().unwrap().join("lu-fsbytes-secret.txt");
+        // Ausserhalb der Wurzel (die ist `dir/repo`), aber INNERHALB des
+        // Testverzeichnisses — sonst raeumt der Drop-Aufraeumer es nicht mit ab.
+        let secret = dir.join("lu-fsbytes-secret.txt");
         fs::write(&secret, b"private").unwrap();
         let root = dir.join("repo");
         fs::create_dir_all(&root).unwrap();
@@ -1677,9 +1678,6 @@ mod explorer_byte_read_tests {
             None,
         );
         assert!(absolute.is_err(), "an outside absolute path must not read bytes");
-
-        let _ = fs::remove_file(&secret);
-        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -1705,7 +1703,6 @@ mod explorer_byte_read_tests {
         )
         .expect("under the built-in cap");
         assert_eq!(v["bytes"], 4096);
-        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -1719,6 +1716,5 @@ mod explorer_byte_read_tests {
         )
         .expect_err("missing");
         assert!(err.contains("File not found"), "got: {err}");
-        let _ = fs::remove_dir_all(&dir);
     }
 }
