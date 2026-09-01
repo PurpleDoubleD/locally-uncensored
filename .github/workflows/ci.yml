@@ -173,18 +173,23 @@ jobs:
         working-directory: src-tauri
         run: cargo test
 
-      # Non-gating for now, on purpose. Today's baseline (stable 1.95) is ~65
-      # warnings plus ONE deny-by-default error: `absurd_extreme_comparisons`
-      # at src/commands/secret.rs:108, where MAX_UNITS is usize::MAX on every
-      # non-Windows target, so `count() <= MAX_UNITS` is always true. That
-      # single line makes `cargo clippy` exit non-zero on the ubuntu lane even
-      # WITHOUT -D warnings, so gating it here would turn CI red on arrival for
-      # a debt this job did not create. Keep the list visible, pay it down, then
-      # drop continue-on-error and add `-- -D warnings`.
-      - name: Clippy (non-gating — pre-existing debt)
+      # Gating since 01.09.2026 — the debt this comment used to describe is paid.
+      # The deny-by-default error sat at src/commands/secret.rs:173, not :108 as
+      # the old note said: MAX_UNITS was a `usize` using `usize::MAX` to mean
+      # "no limit", which made `count() <= MAX_UNITS` always true. It is an
+      # `Option<usize>` now, so "no limit" is `None` and the comparison is gone.
+      # The 78 warning sites behind it are at 0. Eleven `allow`s remain, each on
+      # a single item with its reason written next to it; there is no
+      # crate-level `#![allow]`.
+      #
+      # NOTE for the ubuntu lane: that 0 was measured on macOS, and the
+      # dead-code half of the list is platform-conditional by nature. A Linux
+      # runner can surface items a macOS run cannot see. If this job goes red on
+      # arrival, that is the likely reason — and the fix is the same kind of
+      # single-item annotation with a reason, never a blanket allow.
+      - name: Clippy
         working-directory: src-tauri
-        run: cargo clippy --all-targets
-        continue-on-error: true
+        run: cargo clippy --all-targets -- -D warnings
 
   # ── Is the product still buildable at all? ───────────────────────────────
   #
