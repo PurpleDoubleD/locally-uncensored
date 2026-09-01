@@ -72,7 +72,17 @@ function quelldateien(dir: string, out: string[] = []): string[] {
   return out
 }
 
-const DATEIEN = quelldateien(SRC).map((f) => [f.slice(ROOT.length + 1), nurCode(readFileSync(f, 'utf-8'))] as const)
+// KF-10c. Der relative Pfad wird auf `/` normalisiert, bevor irgendjemand ihn
+// vergleicht. Unter Windows liefert der Wanderer `src\components\layout\brand.ts`,
+// und `rel !== 'src/components/layout/brand.ts'` weiter unten hielt brand.ts
+// dann fuer eine ZWEITE Kopie ihrer selbst — auf der echten Maschine gemessen,
+// zwei Zusicherungen rot, am selben Commit auf dem Mac gruen. Dieselbe Falle,
+// die KF-10 an fuenf hand-kopierten Wanderern schon einmal geschlossen hat;
+// dieser hier ist juenger als der geteilte in quelldateien.ts und hat sie
+// trotzdem wieder aufgemacht. Der eigene Wanderer bleibt vorerst — benannt.
+const DATEIEN = quelldateien(SRC).map(
+  (f) => [f.slice(ROOT.length + 1).split('\\').join('/'), nurCode(readFileSync(f, 'utf-8'))] as const,
+)
 const INDEX_HTML = readFileSync(resolve(ROOT, 'index.html'), 'utf-8')
 
 describe('das Hauszeichen ist nirgends mehr ein Rasterbild', () => {
