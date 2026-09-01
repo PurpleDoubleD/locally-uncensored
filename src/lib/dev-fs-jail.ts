@@ -86,10 +86,65 @@ function compareKey(normalized: string): string {
 }
 
 /**
+ * Filesystem-safe folder name for a chat id — the port of
+ * `agent::sanitize_chat_slug` (src-tauri/src/commands/agent.rs).
+ *
+ * SICHERHEIT (Audit IPC-1, kritisch) — DER PUNKT GEHÖRT HIER NICHT HINEIN.
+ * Diese Funktion stand bis zu diesem Commit als
+ * `id.slice(0, 64).replace(/[^A-Za-z0-9_.-]/g, '_')` da, mit `.` in der
+ * Zeichenklasse, und der Kommentar daneben behauptete „exactly like the Rust
+ * side". Das war es nicht: Rust erlaubt `[A-Za-z0-9_-]`, sonst nichts.
+ *
+ * Mit dem Punkt überlebte eine Chat-Id von `".."` die Sanitisierung wörtlich.
+ * `<workspace>/..` zeigt eine Ebene ÜBER das Workspace-Verzeichnis, und
+ * `lexicalNormalize` löst das `..` auf — die KÄFIGWURZEL SELBST fiel damit auf
+ * `$HOME` zusammen, und jede Containment-Prüfung danach war für das ganze
+ * Heimatverzeichnis erfüllt. Am laufenden Dev-Server nachgestellt:
+ * `POST /local-api/fs-write {"path":".lu-probe","chatId":".."}` antwortete mit
+ * `{"status":"saved","path":"/Users/<user>/.lu-probe"}`.
+ *
+ * Genau dieses Loch war auf der Rust-Seite Audit IPC-1 und ist dort seit
+ * langem zu; der Kommentar in agent.rs nennt `sanitize_chat_slug` deshalb
+ * „the ONLY sanitiser in the tree that drops `.`". Dieser Port hatte die
+ * Korrektur nie mitbekommen.
+ *
+ * WER HIER AUFRÄUMT UND DEN PUNKT WIEDER HINZUFÜGT, ÖFFNET IPC-1 ERNEUT. Er
+ * kostet nichts: keine echte Chat-Id enthält je einen Punkt — Desktop-Slugs
+ * sind `[a-z0-9-]` (`src/api/agent-context.ts::chatWorkspaceSlug`), mobile Ids
+ * sind `c-<millis>-<base36>`, Konversations-Ids sind UUIDs, und der
+ * Sonderschlüssel ist `__remote__`.
+ *
+ * ZWEI WEITERE FEINHEITEN, die derselben Sorte sind wie der Punkt:
+ *
+ *  - GEZÄHLT WIRD IN CODEPOINTS, nicht in UTF-16-Einheiten. Rust arbeitet auf
+ *    `.chars()`, JavaScript auf `.slice()`/`.replace()` in Einheiten: ein
+ *    Zeichen ausserhalb der BMP ist dort ZWEI Einheiten und wurde damit zu
+ *    ZWEI Unterstrichen statt zu einem, und die 64er-Kappung schnitt an einer
+ *    anderen Stelle. Ein Chat hätte im Dev-Server einen anderen Ordner
+ *    bekommen als in der App. `Array.from` iteriert über Codepoints und ist
+ *    deshalb das Gegenstück zu `.chars()`.
+ *  - DIE KAPPUNG STEHT VOR DEM ERSETZEN, wie `.take(64)` vor `.map(…)`.
+ *  - DER LEER-RÜCKFALL GILT NUR FÜR EIN LEERES ERGEBNIS. Ein Slug wie `"__"`
+ *    (aus `".."`) ist ein gültiger Ordnername und muss von `default`
+ *    VERSCHIEDEN bleiben, sonst teilen sich zwei verschiedene Chats ein
+ *    Verzeichnis.
+ *
+ * Die Zusicherung dazu liest die Rust-Quelle und leitet die Erwartung daraus
+ * ab: src/lib/__tests__/dev-fs-jail-slug.test.ts.
+ */
+export function devSanitizeChatSlug(id: string): string {
+  const safe = Array.from(id)
+    .slice(0, 64)
+    .map((c) => (/^[A-Za-z0-9_-]$/.test(c) ? c : '_'))
+    .join('')
+  return safe || 'default'
+}
+
+/**
  * The jail root for a dev file op — port of `workspace_root`. A non-empty
  * `workingDirectory` (the folder the user picked) wins; otherwise the per-chat
- * sandbox `<homeDir>/<AGENT_WORKSPACE_DIR>/<chatId>`, with the id sanitised to
- * `[A-Za-z0-9_.-]` and capped at 64 chars exactly like the Rust side.
+ * sandbox `<homeDir>/<AGENT_WORKSPACE_DIR>/<chatId>`, with the id put through
+ * `devSanitizeChatSlug` — the port of the sanitiser Rust uses at the same spot.
  */
 export function devWorkspaceRoot(
   homeDir: string,
@@ -98,11 +153,10 @@ export function devWorkspaceRoot(
 ): string {
   const wd = (workingDirectory ?? '').trim()
   if (wd) return lexicalNormalize(wd)
-  const id = chatId || 'default'
-  const safe = id
-    .slice(0, 64)
-    .replace(/[^A-Za-z0-9_.-]/g, '_')
-  return lexicalNormalize(`${homeDir}/${AGENT_WORKSPACE_DIR}/${safe || 'default'}`)
+  // `chatId || 'default'` ist `chat_id.unwrap_or("default")`; ein leerer String
+  // landet ohnehin über den Leer-Rückfall der Sanitisierung bei `default`.
+  const safe = devSanitizeChatSlug(chatId || 'default')
+  return lexicalNormalize(`${homeDir}/${AGENT_WORKSPACE_DIR}/${safe}`)
 }
 
 /** Thrown for any path that leaves the workspace root. */

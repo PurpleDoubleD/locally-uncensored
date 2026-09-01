@@ -45,8 +45,14 @@ describe('devWorkspaceRoot', () => {
   })
 
   it('sanitises the chat id the way the Rust side does', () => {
-    expect(devWorkspaceRoot(HOME, '../../etc', null)).toBe(`/Users/dev/${WS}/.._.._etc`)
+    // Der Punkt wird ERSETZT, nicht durchgelassen. Diese Zusicherung stand
+    // hier als `.._.._etc` und hat damit den IPC-1-Fehler festgeschrieben:
+    // ein `..`, das die Sanitisierung überlebt, kollabiert die Käfigwurzel in
+    // `lexicalNormalize` auf `$HOME`. Die vollständige Gegenüberstellung mit
+    // `agent::sanitize_chat_slug` steht in dev-fs-jail-slug.test.ts.
+    expect(devWorkspaceRoot(HOME, '../../etc', null)).toBe(`/Users/dev/${WS}/______etc`)
     expect(devWorkspaceRoot(HOME, 'a/b c', null)).toBe(`/Users/dev/${WS}/a_b_c`)
+    expect(devWorkspaceRoot(HOME, '..', null)).toBe(`/Users/dev/${WS}/__`)
   })
 
   it('caps the chat id at 64 chars', () => {
