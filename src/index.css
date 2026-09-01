@@ -82,17 +82,57 @@
    root (≈33% oversized vs Chat) and every `h-[var(--control-h-*)]` became an
    invalid/auto height — which is what oversized the Create tab relative to
    Chat and clipped the banner title / gallery / drop-zone. Chat is unaffected
-   because it sizes with rem-based `text-*` utilities. These values are rem-
-   based, so Create now scales off the same 18.4px root as Chat.
+   because it sizes with rem-based `text-*` utilities. Seit dem 16px-Wurzel-
+   maß stehen die Typo-Stufen in ganzen px statt in rem-Brüchen — bei
+   16px Wurzel bezeichnen beide dieselbe Länge, und die px-Schreibweise
+   macht das Raster prüfbar.
    ───────────────────────────────────────────────────────────────────── */
 :root {
-  /* Typography scale (rem-based → rides the 18.4px root exactly like Chat) */
-  --text-display: 1.25rem;   --text-display-lh: 1.2;   --text-display-fw: 600;
-  --text-title:   0.95rem;   --text-title-lh:   1.3;   --text-title-fw:   600;
-  --text-body:    0.8rem;    --text-body-lh:    1.5;   --text-body-fw:    400;
-  --text-control: 0.72rem;   --text-control-lh: 1;     --text-control-fw: 500;
-  --text-label:   0.62rem;   --text-label-lh:   1;     --text-label-fw:   600;
-  --text-mono:    0.7rem;
+  /* ── Der EINE Maßstab der App ────────────────────────────────────────
+     Bis 2.6.7 liefen vier Maßstäbe gleichzeitig: ein 18,4px-Wurzelmaß,
+     `zoom: 1.25` auf der Sidebar, `scale(0.763)` auf der IntentBar und
+     `scale(0.7)` auf der Composer-Reglerzeile. Jede Schicht war ein
+     Pflaster über eine Größe, die woanders falsch gesetzt war, und keine
+     zwei kompensierten sich sauber (0,763 ≈ 1/1,31, aber 1,25 ≠ 1,15).
+
+     Jetzt: Wurzel auf 16px, damit `rem` und `px` DASSELBE Raster meinen
+     (0.5rem = 8px = --radius-control, statt 9,2px ≠ 8px), und die +15 %
+     genau einmal als `zoom` auf der App-Wurzel. Warum `zoom` und nicht
+     `transform: scale()` oder `calc()` — gemessen in Chromium 149:
+
+       calc(16px * 1.15) auf `html`  →  ist wieder 18,4px. Behebt nichts:
+         rem-abgeleitete Werte bleiben krumm, px-Werte bleiben unskaliert.
+       transform: scale() auf #root  →  nimmt die Wurzel aus dem Layout-
+         fluss und macht sie zum umschließenden Block jedes
+         `position: fixed`-Kindes (gemessen: ein fixiertes Kind sprang um
+         die halbe Seitenhöhe). 15 Modale hängen daran.
+       zoom                          →  skaliert das Layout mit, lässt
+         `position: fixed; inset: 0` weiterhin exakt das Fenster
+         abdecken (gemessen 1440×900 bei --ui-scale 1.15) und hält
+         `getComputedStyle` auf dem UNskalierten Entwurfsraster, so dass
+         die Quelle in ganzen Pixeln lesbar bleibt.
+
+     Die eine Stelle, die `zoom` NICHT mitnimmt, sind Viewport-Einheiten:
+     `100vw` misst innerhalb des gezoomten Baums weiter das ungezoomte
+     Fenster und wird danach mitskaliert, überschießt also um genau
+     --ui-scale (gemessen: 1656px in einem 1440px-Fenster). Die drei
+     Vollbild-Wurzeln der App (AppShell, ViewSkeletons, Onboarding) sind
+     alle `h-screen w-screen`; die Regel `#root > *` unten bindet sie an
+     #root statt ans Fenster. Sauberer wäre `h-full w-full` in den drei
+     Komponenten — das liegt außerhalb dieser Änderung. */
+  --ui-scale: 1.15;
+
+  /* Typography scale — sechs Stufen, alle auf ganzen CSS-Pixeln des
+     16px-Rasters. Vorher rem-Brüche am 18,4px-Wurzelmaß, die auf 20 /
+     17,48 / 14,72 / 13,248 / 11,408 / 12,88px fielen; keine einzige davon
+     lag auf einem Pixel. Die Stufen selbst sind unverändert gemeint, nur
+     gerundet: 20 / 15 / 13 / 12 / 10 / 11px. */
+  --text-display: 20px;      --text-display-lh: 1.2;   --text-display-fw: 600;
+  --text-title:   15px;      --text-title-lh:   1.3;   --text-title-fw:   600;
+  --text-body:    13px;      --text-body-lh:    1.5;   --text-body-fw:    400;
+  --text-control: 12px;      --text-control-lh: 1;     --text-control-fw: 500;
+  --text-label:   10px;      --text-label-lh:   1;     --text-label-fw:   600;
+  --text-mono:    11px;
 
   /* Control heights + spacing rhythm */
   --space-unit: 4px;
@@ -103,8 +143,42 @@
   /* Chat measure — ONE column for transcript, composer and status anchor.
      They used to be two independent formulas (max-w-[70%] on the composer,
      no max-width at all on the message list), which put the answer text and
-     the input box 157px apart at 1600px and let a line run to ~130 chars. */
-  --lu-measure: 760px;
+     the input box 157px apart at 1600px and let a line run to ~130 chars.
+
+     ACHTUNG, 660 ist kein Tippfehler: dieser Token wird seit der
+     --ui-scale-Umstellung MITSKALIERT. Massgeblich ist die GERENDERTE
+     Spalte — 660 × 1.15 = 759px. Das ist genau die Breite, die die Spalte
+     vor der Umstellung hatte; 760 wuerde heute 874px ergeben.
+
+     Warum: solange die App auf einem 18,4px-Wurzelmass lief, trug dieser
+     px-Token die 15 % NICHT, der rem-basierte Fliesstext aber schon. Jetzt
+     tragen beide. Die Spalte war also als NEBENWIRKUNG um 15 % gewachsen,
+     nicht als Entscheidung — und die 660 stellen den vorherigen Zustand
+     wieder her. Wer sie „korrigiert", weil sie zu schmal aussieht, macht
+     die Spalte um 15 % breiter, nicht die Zahl richtig.
+
+     Zeichen pro Zeile, gemessen (Inter, 1600×1000, 759px Spalte) — die
+     MESSGRUNDLAGE entscheidet, deshalb steht sie dabei:
+
+       Kleinbuchstaben-Alphabet  9,85px/Zeichen  ->  77 Zeichen
+       englische Prosa           8,81px/Zeichen  ->  86 Zeichen
+       deutsche Prosa            8,63px/Zeichen  ->  88 Zeichen
+
+     Das Kleinbuchstaben-Alphabet ist die typografische Konvention fuer
+     „Alphabetlaenge", aber KEINE Aussage ueber Fliesstext: echte Prosa hat
+     Leerzeichen und schmale Buchstaben, also eine kleinere mittlere
+     Zeichenbreite und damit MEHR Zeichen pro Zeile. Der gueltige Wert fuer
+     diese Spalte ist deshalb ~86, nicht 77.
+
+     OFFEN (nicht in diesem Paket entschieden): 86 Zeichen liegen ueber dem
+     klassischen Band fuer gut lesbaren Fliesstext (45–75, aeusserstens 80).
+     Die 760 gerenderten px sind die Wahl aus Audit-Welle 1; ob sie zu breit
+     sind, ist eine eigene, vorbestehende Designfrage.
+
+     Der Test dazu prueft --lu-measure × --ui-scale gegen ~760px, nicht die
+     660 und NICHT eine Zeichenzahl:
+     src/components/__tests__/ein-massstab.test.ts */
+  --lu-measure: 660px;
 
   /* Radii */
   --radius-control: 8px;
@@ -113,11 +187,18 @@
 }
 
 html {
-  font-size: 18.4px; /* 16px * 1.15 = 15% larger UI */
+  /* 16px, nicht 18,4px: das Wurzelmaß ist das Raster, nicht der Regler.
+     Der Regler ist --ui-scale weiter unten. */
+  font-size: 16px;
 }
 
 * {
   box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
 }
 
 body {
@@ -127,9 +208,30 @@ body {
   overflow: hidden;
 }
 
+/* Die +15 % — genau einmal, auf der App-Wurzel.
+   Der zweite Selektor ist keine zweite Anwendung: Tooltip, Select und
+   MemoryDebugPanel portalieren mit `createPortal(…, document.body)` AUS
+   #root heraus, die App hat also mehr als eine Wurzelbox. Die Portale sind
+   Geschwister von #root, nie Kinder — kein Element bekommt den Faktor
+   zweimal. Ohne die zweite Zeile rendern Dropdowns und Tooltips 13 %
+   kleiner als alles andere, also genau der Fehler, den diese Änderung
+   beseitigt. */
+#root,
+body > :not(#root) {
+  zoom: var(--ui-scale);
+}
+
 #root {
   width: 100%;
-  height: 100vh;
+  height: 100%;
+}
+
+/* Siehe --ui-scale: `100vw`/`100vh` sind die einzigen Längen, die `zoom`
+   nicht mitnimmt. Die Vollbild-Wurzel der App (`h-screen w-screen`) füllt
+   deshalb #root statt des Fensters. */
+#root > * {
+  width: 100%;
+  height: 100%;
 }
 
 /* Glass card — aligned with the web companion: near-invisible (a single
@@ -870,7 +972,8 @@ input[type="range"]::-webkit-slider-thumb {
 
    Geometrie: 2px breit (Hairline), `1em` hoch — der Audit nennt 2x14px,
    und 1em IST 14,35px an der Stelle, an der der Balken steht
-   (`text-[0.78rem]` auf 18,4px Wurzel). In em statt in px, damit er der
+   (`text-[0.78rem]` auf 16px Wurzel × --ui-scale 1.15 = 14,35 gerenderte
+   px, wie vorher auf der 18,4px-Wurzel). In em statt in px, damit er der
    Schriftgroesse folgt und nicht bei der naechsten Skalenaenderung
    danebensteht.
 

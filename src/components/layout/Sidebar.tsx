@@ -316,28 +316,27 @@ export function Sidebar() {
     <AnimatePresence>
       {sidebarOpen && (
         <motion.aside
-          className="w-[200px] h-full rounded-xl bg-white dark:bg-[#1e1e1e] ring-1 ring-black/[0.04] dark:ring-white/[0.05] flex flex-col z-20 overflow-hidden"
-          style={{ zoom: 1.25 }}
+          className="w-[250px] h-full rounded-[10px] bg-white dark:bg-[#1e1e1e] ring-1 ring-black/[0.04] dark:ring-white/[0.05] flex flex-col z-20 overflow-hidden"
           initial={{ width: 0, opacity: 0 }}
-          animate={{ width: 200, opacity: 1 }}
+          animate={{ width: 250, opacity: 1 }}
           exit={{ width: 0, opacity: 0 }}
           transition={{ duration: 0.15 }}
         >
           {/* Mode Tabs (Chat | Code | Remote) — icon-only, like uselu.
               Labels live in title/aria-label for accessibility. */}
-          <div className="flex items-center gap-0.5 px-2 pt-2 pb-1">
+          <div className="flex items-center gap-[2.5px] px-2.5 pt-2.5 pb-1.25">
             {/* Chat tab */}
             <button
               onClick={() => { setChatMode('lu'); setActiveConversation(null); setView('chat'); setDispatchPicker(false) }}
               title="Chat"
               aria-label="Chat"
-              className={`flex items-center gap-1 justify-center px-2 py-1 rounded text-[0.6rem] font-medium transition-all flex-1 ${
+              className={`flex items-center gap-1.25 justify-center px-2.5 py-1.25 rounded-[5px] text-[12px] font-medium transition-all flex-1 ${
                 !isCodingMode && !isRemoteMode
                   ? 'bg-gray-200 dark:bg-white/10 text-gray-900 dark:text-white border border-gray-300 dark:border-white/15'
                   : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-white/5 border border-transparent'
               }`}
             >
-              <MessageSquare size={9} />
+              <MessageSquare size={11} />
               <span>Chat</span>
             </button>
 
@@ -347,13 +346,13 @@ export function Sidebar() {
               onClick={() => { setChatMode('codex'); setActiveConversation(null); setView('chat'); setDispatchPicker(false) }}
               title="Code"
               aria-label="Code"
-              className={`flex items-center gap-1 justify-center px-2 py-1 rounded text-[0.6rem] font-medium transition-all flex-1 ${
+              className={`flex items-center gap-1.25 justify-center px-2.5 py-1.25 rounded-[5px] text-[12px] font-medium transition-all flex-1 ${
                 isCodingMode
                   ? 'bg-gray-200 dark:bg-white/10 text-gray-900 dark:text-white border border-gray-300 dark:border-white/15'
                   : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-white/5 border border-transparent'
               }`}
             >
-              <Code size={9} />
+              <Code size={11} />
               <span>Code</span>
             </button>
 
@@ -362,13 +361,13 @@ export function Sidebar() {
               onClick={() => { setChatMode('remote'); setActiveConversation(dispatchedConversationId); setView('chat') }}
               title="Remote"
               aria-label="Remote"
-              className={`flex items-center justify-center px-2 py-1 rounded font-medium transition-all flex-1 ${
+              className={`flex items-center justify-center px-2.5 py-1.25 rounded-[5px] font-medium transition-all flex-1 ${
                 isRemoteMode
                   ? 'bg-gray-200 dark:bg-white/10 text-gray-900 dark:text-white border border-gray-300 dark:border-white/15'
                   : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-white/5 border border-transparent'
               }`}
             >
-              <Radio size={11} />
+              <Radio size={14} />
             </button>
           </div>
 
@@ -376,19 +375,19 @@ export function Sidebar() {
               Bug #16: collapse after first mobile message; reopen via the QR
               icon next to the dispatched chat row (see below). */}
           {isRemoteMode && remoteEnabled && dispatchedConversationId && qrVisible && (
-            <div className="mx-2 mb-1 px-2 py-2 rounded-md bg-green-500/[0.06] border border-green-500/20 space-y-1.5">
+            <div className="mx-2.5 mb-1.25 px-2.5 py-2.5 rounded-[8px] bg-green-500/[0.06] border border-green-500/20 space-y-[7.5px]">
               <div className="flex items-center justify-between">
-                <div className="flex items-center gap-1.5">
-                  <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
-                  <span className="text-[0.55rem] font-medium text-green-400">LIVE</span>
+                <div className="flex items-center gap-[7.5px]">
+                  <span className="w-[7.5px] h-[7.5px] rounded-full bg-green-400 animate-pulse" />
+                  <span className="text-[11px] font-medium text-green-400">LIVE</span>
                 </div>
-                <div className="flex items-center gap-1">
+                <div className="flex items-center gap-1.25">
                   <button
                     onClick={hideQr}
                     title="Hide QR panel (reopen via the QR icon on the chat row)"
-                    className="flex items-center justify-center w-5 h-5 rounded text-gray-400 hover:bg-white/10 transition-all"
+                    className="flex items-center justify-center w-6.25 h-6.25 rounded-[5px] text-gray-400 hover:bg-white/10 transition-all"
                   >
-                    <X size={8} />
+                    <X size={10} />
                   </button>
                   <button
                     onClick={() => {
@@ -400,16 +399,16 @@ export function Sidebar() {
                     }}
                     disabled={remoteLoading}
                     title="Restart server (keeps this chat, issues a new passcode)"
-                    className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[0.5rem] text-blue-400 hover:bg-blue-500/15 border border-blue-500/20 transition-all disabled:opacity-50"
+                    className="flex items-center gap-1.25 px-[7.5px] py-[2.5px] rounded-[5px] text-[10px] text-blue-400 hover:bg-blue-500/15 border border-blue-500/20 transition-all disabled:opacity-50"
                   >
-                    <RefreshCw size={7} className={remoteLoading ? 'animate-spin' : ''} />
+                    <RefreshCw size={9} className={remoteLoading ? 'animate-spin' : ''} />
                     Restart
                   </button>
                   <button
                     onClick={undispatch}
-                    className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[0.5rem] text-red-400 hover:bg-red-500/15 border border-red-500/20 transition-all"
+                    className="flex items-center gap-1.25 px-[7.5px] py-[2.5px] rounded-[5px] text-[10px] text-red-400 hover:bg-red-500/15 border border-red-500/20 transition-all"
                   >
-                    <Square size={7} />
+                    <Square size={9} />
                     Stop
                   </button>
                 </div>
@@ -420,10 +419,10 @@ export function Sidebar() {
                   flash a QR that points at the LAN IP while the tunnel is
                   still coming up. */}
               {awaitingTunnel ? (
-                <div className="w-full flex flex-col items-center justify-center gap-1 py-4 text-center">
-                  <RefreshCw size={16} className="animate-spin text-emerald-400/70" />
-                  <span className="text-[0.55rem] text-emerald-400/80">Connecting to Cloudflare…</span>
-                  <span className="text-[0.45rem] text-gray-500 leading-snug px-2">The QR appears once the tunnel is live</span>
+                <div className="w-full flex flex-col items-center justify-center gap-1.25 py-5 text-center">
+                  <RefreshCw size={20} className="animate-spin text-emerald-400/70" />
+                  <span className="text-[11px] text-emerald-400/80">Connecting to Cloudflare…</span>
+                  <span className="text-[9px] text-gray-500 leading-snug px-2.5">The QR appears once the tunnel is live</span>
                 </div>
               ) : qrPngBase64 ? (
                 <button
@@ -431,31 +430,31 @@ export function Sidebar() {
                   title="Show large QR code"
                   className="w-full flex justify-center group"
                 >
-                  <div className="bg-white rounded p-1 transition-all group-hover:ring-2 group-hover:ring-green-400/50 group-hover:scale-[1.04]">
-                    <img src={`data:image/png;base64,${qrPngBase64}`} alt="QR" className="w-[72px] h-[72px]" />
+                  <div className="bg-white rounded-[5px] p-1.25 transition-all group-hover:ring-2 group-hover:ring-green-400/50 group-hover:scale-[1.04]">
+                    <img src={`data:image/png;base64,${qrPngBase64}`} alt="QR" className="w-[90px] h-[90px]" />
                   </div>
                 </button>
               ) : null}
 
               {/* Passcode */}
               <div className="flex items-center justify-between">
-                <code className="text-[0.7rem] text-amber-400 font-mono tracking-[3px] font-bold">{passcode}</code>
-                <div className="flex items-center gap-1">
+                <code className="text-[14px] text-amber-400 font-mono tracking-[3.75px] font-bold">{passcode}</code>
+                <div className="flex items-center gap-1.25">
                   <button
                     onClick={() => copyToClipboard(passcode, 'panel-passcode')}
-                    className="p-0.5 hover:bg-white/10 rounded"
+                    className="p-[2.5px] hover:bg-white/10 rounded-[5px]"
                     aria-label={copied === 'panel-passcode' ? 'Passcode copied' : 'Copy passcode'}
                     title={copied === 'panel-passcode' ? 'Copied' : 'Copy passcode'}
                   >
                     {copied === 'panel-passcode'
-                      ? <Check size={9} className="text-gray-500" />
-                      : <Copy size={9} className="text-gray-500" />}
+                      ? <Check size={11} className="text-gray-500" />
+                      : <Copy size={11} className="text-gray-500" />}
                   </button>
-                  <button onClick={regenerateToken} className="p-0.5 hover:bg-white/10 rounded">
-                    <RefreshCw size={9} className="text-gray-500" />
+                  <button onClick={regenerateToken} className="p-[2.5px] hover:bg-white/10 rounded-[5px]">
+                    <RefreshCw size={11} className="text-gray-500" />
                   </button>
                   {countdown && (
-                    <span className={`text-[0.45rem] font-mono ${countdown === 'Expired' ? 'text-red-400' : 'text-gray-600'}`}>
+                    <span className={`text-[9px] font-mono ${countdown === 'Expired' ? 'text-red-400' : 'text-gray-600'}`}>
                       {countdown}
                     </span>
                   )}
@@ -463,23 +462,23 @@ export function Sidebar() {
               </div>
 
               {/* URL — prefer tunnel URL when tunnel is active */}
-              <div className="flex items-center gap-1">
+              <div className="flex items-center gap-1.25">
                 {tunnelLoading ? (
-                  <code className="text-[0.5rem] text-emerald-400/70 truncate flex-1 animate-pulse">Starting Cloudflare tunnel…</code>
+                  <code className="text-[10px] text-emerald-400/70 truncate flex-1 animate-pulse">Starting Cloudflare tunnel…</code>
                 ) : (
                   <>
-                    <code className={`text-[0.5rem] truncate flex-1 ${tunnelActive ? 'text-emerald-400' : 'text-blue-400'}`}>
+                    <code className={`text-[10px] truncate flex-1 ${tunnelActive ? 'text-emerald-400' : 'text-blue-400'}`}>
                       {tunnelActive && tunnelUrl ? `${tunnelUrl}/mobile` : (mobileUrl || lanUrl)}
                     </code>
                     <button
                       onClick={() => copyToClipboard(tunnelActive && tunnelUrl ? `${tunnelUrl}/mobile` : (mobileUrl || lanUrl), 'panel-url')}
-                      className="p-0.5 hover:bg-white/10 rounded shrink-0"
+                      className="p-[2.5px] hover:bg-white/10 rounded-[5px] shrink-0"
                       aria-label={copied === 'panel-url' ? 'Address copied' : 'Copy address'}
                       title={copied === 'panel-url' ? 'Copied' : 'Copy address'}
                     >
                       {copied === 'panel-url'
-                        ? <Check size={9} className="text-gray-500" />
-                        : <Copy size={9} className="text-gray-500" />}
+                        ? <Check size={11} className="text-gray-500" />
+                        : <Copy size={11} className="text-gray-500" />}
                     </button>
                   </>
                 )}
@@ -491,37 +490,37 @@ export function Sidebar() {
                   Restart. The note is small + auto-disappears once a
                   device authenticates (qrVisible flips false). */}
               {tunnelActive && tunnelUrl && (
-                <p className="text-[0.5rem] text-gray-500/70 leading-snug">
+                <p className="text-[10px] text-gray-500/70 leading-snug">
                   First connection may take 5 to 10 s while DNS propagates. If you see a DNS error, wait a moment and reload.
                 </p>
               )}
 
               {remoteError && (
-                <p className="text-[0.5rem] text-red-400 truncate">{remoteError}</p>
+                <p className="text-[10px] text-red-400 truncate">{remoteError}</p>
               )}
             </div>
           )}
 
           {/* Search */}
-          <div className="px-2 pb-1">
+          <div className="px-2.5 pb-1.25">
             <div className="relative">
-              <Search size={11} className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-600" />
+              <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-600" />
               <input
                 type="text"
                 placeholder="Search..."
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                className="w-full pl-6 pr-2 py-1 rounded-md bg-transparent border border-gray-200 dark:border-white/[0.04] text-[0.65rem] text-gray-700 dark:text-gray-300 placeholder-gray-400 dark:placeholder-gray-600 focus:outline-none focus:border-gray-400 dark:focus:border-white/10"
+                className="w-full pl-7.5 pr-2.5 py-1.25 rounded-[8px] bg-transparent border border-gray-200 dark:border-white/[0.04] text-[13px] text-gray-700 dark:text-gray-300 placeholder-gray-400 dark:placeholder-gray-600 focus:outline-none focus:border-gray-400 dark:focus:border-white/10"
               />
             </div>
           </div>
 
           {/* Conversations */}
-          <div className="flex-1 overflow-y-auto px-1.5 pt-1 space-y-px scrollbar-thin">
+          <div className="flex-1 overflow-y-auto px-[7.5px] pt-1.25 space-y-px scrollbar-thin">
             {filtered.map((conv) => (
               <div
                 key={conv.id}
-                className={`group flex items-center gap-1.5 px-2 py-1 rounded-md cursor-pointer transition-all ${
+                className={`group flex items-center gap-[7.5px] px-2.5 py-1.25 rounded-[8px] cursor-pointer transition-all ${
                   conv.id === activeConversationId
                     ? 'bg-gray-200 dark:bg-white/[0.06] text-gray-900 dark:text-white'
                     : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-white/[0.03] hover:text-gray-800 dark:hover:text-gray-200'
@@ -537,31 +536,31 @@ export function Sidebar() {
               >
                 <div className="flex-1 min-w-0">
                   {editingId === conv.id ? (
-                    <div className="flex items-center gap-1">
+                    <div className="flex items-center gap-1.25">
                       <input
                         value={editTitle}
                         onChange={(e) => setEditTitle(e.target.value)}
                         onKeyDown={(e) => e.key === 'Enter' && handleRename(conv.id)}
-                        className="w-full bg-white/5 rounded px-1 py-0.5 text-[0.65rem] text-white focus:outline-none"
+                        className="w-full bg-white/5 rounded-[5px] px-1.25 py-[2.5px] text-[13px] text-white focus:outline-none"
                         autoFocus
                         onClick={(e) => e.stopPropagation()}
                       />
-                      <button onClick={(e) => { e.stopPropagation(); handleRename(conv.id) }} className="text-green-400"><Check size={11} /></button>
-                      <button onClick={(e) => { e.stopPropagation(); setEditingId(null) }} className="text-gray-500"><X size={11} /></button>
+                      <button onClick={(e) => { e.stopPropagation(); handleRename(conv.id) }} className="text-green-400"><Check size={14} /></button>
+                      <button onClick={(e) => { e.stopPropagation(); setEditingId(null) }} className="text-gray-500"><X size={14} /></button>
                     </div>
                   ) : (
-                    <div className="flex items-center gap-1.5 min-w-0">
+                    <div className="flex items-center gap-[7.5px] min-w-0">
                       {isRemoteMode && conv.id === dispatchedConversationId && remoteEnabled && (
-                        <span className="w-1.5 h-1.5 rounded-full bg-green-400 shrink-0" />
+                        <span className="w-[7.5px] h-[7.5px] rounded-full bg-green-400 shrink-0" />
                       )}
-                      <p className="text-[0.66rem] truncate flex-1 min-w-0">{truncate(conv.title, 30)}</p>
+                      <p className="text-[13px] truncate flex-1 min-w-0">{truncate(conv.title, 30)}</p>
                       {/* Already formatted in the projection — see SidebarRow. */}
-                      <span className="text-[0.5rem] text-gray-600 shrink-0">{conv.date}</span>
+                      <span className="text-[10px] text-gray-600 shrink-0">{conv.date}</span>
                     </div>
                   )}
                 </div>
                 {editingId !== conv.id && (
-                  <div className="flex items-center gap-0.5 shrink-0">
+                  <div className="flex items-center gap-[2.5px] shrink-0">
                     {/* Bug #16: QR icon on the dispatched Remote chat row.
                         Always visible (not hover-gated) and opens the LARGE
                         QR-modal directly — the row icon itself is just a
@@ -570,27 +569,27 @@ export function Sidebar() {
                       <button
                         onClick={(e) => { e.stopPropagation(); setQrModalOpen(true) }}
                         title="Show QR & passcode"
-                        className="p-1 rounded hover:bg-green-500/15 text-green-400 transition-colors"
+                        className="p-1.25 rounded-[5px] hover:bg-green-500/15 text-green-400 transition-colors"
                       >
-                        <QrCode size={13} />
+                        <QrCode size={16} />
                       </button>
                     )}
-                    <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+                    <div className="flex items-center gap-[2.5px] opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
                       <button
                         onClick={(e) => { e.stopPropagation(); setEditingId(conv.id); setEditTitle(conv.title) }}
                         title="Rename chat"
                         aria-label="Rename chat"
-                        className="p-1 rounded hover:bg-white/10 text-gray-500 hover:text-gray-300"
+                        className="p-1.25 rounded-[5px] hover:bg-white/10 text-gray-500 hover:text-gray-300"
                       >
-                        <Edit3 size={13} />
+                        <Edit3 size={16} />
                       </button>
                       <button
                         onClick={(e) => { e.stopPropagation(); deleteConversation(conv.id) }}
                         title="Delete chat"
                         aria-label="Delete chat"
-                        className="p-1 rounded hover:bg-red-500/20 text-gray-500 hover:text-red-400"
+                        className="p-1.25 rounded-[5px] hover:bg-red-500/20 text-gray-500 hover:text-red-400"
                       >
-                        <Trash2 size={13} />
+                        <Trash2 size={16} />
                       </button>
                     </div>
                   </div>
@@ -599,14 +598,14 @@ export function Sidebar() {
             ))}
 
             {filtered.length === 0 && (
-              <p className="text-center text-gray-600 text-[0.6rem] py-6">
+              <p className="text-center text-gray-600 text-[12px] py-7.5">
                 {search ? 'No results' : isRemoteMode ? 'No dispatched chats' : 'No conversations'}
               </p>
             )}
           </div>
 
           {/* Bottom Action */}
-          <div className="px-2 pb-2 pt-1 border-t border-gray-200 dark:border-white/[0.04]">
+          <div className="px-2.5 pb-2.5 pt-1.25 border-t border-gray-200 dark:border-white/[0.04]">
             {/* #29: dispatch failure used to be invisible — the orphan
                 conv was deleted in handleDispatch's catch block and the
                 user was left looking at the Dispatch button as if nothing
@@ -615,14 +614,14 @@ export function Sidebar() {
                 etc.). Only renders when no chat is dispatched, otherwise
                 ChatView's "Server stopped" banner owns this. */}
             {isRemoteMode && remoteError && !dispatchedConversationId && (
-              <div className="mb-1.5 px-2 py-1 rounded border border-red-500/30 bg-red-500/5 text-[0.55rem] text-red-300/90 flex items-start gap-1.5">
+              <div className="mb-[7.5px] px-2.5 py-1.25 rounded-[5px] border border-red-500/30 bg-red-500/5 text-[11px] text-red-300/90 flex items-start gap-[7.5px]">
                 <span className="break-words flex-1 leading-snug">{remoteError}</span>
                 <button
                   onClick={() => useRemoteStore.getState().clearError()}
                   title="Dismiss"
-                  className="shrink-0 p-0.5 rounded text-red-400/70 hover:text-red-300 hover:bg-red-500/15 transition-all"
+                  className="shrink-0 p-[2.5px] rounded-[5px] text-red-400/70 hover:text-red-300 hover:bg-red-500/15 transition-all"
                 >
-                  <X size={9} />
+                  <X size={11} />
                 </button>
               </div>
             )}
@@ -637,9 +636,9 @@ export function Sidebar() {
                     transition={{ duration: 0.1 }}
                     onClick={() => setDispatchPicker(true)}
                     disabled={remoteLoading || !activeModel}
-                    className="w-full flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded-md text-[0.65rem] text-gray-500 hover:text-white hover:bg-white/[0.04] border border-zinc-300/40 dark:border-zinc-500/40 hover:border-zinc-300/60 dark:hover:border-zinc-400/60 transition-all disabled:opacity-40"
+                    className="w-full flex items-center justify-center gap-[7.5px] px-[12.5px] py-[7.5px] rounded-[8px] text-[13px] text-gray-500 hover:text-white hover:bg-white/[0.04] border border-zinc-300/40 dark:border-zinc-500/40 hover:border-zinc-300/60 dark:hover:border-zinc-400/60 transition-all disabled:opacity-40"
                   >
-                    <Radio size={12} />
+                    <Radio size={15} />
                     <span>{remoteLoading ? '...' : 'Dispatch'}</span>
                   </motion.button>
                 ) : (
@@ -651,20 +650,20 @@ export function Sidebar() {
                       animate={{ opacity: 1 }}
                       exit={{ opacity: 0 }}
                       transition={{ duration: 0.1 }}
-                      className="relative z-50 w-full flex items-center gap-0.5"
+                      className="relative z-50 w-full flex items-center gap-[2.5px]"
                     >
                       <button
                         onClick={() => handleDispatch('lan')}
-                        className="flex-1 flex items-center justify-center gap-1 py-1.5 rounded-md text-[0.55rem] font-medium text-gray-400 border border-zinc-300/40 dark:border-zinc-500/40 hover:bg-white/[0.05] hover:text-zinc-100 hover:border-zinc-300/60 dark:hover:border-zinc-400/60 transition-all cursor-pointer"
+                        className="flex-1 flex items-center justify-center gap-1.25 py-[7.5px] rounded-[8px] text-[11px] font-medium text-gray-400 border border-zinc-300/40 dark:border-zinc-500/40 hover:bg-white/[0.05] hover:text-zinc-100 hover:border-zinc-300/60 dark:hover:border-zinc-400/60 transition-all cursor-pointer"
                       >
-                        <Wifi size={10} className="text-zinc-400" />
+                        <Wifi size={12} className="text-zinc-400" />
                         LAN
                       </button>
                       <button
                         onClick={() => handleDispatch('internet')}
-                        className="flex-1 flex items-center justify-center gap-1 py-1.5 rounded-md text-[0.55rem] font-medium text-gray-400 border border-zinc-300/40 dark:border-zinc-500/40 hover:bg-white/[0.05] hover:text-zinc-100 hover:border-zinc-300/60 dark:hover:border-zinc-400/60 transition-all cursor-pointer"
+                        className="flex-1 flex items-center justify-center gap-1.25 py-[7.5px] rounded-[8px] text-[11px] font-medium text-gray-400 border border-zinc-300/40 dark:border-zinc-500/40 hover:bg-white/[0.05] hover:text-zinc-100 hover:border-zinc-300/60 dark:hover:border-zinc-400/60 transition-all cursor-pointer"
                       >
-                        <Globe size={10} className="text-zinc-400" />
+                        <Globe size={12} className="text-zinc-400" />
                         Internet
                       </button>
                     </motion.div>
@@ -675,9 +674,9 @@ export function Sidebar() {
               <button
                 onClick={handleNewChat}
                 title={activeModel ? 'Start a new chat' : 'Pick or install a model first'}
-                className="w-full flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded-md text-[0.65rem] font-medium bg-gray-50 dark:bg-white/[0.03] hover:bg-gray-100 dark:hover:bg-white/[0.05] text-gray-800 dark:text-gray-200 border border-gray-200 dark:border-white/[0.06] hover:border-gray-300 dark:hover:border-white/[0.1] transition-all"
+                className="w-full flex items-center justify-center gap-[7.5px] px-[12.5px] py-[7.5px] rounded-[8px] text-[13px] font-medium bg-gray-50 dark:bg-white/[0.03] hover:bg-gray-100 dark:hover:bg-white/[0.05] text-gray-800 dark:text-gray-200 border border-gray-200 dark:border-white/[0.06] hover:border-gray-300 dark:hover:border-white/[0.1] transition-all"
               >
-                <Plus size={12} />
+                <Plus size={15} />
                 <span>New Chat</span>
               </button>
             )}
@@ -697,7 +696,7 @@ export function Sidebar() {
           <div
             role="menu"
             aria-label="Chat actions"
-            className="absolute min-w-[9rem] py-1 rounded-md bg-white dark:bg-[#141414] border border-gray-200 dark:border-white/10 shadow-lg text-[0.7rem]"
+            className="absolute min-w-[180px] py-1.25 rounded-[8px] bg-white dark:bg-[#141414] border border-gray-200 dark:border-white/10 shadow-lg text-[14px]"
             style={{ left: Math.min(rowMenu.x, window.innerWidth - 160), top: Math.min(rowMenu.y, window.innerHeight - 80) }}
             onClick={(e) => e.stopPropagation()}
           >
@@ -709,17 +708,17 @@ export function Sidebar() {
                 setEditTitle(conv?.title ?? '')
                 setRowMenu(null)
               }}
-              className="w-full flex items-center gap-2 px-3 py-1.5 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-white/[0.06]"
+              className="w-full flex items-center gap-2.5 px-3.75 py-[7.5px] text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-white/[0.06]"
             >
-              <Edit3 size={12} />
+              <Edit3 size={15} />
               <span>Rename</span>
             </button>
             <button
               role="menuitem"
               onClick={() => { deleteConversation(rowMenu.id); setRowMenu(null) }}
-              className="w-full flex items-center gap-2 px-3 py-1.5 text-red-500 hover:bg-red-500/10"
+              className="w-full flex items-center gap-2.5 px-3.75 py-[7.5px] text-red-500 hover:bg-red-500/10"
             >
-              <Trash2 size={12} />
+              <Trash2 size={15} />
               <span>Delete chat</span>
             </button>
           </div>
@@ -734,7 +733,7 @@ export function Sidebar() {
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           transition={{ duration: 0.12 }}
-          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 backdrop-blur-sm p-6"
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 backdrop-blur-sm p-7.5"
           onClick={() => setQrModalOpen(false)}
         >
           <motion.div
@@ -753,72 +752,76 @@ export function Sidebar() {
                Der Passcode (amber-400, 1,92:1 auf Weiss) traegt jetzt
                amber-700 mit 5,02:1. Die QR-Kachel ist selbst weiss und
                verschwaende sonst im weissen Dialog — daher die Kante. */
-            className="bg-white dark:bg-lu-base border border-gray-200 dark:border-white/10 rounded-xl p-5 max-w-[360px] w-full flex flex-col items-center gap-3 shadow-2xl"
+            className="bg-white dark:bg-lu-base border border-gray-200 dark:border-white/10 rounded-[10px] p-6.25 max-w-[450px] w-full flex flex-col items-center gap-3.75 shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between w-full">
-              <div className="flex items-center gap-1.5 text-green-700 dark:text-green-400">
-                <span className="w-1.5 h-1.5 rounded-full bg-green-600 dark:bg-green-400 animate-pulse" />
-                <span className="text-[0.7rem] font-medium tracking-wide">LIVE</span>
+              <div className="flex items-center gap-[7.5px] text-green-700 dark:text-green-400">
+                <span className="w-[7.5px] h-[7.5px] rounded-full bg-green-600 dark:bg-green-400 animate-pulse" />
+                <span className="text-[14px] font-medium tracking-wide">LIVE</span>
               </div>
               <button
                 onClick={() => setQrModalOpen(false)}
-                className="p-1.5 rounded hover:bg-white/10 text-gray-400 hover:text-white transition-colors"
+                className="p-[7.5px] rounded-[5px] hover:bg-white/10 text-gray-400 hover:text-white transition-colors"
                 aria-label="Close"
               >
-                <X size={14} />
+                <X size={18} />
               </button>
             </div>
 
             {awaitingTunnel ? (
-              <div className="flex flex-col items-center justify-center gap-2 py-10 text-center">
-                <RefreshCw size={28} className="animate-spin text-emerald-700 dark:text-emerald-400/70" />
-                <span className="text-[0.8rem] text-emerald-700 dark:text-emerald-400/90">Connecting to Cloudflare…</span>
-                <span className="text-[0.6rem] text-gray-500">The QR appears once the tunnel is live</span>
+              <div className="flex flex-col items-center justify-center gap-2.5 py-12.5 text-center">
+                {/* 28 × 1,25 = 35; genommen ist 36, weil das die Zahl ist, die
+                    die App an dieser Groesse schon fuehrt (icon-leiter.test.ts
+                    zaehlt die verschiedenen Iconmasse). +2,9 % gegen den
+                    exakten Wert. */}
+                <RefreshCw size={36} className="animate-spin text-emerald-700 dark:text-emerald-400/70" />
+                <span className="text-[16px] text-emerald-700 dark:text-emerald-400/90">Connecting to Cloudflare…</span>
+                <span className="text-[12px] text-gray-500">The QR appears once the tunnel is live</span>
               </div>
             ) : qrPngBase64 ? (
-              <div className="bg-white rounded-lg p-3 ring-1 ring-gray-200 dark:ring-0">
+              <div className="bg-white rounded-[10px] p-3.75 ring-1 ring-gray-200 dark:ring-0">
                 <img
                   src={`data:image/png;base64,${qrPngBase64}`}
                   alt="QR code"
-                  className="w-[280px] h-[280px] block"
+                  className="w-[350px] h-[350px] block"
                   style={{ imageRendering: 'pixelated' }}
                 />
               </div>
             ) : null}
 
-            <div className="flex items-center justify-center gap-3 w-full">
-              <code className="text-2xl font-mono font-bold text-amber-700 dark:text-amber-400 tracking-[8px]">{passcode}</code>
+            <div className="flex items-center justify-center gap-3.75 w-full">
+              <code className="text-[30px] font-mono font-bold text-amber-700 dark:text-amber-400 tracking-[10px]">{passcode}</code>
               <button
                 onClick={() => copyToClipboard(passcode, 'modal-passcode')}
-                className="p-1.5 rounded hover:bg-white/10 text-gray-400 hover:text-white transition-colors"
+                className="p-[7.5px] rounded-[5px] hover:bg-white/10 text-gray-400 hover:text-white transition-colors"
                 aria-label={copied === 'modal-passcode' ? 'Passcode copied' : 'Copy passcode'}
                 title={copied === 'modal-passcode' ? 'Copied' : 'Copy passcode'}
               >
-                {copied === 'modal-passcode' ? <Check size={14} /> : <Copy size={14} />}
+                {copied === 'modal-passcode' ? <Check size={18} /> : <Copy size={18} />}
               </button>
             </div>
             {countdown && (
-              <div className={`text-[0.65rem] font-mono ${countdown === 'Expired' ? 'text-red-700 dark:text-red-400' : 'text-gray-500'}`}>
+              <div className={`text-[13px] font-mono ${countdown === 'Expired' ? 'text-red-700 dark:text-red-400' : 'text-gray-500'}`}>
                 {countdown === 'Expired' ? 'Expired, regenerating…' : `Expires in ${countdown}`}
               </div>
             )}
 
-            <div className="w-full flex items-center gap-2 px-3 py-2 rounded bg-white/[0.04] border border-white/5">
-              <code className={`text-[0.65rem] truncate flex-1 ${tunnelActive ? 'text-emerald-700 dark:text-emerald-400' : 'text-blue-700 dark:text-blue-400'}`}>
+            <div className="w-full flex items-center gap-2.5 px-3.75 py-2.5 rounded-[5px] bg-white/[0.04] border border-white/5">
+              <code className={`text-[13px] truncate flex-1 ${tunnelActive ? 'text-emerald-700 dark:text-emerald-400' : 'text-blue-700 dark:text-blue-400'}`}>
                 {tunnelActive && tunnelUrl ? `${tunnelUrl}/mobile` : (mobileUrl || lanUrl)}
               </code>
               <button
                 onClick={() => copyToClipboard(tunnelActive && tunnelUrl ? `${tunnelUrl}/mobile` : (mobileUrl || lanUrl), 'modal-url')}
-                className="p-1 rounded hover:bg-white/10 text-gray-400 hover:text-white transition-colors shrink-0"
+                className="p-1.25 rounded-[5px] hover:bg-white/10 text-gray-400 hover:text-white transition-colors shrink-0"
                 aria-label={copied === 'modal-url' ? 'Address copied' : 'Copy address'}
                 title={copied === 'modal-url' ? 'Copied' : 'Copy address'}
               >
-                {copied === 'modal-url' ? <Check size={12} /> : <Copy size={12} />}
+                {copied === 'modal-url' ? <Check size={15} /> : <Copy size={15} />}
               </button>
             </div>
 
-            <p className="text-[0.6rem] text-gray-500 text-center">
+            <p className="text-[12px] text-gray-500 text-center">
               Scan the QR or enter the 6-digit code on your phone.
             </p>
           </motion.div>

@@ -175,7 +175,14 @@ export function Composer({ onOpenAdvanced, onOpenWorkflows }: Props) {
     // prompt) don't shrink it. That keeps the viewer + gallery row above it the
     // exact SAME height across all tabs, not just within one.
     <div className="shrink-0 px-4 pb-4 pt-2 min-h-[192px] flex flex-col justify-end">
-      <div className="mx-auto w-full max-w-[760px] space-y-2.5">
+      {/* 660, nicht 760: dieselbe Spalte wie im Chat, und dieselbe Rechnung.
+          Die 760 waren hier als KOPIE von --lu-measure eingetippt; seit die
+          App eine --ui-scale hat, wird die Zahl mitskaliert, 760 ergaebe also
+          874 gerenderte px. 660 × 1.15 = 759 — die Breite, die diese Spalte
+          vor der Umstellung hatte. Siehe --lu-measure in index.css; dass die
+          Zahl hier doppelt steht statt den Token zu lesen, ist ein eigener
+          Befund und hier nicht behoben. */}
+      <div className="mx-auto w-full max-w-[660px] space-y-2.5">
         {special && <SpecialControls intent={intent} />}
         {!isUtility && <LaneControls />}
 
@@ -334,7 +341,14 @@ function LaneControls() {
   if (kind === 'image') {
     return (
       <div className="flex items-center justify-center gap-3 flex-wrap">
-        <div className="flex items-center gap-2" style={{ transform: 'scale(0.7)', transformOrigin: 'center' }}>
+        {/* Bis 2.6.7 stand hier `transform: scale(0.7)` — die vierte
+            Skalierungsschicht der App. Sie schrumpfte nur das Bild: die Zeile
+            belegte weiter ihre volle Layoutbreite, und die 1px-Kanten der
+            Segmented-Pillen wurden auf 0,7px gemalt. Die 0,7 stehen jetzt in
+            den Tokens, die Segmented und LabeledControl ohnehin lesen — als
+            Zielgroessen, nicht als Faktor: 26px Control -> 18px, 12px
+            Controltext -> 8px, 10px Label -> 7px, 8px Radius -> 6px. */}
+        <div className="flex items-center gap-1.5 [--control-h-sm:18px] [--text-control:8px] [--text-label:7px] [--radius-control:6px]">
           <LabeledControl label="Quality">
             <Segmented
               size="sm"
@@ -440,7 +454,9 @@ function LaneControls() {
 
 function LabeledControl({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div className="flex items-center gap-1.5">
+    // gap-1 statt gap-1.5: 0,375rem × 0,7 ≈ 0,26rem, gerundet auf die
+    // 4px-Stufe des 16px-Rasters. Siehe die Reglerzeile oben.
+    <div className="flex items-center gap-1">
       <span className="t-label text-gray-600">{label}</span>
       {children}
     </div>

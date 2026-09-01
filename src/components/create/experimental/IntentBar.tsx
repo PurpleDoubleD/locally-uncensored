@@ -4,7 +4,7 @@ import { useUIStore, type CloudTeaserTarget } from '../../../stores/uiStore'
 import { isIntentLocked, visibleIntents } from './intents'
 import { isMlxImageHost } from '../../../api/mlx-image'
 import { cn } from '../ui/cn'
-import { ICON_MD } from '../../ui/icon-size'
+import { ICON_SM } from '../../ui/icon-size'
 
 // Pure-CSS expand: no Framer layout projection anywhere, so nothing can snap or
 // jitter on settle. The label opens via a `max-width` transition (collapses
@@ -37,10 +37,16 @@ export function IntentBar() {
     <div
       role="radiogroup"
       aria-label="Create mode"
-      className="flex items-center justify-center gap-1 px-4 py-0.5"
-      // Sized to sit just 9% larger than the LaneControls ratio bar below
-      // (which runs at scale 0.7): 0.7 × 1.09 ≈ 0.763.
-      style={{ transform: 'scale(0.763)', transformOrigin: 'center' }}
+      // Bis 2.6.7 stand hier `transform: scale(0.763)` — eine dritte
+      // Skalierungsschicht neben dem 18,4px-Wurzelmass und dem `zoom: 1.25`
+      // der Sidebar. `transform` skaliert nur das BILD: die Leiste belegte
+      // weiter ihre ungeschrumpfte Layoutbreite (gemessen 1084,7px fuer eine
+      // sichtbar 827px breite Zeile) und jede Haarlinie darin wurde auf
+      // 0,763px gemalt. Die 0,763 stehen jetzt in den Groessen selbst:
+      // jede rem-Laenge dieser Leiste ist ihr altes Mass mal 0,763, in
+      // ganzen Pixeln des 16px-Rasters (36px Pille -> 28px, 16px Icon ->
+      // 12px = ICON_SM, 12px Label -> 9px).
+      className="flex items-center justify-center gap-[3px] px-3 py-[1.5px] [--text-control:9px]"
     >
       {intents.map((meta) => {
         const locked = isIntentLocked(meta, backend, mlxHost)
@@ -59,7 +65,7 @@ export function IntentBar() {
                 : setIntent(meta.id)
             }
             className={cn(
-              'relative flex items-center h-9 rounded-full border transition-[background-color,border-color,box-shadow,color] duration-200',
+              'relative flex items-center h-7 rounded-full border transition-[background-color,border-color,box-shadow,color] duration-200',
               EASE,
               selected
                 ? 'bg-white/[0.11] border-white/20 shadow-sm text-white'
@@ -68,15 +74,15 @@ export function IntentBar() {
                   : 'border-transparent text-gray-500 hover:text-gray-200 hover:bg-white/[0.05]',
             )}
           >
-            <span className="grid place-items-center w-9 h-9 shrink-0">
-              <Icon size={ICON_MD} />
+            <span className="grid place-items-center w-7 h-7 shrink-0">
+              <Icon size={ICON_SM} />
             </span>
             {locked && (
               // Brighter, theme-aware cloud tag: violet-300/80 was near
               // invisible on light backgrounds and easy to miss on dark.
               <Cloud
-                size={11}
-                className="absolute top-0.5 right-0.5 text-violet-500 dark:text-violet-200"
+                size={8}
+                className="absolute top-[1.5px] right-[1.5px] text-violet-500 dark:text-violet-200"
                 aria-hidden
               />
             )}
@@ -84,7 +90,7 @@ export function IntentBar() {
               className={cn(
                 'overflow-hidden whitespace-nowrap min-w-0 t-control transition-[max-width,opacity,padding] duration-200',
                 EASE,
-                selected ? 'max-w-[150px] opacity-100 pl-1 pr-3.5' : 'max-w-0 opacity-0 px-0',
+                selected ? 'max-w-[114px] opacity-100 pl-[3px] pr-[10.5px]' : 'max-w-0 opacity-0 px-0',
               )}
             >
               {meta.label}
