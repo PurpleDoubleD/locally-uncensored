@@ -24,14 +24,42 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
 /**
- * `vite.config.ts` ohne reine Kommentarzeilen.
+ * Der Quelltext des ausgelieferten Dev-Servers, ohne reine Kommentarzeilen.
  *
- * Die Kommentare der Datei ZITIEREN die alten Fehlerformen, um zu erklären,
+ * Bis ZB-7 war das `vite.config.ts` allein — der Dev-Server WAR die
+ * Build-Konfiguration. Er liegt jetzt in `dev-server/`; die Zusicherungen
+ * unten sind unverändert, nur ihre Quelle ist es nicht mehr. `vite.config.ts`
+ * bleibt in der Liste, weil dieselben Fehlerformen auch dort nicht
+ * zurückkommen dürfen.
+ *
+ * Die REIHENFOLGE ist die Einhäng-Reihenfolge aus dev-server/index.ts, denn
+ * `ausschnitt` unten schneidet „bis zum nächsten Endpunkt".
+ *
+ * Die Kommentare der Dateien ZITIEREN die alten Fehlerformen, um zu erklären,
  * warum es die Module in `src/dev/` gibt — ein Grep über den Rohtext würde also
  * genau die Erklärung als Verstoss lesen. Nur ganze Kommentarzeilen fallen weg;
  * ein Verstoss im Code steht nie auf einer solchen Zeile.
  */
-const viteConfigRoh = readFileSync(resolve(process.cwd(), 'vite.config.ts'), 'utf8')
+const DEV_SERVER_QUELLEN = [
+  'dev-server/guard.ts',
+  'dev-server/ssrf.ts',
+  'dev-server/http.ts',
+  'dev-server/proxy-routes.ts',
+  'dev-server/remote-stubs.ts',
+  'dev-server/comfy.ts',
+  'dev-server/downloads.ts',
+  'dev-server/exec-routes.ts',
+  'dev-server/fs-routes.ts',
+  'dev-server/system-routes.ts',
+  'dev-server/web-search.ts',
+  'dev-server/whisper.ts',
+  'dev-server/index.ts',
+  'vite.config.ts',
+]
+
+const viteConfigRoh = DEV_SERVER_QUELLEN
+  .map((datei) => readFileSync(resolve(process.cwd(), datei), 'utf8'))
+  .join('\n')
 const viteConfig = viteConfigRoh
   .split('\n')
   .filter((line) => {
@@ -51,7 +79,7 @@ function ausschnitt(von: string, bis?: string | null): string {
   const start = viteConfig.indexOf(von)
   expect(start, `nicht gefunden: ${von}`).toBeGreaterThanOrEqual(0)
   const rest = viteConfig.slice(start + von.length)
-  const marke = bis ?? "server.middlewares.use('/local-api/"
+  const marke = bis ?? "routes.use('/local-api/"
   const ende = rest.indexOf(marke)
   return ende < 0 ? rest : rest.slice(0, ende)
 }
@@ -130,7 +158,7 @@ describe('der SSRF-Wächter', () => {
     // `proxy-download`, die genau dagegen geschützt sind. Der gepackte Build
     // hat an derselben Stelle `proxy::validate_public_url(url)?`
     // (download.rs::download_with_progress).
-    const downloadFile = ausschnitt('function downloadFile(', 'server.middlewares.use(\'/local-api/download-model\'')
+    const downloadFile = ausschnitt('function downloadFile(', 'routes.use(\'/local-api/download-model\'')
     expect(downloadFile).toContain('await assertPublicUrl(requestUrl)')
   })
 
@@ -139,7 +167,7 @@ describe('der SSRF-Wächter', () => {
     // 169.254.169.254. Rust benutzt dafür `ssrf_safe_redirect_policy`; hier
     // muss die Weiterleitung zurück durch `doRequest` — und damit durch den
     // Wächter — statt an ihm vorbei.
-    const downloadFile = ausschnitt('function downloadFile(', 'server.middlewares.use(\'/local-api/download-model\'')
+    const downloadFile = ausschnitt('function downloadFile(', 'routes.use(\'/local-api/download-model\'')
     // Der Wächter steht VOR dem ersten `proto.get`, nicht dahinter.
     const wächter = downloadFile.indexOf('await assertPublicUrl(requestUrl)')
     expect(wächter).toBeGreaterThanOrEqual(0)
@@ -158,7 +186,7 @@ describe('der SSRF-Wächter', () => {
     // Das Verhalten steht in ssrf-fetch.test.ts; hier steht nur, dass die drei
     // Holstellen dieser Datei es auch benutzen.
     expect(viteConfig).toContain('checkPublicUrl(urlStr, ssrfDeps)')
-    const downloadFile = ausschnitt('function downloadFile(', "server.middlewares.use('/local-api/download-model'")
+    const downloadFile = ausschnitt('function downloadFile(', "routes.use('/local-api/download-model'")
     expect(downloadFile).toContain('createPinnedLookup(target.addresses, ssrfDeps.ipFamily)')
     expect(downloadFile).toContain('proto.get(requestUrl, { headers, lookup: pinned }')
   })
@@ -169,7 +197,7 @@ describe('der SSRF-Wächter', () => {
     // fünf — drei Kopien derselben Sicherheitslogik. Die geprüfte Schleife liegt
     // jetzt in src/dev/ssrf-fetch.ts, wo ein Test sie gegen echte Server fährt.
     for (const endpunkt of ['proxy-image', 'proxy-download']) {
-      const handler = ausschnitt(`server.middlewares.use('/local-api/${endpunkt}'`)
+      const handler = ausschnitt(`routes.use('/local-api/${endpunkt}'`)
       expect(handler, endpunkt).toContain('ssrfSafeGet(')
       // Kein von Hand ausgeschriebener Hop mehr in diesen beiden Handlern.
       expect(handler, endpunkt).not.toMatch(/statusCode >= 300/)
@@ -208,8 +236,8 @@ describe('die beiden alten file-Endpunkte', () => {
   // nächsten Aufräumen als „fehlt ja" wieder anlegt, wird hier rot.
 
   it('sind aus dem Dev-Server verschwunden', () => {
-    expect(viteConfig).not.toContain("server.middlewares.use('/local-api/file-read'")
-    expect(viteConfig).not.toContain("server.middlewares.use('/local-api/file-write'")
+    expect(viteConfig).not.toContain("routes.use('/local-api/file-read'")
+    expect(viteConfig).not.toContain("routes.use('/local-api/file-write'")
     expect(viteConfig).not.toContain("'/local-api/file-read'")
     expect(viteConfig).not.toContain("'/local-api/file-write'")
   })
@@ -238,8 +266,8 @@ describe('die beiden alten file-Endpunkte', () => {
     // Ersatzweg mitverschwunden wäre.
     expect(backendTs).toMatch(/\bfs_read:\s*\{/)
     expect(backendTs).toMatch(/\bfs_write:\s*\{/)
-    expect(viteConfig).toContain("server.middlewares.use('/local-api/fs-read'")
-    expect(viteConfig).toContain("server.middlewares.use('/local-api/fs-write'")
+    expect(viteConfig).toContain("routes.use('/local-api/fs-read'")
+    expect(viteConfig).toContain("routes.use('/local-api/fs-write'")
   })
 })
 
@@ -262,8 +290,8 @@ describe('die fünf fs-Endpunkte', () => {
     const stellen = viteConfig.match(/resolveFsRequestPath\(body, os\.homedir\(\), devJail\)/g) ?? []
     expect(stellen.length).toBe(5)
     for (const endpunkt of ['fs-read', 'fs-write', 'fs-list', 'fs-search', 'fs-info']) {
-      const bis = endpunkt === 'fs-info' ? "server.middlewares.use('/local-api/system-info'" : null
-      const handler = ausschnitt(`server.middlewares.use('/local-api/${endpunkt}'`, bis)
+      const bis = endpunkt === 'fs-info' ? "routes.use('/local-api/system-info'" : null
+      const handler = ausschnitt(`routes.use('/local-api/${endpunkt}'`, bis)
       expect(handler, endpunkt).toContain('resolveFsRequestPath(body, os.homedir(), devJail)')
     }
   })
@@ -278,9 +306,9 @@ describe('die fünf fs-Endpunkte', () => {
     expect(viteConfig).toMatch(/const devJail: DevJailOptions = \{/)
     expect(viteConfig).toContain('realPath: (p) => realpathSync(p)')
     expect(viteConfig).toContain('systemDrive: process.env.SystemDrive')
-    const bytes = ausschnitt("server.middlewares.use('/local-api/fs-write'", null)
+    const bytes = ausschnitt("routes.use('/local-api/fs-write'", null)
     expect(bytes).not.toContain('devResolveWithinJail')
-    const leser = ausschnitt("server.middlewares.use('/local-api/fs-read-bytes'", null)
+    const leser = ausschnitt("routes.use('/local-api/fs-read-bytes'", null)
     expect(leser).toContain('devResolveWithinJail({')
     expect(leser).toContain('...devJail,')
   })
@@ -290,8 +318,8 @@ describe('die fünf fs-Endpunkte', () => {
     // Liste; läge der Käfig darin, sähe ein Ausbruchsversuch aus wie ein
     // leeres Verzeichnis statt wie ein 403.
     for (const endpunkt of ['fs-read', 'fs-write', 'fs-list', 'fs-search', 'fs-info']) {
-      const bis = endpunkt === 'fs-info' ? "server.middlewares.use('/local-api/system-info'" : null
-      const handler = ausschnitt(`server.middlewares.use('/local-api/${endpunkt}'`, bis)
+      const bis = endpunkt === 'fs-info' ? "routes.use('/local-api/system-info'" : null
+      const handler = ausschnitt(`routes.use('/local-api/${endpunkt}'`, bis)
       expect(handler.indexOf('resolveFsRequestPath('), endpunkt).toBeLessThan(handler.indexOf('try {'))
     }
   })
