@@ -17,7 +17,7 @@ use crate::state::{AppState, DownloadProgress};
 /// Menu\\Programs\\Startup\\x.bat") can't escape the target directory and drop
 /// an autostart payload. Falls back to "download" if nothing usable remains.
 fn sanitize_filename(name: &str) -> String {
-    let base = name.rsplit(|c| c == '/' || c == '\\').next().unwrap_or("");
+    let base = name.rsplit(['/', '\\']).next().unwrap_or("");
     let cleaned: String = base.chars().filter(|c| !matches!(c, '/' | '\\' | ':' | '\0')).collect();
     let cleaned = cleaned.trim();
     if cleaned.is_empty() || cleaned == "." || cleaned == ".." {
@@ -300,7 +300,8 @@ pub async fn download_model(
     let filename_clone = filename.clone();
 
     tokio::spawn(async move {
-        match do_download(&url, &dest_file, &downloads_arc, &id_clone, token, resume_offset, expected_bytes, expected_sha256).await {
+        match do_download(&url, &dest_file, &downloads_arc, &id_clone, token, resume_offset,
+                        CatalogClaims { expected_bytes, expected_sha256 }).await {
             Ok(_) => {
                 if let Ok(mut dl) = downloads_arc.lock() {
                     if let Some(p) = dl.get_mut(&id_clone) {
@@ -646,6 +647,20 @@ async fn digest_of_prefix(path: &Path, len: u64) -> Result<Sha256, String> {
     Ok(hasher)
 }
 
+/// What the catalog entry claims about the file, as opposed to what the server
+/// says on the wire. The two travel together everywhere and are the only
+/// arguments `do_download` takes that are not about the transfer itself, so
+/// they ride as one — which also puts the argument count back under
+/// `clippy::too_many_arguments`'s threshold without an `allow`.
+struct CatalogClaims {
+    /// Catalog estimate. Plans the space guard when the server states no length;
+    /// never decides that a transfer is finished.
+    expected_bytes: Option<u64>,
+    /// Digest from the catalog entry, already normalised. `None` means the
+    /// content of this file cannot be verified at all.
+    expected_sha256: Option<String>,
+}
+
 async fn do_download(
     url: &str,
     dest: &PathBuf,
@@ -653,13 +668,9 @@ async fn do_download(
     id: &str,
     token: CancellationToken,
     resume_offset: u64,
-    // Catalog estimate. Plans the space guard when the server states no length;
-    // never decides that a transfer is finished.
-    expected_bytes: Option<u64>,
-    // Digest from the catalog entry, already normalised. `None` means the
-    // content of this file cannot be verified at all.
-    expected_sha256: Option<String>,
+    claims: CatalogClaims,
 ) -> Result<(), String> {
+    let CatalogClaims { expected_bytes, expected_sha256 } = claims;
     // SSRF guard: model downloads come from public catalogs (HuggingFace,
     // civitai, ollama). Block private/loopback/metadata hosts and re-validate
     // every redirect hop so a crafted catalog/model URL can't pull from an
@@ -1234,7 +1245,7 @@ fn scan_for_partials(roots: Vec<PathBuf>, live: Vec<String>) -> Vec<OrphanDownlo
         }
     }
     // Biggest first: that is the one whose loss would hurt most.
-    out.sort_by(|a, b| b.bytes.cmp(&a.bytes));
+    out.sort_by_key(|o| std::cmp::Reverse(o.bytes));
     out
 }
 
@@ -1324,7 +1335,8 @@ pub async fn resume_download(
     let id_clone = id.clone();
 
     tokio::spawn(async move {
-        match do_download(&url, &dest_file, &downloads_arc, &id_clone, token, resume_offset, expected_bytes, expected_sha256).await {
+        match do_download(&url, &dest_file, &downloads_arc, &id_clone, token, resume_offset,
+                        CatalogClaims { expected_bytes, expected_sha256 }).await {
             Ok(_) => {
                 if let Ok(mut dl) = downloads_arc.lock() {
                     if let Some(p) = dl.get_mut(&id_clone) {
@@ -1563,7 +1575,8 @@ pub async fn download_model_to_path(
     let filename_clone = filename.clone();
 
     tokio::spawn(async move {
-        match do_download(&url, &dest_file, &downloads_arc, &id_clone, token, resume_offset, expected_bytes, expected_sha256).await {
+        match do_download(&url, &dest_file, &downloads_arc, &id_clone, token, resume_offset,
+                        CatalogClaims { expected_bytes, expected_sha256 }).await {
             Ok(_) => {
                 if let Ok(mut dl) = downloads_arc.lock() {
                     if let Some(p) = dl.get_mut(&id_clone) {

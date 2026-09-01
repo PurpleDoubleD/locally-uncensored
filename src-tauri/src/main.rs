@@ -224,8 +224,14 @@ fn main() {
     // Windows investigation had to untangle by hand.
     crash_report::install_panic_hook();
 
-    #[cfg(target_os = "linux")]
-    apply_linux_webkit_workarounds();
+    // `if cfg!` and not `#[cfg]`: the function is module-level on purpose so the
+    // no-overwrite logic is unit-testable off Linux (see the note on it), and a
+    // `#[cfg]` here left it without a single caller in a macOS build — dead code
+    // by rustc's reckoning, for a function whose whole point is being reachable
+    // from the tests.
+    if cfg!(target_os = "linux") {
+        apply_linux_webkit_workarounds();
+    }
     // Before anything can spawn a child: an AppImage exports PYTHONHOME and
     // PYTHONPATH into its own mount, and every python3 we start inherits them
     // and dies on "No module named 'encodings'".

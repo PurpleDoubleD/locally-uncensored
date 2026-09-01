@@ -116,15 +116,13 @@ impl WhisperServer {
         let tx_clone = tx.clone();
         std::thread::spawn(move || {
             let reader = BufReader::new(stdout);
-            for line in reader.lines() {
-                if let Ok(line) = line {
-                    let trimmed = line.trim();
-                    if trimmed.is_empty() {
-                        continue;
-                    }
-                    if let Ok(json) = serde_json::from_str::<serde_json::Value>(trimmed) {
-                        let _ = tx_clone.send(json);
-                    }
+            for line in reader.lines().map_while(Result::ok) {
+                let trimmed = line.trim();
+                if trimmed.is_empty() {
+                    continue;
+                }
+                if let Ok(json) = serde_json::from_str::<serde_json::Value>(trimmed) {
+                    let _ = tx_clone.send(json);
                 }
             }
         });
@@ -132,11 +130,9 @@ impl WhisperServer {
         // Stderr reader thread — log Python output
         std::thread::spawn(move || {
             let reader = BufReader::new(stderr);
-            for line in reader.lines() {
-                if let Ok(line) = line {
-                    if !line.trim().is_empty() {
-                        println!("[Whisper] {}", line.trim());
-                    }
+            for line in reader.lines().map_while(Result::ok) {
+                if !line.trim().is_empty() {
+                    println!("[Whisper] {}", line.trim());
                 }
             }
         });

@@ -251,12 +251,9 @@ fn resolve_rust_use(prefix: &str, path: &str, from: &str, files: &HashSet<String
     } else {
         format!("{}/{}", base, path_segs.join("/"))
     };
-    for cand in [format!("{}.rs", joined), format!("{}/mod.rs", joined)] {
-        if files.contains(&cand) {
-            return Some(cand);
-        }
-    }
-    None
+    [format!("{}.rs", joined), format!("{}/mod.rs", joined)]
+        .into_iter()
+        .find(|cand| files.contains(cand))
 }
 
 /// Heuristic: the crate root for a Rust file is the closest ancestor that
@@ -297,16 +294,13 @@ fn resolve_python_import(
     } else {
         format!("{}/{}", base, module_path)
     };
-    for cand in [
+    [
         format!("{}.py", joined),
         format!("{}/__init__.py", joined),
         format!("src/{}.py", module_path),
-    ] {
-        if files.contains(&cand) {
-            return Some(cand);
-        }
-    }
-    None
+    ]
+    .into_iter()
+    .find(|cand| files.contains(cand))
 }
 
 /// Extracts all repo-internal imports a file declares. Pure on top of

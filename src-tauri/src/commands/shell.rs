@@ -236,8 +236,12 @@ pub(crate) fn default_shell(windows: bool) -> &'static str {
     }
 }
 
+/// The eight arguments are the IPC contract: `#[tauri::command]` derives the
+/// invoke payload from this signature, so folding them into a struct would
+/// change the JSON the frontend sends. `clippy::too_many_arguments` is allowed
+/// here for that reason and not as a matter of taste.
 #[tauri::command]
-#[allow(non_snake_case)]
+#[allow(non_snake_case, clippy::too_many_arguments)]
 pub async fn shell_execute(
     command: String,
     args: Option<Vec<String>>,
@@ -255,6 +259,10 @@ pub async fn shell_execute(
     .map_err(|e| format!("Task join error: {}", e))?
 }
 
+/// Mirrors `shell_execute`'s parameter list one-to-one on purpose — it is the
+/// blocking half of the same command, and a different shape here would be a
+/// second place to keep in step with the frontend contract.
+#[allow(clippy::too_many_arguments)]
 fn shell_execute_sync(
     command: String,
     args: Option<Vec<String>>,
@@ -285,7 +293,7 @@ fn shell_execute_sync(
     // back to the per-chat agent workspace (created if missing) so a relative
     // command never runs in the app's ambient cwd and scatters files into
     // ~/Documents (David 2026-06-04). Mirrors the file tools' path resolution.
-    let workdir: PathBuf = match cwd.as_ref().map(|d| Path::new(d)) {
+    let workdir: PathBuf = match cwd.as_ref().map(Path::new) {
         Some(p) if p.is_dir() => p.to_path_buf(),
         _ => match working_directory.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
             // Folder workspace (the user's repo, from chatCtx.workingDirectory)

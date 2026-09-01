@@ -304,6 +304,118 @@ pub(crate) fn worker_descendants_of(root: u32) -> Vec<u32> {
 
 // ── Tests for the helpers themselves ──────────────────────────────────────
 
+// ── Ports, stand-ins and the process table ────────────────────────────────
+//
+// Three things every test that scans the REAL process table needs, in one
+// place instead of once per module. `commands/remote.rs` grew them first, for
+// the cloudflared sweep; `commands/process.rs` needed the same three for the
+// ComfyUI adoption scan and copying them would have meant two versions of an
+// argument that took a day to get right.
+
+/// A port number the kernel will not hand to anybody else for as long as the
+/// returned listener is alive.
+///
+/// Tests that need a port NUMBER rather than a socket — because the thing under
+/// test matches on a command line, not on a connection — used to write a
+/// constant. A constant is shared by every concurrent copy of the same test
+/// binary, and that is not hypothetical: with a hard-coded 61888, a second
+/// suite running the ComfyUI adoption test at the same moment put a second
+/// stand-in with the identical argv into the table, and the scan returned
+/// whichever the iteration reached first. Measured over a 0/300/600/1000 ms
+/// delay series under three concurrent suites, every one of the nine failures
+/// was that: a found pid HIGHER than the test's own, i.e. a stranger's.
+///
+/// Binding `:0` and holding the socket removes the collision at the source: the
+/// kernel does not assign a bound port to a second `bind(0)`, so two concurrent
+/// copies of a test cannot draw the same number. Keep the listener in scope for
+/// as long as the number has to stay yours.
+pub(crate) fn reserved_port() -> (u16, std::net::TcpListener) {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0")
+        .expect("the loopback interface refused an ephemeral port");
+    let port = listener
+        .local_addr()
+        .expect("a bound listener has a local address")
+        .port();
+    (port, listener)
+}
+
+/// Path to `examples/park`, the compiled do-nothing stand-in.
+///
+/// Why a compiled binary and not a copy of `/bin/sh`: the full argument is in
+/// the header of `src-tauri/examples/park.rs`. The short version is that macOS
+/// SIGKILLs a copy of a SIP platform binary within a few hundred milliseconds,
+/// so a test built on one is racing the kernel; a binary this toolchain
+/// produced is ad-hoc signed and is left alone.
+///
+/// `cargo test` builds examples, so it is there whenever the tests are, and it
+/// lives next to the test binary: `target/<profile>/deps/<test binary>` →
+/// `target/<profile>/examples/park`.
+#[cfg(unix)]
+pub(crate) fn park_binary() -> PathBuf {
+    let exe = std::env::current_exe().expect("current_exe");
+    let park = exe
+        .parent()
+        .and_then(|deps| deps.parent())
+        .map(|profile| profile.join("examples").join("park"))
+        .expect("no target/<profile>/ above the test binary");
+    assert!(
+        park.is_file(),
+        "{} is missing. It is `src-tauri/examples/park.rs`, which `cargo test` builds \
+         alongside the tests; if it is gone, the tests that spawn it are not measuring \
+         anything.",
+        park.display(),
+    );
+    park
+}
+
+/// A process table that has PROVEN itself, or the reason it could not.
+///
+/// The check is an invariant that cannot be false when the enumeration worked:
+/// this very process is running, so a table without it was not read at all.
+/// That is not a theoretical concern — sysinfo-0.33.1's macOS
+/// `refresh_processes_specifics` takes its pids from `get_proc_list()`, and when
+/// that returns `None` (its second `proc_listallpids` filling the buffer the
+/// first one sized) the function returns 0 and leaves the list untouched, so a
+/// fresh `System` comes back EMPTY with no error anywhere.
+///
+/// Retrying is therefore not hope: every retry is gated on a check, and the
+/// caller only ever asserts on a snapshot that passed. Between the check and the
+/// assertion there is no clock, no syscall and no other thread — the assertions
+/// are a pure function of data already in hand.
+#[cfg(unix)]
+pub(crate) fn checked_table(pid: u32) -> Result<sysinfo::System, String> {
+    use std::time::{Duration, Instant};
+    let me = sysinfo::Pid::from_u32(std::process::id());
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let mut attempts = 0usize;
+    let mut blind = 0usize;
+    loop {
+        if Instant::now() >= deadline {
+            return Err(format!(
+                "no usable process table in 10s ({attempts} attempts, {blind} of them \
+                 without this test's own process in them). That is the TEST ENVIRONMENT, \
+                 not the code under test."
+            ));
+        }
+        if attempts > 0 {
+            // Paces retries so a pathological environment does not spin a core.
+            // It is not what makes the result correct — the checks below are.
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        attempts += 1;
+        let sys = crate::process_util::process_table_with_cmdlines();
+        if sys.process(me).is_none() {
+            blind += 1;
+            continue;
+        }
+        if sys.process(sysinfo::Pid::from_u32(pid)).is_none() {
+            blind += 1;
+            continue;
+        }
+        return Ok(sys);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

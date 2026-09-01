@@ -1665,7 +1665,7 @@ mod tests {
             .await;
             let client = proxy_client(Duration::from_secs(10), ProxyAllowList::default()).unwrap();
             let out = client.get(format!("http://127.0.0.1:{}/start", port)).send().await;
-            let err = out.err().expect("the metadata redirect must not be followed");
+            let err = out.expect_err("the metadata redirect must not be followed");
             assert!(err.is_redirect(), "refused for the wrong reason: {err}");
         });
     }

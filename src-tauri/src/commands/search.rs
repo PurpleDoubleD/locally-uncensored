@@ -90,12 +90,12 @@ async fn try_ddg(query: &str, count: usize) -> Result<Vec<SearchResult>, String>
         .collect();
 
     let mut results = Vec::new();
-    for i in 0..titles.len().min(count) {
+    for (i, title) in titles.iter().take(count).enumerate() {
         let url = urls.get(i).cloned().unwrap_or_default();
         let snippet = snippets.get(i).cloned().unwrap_or_default();
         if !url.is_empty() {
             results.push(SearchResult {
-                title: titles[i].clone(),
+                title: title.clone(),
                 url,
                 snippet,
             });

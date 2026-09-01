@@ -9,18 +9,16 @@
 //! main.rs now owns the Rust half (a rolling file writer next to the crash
 //! log). This module is the part the WebView can reach:
 //!
-//! * `log_write`   — the frontend mirrors its own warn/error lines into the
-//!                   same file, so a support log holds BOTH halves of the app
-//!                   in one chronological stream. Without it the file would
-//!                   describe the backend of a bug whose visible half happened
-//!                   in React.
+//! * `log_write` — the frontend mirrors its own warn/error lines into the
+//!   same file, so a support log holds BOTH halves of the app in one
+//!   chronological stream. Without it the file would describe the backend of a
+//!   bug whose visible half happened in React.
 //! * `log_file_path` — Settings → Troubleshoot shows the user where the file
-//!                   is, which is the whole point of writing one.
-//! * `log_reveal`  — opens that folder in the file manager. `plugin:shell|open`
-//!                   cannot do this: with no `plugins.shell.open` entry in
-//!                   tauri.conf.json the plugin falls back to its built-in
-//!                   validator, which only accepts `https?:` / `mailto:` /
-//!                   `tel:` URLs and rejects a filesystem path.
+//!   is, which is the whole point of writing one.
+//! * `log_reveal` — opens that folder in the file manager. `plugin:shell|open`
+//!   cannot do this: with no `plugins.shell.open` entry in tauri.conf.json the
+//!   plugin falls back to its built-in validator, which only accepts
+//!   `https?:` / `mailto:` / `tel:` URLs and rejects a filesystem path.
 
 use serde::Serialize;
 

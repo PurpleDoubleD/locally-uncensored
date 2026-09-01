@@ -582,9 +582,7 @@ fn preflight_verdict(exit_ok: bool, stdout: &str, stderr: &str, gpu: Option<&str
     if !exit_ok || !stdout.contains("TORCH_OK") {
         let tail = stderr
             .lines()
-            .map(str::trim)
-            .filter(|l| !l.is_empty())
-            .next_back()
+            .map(str::trim).rfind(|l| !l.is_empty())
             .unwrap_or("no detail from python")
             .to_string();
         return Preflight::TorchBroken(tail);

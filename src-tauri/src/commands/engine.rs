@@ -321,13 +321,19 @@ pub(crate) fn split_shard_stem(stem: &str) -> Option<(&str, u32, u32)> {
 /// "models" that can never load. A set with missing parts is not listed at
 /// all, so a paused or aborted multi-part download never impersonates an
 /// installed model (same rule a9ea114 established for MLX downloads).
+/// Accumulator for multi-part GGUF sets: `(dir, base, total)` →
+/// `(part numbers seen, path of part 1, byte sum)`.
+///
+/// The directory is part of the key: two unrelated split sets that share a base
+/// name in different subfolders must never merge into one entry. Named because
+/// the bare type is what `clippy::type_complexity` fires on, and a name says
+/// what the tuples mean better than the tuples do.
+type GgufSplitSets =
+    std::collections::HashMap<(PathBuf, String, u32), (Vec<u32>, Option<String>, u64)>;
+
 pub(crate) fn scan_gguf_models(dir: &Path) -> Vec<BundledModel> {
     let mut out = Vec::new();
-    // (dir, base, total) → (part-numbers seen, path of part 1, byte sum).
-    // The directory is part of the key: two unrelated split sets that share a
-    // base name in different subfolders must never merge into one entry.
-    let mut sets: std::collections::HashMap<(PathBuf, String, u32), (Vec<u32>, Option<String>, u64)> =
-        std::collections::HashMap::new();
+    let mut sets: GgufSplitSets = GgufSplitSets::new();
     scan_gguf_dir(dir, 0, &mut out, &mut sets);
     for ((_dir, base, total), (mut parts, first_path, size)) in sets {
         parts.sort_unstable();
@@ -370,7 +376,7 @@ fn scan_gguf_dir(
     dir: &Path,
     depth: usize,
     out: &mut Vec<BundledModel>,
-    sets: &mut std::collections::HashMap<(PathBuf, String, u32), (Vec<u32>, Option<String>, u64)>,
+    sets: &mut GgufSplitSets,
 ) {
     let entries = match std::fs::read_dir(dir) {
         Ok(e) => e,
@@ -988,7 +994,7 @@ fn spawn_engine_attempt(
         args: args.to_vec(),
     });
 
-    let outcome = wait_for_health_or_exit(&**state, port, health_timeout_for(model_path));
+    let outcome = wait_for_health_or_exit(state, port, health_timeout_for(model_path));
     if matches!(outcome, HealthWait::Ready) {
         // Health said OK, but was it OUR child that answered? A spawn that
         // loses the port to an orphaned llama-server (left behind by a crashed

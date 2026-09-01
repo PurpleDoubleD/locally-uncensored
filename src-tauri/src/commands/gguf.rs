@@ -66,8 +66,8 @@ fn fixed_size(ty: u32) -> Option<u64> {
     match ty {
         0 | 1 | 7 => Some(1), // u8 / i8 / bool
         2 | 3 => Some(2),     // u16 / i16
-        4 | 5 | 6 => Some(4), // u32 / i32 / f32
-        10 | 11 | 12 => Some(8), // u64 / i64 / f64
+        4..=6 => Some(4), // u32 / i32 / f32
+        10..=12 => Some(8), // u64 / i64 / f64
         _ => None,            // 8 = string, 9 = array, unknown
     }
 }

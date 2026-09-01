@@ -121,14 +121,32 @@ static REGISTRY: Lazy<BgRegistry> = Lazy::new(BgRegistry::default);
 /// the registry is one static shared by every test in this binary — so a test
 /// that sweeps and a test that is standing up a live task must not overlap, or
 /// the second one loses its child to the first one's quit. Both kinds hold this
-/// lock. (Poisoning is ignored on purpose: a panicking test has already failed,
-/// and turning that into a cascade of poisoned-lock failures hides which one.)
+/// lock.
+///
+/// It is an ASYNC mutex, and that is not cosmetic. Every holder is a
+/// `#[tokio::test]` that awaits while holding it — spawning a task, waiting for
+/// its children, sleeping through a grace period — so a `std::sync::Mutex`
+/// guard would live across those awaits. `clippy::await_holding_lock` flagged
+/// exactly that at four of the six call sites (a fifth carried a hand-written
+/// `#[allow]`), and the lint is right about the fact even though the deadlock
+/// it warns about could not fire here: a `#[tokio::test]` is a current-thread
+/// runtime whose only task is the test body, and nothing but these tests ever
+/// takes this lock. What the std guard really cost was a parked OS thread per
+/// waiting test and a rule that only held as long as nobody spawned a second
+/// task. `tokio::sync::Mutex` removes both — waiters yield instead of blocking
+/// their runtime — and it removes the lint honestly rather than silencing it.
+///
+/// Poisoning disappears with it, which is the behaviour that was wanted anyway:
+/// the std version deliberately called `into_inner()` on a poisoned lock,
+/// because a panicking test has already failed and turning that into a cascade
+/// of poisoned-lock failures hides which one. A tokio mutex simply hands the
+/// next waiter the lock.
 #[cfg(test)]
-static SWEEP_ISOLATION: Mutex<()> = Mutex::new(());
+static SWEEP_ISOLATION: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 #[cfg(test)]
-fn sweep_isolation() -> std::sync::MutexGuard<'static, ()> {
-    SWEEP_ISOLATION.lock().unwrap_or_else(|e| e.into_inner())
+async fn sweep_isolation() -> tokio::sync::MutexGuard<'static, ()> {
+    SWEEP_ISOLATION.lock().await
 }
 
 /// Start arguments for a task that keeps a CHILD process of its own alive —
@@ -584,7 +602,7 @@ fn arm_exit_sweep() {}
 pub(crate) async fn shell_task_list_impl(_args: &Value) -> CmdResult {
     let mut tasks = REGISTRY.list();
     // Reverse-chronological — newest first reads better in the UI.
-    tasks.sort_by(|a, b| b.started_at.cmp(&a.started_at));
+    tasks.sort_by_key(|t| std::cmp::Reverse(t.started_at));
     Ok(json!({ "tasks": tasks }))
 }
 
@@ -737,7 +755,7 @@ mod cancel_tests {
     /// mechanism in disguise.
     #[tokio::test]
     async fn cancelling_takes_the_grandchild_with_it() {
-        let _isolation = super::sweep_isolation();
+        let _isolation = super::sweep_isolation().await;
         let start = shell_task_start_impl(&super::a_task_that_starts_a_child())
             .await
             .expect("start");
@@ -777,7 +795,7 @@ mod shutdown_sweep_tests {
     #[tokio::test]
     #[cfg(unix)]
     async fn quitting_takes_a_running_task_and_its_children_with_it() {
-        let _isolation = super::sweep_isolation();
+        let _isolation = super::sweep_isolation().await;
         let start = shell_task_start_impl(&super::a_task_that_starts_a_child())
             .await
             .expect("start");
@@ -856,7 +874,7 @@ mod shutdown_sweep_tests {
             }
         }
 
-        let _isolation = super::sweep_isolation();
+        let _isolation = super::sweep_isolation().await;
         let start = shell_task_start_impl(&super::a_task_that_starts_a_child())
             .await
             .expect("start");
@@ -929,7 +947,7 @@ mod shutdown_sweep_tests {
     #[tokio::test]
     #[cfg(unix)]
     async fn a_reaped_pid_is_gone_from_the_registry_the_instant_it_is_freed() {
-        let _isolation = super::sweep_isolation();
+        let _isolation = super::sweep_isolation().await;
         let start = shell_task_start_impl(&json!({
             // The shell exits at once; the grandchild inherits stdout and keeps
             // the reader task running long after the shell has been reaped.
@@ -980,7 +998,7 @@ mod shutdown_sweep_tests {
     /// must never fire at it. Sweeping an idle registry must also not panic.
     #[tokio::test]
     async fn a_finished_task_is_not_swept() {
-        let _isolation = super::sweep_isolation();
+        let _isolation = super::sweep_isolation().await;
         let start = shell_task_start_impl(&super::a_task_that_finishes_at_once())
             .await
             .expect("start");
@@ -1187,15 +1205,14 @@ mod foreground_parity_tests {
     /// contract on both paths, which is the property that has to keep holding
     /// for the Windows one to stay true.
     ///
-    /// The isolation guard is a plain `Mutex` held across the awaits below, on
-    /// purpose and like every other test here that stands up a live task: it is
-    /// what keeps the shutdown-sweep tests from killing this task's child
-    /// mid-run. There is nothing to deadlock against — the lock is only ever
-    /// taken by tests, never by the code under test.
-    #[allow(clippy::await_holding_lock)]
+    /// The isolation guard is held across the awaits below, on purpose and like
+    /// every other test here that stands up a live task: it is what keeps the
+    /// shutdown-sweep tests from killing this task's child mid-run. It used to
+    /// carry an `#[allow(clippy::await_holding_lock)]` for that; the lock is an
+    /// async mutex now, so there is nothing left to allow.
     #[tokio::test]
     async fn a_named_shell_behaves_the_same_in_the_background_as_in_the_foreground() {
-        let _isolation = super::sweep_isolation();
+        let _isolation = super::sweep_isolation().await;
         let dir = a_directory();
 
         let (foreground, fg_code) = what_the_foreground_printed(&dir).await;

@@ -96,10 +96,23 @@ fn check_account(account: &str) -> Result<(), String> {
 mod chunked {
     use super::SERVICE;
 
-    /// Per-entry budget in UTF-16 units. keyring's windows-native backend
-    /// rejects blobs over 2560 bytes (1280 units) — stay comfortably under.
-    /// macOS has no limit, so it never chunks and writes stay single-entry.
-    const MAX_UNITS: usize = if cfg!(target_os = "windows") { 1000 } else { usize::MAX };
+    /// Per-entry budget in UTF-16 units, or `None` where the platform's store
+    /// has no per-entry limit at all. keyring's windows-native backend rejects
+    /// blobs over 2560 bytes (1280 units) — stay comfortably under. macOS has
+    /// no limit, so it never chunks and writes stay single-entry.
+    ///
+    /// "No limit" is `None` and not `usize::MAX` on purpose. With the sentinel,
+    /// the `count() <= MAX_UNITS` in `set` was a comparison against the maximum
+    /// of the type on every non-Windows target, i.e. always true —
+    /// `clippy::absurd_extreme_comparisons`, which is deny-by-default, so this
+    /// one line made `cargo clippy` exit non-zero for the whole crate even
+    /// without `-D warnings`. `Option` states the same fact without a value
+    /// that only pretends to be a bound.
+    const MAX_UNITS: Option<usize> = if cfg!(target_os = "windows") {
+        Some(1000)
+    } else {
+        None
+    };
 
     /// Head marker for a chunked value. No provider key or session JSON ever
     /// starts with this, so plain pre-existing entries read back unchanged.
@@ -170,15 +183,16 @@ mod chunked {
     }
 
     pub fn set(account: &str, value: &str) -> Result<(), String> {
-        if value.encode_utf16().count() <= MAX_UNITS {
+        // No budget (macOS) means it always fits; with a budget, measure.
+        let Some(max_units) = MAX_UNITS.filter(|max| value.encode_utf16().count() > *max) else {
             entry(account)?.set_password(value).map_err(|e| e.to_string())?;
             // Drop every chunk: this value lives in the head alone now.
             let _ = sweep_chunks_from(account, 0);
             return Ok(());
-        }
+        };
         // Chunks first, marker last — a torn write keeps the old head (and
         // thus the old value) readable.
-        let parts = split_units(value, MAX_UNITS);
+        let parts = split_units(value, max_units);
         for (i, part) in parts.iter().enumerate() {
             entry(&chunk_account(account, i))?
                 .set_password(part)

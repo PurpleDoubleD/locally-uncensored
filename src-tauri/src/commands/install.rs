@@ -545,7 +545,7 @@ pub fn pip_install_streaming_with_retry_cancellable(
                 Ok(Some(s)) => break s,
                 Ok(None) => {
                     tick += 1;
-                    if tick % 5 == 0 {
+                    if tick.is_multiple_of(5) {
                         let total = announced_total.load(Ordering::Relaxed);
                         if total > 0 {
                             if let Some(read) = process_read_bytes(pid) {
@@ -2079,6 +2079,11 @@ pub fn linux_python_install_hint(os_release: &str) -> String {
 /// Missing → "install Git for Windows", NonNative → "WSL/non-native git on
 /// PATH may break Windows-path clones", Native → proceed.
 #[derive(Debug, Clone, PartialEq, Eq)]
+/// Dead on every non-Windows target and deliberately so: the only production
+/// caller is `windows_git_probe`, which needs `CommandExt::creation_flags` and
+/// therefore cannot be compiled off Windows. Keeping THIS half uncfg'd is what
+/// lets the unit tests below prove the Windows classification on a macOS run.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 pub enum WindowsGitState {
     /// `git --version` failed to run (not installed or not on PATH).
     Missing,
@@ -2092,6 +2097,11 @@ pub enum WindowsGitState {
 
 /// Pure helper for testability. Classifies a `git --version` invocation
 /// from its stdout (trimmed) plus the spawn/exit status.
+/// Dead on every non-Windows target and deliberately so: the only production
+/// caller is `windows_git_probe`, which needs `CommandExt::creation_flags` and
+/// therefore cannot be compiled off Windows. Keeping THIS half uncfg'd is what
+/// lets the unit tests below prove the Windows classification on a macOS run.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 pub fn windows_git_probe_from_output(stdout: &str, exited_successfully: bool) -> WindowsGitState {
     if !exited_successfully {
         return WindowsGitState::Missing;
@@ -2125,6 +2135,11 @@ pub fn windows_git_probe() -> WindowsGitState {
 
 /// User-facing hint for the probed state. Returns `None` for Native (no hint
 /// needed). For Missing the hint is fatal; for NonNative it's a soft warning.
+/// Dead on every non-Windows target and deliberately so: the only production
+/// caller is `windows_git_probe`, which needs `CommandExt::creation_flags` and
+/// therefore cannot be compiled off Windows. Keeping THIS half uncfg'd is what
+/// lets the unit tests below prove the Windows classification on a macOS run.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 pub fn windows_git_install_hint(state: &WindowsGitState) -> Option<String> {
     match state {
         WindowsGitState::Native => None,
@@ -2689,6 +2704,10 @@ fn install_ollama_linux_impl<F: Fn(&str, &str)>(
 /// Bug G revisit — distro-specific install command for `ollama`. Same parsing
 /// shape as `linux_python_install_hint` (ID + ID_LIKE tokens, quoted values
 /// handled). Falls back to ollama.com/install.sh for unknown distros.
+/// Dead off Linux: the only production caller is `install_ollama_linux_impl`,
+/// which is `#[cfg(target_os = "linux")]` as a whole. The function itself is
+/// left compiled everywhere so its distro table stays unit-tested here.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 pub fn linux_ollama_install_hint(os_release: &str) -> String {
     let mut families: Vec<String> = Vec::new();
     for line in os_release.lines() {
@@ -2970,11 +2989,6 @@ fn lmstudio_path_from_registry() -> Option<PathBuf> {
     None
 }
 
-#[cfg(not(target_os = "windows"))]
-fn lmstudio_path_from_registry() -> Option<PathBuf> {
-    None
-}
-
 /// Path to the LM Studio GUI executable on Windows. We only need to launch
 /// this in the rare case where `lms bootstrap` from the pre-bootstrap binary
 /// reports success but `~/.lmstudio/` is still missing — some installs
@@ -3063,8 +3077,7 @@ pub fn install_lmstudio(state: State<'_, AppState>) -> Result<serde_json::Value,
         // AppImage whose URL rotates with every release, so we can't
         // mirror it from a stable in-binary string — surface a clear
         // download pointer instead of pretending to auto-install.
-        #[cfg(target_os = "linux")]
-        {
+        if cfg!(target_os = "linux") {
             update(
                 "error",
                 "LM Studio's Linux distribution is an AppImage with a URL that \
@@ -3074,216 +3087,233 @@ pub fn install_lmstudio(state: State<'_, AppState>) -> Result<serde_json::Value,
                  Tip: if you prefer the CLI-only path, the `lms` CLI ships with \
                  the AppImage and lands at ~/.lmstudio/bin/lms after first run.",
             );
-            return;
         }
-        #[cfg(target_os = "macos")]
-        {
+        if cfg!(target_os = "macos") {
             update(
                 "error",
                 "On macOS, download LM Studio.app from https://lmstudio.ai/download, \
                  drag it to /Applications, launch it once to finish setup, then \
                  come back to LU and click Re-detect.",
             );
-            return;
         }
 
-        // Pre-check: if LM Studio is already installed (an `lms.exe` is
-        // findable in any of the locations `lmstudio_lms_path()` knows about)
-        // we skip the ~570 MB download entirely. Re-installing on a box where
-        // it's already there was the previous behaviour and made the
-        // "LM Studio detected but server offline" Plug-and-Play scenario
-        // turn into a 5-minute no-op download. The bootstrap + server-start
-        // steps below are idempotent, so the same code path now serves both
-        // first-install and offline-reactivation users.
-        let already_installed = lmstudio_lms_path().is_some();
-        if already_installed && lmstudio_server_running() {
-            update(
-                "complete",
-                "LM Studio is already installed and the server is up on localhost:1234.",
-            );
-            return;
-        }
-
-        if already_installed {
-            update(
-                "starting",
-                "LM Studio is already installed — skipping download. Bootstrapping CLI and starting server…",
-            );
-        } else {
-            let temp_dir = std::env::temp_dir();
-            let installer_path = temp_dir.join("LMStudioSetup.exe");
-
-            println!("[LMStudio] Downloading {}", LMSTUDIO_INSTALLER_URL);
-            if let Err(e) =
-                download_file_blocking(LMSTUDIO_INSTALLER_URL, &installer_path, &lms_state)
-            {
-                let err = format!(
-                    "Download failed: {}. If the network is fine, the installer URL may have rotated — fall back to https://lmstudio.ai/download in your browser.",
-                    e
-                );
-                println!("[LMStudio] {}", err);
-                update("error", &err);
-                return;
-            }
-
-            // OI-8: verified before it is executed. See
-            // LMSTUDIO_INSTALLER_SHA256 for why the digest pin is not filled
-            // in yet and what filling it in takes.
-            if let Err(e) = verify_downloaded_installer(
-                &installer_path,
-                LMSTUDIO_INSTALLER_SHA256,
-                LMSTUDIO_INSTALLER_BYTES,
-                "LM Studio",
-            ) {
-                let _ = fs::remove_file(&installer_path);
-                println!("[LMStudio] {}", e);
-                update("error", &e);
-                return;
-            }
-
-            update(
-                "installing",
-                "Download complete. Running silent installer (this can take a minute)...",
-            );
-
-            // electron-builder NSIS supports /S for silent install. Ignore exit
-            // code: real failures surface via the absence of lms.exe afterwards.
-            let mut cmd = Command::new(&installer_path);
-            cmd.arg("/S");
-            #[cfg(target_os = "windows")]
-            cmd.creation_flags(CREATE_NO_WINDOW);
-            match cmd.output() {
-                Ok(_) => println!("[LMStudio] Installer finished"),
-                Err(e) => {
-                    let err = format!("Could not run installer: {}", e);
-                    println!("[LMStudio] {}", err);
-                    update("error", &err);
+        // ── The Windows path ────────────────────────────────────────────────
+        //
+        // Everything below is the winget install. It used to sit behind the two
+        // `return`s above, which made rustc call it an `unreachable statement`
+        // on macOS and Linux — correct about the control flow, and saying
+        // nothing about the code: this is not dead code, it is the OTHER
+        // platform's implementation.
+        //
+        // `if cfg!` and not `#[cfg]`, for the reason `test_support.rs` states at
+        // its top: a `#[cfg]` would delete this whole branch from a macOS build,
+        // and with it the type-checking of ~150 lines of Windows installer plus
+        // the dozen helpers it is the only caller of (`sha256_file`,
+        // `installer_size_verdict`, `windows_git_probe_from_output` …), which
+        // would then read as dead code here. Compiled-and-never-taken keeps the
+        // Windows half honest on the machine this is developed on.
+        //
+        // The condition is `not(linux or macos)` rather than `windows` so the
+        // set of targets that run it is exactly the set that ran it before.
+        if !cfg!(any(target_os = "linux", target_os = "macos")) {
+                // Pre-check: if LM Studio is already installed (an `lms.exe` is
+                // findable in any of the locations `lmstudio_lms_path()` knows about)
+                // we skip the ~570 MB download entirely. Re-installing on a box where
+                // it's already there was the previous behaviour and made the
+                // "LM Studio detected but server offline" Plug-and-Play scenario
+                // turn into a 5-minute no-op download. The bootstrap + server-start
+                // steps below are idempotent, so the same code path now serves both
+                // first-install and offline-reactivation users.
+                let already_installed = lmstudio_lms_path().is_some();
+                if already_installed && lmstudio_server_running() {
+                    update(
+                        "complete",
+                        "LM Studio is already installed and the server is up on localhost:1234.",
+                    );
                     return;
                 }
-            }
 
-            let _ = fs::remove_file(&installer_path);
-        }
+                if already_installed {
+                    update(
+                        "starting",
+                        "LM Studio is already installed — skipping download. Bootstrapping CLI and starting server…",
+                    );
+                } else {
+                    let temp_dir = std::env::temp_dir();
+                    let installer_path = temp_dir.join("LMStudioSetup.exe");
 
-        // Bootstrap the lms CLI. We do this in two passes:
-        //   (1) Run `lms bootstrap` from whatever path `lmstudio_lms_path()`
-        //       resolves — on a fresh install that's the pre-bootstrap binary
-        //       inside `resources/app/.webpack/lms.exe`. This alone is enough
-        //       on most boxes.
-        //   (2) Verify that ~/.lmstudio/bin/lms.exe now exists. If not, some
-        //       LM Studio builds require the GUI to run once to populate
-        //       ~/.lmstudio/ before the bootstrap registers a launcher there.
-        //       In that case we briefly launch the GUI, wait for ~/.lmstudio/
-        //       to appear, retry bootstrap, then move on. The user sees the
-        //       GUI flash up — not ideal, but strictly better than the old
-        //       "Open LM Studio once from the Start menu" error dialog and a
-        //       failed install.
-        update("starting", "Bootstrapping `lms` CLI...");
-        let initial_lms = lmstudio_lms_path();
-        match &initial_lms {
-            Some(p) => {
-                let mut bs = Command::new(p);
-                bs.arg("bootstrap");
-                #[cfg(target_os = "windows")]
-                bs.creation_flags(CREATE_NO_WINDOW);
-                let _ = bs.output();
-            }
-            None => {
-                update(
-                    "error",
-                    "LM Studio installed but `lms.exe` not found in any expected location. \
-                     The installer may have failed silently. Try installing LM Studio manually \
-                     from https://lmstudio.ai/download and then click Re-Scan.",
-                );
-                return;
-            }
-        }
+                    println!("[LMStudio] Downloading {}", LMSTUDIO_INSTALLER_URL);
+                    if let Err(e) =
+                        download_file_blocking(LMSTUDIO_INSTALLER_URL, &installer_path, &lms_state)
+                    {
+                        let err = format!(
+                            "Download failed: {}. If the network is fine, the installer URL may have rotated — fall back to https://lmstudio.ai/download in your browser.",
+                            e
+                        );
+                        println!("[LMStudio] {}", err);
+                        update("error", &err);
+                        return;
+                    }
 
-        // Did pass 1 produce ~/.lmstudio/bin/lms.exe?  If yes, skip the GUI
-        // dance entirely. If no, fall back to launching the GUI so it seeds
-        // its user-data dir, then retry bootstrap.
-        let post_bootstrap_path = dirs::home_dir()
-            .map(|h| h.join(".lmstudio").join("bin").join("lms.exe"));
-        let needs_gui_seed = post_bootstrap_path
-            .as_ref()
-            .map(|p| !p.exists())
-            .unwrap_or(true);
+                    // OI-8: verified before it is executed. See
+                    // LMSTUDIO_INSTALLER_SHA256 for why the digest pin is not filled
+                    // in yet and what filling it in takes.
+                    if let Err(e) = verify_downloaded_installer(
+                        &installer_path,
+                        LMSTUDIO_INSTALLER_SHA256,
+                        LMSTUDIO_INSTALLER_BYTES,
+                        "LM Studio",
+                    ) {
+                        let _ = fs::remove_file(&installer_path);
+                        println!("[LMStudio] {}", e);
+                        update("error", &e);
+                        return;
+                    }
 
-        if needs_gui_seed {
-            update(
-                "starting",
-                "Launching LM Studio briefly to finalise CLI setup (you may see the window flash)...",
-            );
-            if let Some(gui) = lmstudio_gui_exe() {
-                let mut g = Command::new(&gui);
-                #[cfg(target_os = "windows")]
-                g.creation_flags(CREATE_NO_WINDOW);
-                let _ = g.spawn();
-            }
+                    update(
+                        "installing",
+                        "Download complete. Running silent installer (this can take a minute)...",
+                    );
 
-            // Wait up to 30 s for ~/.lmstudio/ to appear. The first GUI launch
-            // typically writes this within 3–8 s, but on a slow VM 30 s is a
-            // safer ceiling than failing the install.
-            let lmstudio_dir = dirs::home_dir().map(|h| h.join(".lmstudio"));
-            for _ in 0..30 {
-                std::thread::sleep(std::time::Duration::from_secs(1));
-                if let Some(d) = &lmstudio_dir {
-                    if d.exists() {
-                        break;
+                    // electron-builder NSIS supports /S for silent install. Ignore exit
+                    // code: real failures surface via the absence of lms.exe afterwards.
+                    let mut cmd = Command::new(&installer_path);
+                    cmd.arg("/S");
+                    #[cfg(target_os = "windows")]
+                    cmd.creation_flags(CREATE_NO_WINDOW);
+                    match cmd.output() {
+                        Ok(_) => println!("[LMStudio] Installer finished"),
+                        Err(e) => {
+                            let err = format!("Could not run installer: {}", e);
+                            println!("[LMStudio] {}", err);
+                            update("error", &err);
+                            return;
+                        }
+                    }
+
+                    let _ = fs::remove_file(&installer_path);
+                }
+
+                // Bootstrap the lms CLI. We do this in two passes:
+                //   (1) Run `lms bootstrap` from whatever path `lmstudio_lms_path()`
+                //       resolves — on a fresh install that's the pre-bootstrap binary
+                //       inside `resources/app/.webpack/lms.exe`. This alone is enough
+                //       on most boxes.
+                //   (2) Verify that ~/.lmstudio/bin/lms.exe now exists. If not, some
+                //       LM Studio builds require the GUI to run once to populate
+                //       ~/.lmstudio/ before the bootstrap registers a launcher there.
+                //       In that case we briefly launch the GUI, wait for ~/.lmstudio/
+                //       to appear, retry bootstrap, then move on. The user sees the
+                //       GUI flash up — not ideal, but strictly better than the old
+                //       "Open LM Studio once from the Start menu" error dialog and a
+                //       failed install.
+                update("starting", "Bootstrapping `lms` CLI...");
+                let initial_lms = lmstudio_lms_path();
+                match &initial_lms {
+                    Some(p) => {
+                        let mut bs = Command::new(p);
+                        bs.arg("bootstrap");
+                        #[cfg(target_os = "windows")]
+                        bs.creation_flags(CREATE_NO_WINDOW);
+                        let _ = bs.output();
+                    }
+                    None => {
+                        update(
+                            "error",
+                            "LM Studio installed but `lms.exe` not found in any expected location. \
+                             The installer may have failed silently. Try installing LM Studio manually \
+                             from https://lmstudio.ai/download and then click Re-Scan.",
+                        );
+                        return;
                     }
                 }
-            }
 
-            // Retry bootstrap from the (now possibly different) lms.exe.
-            // After GUI launch the .lmstudio dir might already contain a
-            // launcher; if not, the pre-bootstrap path is still valid.
-            if let Some(p) = lmstudio_lms_path() {
-                let mut bs = Command::new(&p);
-                bs.arg("bootstrap");
-                #[cfg(target_os = "windows")]
-                bs.creation_flags(CREATE_NO_WINDOW);
-                let _ = bs.output();
-            }
-        }
+                // Did pass 1 produce ~/.lmstudio/bin/lms.exe?  If yes, skip the GUI
+                // dance entirely. If no, fall back to launching the GUI so it seeds
+                // its user-data dir, then retry bootstrap.
+                let post_bootstrap_path = dirs::home_dir()
+                    .map(|h| h.join(".lmstudio").join("bin").join("lms.exe"));
+                let needs_gui_seed = post_bootstrap_path
+                    .as_ref()
+                    .map(|p| !p.exists())
+                    .unwrap_or(true);
 
-        // Start the embedded server. `lms server start` is non-blocking — it
-        // detaches a background httpd. --cors so LU's web view (which is on a
-        // tauri:// origin) isn't blocked by the SOP. Port matches the
-        // provider-store default of 1234 so user config Just Works.
-        // Re-resolve the path because the bootstrap dance above may have
-        // promoted us from the pre-bootstrap path to ~/.lmstudio/bin/lms.exe.
-        update("starting", "Starting LM Studio server on port 1234...");
-        if let Some(p) = lmstudio_lms_path() {
-            let mut srv = Command::new(&p);
-            srv.args(["server", "start", "--cors", "--port"])
-                .arg(LMSTUDIO_DEFAULT_PORT.to_string())
-                .stdout(Stdio::null())
-                .stderr(Stdio::null());
-            #[cfg(target_os = "windows")]
-            srv.creation_flags(CREATE_NO_WINDOW);
-            let _ = srv.spawn();
-        }
+                if needs_gui_seed {
+                    update(
+                        "starting",
+                        "Launching LM Studio briefly to finalise CLI setup (you may see the window flash)...",
+                    );
+                    if let Some(gui) = lmstudio_gui_exe() {
+                        let mut g = Command::new(&gui);
+                        #[cfg(target_os = "windows")]
+                        g.creation_flags(CREATE_NO_WINDOW);
+                        let _ = g.spawn();
+                    }
 
-        // Wait for the server to respond. LM Studio's server typically takes
-        // ~3-5 s to bind in a fresh install (it loads its model index first).
-        update("starting", "Waiting for LM Studio server...");
-        let mut ready = false;
-        for i in 0..15 {
-            std::thread::sleep(std::time::Duration::from_secs(2));
-            if lmstudio_server_running() {
-                ready = true;
-                break;
-            }
-            println!("[LMStudio] Server not ready, attempt {}/15", i + 1);
-        }
+                    // Wait up to 30 s for ~/.lmstudio/ to appear. The first GUI launch
+                    // typically writes this within 3–8 s, but on a slow VM 30 s is a
+                    // safer ceiling than failing the install.
+                    let lmstudio_dir = dirs::home_dir().map(|h| h.join(".lmstudio"));
+                    for _ in 0..30 {
+                        std::thread::sleep(std::time::Duration::from_secs(1));
+                        if let Some(d) = &lmstudio_dir {
+                            if d.exists() {
+                                break;
+                            }
+                        }
+                    }
 
-        if ready {
-            update("complete", "LM Studio server is up on localhost:1234.");
-        } else {
-            update(
-                "error",
-                "LM Studio installed but the server didn't come up. Open LM Studio from the Start menu and toggle the Server tab on, then click Re-Scan.",
-            );
+                    // Retry bootstrap from the (now possibly different) lms.exe.
+                    // After GUI launch the .lmstudio dir might already contain a
+                    // launcher; if not, the pre-bootstrap path is still valid.
+                    if let Some(p) = lmstudio_lms_path() {
+                        let mut bs = Command::new(&p);
+                        bs.arg("bootstrap");
+                        #[cfg(target_os = "windows")]
+                        bs.creation_flags(CREATE_NO_WINDOW);
+                        let _ = bs.output();
+                    }
+                }
+
+                // Start the embedded server. `lms server start` is non-blocking — it
+                // detaches a background httpd. --cors so LU's web view (which is on a
+                // tauri:// origin) isn't blocked by the SOP. Port matches the
+                // provider-store default of 1234 so user config Just Works.
+                // Re-resolve the path because the bootstrap dance above may have
+                // promoted us from the pre-bootstrap path to ~/.lmstudio/bin/lms.exe.
+                update("starting", "Starting LM Studio server on port 1234...");
+                if let Some(p) = lmstudio_lms_path() {
+                    let mut srv = Command::new(&p);
+                    srv.args(["server", "start", "--cors", "--port"])
+                        .arg(LMSTUDIO_DEFAULT_PORT.to_string())
+                        .stdout(Stdio::null())
+                        .stderr(Stdio::null());
+                    #[cfg(target_os = "windows")]
+                    srv.creation_flags(CREATE_NO_WINDOW);
+                    let _ = srv.spawn();
+                }
+
+                // Wait for the server to respond. LM Studio's server typically takes
+                // ~3-5 s to bind in a fresh install (it loads its model index first).
+                update("starting", "Waiting for LM Studio server...");
+                let mut ready = false;
+                for i in 0..15 {
+                    std::thread::sleep(std::time::Duration::from_secs(2));
+                    if lmstudio_server_running() {
+                        ready = true;
+                        break;
+                    }
+                    println!("[LMStudio] Server not ready, attempt {}/15", i + 1);
+                }
+
+                if ready {
+                    update("complete", "LM Studio server is up on localhost:1234.");
+                } else {
+                    update(
+                        "error",
+                        "LM Studio installed but the server didn't come up. Open LM Studio from the Start menu and toggle the Server tab on, then click Re-Scan.",
+                    );
+                }
         }
     });
 
@@ -3647,8 +3677,7 @@ pub fn install_python(state: State<'_, AppState>) -> Result<serde_json::Value, S
         // button rarely needs to fire — but when it does, surfacing the
         // right distro-specific install command beats a cryptic spawn
         // error.
-        #[cfg(target_os = "linux")]
-        {
+        if cfg!(target_os = "linux") {
             let os_release = std::fs::read_to_string("/etc/os-release").unwrap_or_default();
             let suggestion = linux_python_install_hint(&os_release);
             update(
@@ -3660,161 +3689,178 @@ pub fn install_python(state: State<'_, AppState>) -> Result<serde_json::Value, S
                     suggestion
                 ),
             );
-            return;
         }
-        #[cfg(target_os = "macos")]
-        {
+        if cfg!(target_os = "macos") {
             update(
                 "error",
                 "Python isn't installed system-wide. On macOS, install it via \
                  `brew install python` (Homebrew) or download Python 3.12+ from \
                  https://www.python.org/downloads/macos/ then click Re-detect.",
             );
-            return;
         }
 
-        // Stream-friendly winget invocation. `--silent --accept-*-agreements`
-        // drops the EULA prompts; without them winget will sit and wait for
-        // user input forever inside our background thread. Python.Python.3.12
-        // is the canonical winget id for the python.org installer (matches
-        // `winget search python` top result).
-        update("installing", "Running: winget install Python.Python.3.12 --silent --accept-package-agreements --accept-source-agreements");
+        // ── The Windows path ────────────────────────────────────────────────
+        //
+        // Everything below is the winget install. It used to sit behind the two
+        // `return`s above, which made rustc call it an `unreachable statement`
+        // on macOS and Linux — correct about the control flow, and saying
+        // nothing about the code: this is not dead code, it is the OTHER
+        // platform's implementation.
+        //
+        // `if cfg!` and not `#[cfg]`, for the reason `test_support.rs` states at
+        // its top: a `#[cfg]` would delete this whole branch from a macOS build,
+        // and with it the type-checking of ~150 lines of Windows installer plus
+        // the dozen helpers it is the only caller of (`sha256_file`,
+        // `installer_size_verdict`, `windows_git_probe_from_output` …), which
+        // would then read as dead code here. Compiled-and-never-taken keeps the
+        // Windows half honest on the machine this is developed on.
+        //
+        // The condition is `not(linux or macos)` rather than `windows` so the
+        // set of targets that run it is exactly the set that ran it before.
+        if !cfg!(any(target_os = "linux", target_os = "macos")) {
+                // Stream-friendly winget invocation. `--silent --accept-*-agreements`
+                // drops the EULA prompts; without them winget will sit and wait for
+                // user input forever inside our background thread. Python.Python.3.12
+                // is the canonical winget id for the python.org installer (matches
+                // `winget search python` top result).
+                update("installing", "Running: winget install Python.Python.3.12 --silent --accept-package-agreements --accept-source-agreements");
 
-        let mut cmd = Command::new("winget");
-        cmd.args([
-            "install",
-            "Python.Python.3.12",
-            "--silent",
-            "--accept-package-agreements",
-            "--accept-source-agreements",
-            "--scope",
-            "user",
-        ])
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-        #[cfg(target_os = "windows")]
-        cmd.creation_flags(CREATE_NO_WINDOW);
+                let mut cmd = Command::new("winget");
+                cmd.args([
+                    "install",
+                    "Python.Python.3.12",
+                    "--silent",
+                    "--accept-package-agreements",
+                    "--accept-source-agreements",
+                    "--scope",
+                    "user",
+                ])
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped());
+                #[cfg(target_os = "windows")]
+                cmd.creation_flags(CREATE_NO_WINDOW);
 
-        let child = match cmd.spawn() {
-            Ok(c) => c,
-            Err(e) => {
+                let child = match cmd.spawn() {
+                    Ok(c) => c,
+                    Err(e) => {
+                        update(
+                            "error",
+                            &format!(
+                                "Could not run winget: {}. winget ships with Windows 10/11 — \
+                                 if it's missing, run 'Get App Installer' from the Microsoft \
+                                 Store (free) and retry.",
+                                e
+                            ),
+                        );
+                        return;
+                    }
+                };
+
+                // Stream stdout + stderr line-by-line so the UI's log card animates
+                // as winget extracts and installs (otherwise it freezes for 1–2 min).
+                let mut child = child;
+                let stdout = child.stdout.take();
+                let stderr = child.stderr.take();
+                let stdout_state = py_state.clone();
+                let stdout_handle = std::thread::spawn(move || {
+                    if let Some(out) = stdout {
+                        let reader = BufReader::new(out);
+                        for line in reader.lines().map_while(Result::ok) {
+                            let trimmed = line.trim();
+                            if !trimmed.is_empty() {
+                                if let Ok(mut s) = stdout_state.lock() {
+                                    s.logs.push(trimmed.to_string());
+                                }
+                            }
+                        }
+                    }
+                });
+                let stderr_state = py_state.clone();
+                let stderr_handle = std::thread::spawn(move || {
+                    if let Some(err) = stderr {
+                        let reader = BufReader::new(err);
+                        for line in reader.lines().map_while(Result::ok) {
+                            let trimmed = line.trim();
+                            if !trimmed.is_empty() {
+                                if let Ok(mut s) = stderr_state.lock() {
+                                    s.logs.push(trimmed.to_string());
+                                }
+                            }
+                        }
+                    }
+                });
+
+                let exit_status = match child.wait() {
+                    Ok(s) => s,
+                    Err(e) => {
+                        update("error", &format!("winget wait failed: {}", e));
+                        return;
+                    }
+                };
+                let _ = stdout_handle.join();
+                let _ = stderr_handle.join();
+
+                if !exit_status.success() {
+                    // winget exit codes are HRESULT-shaped; -1978335189 (0x8A150011)
+                    // means "no upgrade applicable" which is fine if Python is
+                    // already present. Anything else is a real failure.
+                    let code = exit_status.code().unwrap_or(-1);
+                    // Re-resolve regardless: Python may already be on the box from
+                    // a previous install attempt that the original where-scan
+                    // missed (e.g. Add-to-PATH was unchecked).
+                    let resolved = crate::python::get_python_bin();
+                    if crate::python::is_real_python(&resolved) {
+                        if let Ok(mut slot) = py_bin_slot.lock() {
+                            *slot = resolved.clone();
+                        }
+                        update(
+                            "complete",
+                            &format!("Python ready (winget exit {} ignored, Python detected at {})", code, resolved),
+                        );
+                        return;
+                    }
+                    update(
+                        "error",
+                        &format!(
+                            "winget exited with code {}. Python was not detected after \
+                             install. Try installing manually from python.org with the \
+                             'Add Python to PATH' checkbox on, then return here and \
+                             click Re-Scan.",
+                            code
+                        ),
+                    );
+                    return;
+                }
+
+                update("starting", "winget finished. Re-resolving Python…");
+
+                // Give the freshly installed Python a moment to settle (winget can
+                // signal completion before the file is fully linked into PATH on
+                // some boxes), then re-resolve and persist.
+                for attempt in 0..15 {
+                    std::thread::sleep(std::time::Duration::from_secs(1));
+                    let resolved = crate::python::get_python_bin();
+                    if crate::python::is_real_python(&resolved) {
+                        if let Ok(mut slot) = py_bin_slot.lock() {
+                            *slot = resolved.clone();
+                        }
+                        update(
+                            "complete",
+                            &format!("Python ready at {}", resolved),
+                        );
+                        return;
+                    }
+                    println!("[Python] post-install resolve attempt {}/15 — not yet on PATH", attempt + 1);
+                }
+
                 update(
                     "error",
-                    &format!(
-                        "Could not run winget: {}. winget ships with Windows 10/11 — \
-                         if it's missing, run 'Get App Installer' from the Microsoft \
-                         Store (free) and retry.",
-                        e
-                    ),
+                    "winget reported success but Python is still not on PATH. \
+                     Restart Locally Uncensored — sometimes Windows needs the new PATH \
+                     to take effect. If it still doesn't show up, install manually \
+                     from python.org with 'Add Python to PATH' on.",
                 );
-                return;
-            }
-        };
-
-        // Stream stdout + stderr line-by-line so the UI's log card animates
-        // as winget extracts and installs (otherwise it freezes for 1–2 min).
-        let mut child = child;
-        let stdout = child.stdout.take();
-        let stderr = child.stderr.take();
-        let stdout_state = py_state.clone();
-        let stdout_handle = std::thread::spawn(move || {
-            if let Some(out) = stdout {
-                let reader = BufReader::new(out);
-                for line in reader.lines().map_while(Result::ok) {
-                    let trimmed = line.trim();
-                    if !trimmed.is_empty() {
-                        if let Ok(mut s) = stdout_state.lock() {
-                            s.logs.push(trimmed.to_string());
-                        }
-                    }
-                }
-            }
-        });
-        let stderr_state = py_state.clone();
-        let stderr_handle = std::thread::spawn(move || {
-            if let Some(err) = stderr {
-                let reader = BufReader::new(err);
-                for line in reader.lines().map_while(Result::ok) {
-                    let trimmed = line.trim();
-                    if !trimmed.is_empty() {
-                        if let Ok(mut s) = stderr_state.lock() {
-                            s.logs.push(trimmed.to_string());
-                        }
-                    }
-                }
-            }
-        });
-
-        let exit_status = match child.wait() {
-            Ok(s) => s,
-            Err(e) => {
-                update("error", &format!("winget wait failed: {}", e));
-                return;
-            }
-        };
-        let _ = stdout_handle.join();
-        let _ = stderr_handle.join();
-
-        if !exit_status.success() {
-            // winget exit codes are HRESULT-shaped; -1978335189 (0x8A150011)
-            // means "no upgrade applicable" which is fine if Python is
-            // already present. Anything else is a real failure.
-            let code = exit_status.code().unwrap_or(-1);
-            // Re-resolve regardless: Python may already be on the box from
-            // a previous install attempt that the original where-scan
-            // missed (e.g. Add-to-PATH was unchecked).
-            let resolved = crate::python::get_python_bin();
-            if crate::python::is_real_python(&resolved) {
-                if let Ok(mut slot) = py_bin_slot.lock() {
-                    *slot = resolved.clone();
-                }
-                update(
-                    "complete",
-                    &format!("Python ready (winget exit {} ignored, Python detected at {})", code, resolved),
-                );
-                return;
-            }
-            update(
-                "error",
-                &format!(
-                    "winget exited with code {}. Python was not detected after \
-                     install. Try installing manually from python.org with the \
-                     'Add Python to PATH' checkbox on, then return here and \
-                     click Re-Scan.",
-                    code
-                ),
-            );
-            return;
         }
-
-        update("starting", "winget finished. Re-resolving Python…");
-
-        // Give the freshly installed Python a moment to settle (winget can
-        // signal completion before the file is fully linked into PATH on
-        // some boxes), then re-resolve and persist.
-        for attempt in 0..15 {
-            std::thread::sleep(std::time::Duration::from_secs(1));
-            let resolved = crate::python::get_python_bin();
-            if crate::python::is_real_python(&resolved) {
-                if let Ok(mut slot) = py_bin_slot.lock() {
-                    *slot = resolved.clone();
-                }
-                update(
-                    "complete",
-                    &format!("Python ready at {}", resolved),
-                );
-                return;
-            }
-            println!("[Python] post-install resolve attempt {}/15 — not yet on PATH", attempt + 1);
-        }
-
-        update(
-            "error",
-            "winget reported success but Python is still not on PATH. \
-             Restart Locally Uncensored — sometimes Windows needs the new PATH \
-             to take effect. If it still doesn't show up, install manually \
-             from python.org with 'Add Python to PATH' on.",
-        );
     });
 
     Ok(serde_json::json!({"status": "installing"}))

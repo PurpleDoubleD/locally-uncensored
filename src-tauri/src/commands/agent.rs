@@ -447,7 +447,7 @@ pub(crate) fn execute_code_blocking(
     // resolution order as the file_* tools and shell_execute.
     let workspace = match workingDirectory.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
         Some(wd) => PathBuf::from(wd),
-        None => agent_workspace(chatId.as_deref(), Some(&*state)),
+        None => agent_workspace(chatId.as_deref(), Some(state)),
     };
     let _ = fs::create_dir_all(&workspace);
 

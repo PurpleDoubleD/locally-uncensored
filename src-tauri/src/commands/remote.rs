@@ -313,23 +313,15 @@ async fn auth_middleware(
         .unwrap_or("");
 
     let cookie_token = cookie_header.split(';')
-        .find_map(|c| {
-            let c = c.trim();
-            if c.starts_with("lu-remote-token=") {
-                Some(&c[16..])
-            } else {
-                None
-            }
-        })
+        .find_map(|c| c.trim().strip_prefix("lu-remote-token="))
         .unwrap_or("");
 
     let query_token = req.uri().query().unwrap_or("").split('&')
-        .find(|p| p.starts_with("token="))
-        .map(|p| &p[6..])
+        .find_map(|p| p.strip_prefix("token="))
         .unwrap_or("");
 
-    let token = if auth_header.starts_with("Bearer ") {
-        &auth_header[7..]
+    let token = if let Some(bearer) = auth_header.strip_prefix("Bearer ") {
+        bearer
     } else if !cookie_token.is_empty() {
         cookie_token
     } else if !query_token.is_empty() {
@@ -3090,7 +3082,7 @@ pub async fn start_tunnel(
     std::thread::spawn(move || {
         use std::io::BufRead;
         let reader = std::io::BufReader::new(stderr);
-        for line in reader.lines().flatten() {
+        for line in reader.lines().map_while(Result::ok) {
             println!("[Tunnel] {}", line);
             // cloudflared prints: "... https://xxx.trycloudflare.com ..."
             if let Some(start) = line.find("https://") {
@@ -4121,52 +4113,11 @@ mod remote_hardening_tests {
 
     /// A process table that has PROVEN itself, or the reason it could not.
     ///
-    /// The check is an invariant that cannot be false when the enumeration
-    /// worked: this very process is running, so a table without it was not read
-    /// at all. That is not a theoretical concern — sysinfo-0.33.1's macOS
-    /// `refresh_processes_specifics` takes its pids from `get_proc_list()`, and
-    /// when that returns `None` (its second `proc_listallpids` filling the
-    /// buffer the first one sized) the function returns 0 and leaves the list
-    /// untouched, so a fresh `System` comes back EMPTY with no error anywhere.
-    ///
-    /// Retrying is therefore not hope: every retry is gated on a check, and the
-    /// caller only ever asserts on a snapshot that passed. Between the check
-    /// and the assertion there is no clock, no syscall and no other thread —
-    /// the assertions are a pure function of data already in hand.
+    /// Moved to `test_support::checked_table` when `commands/process.rs` needed
+    /// the same guarantee for the ComfyUI adoption scan — the argument for it is
+    /// written out there, in one copy.
     #[cfg(unix)]
-    fn checked_table(pid: u32) -> Result<sysinfo::System, String> {
-        use std::time::{Duration, Instant};
-        let me = sysinfo::Pid::from_u32(std::process::id());
-        let deadline = Instant::now() + Duration::from_secs(10);
-        let mut attempts = 0usize;
-        let mut blind = 0usize;
-        loop {
-            if Instant::now() >= deadline {
-                return Err(format!(
-                    "no usable process table in 10s ({attempts} attempts, {blind} of them \
-                     without this test's own process in them). That is the TEST ENVIRONMENT, \
-                     not the sweep."
-                ));
-            }
-            if attempts > 0 {
-                // Paces retries so a pathological environment does not spin a
-                // core. It is not what makes the result correct — the checks
-                // below are.
-                std::thread::sleep(Duration::from_millis(20));
-            }
-            attempts += 1;
-            let sys = crate::process_util::process_table_with_cmdlines();
-            if sys.process(me).is_none() {
-                blind += 1;
-                continue;
-            }
-            if sys.process(sysinfo::Pid::from_u32(pid)).is_none() {
-                blind += 1;
-                continue;
-            }
-            return Ok(sys);
-        }
-    }
+    use crate::test_support::checked_table;
 
     /// A live process that really is NAMED `cloudflared`, publishing `port`.
     ///
@@ -4179,19 +4130,7 @@ mod remote_hardening_tests {
     fn live_cloudflared(port: u16) -> (tempfile::TempDir, std::process::Child) {
         use std::process::{Command, Stdio};
 
-        // target/<profile>/deps/<test binary> -> target/<profile>/examples/park
-        let exe = std::env::current_exe().expect("current_exe");
-        let park = exe
-            .parent()
-            .and_then(|deps| deps.parent())
-            .map(|profile| profile.join("examples").join("park"))
-            .expect("no target/<profile>/ above the test binary");
-        assert!(
-            park.is_file(),
-            "{} is missing. It is `src-tauri/examples/park.rs`, which `cargo test` builds \
-             alongside the tests; if it is gone, this test is not measuring the sweep.",
-            park.display(),
-        );
+        let park = crate::test_support::park_binary();
 
         let dir = tempfile::tempdir().expect("tempdir");
         let bin = dir.path().join("cloudflared");

@@ -866,6 +866,14 @@ pub fn mlx_start(_state: &AppState, _args: &Value) -> CmdResult {
 /// Stop the MLX sidecar (the long-lived image/video server on MLX_PORT). We
 /// didn't keep a Child handle, so stop it by its listening port — the "Stop"
 /// button counterpart to `mlx_start`.
+/// FINDING (clippy paydown, 01.09.2026): this has no caller and no bridge.
+/// `media_cmds.rs` wraps `mlx_status`, `mlx_start`, `mlx_unload`, `mlx_generate`
+/// and the rest as `#[tauri::command]`s — but not this one, so the frontend
+/// cannot reach it and the "Stop" button it describes cannot exist. The only
+/// production path that actually stops the sidecar is the quit-time
+/// `kill_listeners_on_port(MLX_PORT)` in `state.rs`. Either add the wrapper or
+/// delete this; the `allow` only keeps `-D warnings` usable meanwhile.
+#[allow(dead_code)]
 pub fn mlx_stop(_state: &AppState, _args: &Value) -> CmdResult {
     crate::process_util::kill_listeners_on_port(MLX_PORT);
     Ok(json!({ "ok": true, "port": MLX_PORT }))

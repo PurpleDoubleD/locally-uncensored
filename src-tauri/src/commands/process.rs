@@ -1469,7 +1469,7 @@ fn start_comfyui_blocking(state: &AppState) -> Result<serde_json::Value, String>
     };
 
     let comfy_path = comfy_path
-        .or_else(|| find_comfyui_path())
+        .or_else(find_comfyui_path)
         .ok_or_else(|| "ComfyUI not found".to_string())?;
 
     // Store the path for future use
@@ -1578,7 +1578,7 @@ fn start_comfyui_blocking(state: &AppState) -> Result<serde_json::Value, String>
     // guarantees we never pass the flag on a broken install (ComfyUI would
     // error at startup); probe result is cached per python path. CPU mode
     // skips it — flash-attn is CUDA-only.
-    if !needs_cpu_fallback && flash_attention_cached(&state, &python) {
+    if !needs_cpu_fallback && flash_attention_cached(state, &python) {
         comfy_args.push("--use-flash-attention");
         println!("[ComfyUI] flash-attn detected in {} — enabling Flash Attention", python);
     }
@@ -1801,7 +1801,17 @@ pub(crate) fn find_orphaned_comfyui(port: u16) -> Option<u32> {
     // The table MUST come from this helper: a bare `refresh_processes` does not
     // fetch command lines, and every match here would silently be against "".
     // See the note above `process_table_with_cmdlines`.
-    let sys = crate::process_util::process_table_with_cmdlines();
+    find_orphaned_comfyui_in(&crate::process_util::process_table_with_cmdlines(), port)
+}
+
+/// The same scan, against a table the caller already holds.
+///
+/// Split out for the test that proves the scan is wired to real data. Taking the
+/// snapshot as an argument is what lets that test assert on a table
+/// `test_support::checked_table` has already vouched for, with no clock and no
+/// second enumeration between the check and the assertion. `remote.rs` split
+/// `find_stale_tunnels` the same way and for the same reason.
+pub(crate) fn find_orphaned_comfyui_in(sys: &sysinfo::System, port: u16) -> Option<u32> {
     let own = std::process::id();
     for (pid, process) in sys.processes() {
         let pid = pid.as_u32();
@@ -1986,8 +1996,7 @@ pub async fn comfyui_status(state: State<'_, AppState>) -> Result<serde_json::Va
     let running = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(3))
         .build()
-        .ok()
-        .and_then(|c| Some(c.get(format!("http://{}:{}/system_stats", host, port))))
+        .ok().map(|c| c.get(format!("http://{}:{}/system_stats", host, port)))
         .map(|req| async move { req.send().await.map(|r| r.status().is_success()).unwrap_or(false) })
     ;
     let running = match running {
@@ -2309,7 +2318,7 @@ fn normalize_ollama_base(input: &str) -> Result<String, String> {
     };
     // Sanity-check with a URL parse so "http://" alone or "http://:1234" can't pass.
     match url::Url::parse(&with_scheme) {
-        Ok(u) if u.host_str().map_or(false, |h| !h.is_empty()) => Ok(with_scheme),
+        Ok(u) if u.host_str().is_some_and(|h| !h.is_empty()) => Ok(with_scheme),
         _ => Err(format!("Not a valid URL: {}", input)),
     }
 }
@@ -2536,10 +2545,8 @@ pub fn auto_start_comfyui(state: &AppState) {
                         std::thread::spawn(move || {
                             use std::io::{BufRead, BufReader};
                             let reader = BufReader::new(stdout);
-                            for line in reader.lines() {
-                                if let Ok(line) = line {
-                                    println!("[ComfyUI] {}", line);
-                                }
+                            for line in reader.lines().map_while(Result::ok) {
+                                println!("[ComfyUI] {}", line);
                             }
                         });
                     }
@@ -2547,10 +2554,8 @@ pub fn auto_start_comfyui(state: &AppState) {
                         std::thread::spawn(move || {
                             use std::io::{BufRead, BufReader};
                             let reader = BufReader::new(stderr);
-                            for line in reader.lines() {
-                                if let Ok(line) = line {
-                                    println!("[ComfyUI] {}", line);
-                                }
+                            for line in reader.lines().map_while(Result::ok) {
+                                println!("[ComfyUI] {}", line);
                             }
                         });
                     }
@@ -3041,10 +3046,10 @@ pub(crate) fn offload_local_models_blocking(state: &AppState, include_comfyui: O
     //    Both are graceful no-ops when not running, and lazy-start on next use.
     // Call the lifecycle helpers directly — the #[command] wrappers are async
     // now (they moved off the Tauri main thread) and this caller is sync.
-    if crate::commands::engine::stop_engine_locked(&state) {
+    if crate::commands::engine::stop_engine_locked(state) {
         freed.push("bundled-engine");
     }
-    if crate::commands::engine::stop_embed_locked(&state) {
+    if crate::commands::engine::stop_embed_locked(state) {
         freed.push("bundled-embed");
     }
 
@@ -3792,25 +3797,25 @@ mod comfy_adoption_tests {
         ));
     }
 
-    /// The scan runs against the real process table. A process whose argv
-    /// matches must be found by pid; the same process on another port must
-    /// not.
+    /// A live process carrying exactly the argv `start_comfyui_blocking` spawns.
     ///
-    /// Unix only: the stand-in needs a program that keeps LU's argv shape
-    /// while doing nothing, and `sh -c` is the portable way to get one. The
-    /// finding itself is a Linux/macOS one — Windows children join the
-    /// kill-on-close job object and do not orphan in the first place.
+    /// `examples/park`, run directly. It ignores its arguments and blocks on
+    /// stdin, so it carries the argv this test chose, lives exactly as long as
+    /// the test holds the pipe, and forks nothing that could be orphaned.
+    ///
+    /// What it replaced was `/bin/sh -c "sleep 30; :" main.py …`, and both
+    /// halves of that were a liability:
+    ///
+    /// * `sleep 30` is a wall-clock budget on a test, and it forks a
+    ///   grandchild that `child.kill()` does not reach.
+    /// * `sh` is a SIP platform binary. This one was invoked rather than
+    ///   copied, so it escaped the SIGKILL that `examples/park.rs` documents —
+    ///   but the next person to reach for "make a copy and rename it" would
+    ///   not, and the stand-in that does not have the problem is right here.
     #[cfg(unix)]
-    #[test]
-    fn the_scan_finds_a_real_process_by_the_argv_lu_would_have_used() {
-        // The trailing `; :` matters: a single simple command makes sh exec
-        // it and hand over its argv, which would erase the very thing being
-        // matched.
-        let port: u16 = 61888;
-        let mut child = Command::new("/bin/sh")
+    fn live_comfy_stand_in(port: u16) -> std::process::Child {
+        Command::new(crate::test_support::park_binary())
             .args([
-                "-c",
-                "sleep 30; :",
                 "main.py",
                 "--listen",
                 "127.0.0.1",
@@ -3819,22 +3824,94 @@ mod comfy_adoption_tests {
                 "--enable-cors-header",
                 "*",
             ])
-            .stdin(Stdio::null())
+            // Piped, not null: closing this pipe is how the stand-in is ended.
+            .stdin(Stdio::piped())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .spawn()
-            .expect("spawn the stand-in");
+            .expect("spawn the stand-in")
+    }
 
-        // sysinfo needs the process to be in the table.
-        std::thread::sleep(std::time::Duration::from_millis(300));
-        let found = find_orphaned_comfyui(port);
-        let other = find_orphaned_comfyui(port + 1);
+    /// The scan runs against the real process table. A process whose argv
+    /// matches must be found by pid; the same process on another port must
+    /// not.
+    ///
+    /// Unix only: the finding is a Linux/macOS one — Windows children join the
+    /// kill-on-close job object and do not orphan in the first place. (The old
+    /// reason, "`sh -c` is the portable way to get a stand-in", is gone with the
+    /// stand-in; what keeps the gate is that `park_binary()` would need the
+    /// `.exe` suffix there and no Windows machine was available to check it.)
+    ///
+    /// ── Why this test looked like it worked and did not ──
+    ///
+    /// It used to sleep a fixed 300 ms, take exactly one snapshot, and assert on
+    /// it, with a hard-coded port 61888. Measured on 01.09.2026 over a delay
+    /// series under three concurrent copies of the whole suite — the shape the
+    /// flake was reported in — it failed 0/25 at 0 ms, 1/25 at 300 ms, 2/25 at
+    /// 600 ms and 6/25 at 1000 ms, and every single one of those nine failures
+    /// was the same thing: `find_orphaned_comfyui` returned a pid HIGHER than
+    /// this test's own child. A stranger's. A second suite running this very
+    /// test had its own stand-in on 61888, and the scan returned whichever of
+    /// the two the table iteration reached first.
+    ///
+    /// That the failure rate RISES with the sleep is the proof of which
+    /// mechanism it was: a longer sleep is a longer window in which a concurrent
+    /// copy's stand-in is alive at the same time as this one's. A settle-time
+    /// problem would have behaved the other way round.
+    ///
+    /// So the port is no longer written down. It is leased from the kernel, and
+    /// the lease is held for the whole test, which is what makes it impossible
+    /// for a concurrent copy to draw the same number.
+    ///
+    /// Turned up to the maximum — 30 copies of this one test started at the same
+    /// instant, three rounds — the old body failed 87 of 90 and this one 0 of 90
+    /// (0 of 150 at 50 copies). And with everything else here left alone and
+    /// only `reserved_port()` swapped back for the constant 61888, this body
+    /// fails 79 of 90 again. The lease is the fix; the stand-in and the checked
+    /// snapshot are what stop the OTHER two ways it could rot.
+    #[cfg(unix)]
+    #[test]
+    fn the_scan_finds_a_real_process_by_the_argv_lu_would_have_used() {
+        use crate::test_support::{checked_table, reserved_port};
 
+        // Held to the end of the test: while these sockets are bound, no other
+        // process on this machine is handed either number.
+        let (ours, _ours_lease) = reserved_port();
+        let (stranger, _stranger_lease) = reserved_port();
+
+        let mut child = live_comfy_stand_in(ours);
+        let pid = child.id();
+
+        // One snapshot that has shown it contains this process AND the stand-in.
+        // Everything asserted below is a pure function of it — no clock, no
+        // second enumeration, nothing that can change under the assertions.
+        let table = checked_table(pid);
         let _ = child.kill();
         let _ = child.wait();
 
-        assert_eq!(found, Some(child.id()), "the scan did not find the stand-in");
-        assert_eq!(other, None, "the scan matched a process on another port");
+        let sys = table.unwrap_or_else(|why| panic!("{why}"));
+        let entry = sys
+            .process(sysinfo::Pid::from_u32(pid))
+            .expect("checked_table only returns a table containing this pid");
+
+        // If this fails the rest means nothing: the stand-in would not be
+        // carrying the argv the scan matches on.
+        let argv = crate::process_util::cmdline_of(entry);
+        assert!(
+            argv.iter().any(|a| a == "main.py"),
+            "the stand-in is not carrying LU's argv at all: {argv:?}",
+        );
+
+        assert_eq!(
+            find_orphaned_comfyui_in(&sys, ours),
+            Some(pid),
+            "the scan did not find the stand-in. argv={argv:?}",
+        );
+        assert_ne!(
+            find_orphaned_comfyui_in(&sys, stranger),
+            Some(pid),
+            "the scan matched this process while looking for another port ({stranger})",
+        );
     }
 
     /// Stop must not still be the no-op the finding describes.

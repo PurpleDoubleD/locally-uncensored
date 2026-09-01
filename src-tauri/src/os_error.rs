@@ -258,13 +258,16 @@ mod tests {
     #[test]
     fn the_red_hint_over_the_microphone_is_english() {
         let e = Error::from_raw_os_error(232);
-        // What the three call sites used to write: the error's own Display,
-        // which on a German Windows is "Die Pipe wird gerade geschlossen.".
-        let before = format!("stdin flush: {}", e);
+        // What the three call sites used to write was `format!("stdin flush: {e}")`
+        // — the error's own Display, which on a German Windows is "Die Pipe wird
+        // gerade geschlossen.". That used to be bound to a `before` variable and
+        // then never read; `e.to_string()` in the last assertion is the same
+        // string, so the binding is gone rather than renamed to `_before`.
+        //
         // What they write now.
         let after = format!("stdin flush: {}", io_english(&e));
         assert_eq!(after, "stdin flush: the pipe is closing (os error 232)");
-        // On a German box `before` is German; here it is only "Unknown error",
+        // On a German box the old wording is German; here it is only "Unknown error",
         // so the assertion that says something on every platform is that the
         // new wording no longer depends on what the system happens to say.
         assert!(!after.contains(&e.to_string()) || e.to_string() == io_english(&e));

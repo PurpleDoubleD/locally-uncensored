@@ -378,6 +378,13 @@ pub fn find_lmstudio_app() -> Option<PathBuf> {
 }
 
 /// Is LM Studio installed anywhere — the `lms` CLI or the app bundle?
+/// FINDING (clippy paydown, 01.09.2026): nothing in this repository calls this —
+/// not the Rust side, not a `#[tauri::command]` wrapper, not the frontend. It is
+/// kept rather than deleted because deleting a detection helper is a product
+/// decision, not a lint decision; the `allow` is here so the rest of the crate
+/// can run under `-D warnings` while that decision is pending. Wire it or drop
+/// it, but do not leave it in this state indefinitely.
+#[allow(dead_code)]
 pub fn lmstudio_installed() -> bool {
     find_lms_cli().is_some() || find_lmstudio_app().is_some()
 }
@@ -427,11 +434,25 @@ pub fn find_ollama_bin() -> Option<PathBuf> {
 }
 
 /// Is Ollama installed anywhere — CLI binary or app bundle?
+/// FINDING (clippy paydown, 01.09.2026): nothing in this repository calls this —
+/// not the Rust side, not a `#[tauri::command]` wrapper, not the frontend. It is
+/// kept rather than deleted because deleting a detection helper is a product
+/// decision, not a lint decision; the `allow` is here so the rest of the crate
+/// can run under `-D warnings` while that decision is pending. Wire it or drop
+/// it, but do not leave it in this state indefinitely.
+#[allow(dead_code)]
 pub fn ollama_installed() -> bool {
     find_ollama_bin().is_some() || find_ollama_app().is_some()
 }
 
 /// Reasonable places to look for an existing ComfyUI install.
+/// FINDING (clippy paydown, 01.09.2026): nothing in this repository calls this —
+/// not the Rust side, not a `#[tauri::command]` wrapper, not the frontend. It is
+/// kept rather than deleted because deleting a detection helper is a product
+/// decision, not a lint decision; the `allow` is here so the rest of the crate
+/// can run under `-D warnings` while that decision is pending. Wire it or drop
+/// it, but do not leave it in this state indefinitely.
+#[allow(dead_code)]
 pub fn comfyui_search_roots() -> Vec<PathBuf> {
     let mut out = Vec::new();
     let h = home();
@@ -450,6 +471,10 @@ pub fn comfyui_search_roots() -> Vec<PathBuf> {
 
 /// Default ComfyUI install target — where install_comfyui will drop the
 /// portable bundle on Windows / clone the repo on macOS+Linux.
+/// Only the path-inventory test in `app_identity.rs` calls this today — no
+/// production caller is left, so it is dead in the `bin` target and alive in the
+/// `test` one. Same standing decision as the helpers above.
+#[allow(dead_code)]
 pub fn default_comfyui_dir() -> PathBuf {
     data_dir().join("ComfyUI")
 }

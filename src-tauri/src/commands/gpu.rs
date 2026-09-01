@@ -149,8 +149,17 @@ fn note_for(vendor: &str) -> Option<String> {
     }
 }
 
-#[cfg(target_os = "linux")]
+/// `if cfg!` and not `#[cfg]`, for the same reason the parser below gives for
+/// itself: with a `#[cfg(target_os = "linux")]` here plus a stub for everyone
+/// else, `detect_other_via_lspci_from` and `lspci_device_name` have no caller
+/// at all in a macOS or Windows build — so they compile, they are tested, and
+/// rustc still reports them as dead code. Gating at run time on a constant
+/// keeps the chain intact everywhere (the early return folds away) and lets
+/// `-D warnings` stay on without an `allow` per parser.
 fn detect_other_via_lspci(have_rocm: bool) -> Vec<DetectedGpu> {
+    if !cfg!(target_os = "linux") {
+        return vec![];
+    }
     // Best-effort fallback for Intel iGPUs / Intel Arc / Apple-Silicon-in-VM
     // when neither nvidia-smi nor rocm-smi cover them. `lspci -nn | grep VGA`
     // gives "00:02.0 VGA compatible controller [0300]: Intel Corporation
@@ -237,9 +246,6 @@ fn lspci_device_name(line: &str) -> String {
     let out = name.trim().trim_end_matches(',').trim().to_string();
     if out.is_empty() { "GPU".to_string() } else { out }
 }
-
-#[cfg(not(target_os = "linux"))]
-fn detect_other_via_lspci(_have_rocm: bool) -> Vec<DetectedGpu> { vec![] }
 
 #[cfg(target_os = "macos")]
 fn detect_macos() -> Vec<DetectedGpu> {
@@ -374,8 +380,16 @@ fn windows_fallback_from(
     }
 }
 
-#[cfg(target_os = "windows")]
+/// `if cfg!` and not `#[cfg]`, same reason as `detect_other_via_lspci`: this is
+/// the only caller of `parse_reg_query`, `parse_reg_hex`, `adapter_subkey`,
+/// `windows_fallback_from`, `detect_other_via_registry_from` and
+/// `detect_other_via_wmic_from`, all of which are deliberately compiled and
+/// tested on every platform. Gating the caller with `#[cfg]` orphaned the lot
+/// of them in a macOS build.
 fn detect_other_on_windows(have_rocm: bool) -> Vec<DetectedGpu> {
+    if !cfg!(target_os = "windows") {
+        return vec![];
+    }
     // Microsoft disabled wmic.exe by default in Windows 11 23H2 and 24H2 and
     // removed it outright in the August 2026 servicing update, where it is no
     // longer even a Feature on Demand. It used to be this module's only way to
@@ -468,9 +482,6 @@ fn detect_other_via_wmic_from(
     }
     gpus
 }
-
-#[cfg(not(target_os = "windows"))]
-fn detect_other_on_windows(_have_rocm: bool) -> Vec<DetectedGpu> { vec![] }
 
 /// Class GUID of the display-adapter registry branch, lowercase, as
 /// `adapter_subkey` matches it. Microsoft lists it as the "Display Adapters"
@@ -896,7 +907,7 @@ End of search: 3 match(es) found.
         use super::lspci_device_name;
         // NEGATIVE CONTROL: the old expression, which was fine while only
         // Intel reached this branch and is nonsense for anything else.
-        let old_rule = LSPCI_AMD.split(':').last().unwrap();
+        let old_rule = LSPCI_AMD.split(':').next_back().unwrap();
         assert_eq!(old_rule.trim(), "7550] (rev c0)");
 
         assert_eq!(
