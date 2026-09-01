@@ -10,6 +10,7 @@ import { ICON_STROKE_MARK } from '../../ui/icon-size'
 import { Button } from '../ui/Button'
 import { cn } from '../ui/cn'
 import { loadImageRef } from './loadImage'
+import { mediaRefFrom } from './mediaRef'
 import {
   subscribeInstallRuns, getInstallRun, startInstallRun, cancelInstallRun, clearInstallRun,
 } from '../../../lib/model-install-runs'
@@ -591,9 +592,13 @@ function TrainSetBoard() {
   const inputRef = useRef<HTMLInputElement>(null)
 
   const addFiles = (files: FileList | File[]) => {
+    // One mint, one release: `mediaRefFrom` is the only place a staged file
+    // gets a blob: URL, and `addTrainImages` gives back every ref it does not
+    // keep (a name duplicate, anything past the 30 cap). This used to be an
+    // inline copy of those two lines with nothing on the other end.
     const imgs = Array.from(files)
       .filter((f) => f.type.startsWith('image/'))
-      .map((f) => ({ name: f.name, url: URL.createObjectURL(f), blob: f as Blob }))
+      .map(mediaRefFrom)
     if (imgs.length > 0) addTrainImages(imgs)
   }
 

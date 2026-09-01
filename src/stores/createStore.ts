@@ -428,20 +428,42 @@ function releaseItemMedia(item: GalleryItem): void {
 }
 
 /**
- * Replacing a staged input file must free the one it replaces.
+ * A staged input file that stops being reachable must give its `blob:` URL back.
  *
- * `mediaRefFrom` in SpecialIntentControls mints a fresh `blob:` URL for every
- * pick, so re-choosing a driving video or a voice clip five times used to pin
- * five files in the renderer with only the last one reachable. The lifetime is
- * closed HERE rather than at the call site because these two setters are the
- * only way a slot is ever written — a future caller cannot forget.
+ * `mediaRefFrom` (`components/create/experimental/mediaRef.ts`) is the one place
+ * such a URL is minted; this is the one place it dies. Everything a MediaRef
+ * slot can do to a ref — replace it, clear it, drop it out of a set, refuse it
+ * as a duplicate, cut it off past a cap — is the same event seen from a
+ * different angle: it was in the slot before and it is not in the slot after.
+ * So there is ONE rule, stated once, and every setter that writes a MediaRef
+ * slot states its before and its after.
+ *
+ * The lifetime is closed HERE rather than at the call site because these
+ * setters are the only way a slot is ever written — a future caller cannot
+ * forget. That is what the previous, scalar-only version of this helper got
+ * right for `audioInput` / `videoInput` and could not express for the third
+ * slot, `trainImages`: an array whose members are dropped by a filter and by
+ * a silent `.slice(0, 30)`, neither of which anybody was giving back.
+ *
+ * Membership is by URL, not by name: re-picking the same filename mints a
+ * NEW URL, and the loser of that dedupe is exactly the one to revoke.
  *
  * Only the preview URL is dropped; every consumer (local + cloud upload) reads
- * `MediaRef.blob`, which is unaffected by revoking the URL.
+ * `MediaRef.blob`, which is unaffected by revoking the URL. Non-`blob:` URLs
+ * are left alone — they are not ours to revoke.
  */
+function releaseDroppedMediaRefs(previous: readonly MediaRef[], next: readonly MediaRef[]): void {
+  if (previous.length === 0) return
+  const kept = new Set(next.map((r) => r.url))
+  for (const r of previous) {
+    if (kept.has(r.url)) continue
+    if (r.url.startsWith('blob:')) URL.revokeObjectURL(r.url)
+  }
+}
+
+/** The same rule for a slot that holds at most one ref. */
 function releaseReplacedMediaRef(previous: MediaRef | null, next: MediaRef | null): void {
-  if (!previous || previous.url === next?.url) return
-  if (previous.url.startsWith('blob:')) URL.revokeObjectURL(previous.url)
+  releaseDroppedMediaRefs(previous ? [previous] : [], next ? [next] : [])
 }
 
 export const useCreateStore = create<CreateState>()(
@@ -695,13 +717,30 @@ export const useCreateStore = create<CreateState>()(
       setTargetResolution: (targetResolution) => set({ targetResolution }),
       setCharacterTab: (characterTab) => set({ characterTab }),
       // Cap at 30 (the server's image_paths limit) and de-dupe by filename so
-      // a re-drop of the same files doesn't double the set.
-      addTrainImages: (imgs) => set((s) => {
-        const have = new Set(s.trainImages.map((i) => i.name))
-        return { trainImages: [...s.trainImages, ...imgs.filter((i) => !have.has(i.name))].slice(0, 30) }
-      }),
-      removeTrainImage: (name) => set((s) => ({ trainImages: s.trainImages.filter((i) => i.name !== name) })),
-      clearTrainImages: () => set({ trainImages: [] }),
+      // a re-drop of the same files doesn't double the set. Both of those
+      // THROW REFS AWAY — the caller minted a blob: URL for every file it
+      // handed over, including the ones landing in the dedupe and the ones
+      // the cap cuts off, and neither is reachable from the store afterwards.
+      // So "before" is everything in play, not just what was already staged.
+      addTrainImages: (imgs) => {
+        const before = get().trainImages
+        const have = new Set(before.map((i) => i.name))
+        const trainImages = [...before, ...imgs.filter((i) => !have.has(i.name))].slice(0, 30)
+        releaseDroppedMediaRefs([...before, ...imgs], trainImages)
+        set({ trainImages })
+      },
+      removeTrainImage: (name) => {
+        const before = get().trainImages
+        const trainImages = before.filter((i) => i.name !== name)
+        releaseDroppedMediaRefs(before, trainImages)
+        set({ trainImages })
+      },
+      // Called after every submitted training run (useCloudCreate.ts), which
+      // is where the whole 30-photo set used to stay pinned for the session.
+      clearTrainImages: () => {
+        releaseDroppedMediaRefs(get().trainImages, [])
+        set({ trainImages: [] })
+      },
       setTriggerWord: (w) => set({ triggerWord: w.replace(/\s+/g, '').slice(0, 30) }),
       // Same clamp as the Rust command so the UI can never book a rejected run.
       setTrainSteps: (n) => set({ trainSteps: Math.max(100, Math.min(4000, Math.floor(n))) }),

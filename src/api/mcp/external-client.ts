@@ -8,6 +8,7 @@
 import type { Child } from '@tauri-apps/plugin-shell'
 import type { MCPToolDefinition, MCPServerConfig, ToolArgs } from './types'
 import { log } from '../../lib/logger'
+import { isTauri } from '../backend'
 import { isRecord, prop, asString, asNumber, asRecordArray, errorText } from '../../types/json-guards'
 
 // ── JSON-RPC message types ──────────────────────────────────────
@@ -300,10 +301,7 @@ export class MCPExternalClient {
       // A failure after spawn (handshake refused, tools/list timed out) leaves
       // the server process running with nobody holding a handle to it — the
       // caller never gets a client it could disconnect. Take it down here.
-      if (this.child) {
-        try { await this.child.kill() } catch { /* already gone */ }
-        this.child = null
-      }
+      await this.killServerProcess()
       liveClients.delete(this)
       throw new Error(`Failed to connect to MCP server "${this.config.name}": ${err instanceof Error ? err.message : String(err)}`)
     }
@@ -336,13 +334,84 @@ export class MCPExternalClient {
     // inside the sweep must not be reachable a second time.
     liveClients.delete(this)
     this.rejectAllPending('Disconnecting')
-    if (this.child) {
+    await this.killServerProcess()
+  }
+
+  /**
+   * Take the server process down — the whole tree, not just the shim (T-68).
+   *
+   * The one place this client kills anything. Both callers (a failed handshake
+   * in `connect()`, and `disconnect()`) used to run `this.child.kill()`
+   * themselves, and that call is NOT a tree kill:
+   * `tauri-plugin-shell`'s `CommandChild::kill` is one signal to the DIRECT
+   * child (`src/process/mod.rs:78`). An MCP server started as `npx -y <pkg>`
+   * — or `npx.cmd` through cmd.exe on Windows — has the launcher as that
+   * direct child and the real `node` server as a GRANDCHILD. Killing the shim
+   * reaped the launcher and left the server running for the rest of the
+   * session, unreachable: the JS handle was gone with it.
+   *
+   * ── The ordering is the whole point ─────────────────────────────────────
+   *
+   * `kill_process_tree` is called INSTEAD of `child.kill()`, never after it.
+   * The Rust guard (`may_kill_pid`) only allows pids inside this app's own
+   * subtree, and that is exactly what the direct child's death destroys: the
+   * moment the launcher exits, its children are reparented to init, stop being
+   * our descendants, and the guard refuses — correctly, and too late. Kill the
+   * shim first and the tree kill can no longer reach anything.
+   *
+   * The tree kill covers the direct child too (`kill_pid_tree`'s snapshot
+   * includes the root), so nothing is left for a follow-up kill to do. Not
+   * calling the plugin's own `kill` command also does not strand the pid in
+   * its child map: the plugin removes an entry when it sees `Terminated`
+   * (`src/commands.rs:259`), which is what the tree kill causes.
+   *
+   * ── When the command is not there or says no ────────────────────────────
+   *
+   * Two ways to land in the fallback, both real: a Rust side older than
+   * `c5773322` has no such command, and the guard refuses a pid that is not
+   * ours — which happens when the process already exited on its own, so its
+   * pid is not in this app's subtree any more. In both the alternative to
+   * `child.kill()` is leaving a server process running, i.e. exactly the
+   * pre-T-53 bug; so we fall back and say so in the log. What the fallback
+   * can lose is grandchildren — the leak this method exists to close — and
+   * nothing beyond that.
+   *
+   * Outside Tauri there is no IPC to ask, and no MCP server either: the spawn
+   * goes through the shell plugin, which needs the same IPC. The check is
+   * synchronous on purpose, so the no-Tauri case does not pay for a dynamic
+   * import (a page-unload sweep is counted in ticks) and does not log a
+   * warning about a tree kill nobody could have wanted.
+   *
+   * Best-effort throughout: `disconnect()` is reached from a page-unload sweep
+   * where a rejection is an unhandled one.
+   */
+  private async killServerProcess(): Promise<void> {
+    const child = this.child
+    if (!child) return
+    // Dropped before the awaits: a second disconnect (the sweep racing a
+    // panel click) must not issue a second kill for the same pid — by then it
+    // may belong to somebody else.
+    this.child = null
+    const pid = child.pid
+
+    if (isTauri()) {
       try {
-        await this.child.kill()
-      } catch {
-        // Process may already be dead
+        const { invoke } = await import('@tauri-apps/api/core')
+        await invoke('kill_process_tree', { pid })
+        return
+      } catch (err) {
+        log.warn(
+          `[MCP:${this.config.name}] no process-tree kill available — killing only the direct `
+          + 'child, so a server that spawned its own processes may leave them running',
+          { pid, err: errorText(err) },
+        )
       }
-      this.child = null
+    }
+
+    try {
+      await child.kill()
+    } catch {
+      // Process may already be dead
     }
   }
 
