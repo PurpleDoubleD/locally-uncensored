@@ -4,11 +4,18 @@ import { postContentTypeAllowed, postContentTypeError } from '../src/lib/local-a
 /**
  * Der Wächter vor /local-api — Content-Type, CSRF-Header, Origin.
  *
- * `port` ist ein Parameter und kein fester Wert mehr: die Origin-Liste unten
- * nennt den Port, auf dem der Server WIRKLICH hört. Stand er fest verdrahtet
- * in der Datei, konnte man den Server kein zweites Mal starten, ohne dass die
- * Liste einen Port nennt, auf dem niemand mehr hört — und dann fällt die
- * Prüfung still auf die Loopback-Regex allein zurück.
+ * WAS `port` HIER IST, UND WAS NICHT (KF-13). Er ist NICHT die Origin-Regel.
+ * Die Origin-Regel steht vollständig unten und lautet: zwei feste
+ * Tauri-Origins, sonst Loopback auf jedem Port. Ein fester Port als
+ * Listeneintrag wäre von dieser Regel ohnehin gedeckt und entschiede damit
+ * nichts — genau so ein Eintrag stand hier und las sich wie eine Zusicherung
+ * („nur DIESER Port"), die es nie gab.
+ *
+ * Was `port` ist: die Angabe, auf der der Server WIRKLICH hört, und damit die
+ * einzige Zahl, die eine Ablehnung sinnvoll nennen kann. Sie steht deshalb im
+ * 403-Text und nirgends sonst. Der Parameter bleibt auch aus dem zweiten
+ * Grund, aus dem er eingeführt wurde: ein fest verdrahteter Port lässt sich
+ * kein zweites Mal starten (`LU_DEV_PORT`, siehe vite.config.ts).
  */
 export function createLocalApiGuard(port: number): Connect.NextHandleFunction {
   // Vites eigener Middleware-Typ statt einer geratenen Signatur: `next`
@@ -58,14 +65,32 @@ export function createLocalApiGuard(port: number): Connect.NextHandleFunction {
         // only stamps a literal 127.0.0.1/localhost origin on a page it
         // really loaded from loopback, and `evil.localhost` (which Vite's
         // own host check tolerates) does not match this pattern.
-        const allowedOrigins = [
-            'tauri://localhost', 'http://tauri.localhost',
-            `http://localhost:${port}`, `http://127.0.0.1:${port}`,
-        ];
+        // KF-13 — DIE REGEL, AUSGESCHRIEBEN: zwei feste Tauri-Origins, und
+        // Loopback auf JEDEM Port. Mehr ist es nicht.
+        //
+        // Hier standen bis hierher zusätzlich `http://localhost:${port}` und
+        // `http://127.0.0.1:${port}`. Beide waren WIRKUNGSLOS: die Regex eine
+        // Zeile tiefer deckt jeden Loopback-Port ab, den festen eingeschlossen
+        // — es gab keine Anfrage, die die Liste annahm und die Regex ablehnte.
+        // Eine Zeile ohne beobachtbare Wirkung liest sich trotzdem wie eine
+        // Zusicherung („nur DIESER Port"), und die gab es nie.
+        //
+        // VERENGT WURDE NICHTS: die Regex bleibt die absichtlich weitere Regel
+        // (Begründung oben, issue #51). Sie zu verengen wäre eine
+        // Verhaltensänderung an der einzigen Zugangssperre vor /shell-execute
+        // und /execute-code, und sie würde den Fall brechen, für den sie da
+        // ist.
+        //
+        // `port` ist damit KEINE Regel mehr, sondern nur noch die DIAGNOSE in
+        // der Ablehnung: „Invalid Origin" allein sagt nicht, was erwartet war.
+        const allowedOrigins = ['tauri://localhost', 'http://tauri.localhost'];
         const isLoopback = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin);
         if (!allowedOrigins.includes(origin) && !isLoopback) {
             res.writeHead(403, { 'Content-Type': 'text/plain' });
-            res.end('Forbidden: Invalid Origin (CSRF Protection)');
+            res.end(
+                'Forbidden: Invalid Origin (CSRF Protection). Allowed: '
+                + `${allowedOrigins.join(', ')}, and loopback on ANY port (this server: http://localhost:${port}).`,
+            );
             return;
         }
     }

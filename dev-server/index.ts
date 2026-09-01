@@ -19,10 +19,14 @@ import { registerWhisperRoutes } from './whisper'
 
 export interface DevServerOptions {
   /**
-   * Der Port, auf dem Vite bindet — und der einzige Port, den die
-   * Origin-Prüfung in guard.ts als kanonisch behandelt. Ein Parameter, damit
-   * die beiden nicht auseinanderlaufen und damit der Server ein zweites Mal
-   * gestartet werden kann, ohne die Datei zu ändern.
+   * Der Port, auf dem Vite bindet. Ein Parameter, damit der Server ein zweites
+   * Mal gestartet werden kann, ohne eine Datei zu ändern (`LU_DEV_PORT`).
+   *
+   * NICHT die Origin-Regel des Wächters (KF-13): die ist „zwei Tauri-Origins,
+   * sonst Loopback auf jedem Port" und kennt keinen kanonischen Port. Hier
+   * stand einmal, er sei „der einzige Port, den die Origin-Prüfung als
+   * kanonisch behandelt" — das war schon damals nicht wahr. guard.ts benutzt
+   * die Zahl nur noch im Text der Ablehnung; siehe dort.
    */
   port: number
 }

@@ -7,8 +7,10 @@ import { bodyFlag, bodyNumber, bodyString } from '../src/dev/http-body'
 import { resolveFsRequestPath } from '../src/dev/fs-request-path'
 import {
   devResolveWithinJail,
+  devWorkspaceRoot,
   effectiveByteCap,
   JailEscapeError,
+  namedDepth,
   type DevJailOptions,
 } from '../src/lib/dev-fs-jail'
 import { errorText } from '../src/types/json-guards'
@@ -130,6 +132,52 @@ export function registerFsRoutes(routes: RouteMount): void {
       // auf jeden Pfad, den der Prozess öffnen darf. Ausbruch → 403, und
       // zwar bevor irgendein Verzeichnis angelegt wird.
       const resolved = resolveFsRequestPath(body, os.homedir(), devJail)
+
+      // ── KF-12: ein Schreibvorgang ohne Ziel ────────────────────────────
+      // KEIN AUSBRUCH — der Pfad liegt im Käfig. Aber eine Anfrage, die keine
+      // Datei nennt, löst auf die KÄFIGWURZEL SELBST auf, und `writeFileSync`
+      // macht daraus keine Wurzel, sondern eine DATEI. Live ausgelöst mit
+      // `POST /local-api/fs-write {}`: 200 `{"status":"saved"}` und ein
+      // 0-Byte `~/<AGENT_WORKSPACE_DIR>/default` — eine Datei da, wo der
+      // nächste echte Schreibvorgang einen Ordner braucht. Mit
+      // `{"workingDirectory":"<noch-nicht-da>","content":"…"}` bestimmt der
+      // Aufrufer sogar Ort UND Inhalt dieser Datei.
+      //
+      // WARUM AUF DEM AUFGELÖSTEN PFAD UND NICHT AUF DEM STRING: dieselbe
+      // Lage hat vier Schreibweisen — kein `path`, `""`, `"."` und
+      // `"unterordner/.."`. Rusts Textprüfung `is_workspace_root_path`
+      // (filesystem.rs:474) kennt die ersten drei und würde die vierte
+      // durchlassen. `resolved` liegt bereits im Käfig, also ist gleiche
+      // BESTANDTEIL-TIEFE hier dasselbe wie Gleichheit — und `namedDepth`
+      // ist der Zähler, den der Käfig ohnehin benutzt (Groß-/Kleinschreibung
+      // und Trennzeichen inklusive). Die Wurzel kommt aus derselben
+      // `devWorkspaceRoot`-Funktion wie im Käfig, mit denselben Feldern: ein
+      // zweiter AUFRUF, keine zweite Regel.
+      //
+      // 400 UND NICHT 403: 403 heißt in dieser Datei genau eine Sache —
+      // `JailEscapeError`, „der Pfad verlässt den Arbeitsordner". Das tut er
+      // hier nicht. 400 ist, was die Geschwister für eine Anfrage ohne
+      // brauchbare Angabe schon antworten („Missing path" in fs-read-bytes,
+      // „Missing pattern" in fs-search).
+      //
+      // UND NICHT „die Wurzel als Ordner anlegen": das tut der normale Weg
+      // bereits. `{"path":"notiz.txt"}` legt über `mkdirSync(parentDir)`
+      // unten `~/<AGENT_WORKSPACE_DIR>/default/` als ORDNER an und schreibt
+      // die Datei hinein (nachgemessen). Eine Anfrage ohne Datei hätte davon
+      // nichts — sie bekäme nur ein stilles zweites Verhalten.
+      const wurzel = devWorkspaceRoot(
+        os.homedir(),
+        bodyString(body, 'chatId'),
+        bodyString(body, 'workingDirectory'),
+      )
+      if (namedDepth(resolved) === namedDepth(wurzel)) {
+        res.writeHead(400, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({
+          error: `Missing path: fs-write writes a FILE inside the workspace, but this request names the workspace root itself (${resolved})`,
+        }))
+        return
+      }
+
       try {
         const content = bodyString(body, 'content') ?? ''
         const parentDir = resolve(resolved, '..')

@@ -14,6 +14,8 @@
  * Run: npx vitest run dev-server/__tests__/waechter-und-port.test.ts
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { createLocalApiGuard } from '../guard'
 import { anfrage } from './echte-anfrage'
 
@@ -82,6 +84,9 @@ describe('der Content-Type wird erzwungen', () => {
 
 describe('die Origin-Prüfung', () => {
   it('lässt den eigenen Port durch', async () => {
+    // Seit KF-13 tut das die Loopback-Regel, nicht ein Listeneintrag: der
+    // Eintrag `http://localhost:${port}` stand hier einmal und war von der
+    // Regex ohnehin gedeckt. Der Fall bleibt, weil das ERGEBNIS zählt.
     const res = await anfrage(waechter, {
       method: 'POST', url: '/fs-read',
       headers: { ...json, Origin: 'http://localhost:5399' }, body: '{}',
@@ -136,6 +141,87 @@ describe('die Origin-Prüfung', () => {
       headers: { ...json, Origin: 'http://evil.localhost' }, body: '{}',
     })
     expect(res.status).toBe(403)
+  })
+})
+
+describe('KF-13 — die Origin-Liste nennt keinen Port mehr', () => {
+  /**
+   * DER BEFUND: in der Liste erlaubter Origins standen `http://localhost:${port}`
+   * und `http://127.0.0.1:${port}`. KEIN LOCH — beide waren von der
+   * Loopback-Regex zwei Zeilen darunter ohnehin gedeckt. Aber damit hatten sie
+   * am Wächter KEINE beobachtbare Wirkung, und eine wirkungslose Zeile liest
+   * sich wie eine Zusicherung („nur DIESER Port"), die es nie gab.
+   *
+   * WIE MAN SO ETWAS ÜBERHAUPT PRÜFT. Die Entfernung ist per Konstruktion
+   * verhaltensneutral — es gibt keine Anfrage, die die Liste annahm und die
+   * Regex ablehnte. Eine Sonde auf ANNAHME oder ABLEHNUNG kann es hier also
+   * nicht geben. Was es gibt: die Ablehnung ZÄHLT DIE LISTE AUF. Damit ist
+   * ihr Inhalt beobachtbar, und der erste Fall unten ist eine echte
+   * Verhaltensprobe statt eines Griffs in den Quelltext. Der zweite Fall
+   * greift zusätzlich in den Quelltext, für den Fall, dass jemand die Meldung
+   * umbaut — er nennt DAFÜR keinen Variablennamen, weil ein Umbenennen
+   * harmlos ist und nicht rot werden darf.
+   */
+  const quelle = readFileSync(resolve(process.cwd(), 'dev-server/guard.ts'), 'utf8')
+
+  it('zählt in der Ablehnung eine Liste OHNE Port auf', async () => {
+    const res = await anfrage(waechter, {
+      method: 'POST', url: '/fs-read',
+      headers: { ...json, Origin: 'https://boese.example' }, body: '{}',
+    })
+    // Alles vor dem Wort „loopback" ist die Aufzählung der festen Einträge;
+    // der Port steht danach, in der Diagnose.
+    const aufzaehlung = res.text.slice(0, res.text.indexOf('loopback'))
+    expect(aufzaehlung).not.toContain('5399')
+    // Eine Zusicherung, die nur Abwesenheit prüft, wäre auch grün, wenn die
+    // Liste leer wäre.
+    expect(aufzaehlung).toContain('tauri://localhost')
+    expect(aufzaehlung).toContain('http://tauri.localhost')
+  })
+
+  it('interpoliert den Port in keinem Listeneintrag der Quelle', () => {
+    // Eine Zeile, die mit einem Template-Literal `http://…:${port}` BEGINNT,
+    // ist ein Array-Eintrag; die Diagnose steht hinter einem `+ `. Absichtlich
+    // ohne den Namen der Konstante: ein Umbenennen ist harmlos.
+    expect(quelle).not.toMatch(/^\s*`https?:\/\/(localhost|127\.0\.0\.1):\$\{port\}`/m)
+  })
+
+  it('die weitere Regel BLEIBT — Loopback auf einem ganz anderen Port kommt durch', async () => {
+    // Verengt wurde nichts. Wer die Regex enger fasst, um die Liste wirksam zu
+    // machen, bricht genau den Fall, für den sie da ist (Vite bindet 5274+,
+    // wenn 5273 belegt ist — issue #51).
+    for (const origin of ['http://localhost:5402', 'http://127.0.0.1:5402', 'https://localhost:1']) {
+      const res = await anfrage(waechter, {
+        method: 'POST', url: '/fs-read', headers: { ...json, Origin: origin }, body: '{}',
+      })
+      expect(res.status, origin).toBe(DURCHGEREICHT)
+    }
+  })
+
+  it('nennt den echten Port in der Ablehnung — die einzige Stelle, an der er noch wirkt', async () => {
+    // `port` ist keine Regel mehr, sondern die Diagnose: „Invalid Origin"
+    // allein sagt nicht, was erwartet war. Diese Zusicherung ist die Sonde für
+    // die eine verbliebene Wirkung des Parameters.
+    const res = await anfrage(waechter, {
+      method: 'POST', url: '/fs-read',
+      headers: { ...json, Origin: 'https://boese.example' }, body: '{}',
+    })
+    expect(res.status).toBe(403)
+    expect(res.text).toContain('Invalid Origin')
+    expect(res.text).toContain('http://localhost:5399')
+    expect(res.text).toContain('loopback on ANY port')
+  })
+
+  it('nennt den Port des Wächters, den man ihm gegeben hat, und nicht 5399 aus Versehen', async () => {
+    // Die Gegenprobe zur Zeile darüber: stünde die Zahl fest im Text, wäre
+    // jener Fall auch grün, ohne dass der Parameter irgendetwas täte.
+    const anderer = createLocalApiGuard(5402)
+    const res = await anfrage(anderer, {
+      method: 'POST', url: '/fs-read',
+      headers: { ...json, Origin: 'https://boese.example' }, body: '{}',
+    })
+    expect(res.text).toContain('http://localhost:5402')
+    expect(res.text).not.toContain('5399')
   })
 })
 
