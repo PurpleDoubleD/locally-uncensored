@@ -2,10 +2,25 @@
  * Das Monogramm im Fensterbalken — Audit Welle 3, Punkt 5:
  * „Titlebar-Monogramm streichen, SVG statt 512px-PNG".
  *
- * Der Test tut zwei Dinge, und das zweite ist das wichtigere:
+ * Der Bullet hat zwei Haelften, und bis zum 01.09.2026 war nur die zweite
+ * gegangen. Dieser Test haelt jetzt beide fest:
  *
- *   1. Er nagelt fest, dass der Balken die Vektorfassung zieht.
- *   2. Er rechnet die BEHAUPTUNGEN nach, mit denen das begruendet wurde —
+ *   1. Der Balken zieht die Vektorfassung — und zwar aus `brand.ts`, nicht
+ *      mehr aus einer eigenen Kopie der Konstante. (Bis hierher stand hier
+ *      `expect(CODE).toMatch(/const MONOGRAM = '\/LU-monogram\.svg'/)`, was
+ *      genau diese zweite Kopie festgenagelt hat. Die Zeile ist nicht
+ *      weggefallen, sondern umgedreht: verlangt wird jetzt der Import UND
+ *      die Abwesenheit jedes eigenen Pfadliterals. Das ist die schaerfere
+ *      Bedingung — sie verbietet, was die alte erzwungen hat.)
+ *
+ *   2. „Streichen" ist auf mac ausgefuehrt und auf Windows/Linux begruendet
+ *      NICHT ausgefuehrt. Der Test nagelt beide Seiten fest, damit die
+ *      Entscheidung nicht als Zufall wieder umkippt: der mac-Streifen gibt
+ *      ein leeres, selbstschliessendes Drag-Region-Div zurueck (die Hoehe
+ *      muss bleiben, sonst rutscht der Inhalt unter die nativen Lichter),
+ *      der Windows/Linux-Zweig behaelt genau ein 18px-Zeichen.
+ *
+ *   3. Er rechnet die BEHAUPTUNGEN nach, mit denen das begruendet wurde —
  *      inklusive der unbequemen. Die SVG-Datei ist GROESSER als das PNG, und
  *      der Boot-Chunk aendert sich dadurch um nichts, weil `public/` nie
  *      gebuendelt wird. Wer diese Begruendung eines Tages zu „spart Platz"
@@ -33,23 +48,53 @@ function pngSize(file: string): [number, number] {
 }
 
 describe('der Fensterbalken zieht die Vektorfassung', () => {
-  it('genau ein Pfad, und der zeigt auf das SVG', () => {
-    expect(CODE).toMatch(/const MONOGRAM = '\/LU-monogram\.svg'/)
-    expect(CODE).not.toContain('LU-monogram-bw.png')
-    expect(CODE).not.toContain('LU-monogram-white.png')
+  it('genau eine Quelle fuer den Pfad, und die ist `brand.ts`', () => {
+    expect(CODE).toMatch(/import \{ MONOGRAM, MONOGRAM_INVERT \} from '\.\/brand'/)
+    // Kein eigenes Pfadliteral mehr — weder als Konstante noch im JSX.
+    expect(CODE).not.toMatch(/'\/LU-monogram/)
+    expect(CODE).not.toMatch(/const MONOGRAM\s*=/)
   })
 
-  it('beide Fassungen des Balkens (mac und Windows/Linux) nehmen denselben Pfad', () => {
-    // Der Balken existiert zweimal: mac zeichnet keine eigenen Fensterknoepfe
-    // und schiebt die Marke nach rechts. Vorher stand der Pfad zweimal als
-    // Literal da und konnte einzeln veralten.
+  it('und kein Rastername, unter keinem seiner Aliase', () => {
+    expect(CODE).not.toContain('LU-monogram-bw.png')
+    expect(CODE).not.toContain('LU-monogram-white.png')
+    expect(CODE).not.toMatch(/\.(png|jpe?g|webp|gif|bmp)\b/)
+  })
+
+  it('auch das Invertierungsrezept kommt aus `brand.ts`, nicht von Hand', () => {
+    expect(CODE).toContain('${MONOGRAM_INVERT}')
+    expect(CODE).not.toMatch(/className="[^"]*dark:invert-0 invert/)
+  })
+})
+
+describe('„streichen" — auf mac ausgefuehrt, auf Windows/Linux begruendet nicht', () => {
+  it('der mac-Streifen zeigt gar kein Zeichen mehr', () => {
+    // Ein leeres, selbstschliessendes Div: kein Kind, also auch kein <img>.
+    expect(CODE).toMatch(/if \(isMacOS\(\)\) \{\s*return \(\s*<div[^>]*\/>\s*\)\s*\}/)
+  })
+
+  it('aber der Streifen selbst bleibt — er reserviert die Hoehe fuer die nativen Lichter', () => {
+    const macBlock = CODE.slice(CODE.indexOf('if (isMacOS())'))
+    const bis = macBlock.indexOf('/>')
+    expect(bis).toBeGreaterThan(0)
+    const div = macBlock.slice(0, bis)
+    expect(div).toContain('data-tauri-drag-region')
+    expect(div).toContain('h-8')
+  })
+
+  it('Windows/Linux behaelt genau EIN Zeichen — das Fenstersymbol des ersetzten Systembalkens', () => {
     const imgs = [...CODE.matchAll(/<img src=\{?([^ }]+)\}?/g)].map((m) => m[1])
-    expect(imgs).toHaveLength(2)
-    expect(new Set(imgs)).toEqual(new Set(['MONOGRAM']))
+    expect(imgs).toEqual(['MONOGRAM'])
   })
 
   it('und rendert es weiterhin auf 18px', () => {
-    expect((CODE.match(/width=\{18\} height=\{18\}/g) ?? []).length).toBe(2)
+    expect((CODE.match(/width=\{18\} height=\{18\}/g) ?? []).length).toBe(1)
+  })
+
+  it('die Begruendung fuer den Unterschied steht in der Datei, nicht nur im Bericht', () => {
+    // Ohne sie ist die Ungleichbehandlung der beiden Zweige eine Schlamperei.
+    expect(TITLEBAR).toMatch(/decorations: false/)
+    expect(TITLEBAR).toMatch(/KEIN App-Symbol/)
   })
 })
 

@@ -7,6 +7,7 @@ import { INTENT_MAP } from './intents'
 import { stageShowsSetupCard, laneModelCount } from './stageGate'
 import { GeneratingView, ResultView } from './OutputView'
 import { EmptyState } from '../ui/EmptyState'
+import { MONOGRAM, MONOGRAM_INVERT } from '../../layout/brand'
 import { ICON_STROKE_MARK } from '../../ui/icon-size'
 import { Button } from '../ui/Button'
 import { cn } from '../ui/cn'
@@ -121,8 +122,19 @@ export function Stage({ displayed, onOpenMaskEditor, onEditResult, onFullscreen 
       />
     )
   } else {
+    // D-A9/D-W3-7, die zwoelfte Einbindung: hier stand die 512x512-Bitmap des
+    // Monogramms unter ihrem zweiten Dateinamen (die `-white`-Fassung ist
+    // byteidentisch mit der `-bw`-Fassung, derselbe MD5), gezeigt auf 56px.
+    // Sie stand in KEINER der beiden Audit-Listen und ist auch durch die Wache
+    // von `b3f0f786` gefallen, weil die nach EINEM Namen gesucht hat statt
+    // nach dem Muster. `kein-raster-als-hauszeichen.test.ts` sucht das Muster.
+    //
+    // `logoClassName` ist neu und kein Beiwerk: `create/` ist dunkel-zuerst
+    // portiert und sitzt in `<main>` auf `bg-white dark:bg-[#1e1e1e]`. Das
+    // Zeichen ist weiss gezeichnet und stand im Hellmodus unsichtbar auf
+    // Weiss — den Text daneben faengt `index.css:863-868` ab, das Bild nicht.
     body = (
-      <EmptyState icon={Sparkles} logoSrc="/LU-monogram-white.png" title={teachTitle(intent)}>
+      <EmptyState icon={Sparkles} logoSrc={MONOGRAM} logoClassName={MONOGRAM_INVERT} title={teachTitle(intent)}>
         {meta.examples.length > 0 && (
           <div className="flex flex-wrap justify-center gap-1.5 pt-1">
             {meta.examples.map((ex) => (

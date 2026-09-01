@@ -15,6 +15,15 @@ interface Props {
   icon: LucideIcon
   /** When set, renders this image (e.g. the LU monogram) instead of the icon. */
   logoSrc?: string
+  /**
+   * Zusatzklassen fuer das Bild aus `logoSrc`. Existiert, weil das Monogramm
+   * weiss gezeichnet ist und im Hellmodus invertiert werden muss
+   * (`layout/brand.ts` → `MONOGRAM_INVERT`); ohne das stand hier bis zum
+   * 01.09.2026 eine weisse Marke auf der weissen Create-Flaeche. Das Rezept
+   * gehoert an die Call-Site und nicht hier hinein — dieser Baustein weiss
+   * nicht, welches Bild er zeigt.
+   */
+  logoClassName?: string
   title: string
   description?: string
   action?: Action
@@ -23,7 +32,7 @@ interface Props {
   tone?: 'neutral' | 'accent'
 }
 
-export function EmptyState({ icon: Icon, logoSrc, title, description, action, secondaryAction, children, tone = 'neutral' }: Props) {
+export function EmptyState({ icon: Icon, logoSrc, logoClassName = '', title, description, action, secondaryAction, children, tone = 'neutral' }: Props) {
   return (
     <div className="h-full flex flex-col items-center justify-center text-center px-6">
       <motion.div
@@ -33,7 +42,7 @@ export function EmptyState({ icon: Icon, logoSrc, title, description, action, se
         className="max-w-sm space-y-4"
       >
         {logoSrc ? (
-          <img src={logoSrc} alt="" className="mx-auto h-14 w-14 object-contain opacity-90 select-none" draggable={false} />
+          <img src={logoSrc} alt="" className={`mx-auto h-14 w-14 object-contain opacity-90 select-none ${logoClassName}`} draggable={false} />
         ) : (
           // David 2026-07-13: no gray bubble behind the icon — the SVG stands on
           // its own, lifted only by a soft purple accent glow (a gentle, slow
