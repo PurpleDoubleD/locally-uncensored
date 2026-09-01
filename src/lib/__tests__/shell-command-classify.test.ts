@@ -206,10 +206,11 @@ describe('the --no-verify ban applies to a commit anywhere in the line', () => {
     expect(refused('git commit --no-verify -m x > /tmp/out')).toBe(true)
   })
 
-  it('refuses even when a quoted separator splits the flag off the commit', () => {
-    // Der Split ist anfuehrungszeichen-blind: `;` in der Nachricht trennt das
-    // Flag vom Commit. Deshalb wird --no-verify weiter gegen die GANZE Zeile
-    // geprueft, nicht je Segment.
+  it('refuses when a separator inside the commit message looks like a chain', () => {
+    // Die Umgehung, wegen der --no-verify frueher gegen die ganze Zeile
+    // geprueft werden musste: `;` in der Nachricht trennte das Flag vom
+    // Commit. Der Split zaehlt jetzt Anfuehrungszeichen, also ist das EIN
+    // Segment und die Pruefung darf segmentlokal bleiben.
     expect(refused('git commit -m "a;b" --no-verify')).toBe(true)
   })
 
@@ -276,24 +277,118 @@ describe('the ban survives git\'s own global options in front of `commit`', () =
 // faellt jede Zeile mit, die irgendwo das Flag traegt UND irgendwo ein
 // Commit-Segment hat. Das ist die gewollte Richtung — lieber eine Zeile zu
 // viel ablehnen als eine Umgehung offen lassen.
-describe('accepted false alarms of the whole-line flag test', () => {
-  const refused = (c: string) => rejectShellCommand(c) !== null
-
-  it('refuses a commit whose line merely MENTIONS the flag elsewhere', () => {
-    // Der Commit selbst ist gewoehnlich; das Flag steht im echo. Ablehnen ist
-    // richtig: unterscheiden koennte man die beiden nur per Segment, und die
-    // Segmentpruefung ist genau die Umgehung (`git commit -m "a;b"
-    // --no-verify`), die oben geschlossen wurde.
-    expect(refused('echo --no-verify && git commit -m x')).toBe(true)
+// Der Split zaehlt jetzt Anfuehrungszeichen, also darf das Flag SEGMENTLOKAL
+// geprueft werden. Damit verschwinden die drei Fehlalarmklassen, die die
+// Ganzzeilen-Pruefung erzeugt hat — sie war nur noetig, WEIL der Split blind
+// war. Diese beiden Erwartungen standen vorher auf `true` und kippen hier
+// bewusst; genau dafuer waren sie festgenagelt.
+describe('the false alarms the whole-line flag test used to produce are gone', () => {
+  it('an ordinary commit chained with a push that skips the PUSH hook runs', () => {
+    // --no-verify gehoert hier zu `git push`. Die Sperre gilt dem Commit-Hook.
+    expect(rejectShellCommand('git commit -m x && git push --no-verify')).toBeNull()
+    expect(rejectShellCommand('git add -A && git commit -m wip && git push --no-verify')).toBeNull()
   })
 
-  it('refuses an ordinary commit chained with a push that skips the PUSH hook', () => {
-    // Bekannter Fehlalarm, im Bericht als offene Frage vermerkt: hier gehoert
-    // --no-verify zu `git push`, nicht zum Commit, und der Nutzer bekommt eine
-    // Meldung ueber `git commit --no-verify`, die nicht zu seiner Zeile passt.
-    // Faellt weg, sobald die Sperre segmentlokal entscheidet — dann kippt diese
-    // Erwartung bewusst, statt still.
-    expect(refused('git add -A && git commit -m wip && git push --no-verify')).toBe(true)
+  it('an ordinary commit chained with cargo\'s verify build runs', () => {
+    expect(rejectShellCommand('git commit -m release && cargo publish --no-verify')).toBeNull()
+  })
+
+  it('a commit whose line merely MENTIONS the flag in another command runs', () => {
+    expect(rejectShellCommand('echo --no-verify && git commit -m x')).toBeNull()
+  })
+
+  it('a quoted chain that only LOOKS like a commit runs', () => {
+    // Ein Kommando (echo). Der blinde Split hat daraus zwei gemacht und das
+    // zweite als Commit gelesen.
+    expect(rejectShellCommand('echo "a && git commit" --no-verify')).toBeNull()
+  })
+})
+
+// Was der Split kann und was nicht. Die Sicherheitsbedingung: ein falscher
+// Split darf das Flag NIEMALS von seinem Commit trennen. Zusammenfassen ist
+// harmlos (lehnt mehr ab), Auftrennen ist die Umgehung.
+describe('the split counts quotes', () => {
+  const refused = (c: string) => rejectShellCommand(c) !== null
+
+  it('a separator inside DOUBLE quotes does not split the command', () => {
+    expect(refused('git commit -m "a;b" --no-verify')).toBe(true)
+    expect(refused('git commit -m "a && b" --no-verify')).toBe(true)
+    expect(refused('git commit -m "a | b" --no-verify')).toBe(true)
+  })
+
+  it('a separator inside SINGLE quotes does not split the command', () => {
+    expect(refused("git commit -m 'a && b' --no-verify")).toBe(true)
+    expect(refused("git commit -m 'a;b' --no-verify")).toBe(true)
+  })
+
+  it('a quote inside the other kind of quote is text, not a delimiter', () => {
+    expect(refused('git commit -m "it\'s fine; really" --no-verify')).toBe(true)
+    expect(refused('git commit -m \'say "hi"; ok\' --no-verify')).toBe(true)
+  })
+
+  it('an escaped quote does not open a string', () => {
+    expect(refused('git commit -m "a \\" b; c" --no-verify')).toBe(true)
+    expect(refused('git commit -m \\" --no-verify')).toBe(true)
+  })
+
+  it('a backslash-escaped newline keeps the flag with its commit', () => {
+    // Zeilenfortsetzung: fuer die Shell EIN Kommando. Zaehlt der Scan den
+    // Backslash nicht, wird der Zeilenumbruch zum Trenner und das Flag landet
+    // in einem eigenen Segment — die Sperre saehe es nicht mehr.
+    expect(refused('git commit -m x \\\n--no-verify')).toBe(true)
+  })
+
+  it('a backslash inside single quotes stays literal (POSIX)', () => {
+    expect(refused("git commit -m 'a\\' --no-verify")).toBe(true)
+  })
+
+  it('still splits at separators OUTSIDE quotes', () => {
+    expect(refused('echo "hello world" && git commit --no-verify -m x')).toBe(true)
+    expect(rejectShellCommand('echo "hello world" && git commit -m x')).toBeNull()
+  })
+})
+
+// Im Zweifel ablehnen. Bei unbalancierten Anfuehrungszeichen ist nicht mehr
+// bestimmbar, wo ein Kommando endet — dann wird nicht geraten, sondern auf die
+// alte Ganzzeilen-Pruefung zurueckgefallen.
+describe('unbalanced quotes fall back to the whole line', () => {
+  const refused = (c: string) => rejectShellCommand(c) !== null
+
+  it('refuses a commit hiding behind an unterminated string', () => {
+    // Ohne den Rueckfall liefe die ganze Restzeile als EIN Segment, das mit
+    // `echo` beginnt — der Commit waere unsichtbar und die Zeile liefe durch.
+    expect(refused("echo 'unclosed && git commit --no-verify")).toBe(true)
+    expect(refused('echo "unclosed && git commit --no-verify')).toBe(true)
+  })
+
+  it('refuses an unterminated commit line that carries the flag', () => {
+    expect(refused('git commit -m "a && b --no-verify')).toBe(true)
+  })
+
+  it('does not invent a refusal for an unterminated line without the flag', () => {
+    expect(rejectShellCommand('echo "unclosed && git commit -m x')).toBeNull()
+  })
+})
+
+// Der EINE Fehlalarm, der bleibt, und warum: das Flag steht in einem
+// Commit-Segment. Ohne echtes Argument-Parsing — also ohne zu wissen, dass
+// `-m` sein naechstes Wort als Nachricht frisst — ist die Erwaehnung in der
+// Nachricht nicht vom Flag zu unterscheiden. Bewusster Rest.
+describe('the one false alarm that stays', () => {
+  it('refuses a commit whose MESSAGE mentions the flag', () => {
+    expect(rejectShellCommand('git commit -m "nie wieder --no-verify"')).not.toBeNull()
+  })
+})
+
+// Und das eine Loch, das offen bleibt: ein Wort VOR `git`. Der Segmenttest
+// verlangt, dass das Segment mit `git` beginnt; es zu weiten hiesse Wrapper zu
+// erraten (sudo, env, nice, time, doas, …), und jede Rateliste ist entweder
+// unvollstaendig oder faengt Fremdes. Hier festgehalten, damit es sichtbar ist
+// und nicht still: wer es schliesst, kippt diese Erwartungen bewusst.
+describe('known hole: a word in front of `git`', () => {
+  it('does not see a commit behind a wrapper or an env prefix', () => {
+    expect(rejectShellCommand('sudo git commit --no-verify')).toBeNull()
+    expect(rejectShellCommand('GIT_DIR=x git commit --no-verify')).toBeNull()
   })
 })
 

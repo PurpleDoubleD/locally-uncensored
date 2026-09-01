@@ -132,18 +132,127 @@ export function isReadOnlyCommand(command: string): boolean {
 }
 
 /**
- * Every command in a chained line.
- *
- * Split on the SAME {@link CHAINING} pattern `isReadOnlyCommand` refuses on,
- * so both functions agree on what a separator is: `;` `&` `|`, a newline,
- * every output redirection, and the two substitution openers. The pattern has
- * no capture groups, so `split` drops the separators and hands back only the
- * commands between them — including the BODY of a `$(…)` or a backtick pair,
- * which is a place a commit hides just as well as after an `&&`.
+ * The separator characters {@link CHAINING} names, as single characters:
+ * command separators, background, pipes, backtick substitution, newlines and
+ * every output redirection. `$(` and `<(` are two characters and handled
+ * beside this.
  */
-function commandSegments(command: string): string[] {
-  return command.split(CHAINING).map((s) => s.trim()).filter((s) => s.length > 0)
+const SEPARATOR_CHARS = ';&|`\n\r>'
+
+/**
+ * Every command in a chained line, counting quotes.
+ *
+ * THE RULE THIS FUNCTION EXISTS FOR — and the reason it is a scan and not a
+ * regex: a wrong split must never separate `--no-verify` from the commit it
+ * belongs to. MERGING two commands into one segment is harmless; the ban then
+ * tests a wider string and can only refuse MORE. SPLITTING one command into
+ * two is what lets the flag land in a different segment than its commit, and
+ * that is a bypass. So this errs towards merging wherever it is unsure, and
+ * when the quotes do not balance it gives up (`null`) rather than guess —
+ * the caller then falls back to testing the whole line, which is stricter
+ * than any split could be.
+ *
+ * The separators are the ones {@link CHAINING} already names, so this agrees
+ * with `isReadOnlyCommand` on what a separator IS — but only outside a quoted
+ * string. That is the entire difference from the blind split this replaces:
+ * `git commit -m "a;b" --no-verify` is ONE command, so the flag stays with
+ * its commit and the ban no longer has to test the whole line to see it.
+ *
+ * A backslash escapes the next character outside quotes and inside double
+ * quotes (inside single quotes POSIX says it is literal). That is not
+ * decoration: a line continuation — `git commit -m x \` + newline +
+ * `--no-verify` — is ONE command to the shell, and treating that newline as a
+ * separator would put the flag in a segment of its own.
+ *
+ * Deliberately NOT a shell tokenizer. It knows quotes and backslashes and
+ * nothing else: no word splitting, no expansion, no operator precedence.
+ */
+function quoteAwareSegments(command: string): string[] | null {
+  const segments: string[] = []
+  let current = ''
+  let quote: '"' | "'" | null = null
+
+  for (let i = 0; i < command.length; i++) {
+    const ch = command[i]
+
+    // Escape. Inside single quotes a backslash is a literal character, so the
+    // escape only applies outside quotes and inside double quotes.
+    if (ch === '\\' && quote !== "'" && i + 1 < command.length) {
+      current += ch + command[i + 1]
+      i++
+      continue
+    }
+
+    if (quote !== null) {
+      current += ch
+      if (ch === quote) quote = null
+      continue
+    }
+
+    if (ch === '"' || ch === "'") {
+      quote = ch
+      current += ch
+      continue
+    }
+
+    if (SEPARATOR_CHARS.includes(ch)) {
+      segments.push(current)
+      current = ''
+      continue
+    }
+    // `$(` and `<(` open a command of their own — a commit hides in there as
+    // well as after an `&&`.
+    if ((ch === '$' || ch === '<') && command[i + 1] === '(') {
+      segments.push(current)
+      current = ''
+      i++
+      continue
+    }
+
+    current += ch
+  }
+
+  // An opened string that never closed. We cannot say where one command ends,
+  // so we say nothing.
+  if (quote !== null) return null
+
+  segments.push(current)
+  return segments.map((seg) => seg.trim()).filter((seg) => seg.length > 0)
 }
+
+/**
+ * The blind split — every separator, quotes and all. Only used when
+ * {@link quoteAwareSegments} gives up, where over-splitting is the safe
+ * direction because the flag is then tested against the whole line anyway.
+ */
+function blindSegments(command: string): string[] {
+  return command.split(CHAINING).map((seg) => seg.trim()).filter((seg) => seg.length > 0)
+}
+
+/**
+ * Does this segment invoke `git commit`?
+ *
+ * It starts with `git` and mentions `commit` as a word — not `^git\s+commit`,
+ * which git's own global options walk straight past (`git -C /repo commit`,
+ * `git -c a=b commit`, `git --git-dir=… commit`). Skipping those options
+ * properly would mean parsing git's option grammar AND shell quoting
+ * (`git -c 'a b' commit` defeats any token walk), and an option-skipper that
+ * is wrong in the permissive direction is a new bypass rather than a fix.
+ * This test needs to know none of it: it is deliberately too coarse, in the
+ * safe direction. What it costs is a segment that merely SAYS commit while
+ * carrying the flag — `git log --grep=commit --no-verify`, which nobody
+ * writes, since `--no-verify` is no `log` flag.
+ */
+function invokesGitCommit(segment: string): boolean {
+  return /^git\b/.test(segment) && /\bcommit\b/.test(segment)
+}
+
+function carriesNoVerify(text: string): boolean {
+  return /--no-verify\b/.test(text)
+}
+
+const NO_VERIFY_REFUSAL =
+  'Refused: git commit --no-verify skips the repository hooks. Fix what the hook reports instead of silencing it, then commit normally.'
 
 /**
  * The one refusal that stays hard: --no-verify on a commit. The old
@@ -161,35 +270,32 @@ function commandSegments(command: string): string[] {
  * case; `commandKind` is left alone because `commandTimeoutMs` and
  * `commandIcon` read it too.
  *
- * `--no-verify` is deliberately still matched against the WHOLE line rather
- * than per segment: the split is quote-blind, so a `;` inside a commit
- * message would otherwise put the flag in a different segment from the commit
- * (`git commit -m "a;b" --no-verify`) and hand back the very bypass this is
- * closing. Testing the wider string can only ever refuse more, never less.
+ * The flag is tested PER SEGMENT, which it could not be while the split was
+ * quote-blind: a `;` inside a commit message put the flag in a different
+ * segment than its commit, so the ban had to test the whole line to still see
+ * it — and then refused three shapes that were never the point:
  *
- * A segment counts as a commit when it STARTS with `git` and mentions
- * `commit` as a word — not `^git\s+commit`, which git's own global options
- * walk straight past (`git -C /repo commit`, `git -c a=b commit`,
- * `git --git-dir=… commit`). Skipping those options properly would mean
- * parsing git's option grammar AND shell quoting (`git -c 'a b' commit`
- * defeats any token walk), and an option-skipper that is wrong in the
- * permissive direction is a new bypass rather than a fix. This test needs to
- * know none of it: it is deliberately too coarse, in the same direction as
- * the whole-line flag test. What it costs is a segment that merely SAYS
- * commit while the line also carries the flag — `git log --grep=commit
- * --no-verify`, which is not a thing anybody writes, since `--no-verify` is
- * no `log` flag.
+ *   git commit -m x && git push --no-verify          the PUSH hook is meant
+ *   git commit -m rel && cargo publish --no-verify   cargo's verify build
+ *   echo --no-verify && git commit -m x              the flag is in the echo
+ *
+ * A ban that refuses what it does not mean is one people learn to route
+ * around, and then they route around it where it was right too. Counting
+ * quotes removes the cause, so the test can be as narrow as the rule.
  *
  * Returns the refusal text, or null when the command may run.
  */
 export function rejectShellCommand(command: string): string | null {
-  const commits = commandSegments(command).some(
-    (seg) => /^git\b/.test(seg) && /\bcommit\b/.test(seg),
-  )
-  if (commits && /--no-verify\b/.test(command)) {
-    return 'Refused: git commit --no-verify skips the repository hooks. Fix what the hook reports instead of silencing it, then commit normally.'
-  }
-  return null
+  const segments = quoteAwareSegments(command)
+  const refuse = segments === null
+    // Quotes did not balance. We do not guess where one command ends: the
+    // line is tested the old way — a commit in ANY (blindly split) segment
+    // plus the flag ANYWHERE — which refuses at least as much as any split of
+    // it would. In doubt, refuse.
+    ? blindSegments(command).some(invokesGitCommit) && carriesNoVerify(command)
+    : segments.some((seg) => invokesGitCommit(seg) && carriesNoVerify(seg))
+
+  return refuse ? NO_VERIFY_REFUSAL : null
 }
 
 /** Timeout for the command, in ms. A recognised test run keeps run_tests' cap. */
