@@ -33,13 +33,9 @@
  */
 import { describe, it, expect } from 'vitest'
 import { catalogAddresses, classifyAddressProbe, type AddressVerdict } from '../discover'
+import { alleKlopfen, klopfen, BEKANNT_TOT } from './hf-live-probe'
 
 const LIVE = process.env.LIVE_HF === '1'
-
-/** Gleichzeitige Anfragen. Klein gehalten: das Tor soll den Anbieter nicht
- *  aergern, und ein 429 macht die Antwort wertlos statt rot. */
-const PARALLEL = 4
-const TIMEOUT_PRO_ANFRAGE_MS = 20_000
 
 interface Befund {
   url: string
@@ -49,58 +45,31 @@ interface Befund {
   note?: string
 }
 
-async function klopfen(url: string): Promise<{ status: number; note?: string }> {
-  try {
-    const r = await fetch(url, {
-      method: 'HEAD',
-      redirect: 'follow',
-      signal: AbortSignal.timeout(TIMEOUT_PRO_ANFRAGE_MS),
-    })
-    return { status: r.status }
-  } catch (err) {
-    // Kein Netz, DNS weg, Zeit abgelaufen: das ist keine Aussage ueber die
-    // Adresse. Status 0 laeuft durch classifyAddressProbe auf 'unclear'.
-    return { status: 0, note: String(err) }
-  }
-}
-
-async function alleKlopfen(): Promise<Befund[]> {
+async function katalogKlopfen(): Promise<Befund[]> {
   const adressen = catalogAddresses()
-  const befunde: Befund[] = []
-  let naechste = 0
-  const arbeiter = Array.from({ length: PARALLEL }, async () => {
-    for (let i = naechste++; i < adressen.length; i = naechste++) {
-      const a = adressen[i]
-      const { status, note } = await klopfen(a.url)
-      befunde.push({ url: a.url, where: a.where, status, verdict: classifyAddressProbe(status), note })
+  const sonden = await alleKlopfen(adressen.map((a) => a.url))
+  return adressen.map((a) => {
+    const s = sonden.get(a.url)
+    return {
+      url: a.url,
+      where: a.where,
+      status: s?.status ?? 0,
+      verdict: s?.verdict ?? classifyAddressProbe(0),
+      note: s?.note,
     }
   })
-  await Promise.all(arbeiter)
-  return befunde
 }
 
 const zeile = (b: Befund) => `HTTP ${b.status}  ${b.url}\n      genannt von: ${b.where.join(', ')}${b.note ? `\n      ${b.note}` : ''}`
 
-/**
- * Adressen, die nachweislich tot sind und fuer die es KEINEN geprueften Ersatz
- * gibt. Sie stehen hier, damit ein Tor, das an ihnen dauerhaft rot waere, kein
- * Tor mehr waere — ein dauerhaft rotes Gate wird ignoriert, und dann faellt
- * die naechste Adresse, die stirbt, niemandem mehr auf.
- *
- * Die Liste kann nicht zum Friedhof werden: der zweite Test unten wird ROT,
- * sobald eine Adresse von hier wieder antwortet. Wer einen Eintrag hier
- * ablegt, muss den Grund im Katalog selbst dokumentieren.
- */
-const BEKANNT_TOT: Record<string, string> = {
-  'https://huggingface.co/huihui-ai/Huihui-DeepSeek-V4-Flash-abliterated-GGUF/resolve/main/DeepSeek-V4-Flash-UD-IQ1_M.gguf':
-    'Repo privat oder geloescht (HTTP 401), kein geprueftes Ersatz-Repo · Begruendung bei den Eintraegen in discover.ts',
-  'https://huggingface.co/huihui-ai/Huihui-DeepSeek-V4-Flash-abliterated-GGUF/resolve/main/ggml-model-Q3_K_S.gguf':
-    'Repo privat oder geloescht (HTTP 401), kein geprueftes Ersatz-Repo · Begruendung bei den Eintraegen in discover.ts',
-}
+// Die Ausnahmeliste `BEKANNT_TOT` liegt in `hf-live-probe.ts`, weil der
+// Groessen-Waechter sie genauso braucht: eine Adresse, die es nicht mehr gibt,
+// ist dort der Grund, warum eine Datei ungemessen bleibt. Zwei Listen waeren
+// zwei Chancen, still uneins zu werden.
 
 describe.runIf(LIVE)('Katalog-Adressen gegen die echten Dateien', () => {
   it('keine Adresse des Katalogs stirbt unbemerkt', { timeout: 600_000 }, async () => {
-    const befunde = await alleKlopfen()
+    const befunde = await katalogKlopfen()
     const tot = befunde.filter((b) => b.verdict === 'dead')
     const unklar = befunde.filter((b) => b.verdict === 'unclear')
     const erreichbar = befunde.length - tot.length - unklar.length
