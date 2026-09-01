@@ -1,9 +1,21 @@
 import { defineConfig, parseAst, type Plugin } from 'vite'
+import type { Connect } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
-import { spawn, execSync, type ChildProcess } from 'child_process'
-import { existsSync, readdirSync, createWriteStream, mkdirSync, statSync, type Dirent } from 'fs'
+import { spawn, execSync, execFileSync, type ChildProcess } from 'child_process'
+import {
+  existsSync,
+  readdirSync,
+  createWriteStream,
+  mkdirSync,
+  readFileSync,
+  statSync,
+  statfsSync,
+  writeFileSync,
+  type Dirent,
+} from 'fs'
 import { resolve, join, basename, isAbsolute } from 'path'
+import type { IncomingMessage, ServerResponse } from 'http'
 import https from 'https'
 import http from 'http'
 import { config } from 'dotenv'
@@ -18,6 +30,39 @@ import { devResolveWithinJail, effectiveByteCap, JailEscapeError } from './src/l
 // src-tauri/src/app_identity.rs.
 import { AGENT_WORKSPACE_DIR, APP_CONFIG_DIR } from './src/lib/app-identity'
 import { postContentTypeAllowed, postContentTypeError } from './src/lib/local-api-guard'
+// Die herausgelösten, getesteten Teile dieses Dev-Servers. Sie liegen unter
+// src/dev/, damit vitest sie sieht; alles dort ist rein (keine node:*-Importe),
+// weil das App-tsconfig keine Node-Typen kennt — dieselbe Regel wie bei
+// src/lib/dev-fs-jail.ts.
+import {
+  bodyFlag,
+  bodyNumber,
+  bodyRecords,
+  bodyString,
+  decodeBodyChunks,
+  parseJsonBody,
+} from './src/dev/http-body'
+import { createSsrfPolicy } from './src/dev/ssrf-policy'
+import {
+  applyConsoleRemovals,
+  collectConsoleRemovals,
+  isStrippableModule,
+} from './src/dev/console-strip'
+import {
+  comfyDestPath,
+  customNodeDir,
+  downloadToPathDest,
+  modelDirCandidates,
+} from './src/dev/model-paths'
+import {
+  parseBraveResults,
+  parseDdgHtmlResults,
+  parseSearxngResults,
+  parseTavilyResults,
+  parseWikipediaResults,
+  type WebSearchResult,
+} from './src/dev/web-search-parse'
+import { asNumber, asString, errorText, prop } from './src/types/json-guards'
 
 // The port the dev server binds and the only port the /local-api origin check
 // treats as canonical. Kept next to the guard it feeds so the two can't drift
@@ -34,66 +79,104 @@ const DEV_PORT = 5273
 // (src-tauri/src/commands/proxy.rs); this is the parity guard for the
 // `npm run dev` / web build (konata's SSH-tunnel path). Best-effort against
 // DNS-rebind — this is a dev server, not the production trust boundary.
-function isBlockedIp(ip: string): boolean {
-  const v = net.isIP(ip)
-  if (v === 4) {
-    const p = ip.split('.').map(Number)
-    if (p.length !== 4 || p.some((n) => Number.isNaN(n) || n < 0 || n > 255)) return true
-    const [a, b] = p
-    if (a === 0) return true // 0.0.0.0/8 "this host"
-    if (a === 10) return true // 10/8 private
-    if (a === 127) return true // loopback
-    if (a === 169 && b === 254) return true // link-local + 169.254.169.254 cloud metadata
-    if (a === 172 && b >= 16 && b <= 31) return true // 172.16/12 private
-    if (a === 192 && b === 168) return true // 192.168/16 private
-    if (a === 100 && b >= 64 && b <= 127) return true // 100.64/10 CGNAT
-    if (a >= 224) return true // multicast + reserved
-    return false
-  }
-  if (v === 6) {
-    const lc = ip.toLowerCase().replace(/^\[|\]$/g, '')
-    if (lc === '::1' || lc === '::') return true // loopback / unspecified
-    if (lc.startsWith('fe80')) return true // link-local
-    if (lc.startsWith('fc') || lc.startsWith('fd')) return true // ULA fc00::/7
-    if (lc.startsWith('64:ff9b:')) return true // NAT64 (embeds an IPv4 — block)
-    // IPv4-mapped IPv6 in BOTH the dotted (::ffff:127.0.0.1) and the hex
-    // (::ffff:7f00:1) forms — decode the embedded IPv4 and re-check it.
-    const dotted = lc.match(/::ffff:(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/)
-    if (dotted) return isBlockedIp(dotted[1])
-    const hex = lc.match(/::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/)
-    if (hex) {
-      const hi = parseInt(hex[1], 16)
-      const lo = parseInt(hex[2], 16)
-      return isBlockedIp(`${(hi >> 8) & 0xff}.${hi & 0xff}.${(lo >> 8) & 0xff}.${lo & 0xff}`)
-    }
-    return false
-  }
-  return false // not an IP literal — caller resolves DNS and re-checks
-}
+//
+// The rule table itself now lives in src/dev/ssrf-policy.ts, next to its test:
+// it used to decide on the SPELLING of an IPv6 address (`startsWith('fe80')`,
+// `/::ffff:…$/`), which only holds while the text is already in canonical
+// compressed form. `net.isIP` stays the oracle for "is this an IP literal at
+// all" and is handed in rather than reimplemented.
+const ssrf = createSsrfPolicy((value) => net.isIP(value))
 
 async function assertPublicUrl(urlStr: string): Promise<URL> {
-  let u: URL
-  try {
-    u = new URL(urlStr)
-  } catch {
-    throw new Error('invalid url')
-  }
-  if (u.protocol !== 'http:' && u.protocol !== 'https:') throw new Error('scheme not allowed')
-  const host = u.hostname.replace(/^\[|\]$/g, '')
-  if (!host) throw new Error('no host')
-  if (host === 'localhost' || host.toLowerCase().endsWith('.localhost')) throw new Error('blocked host')
-  // Reject all-digit decimal / 0x-hex integer hosts (inet_aton SSRF encodings).
-  if (/^\d+$/.test(host) || /^0x[0-9a-f]+$/i.test(host)) throw new Error('blocked numeric host')
-  if (net.isIP(host)) {
-    if (isBlockedIp(host)) throw new Error('blocked ip')
-    return u
-  }
-  const addrs = await dns.promises.lookup(host, { all: true })
-  if (!addrs.length) throw new Error('dns empty')
-  for (const a of addrs) {
-    if (isBlockedIp(a.address)) throw new Error('blocked resolved ip')
-  }
-  return u
+  const verdict = ssrf.checkUrl(urlStr)
+  if (verdict.kind === 'deny') throw new Error(verdict.reason)
+  if (verdict.kind === 'allow') return verdict.url
+  const addrs = await dns.promises.lookup(verdict.host, { all: true })
+  const resolved = ssrf.checkResolved(addrs.map((a) => a.address))
+  if (!resolved.ok) throw new Error(resolved.reason)
+  return verdict.url
+}
+
+// ── Request bodies ──────────────────────────────────────────────
+// Every /local-api POST handler used to open with the same three lines:
+//
+//   let body = ''
+//   req.on('data', (c: any) => { body += c })
+//   req.on('end', () => { const { path } = JSON.parse(body) … })
+//
+// Twenty copies, and two defects copied twenty times with them: `body += c`
+// decodes each chunk on its own (a multi-byte character split across a chunk
+// boundary arrives as U+FFFD), and three of the handlers called JSON.parse
+// with no try — a throw inside an 'end' listener happens long after the
+// middleware returned, so nothing catches it and a single malformed POST takes
+// the whole `npm run dev` process down with it. Both fixes live in
+// src/dev/http-body.ts, next to their test; this is the one call site.
+type JsonBodyHandler = (body: unknown) => void
+
+function withJsonBody(req: IncomingMessage, res: ServerResponse, handle: JsonBodyHandler): void {
+  const chunks: Buffer[] = []
+  req.on('data', (chunk: Buffer) => { chunks.push(chunk) })
+  req.on('end', () => {
+    const parsed = parseJsonBody(decodeBodyChunks(chunks))
+    if (!parsed.ok) {
+      res.writeHead(400, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ error: `Invalid JSON body: ${parsed.error}` }))
+      return
+    }
+    try {
+      handle(parsed.value)
+    } catch (err) {
+      // Same reason as above: we are past the middleware, nobody else is left
+      // to catch this. A 400 beats a dead dev server.
+      res.writeHead(err instanceof JailEscapeError ? 403 : 400, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ error: errorText(err) || String(err) }))
+    }
+  })
+}
+
+/** POST-only endpoints answer 405 to everything else, as they always did. */
+function requirePost(req: IncomingMessage, res: ServerResponse): boolean {
+  if (req.method === 'POST') return true
+  res.writeHead(405)
+  res.end()
+  return false
+}
+
+/** One JSON response, the shape every handler here writes. */
+function sendJson(res: ServerResponse, status: number, payload: unknown): void {
+  res.writeHead(status, { 'Content-Type': 'application/json' })
+  res.end(JSON.stringify(payload))
+}
+
+/**
+ * The error answer for a handler that resolves a caller-supplied path: a jail
+ * escape is a 403 and says so, everything else keeps the 400 these endpoints
+ * always answered with.
+ */
+function failRequest(res: ServerResponse, err: unknown): void {
+  sendJson(res, err instanceof JailEscapeError ? 403 : 400, { error: errorText(err) || String(err) })
+}
+
+/** One grep hit of /local-api/fs-search: a line number and the (clipped) line. */
+interface FsSearchMatch {
+  line: number
+  text: string
+}
+
+/** One file of /local-api/fs-search with the matches found in it. */
+interface FsSearchHit {
+  file: string
+  matches: FsSearchMatch[]
+}
+
+/** One entry of the dev download manager, as /local-api/download-progress reports it. */
+interface DownloadState {
+  progress: number
+  total: number
+  speed: number
+  filename: string
+  status: 'connecting' | 'downloading' | 'paused' | 'complete' | 'error'
+  error?: string
 }
 
 // Load .env file from project root
@@ -118,109 +201,25 @@ config({ path: resolve(__dirname, '.env') })
 // (`build.sourcemap` unset → default false), so returning transformed code
 // without a map is safe; the guard below also bails when a map is requested.
 function stripConsolePlugin(): Plugin {
-  const TARGETS = new Set(['log', 'info', 'debug'])
-  const STRIPPABLE = /\.[cm]?[jt]sx?$/
-
-  // True iff `node` is a `console.log(...)` / `.info` / `.debug` CallExpression.
-  // Matches the bare `console.<m>(…)` member call only — `foo.console.log`,
-  // `myLogger.log`, and re-assigned `const x = console.log` are left alone.
-  const isStrippableConsoleCall = (node: any): boolean => {
-    if (!node || node.type !== 'CallExpression') return false
-    const callee = node.callee
-    if (!callee || callee.type !== 'MemberExpression' || callee.computed) return false
-    const obj = callee.object
-    const prop = callee.property
-    return (
-      obj?.type === 'Identifier' &&
-      obj.name === 'console' &&
-      prop?.type === 'Identifier' &&
-      TARGETS.has(prop.name)
-    )
-  }
-
   return {
     name: 'lu-strip-console',
     apply: 'build',
     transform(code, id) {
-      if (id.includes('\0')) return null // virtual module
-      if (id.includes('node_modules')) return null
-      const clean = id.split('?')[0]
-      // The structured logger (src/lib/logger.ts) is the ONE sanctioned console
-      // sink: in production it serialises every event to a single-line JSON
-      // object on stdout via `console.log`. That call is a brace-less
-      // `else console.log(line)` which this plugin would neutralise to `void 0`,
-      // silencing every log.info/log.debug in prod and defeating the logger's
-      // whole purpose. Leave the logger module untouched, like node_modules.
-      if (/[\\/]lib[\\/]logger\.[cm]?[jt]sx?$/.test(clean)) return null
-      if (!STRIPPABLE.test(clean)) return null
-      if (!code.includes('console.')) return null
+      if (!isStrippableModule(id, code)) return null
 
-      let ast: any
+      let ast: unknown
       try {
         ast = parseAst(code, { sourceType: 'module' })
       } catch {
         return null // let the real parse step report syntax errors
       }
 
-      // Containers where an ExpressionStatement can simply be deleted with
-      // no syntactic fallout (its siblings or the empty block remain valid).
-      const BLOCK_LIKE = new Set(['BlockStatement', 'Program', 'StaticBlock'])
-
-      // Collect [start,end) byte ranges of every strippable call.
-      //   • Whole-statement call inside a block  → delete the statement.
-      //   • Whole-statement call that is the *single* (brace-less) body of an
-      //     if/else/for/while/do/with/label arm → replace the CALL with
-      //     `void 0` so the arm keeps a statement (`else void 0;`). Deleting
-      //     it would orphan the `else`/`for(...)` and break parsing — this
-      //     was the logger.ts `if (…) console.error(x)\nelse console.log(y)`
-      //     case that the naive version corrupted.
-      //   • Call used as a sub-expression (`a && console.log(b)`, a ternary
-      //     arm, an arg) → replace the CALL with `void 0`.
-      const removals: Array<{ start: number; end: number; replacement: string }> = []
-
-      const visit = (node: any, parent: any, grandparent: any, parentKey: string | null): void => {
-        if (!node || typeof node.type !== 'string') return
-        if (isStrippableConsoleCall(node)) {
-          const stmt = parent && parent.type === 'ExpressionStatement' && parent.expression === node
-            ? parent
-            : null
-          if (stmt && grandparent && BLOCK_LIKE.has(grandparent.type)) {
-            // Safe to drop the whole statement (incl. its trailing `;`).
-            removals.push({ start: stmt.start, end: stmt.end, replacement: '' })
-          } else if (stmt && grandparent && grandparent.type === 'SwitchCase' && parentKey === 'consequent') {
-            removals.push({ start: stmt.start, end: stmt.end, replacement: '' })
-          } else {
-            // Brace-less control-flow arm OR a sub-expression: neutralise the
-            // call but keep a valid expression in its place.
-            removals.push({ start: node.start, end: node.end, replacement: 'void 0' })
-          }
-          return // don't descend into the args of a call we're deleting
-        }
-        for (const key in node) {
-          if (key === 'start' || key === 'end' || key === 'parent') continue
-          const child = (node as any)[key]
-          if (Array.isArray(child)) {
-            for (const c of child) {
-              if (c && typeof c.type === 'string') visit(c, node, parent, key)
-            }
-          } else if (child && typeof child.type === 'string') {
-            visit(child, node, parent, key)
-          }
-        }
-      }
-      visit(ast, null, null, null)
-
+      const removals = collectConsoleRemovals(ast)
       if (removals.length === 0) return null
 
-      // Apply back-to-front so earlier offsets stay valid.
-      removals.sort((a, b) => b.start - a.start)
-      let out = code
-      for (const r of removals) {
-        out = out.slice(0, r.start) + r.replacement + out.slice(r.end)
-      }
       // Sourcemaps are off for prod here; null map signals "I rewrote the
       // text, don't trust a passthrough map" without fabricating one.
-      return { code: out, map: null }
+      return { code: applyConsoleRemovals(code, removals), map: null }
     },
   }
 }
@@ -374,7 +373,9 @@ function comfyLauncher(): Plugin {
     name: 'comfy-launcher',
     configureServer(server) {
       // --- Security Middleware ---
-      server.middlewares.use('/local-api', (req, res, next) => {
+      // Vites eigener Middleware-Typ statt einer geratenen Signatur: `next`
+      // ist hier Pflicht, weil dieser Wächter durchreicht statt zu antworten.
+      const localApiGuard: Connect.NextHandleFunction = (req, res, next) => {
         // Exclude GET proxy-image/download from strict header checks (used in <img> tags and simple fetches)
         if (req.method === 'GET' && (req.url?.startsWith('/proxy-image') || req.url?.startsWith('/proxy-download'))) {
           return next();
@@ -432,7 +433,8 @@ function comfyLauncher(): Plugin {
         }
 
         next();
-      });
+      }
+      server.middlewares.use('/local-api', localApiGuard);
 
       // Auto-start Ollama when dev server starts (best-effort, NEVER fatal:
       // a from-source dev run may not have Ollama installed at all — #63
@@ -670,11 +672,12 @@ function comfyLauncher(): Plugin {
         '/local-api/stop-tunnel',
         '/local-api/tunnel-status',
       ]
+      const remoteDevModeStub: Connect.SimpleHandleFunction = (_req, res) => {
+        res.writeHead(501, { 'Content-Type': 'application/json' })
+        res.end(REMOTE_DEV_MODE_BODY)
+      }
       for (const path of remoteStubPaths) {
-        server.middlewares.use(path, (_req, res) => {
-          res.writeHead(501, { 'Content-Type': 'application/json' })
-          res.end(REMOTE_DEV_MODE_BODY)
-        })
+        server.middlewares.use(path, remoteDevModeStub)
       }
 
       // API: Manual start
@@ -711,7 +714,7 @@ function comfyLauncher(): Plugin {
       })
 
       // ─── Model Download Manager ───
-      const activeDownloads = new Map<string, { progress: number; total: number; speed: number; filename: string; status: string; error?: string }>()
+      const activeDownloads = new Map<string, DownloadState>()
 
       function downloadFile(url: string, destPath: string, id: string): Promise<void> {
         return new Promise((promiseResolve, promiseReject) => {
@@ -793,12 +796,13 @@ function comfyLauncher(): Plugin {
 
       // API: Start a model download
       server.middlewares.use('/local-api/download-model', (req, res) => {
-        if (req.method !== 'POST') { res.writeHead(405); res.end(); return }
-        let body = ''
-        req.on('data', (c: any) => { body += c })
-        req.on('end', () => {
+        if (!requirePost(req, res)) return
+        withJsonBody(req, res, (body) => {
           try {
-            const { url, subfolder, filename, expectedBytes } = JSON.parse(body)
+            const url = bodyString(body, 'url')
+            const subfolder = bodyString(body, 'subfolder')
+            const filename = bodyString(body, 'filename')
+            const expectedBytes = bodyNumber(body, 'expectedBytes')
             if (!url || !subfolder || !filename) {
               res.writeHead(400, { 'Content-Type': 'application/json' })
               res.end(JSON.stringify({ error: 'Missing url, subfolder, or filename' }))
@@ -810,10 +814,12 @@ function comfyLauncher(): Plugin {
               res.end(JSON.stringify({ error: 'ComfyUI not found' }))
               return
             }
-            const destDir = subfolder.startsWith('custom_nodes/') || subfolder.startsWith('custom_nodes\\')
-              ? join(comfyPath, subfolder)
-              : join(comfyPath, 'models', subfolder)
-            const destPath = join(destDir, filename)
+            // SICHERHEITSBEFUND: `subfolder`/`filename` gingen ungeprüft in
+            // `join(comfyPath, 'models', …)` und dann in einen echten Schreibvorgang.
+            // Der Käfig liegt jetzt in src/dev/model-paths.ts; ein Ausbruch wirft
+            // JailEscapeError und wird unten als 403 beantwortet.
+            const destPath = comfyDestPath(comfyPath, subfolder, filename, 'separator')
+            const destDir = dirname(destPath)
 
             if (existsSync(destPath)) {
               // Validate file size if expectedBytes provided (catch partial downloads)
@@ -846,20 +852,19 @@ function comfyLauncher(): Plugin {
               return
             }
             console.log(`[Download] Starting: ${filename} → ${destDir}`)
-            downloadFile(url, destPath, id).catch(err => console.error(`[Download] Failed: ${err.message}`))
+            downloadFile(url, destPath, id).catch(err => console.error(`[Download] Failed: ${errorText(err)}`))
 
             res.writeHead(200, { 'Content-Type': 'application/json' })
             res.end(JSON.stringify({ status: 'started', id }))
           } catch (err) {
-            res.writeHead(400, { 'Content-Type': 'application/json' })
-            res.end(JSON.stringify({ error: String(err) }))
+            failRequest(res, err)
           }
         })
       })
 
       // API: Download progress
       server.middlewares.use('/local-api/download-progress', (_req, res) => {
-        const downloads: Record<string, any> = {}
+        const downloads: Record<string, DownloadState> = {}
         for (const [id, info] of activeDownloads.entries()) {
           downloads[id] = info
           if (info.status === 'complete' || info.status === 'error') {
@@ -872,35 +877,18 @@ function comfyLauncher(): Plugin {
 
       // API: Detect model path for non-Ollama providers (LM Studio, etc.)
       server.middlewares.use('/local-api/detect-model-path', (req, res) => {
-        if (req.method !== 'POST') { res.writeHead(405); res.end(); return }
-        let body = ''
-        req.on('data', (c: any) => { body += c })
-        req.on('end', () => {
+        if (!requirePost(req, res)) return
+        withJsonBody(req, res, (body) => {
           try {
-            const { provider } = JSON.parse(body)
             const home = os.homedir()
             // Which backend was asked about used to be read and then thrown
             // away: every provider got LM Studio's directory back, including
-            // Ollama and the built-in engine. Mirrors the dispatch in the Rust
-            // command (src-tauri/src/commands/download.rs detect_model_path)
-            // for the backends with a conventional managed dir; everything
-            // else falls through to the LU fallback dir below, as there.
-            const asked = String(provider ?? '').toLowerCase()
-            const candidates =
-              asked === 'ollama'
-                ? [join(home, '.ollama', 'models')]
-                : asked === 'lm studio' || asked === 'lmstudio'
-                  ? [
-                      join(home, '.lmstudio', 'models'),
-                      join(home, '.cache', 'lm-studio', 'models'),
-                      join(home, 'AppData', 'Local', 'LM Studio', 'models'),
-                      join(home, '.local', 'share', 'lm-studio', 'models'),
-                    ]
-                  : asked === 'jan'
-                    ? [join(home, '.jan', 'models'), join(home, 'jan', 'models')]
-                    : asked === 'gpt4all'
-                      ? [join(home, '.cache', 'gpt4all')]
-                      : []
+            // Ollama and the built-in engine. The dispatch (a mirror of
+            // src-tauri/src/commands/download.rs detect_model_path) now lives in
+            // src/dev/model-paths.ts next to its test; everything it does not
+            // know falls through to the LU fallback dir below, as there.
+            const candidates = modelDirCandidates(bodyString(body, 'provider') ?? '')
+              .map((segments) => join(home, ...segments))
             const found = candidates.find((p) => existsSync(p))
             if (found) {
               res.writeHead(200, { 'Content-Type': 'application/json' })
@@ -921,15 +909,10 @@ function comfyLauncher(): Plugin {
 
       // API: Check model file sizes (for partial download detection)
       server.middlewares.use('/local-api/check-model-sizes', (req, res) => {
-        if (req.method !== 'POST') { res.writeHead(405); res.end(); return }
-        let body = ''
-        req.on('data', (c: any) => { body += c })
-        req.on('end', () => {
+        if (!requirePost(req, res)) return
+        withJsonBody(req, res, (body) => {
           try {
-            const { files } = JSON.parse(body)
-            const { existsSync, statSync } = require('fs')
-            const { join } = require('path')
-            const home = require('os').homedir()
+            const home = os.homedir()
             // Prefer the ComfyUI path the app actually persisted (matches the
             // Rust backend); only then fall back to common defaults. Without
             // this the dev stub guessed wrong for non-default installs and
@@ -939,8 +922,9 @@ function comfyLauncher(): Plugin {
             try {
               const cfgPath = join(process.env.APPDATA || join(home, 'AppData', 'Roaming'), APP_CONFIG_DIR, 'config.json')
               if (existsSync(cfgPath)) {
-                const cfg = JSON.parse(require('fs').readFileSync(cfgPath, 'utf8'))
-                if (cfg.comfyui_path && existsSync(cfg.comfyui_path)) comfyPath = cfg.comfyui_path
+                const cfg = parseJsonBody(readFileSync(cfgPath, 'utf8'))
+                const persisted = cfg.ok ? asString(prop(cfg.value, 'comfyui_path')) : undefined
+                if (persisted && existsSync(persisted)) comfyPath = persisted
               }
             } catch { /* ignore — fall through to candidates */ }
             if (!comfyPath) {
@@ -951,54 +935,59 @@ function comfyLauncher(): Plugin {
               ]
               comfyPath = candidates.find(p => existsSync(p)) || join(home, 'ComfyUI')
             }
-            const results = (files as any[]).map((f: any) => {
-              const subfolder = f.subfolder || ''
-              const dir = subfolder.startsWith('custom_nodes')
-                ? join(comfyPath, subfolder)
-                : join(comfyPath, 'models', subfolder)
-              const filePath = join(dir, f.filename)
+            const results = bodyRecords(body, 'files').map((f) => {
+              const filename = asString(f.filename) ?? ''
+              const subfolder = asString(f.subfolder) ?? ''
+              const expectedBytes = asNumber(f.expectedBytes) ?? 0
+              // SICHERHEITSBEFUND: `subfolder`/`filename` gingen ungeprüft in
+              // `join(comfyPath, …)`. Ein Ausbruch beantwortet der Eintrag jetzt
+              // mit `exists: false`, statt fremde Dateien abzutasten.
+              let filePath: string
+              try {
+                filePath = comfyDestPath(comfyPath, subfolder, filename, 'prefix')
+              } catch {
+                return { filename, exists: false, actualBytes: 0, complete: false }
+              }
               if (existsSync(filePath)) {
                 const actual = statSync(filePath).size
-                const threshold = f.expectedBytes > 0 ? f.expectedBytes * 0.9 : 0
-                return { filename: f.filename, exists: true, actualBytes: actual, complete: f.expectedBytes === 0 || actual >= threshold }
+                const threshold = expectedBytes > 0 ? expectedBytes * 0.9 : 0
+                return { filename, exists: true, actualBytes: actual, complete: expectedBytes === 0 || actual >= threshold }
               }
-              return { filename: f.filename, exists: false, actualBytes: 0, complete: false }
+              return { filename, exists: false, actualBytes: 0, complete: false }
             })
             res.writeHead(200, { 'Content-Type': 'application/json' })
             res.end(JSON.stringify(results))
           } catch (err) {
             res.writeHead(500, { 'Content-Type': 'application/json' })
-            res.end(JSON.stringify({ error: String(err) }))
+            res.end(JSON.stringify({ error: errorText(err) || String(err) }))
           }
         })
       })
 
       // API: Download model to a specific path (for HuggingFace GGUF → LM Studio etc.)
       server.middlewares.use('/local-api/download-model-to-path', (req, res) => {
-        if (req.method !== 'POST') { res.writeHead(405); res.end(); return }
-        let body = ''
-        req.on('data', (c: any) => { body += c })
-        req.on('end', () => {
+        if (!requirePost(req, res)) return
+        withJsonBody(req, res, (body) => {
           try {
-            const parsed = JSON.parse(body)
-            const url = parsed.url
-            const destDir = parsed.destDir || parsed.dest_dir
-            const filename = parsed.filename
+            const url = bodyString(body, 'url')
+            const destDir = bodyString(body, 'destDir', 'dest_dir')
+            const filename = bodyString(body, 'filename')
             if (!url || !destDir || !filename) {
               res.writeHead(400, { 'Content-Type': 'application/json' })
               res.end(JSON.stringify({ error: 'Missing url, destDir, or filename' }))
               return
             }
-            const { existsSync, mkdirSync, statSync: statSyncFs } = require('fs')
-            const { join } = require('path')
-            const expectedBytes = parsed.expectedBytes
+            const expectedBytes = bodyNumber(body, 'expectedBytes')
+            // `destDir` ist hier absichtlich frei (das ist der Zweck des
+            // Endpunkts: neben eine fremde Installation legen). `filename` ist
+            // es nicht mehr — ein `../` darin wird jetzt abgelehnt.
+            const destPath = downloadToPathDest(destDir, filename)
             if (!existsSync(destDir)) mkdirSync(destDir, { recursive: true })
-            const destPath = join(destDir, filename)
             if (existsSync(destPath)) {
               let fileComplete = true
               if (expectedBytes && expectedBytes > 0) {
                 try {
-                  const actual = statSyncFs(destPath).size
+                  const actual = statSync(destPath).size
                   fileComplete = actual >= expectedBytes * 0.9
                   if (!fileComplete) console.log(`[Download] ${filename} incomplete: ${actual} vs ${expectedBytes} expected`)
                 } catch { fileComplete = true }
@@ -1017,24 +1006,21 @@ function comfyLauncher(): Plugin {
               return
             }
             console.log(`[Download] Starting to path: ${filename} → ${destDir}`)
-            downloadFile(url, destPath, id).catch(err => console.error(`[Download] Failed: ${err.message}`))
+            downloadFile(url, destPath, id).catch(err => console.error(`[Download] Failed: ${errorText(err)}`))
             res.writeHead(200, { 'Content-Type': 'application/json' })
             res.end(JSON.stringify({ status: 'started', id }))
           } catch (err) {
-            res.writeHead(500, { 'Content-Type': 'application/json' })
-            res.end(JSON.stringify({ error: String(err) }))
+            failRequest(res, err)
           }
         })
       })
 
       // API: Pause download (dev mode stub — sets status to paused)
       server.middlewares.use('/local-api/pause-download', (req, res) => {
-        if (req.method !== 'POST') { res.writeHead(405); res.end(); return }
-        let body = ''
-        req.on('data', (c: any) => { body += c })
-        req.on('end', () => {
-          const { id } = JSON.parse(body)
-          const dl = activeDownloads.get(id)
+        if (!requirePost(req, res)) return
+        withJsonBody(req, res, (body) => {
+          const id = bodyString(body, 'id')
+          const dl = id ? activeDownloads.get(id) : undefined
           if (dl) dl.status = 'paused'
           res.writeHead(200, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify({ status: 'paused' }))
@@ -1043,12 +1029,10 @@ function comfyLauncher(): Plugin {
 
       // API: Cancel download (dev mode stub — removes from map)
       server.middlewares.use('/local-api/cancel-download', (req, res) => {
-        if (req.method !== 'POST') { res.writeHead(405); res.end(); return }
-        let body = ''
-        req.on('data', (c: any) => { body += c })
-        req.on('end', () => {
-          const { id } = JSON.parse(body)
-          activeDownloads.delete(id)
+        if (!requirePost(req, res)) return
+        withJsonBody(req, res, (body) => {
+          const id = bodyString(body, 'id')
+          if (id) activeDownloads.delete(id)
           res.writeHead(200, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify({ status: 'cancelled' }))
         })
@@ -1056,16 +1040,19 @@ function comfyLauncher(): Plugin {
 
       // API: Resume download (dev mode stub — restarts download)
       server.middlewares.use('/local-api/resume-download', (req, res) => {
-        if (req.method !== 'POST') { res.writeHead(405); res.end(); return }
-        let body = ''
-        req.on('data', (c: any) => { body += c })
-        req.on('end', () => {
-          const { id, url, subfolder } = JSON.parse(body)
-          if (url && subfolder) {
+        if (!requirePost(req, res)) return
+        withJsonBody(req, res, (body) => {
+          const id = bodyString(body, 'id')
+          const url = bodyString(body, 'url')
+          const subfolder = bodyString(body, 'subfolder')
+          if (id && url && subfolder) {
             const comfyPath = findComfyUI()
             if (comfyPath) {
-              const destPath = join(comfyPath, 'models', subfolder, id)
-              downloadFile(url, destPath, id).catch(err => console.error(`[Download] Resume failed: ${err.message}`))
+              // SICHERHEITSBEFUND, wie bei /download-model: `subfolder` und `id`
+              // bauten den Zielpfad ungeprüft zusammen. `comfyDestPath` wirft
+              // statt zu schreiben — withJsonBody macht daraus ein 403.
+              const destPath = comfyDestPath(comfyPath, subfolder, id, 'never')
+              downloadFile(url, destPath, id).catch(err => console.error(`[Download] Resume failed: ${errorText(err)}`))
             }
           }
           res.writeHead(200, { 'Content-Type': 'application/json' })
@@ -1075,14 +1062,11 @@ function comfyLauncher(): Plugin {
 
       // API: Install custom node (git clone into ComfyUI/custom_nodes/)
       server.middlewares.use('/local-api/install-custom-node', (req, res) => {
-        if (req.method !== 'POST') { res.writeHead(405); res.end(); return }
-        let body = ''
-        req.on('data', (c: any) => { body += c })
-        req.on('end', () => {
+        if (!requirePost(req, res)) return
+        withJsonBody(req, res, (body) => {
           try {
-            const _parsed = JSON.parse(body)
-            const repo_url = _parsed.repoUrl || _parsed.repo_url
-            const node_name = _parsed.nodeName || _parsed.node_name
+            const repoUrl = bodyString(body, 'repoUrl', 'repo_url') ?? ''
+            const nodeName = bodyString(body, 'nodeName', 'node_name') ?? ''
             const comfyPath = findComfyUI()
             if (!comfyPath) {
               res.writeHead(404, { 'Content-Type': 'application/json' })
@@ -1091,50 +1075,55 @@ function comfyLauncher(): Plugin {
             }
             const customNodesDir = join(comfyPath, 'custom_nodes')
             if (!existsSync(customNodesDir)) mkdirSync(customNodesDir, { recursive: true })
-            const targetDir = join(customNodesDir, node_name || basename(repo_url, '.git'))
+            // SICHERHEITSBEFUND: `nodeName` hing ungeprüft an `custom_nodes/`
+            // (`'../../..'` klonte ausserhalb von ComfyUI), und `repoUrl` ging in
+            // eine SHELL-Zeichenkette — `x"; rm -rf ~; echo "` war ein zweites
+            // Kommando. Der Käfig steht jetzt in src/dev/model-paths.ts, und
+            // execFileSync übergibt Argumente ohne Shell dazwischen.
+            const targetDir = customNodeDir(comfyPath, nodeName, repoUrl)
             if (existsSync(targetDir)) {
-              console.log(`[CustomNode] Already installed: ${node_name}`)
+              console.log(`[CustomNode] Already installed: ${nodeName}`)
               res.writeHead(200, { 'Content-Type': 'application/json' })
               res.end(JSON.stringify({ status: 'already_installed', path: targetDir }))
               return
             }
-            console.log(`[CustomNode] Installing ${node_name} from ${repo_url}...`)
+            console.log(`[CustomNode] Installing ${nodeName} from ${repoUrl}...`)
             try {
-              execSync(`git clone "${repo_url}" "${targetDir}"`, { timeout: 120000 })
+              execFileSync('git', ['clone', repoUrl, targetDir], { timeout: 120000 })
               // Try pip install if requirements.txt exists
               const reqFile = join(targetDir, 'requirements.txt')
               if (existsSync(reqFile)) {
                 try {
-                  execSync(`pip install -r "${reqFile}"`, { cwd: targetDir, timeout: 300000 })
-                } catch (pipErr: any) {
-                  console.warn(`[CustomNode] pip install failed for ${node_name}:`, pipErr.message)
+                  execFileSync('pip', ['install', '-r', reqFile], { cwd: targetDir, timeout: 300000 })
+                } catch (pipErr) {
+                  console.warn(`[CustomNode] pip install failed for ${nodeName}:`, errorText(pipErr))
                 }
               }
-              console.log(`[CustomNode] Installed: ${node_name}`)
+              console.log(`[CustomNode] Installed: ${nodeName}`)
               res.writeHead(200, { 'Content-Type': 'application/json' })
               res.end(JSON.stringify({ status: 'installed', path: targetDir }))
-            } catch (gitErr: any) {
-              console.error(`[CustomNode] Git clone failed:`, gitErr.message)
+            } catch (gitErr) {
+              const detail = errorText(gitErr)
+              console.error(`[CustomNode] Git clone failed:`, detail)
               res.writeHead(500, { 'Content-Type': 'application/json' })
-              res.end(JSON.stringify({ error: `Git clone failed: ${gitErr.message}` }))
+              res.end(JSON.stringify({ error: `Git clone failed: ${detail}` }))
             }
           } catch (err) {
-            res.writeHead(400, { 'Content-Type': 'application/json' })
-            res.end(JSON.stringify({ error: String(err) }))
+            failRequest(res, err)
           }
         })
       })
 
       // API: Set ComfyUI path (writes to .env and starts ComfyUI)
       server.middlewares.use('/local-api/set-comfyui-path', (req, res) => {
-        if (req.method !== 'POST') { res.writeHead(405); res.end(); return }
-        let body = ''
-        req.on('data', (c: any) => { body += c })
-        req.on('end', () => {
+        if (!requirePost(req, res)) return
+        withJsonBody(req, res, (body) => {
           try {
-            const { path: newPath } = JSON.parse(body)
-            const mainPy = join(newPath, 'main.py')
-            if (!existsSync(mainPy)) {
+            const newPath = bodyString(body, 'path') ?? ''
+            // Ohne Pfad gibt es nichts zu prüfen; `join(undefined, …)` warf hier
+            // vorher eine TypeError in den Catch und meldete sie als "error".
+            const mainPy = newPath ? join(newPath, 'main.py') : ''
+            if (!mainPy || !existsSync(mainPy)) {
               res.writeHead(200, { 'Content-Type': 'application/json' })
               res.end(JSON.stringify({ status: 'error', error: `main.py not found in "${newPath}". Make sure this is the ComfyUI root folder.` }))
               return
@@ -1142,7 +1131,6 @@ function comfyLauncher(): Plugin {
 
             // Write to .env file
             const envPath = resolve(__dirname, '.env')
-            const { writeFileSync, readFileSync } = require('fs')
             let envContent = ''
             try { envContent = readFileSync(envPath, 'utf8') } catch { /* no .env yet */ }
 
@@ -1168,7 +1156,7 @@ function comfyLauncher(): Plugin {
             res.end(JSON.stringify({ status: 'ok', path: newPath }))
           } catch (err) {
             res.writeHead(400, { 'Content-Type': 'application/json' })
-            res.end(JSON.stringify({ status: 'error', error: String(err) }))
+            res.end(JSON.stringify({ status: 'error', error: errorText(err) || String(err) }))
           }
         })
       })
@@ -1327,12 +1315,11 @@ function comfyLauncher(): Plugin {
 
       // API: Execute Python code
       server.middlewares.use('/local-api/execute-code', (req, res) => {
-        if (req.method !== 'POST') { res.writeHead(405); res.end(); return }
-        let body = ''
-        req.on('data', (c: any) => { body += c })
-        req.on('end', () => {
+        if (!requirePost(req, res)) return
+        withJsonBody(req, res, (body) => {
           try {
-            const { code, timeout: timeoutMs } = JSON.parse(body)
+            const code = bodyString(body, 'code')
+            const timeoutMs = bodyNumber(body, 'timeout')
             if (!code) {
               res.writeHead(400, { 'Content-Type': 'application/json' })
               res.end(JSON.stringify({ error: 'Missing code parameter' }))
@@ -1400,12 +1387,10 @@ function comfyLauncher(): Plugin {
 
       // API: Read file from agent workspace
       server.middlewares.use('/local-api/file-read', (req, res) => {
-        if (req.method !== 'POST') { res.writeHead(405); res.end(); return }
-        let body = ''
-        req.on('data', (c: any) => { body += c })
-        req.on('end', () => {
+        if (!requirePost(req, res)) return
+        withJsonBody(req, res, (body) => {
           try {
-            const { path: filePath } = JSON.parse(body)
+            const filePath = bodyString(body, 'path')
             if (!filePath || filePath.includes('..')) {
               res.writeHead(400, { 'Content-Type': 'application/json' })
               res.end(JSON.stringify({ error: 'Invalid path' }))
@@ -1435,12 +1420,11 @@ function comfyLauncher(): Plugin {
 
       // API: Write file to agent workspace
       server.middlewares.use('/local-api/file-write', (req, res) => {
-        if (req.method !== 'POST') { res.writeHead(405); res.end(); return }
-        let body = ''
-        req.on('data', (c: any) => { body += c })
-        req.on('end', () => {
+        if (!requirePost(req, res)) return
+        withJsonBody(req, res, (body) => {
           try {
-            const { path: filePath, content } = JSON.parse(body)
+            const filePath = bodyString(body, 'path')
+            const content = bodyString(body, 'content')
             if (!filePath || filePath.includes('..')) {
               res.writeHead(400, { 'Content-Type': 'application/json' })
               res.end(JSON.stringify({ error: 'Invalid path' }))
@@ -1473,12 +1457,13 @@ function comfyLauncher(): Plugin {
 
       // API: Shell execute
       server.middlewares.use('/local-api/shell-execute', (req, res) => {
-        if (req.method !== 'POST') { res.writeHead(405); res.end(); return }
-        let body = ''
-        req.on('data', (c: any) => { body += c })
-        req.on('end', () => {
+        if (!requirePost(req, res)) return
+        withJsonBody(req, res, (body) => {
           try {
-            const { command, cwd, timeout: timeoutMs, shell: shellType } = JSON.parse(body)
+            const command = bodyString(body, 'command')
+            const cwd = bodyString(body, 'cwd')
+            const timeoutMs = bodyNumber(body, 'timeout')
+            const shellType = bodyString(body, 'shell')
             if (!command) {
               res.writeHead(400, { 'Content-Type': 'application/json' })
               res.end(JSON.stringify({ error: 'Missing command' }))
@@ -1538,15 +1523,13 @@ function comfyLauncher(): Plugin {
 
       // API: FS read (unsandboxed)
       server.middlewares.use('/local-api/fs-read', (req, res) => {
-        if (req.method !== 'POST') { res.writeHead(405); res.end(); return }
-        let body = ''
-        req.on('data', (c: any) => { body += c })
-        req.on('end', () => {
+        if (!requirePost(req, res)) return
+        withJsonBody(req, res, (body) => {
           try {
-            const { path: filePath } = JSON.parse(body)
+            const filePath = bodyString(body, 'path') ?? ''
             const os = require('os')
             const fs = require('fs')
-            const resolved = require('path').isAbsolute(filePath) ? filePath : join(os.homedir(), AGENT_WORKSPACE_DIR, filePath)
+            const resolved = isAbsolute(filePath) ? filePath : join(os.homedir(), AGENT_WORKSPACE_DIR, filePath)
             const content = fs.readFileSync(resolved, 'utf8')
             res.writeHead(200, { 'Content-Type': 'application/json' })
             res.end(JSON.stringify({ content, encoding: 'utf8' }))
@@ -1564,16 +1547,17 @@ function comfyLauncher(): Plugin {
       // panel, not a payload. Deliberately stricter than the fs-read
       // middleware above, which predates the jail and stays as it is.
       server.middlewares.use('/local-api/fs-read-bytes', (req, res) => {
-        if (req.method !== 'POST') { res.writeHead(405); res.end(); return }
-        let body = ''
-        req.on('data', (c: any) => { body += c })
-        req.on('end', () => {
+        if (!requirePost(req, res)) return
+        withJsonBody(req, res, (body) => {
           const fail = (status: number, error: string) => {
             res.writeHead(status, { 'Content-Type': 'application/json' })
             res.end(JSON.stringify({ error }))
           }
           try {
-            const { path: filePath, chatId, workingDirectory, maxBytes } = JSON.parse(body)
+            const filePath = bodyString(body, 'path')
+            const chatId = bodyString(body, 'chatId')
+            const workingDirectory = bodyString(body, 'workingDirectory')
+            const maxBytes = bodyNumber(body, 'maxBytes')
             if (typeof filePath !== 'string' || !filePath) {
               fail(400, 'Missing path')
               return
@@ -1606,15 +1590,14 @@ function comfyLauncher(): Plugin {
 
       // API: FS write (unsandboxed)
       server.middlewares.use('/local-api/fs-write', (req, res) => {
-        if (req.method !== 'POST') { res.writeHead(405); res.end(); return }
-        let body = ''
-        req.on('data', (c: any) => { body += c })
-        req.on('end', () => {
+        if (!requirePost(req, res)) return
+        withJsonBody(req, res, (body) => {
           try {
-            const { path: filePath, content } = JSON.parse(body)
+            const filePath = bodyString(body, 'path') ?? ''
+            const content = bodyString(body, 'content') ?? ''
             const os = require('os')
             const fs = require('fs')
-            const resolved = require('path').isAbsolute(filePath) ? filePath : join(os.homedir(), AGENT_WORKSPACE_DIR, filePath)
+            const resolved = isAbsolute(filePath) ? filePath : join(os.homedir(), AGENT_WORKSPACE_DIR, filePath)
             const parentDir = resolve(resolved, '..')
             if (!existsSync(parentDir)) mkdirSync(parentDir, { recursive: true })
             fs.writeFileSync(resolved, content, 'utf8')
@@ -1629,12 +1612,11 @@ function comfyLauncher(): Plugin {
 
       // API: FS list
       server.middlewares.use('/local-api/fs-list', (req, res) => {
-        if (req.method !== 'POST') { res.writeHead(405); res.end(); return }
-        let body = ''
-        req.on('data', (c: any) => { body += c })
-        req.on('end', () => {
+        if (!requirePost(req, res)) return
+        withJsonBody(req, res, (body) => {
           try {
-            const { path: dirPath, recursive } = JSON.parse(body)
+            const dirPath = bodyString(body, 'path') ?? ''
+            const recursive = bodyFlag(body, 'recursive')
             const resolved = isAbsolute(dirPath) ? dirPath : join(os.homedir(), AGENT_WORKSPACE_DIR, dirPath)
             const entries: Array<{ name: string; path: string; size: number; isDir: boolean; modified: number }> = []
             // `recursive` arrived from the caller (file_list passes the model's
@@ -1672,18 +1654,22 @@ function comfyLauncher(): Plugin {
 
       // API: FS search (grep-like)
       server.middlewares.use('/local-api/fs-search', (req, res) => {
-        if (req.method !== 'POST') { res.writeHead(405); res.end(); return }
-        let body = ''
-        req.on('data', (c: any) => { body += c })
-        req.on('end', () => {
+        if (!requirePost(req, res)) return
+        withJsonBody(req, res, (body) => {
           try {
-            const { path: dirPath, pattern, max_results } = JSON.parse(body)
+            const dirPath = bodyString(body, 'path') ?? ''
+            const pattern = bodyString(body, 'pattern')
+            if (!pattern) {
+              res.writeHead(400, { 'Content-Type': 'application/json' })
+              res.end(JSON.stringify({ results: [], count: 0, error: 'Missing pattern' }))
+              return
+            }
             const os = require('os')
             const fs = require('fs')
-            const resolved = require('path').isAbsolute(dirPath) ? dirPath : join(os.homedir(), AGENT_WORKSPACE_DIR, dirPath)
+            const resolved = isAbsolute(dirPath) ? dirPath : join(os.homedir(), AGENT_WORKSPACE_DIR, dirPath)
             const re = new RegExp(pattern)
-            const results: any[] = []
-            const max = max_results || 50
+            const results: FsSearchHit[] = []
+            const max = bodyNumber(body, 'max_results') ?? 50
 
             function walkDir(dir: string, depth: number) {
               if (depth > 5 || results.length >= max) return
@@ -1697,7 +1683,7 @@ function comfyLauncher(): Plugin {
                       const stat = fs.statSync(full)
                       if (stat.size > 1000000) continue
                       const content = fs.readFileSync(full, 'utf8')
-                      const matches: any[] = []
+                      const matches: FsSearchMatch[] = []
                       content.split('\n').forEach((line: string, i: number) => {
                         if (re.test(line) && matches.length < 10) {
                           matches.push({ line: i + 1, text: line.slice(0, 200) })
@@ -1714,22 +1700,20 @@ function comfyLauncher(): Plugin {
             res.end(JSON.stringify({ results, count: results.length }))
           } catch (err) {
             res.writeHead(200, { 'Content-Type': 'application/json' })
-            res.end(JSON.stringify({ results: [], count: 0, error: String(err) }))
+            res.end(JSON.stringify({ results: [], count: 0, error: errorText(err) || String(err) }))
           }
         })
       })
 
       // API: FS info
       server.middlewares.use('/local-api/fs-info', (req, res) => {
-        if (req.method !== 'POST') { res.writeHead(405); res.end(); return }
-        let body = ''
-        req.on('data', (c: any) => { body += c })
-        req.on('end', () => {
+        if (!requirePost(req, res)) return
+        withJsonBody(req, res, (body) => {
           try {
-            const { path: filePath } = JSON.parse(body)
+            const filePath = bodyString(body, 'path') ?? ''
             const os = require('os')
             const fs = require('fs')
-            const resolved = require('path').isAbsolute(filePath) ? filePath : join(os.homedir(), AGENT_WORKSPACE_DIR, filePath)
+            const resolved = isAbsolute(filePath) ? filePath : join(os.homedir(), AGENT_WORKSPACE_DIR, filePath)
             const stat = fs.statSync(resolved)
             res.writeHead(200, { 'Content-Type': 'application/json' })
             res.end(JSON.stringify({
@@ -1765,8 +1749,8 @@ function comfyLauncher(): Plugin {
           try {
             const r = await fetch(url)
             return { status: r.ok ? 'ok' : 'error', detail: `HTTP ${r.status}`, endpoint }
-          } catch (e: any) {
-            return { status: 'unreachable', detail: String(e?.message || e), endpoint }
+          } catch (e) {
+            return { status: 'unreachable', detail: errorText(e) || String(e), endpoint }
           }
         }
         const ollamaBase = (process.env.OLLAMA_HOST && /^https?:/.test(process.env.OLLAMA_HOST))
@@ -1789,11 +1773,8 @@ function comfyLauncher(): Plugin {
         } catch { /* no nvidia-smi → null */ }
         let disk_free_gb = 0
         try {
-          const fs: any = require('fs')
-          if (fs.statfsSync) {
-            const st = fs.statfsSync(os.homedir())
-            disk_free_gb = +((st.bavail * st.bsize) / 1e9).toFixed(1)
-          }
+          const st = statfsSync(os.homedir())
+          disk_free_gb = +((Number(st.bavail) * Number(st.bsize)) / 1e9).toFixed(1)
         } catch { /* statfs unavailable */ }
         res.writeHead(200, { 'Content-Type': 'application/json' })
         res.end(JSON.stringify({
@@ -1983,21 +1964,24 @@ function comfyLauncher(): Plugin {
 
       // API: Multi-tier web search (Brave/Tavily > SearXNG > DDG > Wikipedia)
       server.middlewares.use('/local-api/web-search', (req, res) => {
-        if (req.method !== 'POST') { res.writeHead(405); res.end(); return }
-        let body = ''
-        req.on('data', (c: any) => { body += c })
-        req.on('end', () => {
+        if (!requirePost(req, res)) return
+        withJsonBody(req, res, (body) => {
           try {
-            const { query, count, provider, braveApiKey, tavilyApiKey } = JSON.parse(body)
+            const query = bodyString(body, 'query')
+            const provider = bodyString(body, 'provider')
+            const braveApiKey = bodyString(body, 'braveApiKey')
+            const tavilyApiKey = bodyString(body, 'tavilyApiKey')
             if (!query) {
               res.writeHead(400, { 'Content-Type': 'application/json' })
               res.end(JSON.stringify({ error: 'Missing query parameter' }))
               return
             }
 
-            const maxResults = count || 5
+            const maxResults = bodyNumber(body, 'count') || 5
 
-            const fetchJSON = (url: string): Promise<any> => {
+            // Fremde JSON-Antwort: `unknown` bis die Auswerter in
+            // src/dev/web-search-parse.ts sie geprüft haben.
+            const fetchJSON = (url: string): Promise<unknown> => {
               return new Promise((resolve, reject) => {
                 const proto = url.startsWith('https') ? https : http
                 const httpReq = proto.get(url, { headers: { 'User-Agent': 'locally-uncensored/1.0', 'Accept': 'application/json' }, timeout: 8000 }, (response) => {
@@ -2010,10 +1994,10 @@ function comfyLauncher(): Plugin {
                     response.resume()
                     return
                   }
-                  let data = ''
-                  response.on('data', (chunk: Buffer) => { data += chunk.toString() })
+                  const chunks: Buffer[] = []
+                  response.on('data', (chunk: Buffer) => { chunks.push(chunk) })
                   response.on('end', () => {
-                    try { resolve(JSON.parse(data)) } catch (e) { reject(e) }
+                    try { resolve(JSON.parse(decodeBodyChunks(chunks))) } catch (e) { reject(e) }
                   })
                 })
                 httpReq.on('error', reject)
@@ -2021,23 +2005,24 @@ function comfyLauncher(): Plugin {
               })
             }
 
+            // Die fünf Auswerter liegen in src/dev/web-search-parse.ts neben
+            // ihrem Test — bis hierher ist jede dieser Antworten `unknown`.
+            const tierEmpty = (tier: string): Error => new Error(tier + ' returned no results')
+
             // Tier 1: SearXNG (local instance)
-            const trySearXNG = (): Promise<{ title: string; url: string; snippet: string }[]> => {
+            const trySearXNG = (): Promise<WebSearchResult[]> => {
               if (!searxngAvailable) return Promise.reject(new Error('SearXNG not available'))
               const searxUrl = 'http://localhost:8888/search?q=' + encodeURIComponent(query) + '&format=json'
-              return fetchJSON(searxUrl).then((data: any) => {
-                if (!data.results || data.results.length === 0) throw new Error('SearXNG returned no results')
-                console.log('[WebSearch] SearXNG returned ' + data.results.length + ' results')
-                return data.results.slice(0, maxResults).map((r: any) => ({
-                  title: r.title || '',
-                  url: r.url || '',
-                  snippet: r.content || '',
-                }))
+              return fetchJSON(searxUrl).then((data) => {
+                const results = parseSearxngResults(data, maxResults)
+                if (results.length === 0) throw tierEmpty('SearXNG')
+                console.log('[WebSearch] SearXNG returned ' + results.length + ' results')
+                return results
               })
             }
 
             // Tier 2: DuckDuckGo HTML search (POST, returns current results)
-            const tryDDGHTML = (): Promise<{ title: string; url: string; snippet: string }[]> => {
+            const tryDDGHTML = (): Promise<WebSearchResult[]> => {
               return new Promise((resolve, reject) => {
                 const postData = 'q=' + encodeURIComponent(query)
                 const options = {
@@ -2060,50 +2045,16 @@ function comfyLauncher(): Plugin {
                     reject(new Error('DDG HTML returned HTTP ' + response.statusCode))
                     return
                   }
-                  let html = ''
-                  response.on('data', (chunk: Buffer) => { html += chunk.toString() })
+                  const chunks: Buffer[] = []
+                  response.on('data', (chunk: Buffer) => { chunks.push(chunk) })
                   response.on('end', () => {
                     try {
-                      const results: { title: string; url: string; snippet: string }[] = []
-                      // Parse result links: <a class="result__a" href="...">title</a>
-                      const linkRegex = /<a[^>]+class="result__a"[^>]*href="([^"]*)"[^>]*>([\s\S]*?)<\/a>/gi
-                      // Parse snippets: <a class="result__snippet" ...>snippet</a>
-                      const snippetRegex = /<a[^>]+class="result__snippet"[^>]*>([\s\S]*?)<\/a>/gi
-
-                      const links: { title: string; url: string }[] = []
-                      let linkMatch
-                      while ((linkMatch = linkRegex.exec(html)) !== null) {
-                        let url = linkMatch[1]
-                        // DDG wraps URLs in redirect: //duckduckgo.com/l/?uddg=ENCODED_URL
-                        if (url.includes('uddg=')) {
-                          const uddg = url.split('uddg=')[1]?.split('&')[0]
-                          if (uddg) url = decodeURIComponent(uddg)
-                        }
-                        const title = linkMatch[2].replace(/<[^>]*>/g, '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&#x27;/g, "'").replace(/&quot;/g, '"').trim()
-                        if (title && url && url.startsWith('http')) {
-                          links.push({ title, url })
-                        }
-                      }
-
-                      const snippets: string[] = []
-                      let snippetMatch
-                      while ((snippetMatch = snippetRegex.exec(html)) !== null) {
-                        snippets.push(snippetMatch[1].replace(/<[^>]*>/g, '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&#x27;/g, "'").replace(/&quot;/g, '"').replace(/\s+/g, ' ').trim())
-                      }
-
-                      for (let i = 0; i < Math.min(links.length, maxResults); i++) {
-                        results.push({
-                          title: links[i].title,
-                          url: links[i].url,
-                          snippet: snippets[i] || '',
-                        })
-                      }
-
+                      const results = parseDdgHtmlResults(decodeBodyChunks(chunks), maxResults)
                       if (results.length === 0) throw new Error('DDG HTML returned no parseable results')
                       console.log('[WebSearch] DDG HTML returned ' + results.length + ' results')
                       resolve(results)
                     } catch (e) {
-                      reject(e)
+                      reject(e instanceof Error ? e : new Error(String(e)))
                     }
                   })
                 })
@@ -2115,7 +2066,7 @@ function comfyLauncher(): Plugin {
             }
 
             // Tier: Brave Search API (needs API key)
-            const tryBrave = (): Promise<{ title: string; url: string; snippet: string }[]> => {
+            const tryBrave = (): Promise<WebSearchResult[]> => {
               if (!braveApiKey) return Promise.reject(new Error('No Brave API key'))
               const braveUrl = 'https://api.search.brave.com/res/v1/web/search?q=' + encodeURIComponent(query) + '&count=' + maxResults
               return new Promise((resolve, reject) => {
@@ -2124,18 +2075,15 @@ function comfyLauncher(): Plugin {
                   timeout: 8000,
                 }, (response) => {
                   if (response.statusCode !== 200) { response.resume(); reject(new Error('Brave HTTP ' + response.statusCode)); return }
-                  let data = ''
-                  response.on('data', (chunk: Buffer) => { data += chunk.toString() })
+                  const chunks: Buffer[] = []
+                  response.on('data', (chunk: Buffer) => { chunks.push(chunk) })
                   response.on('end', () => {
                     try {
-                      const parsed = JSON.parse(data)
-                      const results = (parsed.web?.results || []).slice(0, maxResults).map((r: any) => ({
-                        title: r.title || '', url: r.url || '', snippet: r.description || '',
-                      }))
-                      if (results.length === 0) throw new Error('Brave returned no results')
+                      const results = parseBraveResults(JSON.parse(decodeBodyChunks(chunks)), maxResults)
+                      if (results.length === 0) throw tierEmpty('Brave')
                       console.log('[WebSearch] Brave returned ' + results.length + ' results')
                       resolve(results)
-                    } catch (e) { reject(e) }
+                    } catch (e) { reject(e instanceof Error ? e : new Error(String(e))) }
                   })
                 })
                 httpReq.on('error', reject)
@@ -2144,7 +2092,7 @@ function comfyLauncher(): Plugin {
             }
 
             // Tier: Tavily Search API (needs API key, optimized for AI agents)
-            const tryTavily = (): Promise<{ title: string; url: string; snippet: string }[]> => {
+            const tryTavily = (): Promise<WebSearchResult[]> => {
               if (!tavilyApiKey) return Promise.reject(new Error('No Tavily API key'))
               return new Promise((resolve, reject) => {
                 const postData = JSON.stringify({ api_key: tavilyApiKey, query, max_results: maxResults, search_depth: 'basic' })
@@ -2154,18 +2102,15 @@ function comfyLauncher(): Plugin {
                   timeout: 10000,
                 }, (response) => {
                   if (response.statusCode !== 200) { response.resume(); reject(new Error('Tavily HTTP ' + response.statusCode)); return }
-                  let data = ''
-                  response.on('data', (chunk: Buffer) => { data += chunk.toString() })
+                  const chunks: Buffer[] = []
+                  response.on('data', (chunk: Buffer) => { chunks.push(chunk) })
                   response.on('end', () => {
                     try {
-                      const parsed = JSON.parse(data)
-                      const results = (parsed.results || []).slice(0, maxResults).map((r: any) => ({
-                        title: r.title || '', url: r.url || '', snippet: r.content || '',
-                      }))
-                      if (results.length === 0) throw new Error('Tavily returned no results')
+                      const results = parseTavilyResults(JSON.parse(decodeBodyChunks(chunks)), maxResults)
+                      if (results.length === 0) throw tierEmpty('Tavily')
                       console.log('[WebSearch] Tavily returned ' + results.length + ' results')
                       resolve(results)
-                    } catch (e) { reject(e) }
+                    } catch (e) { reject(e instanceof Error ? e : new Error(String(e))) }
                   })
                 })
                 httpReq.on('error', reject)
@@ -2176,23 +2121,18 @@ function comfyLauncher(): Plugin {
             }
 
             // Tier 3: Wikipedia API (always works)
-            const tryWikipedia = (): Promise<{ title: string; url: string; snippet: string }[]> => {
+            const tryWikipedia = (): Promise<WebSearchResult[]> => {
               const wikiUrl = 'https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=' + encodeURIComponent(query) + '&format=json&srlimit=' + maxResults + '&utf8=1'
-              return fetchJSON(wikiUrl).then((data: any) => {
-                if (!data.query || !data.query.search || data.query.search.length === 0) {
-                  throw new Error('Wikipedia returned no results')
-                }
-                console.log('[WebSearch] Wikipedia returned ' + data.query.search.length + ' results')
-                return data.query.search.slice(0, maxResults).map((r: any) => ({
-                  title: r.title || '',
-                  url: 'https://en.wikipedia.org/wiki/' + encodeURIComponent(r.title.replace(/ /g, '_')),
-                  snippet: (r.snippet || '').replace(/<[^>]*>/g, ''),
-                }))
+              return fetchJSON(wikiUrl).then((data) => {
+                const results = parseWikipediaResults(data, maxResults)
+                if (results.length === 0) throw tierEmpty('Wikipedia')
+                console.log('[WebSearch] Wikipedia returned ' + results.length + ' results')
+                return results
               })
             }
 
             // Execute tiers based on provider setting
-            const searchChain = (): Promise<{ title: string; url: string; snippet: string }[]> => {
+            const searchChain = (): Promise<WebSearchResult[]> => {
               if (provider === 'brave') return tryBrave().catch(() => trySearXNG()).catch(() => tryDDGHTML()).catch(() => tryWikipedia())
               if (provider === 'tavily') return tryTavily().catch(() => trySearXNG()).catch(() => tryDDGHTML()).catch(() => tryWikipedia())
               // 'auto': SearXNG > Brave (if key) > Tavily (if key) > DDG > Wikipedia
@@ -2227,31 +2167,34 @@ function comfyLauncher(): Plugin {
       let whisperReady = false
       let whisperBackend: string | null = null
       let whisperBuffer = ''
-      const whisperQueue: Array<{ resolve: (v: any) => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> }> = []
+      // Der Whisper-Server ist ein FREMDER Prozess (public/whisper_server.py):
+      // was er auf stdout schreibt, ist unbekannte Form, bis es geprüft ist.
+      const whisperQueue: Array<{ resolve: (v: unknown) => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> }> = []
 
       function handleWhisperLine(line: string) {
-        try {
-          const data = JSON.parse(line)
-          if (data.status === 'ready') {
-            whisperReady = true
-            whisperBackend = data.backend || 'faster-whisper'
-            console.log(`[Whisper] Server ready (backend: ${whisperBackend})`)
-            return
-          }
-          if (data.status === 'error' && !whisperReady) {
-            console.error('[Whisper] Server failed to start:', data.error)
-            return
-          }
-          // Route response to the oldest queued request
-          const pending = whisperQueue.shift()
-          if (pending) {
-            clearTimeout(pending.timer)
-            pending.resolve(data)
-          }
-        } catch { /* not JSON, ignore */ }
+        const parsed = parseJsonBody(line)
+        if (!parsed.ok) return // keine JSON-Zeile — der Server loggt auch Text
+        const data = parsed.value
+        const status = asString(prop(data, 'status'))
+        if (status === 'ready') {
+          whisperReady = true
+          whisperBackend = asString(prop(data, 'backend')) || 'faster-whisper'
+          console.log(`[Whisper] Server ready (backend: ${whisperBackend})`)
+          return
+        }
+        if (status === 'error' && !whisperReady) {
+          console.error('[Whisper] Server failed to start:', errorText(prop(data, 'error')))
+          return
+        }
+        // Route response to the oldest queued request
+        const pending = whisperQueue.shift()
+        if (pending) {
+          clearTimeout(pending.timer)
+          pending.resolve(data)
+        }
       }
 
-      function sendWhisperCommand(cmd: object, timeoutMs = 30000): Promise<any> {
+      function sendWhisperCommand(cmd: object, timeoutMs = 30000): Promise<unknown> {
         return new Promise((resolve, reject) => {
           if (!whisperProc || !whisperReady) {
             reject(new Error('Whisper server not ready'))
@@ -2446,20 +2389,23 @@ function comfyLauncher(): Plugin {
             // Clean up temp file
             try { fs.unlinkSync(tmpFile) } catch { /* ignore */ }
 
-            if (result.error) {
-              console.error('[Whisper] Transcription error:', result.error)
+            const whisperError = errorText(prop(result, 'error'))
+            if (whisperError) {
+              console.error('[Whisper] Transcription error:', whisperError)
               res.writeHead(200, { 'Content-Type': 'application/json' })
-              res.end(JSON.stringify({ error: result.error, transcript: '' }))
+              res.end(JSON.stringify({ error: whisperError, transcript: '' }))
               return
             }
 
-            console.log(`[Whisper] Transcribed: "${result.transcript?.substring(0, 80)}..." (lang: ${result.language})`)
+            const transcript = asString(prop(result, 'transcript')) ?? ''
+            const language = asString(prop(result, 'language')) ?? 'en'
+            console.log(`[Whisper] Transcribed: "${transcript.substring(0, 80)}..." (lang: ${language})`)
             res.writeHead(200, { 'Content-Type': 'application/json' })
-            res.end(JSON.stringify({ transcript: result.transcript || '', language: result.language || 'en' }))
+            res.end(JSON.stringify({ transcript, language }))
           } catch (err) {
-            console.error('[Whisper] Request error:', (err as Error).message)
+            console.error('[Whisper] Request error:', errorText(err))
             res.writeHead(500, { 'Content-Type': 'application/json' })
-            res.end(JSON.stringify({ error: String(err), transcript: '' }))
+            res.end(JSON.stringify({ error: errorText(err) || String(err), transcript: '' }))
           }
         })
       })

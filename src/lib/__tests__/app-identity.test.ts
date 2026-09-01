@@ -60,18 +60,41 @@ describe('Verzeichnisnamen dieses Builds', () => {
     // mit `lu-labs` an, und ein neu hingeschriebenes Literal wandert an
     // app-identity.ts vorbei. vite.config.ts bedient den `npm run dev`-Pfad
     // und schreibt mit echten Node-fs-Aufrufen auf die Platte.
-    const vite = readFileSync(resolve(process.cwd(), 'vite.config.ts'), 'utf8')
-    const jail = readFileSync(resolve(process.cwd(), 'src/lib/dev-fs-jail.ts'), 'utf8')
-    for (const name of ['lu-labs', 'locally-uncensored', 'Locally Uncensored', 'agent-workspace']) {
-      for (const quelle of [
-        ['vite.config.ts', vite],
-        ['src/lib/dev-fs-jail.ts', jail],
-      ] as const) {
-        expect(quelle[1], `${quelle[0]}: '${name}' als Pfadbestandteil hartkodiert`)
-          .not.toContain(`'${name}'`)
-        expect(quelle[1], `${quelle[0]}: '${name}/' als Pfadbestandteil hartkodiert`)
-          .not.toContain(`/${name}/`)
+    //
+    // Die Prüfung WANDERT MIT dem Code: Teile des Dev-Servers liegen inzwischen
+    // in src/dev/ (herausgelöst, damit sie testbar sind). Wäre hier nur
+    // vite.config.ts genannt, hätte das Verschieben das Loch nur umgezogen —
+    // deshalb wird das Verzeichnis gelesen, nicht eine Dateiliste gepflegt.
+    for (const [name, text] of devServerSources()) {
+      for (const echt of ['lu-labs', 'locally-uncensored', 'Locally Uncensored', 'agent-workspace']) {
+        expect(text, `${name}: '${echt}' als Pfadbestandteil hartkodiert`)
+          .not.toContain(`'${echt}'`)
+        expect(text, `${name}: '${echt}/' als Pfadbestandteil hartkodiert`)
+          .not.toContain(`/${echt}/`)
       }
     }
   })
+
+  it('deckt alle Dev-Server-Quellen ab, auch neu hinzugekommene', () => {
+    // Ohne diese Zusicherung könnte die Prüfung oben still auf null Dateien
+    // laufen — ein grüner Test, der nichts liest.
+    const namen = devServerSources().map(([name]) => name)
+    expect(namen).toContain('vite.config.ts')
+    expect(namen).toContain('src/lib/dev-fs-jail.ts')
+    expect(namen.filter((n) => n.startsWith('src/dev/')).length).toBeGreaterThan(0)
+  })
 })
+
+/**
+ * Jede Quelldatei, die den `npm run dev`-Pfad bedient: die vite-Konfiguration,
+ * der Pfad-Käfig und alles, was aus der Konfiguration nach `src/dev/`
+ * herausgelöst wurde (ohne die Tests dort).
+ */
+function devServerSources(): [string, string][] {
+  const root = process.cwd()
+  const dateien = ['vite.config.ts', 'src/lib/dev-fs-jail.ts']
+  for (const entry of readdirSync(resolve(root, 'src/dev'), { withFileTypes: true })) {
+    if (entry.isFile() && entry.name.endsWith('.ts')) dateien.push(`src/dev/${entry.name}`)
+  }
+  return dateien.map((name) => [name, readFileSync(resolve(root, name), 'utf8')])
+}
