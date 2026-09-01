@@ -1,9 +1,13 @@
 import { comfyuiUrl, localFetch } from './backend'
 import { log } from '../lib/logger'
 import { readComboOptions } from './comfyui-enum'
-// Type-only import — erased at runtime, so it cannot form a comfyui.ts ↔
-// comfyui-nodes.ts import cycle. classifyModel/MODEL_TYPE_DEFAULTS (runtime
-// values) are pulled via a DYNAMIC import inside getModelCapabilities() below.
+// Audit W-T2: classifyModel/MODEL_TYPE_DEFAULTS kamen hier per `await import()`
+// mitten in getModelCapabilities() herein, „so this module never forms a runtime
+// import cycle". Den Kreis gab es (comfyui → dynamic-workflow → comfyui-nodes →
+// comfyui), aber er lief über eine Kante, die comfyui.ts gar nicht haben durfte
+// — die ist weg (siehe comfyui-graph.ts). comfyui.ts importiert dieses Modul
+// nicht, also ist ein ganz normaler statischer Import hier die ehrliche Form.
+import { classifyModel, MODEL_TYPE_DEFAULTS } from './comfyui'
 import type { ModelType } from './comfyui'
 
 // ─── Types ───
@@ -281,9 +285,6 @@ export async function getModelCapabilities(model: string): Promise<ModelCapabili
     return null
   }
 
-  // classifyModel + MODEL_TYPE_DEFAULTS are runtime VALUES from comfyui.ts. Import
-  // them DYNAMICALLY so this module never forms a runtime import cycle.
-  const { classifyModel, MODEL_TYPE_DEFAULTS } = await import('./comfyui')
   const type = classifyModel(model)
   const caps: ModelCapabilities = { modelType: type, usesKSampler: true, discoveryErrors: [] }
 

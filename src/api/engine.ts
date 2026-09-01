@@ -13,7 +13,7 @@
 
 import { backendCall } from './backend'
 import { trackEngineSwap } from './engine-swap-gate'
-import { prefixModelName } from './providers'
+import { prefixModelName } from './providers/model-name'
 import { useProviderStore } from '../stores/providerStore'
 import { useSettingsStore } from '../stores/settingsStore'
 import type { CloudModel } from '../types/models'

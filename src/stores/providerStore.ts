@@ -10,8 +10,9 @@ import { persist } from 'zustand/middleware'
 import { keepPersistedState } from '../lib/persist-version'
 import { safeJSONStorage } from '../lib/storage-quota'
 import type { ProviderId, ProviderConfig } from '../api/providers/types'
-import { clearProviderCache } from '../api/providers/registry'
+import { clearProviderCache } from '../api/providers/client-cache'
 import { onLocalSlotChanged } from '../lib/builtin-slot-eviction'
+import { announceDarkenedSlots } from '../lib/provider-slot-darkening'
 import { secretGet, secretSet, secretDelete } from '../api/backend'
 import { CLOUD_BASE } from '../api/cloud/config'
 
@@ -116,23 +117,29 @@ const DEFAULT_PROVIDERS: Record<ProviderId, ProviderConfig> = {
  * the same broken state through a supported, one-click, non-exotic path.
  * `resetProvider` does the same for one slot.
  *
- * Imported lazily on purpose: modelStore reaches back here through
- * chatStore/remoteStore, and a static edge would close that circle at
- * module-init time.
+ * Audit W-T2: hier stand `void import('./modelStore')` mit der Begründung
+ * "modelStore reaches back here through chatStore/remoteStore, and a static
+ * edge would close that circle at module-init time". Die Begründung stimmte,
+ * die Auflösung nicht: der dynamische Import hat den Kreis nicht geöffnet,
+ * sondern nur unsichtbar gemacht (providerStore → modelStore → engine →
+ * providerStore, und providerStore → modelStore → chatStore → remoteStore →
+ * providerStore).
+ *
+ * Dieser Store hat kein Geschäft damit, den Modell-Store zu kennen. Er weiß
+ * nur, welche Slots gerade dunkel geworden sind — und sagt es an. Wer darauf
+ * reagieren will, meldet sich an; die Leitung dazwischen steht in
+ * lib/provider-slot-darkening.ts, gehört keinem der beiden Stores und schließt
+ * damit keinen Kreis.
  */
 function dropPicksForDarkenedSlots(
   before: Partial<Record<ProviderId, ProviderConfig>>,
   after: Partial<Record<ProviderId, ProviderConfig>>,
 ): void {
-  const darkened = (Object.keys(after) as ProviderId[]).filter(
-    (id) => before[id]?.enabled === true && after[id]?.enabled === false,
+  announceDarkenedSlots(
+    (Object.keys(after) as ProviderId[]).filter(
+      (id) => before[id]?.enabled === true && after[id]?.enabled === false,
+    ),
   )
-  if (darkened.length === 0) return
-  void import('./modelStore')
-    .then((m) => {
-      for (const id of darkened) m.useModelStore.getState().dropActiveModelIfServedBy(id)
-    })
-    .catch(() => { /* best-effort: the next inventory refresh re-checks */ })
 }
 
 // ── Store Interface ────────────────────────────────────────────

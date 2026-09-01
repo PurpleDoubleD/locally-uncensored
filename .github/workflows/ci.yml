@@ -55,6 +55,15 @@ jobs:
       - name: Type check
         run: npm run typecheck
 
+      # Audit W-T2: der Baum stand auf 11 Importzyklen, alle mit derselben
+      # Bauart — eine Kante, die es nicht geben durfte, versteckt hinter einem
+      # `await import()` mitten in einer Funktion. Sichtbar wird so etwas nur,
+      # wenn jemand misst; also misst CI. Gating ab dem ersten Tag, weil der
+      # Stand bei null anfängt und es hier folglich keine Altlast zu bezahlen
+      # gibt (anders als bei lint und clippy weiter unten).
+      - name: Import cycles
+        run: npm run cycles
+
       - name: Unit tests
         run: npx vitest run
 

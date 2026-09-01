@@ -3,6 +3,17 @@ import { log } from "../lib/logger"
 import { LU_CLIENT_PREFIX } from "./comfyui-ws"
 import { nodeComboOptions } from "./comfyui-enum"
 import { resolveRunSeed } from '../lib/run-seed'
+// Audit W-T2: videoDecodeNode/promptFilenamePrefix kamen hier bis eben per
+// `await import('./dynamic-workflow')` mitten in den Buildern herein — ein
+// dynamischer Import, der nur den Zyklus comfyui ↔ dynamic-workflow
+// verdeckt hat. Beide sind reine Graph-Bausteine und wohnen jetzt in
+// comfyui-graph.ts, das nichts importiert.
+import { videoDecodeNode, promptFilenamePrefix } from './comfyui-graph'
+// Audit W-T2: der Katalog kam bis eben per `await import('./discover')` in
+// getKnownFileSizes() herein, „to break the cycle at runtime". Die
+// Bundle-Daten gehören weder hierher noch nach discover.ts — sie liegen
+// jetzt in model-bundles.ts, das beide Seiten statisch lesen.
+import { getImageBundles, getVideoBundles } from './model-bundles'
 
 // ─── Control-plane fetch timeouts ───
 //
@@ -769,16 +780,12 @@ export async function getAnimateDiffModels(): Promise<string[]> {
 
 // ─── Partial Download Filter ───
 // Filters out files that exist on disk but are incomplete (< 90% of expected size).
-// Uses known bundle file sizes from discover.ts. Unknown files pass through.
+// Uses known bundle file sizes from model-bundles.ts. Unknown files pass through.
 
 let _knownFileSizes: Map<string, { subfolder: string; expectedBytes: number }> | null = null
 
 async function getKnownFileSizes(): Promise<Map<string, { subfolder: string; expectedBytes: number }>> {
   if (_knownFileSizes) return _knownFileSizes
-  // Dynamic import (not CommonJS require) — discover.ts imports back into
-  // comfyui.ts for classification helpers, so we defer the import to break
-  // the cycle at runtime instead of at module init.
-  const { getImageBundles, getVideoBundles } = await import('./discover')
   _knownFileSizes = new Map()
   for (const bundle of [...getImageBundles(), ...getVideoBundles()]) {
     for (const f of (bundle as any).files) {
@@ -2002,7 +2009,6 @@ export async function buildWanVideoWorkflow(params: VideoParams): Promise<Record
 
   const vae = await findMatchingVAE('wan')
   const clip = await findMatchingCLIP('wan')
-  const { videoDecodeNode } = await import('./dynamic-workflow')
   const hasTiledDecode = await nodeExists('VAEDecodeTiled')
 
   const workflow: Record<string, any> = {
@@ -2026,7 +2032,6 @@ export async function buildWanVideoWorkflow(params: VideoParams): Promise<Record
   // Use SaveAnimatedWEBP if available, otherwise fall back to SaveImage (frame
   // sequence). Prompt-based prefix (David 2026-06-11) — the dynamic builder got
   // this in c40d13f, this legacy T2V path still wrote locally_uncensored_vid.
-  const { promptFilenamePrefix } = await import('./dynamic-workflow')
   const vidPrefix = promptFilenamePrefix(params.prompt, true)
   if (hasSaveWEBP) {
     workflow['9'] = {
@@ -2052,7 +2057,6 @@ export async function buildAnimateDiffWorkflow(params: VideoParams): Promise<Rec
 
   // AnimateDiff: batch_size=1, motion model handles temporal dimension
   const hasVHS = await nodeExists('VHS_VideoCombine')
-  const { videoDecodeNode } = await import('./dynamic-workflow')
   const hasTiledDecode = await nodeExists('VAEDecodeTiled')
 
   const workflow: Record<string, any> = {

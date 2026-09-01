@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
 // H5: provider API keys move to the OS keychain on Win/macOS, with a
 // localStorage fallback (Linux + web build). These tests mock the Rust
-// secret_* bridge and the registry, then exercise hydrateProviderKeys,
+// secret_* bridge and the client cache, then exercise hydrateProviderKeys,
 // setProviderApiKey, migration, and the localStorage-strip via partialize.
 //
 // `keychainReady` is module-level state, so each case re-imports the store
@@ -14,7 +14,9 @@ const { secretGet, secretSet, secretDelete } = vi.hoisted(() => ({
   secretDelete: vi.fn(),
 }))
 
-vi.mock('../../api/providers/registry', () => ({ clearProviderCache: vi.fn() }))
+// Audit W-T2: Pfadanpassung — clearProviderCache wohnt jetzt in
+// providers/client-cache.ts (siehe dort). Gleiche Attrappe, gleicher Zweck.
+vi.mock('../../api/providers/client-cache', () => ({ clearProviderCache: vi.fn() }))
 vi.mock('../../api/backend', () => ({ secretGet, secretSet, secretDelete }))
 
 async function freshStore() {

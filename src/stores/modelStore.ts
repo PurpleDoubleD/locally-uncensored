@@ -16,7 +16,8 @@ import { log } from '../lib/logger'
 // ('sdxl::x.safetensors' → null vs 'sdxl', 'a::b::c' → null vs 'ollama'), which
 // is the worst possible place for two answers: the guard below would decline to
 // clear a pick that the send path would then route to a dead backend.
-import { getProviderIdFromModel } from '../api/providers'
+import { getProviderIdFromModel } from '../api/providers/model-name'
+import { onProviderSlotsDarkened } from '../lib/provider-slot-darkening'
 import type { ProviderId } from '../api/providers/types'
 
 export interface PullState {
@@ -294,3 +295,13 @@ export const useModelStore = create<ModelState>()(
     }
   )
 )
+
+// Audit W-T2: Der providerStore hat sich diesen Store früher selbst geholt
+// (`void import('./modelStore')`), um bei abgeschalteten Slots die Modellwahl
+// zu räumen — ein dynamischer Import, der den Kreis providerStore ↔ modelStore
+// nur verdeckt hat. Jetzt wird dort angesagt und hier zugehört; die Anmeldung
+// passiert beim Laden dieses Moduls, wie registerBuiltinTools() sich beim
+// Tool-Registry anmeldet.
+onProviderSlotsDarkened((darkened) => {
+  for (const id of darkened) useModelStore.getState().dropActiveModelIfServedBy(id)
+})
