@@ -415,13 +415,15 @@ export function ChatInput({ onSend, onStop, isGenerating, pendingApproval, onApp
             still than it was working, which is what David saw as "der Stop
             Knopf oeffnet eine weitere Zeile, alles sieht asymmetrisch aus".
             No wrapping, a fixed-height row, and every control shrink-0 with
-            only the middle spacer giving way. */}
+            only the middle spacer giving way — das `flex: 0 0 auto` steckt
+            seit der Composer-Grammatik im Rezept `.lu-control` (index.css),
+            nicht mehr als `shrink-0` an jedem einzelnen Knopf. */}
         <div className="flex flex-nowrap items-center gap-1 px-2 py-1.5 min-h-[38px] border-t border-gray-200 dark:border-white/[0.05]">
           {/* Clip button */}
           <button
             onClick={() => fileInputRef.current?.click()}
             disabled={isGenerating}
-            className="p-1.5 rounded-md text-gray-500 hover:text-gray-300 hover:bg-white/5 disabled:opacity-20 transition-all shrink-0"
+            className="lu-control lu-control--icon"
             title="Attach images. For PDFs and documents use the Documents panel"
           >
             <Paperclip size={14} />
@@ -448,18 +450,19 @@ export function ChatInput({ onSend, onStop, isGenerating, pendingApproval, onApp
             disabled={isGenerating}
           />
 
-          {/* Think toggle ('always'-models render it locked on) */}
+          {/* Think toggle ('always'-models render it locked on).
+              Der Ein-Zustand kommt aus `aria-pressed`, nicht aus einer
+              zweiten Klassenkette: das neutrale Rezept liest ihn und setzt
+              den Behaelter. Vorher war Ein ein blaues Pill — dieselbe Farbe,
+              die auch der Fokusring traegt, also zwei Bedeutungen auf einer
+              Farbe (Audit §4, Chat mit Antwort). */}
           <button
             onClick={() => {
               if (canThink) updateSettings({ thinkingEnabled: !thinkingEnabled })
             }}
-            className={`flex items-center gap-1 px-1.5 py-1.5 rounded-md transition-all shrink-0 text-[0.6rem] font-medium ${
-              (thinkingEnabled && canThink) || thinkLockedOn
-                ? 'bg-blue-500/15 text-blue-400 border border-blue-500/30'
-                : !canThink
-                  ? 'text-gray-600 opacity-40 cursor-default'
-                  : 'text-gray-500 hover:text-gray-300 hover:bg-white/5'
-            }`}
+            disabled={!canThink && !thinkLockedOn}
+            aria-pressed={(thinkingEnabled && canThink) || thinkLockedOn}
+            className="lu-control"
             title={
               thinkLockedOn
                 ? 'Thinking is always on for this model'
@@ -511,7 +514,12 @@ export function ChatInput({ onSend, onStop, isGenerating, pendingApproval, onApp
             {isGenerating ? (
               <motion.button
                 onClick={onStop}
-                className="w-full h-full flex items-center justify-center rounded-md bg-red-500/15 text-red-400 hover:bg-red-500/25 transition-all"
+                // Neutral, nicht rot: Stop ist der Normalabschluss und die
+                // haeufigste Aktion waehrend eines Streams. `data-active`
+                // gibt ihm den Behaelter des neutralen Rezepts, damit er
+                // auffindbar bleibt, ohne die Fehlerfarbe zu tragen.
+                data-active="true"
+                className="lu-control lu-control--icon w-full h-full"
                 whileTap={{ scale: 0.9 }}
                 aria-label="Stop generation"
               >
@@ -521,7 +529,7 @@ export function ChatInput({ onSend, onStop, isGenerating, pendingApproval, onApp
               <motion.button
                 onClick={handleSend}
                 disabled={(!input.trim() && images.length === 0) || isTranscribing}
-                className="lu-primary w-full h-full flex items-center justify-center rounded-md disabled:opacity-40 transition-colors"
+                className="lu-control lu-control--icon lu-primary w-full h-full"
                 whileTap={{ scale: 0.9 }}
                 aria-label="Send message"
               >

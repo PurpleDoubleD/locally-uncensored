@@ -469,6 +469,141 @@ input[type="range"]::-webkit-slider-thumb {
 }
 
 /* ──────────────────────────────────────────────────────────────────
+   .lu-control — DAS neutrale Control-Rezept der Composer-Leiste.
+
+   Zusammen mit `.lu-primary` weiter unten sind das die ZWEI Formsprachen,
+   die die Prompt-Zeile noch kennt. Vorher waren es neun, nebeneinander,
+   auf 40 Pixel Hoehe (Audit Welle 2, „Composer-Grammatik"; die Zaehlung
+   steht in src/components/chat/__tests__/composer-grammar.test.ts):
+   Paperclip `p-1.5 rounded-md`, Think `px-1.5 py-1.5 rounded-md` mit
+   blauem Rand nur im Ein-Zustand, Docs dasselbe in Gruen, Tools ganz ohne
+   Flaeche, Plugins `px-2 py-0.5 rounded` mit Dauer-Rand und 10,12px
+   Schrift, Modellwaehler `h-[26px] rounded-md` mit Dauer-Rand und 12,88px
+   Schrift, Stop rot gefuellt, Send violett gefuellt. Vier Hoehen
+   (17 / 26 / 27,8 px), drei Radien (4,6 / 6,9 / 9,2 px), drei
+   Schriftgroessen.
+
+   Was hier steht, ist ausdruecklich EIN Rezept mit ZUSTAENDEN, nicht
+   mehrere Rezepte: Ruhe · Hover · aktiv/offen · disabled · Fokus. Der
+   aktive Zustand wird aus ARIA gelesen (`aria-pressed` fuer Umschalter,
+   `aria-expanded` fuer Aufklapper), damit die Call-Sites nichts
+   dazuschreiben muessen und die Zustandsanzeige zwangslaeufig mit der
+   Barrierefreiheit uebereinstimmt statt daneben zu leben.
+   `data-active` ist die dritte Tuer, fuer Controls, die weder Umschalter
+   noch Aufklapper sind — heute genau eine: Stop.
+
+   Der Rand ist IMMER da, nur im Ruhezustand durchsichtig. Vorher kam er
+   erst beim Aktivieren dazu und die Leiste wuchs beim Umschalten um 2px.
+
+   Warum Stop NEUTRAL bleibt und nicht `.lu-primary` traegt: Stop ist der
+   Normalabschluss eines Streams und die haeufigste Aktion, waehrend eine
+   Antwort laeuft — kein destruktiver Bestaetigungsknopf. Es trug
+   `bg-red-500/15 text-red-400`, und bei 94 `text-red-400`-Fundstellen
+   heisst Rot in dieser App „kaputt oder wird geloescht" (Audit §4, Chat
+   streamend). Auffindbar bleibt es ueber `data-active`, also ueber den
+   Behaelter des neutralen Rezepts, nicht ueber Farbe.
+
+   Geometrie aus vorhandenen Tokens, keine neuen Zahlen:
+   Hoehe --control-h-sm (26px, die Hoehe, die der Modellwaehler und der
+   Send-Slot schon hatten), Radius --radius-control (8px, die Stufe aus
+   dem Token-Diff), Uebergang --motion-fast/--motion-ease.
+
+   Farbe: gerechnet, nicht geschaetzt (WCAG 2.1, 11,04px = Fliesstext,
+   AA = 4.5:1). Dunkelmodus #9ca3af auf #1e1e1e = 6.57:1, aktiv #f3f4f6
+   = 15.15:1. Hellmodus #4b5563 auf #ffffff = 7.56:1, aktiv #111827
+   = 17.74:1. composer-grammar.test.ts rechnet diese vier Werte nach UND
+   prueft, dass genau sie hier stehen — der Kommentar kann also nicht
+   veralten, ohne rot zu werden.
+   ───────────────────────────────────────────────────────────────── */
+.lu-control {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  flex: 0 0 auto;
+  height: var(--control-h-sm);
+  padding: 0 8px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-control);
+  background-color: transparent;
+  color: rgb(156 163 175);
+  font-size: 0.6rem;
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+  transition:
+    background-color var(--motion-fast) var(--motion-ease),
+    border-color var(--motion-fast) var(--motion-ease),
+    color var(--motion-fast) var(--motion-ease);
+}
+/* Ueberall dort, wo die neutrale HAUT gesetzt wird, steht `:not(.lu-primary)`.
+   Grund: Send traegt beide Klassen (`.lu-control .lu-control--icon
+   .lu-primary`) — Geometrie vom neutralen, Farbe vom betonten Rezept. Beide
+   sind ungeschichtet, also entscheidet erst die Spezifitaet und dann die
+   Reihenfolge. `.light .lu-control:hover:not(:disabled)` ist 0,4,0 und
+   schlaegt `.lu-primary:hover:not(:disabled)` mit 0,3,0 — im Hellmodus
+   waere der Senden-Knopf beim Ueberfahren grau geworden. Die Ausnahme steht
+   deshalb an der Regel, nicht als Gegengewicht mit noch mehr Spezifitaet.
+   Geometrie (Hoehe, Radius, Polsterung, Rand-PLATZ) gilt weiterhin fuer
+   beide — sie ist ja gerade der gemeinsame Teil. */
+.light .lu-control:not(.lu-primary) { color: rgb(75 85 99); }
+
+/* Die quadratische Variante fuer nackte Icons. Gleiche Hoehe, gleicher
+   Radius, gleiche Zustaende — nur ohne waagerechtes Padding, damit das
+   Icon mittig sitzt. Das ist keine zweite Formsprache, sondern dieselbe
+   ohne Beschriftung. */
+.lu-control--icon {
+  width: var(--control-h-sm);
+  padding: 0;
+}
+
+.lu-control:not(.lu-primary):hover:not(:disabled) {
+  background-color: rgba(255, 255, 255, 0.07);
+  color: rgb(243 244 246);
+}
+.light .lu-control:not(.lu-primary):hover:not(:disabled) {
+  background-color: rgba(0, 0, 0, 0.05);
+  color: rgb(17 24 39);
+}
+
+/* Aktiv / offen — der Behaelter erscheint erst hier. Traeger der Aussage
+   ist die Textfarbe (6.57:1 → 15.34:1 im Dunkelmodus), nicht der Rand:
+   ein 1px-Rand bei 14% Deckung erfuellt 1.4.11 fuer sich genommen nicht
+   und ist deshalb bewusst nur die Zugabe, nie das einzige Signal. */
+.lu-control:not(.lu-primary)[aria-pressed='true'],
+.lu-control:not(.lu-primary)[aria-expanded='true'],
+.lu-control:not(.lu-primary)[data-active='true'] {
+  background-color: rgba(255, 255, 255, 0.07);
+  border-color: rgba(255, 255, 255, 0.14);
+  color: rgb(243 244 246);
+}
+.light .lu-control:not(.lu-primary)[aria-pressed='true'],
+.light .lu-control:not(.lu-primary)[aria-expanded='true'],
+.light .lu-control:not(.lu-primary)[data-active='true'] {
+  background-color: rgba(0, 0, 0, 0.05);
+  border-color: rgba(0, 0, 0, 0.14);
+  color: rgb(17 24 39);
+}
+
+/* Beschaeftigt — der Modellwaehler waehrend ein Modell laedt. Akzentkante
+   statt eines eigenen blauen Rezepts mit Leuchtschatten. */
+.lu-control:not(.lu-primary)[aria-busy='true'] {
+  border-color: var(--color-lu-accent-ring);
+}
+
+.lu-control:focus-visible {
+  outline: 2px solid var(--color-lu-accent-ring);
+  outline-offset: 2px;
+}
+
+/* Deaktiviert heisst gedimmt, nicht defekt: Paperclip und Mikrofon standen
+   auf `opacity-20` und lasen sich als kaputt (Audit §4, Chat streamend). */
+.lu-control:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* ──────────────────────────────────────────────────────────────────
    .lu-primary — DAS Primaer-Rezept. Genau einmal definiert, benutzt von
    allen drei Primaeraktionen der App:
      • create/ui/Button.tsx      (Variante `primary`, u.a. Generate)

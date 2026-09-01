@@ -813,31 +813,30 @@ export function ModelSelector({ openUpward = false, surface = 'chat' }: ModelSel
         onClick={() => setOpen(!open)}
         title={activeModel ? `Model: ${activeDisplayName}, click to switch` : 'Select a chat model'}
         aria-label="Select chat model"
-        className={`
-          group flex items-center gap-1.5 h-[26px] px-2 rounded-md
-          bg-transparent border transition-all text-[0.7rem]
-          hover:bg-white/[0.04]
-          ${isModelLoading
-            ? 'border-blue-500/40 shadow-[0_0_6px_rgba(59,130,246,0.2)]'
-            : 'border-white/[0.06] hover:border-white/[0.1]'
-          }
-        `}
+        aria-expanded={open}
+        // Laedt gerade ein Modell: `aria-busy` statt eines eigenen blauen
+        // Rezepts mit Leuchtschatten. Das Rezept faerbt die Kante mit dem
+        // Akzent, die Aussage steht damit im selben Vokabular wie der Rest
+        // der Leiste — und im Accessibility-Baum, wo sie hingehoert.
+        aria-busy={isModelLoading}
+        className="lu-control"
       >
         {/* Type indicator dot */}
         <span className={`w-1.5 h-1.5 rounded-full ${
           activeType === 'text' ? 'bg-blue-400' : activeType === 'image' ? 'bg-purple-400' : 'bg-emerald-400'
         } ${isModelLoading ? 'animate-pulse' : ''}`} />
 
-        {/* Model name */}
-        <span className="text-gray-300 max-w-[140px] truncate leading-none">
+        {/* Model name. Keine eigene Textfarbe mehr — sie wird vom Control
+            geerbt, sonst haette der Knopf zwei Graustufen in sich. */}
+        <span className="max-w-[140px] truncate leading-none">
           {activeDisplayName}
         </span>
 
         {/* Chevron / Spinner */}
         {isModelLoading ? (
-          <Loader2 size={10} className="animate-spin text-blue-400 ml-0.5" />
+          <Loader2 size={10} className="animate-spin" />
         ) : (
-          <ChevronDown size={10} className={`text-gray-500 transition-transform ml-0.5 ${open ? 'rotate-180' : ''}`} />
+          <ChevronDown size={10} className={`transition-transform ${open ? 'rotate-180' : ''}`} />
         )}
       </button>
 

@@ -12,25 +12,13 @@
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
+// Die Rechnung liegt seit dem Hellmodus-Nachzug in einem eigenen Modul,
+// damit der zweite Test sie benutzt statt sie zu kopieren. Die
+// Referenzwerte der Spec unten pruefen weiterhin genau diese Funktionen.
+import { contrast } from './wcag-contrast'
 
 const css = readFileSync(resolve(__dirname, '../../index.css'), 'utf-8')
 const read = (rel: string) => readFileSync(resolve(__dirname, rel), 'utf-8')
-
-/** WCAG 2.1 relative Luminanz eines #rrggbb-Werts. */
-function luminance(hex: string): number {
-  const h = hex.replace('#', '')
-  const channel = (i: number) => {
-    const c = parseInt(h.slice(i, i + 2), 16) / 255
-    return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4
-  }
-  return 0.2126 * channel(0) + 0.7152 * channel(2) + 0.0722 * channel(4)
-}
-
-/** WCAG 2.1 Kontrastverhaeltnis zweier #rrggbb-Werte, immer >= 1. */
-function contrast(a: string, b: string): number {
-  const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x)
-  return (hi + 0.05) / (lo + 0.05)
-}
 
 /** Liest einen `--color-*: #rrggbb;`-Token aus dem @theme-Block. */
 function token(name: string): string {

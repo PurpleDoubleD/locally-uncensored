@@ -707,12 +707,23 @@ export function Sidebar() {
             animate={{ scale: 1, opacity: 1 }}
             exit={{ scale: 0.92, opacity: 0 }}
             transition={{ duration: 0.15, ease: 'easeOut' }}
-            className="bg-[#212121] border border-white/10 rounded-xl p-5 max-w-[360px] w-full flex flex-col items-center gap-3 shadow-2xl"
+            /* Hellmodus-Luecke aus Welle 2, in f336b91e gemeldet statt
+               geaendert („das Innere ist durchgehend dunkelmodus-only
+               gefaerbt"). Beides zusammen, sonst waere es genau die
+               Verschlimmbesserung, die dort beschrieben steht: die Flaeche
+               auf Tokens, und jeder Akzent darin mit Hell-Pendant.
+               Vorher im Hellmodus blieb die Flaeche #212121, waehrend der
+               Rescue-Layer die Schrift nach unten drehte — `text-gray-400`
+               wurde #374151 und stand bei 1,56:1. Nachher 10,31:1.
+               Der Passcode (amber-400, 1,92:1 auf Weiss) traegt jetzt
+               amber-700 mit 5,02:1. Die QR-Kachel ist selbst weiss und
+               verschwaende sonst im weissen Dialog — daher die Kante. */
+            className="bg-white dark:bg-lu-base border border-gray-200 dark:border-white/10 rounded-xl p-5 max-w-[360px] w-full flex flex-col items-center gap-3 shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between w-full">
-              <div className="flex items-center gap-1.5 text-green-400">
-                <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
+              <div className="flex items-center gap-1.5 text-green-700 dark:text-green-400">
+                <span className="w-1.5 h-1.5 rounded-full bg-green-600 dark:bg-green-400 animate-pulse" />
                 <span className="text-[0.7rem] font-medium tracking-wide">LIVE</span>
               </div>
               <button
@@ -726,12 +737,12 @@ export function Sidebar() {
 
             {awaitingTunnel ? (
               <div className="flex flex-col items-center justify-center gap-2 py-10 text-center">
-                <RefreshCw size={28} className="animate-spin text-emerald-400/70" />
-                <span className="text-[0.8rem] text-emerald-400/90">Connecting to Cloudflare…</span>
+                <RefreshCw size={28} className="animate-spin text-emerald-700 dark:text-emerald-400/70" />
+                <span className="text-[0.8rem] text-emerald-700 dark:text-emerald-400/90">Connecting to Cloudflare…</span>
                 <span className="text-[0.6rem] text-gray-500">The QR appears once the tunnel is live</span>
               </div>
             ) : qrPngBase64 ? (
-              <div className="bg-white rounded-lg p-3">
+              <div className="bg-white rounded-lg p-3 ring-1 ring-gray-200 dark:ring-0">
                 <img
                   src={`data:image/png;base64,${qrPngBase64}`}
                   alt="QR code"
@@ -742,7 +753,7 @@ export function Sidebar() {
             ) : null}
 
             <div className="flex items-center justify-center gap-3 w-full">
-              <code className="text-2xl font-mono font-bold text-amber-400 tracking-[8px]">{passcode}</code>
+              <code className="text-2xl font-mono font-bold text-amber-700 dark:text-amber-400 tracking-[8px]">{passcode}</code>
               <button
                 onClick={() => copyToClipboard(passcode)}
                 className="p-1.5 rounded hover:bg-white/10 text-gray-400 hover:text-white transition-colors"
@@ -752,13 +763,13 @@ export function Sidebar() {
               </button>
             </div>
             {countdown && (
-              <div className={`text-[0.65rem] font-mono ${countdown === 'Expired' ? 'text-red-400' : 'text-gray-500'}`}>
+              <div className={`text-[0.65rem] font-mono ${countdown === 'Expired' ? 'text-red-700 dark:text-red-400' : 'text-gray-500'}`}>
                 {countdown === 'Expired' ? 'Expired, regenerating…' : `Expires in ${countdown}`}
               </div>
             )}
 
             <div className="w-full flex items-center gap-2 px-3 py-2 rounded bg-white/[0.04] border border-white/5">
-              <code className={`text-[0.65rem] truncate flex-1 ${tunnelActive ? 'text-emerald-400' : 'text-blue-400'}`}>
+              <code className={`text-[0.65rem] truncate flex-1 ${tunnelActive ? 'text-emerald-700 dark:text-emerald-400' : 'text-blue-700 dark:text-blue-400'}`}>
                 {tunnelActive && tunnelUrl ? `${tunnelUrl}/mobile` : (mobileUrl || lanUrl)}
               </code>
               <button

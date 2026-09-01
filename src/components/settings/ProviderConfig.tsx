@@ -693,8 +693,17 @@ export function ProviderSettings() {
           <Plus size={10} />
           <span>Add Provider</span>
         </button>
+        {/* Hellmodus-Luecke aus Welle 2, in f336b91e gemeldet statt
+            geaendert. Die Flaeche war `bg-[#363636]` OHNE `dark:`, blieb im
+            Hellmodus also dunkel — waehrend der Rescue-Layer in index.css
+            die Schrift darin nach unten dreht (`.light .text-gray-500 →
+            #374151`). Ergebnis: #374151 auf #363636 = 1,17:1, praktisch
+            unsichtbar; jetzt 10,31:1. Kein zweites Literal, sondern
+            derselbe Tokenwechsel wie in ChatView (f336b91e). Das gruene
+            „Active" stand auf Weiss bei 1,74:1 und traegt jetzt green-700
+            mit 5,02:1. */}
         {dropdownOpen && (
-          <div className="absolute z-50 top-full mt-1 w-full bg-[#363636] border border-white/10 rounded-lg shadow-xl max-h-56 overflow-y-auto scrollbar-thin">
+          <div className="absolute z-50 top-full mt-1 w-full bg-white dark:bg-lu-overlay border border-gray-200 dark:border-white/10 rounded-lg shadow-xl max-h-56 overflow-y-auto scrollbar-thin">
             {/* Local group */}
             <div className="px-2.5 py-1 text-[0.5rem] uppercase tracking-wider text-gray-600 font-semibold">Local</div>
             {localPresets.map(preset => {
@@ -710,7 +719,7 @@ export function ProviderSettings() {
                 >
                   <div className="flex items-center justify-between">
                     <span className="font-medium">{preset.name}</span>
-                    {isActive && <span className="text-[0.5rem] text-green-400">Active</span>}
+                    {isActive && <span className="text-[0.5rem] text-green-700 dark:text-green-400">Active</span>}
                   </div>
                   {preset.baseUrl && <span className="block text-[0.55rem] text-gray-500 font-mono">{preset.baseUrl}</span>}
                 </button>
@@ -732,7 +741,7 @@ export function ProviderSettings() {
                 >
                   <div className="flex items-center justify-between">
                     <span className="font-medium">{preset.name}</span>
-                    {isActive && <span className="text-[0.5rem] text-green-400">Active</span>}
+                    {isActive && <span className="text-[0.5rem] text-green-700 dark:text-green-400">Active</span>}
                   </div>
                   {preset.baseUrl && <span className="block text-[0.55rem] text-gray-500 font-mono">{preset.baseUrl}</span>}
                 </button>

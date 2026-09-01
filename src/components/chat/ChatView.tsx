@@ -394,12 +394,8 @@ export function ChatView() {
                   {appMode !== 'cloud' && (
                   <button
                     onClick={() => setRagPanelOpen(!ragPanelOpen)}
-                    className={
-                      'flex items-center gap-1 px-2 py-1.5 rounded-md transition-all shrink-0 text-[0.6rem] font-medium ' +
-                      (ragPanelOpen || ragEnabled
-                        ? 'bg-green-500/15 text-green-400 border border-green-500/30'
-                        : 'text-gray-500 hover:text-gray-300 hover:bg-white/5')
-                    }
+                    aria-pressed={ragPanelOpen || ragEnabled}
+                    className="lu-control"
                     title="Document Chat (RAG)"
                   >
                     <FileText size={11} />
@@ -423,9 +419,13 @@ export function ChatView() {
                     <div className="relative">
                       <button
                         onClick={() => setToolsDropdownOpen(!toolsDropdownOpen)}
-                        className="flex items-center gap-1 px-2 py-1.5 rounded-md text-gray-500 hover:text-gray-300 hover:bg-white/5 transition-all shrink-0 text-[0.6rem] font-medium"
+                        aria-expanded={toolsDropdownOpen}
+                        className="lu-control"
                       >
-                        <Wrench size={11} className="text-green-400" />
+                        {/* Kein eigener Gruenton mehr: das Icon erbt die
+                            Farbe des Controls, sonst traegt ein neutrales
+                            Control wieder einen Akzent von sich aus. */}
+                        <Wrench size={11} />
                         <span>Tools</span>
                         <ChevronDown size={9} className={`transition-transform ${toolsDropdownOpen ? 'rotate-180' : ''}`} />
                       </button>
