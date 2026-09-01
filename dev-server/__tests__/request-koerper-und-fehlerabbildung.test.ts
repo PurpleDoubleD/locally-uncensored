@@ -24,8 +24,7 @@
  * Run: npx vitest run dev-server/__tests__/request-koerper-und-fehlerabbildung.test.ts
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { mkdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { Connect } from 'vite'
 import { JailEscapeError } from '../../src/lib/dev-fs-jail'
@@ -33,33 +32,51 @@ import { failRequest, requirePost, sendJson, withJsonBody } from '../http'
 import { registerFsRoutes } from '../fs-routes'
 import { registerDownloadRoutes } from '../downloads'
 import { anfrage, routeHolen } from './echte-anfrage'
+import { anfrageImHeim, arbeitsordnerIn, frischesHeim, kulisseAufraeumen } from './kaefig-kulisse'
 
+/**
+ * Das Wegwerf-Heim, auf das `os.homedir()` für die Dauer jeder Anfrage an
+ * einen EINGEHÄNGTEN Handler zeigt — siehe kaefig-kulisse.ts. Ohne das lag
+ * `ws` unter Windows in `$HOME\AppData\Local\Temp`, und das erste Tor des
+ * Käfigs lehnte die Wurzel mit 403 ab, bevor der geprüfte Code überhaupt
+ * dran war.
+ */
+let heim = ''
 let ws = ''
 
 beforeAll(() => {
-  ws = realpathSync(mkdtempSync(join(tmpdir(), 'lu-zb7-http-')))
-  mkdirSync(join(ws, 'arbeit'), { recursive: true })
-  ws = join(ws, 'arbeit')
+  heim = frischesHeim()
+  ws = arbeitsordnerIn(heim, 'arbeit')
+  mkdirSync(ws, { recursive: true })
 })
 
-afterAll(() => {
-  if (ws) rmSync(join(ws, '..'), { recursive: true, force: true })
-})
+afterAll(kulisseAufraeumen)
 
-const fsWrite = () => routeHolen(registerFsRoutes, '/local-api/fs-write')
-const fsInfo = () => routeHolen(registerFsRoutes, '/local-api/fs-info')
+/**
+ * Jede Anfrage an einen EINGEHÄNGTEN Handler läuft im Wegwerf-Heim. Die drei
+ * hand-komponierten Handler weiter unten (`werfer`, `failRequest`, `sendJson`)
+ * fassen kein Dateisystem an und rufen `os.homedir()` nie — sie bleiben
+ * deshalb beim nackten `anfrage`, und der Unterschied ist genau dieser.
+ */
+const route = (register: Parameters<typeof routeHolen>[0], pfad: string) =>
+  (optionen: Parameters<typeof anfrage>[1]) =>
+    anfrageImHeim(routeHolen(register, pfad), heim, optionen)
+
+const fsWrite = () => route(registerFsRoutes, '/local-api/fs-write')
+const fsInfo = () => route(registerFsRoutes, '/local-api/fs-info')
+const pauseDownload = () => route(registerDownloadRoutes, '/local-api/pause-download')
 
 describe('requirePost — am ausgelieferten Endpunkt', () => {
   for (const methode of ['GET', 'PUT', 'DELETE', 'PATCH']) {
     it(`beantwortet ${methode} mit 405 und leerem Körper`, async () => {
-      const res = await anfrage(fsInfo(), { method: methode })
+      const res = await fsInfo()({ method: methode })
       expect(res.status).toBe(405)
       expect(res.text).toBe('')
     })
   }
 
   it('lässt POST durch (die Antwort kommt vom Handler, nicht vom 405)', async () => {
-    const res = await anfrage(fsInfo(), {
+    const res = await fsInfo()({
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ path: 'gibtsnicht.txt', workingDirectory: ws }),
@@ -89,7 +106,7 @@ describe('withJsonBody — am ausgelieferten Endpunkt', () => {
     expect(emojiStart, 'das Emoji muss im Körper stehen').toBeGreaterThan(0)
     const schnitt = emojiStart + 2 // mitten in den vier Bytes
 
-    const res = await anfrage(fsWrite(), {
+    const res = await fsWrite()({
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: [koerper.subarray(0, schnitt), koerper.subarray(schnitt)],
@@ -111,8 +128,7 @@ describe('withJsonBody — am ausgelieferten Endpunkt', () => {
     // `~/<AGENT_WORKSPACE_DIR>/default` — der Test würde dann beim Fehlschlagen
     // ins echte Heimatverzeichnis schreiben. Ein Test, der im Fehlerfall Müll
     // hinterlässt, ist beim Gegenprobieren nicht brauchbar.
-    const handler = routeHolen(registerDownloadRoutes, '/local-api/pause-download')
-    const res = await anfrage(handler, {
+    const res = await pauseDownload()({
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: '{ das ist kein JSON',
@@ -124,7 +140,7 @@ describe('withJsonBody — am ausgelieferten Endpunkt', () => {
   it('und antwortet danach weiter (der Prozess lebt)', async () => {
     // Die Zusicherung, die den vorigen Fall erst zu einer macht: nach dem
     // kaputten Körper muss der nächste Request noch bedient werden.
-    const res = await anfrage(fsInfo(), {
+    const res = await fsInfo()({
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ path: 'chunk.txt', workingDirectory: ws }),
@@ -148,8 +164,7 @@ describe('withJsonBody — am ausgelieferten Endpunkt', () => {
     // Beim ersten Lauf dieser Datei ist genau das passiert (fs-write, 0 Bytes,
     // `~/agent-workspace-experiment/default`). `pause-download` fasst kein
     // Dateisystem an.
-    const handler = routeHolen(registerDownloadRoutes, '/local-api/pause-download')
-    const res = await anfrage(handler, {
+    const res = await pauseDownload()({
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: '',

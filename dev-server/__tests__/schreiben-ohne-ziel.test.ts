@@ -30,59 +30,46 @@
  * VAKUUM-GRÜN und blieben auch ohne die Prüfung grün, während der Handler ins
  * echte Profil schriebe.
  *
+ * DER MECHANISMUS STEHT JETZT IN kaefig-kulisse.ts, und zwar mit PFLICHT-Heim.
+ * Er stand hier als lokaler `fsPost` mit einem OPTIONALEN dritten Argument, und
+ * drei Aufrufstellen liessen es weg — die drei, die eine Kulisse unter
+ * `tmpdir()` aufbauten. Unter Windows liegt `tmpdir()` in `$HOME\AppData`, das
+ * der Käfig als Wurzel absichtlich verbietet; genau diese drei antworteten dort
+ * mit 403 statt 200/400. Ein optionales Argument, das man vergessen kann, WIRD
+ * vergessen. Zwei Nachbardateien hatten denselben Mechanismus gar nicht.
+ *
  * Run: npx vitest run dev-server/__tests__/schreiben-ohne-ziel.test.ts
  */
 import { afterAll, describe, expect, it } from 'vitest'
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { existsSync, lstatSync, mkdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { AGENT_WORKSPACE_DIR } from '../../src/lib/app-identity'
 import { registerFsRoutes } from '../fs-routes'
-import { anfrage, routeHolen } from './echte-anfrage'
+import { routeHolen } from './echte-anfrage'
+import { anfrageImHeim, arbeitsordnerIn, frischesHeim, kulisseAufraeumen } from './kaefig-kulisse'
 
-/** Alles, was diese Datei anlegt, damit `afterAll` es wieder los wird. */
-const wegwerf: string[] = []
-
-afterAll(() => {
-  for (const p of wegwerf) rmSync(p, { recursive: true, force: true })
-})
-
-/** Ein frisches Wegwerf-Heimatverzeichnis. `realpathSync`, weil /var auf macOS ein Symlink ist. */
-function frischesHeim(): string {
-  const heim = realpathSync(mkdtempSync(join(tmpdir(), 'lu-kf12-')))
-  wegwerf.push(heim)
-  return heim
-}
+afterAll(kulisseAufraeumen)
 
 /** Die Käfigwurzel, die ein Request ohne `workingDirectory` und ohne `chatId` trifft. */
 function sandkasten(heim: string): string {
   return join(heim, AGENT_WORKSPACE_DIR, 'default')
 }
 
-/** Die beiden Variablen, aus denen `os.homedir()` sein Ergebnis nimmt. */
-const HEIM_VARIABLEN = ['HOME', 'USERPROFILE'] as const
-
-/** Eine echte POST-Anfrage an eine der sechs fs-Türen, mit umgebogenem Heim. */
-async function fsPost(
+/**
+ * Eine echte POST-Anfrage an eine der sechs fs-Türen, mit umgebogenem Heim.
+ * `heim` ist PFLICHT — siehe Dateikopf.
+ */
+function fsPost(
   endpunkt: string,
   koerper: Record<string, unknown>,
-  heim?: string,
+  heim: string,
 ) {
   const handler = routeHolen(registerFsRoutes, `/local-api/${endpunkt}`)
-  const vorher = HEIM_VARIABLEN.map((name) => [name, process.env[name]] as const)
-  if (heim !== undefined) for (const name of HEIM_VARIABLEN) process.env[name] = heim
-  try {
-    return await anfrage(handler, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(koerper),
-    })
-  } finally {
-    for (const [name, wert] of vorher) {
-      if (wert === undefined) delete process.env[name]
-      else process.env[name] = wert
-    }
-  }
+  return anfrageImHeim(handler, heim, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(koerper),
+  })
 }
 
 describe('fs-write ohne Ziel legt die Käfigwurzel nicht als Datei an', () => {
@@ -120,7 +107,7 @@ describe('fs-write ohne Ziel legt die Käfigwurzel nicht als Datei an', () => {
     // antwortete das mit 200 und einer 8-Byte-Datei namens `projekt-neu`.
     const basis = frischesHeim()
     const nochNichtDa = join(basis, 'projekt-neu')
-    const res = await fsPost('fs-write', { workingDirectory: nochNichtDa, content: 'BELIEBIG' })
+    const res = await fsPost('fs-write', { workingDirectory: nochNichtDa, content: 'BELIEBIG' }, basis)
     expect(res.status).toBe(400)
     expect(existsSync(nochNichtDa)).toBe(false)
   })
@@ -143,13 +130,13 @@ describe('die Gegenprobe: der Käfig schreibt weiterhin, wenn eine Datei genannt
 
   it('schreibt auch in einen tieferen Unterordner des Arbeitsordners', async () => {
     const basis = frischesHeim()
-    const ws = join(basis, 'arbeitsordner')
+    const ws = arbeitsordnerIn(basis)
     mkdirSync(ws, { recursive: true })
     const res = await fsPost('fs-write', {
       path: 'a/b/c.txt',
       content: 'tief drin',
       workingDirectory: ws,
-    })
+    }, basis)
     expect(res.status).toBe(200)
     expect(readFileSync(join(ws, 'a', 'b', 'c.txt'), 'utf8')).toBe('tief drin')
   })
@@ -185,9 +172,9 @@ describe('die fünf Geschwister geraten nicht in dieselbe Lage', () => {
     // eigens offen (`is_workspace_root_path`, filesystem.rs:474). Eine
     // Ablehnung hier wäre eine Verengung ohne Befund dahinter.
     const basis = frischesHeim()
-    const ws = join(basis, 'arbeitsordner')
+    const ws = arbeitsordnerIn(basis)
     mkdirSync(join(ws, 'unterordner'), { recursive: true })
-    const res = await fsPost('fs-list', { path: '.', workingDirectory: ws })
+    const res = await fsPost('fs-list', { path: '.', workingDirectory: ws }, basis)
     expect(res.status).toBe(200)
     expect(res.text).toContain('unterordner')
   })

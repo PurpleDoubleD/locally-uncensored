@@ -16,39 +16,42 @@
  * Run: npx vitest run dev-server/__tests__/pfad-kaefig-am-echten-handler.test.ts
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { registerFsRoutes } from '../fs-routes'
 import { registerDownloadRoutes } from '../downloads'
-import { anfrage, routeHolen } from './echte-anfrage'
+import { routeHolen } from './echte-anfrage'
+import { anfrageImHeim, arbeitsordnerIn, frischesHeim, kulisseAufraeumen } from './kaefig-kulisse'
 
+/**
+ * Das Wegwerf-Heim, in dem die Kulisse steht, und auf das `os.homedir()` für
+ * die Dauer jeder Anfrage zeigt — siehe kaefig-kulisse.ts. Ohne das lag die
+ * Wurzel unter Windows in `$HOME\AppData\Local\Temp` und wurde vom ERSTEN
+ * Tor des Käfigs abgelehnt, bevor irgendein Pfad geprüft war: die fünf
+ * 403-Fälle hier waren dort grün, aber aus dem falschen Grund.
+ */
+let heim = ''
 /** Der Arbeitsordner, der in diesen Tests die Käfigwurzel ist. */
 let ws = ''
 /** Ein Ordner NEBEN dem Käfig — hierhin darf keine Anfrage reichen. */
 let daneben = ''
 
 beforeAll(() => {
-  // `realpathSync`, weil /var auf macOS ein Symlink auf /private/var ist und
-  // der Käfig Symlinks auflöst: ohne das prüfte der Test gegen eine Wurzel,
-  // die der Handler anders schreibt als wir.
-  const wurzel = realpathSync(mkdtempSync(join(tmpdir(), 'lu-zb7-')))
-  ws = join(wurzel, 'arbeitsordner')
-  daneben = join(wurzel, 'geheim')
+  heim = frischesHeim()
+  ws = arbeitsordnerIn(heim)
+  daneben = join(heim, 'geheim')
   mkdirSync(ws, { recursive: true })
   mkdirSync(daneben, { recursive: true })
   writeFileSync(join(ws, 'drin.txt'), 'ich liege im Käfig\n', 'utf8')
   writeFileSync(join(daneben, 'passwort.txt'), 'streng geheim\n', 'utf8')
 })
 
-afterAll(() => {
-  if (ws) rmSync(join(ws, '..'), { recursive: true, force: true })
-})
+afterAll(kulisseAufraeumen)
 
-/** Eine echte POST-Anfrage an einen der sechs fs-Endpunkte. */
+/** Eine echte POST-Anfrage an einen der sechs fs-Endpunkte, im Wegwerf-Heim. */
 function fsPost(endpunkt: string, koerper: Record<string, unknown>) {
   const handler = routeHolen(registerFsRoutes, `/local-api/${endpunkt}`)
-  return anfrage(handler, {
+  return anfrageImHeim(handler, heim, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(koerper),
@@ -136,7 +139,13 @@ describe('das erste Tor: welche Wurzel überhaupt ein Käfig sein darf', () => {
   })
 
   it('lehnt das Heimatverzeichnis als Wurzel ab', async () => {
-    const res = await fsPost('fs-list', { path: '.', workingDirectory: process.env.HOME ?? '/' })
+    // `heim` UND NICHT `process.env.HOME`: gemeint war immer „das
+    // Heimatverzeichnis, das der Handler sieht". Unter Windows liest
+    // `os.homedir()` `USERPROFILE`, nicht `HOME`, und der alte Ausdruck fiel
+    // ohne gesetztes `HOME` auf `'/'` zurück — das ist ein 403 aus einem
+    // ANDEREN Grund (Laufwerkswurzel). Die Aussage bleibt dieselbe, sie trifft
+    // jetzt auf beiden Plattformen wirklich das Heimatverzeichnis.
+    const res = await fsPost('fs-list', { path: '.', workingDirectory: heim })
     expect(res.status).toBe(403)
   })
 })
@@ -159,7 +168,7 @@ describe('failRequest bildet den Ausbruch auf 403 ab, nicht auf 400', () => {
     // erreicht, der KEINE ComfyUI-Installation braucht: `downloadToPathDest`
     // wirft, bevor irgendein Verzeichnis angelegt oder ein Byte geholt wird.
     const handler = routeHolen(registerDownloadRoutes, '/local-api/download-model-to-path')
-    const res = await anfrage(handler, {
+    const res = await anfrageImHeim(handler, heim, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -177,7 +186,7 @@ describe('failRequest bildet den Ausbruch auf 403 ab, nicht auf 400', () => {
     // Die Gegenprobe: ein Test, der nur Ablehnung prüft, wäre auch grün, wenn
     // der Endpunkt alles ablehnte.
     const handler = routeHolen(registerDownloadRoutes, '/local-api/download-model-to-path')
-    const res = await anfrage(handler, {
+    const res = await anfrageImHeim(handler, heim, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       // Kein `url`: der Handler antwortet mit „Missing …" — das reicht, um zu
