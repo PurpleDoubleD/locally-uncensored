@@ -1,5 +1,7 @@
 import { backendCall, fetchExternal } from "./backend"
 import { getCheckpoints, getDiffusionModels, getVAEModels, getCLIPModels, getGgufUnetModels, getAnimateDiffModels, getLoraModels, filterPartialFiles, refreshComfyModels } from "./comfyui"
+import { clearNodeCache } from "./comfyui-nodes"
+import { restartComfyForNewNodes } from "./comfy-restart"
 import type { ProviderId } from "./providers/types"
 import { log } from "../lib/logger"
 import { waitForModelsVisible } from "../lib/bundle-install"
@@ -70,17 +72,32 @@ export async function clearDownloadEntry(id: string): Promise<void> {
   await backendCall("clear_download_entry", { id })
 }
 
-/** Statuses that mean the address itself is dead, so Retry cannot work. */
-const PERMANENT_HTTP = /\(HTTP (401|403|404|410)\)/
+/**
+ * The four answers that mean the ADDRESS is dead rather than the connection:
+ * gone (404/410) and gated-or-private (401/403). Everything else — a transport
+ * error, a rate limit, a 5xx — is the host having a bad minute and stays
+ * retryable.
+ *
+ * ONE list, read from two directions. `isPermanentDownloadError` reads it out
+ * of the message a failed download carries back from Rust; `classifyAddressProbe`
+ * (below, used by the catalog gate) reads it out of a bare HTTP status. Two
+ * hand-written copies of "what counts as broken" would be two chances to
+ * disagree, and the disagreement would be silent: the gate would pass an
+ * address the download path calls permanently dead.
+ */
+export const PERMANENT_HTTP_STATUSES: readonly number[] = [401, 403, 404, 410]
+
+const PERMANENT_HTTP = new RegExp(`\\(HTTP (${PERMANENT_HTTP_STATUSES.join('|')})\\)`)
 
 /**
  * Would pressing Retry on this error ever succeed?
  *
- * The catalog hard-codes 106 HuggingFace addresses. When one of those repos is
- * renamed, gated or taken down, every attempt answers the same 404/403 forever,
- * and the old UI answered with a bare "HTTP 404" and a Retry button — a loop
- * with no exit. The status code inside the message is the contract; it is put
- * there by `http_error_message` in src-tauri/src/commands/download.rs.
+ * The catalog hard-codes its HuggingFace addresses (`catalogAddresses()` walks
+ * every one of them). When one of those repos is renamed, gated or taken down,
+ * every attempt answers the same 404/403 forever, and the old UI answered with
+ * a bare "HTTP 404" and a Retry button — a loop with no exit. The status code
+ * inside the message is the contract; it is put there by `http_error_message`
+ * in src-tauri/src/commands/download.rs.
  *
  * A transport error, a rate limit and a 5xx are all temporary and stay
  * retryable: only an address that is gone is permanent.
@@ -436,22 +453,91 @@ export function assertNodeInstallOk(result: unknown, name: string): void {
   }
 }
 
-export async function installCustomNodes(nodeKeys: string[]): Promise<void> {
-  for (const key of nodeKeys) {
-    const entry = CUSTOM_NODE_REGISTRY[key]
-    if (!entry) {
-      log.warn(`[discover] Unknown custom node key: ${key}`)
-      continue
+/** Where the callers of a node install genuinely differ — and nothing else. */
+export interface CustomNodeInstallOptions {
+  /**
+   * Keep going when one pack fails, instead of throwing on the first.
+   *
+   * True for the bundle download, where the packs are an extra alongside
+   * gigabytes of models and one broken clone must not cost the rest. False —
+   * the default — for the Create flows, which install exactly the pack the
+   * next step needs and have nothing to do without it.
+   */
+  keepGoing?: boolean
+  /**
+   * Restart ComfyUI afterwards so the packs actually register.
+   *
+   * A cloned pack is Python that only loads at ComfyUI startup, so without
+   * this the install is on disk and invisible. The callers in the Create
+   * surface do their own restart around their own progress text; the bundle
+   * download has no such surface and asks for it here.
+   */
+  restart?: boolean
+  /** Progress text for a caller that has somewhere to put it. */
+  onProgress?: (message: string) => void
+}
+
+/**
+ * Install node packs — and leave this process's idea of "which nodes exist"
+ * broken behind you, because it is now a lie.
+ *
+ * THE ONE PATH. There used to be two: this function, and a hand-copied loop
+ * inside `installBundleComplete` below. They drifted, as copies do. This one never
+ * touched `clearNodeCache()`, so every caller had to remember; three of them
+ * did, each in its own hand-written sequence (CreateContext.tsx:346 and :407,
+ * useCreate.ts:991). The copy in `installBundleComplete` did not — it restarted
+ * ComfyUI and refreshed the MODEL lists, which is a different cache entirely.
+ * `getAllNodeInfo` holds `/object_info` for five minutes
+ * (comfyui-nodes.ts:60), so after a bundle install the workflow builder kept
+ * reading the pre-install catalogue and kept telling the user to install the
+ * pack he had just installed. T-67.
+ *
+ * The cache break is in a `finally` on purpose. A pack whose `pip install`
+ * died halfway can still have registered its nodes, and a failed install is
+ * exactly the moment nobody remembers to invalidate anything. Dropping a
+ * five-minute cache costs one `/object_info` fetch; keeping a stale one costs
+ * the user a wrong instruction he cannot argue with.
+ *
+ * It is broken a SECOND time after the restart, and that is the one that
+ * matters: between install and restart the nodes are still not registered, so
+ * anything that refetches in that window would just re-cache the same stale
+ * answer. The restart is when the truth changes.
+ */
+export async function installCustomNodes(nodeKeys: string[], opts: CustomNodeInstallOptions = {}): Promise<void> {
+  try {
+    for (const key of nodeKeys) {
+      const entry = CUSTOM_NODE_REGISTRY[key]
+      if (!entry) {
+        log.warn(`[discover] Unknown custom node key: ${key}`)
+        continue
+      }
+      try {
+        opts.onProgress?.(`Installing ${entry.name}…`)
+        const result = await backendCall('install_custom_node', { repoUrl: entry.repo, nodeName: entry.name })
+        assertNodeInstallOk(result, entry.name)
+        log.info(`[discover] Installed custom node: ${entry.name}`)
+      } catch (err) {
+        if (!opts.keepGoing) {
+          log.error(`[discover] Failed to install ${entry.name}`, { err })
+          throw new Error(`Failed to install ${entry.name}: ${err}`)
+        }
+        log.warn('[discover] Custom node install failed', { err })
+      }
     }
-    try {
-      const result = await backendCall('install_custom_node', { repoUrl: entry.repo, nodeName: entry.name })
-      assertNodeInstallOk(result, entry.name)
-      log.info(`[discover] Installed custom node: ${entry.name}`)
-    } catch (err) {
-      log.error(`[discover] Failed to install ${entry.name}`, { err })
-      throw new Error(`Failed to install ${entry.name}: ${err}`)
-    }
+  } finally {
+    clearNodeCache()
   }
+
+  if (!opts.restart) return
+  // `restartComfyForNewNodes`, not a hand-rolled stop/sleep/start. The copy
+  // this replaced slept two seconds and started again unconditionally, which
+  // is exactly wrong for a ComfyUI that LU did not spawn: the old process
+  // keeps the port and its old node list, the new one never gets the port, and
+  // the user is sent hunting an IMPORT FAILED line nobody ever wrote (measured
+  // on the test box 2026-08-15, see comfy-restart.ts).
+  opts.onProgress?.('Restarting ComfyUI so the new nodes register…')
+  await restartComfyForNewNodes()
+  clearNodeCache()
 }
 
 /** How long an install click itself waits for ComfyUI to notice a file that is
@@ -652,36 +738,24 @@ export async function installBundleComplete(bundle: ModelBundle): Promise<void> 
 
   // Step 2: Install custom nodes in BACKGROUND (fire-and-forget, non-blocking)
   // This runs git clone + pip install which can take minutes · never block downloads
+  //
+  // Through `installCustomNodes`, not a copy of it. The loop that used to stand
+  // here was the second of two paths doing the same job, and it was the one
+  // nobody maintained: it never broke the /object_info cache, so the workflow
+  // builder went on recommending the pack this very call had just installed
+  // (T-67), and its restart was a hand-rolled sleep that could not tell a
+  // ComfyUI LU owns from one it does not.
   if (bundle.customNodes && bundle.customNodes.length > 0) {
-    const nodeKeys = [...bundle.customNodes]
-    void (async () => {
-      for (const key of nodeKeys) {
-        try {
-          const entry = CUSTOM_NODE_REGISTRY[key]
-          if (!entry) continue
-          const result = await backendCall('install_custom_node', { repoUrl: entry.repo, nodeName: entry.name })
-          assertNodeInstallOk(result, entry.name)
-          log.info(`[discover] Installed custom node: ${entry.name}`)
-        } catch (err) {
-          log.warn('[discover] Custom node install failed', { err })
-        }
-      }
-      // Restart ComfyUI after custom nodes are done (needed for node registration)
-      try {
-        await backendCall('stop_comfyui')
-        await new Promise(resolve => setTimeout(resolve, 2000))
-        await backendCall('start_comfyui')
-        log.info('[discover] ComfyUI restarted after custom node install')
-      } catch (err) {
-        log.warn('[discover] ComfyUI restart after custom node install failed', { err })
-      }
-    })()
+    void installCustomNodes([...bundle.customNodes], { keepGoing: true, restart: true })
+      .catch((err) => log.warn('[discover] Custom node install/restart failed', { err }))
   }
 
   // Force ComfyUI to re-scan model directories so new files appear in /object_info.
-  // Without this, ComfyUI's cached model list stays stale on Windows.
+  // Without this, ComfyUI's cached model list stays stale on Windows. This is
+  // the MODEL scan (ComfyUI's own), not the node catalogue — the node half is
+  // `clearNodeCache()` inside installCustomNodes above, and confusing the two
+  // is what left T-67 open.
   try {
-    const { refreshComfyModels } = await import('./comfyui')
     await refreshComfyModels()
   } catch { /* non-fatal · fetchModels also calls refresh */ }
 
@@ -816,10 +890,18 @@ const HF = (repo: string, file: string) => `https://huggingface.co/${repo}/resol
  * Derived, never hand-written in the catalog, because the built-in engine has
  * to find the projector from the model path alone (src-tauri engine.rs mirrors
  * this exact rule). The upstream repos disagree on naming (`mmproj-F16.gguf`,
- * `mmproj-model-bf16.gguf`, `Qwen3.8-27B-Uncensored-vision-f16.gguf`), and the
+ * `mmproj-model-bf16.gguf`, `mmproj-Qwen3.8-27B-Uncensored-F16.gguf`), and the
  * built-in models dir is FLAT, so keeping the upstream name would leave two
  * models fighting over one projector file. Tying the name to the model also
  * keeps the pairing right when a user downloads several quants of one model.
+ *
+ * The third example used to read `Qwen3.8-27B-Uncensored-vision-f16.gguf`.
+ * That file never existed: the address built from it answered 404, and all six
+ * Qwen 3.8 27B entries pointed at it, so every one of them would have fetched
+ * 11-29 GB of model and then failed on the projector. Nothing noticed for as
+ * long as nobody asked the host — which is the whole of T-70. Corrected
+ * against the repo's own file list on 2026-09-01, first run of the gate in
+ * `__tests__/hf-catalog-addresses.live.test.ts`.
  */
 export function mmprojFileName(modelFilename: string): string {
   const stem = modelFilename.replace(/\.gguf$/i, '')
@@ -903,12 +985,12 @@ export function getUncensoredTextModels(): DiscoverModel[] {
     // ships inside these GGUFs loads fine on the pinned llama.cpp b9949, which
     // implements the qwen35 MTP block, so we point at the plain files and not
     // at JonathanColetti's noMTP cut.
-    { name: 'Qwen 3.8 27B Uncensored', group: 'Qwen 3.8 27B Uncensored', description: 'Qwen 3.8 27B dense · the viral uncensored build. Vision + thinking, 262K context. Recommended quant. The 0.9 GB vision projector comes with it.', pulls: '1M+', tags: ['27B', 'Vision', 'Q4_K_M', '17 GB'], updated: 'Hot', agent: true, released: '2026-08', downloadUrl: HF('JonathanColetti/Qwen3.8-27B-Uncensored-GGUF', 'Qwen3.8-27B-Uncensored-Q4_K_M.gguf'), filename: 'Qwen3.8-27B-Uncensored-Q4_K_M.gguf', sizeGB: 16.8, mmprojUrl: HF('JonathanColetti/Qwen3.8-27B-Uncensored-GGUF', 'Qwen3.8-27B-Uncensored-vision-f16.gguf'), mmprojSizeGB: 0.93 },
-    { name: 'Qwen 3.8 27B Uncensored IQ2_M', group: 'Qwen 3.8 27B Uncensored', description: 'Qwen 3.8 27B uncensored · smallest quant, fits a 12 GB card. Real quality tradeoff, but it runs.', pulls: '1M+', tags: ['27B', 'Vision', 'IQ2_M', '11 GB'], updated: 'Hot', agent: true, released: '2026-08', downloadUrl: HF('JonathanColetti/Qwen3.8-27B-Uncensored-GGUF', 'Qwen3.8-27B-Uncensored-IQ2_M.gguf'), filename: 'Qwen3.8-27B-Uncensored-IQ2_M.gguf', sizeGB: 10.6, mmprojUrl: HF('JonathanColetti/Qwen3.8-27B-Uncensored-GGUF', 'Qwen3.8-27B-Uncensored-vision-f16.gguf'), mmprojSizeGB: 0.93 },
-    { name: 'Qwen 3.8 27B Uncensored IQ4_XS', group: 'Qwen 3.8 27B Uncensored', description: 'Qwen 3.8 27B uncensored · IQ4_XS, the cheapest 4 bit. Close to Q4_K_M on 16 GB cards.', pulls: '1M+', tags: ['27B', 'Vision', 'IQ4_XS', '15 GB'], updated: 'New', agent: true, released: '2026-08', downloadUrl: HF('JonathanColetti/Qwen3.8-27B-Uncensored-GGUF', 'Qwen3.8-27B-Uncensored-IQ4_XS.gguf'), filename: 'Qwen3.8-27B-Uncensored-IQ4_XS.gguf', sizeGB: 15.3, mmprojUrl: HF('JonathanColetti/Qwen3.8-27B-Uncensored-GGUF', 'Qwen3.8-27B-Uncensored-vision-f16.gguf'), mmprojSizeGB: 0.93 },
-    { name: 'Qwen 3.8 27B Uncensored Q5_K_M', group: 'Qwen 3.8 27B Uncensored', description: 'Qwen 3.8 27B uncensored · Q5, higher quality. For 24 GB cards.', pulls: '1M+', tags: ['27B', 'Vision', 'Q5_K_M', '20 GB'], updated: 'New', agent: true, released: '2026-08', downloadUrl: HF('JonathanColetti/Qwen3.8-27B-Uncensored-GGUF', 'Qwen3.8-27B-Uncensored-Q5_K_M.gguf'), filename: 'Qwen3.8-27B-Uncensored-Q5_K_M.gguf', sizeGB: 19.5, mmprojUrl: HF('JonathanColetti/Qwen3.8-27B-Uncensored-GGUF', 'Qwen3.8-27B-Uncensored-vision-f16.gguf'), mmprojSizeGB: 0.93 },
-    { name: 'Qwen 3.8 27B Uncensored Q6_K', group: 'Qwen 3.8 27B Uncensored', description: 'Qwen 3.8 27B uncensored · Q6, near-lossless. High-VRAM setups.', pulls: '1M+', tags: ['27B', 'Vision', 'Q6_K', '22 GB'], updated: 'New', agent: true, released: '2026-08', downloadUrl: HF('JonathanColetti/Qwen3.8-27B-Uncensored-GGUF', 'Qwen3.8-27B-Uncensored-Q6_K.gguf'), filename: 'Qwen3.8-27B-Uncensored-Q6_K.gguf', sizeGB: 22.4, mmprojUrl: HF('JonathanColetti/Qwen3.8-27B-Uncensored-GGUF', 'Qwen3.8-27B-Uncensored-vision-f16.gguf'), mmprojSizeGB: 0.93 },
-    { name: 'Qwen 3.8 27B Uncensored Q8_0', group: 'Qwen 3.8 27B Uncensored', description: 'Qwen 3.8 27B uncensored · Q8, full quality. 32 GB+ or CPU with lots of RAM.', pulls: '1M+', tags: ['27B', 'Vision', 'Q8_0', '29 GB'], updated: 'New', agent: true, released: '2026-08', downloadUrl: HF('JonathanColetti/Qwen3.8-27B-Uncensored-GGUF', 'Qwen3.8-27B-Uncensored-Q8_0.gguf'), filename: 'Qwen3.8-27B-Uncensored-Q8_0.gguf', sizeGB: 29, mmprojUrl: HF('JonathanColetti/Qwen3.8-27B-Uncensored-GGUF', 'Qwen3.8-27B-Uncensored-vision-f16.gguf'), mmprojSizeGB: 0.93 },
+    { name: 'Qwen 3.8 27B Uncensored', group: 'Qwen 3.8 27B Uncensored', description: 'Qwen 3.8 27B dense · the viral uncensored build. Vision + thinking, 262K context. Recommended quant. The 0.9 GB vision projector comes with it.', pulls: '1M+', tags: ['27B', 'Vision', 'Q4_K_M', '17 GB'], updated: 'Hot', agent: true, released: '2026-08', downloadUrl: HF('JonathanColetti/Qwen3.8-27B-Uncensored-GGUF', 'Qwen3.8-27B-Uncensored-Q4_K_M.gguf'), filename: 'Qwen3.8-27B-Uncensored-Q4_K_M.gguf', sizeGB: 16.8, mmprojUrl: HF('JonathanColetti/Qwen3.8-27B-Uncensored-GGUF', 'mmproj-Qwen3.8-27B-Uncensored-F16.gguf'), mmprojSizeGB: 0.93 },
+    { name: 'Qwen 3.8 27B Uncensored IQ2_M', group: 'Qwen 3.8 27B Uncensored', description: 'Qwen 3.8 27B uncensored · smallest quant, fits a 12 GB card. Real quality tradeoff, but it runs.', pulls: '1M+', tags: ['27B', 'Vision', 'IQ2_M', '11 GB'], updated: 'Hot', agent: true, released: '2026-08', downloadUrl: HF('JonathanColetti/Qwen3.8-27B-Uncensored-GGUF', 'Qwen3.8-27B-Uncensored-IQ2_M.gguf'), filename: 'Qwen3.8-27B-Uncensored-IQ2_M.gguf', sizeGB: 10.6, mmprojUrl: HF('JonathanColetti/Qwen3.8-27B-Uncensored-GGUF', 'mmproj-Qwen3.8-27B-Uncensored-F16.gguf'), mmprojSizeGB: 0.93 },
+    { name: 'Qwen 3.8 27B Uncensored IQ4_XS', group: 'Qwen 3.8 27B Uncensored', description: 'Qwen 3.8 27B uncensored · IQ4_XS, the cheapest 4 bit. Close to Q4_K_M on 16 GB cards.', pulls: '1M+', tags: ['27B', 'Vision', 'IQ4_XS', '15 GB'], updated: 'New', agent: true, released: '2026-08', downloadUrl: HF('JonathanColetti/Qwen3.8-27B-Uncensored-GGUF', 'Qwen3.8-27B-Uncensored-IQ4_XS.gguf'), filename: 'Qwen3.8-27B-Uncensored-IQ4_XS.gguf', sizeGB: 15.3, mmprojUrl: HF('JonathanColetti/Qwen3.8-27B-Uncensored-GGUF', 'mmproj-Qwen3.8-27B-Uncensored-F16.gguf'), mmprojSizeGB: 0.93 },
+    { name: 'Qwen 3.8 27B Uncensored Q5_K_M', group: 'Qwen 3.8 27B Uncensored', description: 'Qwen 3.8 27B uncensored · Q5, higher quality. For 24 GB cards.', pulls: '1M+', tags: ['27B', 'Vision', 'Q5_K_M', '20 GB'], updated: 'New', agent: true, released: '2026-08', downloadUrl: HF('JonathanColetti/Qwen3.8-27B-Uncensored-GGUF', 'Qwen3.8-27B-Uncensored-Q5_K_M.gguf'), filename: 'Qwen3.8-27B-Uncensored-Q5_K_M.gguf', sizeGB: 19.5, mmprojUrl: HF('JonathanColetti/Qwen3.8-27B-Uncensored-GGUF', 'mmproj-Qwen3.8-27B-Uncensored-F16.gguf'), mmprojSizeGB: 0.93 },
+    { name: 'Qwen 3.8 27B Uncensored Q6_K', group: 'Qwen 3.8 27B Uncensored', description: 'Qwen 3.8 27B uncensored · Q6, near-lossless. High-VRAM setups.', pulls: '1M+', tags: ['27B', 'Vision', 'Q6_K', '22 GB'], updated: 'New', agent: true, released: '2026-08', downloadUrl: HF('JonathanColetti/Qwen3.8-27B-Uncensored-GGUF', 'Qwen3.8-27B-Uncensored-Q6_K.gguf'), filename: 'Qwen3.8-27B-Uncensored-Q6_K.gguf', sizeGB: 22.4, mmprojUrl: HF('JonathanColetti/Qwen3.8-27B-Uncensored-GGUF', 'mmproj-Qwen3.8-27B-Uncensored-F16.gguf'), mmprojSizeGB: 0.93 },
+    { name: 'Qwen 3.8 27B Uncensored Q8_0', group: 'Qwen 3.8 27B Uncensored', description: 'Qwen 3.8 27B uncensored · Q8, full quality. 32 GB+ or CPU with lots of RAM.', pulls: '1M+', tags: ['27B', 'Vision', 'Q8_0', '29 GB'], updated: 'New', agent: true, released: '2026-08', downloadUrl: HF('JonathanColetti/Qwen3.8-27B-Uncensored-GGUF', 'Qwen3.8-27B-Uncensored-Q8_0.gguf'), filename: 'Qwen3.8-27B-Uncensored-Q8_0.gguf', sizeGB: 29, mmprojUrl: HF('JonathanColetti/Qwen3.8-27B-Uncensored-GGUF', 'mmproj-Qwen3.8-27B-Uncensored-F16.gguf'), mmprojSizeGB: 0.93 },
     { name: 'Qwen 3.8 27B Abliterated', group: 'Qwen 3.8 27B Abliterated', description: 'huihui Qwen 3.8 27B abliterated · clean uncensor of the newest Qwen dense model. Vision + thinking. Note the quant is called Q4_K, not Q4_K_M.', pulls: '635K+', tags: ['27B', 'Vision', 'Q4_K', '17 GB'], updated: 'Hot', agent: true, released: '2026-08', downloadUrl: HF('huihui-ai/Huihui-Qwen3.8-27B-abliterated-GGUF', 'Huihui-Qwen3.8-27B-abliterated-Q4_K.gguf'), filename: 'Huihui-Qwen3.8-27B-abliterated-Q4_K.gguf', sizeGB: 16.8, mmprojUrl: HF('huihui-ai/Huihui-Qwen3.8-27B-abliterated-GGUF', 'mmproj-model-bf16.gguf'), mmprojSizeGB: 0.93 },
     { name: 'Qwen 3.8 27B Abliterated Q2_K', group: 'Qwen 3.8 27B Abliterated', description: 'huihui Qwen 3.8 27B abliterated · smallest quant for 12 GB cards.', pulls: '635K+', tags: ['27B', 'Vision', 'Q2_K', '11 GB'], updated: 'New', agent: true, released: '2026-08', downloadUrl: HF('huihui-ai/Huihui-Qwen3.8-27B-abliterated-GGUF', 'Huihui-Qwen3.8-27B-abliterated-Q2_K.gguf'), filename: 'Huihui-Qwen3.8-27B-abliterated-Q2_K.gguf', sizeGB: 10.9, mmprojUrl: HF('huihui-ai/Huihui-Qwen3.8-27B-abliterated-GGUF', 'mmproj-model-bf16.gguf'), mmprojSizeGB: 0.93 },
     { name: 'Qwen 3.8 27B Abliterated Q5_K', group: 'Qwen 3.8 27B Abliterated', description: 'huihui Qwen 3.8 27B abliterated · Q5, higher quality. For 24 GB cards.', pulls: '635K+', tags: ['27B', 'Vision', 'Q5_K', '20 GB'], updated: 'New', agent: true, released: '2026-08', downloadUrl: HF('huihui-ai/Huihui-Qwen3.8-27B-abliterated-GGUF', 'Huihui-Qwen3.8-27B-abliterated-Q5_K.gguf'), filename: 'Huihui-Qwen3.8-27B-abliterated-Q5_K.gguf', sizeGB: 19.5, mmprojUrl: HF('huihui-ai/Huihui-Qwen3.8-27B-abliterated-GGUF', 'mmproj-model-bf16.gguf'), mmprojSizeGB: 0.93 },
@@ -991,6 +1073,21 @@ export function getUncensoredTextModels(): DiscoverModel[] {
     // exists yet (checked 2026-08-01, one day after the 0731 drop; only FP8
     // and MLX abliterations are out). Watchlist: swap to the 0731 uncensor
     // the day huihui or DavidAU ships one.
+    //
+    // BOTH ADDRESSES BELOW ANSWER 401 (measured 2026-09-01, first run of the
+    // catalog gate in __tests__/hf-catalog-addresses.live.test.ts).
+    // `huihui-ai/Huihui-DeepSeek-V4-Flash-abliterated-GGUF` is private or gone
+    // — HuggingFace answers 401 for both, on purpose, so which one it is
+    // cannot be told from outside. They are LEFT AS THEY ARE and not repointed,
+    // because there is nothing verified to repoint them to: the two surviving
+    // huihui repos with similar names
+    // (`...-abliterated-ds4-GGUF`, `...-0731-abliterated-GGUF`) carry neither
+    // `DeepSeek-V4-Flash-UD-IQ1_M.gguf` nor `ggml-model-Q3_K_S.gguf`, and their
+    // quants (Q2/Q2_K/Q4_K) are different files at different sizes. Swapping a
+    // dead 87 GB promise for an unverified one is not a fix, it is a new bug
+    // with a nicer address. Until someone confirms a replacement, the user
+    // clicking these gets the gated-repo sentence from `http_error_message`
+    // and no Retry button (T-07), which is the honest end of the road.
     { name: 'DeepSeek V4 Flash Abliterated IQ1', group: 'DeepSeek V4 Flash Abliterated', description: 'huihui abliterated DeepSeek V4-Flash · 284B MoE (13B active), the most-downloaded uncensored model of 2026 so far. Smallest quant, single 87 GB file, runs on 96 GB RAM rigs. MIT.', pulls: '115K+', tags: ['284B MoE', 'UD-IQ1_M', '87 GB'], updated: 'Hot', agent: true, released: '2026-05', downloadUrl: HF('huihui-ai/Huihui-DeepSeek-V4-Flash-abliterated-GGUF', 'DeepSeek-V4-Flash-UD-IQ1_M.gguf'), filename: 'DeepSeek-V4-Flash-UD-IQ1_M.gguf', sizeGB: 86.8 },
     { name: 'DeepSeek V4 Flash Abliterated Q3', group: 'DeepSeek V4 Flash Abliterated', description: 'huihui abliterated DeepSeek V4-Flash · Q3_K_S, higher fidelity. Single 122 GB file for big-RAM setups. MIT.', pulls: '115K+', tags: ['284B MoE', 'Q3_K_S', '122 GB'], updated: 'Hot', agent: true, released: '2026-05', downloadUrl: HF('huihui-ai/Huihui-DeepSeek-V4-Flash-abliterated-GGUF', 'ggml-model-Q3_K_S.gguf'), filename: 'ggml-model-Q3_K_S.gguf', sizeGB: 122 },
     { name: 'GLM 5.2 Abliterated', description: 'huihui abliterated GLM 5.2 · 744B MoE (40B active) uncensored frontier coder. Multi-part download, ~356 GB. MIT.', pulls: '13K+', tags: ['744B MoE', 'UD-Q3_K_M', '356 GB', 'Multi-part'], updated: 'New', agent: true, released: '2026-06', downloadUrl: HF('huihui-ai/Huihui-GLM-5.2-abliterated-GGUF', 'UD-Q3_K_M/GLM-5.2-UD-Q3_K_M-00001-of-00009.gguf'), filename: 'GLM-5.2-UD-Q3_K_M-00001-of-00009.gguf', sizeGB: 356 },
@@ -1437,6 +1534,111 @@ export function catalogFilenames(): string[] {
   const names: string[] = []
   for (const m of catalogEntries()) if (m.filename) names.push(m.filename)
   return names
+}
+
+
+// ─── The catalog against reality (T-70) ───
+//
+// THERE IS DELIBERATELY NO LIVENESS CHECK AT RUNTIME, and this is the reason.
+//
+// The audit's complaint is true: every download address in this app is a
+// string a human typed, and nothing ever asked HuggingFace whether the file is
+// still there. The obvious repair — probe them when the app starts — is worse
+// than the disease:
+//
+//   · It buys the app a hundred-odd HEAD requests before the user has asked
+//     for anything, on every start.
+//   · It invents a network dependency LU does not have. This is a local-first
+//     app; the Models tab has to render on a train. A probe that fails offline
+//     either lies ("all of these are broken") or is ignored, and an ignored
+//     check is not a check.
+//   · It cannot fix anything. These URLs are compile-time constants. Knowing
+//     at 09:00 that one is dead does not give the running app a working
+//     address — it only lets it phrase a better refusal.
+//
+// And the better refusal is already built, one layer down and at zero cost:
+// the Rust downloader turns the status of the request the USER started into a
+// sentence that names the cause (`http_error_message`,
+// src-tauri/src/commands/download.rs), and `isPermanentDownloadError` above
+// stops the UI offering Retry on an address that can never answer. That is the
+// lazy check, at the moment of actual access, and it costs no extra request.
+//
+// What was genuinely missing is the other half: nobody checks the catalog
+// BEFORE it ships. So the check moved to where it belongs — a gate the
+// developer and CI run, never the user:
+//
+//     LIVE_HF=1 npx vitest run src/api/__tests__/hf-catalog-addresses.live.test.ts
+//
+// The two functions below are that gate's eyes. They live here, next to the
+// catalog, and they are derived from it rather than copied out of it: a URL
+// added to COMPONENT_REGISTRY or to any bundle is inside the gate the moment
+// it is written. A hand-kept list in the test file would have been a second
+// catalog to forget to update — the same mistake as T-67, in a new place.
+
+/** One address the catalog can hand to the downloader. */
+export interface CatalogAddress {
+  url: string
+  /** Every catalog slot that names this URL, each named once. Several entries
+   *  share the big text encoders — the same Wan VAE sits in four bundles — and
+   *  a dead address has to be able to name all of its victims. */
+  where: string[]
+}
+
+/**
+ * Every hardcoded download address the catalog holds, deduplicated by URL.
+ *
+ * Two sources, because there are two: the model catalog `catalogEntries()`
+ * already walks (bundles + text models, model file and vision projector), and
+ * `COMPONENT_REGISTRY`, whose VAE/CLIP addresses are handed to
+ * `startModelDownload` by the component-completion path and appear in no
+ * bundle at all.
+ */
+export function catalogAddresses(): CatalogAddress[] {
+  const byUrl = new Map<string, Set<string>>()
+  const add = (url: string | undefined, where: string) => {
+    if (!url) return
+    const seen = byUrl.get(url)
+    if (seen) seen.add(where)
+    else byUrl.set(url, new Set([where]))
+  }
+
+  for (const m of catalogEntries()) {
+    add(m.downloadUrl, m.filename ? `${m.name} · ${m.filename}` : m.name)
+    add(m.mmprojUrl, `${m.name} · vision projector`)
+  }
+
+  for (const [type, req] of Object.entries(COMPONENT_REGISTRY)) {
+    add(req.vae?.downloadUrl, `COMPONENT_REGISTRY.${type}.vae`)
+    add(req.clip?.downloadUrl, `COMPONENT_REGISTRY.${type}.clip`)
+    add(req.clipSecondary?.downloadUrl, `COMPONENT_REGISTRY.${type}.clipSecondary`)
+  }
+
+  return [...byUrl].map(([url, where]) => ({ url, where: [...where] }))
+}
+
+/** What a probe of a catalog address proved. */
+export type AddressVerdict =
+  /** The host serves this file. */
+  | 'reachable'
+  /** The address is gone or gated — the user's download would fail forever. */
+  | 'dead'
+  /** The host did not answer the question (rate limit, 5xx, no network). */
+  | 'unclear'
+
+/**
+ * Read one HTTP status as a verdict about the ADDRESS.
+ *
+ * The third case is the point. The size watcher next door
+ * (`bundle-size-drift.live.test.ts`) treats every non-OK answer the same way —
+ * `if (echt === null) continue` — so a 404 is silently skipped and the run
+ * still goes green. "I could not ask" and "the answer is no" are different
+ * facts, and a gate that cannot tell them apart passes exactly when it should
+ * shout. A 429 must not fail the build; a 404 must.
+ */
+export function classifyAddressProbe(status: number): AddressVerdict {
+  if (PERMANENT_HTTP_STATUSES.includes(status)) return 'dead'
+  if (status >= 200 && status < 400) return 'reachable'
+  return 'unclear'
 }
 
 
