@@ -19,6 +19,8 @@ import { useModelStore } from '../../stores/modelStore'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { extractToolCallsFromContent, looksLikeToolIntent } from '../../lib/tool-call-repair'
 import { isAgentCompatible } from '../../lib/model-compatibility'
+import { ContextMenu } from '../ui/ContextMenu'
+import { buildMessageMenu, type MessageMenuHandlers } from '../ui/menu-actions'
 
 interface Props {
   message: Message
@@ -45,6 +47,7 @@ function MessageBubbleImpl({ message, onRegenerate, onEdit, pendingApprovalId, o
   const [isEditing, setIsEditing] = useState(false)
   const [editContent, setEditContent] = useState('')
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null)
   const editRef = useRef<HTMLTextAreaElement>(null)
   const isUser = message.role === 'user'
 
@@ -185,9 +188,33 @@ function MessageBubbleImpl({ message, onRegenerate, onEdit, pendingApprovalId, o
     deleteMessage(activeConversationId, message.id)
   }
 
+  // EIN Satz Aktionen fuer diese Nachricht. Die Leiste unter der Nachricht
+  // liest daraus, und das Kontextmenue bekommt DASSELBE Objekt gereicht
+  // (`buildMessageMenu` gibt die Funktionen unveraendert als `run` weiter).
+  // Rechtsklick und Knopf koennen damit nicht auseinanderlaufen — genau die
+  // Doppelung, die dieses Projekt schon mehrfach bezahlt hat.
+  //
+  // `edit` und `regenerate` sind `null`, wo die Leiste den Knopf auch nicht
+  // zeigt; das Menue laesst den Eintrag dann ebenfalls weg.
+  const canEdit = (isUser && !!onEdit) || canEditAssistant
+  const actions: MessageMenuHandlers = {
+    copy: handleCopy,
+    edit: canEdit ? startEdit : null,
+    regenerate: !isUser && onRegenerate ? () => onRegenerate(message.id) : null,
+    remove: handleDelete,
+  }
+  // Die Leiste haengt an `!isEditing && !isStreaming` — das Menue bietet
+  // dieselben Aktionen an, also gilt fuer es dieselbe Bedingung.
+  const actionsAvailable = !isEditing && !isStreaming
+
   return (
     <motion.div
       className={'flex gap-2 px-3 py-1 group ' + (isUser ? 'flex-row-reverse' : '')}
+      onContextMenu={(e) => {
+        if (!actionsAvailable) return
+        e.preventDefault()
+        setMenu({ x: e.clientX, y: e.clientY })
+      }}
       initial={{ opacity: 0, y: 6 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.15 }}
@@ -471,25 +498,36 @@ function MessageBubbleImpl({ message, onRegenerate, onEdit, pendingApprovalId, o
             half-written answer from the first token on. Gated on the live
             generating flag rather than on `usage`, because a backend that
             never reports usage would otherwise lose the bar for good. */}
-        {!isEditing && !isStreaming && (
+        {actionsAvailable && (
           <div className={'flex items-center gap-0.5 ' + (isUser ? 'justify-end pr-0.5' : 'justify-start pl-0.5')}>
-            {isUser && onEdit && (
-              <button onClick={startEdit} className="p-1 rounded-md text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/10 transition-colors" aria-label="Edit message" title="Edit"><Pencil size={12} /></button>
+            {isUser && actions.edit && (
+              <button onClick={actions.edit} className="p-1 rounded-md text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/10 transition-colors" aria-label="Edit message" title="Edit"><Pencil size={12} /></button>
             )}
-            {canEditAssistant && (
-              <button onClick={startEdit} className="p-1 rounded-md text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/10 transition-colors" aria-label="Edit response" title="Edit"><Pencil size={12} /></button>
+            {!isUser && actions.edit && (
+              <button onClick={actions.edit} className="p-1 rounded-md text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/10 transition-colors" aria-label="Edit response" title="Edit"><Pencil size={12} /></button>
             )}
-            {!isUser && onRegenerate && (
-              <button onClick={() => onRegenerate(message.id)} className="p-1 rounded-md text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/10 transition-colors" aria-label="Regenerate response" title="Regenerate"><RefreshCw size={12} /></button>
+            {actions.regenerate && (
+              <button onClick={actions.regenerate} className="p-1 rounded-md text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/10 transition-colors" aria-label="Regenerate response" title="Regenerate"><RefreshCw size={12} /></button>
             )}
-            <button onClick={handleCopy} className="p-1 rounded-md text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/10 transition-colors" aria-label="Copy message" title={copied ? 'Copied' : 'Copy'}>
+            <button onClick={actions.copy} className="p-1 rounded-md text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/10 transition-colors" aria-label="Copy message" title={copied ? 'Copied' : 'Copy'}>
               {copied ? <Check size={12} className="text-green-500" /> : <Copy size={12} />}
             </button>
             {!isUser && <SpeakerButton text={message.content} />}
-            <button onClick={handleDelete} className={'p-1 rounded-md transition-colors hover:bg-gray-100 dark:hover:bg-white/10 ' + (confirmDelete ? 'text-red-500' : 'text-gray-400 dark:text-gray-500 hover:text-red-500')} aria-label="Delete message" title={confirmDelete ? 'Click again to delete' : 'Delete message'}>
+            <button onClick={actions.remove} className={'p-1 rounded-md transition-colors hover:bg-gray-100 dark:hover:bg-white/10 ' + (confirmDelete ? 'text-red-500' : 'text-gray-400 dark:text-gray-500 hover:text-red-500')} aria-label="Delete message" title={confirmDelete ? 'Click again to delete' : 'Delete message'}>
               <Trash2 size={12} />
             </button>
           </div>
+        )}
+
+        {/* Rechtsklick auf die Nachricht — dieselben Aktionen, derselbe Code. */}
+        {menu && (
+          <ContextMenu
+            items={buildMessageMenu(actions, { copied, confirmDelete })}
+            x={menu.x}
+            y={menu.y}
+            label={isUser ? 'Message actions' : 'Response actions'}
+            onClose={() => setMenu(null)}
+          />
         )}
 
         {/* RAG sources */}

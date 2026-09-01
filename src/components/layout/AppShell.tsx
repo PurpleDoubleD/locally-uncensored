@@ -42,6 +42,7 @@ import { CloudGateModal } from '../cloud/CloudGateModal'
 import { CloudTeaserModal } from '../cloud/CloudTeaserModal'
 import { ReleaseNotesModal } from '../release/ReleaseNotesModal'
 import { ShortcutsModal } from './ShortcutsModal'
+import { CommandPalette } from '../ui/CommandPalette'
 import { CreditsExhaustedModal } from './CreditsExhaustedModal'
 import { Titlebar } from './Titlebar'
 
@@ -974,6 +975,10 @@ function AppShellTree() {
           it can never stack on top of the onboarding wizard. */}
       <ReleaseNotesModal />
       <ShortcutsModal />
+      {/* Cmd/Ctrl+K. Hoert auf `lu-command-palette`, genau wie die
+          Kuerzel-Uebersicht darueber auf `lu-show-shortcuts` hoert — kein
+          zweiter Tastatur-Handler. */}
+      <CommandPalette />
       {/* Out-of-credits purchase prompt: opens when LU Cloud answers
           code:'credits_exhausted' (monthly budget + top-up wallet empty). */}
       <CreditsExhaustedModal />

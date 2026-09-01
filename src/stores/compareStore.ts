@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import type { Message } from '../types/chat'
+import { useUIStore } from './uiStore'
 
 interface ModelStats {
   tokens: number
@@ -102,3 +103,15 @@ export const useCompareStore = create<CompareState>()((set) => ({
     isStreamingB: false,
   }),
 }))
+
+/**
+ * „Compare" einschalten. Das ist kein View, sondern ein Flag PLUS ein Wechsel
+ * nach Chat — die A/B-Spalten übernehmen den Chatbereich. Diese zwei Zeilen
+ * standen im Header zweimal wörtlich da (Leiste und Überlaufmenü); die
+ * Kommandopalette wäre die dritte Abschrift geworden. Jetzt rufen alle drei
+ * dieselbe Funktion.
+ */
+export function openCompare(): void {
+  useCompareStore.getState().setComparing(true)
+  useUIStore.getState().setView('chat')
+}

@@ -1,6 +1,9 @@
 import { Trash2, Info, MessageSquare, Image, Video } from 'lucide-react'
+import { useState } from 'react'
 import { formatBytes } from '../../lib/formatters'
 import { BenchmarkButton } from './ModelBenchmark'
+import { ContextMenu } from '../ui/ContextMenu'
+import { buildModelCardMenu, type ModelMenuHandlers } from '../ui/menu-actions'
 import type { AIModel } from '../../types/models'
 
 interface Props {
@@ -21,10 +24,21 @@ const TYPE_CONFIG = {
 export function ModelCard({ model, isActive, onSelect, onDelete, onInfo, canDelete = true }: Props) {
   const typeInfo = TYPE_CONFIG[model.type] || TYPE_CONFIG.text
   const TypeIcon = typeInfo.icon
+  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null)
+
+  // EIN Satz Aktionen fuer die Karte. Die sichtbaren Knoepfe unten lesen aus
+  // diesem Objekt, das Kontextmenue bekommt dasselbe Objekt gereicht — es gibt
+  // also keinen zweiten Aufrufweg, der irgendwann anders werden koennte.
+  const actions: ModelMenuHandlers = { select: onSelect, info: onInfo, remove: onDelete }
 
   return (
+    <>
     <div
-      onClick={onSelect}
+      onClick={actions.select}
+      onContextMenu={(e) => {
+        e.preventDefault()
+        setMenu({ x: e.clientX, y: e.clientY })
+      }}
       className={`flex items-center gap-2.5 px-3 py-1.5 rounded-lg border cursor-pointer transition-all group ${
         isActive
           ? 'bg-blue-50 dark:bg-white/[0.05] border-blue-400/40 ring-1 ring-blue-400/40'
@@ -61,7 +75,7 @@ export function ModelCard({ model, isActive, onSelect, onDelete, onInfo, canDele
           </div>
         )}
         <button
-          onClick={(e) => { e.stopPropagation(); onInfo() }}
+          onClick={(e) => { e.stopPropagation(); actions.info() }}
           className="p-1 rounded hover:bg-gray-100 dark:hover:bg-white/10 text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 transition-colors"
           title="Details"
         >
@@ -69,7 +83,7 @@ export function ModelCard({ model, isActive, onSelect, onDelete, onInfo, canDele
         </button>
         {canDelete && (
           <button
-            onClick={(e) => { e.stopPropagation(); onDelete() }}
+            onClick={(e) => { e.stopPropagation(); actions.remove() }}
             className="p-1 rounded hover:bg-red-500/20 text-gray-400 hover:text-red-400 transition-colors"
             title="Delete"
           >
@@ -78,5 +92,16 @@ export function ModelCard({ model, isActive, onSelect, onDelete, onInfo, canDele
         )}
       </div>
     </div>
+
+    {menu && (
+      <ContextMenu
+        items={buildModelCardMenu(actions, { isActive, canDelete })}
+        x={menu.x}
+        y={menu.y}
+        label={`Actions for ${model.name}`}
+        onClose={() => setMenu(null)}
+      />
+    )}
+    </>
   )
 }

@@ -3,7 +3,7 @@ import { Menu, Loader2, Sun, Moon, RefreshCw, X, MoreVertical } from 'lucide-rea
 import { useUIStore } from '../../stores/uiStore'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { useChatStore } from '../../stores/chatStore'
-import { useCompareStore } from '../../stores/compareStore'
+import { useCompareStore, openCompare } from '../../stores/compareStore'
 import { useModelStore } from '../../stores/modelStore'
 import { useProviderStore } from '../../stores/providerStore'
 import { UpdateBadge } from './UpdateBadge'
@@ -288,10 +288,7 @@ export function Header() {
           {textNav('create', 'Create')}
 
           <button
-            onClick={() => {
-              useCompareStore.getState().setComparing(true)
-              setView('chat')
-            }}
+            onClick={openCompare}
             className={navClass(isComparing)}
           >
             Compare
@@ -326,11 +323,7 @@ export function Header() {
                 {dropdownNav('create', 'Create')}
 
                 <button
-                  onClick={() => {
-                    useCompareStore.getState().setComparing(true)
-                    setView('chat')
-                    setShowMoreMenu(false)
-                  }}
+                  onClick={() => { openCompare(); setShowMoreMenu(false) }}
                   className={navClass(isComparing, true)}
                 >
                   Compare
