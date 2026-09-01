@@ -19,6 +19,7 @@ import { useCloudAuth } from '../../hooks/useCloudAuth'
 import { AccountPanel } from '../auth/AccountPanel'
 import { CLOUD_BASE } from '../../api/cloud/config'
 import { openExternal } from '../../api/backend'
+import { MONOGRAM, MONOGRAM_INVERT } from '../layout/brand'
 
 const PLANS = [
   { anchor: 'hosted', name: 'Hosted', price: '€19' },
@@ -68,11 +69,11 @@ function CloudHero({ subtitle }: { subtitle?: string }) {
   return (
     <div className="flex flex-col items-center text-center gap-2">
       <img
-        src="/LU-monogram-bw.png"
+        src={MONOGRAM}
         alt=""
         width={40}
         height={40}
-        className="dark:invert-0 invert opacity-90 select-none"
+        className={`${MONOGRAM_INVERT} opacity-90 select-none`}
         draggable={false}
       />
       <h2 className="text-xl font-semibold text-gray-900 dark:text-white">LU Cloud</h2>

@@ -32,6 +32,17 @@ import { CodexView } from './CodexView'
 import { useCodexStore } from '../../stores/codexStore'
 import { useGenerationStore } from '../../stores/generationStore'
 import { useRemoteStore } from '../../stores/remoteStore'
+import { useUIStore } from '../../stores/uiStore'
+import { displayModelName } from '../../api/providers'
+import { MONOGRAM, MONOGRAM_INVERT } from '../layout/brand'
+
+/** Was die Eingangsseite sagt und anbietet, je nach Lage. */
+interface Landing {
+  readonly subline: string
+  /** Zweite Zeile, einzeilig gekuerzt — heute der Name des Modells. */
+  readonly note?: string
+  readonly cta: { readonly label: string; readonly run: () => void } | null
+}
 
 export function ChatView() {
   const { sendMessage, stopGeneration, isGenerating, isLoadingModel, regenerateMessage, editAndResend, pendingApproval, approveToolCall, rejectToolCall } = useChat()
@@ -54,6 +65,7 @@ export function ChatView() {
   const [exportToast, setExportToast] = useState<string>('')
   const [toolsDropdownOpen, setToolsDropdownOpen] = useState(false)
   const chatMode = useCodexStore((s) => s.chatMode)
+  const setView = useUIStore((s) => s.setView)
 
   // Per-conversation generating flag (David 2026-06-12): the typing indicator
   // + realtime counter must show ONLY in the chat that is actually generating,
@@ -157,6 +169,26 @@ export function ChatView() {
     return <ABCompare />
   }
 
+  // Die drei Lagen, in denen man auf der Eingangsseite landen kann. Der
+  // Primaerknopf steht nur in der einen, die der Composer nicht loesen kann.
+  const landing: Landing = !activeModel && models.length === 0
+    ? (appMode === 'cloud'
+        // Cloud versteckt die Modellansicht (lokale Hardware ist dort
+        // bedeutungslos) — ein Knopf dorthin waere ein toter Klick.
+        ? { subline: 'The hosted catalogue is still loading.', cta: null }
+        : {
+            subline: 'No model is installed yet — that is the one thing this box cannot do for you.',
+            cta: { label: 'Install a model', run: () => setView('models') },
+          })
+    : !activeModel
+      // Der Waehler steht IM Composer und oeffnet nach oben. Der alte Satz
+      // hier hiess „Select a model above." und zeigte in die falsche Richtung.
+      ? { subline: 'Pick a model in the box below, then type.', cta: null }
+      // Der Modellname steht auf einer EIGENEN Zeile und wird gekuerzt: er ist
+      // haeufig 50+ Zeichen lang (`hf.co/DevQuasar/huihui-ai_Qwen3-4B-abliterated-GGUF`),
+      // und im Fliesstext liess er die Zeile dreimal umbrechen.
+      : { subline: 'Type below to start.', note: displayModelName(activeModel), cta: null }
+
   return (
     <div className="h-full flex flex-col min-w-0">
       {/* One composer, two places. The landing state used to render a logo and
@@ -173,20 +205,79 @@ export function ChatView() {
           ) : (<>
           <AnimatePresence mode="wait">
             {!activeConversationId ? (
-              // ── Homepage: logo above the shared composer ──
+              // ── Die Eingangsseite ──
+              //
+              // D-S02 („Empty-State ohne Titel und CTA") und D-S05 („1237x850px
+              // tote Flaeche") sind EIN Befund und werden als einer geloest.
+              //
+              // Was hier stand: ein 46px-Monogramm auf `opacity-20`, mittig in
+              // einer 850px hohen leeren Flaeche, und darunter — nur wenn
+              // Modelle da waren, aber keins gewaehlt — der Satz „Select a
+              // model above." Das war die erste Flaeche der App, und sie sagte
+              // nicht, wie die App heisst, was sie tut oder was man tun soll.
+              //
+              // Der Satz war ausserdem falsch: der Modellwaehler ist mit dem
+              // Umbau vom 2026-07-11 in den Composer gezogen und oeffnet nach
+              // OBEN — er steht seither UNTER dem Text, der auf ihn zeigt. Wer
+              // dem Hinweis folgte, sah in die Kopfzeile und fand nichts.
+              //
+              // Was jetzt hier steht: Zeichen, Titel, eine Zeile, die den
+              // wirklichen naechsten Schritt benennt, und — nur wo er etwas
+              // kann, was der Composer nicht kann — ein Primaerknopf.
+              //
+              // WIDERSPRUCH ZUM AUDIT, ausdruecklich: der Audit verlangt
+              // „Zeichen + Headline + Subline + Primaerbutton", vier Dinge,
+              // immer. Der vierte kommt hier nur im Modellfall. Begruendung:
+              // als der Audit gemessen wurde, hatte dieser Screen GAR KEIN
+              // Eingabefeld (D-S01, geschlossen mit `bcec642b`) — ein
+              // Primaerknopf war der einzig moegliche Weg vorwaerts. Seither
+              // steht der Composer da, und der IST die Primaeraktion. Ein
+              // zweiter Primaerknopf daneben, der nichts anderes tut, waere
+              // genau die Doppelung, die dieser Audit an vier anderen Stellen
+              // ruegt (D-S06, D-S07, D-S23, D-A5). Wo der Composer aber nicht
+              // weiterhilft — kein einziges Modell installiert —, steht der
+              // Knopf, und er fuehrt an die einzige Stelle, die das aendert.
+              //
+              // Zur toten Flaeche: kein Layout entfernt Leere, nur Inhalt tut
+              // das. Der Block ist deshalb (a) inhaltlich gefuellt, (b) auf die
+              // Spaltenbreite `--lu-measure` gelegt, dieselbe wie Transkript
+              // und Composer (D-A1), und (c) UNTEN verankert statt in der Mitte
+              // zu schweben, damit er mit dem Composer als ein Element liest
+              // statt als Fleck in einem Feld. Erfundene Beispiel-Prompts als
+              // Fuellmaterial habe ich bewusst nicht gebaut: sie waeren Inhalt,
+              // den niemand bestellt hat, und der Audit verlangt sie nicht.
               <motion.div
                 key="home"
-                className="flex-1 flex flex-col items-center justify-center min-h-0"
+                className="flex-1 flex flex-col items-center justify-end min-h-0 px-3 pb-4"
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0, y: -20 }}
                 transition={{ duration: 0.2 }}
               >
-                <img src="/LU-monogram-bw.png" alt="" width={46} height={46} className="dark:invert-0 invert opacity-20" />
-
-                {models.length > 0 && !activeModel && (
-                  <p className="text-[0.6rem] text-amber-500/60 mt-3">Select a model above.</p>
-                )}
+                <div
+                  data-testid="chat-landing"
+                  className="w-full max-w-[var(--lu-measure)] flex flex-col items-center text-center gap-2"
+                >
+                  <img
+                    src={MONOGRAM}
+                    alt=""
+                    width={56}
+                    height={56}
+                    className={`${MONOGRAM_INVERT} opacity-90`}
+                  />
+                  <h1 className="t-display text-gray-900 dark:text-gray-100">Ask LU anything</h1>
+                  <p className="t-body text-gray-500 max-w-[40ch]">{landing.subline}</p>
+                  {landing.note && (
+                    <p className="t-mono w-full truncate px-4 text-gray-400 dark:text-gray-500" title={landing.note}>
+                      {landing.note}
+                    </p>
+                  )}
+                  {landing.cta && (
+                    <button onClick={landing.cta.run} className="lu-primary lu-control mt-1">
+                      {landing.cta.label}
+                    </button>
+                  )}
+                </div>
               </motion.div>
             ) : (
               // ── Active chat ──
@@ -197,21 +288,68 @@ export function ChatView() {
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.25, ease: 'easeOut' }}
               >
-                  {/* Top bar — slim: session/meta controls only. Docs · Plugins ·
-                      Tools + the model picker moved into the composer action bar
-                      (web parity, David 2026-07-11); Memory stands alone top-right. */}
-                  <div className="flex items-center gap-1.5 px-2 pt-0.5">
+                  {/* The plan, for plain chat and for Agent alike. It belongs
+                      above the transcript, not at the prompt box: the Chat
+                      surface has no right-hand column to hand it to, and a plan
+                      is what the run is going to DO — it reads before the
+                      output, not after it. Collapsed by default so it costs one
+                      line, and it renders nothing at all while there is no plan,
+                      so the empty case costs zero.
+                      (Die uebrigen Sitzungsanzeigen sind mit D-S18 unter das
+                      Transkript gezogen; der Plan bleibt, weil
+                      `the-prompt-window-is-the-prompt-window.test.ts` genau
+                      diese Reihenfolge festnagelt.) */}
+                  <PlanBar />
+
+                  <MessageList
+                    isGenerating={isGenerating}
+                    isThisChatGenerating={activeGenerating}
+                    isLoadingModel={isLoadingModel}
+                    onRegenerate={regenerateMessage}
+                    onEdit={editAndResend}
+                    pendingApprovalId={pendingApproval?.id ?? null}
+                    onApprove={approveToolCall}
+                    onReject={rejectToolCall}
+                  />
+
+                  {/* Die Statusleiste der Sitzung — Agent, Arbeitsordner,
+                      Kontext, Memory, Export. Inhaltlich unveraendert; was sich
+                      geaendert hat, ist der PLATZ.
+
+                      D-S18: „Drei Baender vor dem ersten Inhalt" — Titlebar
+                      (h-8), Header (h-10) und diese Leiste. Zwei davon sind
+                      Fensterrahmen und globale Navigation und koennen hier
+                      nicht weg; die dritte muss aber gar nicht VOR dem
+                      Transkript stehen. Nichts hier gehoert zur naechsten
+                      Nachricht — es sind Eigenschaften des Laufs, und die
+                      liest man, waehrend man tippt, nicht bevor man liest.
+                      Also steht sie jetzt UNTER dem Transkript, direkt ueber
+                      dem Composer, bei den anderen Sitzungsanzeigen (LoopBar,
+                      GoalBar, GroupCostHint). Vor dem ersten Inhalt bleiben
+                      zwei Baender.
+
+                      Ausdruecklich NICHT in den Composer hinein: `composerAbove`
+                      rendert INNERHALB der Promptbox (ChatInput.tsx:318), und
+                      „das promptfenster ist ueberfuellt" ist eine stehende
+                      Regel dieses Hauses. Diese Leiste ist ein Geschwister der
+                      Box, kein Inhalt darin.
+
+                      Der PlanBar bleibt oben — `the-prompt-window-is-the-prompt-
+                      window.test.ts` verlangt Plan vor Transkript, und er
+                      rendert ohnehin `null`, solange es keinen Plan gibt. */}
+                  <div data-testid="chat-session-strip" className="flex items-center gap-1.5 px-2 py-0.5">
                     <AgentModeToggle />
                     <AgentWorkspaceBadge />
 
                     {/* Spacer */}
                     <div className="flex-1" />
 
-                    {/* Token Counter */}
-                    <TokenCounter />
-
-                    {/* Context window picker (Ollama num_ctx / LM Studio loaded ctx) */}
-                    <ContextDropdown />
+                    {/* EIN Kontextelement statt zwei (D-S06): der Fuellstand
+                        ist die Beschriftung des Fensterwaehlers geworden, statt
+                        dieselbe Zahl 24px daneben ein zweites Mal in einer
+                        anderen Schreibweise zu zeigen. Die Begruendung samt der
+                        beiden Ausweichfaelle steht im Kopf von ContextDropdown. */}
+                    <ContextDropdown><TokenCounter /></ContextDropdown>
 
                     {/* Small-Model Mode — only relevant when the agent loop (tools)
                         is active; plain chat has no tool calls to lean out. */}
@@ -260,26 +398,6 @@ export function ChatView() {
                       )}
                     </div>
                   </div>
-
-                  {/* The plan, for plain chat and for Agent alike. It belongs with
-                      the standing status controls in the header, not at the prompt
-                      box: the Chat surface has no right-hand column to hand it to,
-                      and this row is where everything that is TRUE OF THE SESSION
-                      rather than of the next message already lives (agent toggle,
-                      workspace, token counter, context window, memory). Collapsed
-                      by default so it costs one line above the transcript. */}
-                  <PlanBar />
-
-                  <MessageList
-                    isGenerating={isGenerating}
-                    isThisChatGenerating={activeGenerating}
-                    isLoadingModel={isLoadingModel}
-                    onRegenerate={regenerateMessage}
-                    onEdit={editAndResend}
-                    pendingApprovalId={pendingApproval?.id ?? null}
-                    onApprove={approveToolCall}
-                    onReject={rejectToolCall}
-                  />
 
                   {/* Remote session banners */}
                   {isThisRemoteActive && (

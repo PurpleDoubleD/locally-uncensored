@@ -1,6 +1,7 @@
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import { ChevronDown, Check, Loader2, AlertTriangle } from 'lucide-react'
 import { useModelStore } from '../../stores/modelStore'
+import { useChatStore } from '../../stores/chatStore'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { getProviderIdFromModel, displayModelName } from '../../api/providers'
 import { getModelContextCached, warmupOllamaContext } from '../../api/ollama'
@@ -25,8 +26,32 @@ const fmt = (n: number) =>
  *   - Built-in:  ctx lives in settings.builtinEngine (expert tuning), the
  *                engine relaunches with the new -c via swapBundledModel.
  * Hidden for cloud models (their context is fixed and not adjustable here).
+ *
+ * D-S06 — „Zwei Kontextanzeigen 24px nebeneinander in verschiedener Notation:
+ * ‚32/8.2k' und ‚ctx 8K' → eine."
+ *
+ * Beide zeigten DIESELBE Zahl: der Nenner des Fuellstands und die Beschriftung
+ * dieses Knopfes sind dasselbe Kontextfenster, einmal als „8.2k" (Tausender)
+ * und einmal als „8K" (Kibi). Wer den Unterschied las, suchte einen, den es
+ * nicht gibt.
+ *
+ * Aufgeloest wird das nicht dadurch, dass eine der beiden verschwindet — der
+ * Fuellstand ist die einzige Stelle, die den VERBRAUCH zeigt, und dieser Knopf
+ * ist die einzige Stelle, die das Fenster AENDERT. Aufgeloest wird es dadurch,
+ * dass der Fuellstand die Beschriftung DIESES Knopfes wird: ein Element, eine
+ * Zahl, und der Messwert sitzt auf dem Regler, der ihn bewegt.
+ *
+ * Die Ausweichfaelle, beide bewusst:
+ *   - Kein Fuellstand (leerer Chat — `TokenCounter` gibt dort `null` zurueck,
+ *     und das ist in `token-usage.test.ts` festgenagelt): der Knopf traegt
+ *     wieder das Fenster allein. Beide Schreibweisen sind dann nie gleichzeitig
+ *     zu sehen, also gibt es auch nichts zu vergleichen.
+ *   - Nicht verstellbar (Cloud-Modelle): der Knopf verschwindet, aber der
+ *     Fuellstand bleibt — er wird dann OHNE Rahmen ausgegeben. Ohne diesen
+ *     Zweig haette das Zusammenlegen den Fuellstand auf Cloud-Modellen mit
+ *     entfernt, wo er vorher stand.
  */
-export function ContextDropdown() {
+export function ContextDropdown({ children }: { children?: ReactNode }) {
   const activeModel = useModelStore((s) => s.activeModel)
   const override = useSettingsStore((s) => s.settings.contextWindowOverride)
   const updateSettings = useSettingsStore((s) => s.updateSettings)
@@ -43,8 +68,16 @@ export function ContextDropdown() {
   // The check-mark anchor: built-in reads its own tuning field, not the
   // Ollama/LM Studio override.
   const selected = ctx.provider === 'builtin' ? builtinCtx : override
+  // Gibt es ueberhaupt einen Fuellstand zu zeigen? Genau die Bedingung, unter
+  // der `TokenCounter` `null` zurueckgibt. Bewusst ein BOOLEAN als Selektor:
+  // ein Abo auf `s.conversations` wuerde diesen Knopf bei jedem Streaming-Flush
+  // neu rendern (T-45), ein Boolean wechselt einmal pro Chat.
+  const hasFill = useChatStore(
+    (s) => (s.conversations.find((c) => c.id === s.activeConversationId)?.messages.length ?? 0) > 0,
+  )
 
-  if (!activeModel || !ctx.adjustable) return null
+  // Nicht verstellbar (Cloud): kein Regler, aber der Fuellstand bleibt stehen.
+  if (!activeModel || !ctx.adjustable) return <>{children}</>
 
   const max = ctx.modelMax > 0 ? ctx.modelMax : 131072
   const options = PRESETS.filter((p) => p <= Math.max(max, 4096))
@@ -115,11 +148,16 @@ export function ContextDropdown() {
         onClick={() => setOpen((o) => !o)}
         disabled={busy}
         title={`Context window: ${ctx.provider === 'lmstudio' ? "LM Studio's loaded context" : ctx.provider === 'builtin' ? "the built-in engine's loaded context" : 'Ollama num_ctx'}. Changing it reloads the model so it takes effect now.`}
-        className="flex items-center gap-1 px-1.5 py-0.5 rounded border border-gray-200 dark:border-white/[0.06] hover:border-gray-400 dark:hover:border-white/15 text-gray-500 transition-colors text-[0.55rem] font-mono tabular-nums disabled:opacity-60"
+        aria-label="Context window"
+        aria-expanded={open}
+        aria-haspopup="menu"
+        className="flex items-center gap-1 px-1.5 py-0.5 rounded border border-gray-200 dark:border-white/[0.06] hover:border-gray-400 dark:hover:border-white/15 text-gray-500 transition-colors text-[0.55rem] lu-hud-num disabled:opacity-60"
       >
         {busy ? <Loader2 size={9} className="animate-spin" /> : null}
         {applyError && !busy ? <AlertTriangle size={9} className="text-red-400" /> : null}
-        <span>ctx {fmt(ctx.contextWindow)}</span>
+        {/* Der Fuellstand IST die Beschriftung. Nur wenn es keinen gibt (leerer
+            Chat), steht hier wieder das Fenster allein. */}
+        {hasFill ? children : <span>ctx {fmt(ctx.contextWindow)}</span>}
         <ChevronDown size={8} className={`transition-transform ${open ? 'rotate-180' : ''}`} />
       </button>
       {applyError && !open && (

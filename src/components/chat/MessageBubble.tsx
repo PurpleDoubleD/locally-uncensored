@@ -21,6 +21,8 @@ import { extractToolCallsFromContent, looksLikeToolIntent } from '../../lib/tool
 import { isAgentCompatible } from '../../lib/model-compatibility'
 import { ContextMenu } from '../ui/ContextMenu'
 import { buildMessageMenu, type MessageMenuHandlers } from '../ui/menu-actions'
+import { MONOGRAM, MONOGRAM_INVERT } from '../layout/brand'
+import { AVATAR_SLOT } from './avatar-slot'
 
 interface Props {
   message: Message
@@ -207,6 +209,50 @@ function MessageBubbleImpl({ message, onRegenerate, onEdit, pendingApprovalId, o
   // dieselben Aktionen an, also gilt fuer es dieselbe Bedingung.
   const actionsAvailable = !isEditing && !isStreaming
 
+  /**
+   * D-S07 — die Leiste ist jetzt hover-gated.
+   *
+   * Der Befund: „Aktionsleiste ist dauerhaft sichtbar, nicht hover-gated:
+   * drei 12px-Icons unter jeder Nachricht, immer." Der Kommentar an der Leiste
+   * nannte „always visible but subtle" ausdruecklich als Absicht — in einem
+   * Transkript mit 40 Antworten sind das 120 graue Glyphen, die nie jemand
+   * angesehen hat, und sie stehen genau dort, wo die naechste Zeile Text
+   * anfangen wuerde.
+   *
+   * Warum das JETZT geht und vorher nicht: seit `f2650788` traegt die
+   * Nachricht ein Kontextmenue (Rechtsklick) mit denselben Aktionen ueber
+   * DIESELBEN Handler (`actions` unten geht unveraendert an
+   * `buildMessageMenu`). Vorher waere Verstecken ein Funktionsverlust
+   * gewesen: wer die Maus nicht ueber die Nachricht haelt, haette keinen Weg
+   * mehr zu Kopieren gehabt. Jetzt gibt es zwei.
+   *
+   * Was hier NICHT gemacht wird und warum:
+   *
+   *   - Kein `hidden`/`absolute`. Die Leiste behaelt ihren Layoutplatz. Das
+   *     ist bei D-S15 (Sidebar) ausdruecklich falsch, weil sie dort 55px
+   *     Titelbreite frisst — hier ist es richtig: die Zeile liegt UNTER der
+   *     Nachricht, und wuerde sie beim Hovern erst entstehen, spraenge das
+   *     ganze Transkript unter dem Mauszeiger weg. Ein scrollendes Protokoll,
+   *     das bei jeder Mausbewegung umbricht, ist schlimmer als drei blasse
+   *     Icons.
+   *   - `group-focus-within` steht neben `group-hover`. Ohne das waere die
+   *     Leiste per Tastatur unerreichbar sichtbar: die Knoepfe blieben
+   *     fokussierbar, aber unsichtbar, und der Fokus verschwaende ins Nichts.
+   *   - `copied` und `confirmDelete` halten sie offen. Beide sind
+   *     Rueckmeldungen AUF einen Klick („Copied", „Click again to delete");
+   *     verschwaende die Leiste, sobald die Maus weiterzieht, waere die
+   *     Rueckmeldung fuer genau die Geste unsichtbar, die sie ausgeloest hat.
+   *
+   * Was das kostet, offen gesagt: auf einem Geraet ohne Zeiger (Touch) gibt
+   * es weder Hover noch Rechtsklick. Das ist eine Tauri-Desktop-App fuer
+   * mac/Windows/Linux, also heute kein realer Fall — aber es ist einer, falls
+   * die App je auf ein Tablet geht.
+   */
+  const actionBarVisibility =
+    copied || confirmDelete
+      ? 'opacity-100'
+      : 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity'
+
   return (
     <motion.div
       className={'flex gap-2 px-3 py-1 group ' + (isUser ? 'flex-row-reverse' : '')}
@@ -219,21 +265,21 @@ function MessageBubbleImpl({ message, onRegenerate, onEdit, pendingApprovalId, o
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.15 }}
     >
-      {/* Avatar */}
-      <div
-        className={
-          'w-6 h-6 rounded-md overflow-hidden flex items-center justify-center shrink-0 ' +
-          // User avatar keeps a framed chip; the AI monogram stands alone (no box).
-          (isUser ? 'bg-gray-100 dark:bg-white/8 border border-gray-200 dark:border-white/10' : '')
-        }
-      >
+      {/* Avatar — EIN Slot, zwei Inhalte (Audit §4, „Zwei Avatar-Systeme:
+          Assistent rahmenlos, User als gerahmte Box").
+          Vorher trug nur die Nutzerseite Rahmen und Flaeche, das Monogramm sass
+          nackt auf der Pane. Zwei Silhouetten in einer Spalte, die der Blick
+          beim Scrollen als Taktgeber benutzt — der Sprecherwechsel war an der
+          Form nicht ablesbar, nur am Inhalt.
+          Jetzt: derselbe Chip fuer beide, und das Monogramm bekommt dabei
+          nebenbei einen definierten Untergrund statt der jeweiligen Pane. */}
+      <div className={AVATAR_SLOT}>
         {isUser ? (
           userAvatarDataUrl
             ? <img src={userAvatarDataUrl} alt="" className="w-full h-full object-cover" />
             : <User size={11} className="text-gray-400" />
         ) : (
-          // AI avatar = the LU monogram ALONE, filling the slot — no box/border/bg.
-          <img src="/LU-monogram-bw.png" alt="" className="w-full h-full object-contain dark:invert-0 invert opacity-80" />
+          <img src={MONOGRAM} alt="" className={`w-[70%] h-[70%] object-contain opacity-80 ${MONOGRAM_INVERT}`} />
         )}
       </div>
 
@@ -492,14 +538,19 @@ function MessageBubbleImpl({ message, onRegenerate, onEdit, pendingApprovalId, o
 
         {/* Action bar UNDER the message (David 2026-06-06: "eigene Leiste unter
             der Nachricht" instead of cramped hover-icons in the corner). Bigger
-            targets, always visible but subtle; assistant left, user right. */}
+            targets; assistant left, user right. */}
         {/* Hidden while this very turn still streams: the bar used to hang on
             !isEditing alone, so Copy/Regenerate/Delete rendered under a
             half-written answer from the first token on. Gated on the live
             generating flag rather than on `usage`, because a backend that
             never reports usage would otherwise lose the bar for good. */}
+        {/* Und seit D-S07 nur noch beim Hovern/Fokus sichtbar — die Begruendung
+            samt der beiden bewussten Ausnahmen steht bei `actionBarVisibility`. */}
         {actionsAvailable && (
-          <div className={'flex items-center gap-0.5 ' + (isUser ? 'justify-end pr-0.5' : 'justify-start pl-0.5')}>
+          <div className={
+            'flex items-center gap-0.5 ' + actionBarVisibility + ' ' +
+            (isUser ? 'justify-end pr-0.5' : 'justify-start pl-0.5')
+          }>
             {isUser && actions.edit && (
               <button onClick={actions.edit} className="p-1 rounded-md text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/10 transition-colors" aria-label="Edit message" title="Edit"><Pencil size={12} /></button>
             )}

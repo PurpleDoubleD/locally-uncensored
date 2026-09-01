@@ -925,7 +925,50 @@ function AppShellTree() {
   }
 
   return (
-    <div className="h-screen w-screen overflow-hidden bg-gray-100 dark:bg-[#141414] text-gray-900 dark:text-gray-100">
+    /* D-S42 — „Keine Ebenen: Sidebar, Chat-Pane und Composer sind alle weiss,
+       getrennt nur durch 1px gray-200, waehrend Dark drei Stufen hat."
+
+       Nachgemessen (WCAG 2.1, relative Luminanz), Leinwand gegen Pane:
+
+         dunkel  #141414 (L 0,00699) → #1e1e1e (L 0,01299)   = 1,105:1
+         hell    #f3f4f6 (L 0,90412) → #ffffff (L 1,00000)   = 1,100:1
+
+       Der Stufenabstand war also numerisch derselbe — die Ebenen fehlten
+       trotzdem, und zwar wegen der KANTE. Beide Panes tragen einen 1px-Ring:
+
+         dunkel  ring-white/[0.05] auf #1e1e1e ergibt #292929 (L 0,02239)
+                 gegen die Leinwand #141414                   = 1,270:1
+         hell    ring-black/[0.04] auf #ffffff ergibt #f5f5f5 (L 0,91141)
+                 gegen die Leinwand #f3f4f6                   = 1,008:1
+
+       1,008:1 ist keine Kante, das ist Rauschen — 34-mal weniger Abstand als
+       im Dunkeln. Im Hellmodus stand die Pane damit ohne Stufe UND ohne Rand
+       auf der Leinwand, also gar nicht auf ihr.
+
+       Geaendert ist genau EIN Wert: die Leinwand geht von gray-100 auf
+       gray-200 (#e5e7eb, L 0,79809). Damit
+
+         hell    #e5e7eb → #ffffff                            = 1,238:1
+
+       — die Stufe traegt jetzt allein, ohne auf die unsichtbare Kante
+       angewiesen zu sein, und sie ist staerker als die dunkle (1,105:1). Der
+       unveraenderte Ring gewinnt dabei mit: 1,008:1 → 1,134:1 gegen die
+       tiefere Leinwand. Alle Zahlen sind am laufenden Fenster nachgerechnet
+       (Canvas-Pixel + WCAG-2.1-Luminanz), nicht geschaetzt; die Rechnung
+       steht als Test in `__tests__/hellmodus-hat-ebenen.test.ts`.
+       Der Ring bleibt unangetastet: er sitzt auch auf der Sidebar
+       (`Sidebar.tsx:319`), und die Datei gehoert in diesem Durchgang einem
+       anderen Agenten — eine Kante nur an der Pane zu schaerfen haette zwei
+       Raender aus einer Familie auseinanderlaufen lassen.
+
+       Was hier NICHT passiert und warum: die Literale wurden NICHT durch
+       `bg-lu-*` ersetzt. Die vier Flaechentokens in `index.css:21-24` sind
+       reine DUNKEL-Werte ohne `.light`-Gegenstueck; `bg-lu-base` wuerde im
+       Hellmodus #202020 malen. Und die beiden Familien lassen sich auch dunkel
+       nicht sauber migrieren: fuer #141414 (Leinwand + Header + Titlebar) gibt
+       es gar kein Token, und #1e1e1e (Pane) teilt sich die Pane mit der
+       Sidebar. Die fehlenden Zeilen stehen im Bericht. */
+    <div className="h-screen w-screen overflow-hidden bg-gray-200 dark:bg-[#141414] text-gray-900 dark:text-gray-100">
       <div className="h-full flex flex-col">
         <Titlebar />
         <Header />

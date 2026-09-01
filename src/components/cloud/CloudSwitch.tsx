@@ -13,6 +13,7 @@ import { useUIStore } from '../../stores/uiStore'
 import { useCloudAuthStore, deriveCloudAvailable } from '../../stores/cloudAuthStore'
 import { cloudSwitchClick, CLOUD_ARM_TIMEOUT_MS } from '../../lib/cloud-switch-guard'
 import { cn } from '../create/ui/cn'
+import { MONOGRAM, MONOGRAM_INVERT } from '../layout/brand'
 
 export function CloudSwitch() {
   const appMode = useSettingsStore((s) => s.settings.appMode)
@@ -87,12 +88,12 @@ export function CloudSwitch() {
       )}
     >
       <img
-        src="/LU-monogram-bw.png"
+        src={MONOGRAM}
         alt=""
         width={12}
         height={12}
         draggable={false}
-        className="shrink-0 select-none dark:invert-0 invert"
+        className={`shrink-0 select-none ${MONOGRAM_INVERT}`}
       />
       {/* The armed switch says what the next click will do, in the place the
           finger already is. No transition on this text on purpose: the label

@@ -10,6 +10,7 @@ import { useCloudAuth } from '../../hooks/useCloudAuth'
 import { useCloudAuthStore } from '../../stores/cloudAuthStore'
 import { loginWithProvider } from '../../api/cloud/supabase'
 import { CLOUD_BASE } from '../../api/cloud/config'
+import { MONOGRAM } from '../layout/brand'
 import { openExternal } from '../../api/backend'
 
 /**
@@ -206,7 +207,7 @@ export function AccountPanel() {
                  also muss das Monogramm auch in beiden Modi dunkel sein —
                  vorher kippte es mit dem Modus, weil der Knopf das tat. */
               <img
-                src="/LU-monogram-bw.png"
+                src={MONOGRAM}
                 alt=""
                 width={12}
                 height={12}

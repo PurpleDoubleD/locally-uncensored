@@ -17,6 +17,8 @@ import { useCodexConfirmStore } from '../../stores/codexConfirmStore'
 import { PluginsDropdown } from './PluginsDropdown'
 import { CodexModeDropdown } from './CodexModeDropdown'
 import { ModelSelector } from '../models/ModelSelector'
+import { MONOGRAM, MONOGRAM_INVERT } from '../layout/brand'
+import { AVATAR_SLOT } from './avatar-slot'
 import { GoalBar } from './GoalBar'
 import { LoopBar } from './LoopBar'
 import { useSettingsStore } from '../../stores/settingsStore'
@@ -163,8 +165,9 @@ export function CodexView() {
               ueberfuellt"). The dropdown itself is untouched, only the place
               and the trigger changed. */}
           <PluginsDropdown iconOnly />
-          <TokenCounter />
-          <ContextDropdown />
+          {/* EIN Kontextelement (D-S06): der Fuellstand ist die Beschriftung
+              des Fensterwaehlers, nicht dieselbe Zahl ein zweites Mal daneben. */}
+          <ContextDropdown><TokenCounter /></ContextDropdown>
           <SmallModelModeToggle />
         </div>
 
@@ -249,16 +252,14 @@ export function CodexView() {
                     key={msg.id}
                     className={`flex gap-2 px-3 py-1 ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}
                   >
-                    <div className={`w-5 h-5 rounded overflow-hidden flex items-center justify-center shrink-0 ${
-                      msg.role === 'user'
-                        ? 'bg-gray-100 dark:bg-white/8'
-                        : ''
-                    }`}>
+                    {/* Derselbe Chip wie im Chat (avatar-slot.ts). Hier stand
+                        die dritte Fassung: 20px, ohne Rahmen, Monogramm nackt. */}
+                    <div className={AVATAR_SLOT}>
                       {msg.role === 'user'
                         ? (userAvatarDataUrl
                             ? <img src={userAvatarDataUrl} alt="" className="w-full h-full object-cover" />
-                            : <User size={9} className="text-gray-400" />)
-                        : <img src="/LU-monogram-bw.png" alt="" className="w-full h-full object-contain dark:invert-0 invert opacity-80" />
+                            : <User size={11} className="text-gray-400" />)
+                        : <img src={MONOGRAM} alt="" className={`w-[70%] h-[70%] object-contain opacity-80 ${MONOGRAM_INVERT}`} />
                       }
                     </div>
                     <div className="max-w-[85%] space-y-0.5">

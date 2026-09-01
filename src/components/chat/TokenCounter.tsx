@@ -79,19 +79,23 @@ export function TokenCounter() {
       ? `Context: ${usedTokens.toLocaleString()} / ${maxTokens.toLocaleString()} tokens (${source}), anchored on the model's last reported usage (includes system prompt + tools + RAG); reasoning tokens are not context and aren't counted${capNote}`
       : `Estimated: ${usedTokens.toLocaleString()} / ${maxTokens.toLocaleString()} tokens (${source}), estimate until the model reports real usage${capNote}`
 
+  // `span`, nicht `div`, und ohne eigenes Padding: seit D-S06 ist dieser
+  // Fuellstand die Beschriftung INNERHALB des Kontextfenster-Knopfes
+  // (`ContextDropdown`). Ein `div` im `<button>` ist kein gueltiges
+  // Phrasing-Content, und das Padding kam sonst zweimal.
   return (
-    <div className={`flex items-center gap-1.5 px-2 py-1 ${color}`} title={title}>
-      <div className="w-12 h-1 rounded-full bg-gray-200 dark:bg-white/10 overflow-hidden">
-        <div
-          className={`h-full rounded-full transition-all duration-300 ${barColor}`}
+    <span className={`inline-flex items-center gap-1.5 ${color}`} title={title}>
+      <span className="block w-12 h-1 rounded-full bg-gray-200 dark:bg-white/10 overflow-hidden">
+        <span
+          className={`block h-full rounded-full transition-all duration-300 ${barColor}`}
           style={{ width: `${Math.min(ratio * 100, 100)}%` }}
         />
-      </div>
+      </span>
       {/* `font-mono tabular-nums` war dasselbe Rezept, nur an der Call-Site
           buchstabiert. `.lu-hud-num` ist die eine Stelle, an der es steht. */}
       <span className="text-[0.55rem] lu-hud-num">
         {formatK(usedTokens)}/{formatK(maxTokens)}
       </span>
-    </div>
+    </span>
   )
 }

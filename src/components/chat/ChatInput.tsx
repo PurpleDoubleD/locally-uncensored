@@ -9,6 +9,7 @@ import { useModelStore } from '../../stores/modelStore'
 import { isThinkingCompatible, isVisionCompatible, declaredVision } from '../../lib/model-compatibility'
 import type { AgentToolCall } from '../../types/agent-mode'
 import type { ImageAttachment } from '../../types/chat'
+import { MONOGRAM, MONOGRAM_INVERT } from '../layout/brand'
 
 interface Props {
   onSend: (content: string, images?: ImageAttachment[]) => void
@@ -488,12 +489,12 @@ export function ChatInput({ onSend, onStop, isGenerating, pendingApproval, onApp
               className="flex items-center gap-1 px-1.5 py-1.5 rounded-md shrink-0 text-[0.6rem] font-medium bg-[#7c3aed]/15 text-[#7c3aed] dark:text-[#a78bfa] border border-[#7c3aed]/30"
             >
               <img
-                src="/LU-monogram-bw.png"
+                src={MONOGRAM}
                 alt=""
                 width={10}
                 height={10}
                 draggable={false}
-                className="shrink-0 select-none dark:invert-0 invert"
+                className={`shrink-0 select-none ${MONOGRAM_INVERT}`}
               />
               <span>Cloud</span>
             </span>
