@@ -93,10 +93,16 @@ function evaluateStringLiteralExpression(expr: string): string {
   while ((m = re.exec(expr)) !== null) {
     pieces.push(
       m[2]
+        // NUL is used as a private placeholder, not matched as input: an
+        // escaped backslash is parked on a byte that cannot occur in a
+        // TypeScript source literal, the other escapes are resolved, and the
+        // last .replace puts it back. Any printable sentinel would be
+        // ambiguous with real content — which is the whole point.
         .replace(/\\\\/g, '\x00') // placeholder so we do not re-process escaped backslashes
         .replace(/\\'/g, "'")
         .replace(/\\"/g, '"')
         .replace(/\\n/g, '\n')
+        // eslint-disable-next-line no-control-regex
         .replace(/\x00/g, '\\')
     )
   }

@@ -98,16 +98,15 @@ export async function streamOllamaChatWithTools(
   else if (options.thinking === false) body.think = false
 
   const url = ollamaUrl('/chat')
-  let response: Response
-  try {
-    response = await localFetchStream(url, {
-      method: 'POST',
-      body: JSON.stringify(body),
-      signal: options.signal,
-    })
-  } catch (fetchErr) {
-    throw fetchErr
-  }
+  // Was wrapped in `try { … } catch (fetchErr) { throw fetchErr }`. Checked
+  // against 9eb13291, the commit that wrote it: the catch never enriched
+  // anything — it was born as a plain rethrow. Removing it changes no
+  // behaviour; keeping it only suggested that something happened here.
+  let response: Response = await localFetchStream(url, {
+    method: 'POST',
+    body: JSON.stringify(body),
+    signal: options.signal,
+  })
 
   if (!response.ok && response.status === 400 && 'think' in body) {
     delete body.think

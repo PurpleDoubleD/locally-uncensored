@@ -184,7 +184,9 @@ describe.runIf(LIVE)('the same catalog through a real tokenizer', () => {
   it('a plain coding step stays under the token ceiling', async () => {
     const wire = codingWire()
     const tokens = await countTokens(wire)
-    // eslint-disable-next-line no-console
+    // Absichtliche Messausgabe (Lauf nur unter LIVE). Kein Unterdruecken
+    // noetig: `no-console` ist in eslint.config.js gar nicht eingeschaltet —
+    // gemessen 01.09.2026, 38 console-Aufrufe in src/, alle in api/lib/hooks.
     console.log(`coding step: ${wire.length} chars, ${tokens} tokens (${TOKENIZER_MODEL})`)
     expect(tokens).toBeLessThanOrEqual(CODING_TOKEN_CEILING)
   }, 300000)
@@ -192,7 +194,7 @@ describe.runIf(LIVE)('the same catalog through a real tokenizer', () => {
   it('the ungated coding catalog stays under its token ceiling', async () => {
     const wire = fullWire()
     const tokens = await countTokens(wire)
-    // eslint-disable-next-line no-console
+    // Absichtliche Messausgabe, siehe oben.
     console.log(`full catalog: ${wire.length} chars, ${tokens} tokens (${TOKENIZER_MODEL})`)
     expect(tokens).toBeLessThanOrEqual(FULL_TOKEN_CEILING)
   }, 300000)

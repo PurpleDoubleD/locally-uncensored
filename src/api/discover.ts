@@ -642,7 +642,7 @@ export async function installBundleComplete(bundle: ModelBundle): Promise<void> 
   const errors: string[] = []
 
   // Pre-check: which files already exist on disk (skip re-downloading them)
-  let installedFiles = new Set<string>()
+  const installedFiles = new Set<string>()
   try {
     const checkFiles = bundle.files
       .filter(f => f.subfolder && f.filename)

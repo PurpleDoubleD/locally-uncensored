@@ -8,6 +8,9 @@
  * message, with no subject and no hint of who said it.
  */
 import { describe, it, expect } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+import { dirname, resolve } from 'node:path'
 import { detailOf, withDetail, withInstallerOutput } from '../error-text'
 
 describe('detailOf', () => {
@@ -52,11 +55,7 @@ describe('withDetail', () => {
 
 describe('the surfaces that used to set foreign text as the whole message', () => {
   const read = (p: string) =>
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    require('node:fs').readFileSync(
-      require('node:path').resolve(__dirname, '..', '..', p),
-      'utf8',
-    ) as string
+    readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', p), 'utf8')
 
   it('first run frames every installer log tail', () => {
     // Onboarding is the highest visibility surface in the app and it had four

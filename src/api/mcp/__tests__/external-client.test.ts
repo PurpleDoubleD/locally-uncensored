@@ -63,6 +63,12 @@ class FakeServer extends Emitter {
   }
   constructor() {
     super()
+    // Not the `const self = this` idiom the rule is aimed at (that one is
+    // fixed by an arrow function). This hands the freshly built fake to the
+    // test file so assertions can reach the instance the code under test
+    // constructed — there is no other handle on it, and no arrow function
+    // would produce one.
+    // eslint-disable-next-line @typescript-eslint/no-this-alias
     lastServer = this
   }
   async spawn() {

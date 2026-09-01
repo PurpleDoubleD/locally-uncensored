@@ -1,7 +1,7 @@
 // Agent Mode — Type Definitions
 // Part of the Agent Mode feature (coding-orch branch)
 
-import type { JSONSchemaProp } from '../api/mcp/types'
+import type { JSONSchemaProp, ToolArgs } from '../api/mcp/types'
 
 // Permission tiers (auto-approve reads, confirm writes)
 export type ToolPermission = 'auto' | 'confirm'
@@ -52,7 +52,11 @@ export interface OllamaTool {
 export interface OllamaToolCall {
   function: {
     name: string
-    arguments: Record<string, any>
+    /* Was `Record<string, any>`. It is the project's own ToolArgs — every
+       consumer already reads these through the argString/argNumber guards in
+       builtin-tools.ts, so the `any` was not carrying anything: swapping it
+       for the real type left tsc at 0 errors across the whole program. */
+    arguments: ToolArgs
   }
 }
 
@@ -84,7 +88,7 @@ export type ToolCallStatus = 'pending_approval' | 'running' | 'completed' | 'fai
 export interface AgentToolCall {
   id: string
   toolName: string
-  args: Record<string, any>
+  args: ToolArgs
   status: ToolCallStatus
   result?: string
   error?: string

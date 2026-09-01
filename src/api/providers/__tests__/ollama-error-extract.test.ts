@@ -6,7 +6,7 @@ async function extractError(res: Response, fallback: string): Promise<string> {
   try {
     const data = await res.json()
     const raw = data.error || fallback
-    const m = typeof raw === 'string' && raw.match(/[\\'"]*([\w.:/\-]+?)[\\'"]*\s+does not support (chat|completion)/i)
+    const m = typeof raw === 'string' && raw.match(/[\\'"]*([\w.:/-]+?)[\\'"]*\s+does not support (chat|completion)/i)
     if (m) {
       const name = m[1]
       return `Ollama rejected "${name}" — its manifest is stale (pulled before Ollama 0.15). Open a terminal and run: ollama pull ${name}   Then reload the model.`

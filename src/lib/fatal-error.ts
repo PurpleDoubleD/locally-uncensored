@@ -67,7 +67,9 @@ export function escapeHtml(s: string): string {
 /** Plain-DOM fatal-error screen for a boot throw the ErrorBoundary can't catch. */
 export function mountFatalError(rootEl: HTMLElement, err: unknown): void {
   forceShowWindow()
-  // eslint-disable-next-line no-console
+  // Bewusst console.error: das ist der Boot-Pfad, in dem der Logger selbst
+  // schon gescheitert sein kann. `no-console` ist nicht eingeschaltet, die
+  // Unterdrueckung hier war folgenlos.
   try { console.error('[LU] fatal boot error', err) } catch { /* ignore */ }
   const message = err instanceof Error ? err.stack || err.message : String(err)
   const btn =

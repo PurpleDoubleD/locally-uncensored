@@ -192,9 +192,9 @@ function observationToString(data) {
 function isSystemPromptEcho(content) {
   if (!content) return false
   const head = String(content).trim().slice(0, 240)
-  if (/^(hello[!,\.]?\s+|hi[!,\.]?\s+|hey[!,\.]?\s+)?(i['’]?m|i am|you are)\s+(codex|an autonomous|the agent|an? ai)/i.test(head)) return true
+  if (/^(hello[!,.]?\s+|hi[!,.]?\s+|hey[!,.]?\s+)?(i['’]?m|i am|you are)\s+(codex|an autonomous|the agent|an? ai)/i.test(head)) return true
   if (/^(i am|i['’]m)\s+ready\s+to\s+(receive|assist|help)/i.test(head)) return true
-  if (/^(hello|hi|hey)[!,\.]?\s+i['’]?m\s+ready/i.test(head)) return true
+  if (/^(hello|hi|hey)[!,.]?\s+i['’]?m\s+ready/i.test(head)) return true
   return false
 }
 
@@ -202,7 +202,9 @@ function repairToolCallArgs(tc) {
   if (!tc?.function) return tc
   let a = tc.function.arguments
   if (typeof a === 'string') {
-    try { tc.function.arguments = JSON.parse(a) } catch (_) {}
+    // Kein JSON: dann bleibt der String stehen und der Aufrufer sieht ihn
+    // unveraendert — genau das ist die Reparatur, die diese Funktion anbietet.
+    try { tc.function.arguments = JSON.parse(a) } catch { /* String bleibt String */ }
   }
   return tc
 }

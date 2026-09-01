@@ -13,6 +13,13 @@
  *   node scripts/mobile-real-browser.mjs --url <full mobile url> --code <6 digit>
  */
 
+/* global window, document -- die page.evaluate-Rueckrufe weiter unten laufen
+   IM Browser, nicht in Node. Die Deklaration steht hier statt in
+   eslint.config.js, damit `no-undef` fuer die uebrigen Skripte scharf bleibt:
+   `name`, `status` und `location` sind Browser-Globals, und ein Tippfehler auf
+   einen davon waere in einem Node-Skript ein ReferenceError, den eine pauschal
+   gesetzte Browser-Umgebung durchliesse. */
+
 import { chromium } from 'playwright'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { argv, exit } from 'node:process'
@@ -57,30 +64,17 @@ Schreib zum Schluss audit/REPORT.md mit einer Aufzählung welches Tool was gelie
 
 Halt dich strikt an die Reihenfolge, übersprich KEINEN Schritt, leere Antworten zwischen den Schritten sind FEHLER.`
 
-// Tools the mobile_landing JS exposes. Source of truth is AGENT_TOOLS in
-// src-tauri/src/commands/remote.rs. Codex uses a subset.
-const AGENT_TOOL_NAMES = ['web_search','web_fetch','file_read','file_write','file_list','file_search','shell_execute','code_execute','system_info','process_list','screenshot','image_generate','get_current_time']
-const CODEX_TOOL_NAMES = ['file_read','file_write','file_list','file_search','shell_execute','code_execute','system_info','get_current_time','web_search','web_fetch']
-
-// Per-tool nudge text. The user types this verbatim into the chat as a
-// follow-up message when a tool was not exercised in the previous run.
-// Each phrasing is concrete enough that the model can't sidestep with
-// prose — it has to call the tool to comply.
-const TOOL_NUDGES = {
-  web_search:    'Search the web for "ollama best small models 2024" with web_search and tell me the top result.',
-  web_fetch:     'Use web_fetch to fetch https://example.com and report its <title>.',
-  file_read:     'Read the file gemtest/index.html with file_read and quote the first <h1> tag.',
-  file_write:    'Use file_write to create gemtest/notes.md with the text "Mobile E2E proof — all tools".',
-  file_list:     'Use file_list with path "gemtest" recursive=true and list the entries.',
-  file_search:   'Use file_search with path "gemtest" and query "Hello" and report any matches.',
-  shell_execute: 'Run "echo hello-from-shell" via shell_execute and report stdout.',
-  code_execute:  'Use code_execute with this Python: print(2+2). Report the stdout.',
-  system_info:   'Call system_info and report the os + cpuCount.',
-  process_list:  'Call process_list and report the top process by memory.',
-  screenshot:    'Call screenshot once and report the image format from the response.',
-  image_generate:'Call image_generate with prompt "test". Whatever response comes back, report its error or status field.',
-  get_current_time:'Call get_current_time and report the iso_local field.',
-}
+// Hier standen AGENT_TOOL_NAMES, CODEX_TOOL_NAMES und TOOL_NUDGES; keines der
+// drei wurde je gelesen.
+//
+// Die beiden Namenslisten waren eine dritte, handkopierte Fassung dessen, was
+// scripts/remote-agent-e2e.mjs daneben schon fuehrt — dort einmal ABGELEITET
+// (`AGENT_TOOLS.map(t => t.name)`) und einmal von Hand. Eine Kopie, die
+// niemand liest, kann von der Quelle wegdriften, ohne dass etwas auffaellt;
+// das Einzige, was sie hier ungefaehrlich machte, war, dass sie tot war.
+//
+// TOOL_NUDGES widersprach dem Kopf dieser Datei: "No shortcuts. No auto-nudge."
+// Das Skript beobachtet absichtlich, statt nachzuhelfen.
 
 async function main() {
   const { url, code, mode, task, headless } = args()
@@ -94,7 +88,9 @@ async function main() {
   const consoleLog = []
   const chatEvents = []
   const toolCalls = []
-  const toolResults = []
+  // (Ein `toolResults`-Puffer stand hier, wurde nie gefuellt und nie
+  //  geschrieben — saveAll() kennt ihn nicht. Was er halten sollte, traegt
+  //  toolCalls[].responseBody bereits.)
   let final = []
   let elapsedMs = 0
 
@@ -120,7 +116,8 @@ async function main() {
       writeFileSync(`${outDir}/tool-calls.json`, JSON.stringify(toolCalls, null, 2))
       writeFileSync(`${outDir}/chat-events.json`, JSON.stringify(chatEvents, null, 2))
       writeFileSync(`${outDir}/transcript.json`, JSON.stringify(final, null, 2))
-    } catch (_) {}
+    } catch { /* saveAll laeuft auch aus dem finally: ein Schreibfehler hier
+                 darf den Abbruchgrund nicht verdecken */ }
   }
 
   page.on('console', msg => {
@@ -140,7 +137,8 @@ async function main() {
       if (h.includes('json') || h.includes('text')) {
         body = await res.text()
       }
-    } catch (_) {}
+    } catch { /* Antwortkoerper nicht lesbar (abgebrochen/binaer) — der
+                 Netzwerkeintrag unten wird trotzdem geschrieben */ }
     networkLog.push({ phase: 'response', status: res.status(), url: u, body: body?.slice(0, 4000), at: Date.now() })
 
     // Targeted parsing: tool calls + chat events
@@ -148,13 +146,13 @@ async function main() {
       try {
         const reqBody = res.request().postDataJSON()
         toolCalls.push({ ts: Date.now(), tool: reqBody?.tool, args: reqBody?.args, chatId: reqBody?.chatId, status: res.status(), responseBody: (body||'').slice(0,800) })
-      } catch (_) {}
+      } catch { /* kein JSON-Body am Request — dann gibt es nichts zu buchen */ }
     }
     if (u.endsWith('/remote-api/chat-event')) {
       try {
         const reqBody = res.request().postDataJSON()
         chatEvents.push({ ts: Date.now(), role: reqBody?.role, content: (reqBody?.content||'').slice(0,500), status: res.status() })
-      } catch (_) {}
+      } catch { /* dito */ }
     }
   })
 

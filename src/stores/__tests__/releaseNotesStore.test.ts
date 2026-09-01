@@ -119,9 +119,10 @@ describe('the notes table', () => {
   it('the modal renders the expander and the sections', () => {
     // Source guard, same pattern as the settings guards: the sheet must offer
     // Show all changes and map note.details, or the table above is dead data.
-    const { readFileSync } = require('node:fs')
-    const { resolve } = require('node:path')
-    const src = readFileSync(resolve(__dirname, '../../components/release/ReleaseNotesModal.tsx'), 'utf8')
+    const src = readFileSync(
+      resolve(dirname(fileURLToPath(import.meta.url)), '../../components/release/ReleaseNotesModal.tsx'),
+      'utf8',
+    )
     expect(src).toContain('Show all changes')
     expect(src).toContain('note.details.map')
     expect(src).toContain('section.items.map')

@@ -368,7 +368,10 @@ export async function checkModelCapability(
       signal,
     })
     if (res.ok) {
-      try { await res.json() } catch {}
+      // Drain the body so the socket is released; the VERDICT is the status,
+      // not the payload. A malformed body on a 200 changes nothing this
+      // function reports, so there is nothing here to handle or to log.
+      try { await res.json() } catch { /* body only drained, never read */ }
       return { name, ok: true, stale: false }
     }
     const { parseOllamaError, parseShowNotFound } = await import("../lib/ollama-errors")
@@ -420,8 +423,21 @@ export async function loadModel(name: string): Promise<void> {
     log.warn(`[ollama] failed to load model "${name}"`, { status: res.status, message: parsed.message })
     throw new ModelLoadError(parsed, name)
   }
-  // Consume response to ensure model is fully loaded
-  try { await res.json() } catch {}
+  // Consume response to ensure model is fully loaded.
+  //
+  // Reading the body IS the wait — Ollama answers /api/generate with
+  // stream:false only once the weights are resident. So a body that fails to
+  // arrive means "we stopped waiting", not "loaded". We still do not throw:
+  // every caller treats loadModel as a warm-up (Header/ModelSelector warm the
+  // picked model, vram-handoff documents its restore as explicitly non-fatal),
+  // and turning a torn read into a user-facing error would be a behaviour
+  // change none of them asked for. What was wrong was doing it in SILENCE:
+  // the one case where "loaded" is a lie left no trace anywhere.
+  try {
+    await res.json()
+  } catch (e) {
+    log.warn(`[ollama] load of "${name}" returned but its body did not read back`, { err: e })
+  }
 }
 
 export async function unloadModel(name: string): Promise<void> {

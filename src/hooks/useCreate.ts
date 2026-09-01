@@ -1485,7 +1485,11 @@ export function useCreate() {
   const cancel = useCallback(async () => {
     abortRef.current?.abort()
     if (trainingActive.current) {
-      try { await cancelCharacterTraining() } catch {}
+      // Best effort, and deliberately not fatal: Stop's real job is the
+      // abandonPrompt below. A training cancel that fails must not stop us
+      // from taking the render out of the queue — that was the R32 defect
+      // (job left running, file on disk, nobody watching).
+      try { await cancelCharacterTraining() } catch { /* Stop continues regardless */ }
     }
     // Take OUR job out of the queue — do not blanket-/interrupt.
     //

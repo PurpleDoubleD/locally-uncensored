@@ -504,7 +504,17 @@ async function executeWebFetch(args: ToolArgs): Promise<string> {
       if (text.length > maxLength) return text.substring(0, maxLength) + '\n\n[...truncated]'
       return text || 'Error: Page returned empty content'
     } catch (fallbackErr) {
-      return `Error: web_fetch failed: ${e instanceof Error ? e.message : String(e)}`
+      // The fallback's OWN reason comes first. `fallbackErr` was caught and
+      // then thrown away here, and that was not cosmetic: in browser/dev mode
+      // the Rust command is never reachable, so `e` is the same constant
+      // "backend unavailable" sentence on every single failure. The only text
+      // that says what actually went wrong — DNS, CORS, 404, timeout — lives
+      // in `fallbackErr`, and the model got none of it. Thirty lines up,
+      // executeWebSearch already writes the rule down: a silently swallowed
+      // provider error "would look like search is broken".
+      const why = fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr)
+      const primary = e instanceof Error ? e.message : String(e)
+      return `Error: web_fetch failed: ${why} (the backend path failed first: ${primary})`
     }
   }
 }

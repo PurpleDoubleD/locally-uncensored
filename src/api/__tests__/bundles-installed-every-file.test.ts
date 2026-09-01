@@ -186,7 +186,9 @@ describe('the row a user actually reads names the cause that fits the file', () 
   })
 
   it('no dashes in either text (house rule) and both stay English', () => {
-    // eslint-disable-next-line no-misleading-character-class
+    // (Die Unterdrueckung fuer no-misleading-character-class stand hier, ohne
+    // dass die Regel je etwas gemeldet haette — beide Code Points sind BMP
+    // und bilden kein Surrogatpaar.)
     const dash = /[\u2013\u2014]/
     return import('../../stores/downloadStore').then(({ invisibleFileMessage }) => {
       expect(invisibleFileMessage(GGUF)).not.toMatch(dash)

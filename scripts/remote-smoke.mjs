@@ -25,7 +25,6 @@
  */
 
 import { argv, exit } from 'node:process'
-import { join } from 'node:path'
 // Der Sandkasten-Name kommt aus app-identity. Dieser Branch hängt einen Suffix
 // an; eine fest verdrahtete Zusicherung wäre danach immer erfüllt und würde
 // eine echte Regression nicht mehr fangen.
@@ -77,7 +76,9 @@ async function agentTool(base, token, chatId, tool, args) {
   })
   const text = await r.text()
   let data = null
-  try { data = JSON.parse(text) } catch (_) {}
+  // Nicht-JSON ist erlaubt: die naechste Zeile entscheidet anhand von
+  // `data === null` UND dem Status, ob das ein Fehler ist.
+  try { data = JSON.parse(text) } catch { /* data bleibt null */ }
   if (!r.ok && !data) throw new Error(`HTTP ${r.status}: ${text}`)
   return data ?? text
 }

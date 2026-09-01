@@ -88,7 +88,7 @@ export function deriveSideEffectKey(
 function normalizePath(p: string): string {
   // Windows paths case-insensitively; Unix paths case-sensitively. Keep
   // behaviour conservative: lowercase on Windows, preserve on Unix.
-  const isWindowsLike = /^[A-Za-z]:[\\\/]/.test(p) || p.startsWith('\\\\')
+  const isWindowsLike = /^[A-Za-z]:[\\/]/.test(p) || p.startsWith('\\\\')
   let out = p.trim().replace(/\\/g, '/')
   // Collapse trailing slash so "./foo" and "./foo/" collide.
   out = out.replace(/\/+$/, '')
