@@ -256,3 +256,51 @@ Zusätzlich selbst nachgeholt statt übersprungen: die 51 Katalog-Downloads gege
 ihre echten Dateigrößen per HEAD geprüft — **0 untertrieben**. Der im Kommentar
 dokumentierte Vorfall (13 GB angekündigt, 16,3 GB echt, Platte auf 0 Byte)
 wiederholt sich derzeit nicht.
+
+## Etappenstand — beide Maschinen, am committeten Stand geprüft
+
+Alle Zahlen unten stammen aus einem **frischen Arbeitsbaum auf `HEAD`**, nicht
+aus meinem Arbeitsverzeichnis. Das ist der Unterschied, der in dieser Session
+zweimal etwas gefunden hat: neue Dateien, die von committetem Code importiert
+werden, aber untracked liegen blieben, sind lokal unsichtbar und kippen den
+Build erst woanders um (einmal auf der Windows-Maschine bemerkt, einmal von mir
+vor dem Verlassen des Rechners).
+
+| Messgröße | Basis | jetzt | Ziel |
+|---|---|---|---|
+| Typfehler | 118 | **0** | 0 |
+| Importzyklen | 11 (Audit: 9) | **0** | 0 |
+| Boot-Chunk | 2016 kB | **714 kB** | < 800 |
+| `INEFFECTIVE_DYNAMIC_IMPORT` | 11 | **0** | 0 |
+| `react-hooks/*` | 47 | **2** | 0 |
+| eslint gesamt | 1040 | 995 | — |
+| vitest Mac | 5405 | **6729 / 0 rot** | — |
+| vitest Windows | 8 rot | **6729 / 0 rot** | — |
+| cargo test Mac | 438 | **714 / 0 rot** | — |
+| cargo test Windows | 15 rot | **692 / 0 rot** | — |
+
+Drei Gates sind neu und **durch eine Sonde als scharf belegt**, nicht nur
+eingehängt: `typecheck` (Sonde: absichtlicher Typfehler → Exit 2), `cycles`
+(Sonde: zwei einander importierende Module → Exit 1, nach Entfernen Exit 0),
+und die Isolation (Sonde: Branch-Suffix leeren → 3 Tests rot mit Pfad im
+Klartext). Diese Sonden sind Pflicht geworden, seit sich herausstellte, dass
+der Typecheck monatelang gar nichts geprüft hat.
+
+### Ehrlich offen
+
+- **2 `react-hooks`-Verstöße in `SettingsPage.tsx`.** Der Agent ist vor deren
+  Abschluss ausgestiegen. Sie stehen hier als Rest, statt stillgelegt im Code.
+- **8 Rust-Tests sind auf Windows `#[cfg_attr(windows, ignore)]`** (`state.rs`,
+  `engine.rs`, `bg_tasks.rs`) — sie starten `sh`, `sleep`, `ps`, `pwd`. Das ist
+  dieselbe Klasse, die auf der TS-Seite bereits gelöst ist (Git Bash statt
+  WSL-Stub). Für einen Teil davon ist der ehrliche Weg allerdings kein
+  erzwungener Unix-Test, sondern ein Windows-Gegenstück über das dort benutzte
+  Job Object.
+- **16 e2e-Tests sind flaky** — sie bestehen nur im Retry. **Nicht von uns:**
+  am unveränderten Ausgangsstand `10bfa0d7` fallen dieselben Tests mit
+  identischer Meldung um (in einem separaten Arbeitsbaum gegengeprüft). Der
+  Lauf endet mit Exit 0, weil Playwright Retries zulässt; ohne `--retries=0`
+  sieht man es nicht.
+- **`no-explicit-any` steht bei 827** (149 Dateien), Audit-Ziel ist < 100.
+- **Design-Welle 2**: 2 von 7 Posten erledigt (Modal-Bedienbarkeit,
+  Motion/reduced-motion). Welle 3 unberührt.
