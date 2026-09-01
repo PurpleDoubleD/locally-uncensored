@@ -42,6 +42,12 @@ import { ShortcutsModal } from './ShortcutsModal'
 import { CreditsExhaustedModal } from './CreditsExhaustedModal'
 import { Titlebar } from './Titlebar'
 
+// Aus der Komponente herausgezogen: `new Set(STORE_KEYS)` entstand bei jedem
+// Render neu und war damit die instabile Referenz, wegen der der Restore-Effekt
+// seine eigene Abhaengigkeit nicht nennen konnte. STORE_KEYS ist ein
+// Modulkonstante, das Set also genauso konstant.
+const STORE_KEYS_SET = new Set(STORE_KEYS)
+
 // The backup triad must never write %APPDATA%/store_backup.json before the
 // restore decision — on a post-NSIS boot the first doBackup would otherwise
 // snapshot the wiped localStorage over the only good backup. Resolved on every
@@ -204,7 +210,7 @@ export function AppShell() {
   // The key lists and the snapshot builder live in lib/store-backup so the
   // update path can ask for a backup too. It used to hand the process to the
   // installer with whatever the 5 s interval last wrote (Bug A1, 2.6.7).
-  const STORE_KEYS_SET = new Set(STORE_KEYS)
+  // (STORE_KEYS_SET steht jetzt auf Modulebene, siehe oben.)
 
   // Feature FF: reserved key under which memory embeddings ride inside the RAG
   // chunk backup file. Never collides with a real documentId (those are UUIDs).
@@ -391,7 +397,10 @@ export function AppShell() {
       }
     }, 100)
     return () => clearInterval(waitForTauri)
-  }, [])
+    // Beide Deps sind konstant: STORE_KEYS_SET liegt jetzt auf Modulebene,
+    // `updateSettings` ist eine Zustand-Action mit fester Referenz. Der
+    // Restore-Effekt bleibt damit exakt der Mount-Einmal-Effekt, der er war.
+  }, [updateSettings])
 
   // Backup stores to %APPDATA% — three-pronged so chat history survives
   // NSIS updates + abrupt process kills:

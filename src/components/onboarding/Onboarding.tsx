@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { withInstallerOutput } from '../../lib/error-text'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Minus, Square, X as XIcon, ArrowRight, Download, Check, ChevronRight, Loader2, RefreshCw, ExternalLink, FolderOpen, Cpu } from 'lucide-react'
@@ -614,6 +614,11 @@ export function Onboarding() {
     return () => clearInterval(timer)
   }, [pythonStartTime])
 
+  /** Der Auto-Scan laeuft einmal pro Mount, sobald der comfyui-Schritt erreicht
+   *  ist. Ref statt State: der Wert steuert keinen Render, sondern verhindert
+   *  nur den Wiedereintritt in den Effekt. */
+  const comfyAutoDetectStarted = useRef(false)
+
   // Auto-detect ComfyUI when entering the comfyui step. We mark the install
   // as "ready" (=> Continue button) only when both `found` AND `complete`
   // are true. A `found && !complete` carcass (P14) keeps the install option
@@ -623,7 +628,15 @@ export function Onboarding() {
     // straight past this step, so `step` should never actually be 'comfyui'
     // there — but never auto-detect/install ComfyUI on Mac regardless (hard
     // rule: Mac local image/video is MLX only).
-    if (step === 'comfyui' && !isMacOS() && !comfyFound && !comfyDetecting) {
+    if (step === 'comfyui' && !isMacOS() && !comfyAutoDetectStarted.current) {
+      // Die Wiedereintritts-Sperre steckte bisher in `!comfyFound &&
+      // !comfyDetecting`. Als Dependencies notiert waeren genau diese beiden
+      // eine Endlosschleife: der Mehrfach-Install-Zweig setzt `comfyFound`
+      // absichtlich wieder auf null und `finally` setzt `comfyDetecting` auf
+      // false — der Effekt haette sich damit selbst nachgetriggert und den
+      // Backend-Scan in Dauerschleife gefahren. Die Sperre ist Lauf-Zustand,
+      // kein Render-Zustand, und liegt deshalb in einer Ref.
+      comfyAutoDetectStarted.current = true
       setComfyDetecting(true)
       // First: enumerate ALL installs (Bug #3). When >1 we show a picker
       // BEFORE auto-picking — preventing the ninjastic2008 trap where LU

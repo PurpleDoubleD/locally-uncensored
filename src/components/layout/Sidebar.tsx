@@ -286,7 +286,10 @@ export function Sidebar() {
     tick()
     const timer = setInterval(tick, 1000)
     return () => clearInterval(timer)
-  }, [passcodeExpiresAt, remoteEnabled])
+    // `regenerateToken` ist eine Store-Action mit fester Referenz (wie das
+    // `refreshDevices`/`hideQr` der Effekte darueber), der Countdown startet
+    // also weiterhin nur bei neuem Ablaufzeitpunkt oder Remote-Umschaltung neu.
+  }, [passcodeExpiresAt, regenerateToken, remoteEnabled])
 
   return (
     <AnimatePresence>

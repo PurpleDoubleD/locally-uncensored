@@ -1444,7 +1444,12 @@ export function useCreate() {
       // the haul instead of waiting for it to load).
       if (renderEviction) void restoreChatBackendsAfterRender(renderEviction)
     }
-  }, [videoBackend, runCharacterTraining])
+    // `videoModelsList` ist State: seine Referenz wechselt nur, wenn
+    // setVideoModelsList wirklich eine neue Liste schreibt (fetchModels), und
+    // generateInner schreibt sie nicht. Der Callback wird also genau dann neu
+    // gebaut, wenn sich die Modellliste aendert — vorher las er sie aus einer
+    // veralteten Closure und leitete daraus den falschen `modelType` ab.
+  }, [videoBackend, runCharacterTraining, videoModelsList])
 
   // Double-click idempotence: isGenerating only flips after the first await,
   // so a second click racing the first must be blocked SYNCHRONOUSLY — two

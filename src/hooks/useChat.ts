@@ -267,6 +267,12 @@ export function useChat() {
 
   // Agent mode composition
   const agentChat = useAgentChat()
+  // `useAgentChat()` gibt bei jedem Render ein frisches Objektliteral zurueck —
+  // das ist die instabile Referenz, wegen der `sendMessage` seine Abhaengigkeit
+  // nicht nennen konnte. Der einzige Teil davon, den `sendMessage` braucht, ist
+  // `sendAgentMessage`, und das ist ein useCallback mit leerer Dep-Liste, also
+  // ueber die Lebensdauer des Hooks stabil.
+  const { sendAgentMessage } = agentChat
   const { extractAndSave } = useMemory()
 
   // G29: a run outlives this hook instance when the chat view unmounts on a
@@ -360,13 +366,13 @@ export function useChat() {
               return { pass: 1, intervalMs, task: rest || content, startedAt: Date.now() }
             })()
           : undefined
-        return agentChat.sendAgentMessage(slash.expanded, images, {
+        return sendAgentMessage(slash.expanded, images, {
           displayContent: content,
           readOnly: slash.command.readOnly === true,
           ...(loop ? { loop } : {}),
         })
       }
-      return agentChat.sendAgentMessage(content, images)
+      return sendAgentMessage(content, images)
     }
 
     // Group chat v1 (Nurse KillJoy): two to four models answer in turn in
@@ -406,7 +412,7 @@ export function useChat() {
       // stripped from the curated list so a web/file turn can't call it.
       const cloudMode = settings.appMode === 'cloud'
       if (route && !(cloudMode && route.mediaHint)) {
-        return agentChat.sendAgentMessage(content, images, {
+        return sendAgentMessage(content, images, {
           curatedTools: cloudMode
             ? CHAT_TOOLS.filter((t) => t !== 'image_generate' && t !== 'video_generate')
             : CHAT_TOOLS,
@@ -993,7 +999,11 @@ export function useChat() {
         extractAndSave(content, contentRef.current, convId).catch(() => {})
       }
     }
-  }, [])
+    // Alle drei Referenzen sind konstant: `extractAndSave` kommt aus dem
+    // Modul-Singleton MEMORY_API, `runGroupRound` ist ein useCallback mit
+    // leerer Dep-Liste, `sendAgentMessage` ebenfalls. `sendMessage` behaelt
+    // damit ueber die gesamte Hook-Lebensdauer dieselbe Identitaet wie vorher.
+  }, [extractAndSave, runGroupRound, sendAgentMessage])
 
   const stopGeneration = useCallback(() => {
     abortRef.current?.abort()

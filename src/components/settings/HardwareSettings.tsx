@@ -43,7 +43,10 @@ export function HardwareSettings() {
   const [showRestartHint, setShowRestartHint] = useState(false)
 
   const vendor = (settings.gpuVendor || 'auto') as GpuVendor
-  const indices = settings.gpuIndices || []
+  // Das `|| []` erzeugte bei jedem Render ein frisches Array. Der Effekt unten
+  // haengt an `indices` und schickte deshalb bei JEDEM Render ein
+  // `set_gpu_selection` ans Backend, statt nur bei einer echten Aenderung.
+  const indices = useMemo(() => settings.gpuIndices || [], [settings.gpuIndices])
 
   const detect = async () => {
     setLoading(true)

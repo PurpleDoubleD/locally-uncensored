@@ -305,7 +305,10 @@ export function CreateExpProvider({ children }: { children: ReactNode }) {
       const out = await backendCall<{ lines?: string[] }>('comfyui_last_output').catch(() => null)
       throw new Error(comfyStartupError(out?.lines))
     }
-  }, [checkConnection, repairComfyEnv, startAndAwait])
+    // `checkConnection` stand hier, ohne im Rumpf vorzukommen: aufgerufen wird
+    // es von `startAndAwait`, das selbst schon davon abhaengt. Der Eintrag war
+    // damit reine Dopplung derselben Invalidierung.
+  }, [repairComfyEnv, startAndAwait])
 
   // Install a capability in place — mirrors the VHS one-click flow (#72):
   // ensure ComfyUI runs, clone the custom node + pip install where one is
