@@ -220,7 +220,7 @@ Die Befundtabelle §4b ist nicht das ganze Audit. Sechs der zehn **Amateur-Signa
 
 Befunde, die in **keinem** der beiden Audits stehen. Ich habe sie beim Nachmessen gefunden, nicht beim Lesen — sie stehen hier, weil ein Deckungsdokument, das nur die Aufgabenliste abhakt, genau die Blindheit hätte, die es anprangert.
 
-**Stand dieser Fassung: 36 Zeilen** — 21 `umgesetzt`, 1 `widerlegt` (KF-6), 1 mit dieser Fassung behoben (KF-22), 13 offen oder entschieden. Nachgezählt aus der Datei, nicht aus dem Kopf:
+**Stand dieser Fassung: 36 Zeilen** — 24 `umgesetzt`, 1 `widerlegt` (KF-6), 1 mit dieser Fassung behoben (KF-22), 10 offen oder entschieden (5 offen benannt, 2 offen mit bewusster Deckelung, 2 bewusst so gelassen, 1 entschieden). Nachgezählt aus der Datei, nicht aus dem Kopf:
 `grep -cE '^\| KF-[0-9]+ ' AUDIT-COVERAGE.md` → 36 · `… .*\| umgesetzt` → 21 · `… .*\| \*\*widerlegt\*\*` → 1 · `… .*\| \*\*behoben mit dieser Fassung\*\* \|` → 1; der Rest sind 13.
 Über den Text statt über die Statusspalte zu greppen wäre hier falsch — `grep -cE '^\| KF-[0-9]+.*offen'` liefert 13, aber sieben davon sind Treffer in der Anmerkung („die größte offene Tür“, „offengelegt“, „vier Windows-Punkte offen“) und drei offene Zeilen fehlen darin. Die Statusspalte ist die einzige Stelle, die zählt.
 Die Zeilen KF-22 bis KF-36 sind neu; sie sammeln, was die Pakete dieser Runde selbst als Rest gemeldet haben. Ein gemeldeter Rest, der nirgends steht, ist ein vergessener Rest.
