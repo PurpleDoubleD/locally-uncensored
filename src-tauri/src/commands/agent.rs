@@ -558,6 +558,17 @@ pub fn file_write(
     state: State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
     let full_path = resolve_agent_path(&path, chatId.as_deref(), Some(&*state))?;
+    // KF-15, and the SECOND door with this shape: a path that names no file
+    // (`""`, `"."`, `"unterordner/.."`) resolves to the workspace root, and the
+    // three lines below turn that root into a FILE holding the caller's bytes.
+    // This is the door the MODEL calls (`file_write`), so it is the one a
+    // prompt-injected model reaches first. Same guard as fs_write's — one
+    // function, two call sites, because "two routes that should do the same
+    // thing, only one maintained" is how this hole got here.
+    crate::commands::filesystem::reject_root_as_write_target(
+        &agent_workspace(chatId.as_deref(), Some(&*state)),
+        &full_path,
+    )?;
     if let Some(parent) = full_path.parent() {
         fs::create_dir_all(parent).map_err(|e| format!("Create dir: {}", os_error::english(&e)))?;
     }
@@ -878,5 +889,85 @@ mod workspace_override_tests {
         // Clearing still works and takes the entry with it.
         set_chat_workspace_override_impl("__remote__", None, &state).expect("cleared");
         assert!(state.chat_workspace_overrides.lock().unwrap().is_empty());
+    }
+}
+
+/// KF-15, second door. `fs_write` (commands/filesystem.rs) and `file_write`
+/// here are the two write routes into an agent workspace, and both had the same
+/// hole: a path that names no file resolves to the workspace ROOT, and the
+/// write turns that root into a regular file holding the caller's bytes. This
+/// one is the door the MODEL calls.
+///
+/// Measured before the guard, with a chat workspace override pointing at a
+/// folder that did not exist yet: all five spellings resolved to the root, and
+/// `file_write`'s own three following lines left a file there containing
+/// `GEHEIM`.
+#[cfg(test)]
+mod write_needs_a_target_tests {
+    use super::*;
+    use crate::state::AppState;
+
+    /// Every spelling of "no file". The last two only collapse onto the root
+    /// once `..` is applied — a check on the raw string misses them, which is
+    /// why the guard measures the RESOLVED path.
+    const ROOT_SPELLINGS: [&str; 5] = ["", ".", "./", "unterordner/..", "a/b/../.."];
+
+    #[test]
+    fn no_spelling_of_the_root_survives_the_write_guard() {
+        let state = AppState::new();
+        let parent = crate::os_paths::test_dir("kf15-agent");
+        let root = parent.join("chat-9"); // the workspace — not created yet
+        state
+            .chat_workspace_overrides
+            .lock()
+            .unwrap()
+            .insert("c".to_string(), root.clone());
+
+        for spelling in ROOT_SPELLINGS {
+            let full = resolve_agent_path(spelling, Some("c"), Some(&state))
+                .unwrap_or_else(|e| panic!("{spelling:?} did not resolve: {e}"));
+            assert_eq!(full, root, "{spelling:?} did not resolve to the workspace root");
+
+            let got = crate::commands::filesystem::reject_root_as_write_target(
+                &agent_workspace(Some("c"), Some(&state)),
+                &full,
+            );
+            let err = got
+                .err()
+                .unwrap_or_else(|| panic!("{spelling:?} was accepted as a write target"));
+            assert!(err.starts_with("Not a file:"), "{spelling:?}: {err}");
+        }
+
+        // A named file inside the same workspace is untouched by the guard.
+        let named = resolve_agent_path("a/b/../notiz.txt", Some("c"), Some(&state)).unwrap();
+        assert!(
+            crate::commands::filesystem::reject_root_as_write_target(
+                &agent_workspace(Some("c"), Some(&state)),
+                &named,
+            )
+            .is_ok(),
+            "the guard refused an ordinary file",
+        );
+        assert!(!root.exists(), "the probe created something on disk");
+    }
+
+    /// The guard has to be WIRED IN, not merely available: the composition
+    /// above is the test's, and only the source says `file_write` performs it.
+    /// A `State`-taking command cannot be called from a unit test without
+    /// Tauri's `test` feature, which this crate does not build with.
+    #[test]
+    fn file_write_actually_calls_the_guard() {
+        const SRC: &str = include_str!("agent.rs");
+        let at = SRC.find("pub fn file_write(").expect("file_write is gone");
+        let body_end = at + SRC[at..].find("\n}\n").expect("unterminated file_write");
+        let body = &SRC[at..body_end];
+        assert!(
+            body.contains("reject_root_as_write_target("),
+            "file_write lost the KF-15 guard: {body}",
+        );
+        // …and before anything is created, or the guard is decoration.
+        let guard_at = body.find("reject_root_as_write_target(").unwrap();
+        let mkdir_at = body.find("create_dir_all(").expect("file_write stopped creating parents");
+        assert!(guard_at < mkdir_at, "the guard runs after the directory is created");
     }
 }

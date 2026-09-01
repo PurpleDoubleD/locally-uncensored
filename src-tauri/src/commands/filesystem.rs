@@ -468,13 +468,68 @@ fn resolve_path(path: &str, chat_id: Option<&str>, working_dir: Option<&str>) ->
     contain_within(&root, &candidate)
 }
 
-/// True when `path` addresses the workspace ROOT itself ("", ".", "./",
+/// True when `path` LOOKS like the workspace ROOT itself ("", ".", "./",
 /// trailing slashes) rather than a named subpath. Used to decide whether a
 /// missing directory should be auto-created as the per-chat sandbox root.
+///
+/// A guess on the raw string, and it is wrong in both directions: it misses
+/// `"unterordner/.."` (which resolves to the root) and it claims `"  "` and
+/// `".\\"` (which resolve to ordinary files inside it, on a platform where a
+/// backslash is an ordinary character). That is affordable for its ONE caller —
+/// `fs_list`, where the answer only decides whether an empty directory gets
+/// created and a wrong guess costs nothing. It is NOT affordable for a write;
+/// see `reject_root_as_write_target`.
 fn is_workspace_root_path(path: &str) -> bool {
     let t = path.trim().replace('\\', "/");
     let t = t.trim_end_matches('/');
     t.is_empty() || t == "."
+}
+
+/// KF-15 / KF-12: refuse a write whose target IS the workspace root.
+///
+/// A write path that names no file — `""`, `"."`, `"./"`, `"unterordner/.."` —
+/// resolves to the root itself, and the write path does not turn that into a
+/// root: `create_dir_all(parent)` creates the root's PARENT and `write_atomic`
+/// renames a temp file onto the root's name, leaving a regular FILE where the
+/// next real write needs a directory. Measured before this guard existed, with
+/// `workingDirectory` pointing at a workspace folder that did not exist yet:
+/// `fs_write("", "GEHEIM", …)` answered `{"status":"saved","bytes":6}` and left
+/// a 6-byte file containing `GEHEIM` at the workspace root. The caller chose
+/// both the place and the content.
+///
+/// ON THE RESOLVED PATH, NOT ON THE STRING. `is_workspace_root_path` above is a
+/// string guess with errors in both directions; a write cannot pay for either.
+/// The resolved path has already been through `contain_within`, so comparing it
+/// to the root is exact.
+///
+/// MUTUAL CONTAINMENT, NOT `==`. Same idiom as `may_be_a_picked_root`'s `same`
+/// closure — it is the only comparison in this file that folds case on Windows
+/// and strips a `\\?\` prefix that may sit on one side only.
+///
+/// THE WORDING IS DELIBERATE. "Path escapes the allowed workspace" has exactly
+/// one meaning in this file (`contain_within`, and its echo in `fs_list`'s
+/// pattern guard): the path left the jail. It did not — it is inside the
+/// workspace, it just is not a file. The siblings' answer for an argument that
+/// names the wrong KIND of thing is `"Not a directory: …"` (`fs_list:689`,
+/// `fs_search:768`); this is its mirror image, and it names the path, the way
+/// `"File not found: …"` (`fs_read`) and `"Path not found: …"` (`fs_info`) do.
+///
+/// EXPLICITLY NOT "create the root as a directory instead". The ordinary write
+/// already does that — `fs_write("notiz.txt", …)` runs `create_dir_all` over
+/// the root and puts the file inside (measured, and pinned by
+/// `an_ordinary_write_still_creates_the_root_as_a_directory`). A write that
+/// names no file would gain nothing from it and would only get a second, silent
+/// behaviour.
+pub(crate) fn reject_root_as_write_target(root: &Path, target: &Path) -> Result<(), String> {
+    let nroot = lexical_normalize(root);
+    let ntarget = lexical_normalize(target);
+    if is_within(&nroot, &ntarget) && is_within(&ntarget, &nroot) {
+        return Err(format!(
+            "Not a file: {} is the workspace root itself — a write needs a file INSIDE the workspace",
+            ntarget.display()
+        ));
+    }
+    Ok(())
 }
 
 fn file_meta(path: &Path) -> serde_json::Value {
@@ -636,6 +691,13 @@ pub(crate) fn write_atomic(target: &Path, bytes: &[u8]) -> Result<(), String> {
 #[allow(non_snake_case)]
 pub fn fs_write(path: String, content: String, chatId: Option<String>, workingDirectory: Option<String>) -> Result<serde_json::Value, String> {
     let full = resolve_path(&path, chatId.as_deref(), workingDirectory.as_deref())?;
+    // KF-15. Before any directory is created and before write_atomic drops its
+    // temp file into the target's parent — which for a root-as-target is one
+    // level ABOVE the workspace.
+    reject_root_as_write_target(
+        &workspace_root(chatId.as_deref(), workingDirectory.as_deref()),
+        &full,
+    )?;
     if let Some(parent) = full.parent() {
         fs::create_dir_all(parent).map_err(|e| format!("Create dir: {}", os_error::english(&e)))?;
     }
@@ -1718,3 +1780,265 @@ mod explorer_byte_read_tests {
         assert!(err.contains("File not found"), "got: {err}");
     }
 }
+
+/// KF-15 — `fs_write` and the workspace ROOT itself.
+///
+/// The dev-server half of this was closed in a50fddef; this is the same hole on
+/// the Rust route, i.e. in the SHIPPED build. A write whose path does not name a
+/// file resolves to the workspace root, and `write_atomic` does not make a root
+/// out of that — it makes a FILE. Both directions are pinned here: the refusal,
+/// and every ordinary write that has to keep working.
+#[cfg(test)]
+mod write_needs_a_target_tests {
+    use super::*;
+    use std::fs;
+
+    /// A folder the user picked in the native dialog. The workspace ROOT in
+    /// these tests is a CHILD of it that does not exist yet — the shape a fresh
+    /// per-chat sandbox (`~/agent-workspace/<chat_id>`) has before the first
+    /// write of a chat, reproduced without touching the real home directory.
+    fn picked(tag: &str) -> crate::os_paths::TestDir {
+        let d = crate::os_paths::test_dir(&format!("kf15-{tag}"));
+        allow_root_for_test(&d); // stands in for the user picking this folder
+        d
+    }
+
+    /// Every spelling that RESOLVES to the workspace root. The first three are
+    /// the ones the string predicate `is_workspace_root_path` knows; the last
+    /// three it does not — they only collapse once `..` is applied.
+    const ROOT_SPELLINGS: [&str; 6] = ["", ".", "./", "./.", "unterordner/..", "a/b/../.."];
+
+    /// The sharp form: the caller picks BOTH the place and the content.
+    ///
+    /// `workingDirectory` names a workspace folder that does not exist yet
+    /// (every chat's first write), `path` names no file. Before the guard this
+    /// answered `{"status":"saved"}` and left the workspace root on disk as a
+    /// regular file holding the caller's bytes.
+    #[test]
+    fn a_caller_cannot_write_the_workspace_root_as_a_file() {
+        let parent = picked("sharp");
+        // Two levels down, and NOTHING of it exists yet. That is what makes the
+        // ORDER visible: a guard placed after `create_dir_all(parent)` would
+        // still refuse the write, but only after leaving `nested/` behind — a
+        // refused request must not create directories.
+        let root = parent.join("nested").join("chat-7");
+        let root_arg = root.to_string_lossy().to_string();
+
+        let got = fs_write("".into(), "GEHEIM".into(), None, Some(root_arg));
+
+        assert!(got.is_err(), "a write with no target was accepted: {got:?}");
+        assert!(
+            !root.is_file(),
+            "the workspace root landed on disk as a FILE ({} bytes, content {:?})",
+            fs::metadata(&root).map(|m| m.len()).unwrap_or(0),
+            fs::read_to_string(&root).ok(),
+        );
+        // And nothing outside the cage either: `write_atomic` puts its temp file
+        // in the target's PARENT, which for a root-as-target is one level ABOVE
+        // the workspace.
+        let debris: Vec<String> = fs::read_dir(&*parent)
+            .expect("read parent")
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().to_string())
+            .collect();
+        assert!(debris.is_empty(), "a refused write left something behind: {debris:?}");
+    }
+
+    /// Same refusal for every spelling of "no file", including the two the
+    /// string predicate cannot see.
+    #[test]
+    fn no_spelling_of_the_root_is_a_write_target() {
+        for (i, spelling) in ROOT_SPELLINGS.iter().enumerate() {
+            let parent = picked(&format!("spell{i}"));
+            let root = parent.join("ws");
+            let root_arg = root.to_string_lossy().to_string();
+
+            let got = fs_write((*spelling).into(), "X".into(), None, Some(root_arg));
+
+            assert!(got.is_err(), "path {spelling:?} was accepted as a write target: {got:?}");
+            assert!(
+                !root.is_file(),
+                "path {spelling:?} turned the workspace root into a file",
+            );
+        }
+    }
+
+    /// An EXISTING root cannot be overwritten either, and the refusal has to be
+    /// the guard's, not an accident of `rename` failing on a directory.
+    #[test]
+    fn an_existing_root_directory_is_refused_before_anything_is_attempted() {
+        let root = picked("existing");
+        let root_arg = root.to_string_lossy().to_string();
+
+        let got = fs_write(".".into(), "X".into(), None, Some(root_arg));
+
+        assert!(got.is_err(), "writing over an existing root was accepted: {got:?}");
+        assert!(root.is_dir(), "the workspace root stopped being a directory");
+        let err = got.unwrap_err();
+        assert!(
+            !err.contains("rename"),
+            "the refusal came from the filesystem, not from the guard: {err}",
+        );
+    }
+
+    /// The refusal must NOT claim an escape. In this file
+    /// "Path escapes the allowed workspace" has exactly one meaning —
+    /// `contain_within` refused to let the path leave the jail — and that is not
+    /// what happened here: the path is inside the workspace, it is just not a
+    /// file. The siblings' wording for an argument that names the wrong KIND of
+    /// thing is "Not a directory: …" (`fs_list`, `fs_search`); this is its
+    /// mirror image.
+    #[test]
+    fn the_refusal_reads_like_a_bad_argument_and_not_like_an_escape() {
+        let parent = picked("wording");
+        let root = parent.join("ws");
+        let err = fs_write("".into(), "X".into(), None, Some(root.to_string_lossy().to_string()))
+            .expect_err("the guard did not fire");
+
+        assert!(!err.contains("escapes"), "an in-cage path was reported as an escape: {err}");
+        assert!(err.starts_with("Not a file:"), "the refusal lost its sibling wording: {err}");
+        assert!(
+            err.contains(&root.to_string_lossy().to_string()),
+            "the refusal does not say WHICH path it means: {err}",
+        );
+    }
+
+    // ── The other direction: everything that was allowed stays allowed ──────
+
+    /// The ordinary write already does the thing a "create the root instead"
+    /// fix would have added: it creates the workspace root as a DIRECTORY and
+    /// puts the file inside it. Measured, not assumed — this is the reason the
+    /// guard refuses instead of auto-creating.
+    #[test]
+    fn an_ordinary_write_still_creates_the_root_as_a_directory() {
+        let parent = picked("ordinary");
+        let root = parent.join("ws"); // does not exist yet
+        let root_arg = root.to_string_lossy().to_string();
+
+        let v = fs_write("notiz.txt".into(), "hallo".into(), None, Some(root_arg))
+            .expect("an ordinary write was refused");
+
+        assert_eq!(v["status"], "saved");
+        assert!(root.is_dir(), "the workspace root was not created as a directory");
+        assert_eq!(fs::read_to_string(root.join("notiz.txt")).unwrap(), "hallo");
+    }
+
+    /// Deep subfolders keep working, and so does a name that only LOOKS like it
+    /// climbs out — `a/b/../c.txt` is a file, not the root.
+    #[test]
+    fn deep_subfolders_and_harmless_dotdot_still_write() {
+        let root = picked("deep");
+        let root_arg = root.to_string_lossy().to_string();
+
+        fs_write("a/b/c/tief.txt".into(), "tief".into(), None, Some(root_arg.clone()))
+            .expect("a deep write was refused");
+        assert_eq!(fs::read_to_string(root.join("a/b/c/tief.txt")).unwrap(), "tief");
+
+        fs_write("a/b/../flach.txt".into(), "flach".into(), None, Some(root_arg))
+            .expect("a dotdot that stays inside was refused");
+        assert_eq!(fs::read_to_string(root.join("a/flach.txt")).unwrap(), "flach");
+    }
+
+    /// The unchanged-write shortcut and the second write to the same file are
+    /// on the far side of the guard and must still be reachable.
+    #[test]
+    fn rewriting_the_same_file_still_reports_unchanged() {
+        let root = picked("unchanged");
+        let root_arg = root.to_string_lossy().to_string();
+
+        fs_write("x.txt".into(), "eins".into(), None, Some(root_arg.clone())).expect("first write");
+        let again = fs_write("x.txt".into(), "eins".into(), None, Some(root_arg.clone()))
+            .expect("second write");
+        assert_eq!(again["status"], "unchanged");
+
+        let changed = fs_write("x.txt".into(), "zwei".into(), None, Some(root_arg)).expect("third");
+        assert_eq!(changed["status"], "saved");
+        assert_eq!(fs::read_to_string(root.join("x.txt")).unwrap(), "zwei");
+    }
+
+    /// READING the root is a legitimate request and stays one. `fs_list(".")`
+    /// on a workspace that does not exist yet still creates it as a DIRECTORY
+    /// and answers with an empty listing — the guard is on the write door only.
+    #[test]
+    fn listing_the_root_is_still_allowed_and_still_creates_it_as_a_directory() {
+        let parent = picked("list");
+        let root = parent.join("ws");
+        let root_arg = root.to_string_lossy().to_string();
+
+        for spelling in ["", "."] {
+            let v = fs_list(spelling.into(), None, None, None, Some(root_arg.clone()))
+                .unwrap_or_else(|e| panic!("fs_list({spelling:?}) was refused: {e}"));
+            assert_eq!(v["count"], 0);
+            assert!(root.is_dir(), "fs_list({spelling:?}) did not create the root as a directory");
+        }
+    }
+
+    // ── Why the guard measures the RESOLVED path and not the string ─────────
+
+    /// The string predicate is wrong in BOTH directions, which is why the guard
+    /// does not use it.
+    ///
+    /// * `"unterordner/.."` resolves to the root and the predicate says no.
+    /// * `"  "` and `".\\"` resolve to ordinary FILES inside the root (on Unix a
+    ///   backslash is an ordinary character) and the predicate says yes — a
+    ///   guard built on it would refuse two legitimate writes.
+    ///
+    /// `is_workspace_root_path` keeps its one caller, `fs_list`, where it only
+    /// decides whether to auto-create a directory and a wrong answer costs
+    /// nothing.
+    #[test]
+    fn the_string_predicate_disagrees_with_the_resolved_path() {
+        assert!(is_workspace_root_path(""));
+        assert!(is_workspace_root_path("."));
+        assert!(is_workspace_root_path("./"));
+        // Misses a root: `..` is never applied.
+        assert!(!is_workspace_root_path("unterordner/.."));
+        assert!(!is_workspace_root_path("a/b/../.."));
+
+        let root = picked("predicate");
+        let root_arg = root.to_string_lossy().to_string();
+        let resolve = |p: &str| resolve_path(p, None, Some(&root_arg)).expect("resolve");
+        assert_eq!(resolve("unterordner/.."), lexical_normalize(&root));
+        assert_eq!(resolve("a/b/../.."), lexical_normalize(&root));
+
+        // Claims a root where the resolved path is a named child.
+        #[cfg(not(windows))]
+        {
+            assert!(is_workspace_root_path("  "));
+            assert!(is_workspace_root_path(".\\"));
+            assert_ne!(resolve("  "), lexical_normalize(&root));
+            assert_ne!(resolve(".\\"), lexical_normalize(&root));
+            // …and those writes still go through.
+            fs_write("  ".into(), "leerzeichen".into(), None, Some(root_arg.clone()))
+                .expect("a file named with a space was refused");
+            fs_write(".\\".into(), "backslash".into(), None, Some(root_arg))
+                .expect("a file named with a backslash was refused");
+        }
+    }
+
+    /// A COMPLETELY MISSING `path` — the dev-server's `{}` body — cannot reach
+    /// this function at all: `path` is a plain `String`, and Tauri deserializes
+    /// every command argument before the body runs.
+    ///
+    /// What this proves and what it does not: it pins the TYPE (a missing key
+    /// deserializes for `Option<String>` and fails for `String`) and it pins the
+    /// signature in the source. It does not drive Tauri's IPC — that needs the
+    /// `tauri` `test` feature, which this crate does not build with. The three
+    /// spellings that DO get through (`""`, `"."`, and the `..` shapes) are
+    /// covered by real calls above.
+    #[test]
+    fn a_missing_path_argument_cannot_reach_the_body() {
+        use serde_json::Value;
+        assert!(serde_json::from_value::<String>(Value::Null).is_err());
+        assert!(serde_json::from_value::<Option<String>>(Value::Null).is_ok());
+
+        const SRC: &str = include_str!("filesystem.rs");
+        let at = SRC.find("pub fn fs_write(").expect("fs_write is gone");
+        let sig = &SRC[at..at + SRC[at..].find(')').expect("unterminated signature")];
+        assert!(sig.contains("path: String"), "fs_write's path became optional: {sig}");
+        assert!(sig.contains("chatId: Option<String>"), "the Option siblings moved: {sig}");
+    }
+}
+
+
+
