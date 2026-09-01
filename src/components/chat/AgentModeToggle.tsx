@@ -153,7 +153,7 @@ export function AgentModeToggle() {
       </button>
 
       {/* New Chat Required Modal */}
-      <Modal open={showNewChatModal} onClose={() => { setShowNewChatModal(false); setNeverShowChecked(false) }} title="">
+      <Modal open={showNewChatModal} onClose={() => { setShowNewChatModal(false); setNeverShowChecked(false) }} title="" ariaLabel="New chat required">
         <div className="space-y-4">
           <motion.div
             initial={{ opacity: 0, y: 10 }}

@@ -1,4 +1,5 @@
 import { useEffect } from 'react'
+import { MotionConfig } from 'framer-motion'
 import { AppShell } from './components/layout/AppShell'
 import { useSettingsStore } from './stores/settingsStore'
 import { useVoiceStore } from './stores/voiceStore'
@@ -57,7 +58,17 @@ function App() {
     }
   }, [])
 
-  return <AppShell />
+  // „Bewegung reduzieren" respektieren (Audit Welle 2). Die CSS-Regel in
+  // index.css erreicht framer-motion NICHT — das schreibt Transforms per JS
+  // direkt ins style-Attribut, an der Kaskade vorbei. `reducedMotion="user"`
+  // liest dieselbe Systemeinstellung und ersetzt Transform-/Layout-Animationen
+  // durch eine reine Opacity-Blende: die Fläche wandert nicht mehr, der
+  // Zustandswechsel bleibt aber sichtbar (siehe Begründung in index.css).
+  return (
+    <MotionConfig reducedMotion="user">
+      <AppShell />
+    </MotionConfig>
+  )
 }
 
 export default App

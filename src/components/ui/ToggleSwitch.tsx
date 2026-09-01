@@ -1,4 +1,5 @@
 import { motion } from 'framer-motion'
+import { SPRING_CONTROL } from './motion'
 
 interface Props {
   enabled: boolean
@@ -36,7 +37,7 @@ export function ToggleSwitch({ enabled, onChange, label, disabled = false, size 
             enabled ? 'bg-green-400' : 'bg-gray-400 dark:bg-gray-500'
           }`}
           animate={{ left: enabled ? dotTravel : 2 }}
-          transition={{ type: 'spring', stiffness: 500, damping: 30 }}
+          transition={SPRING_CONTROL}
         />
       </div>
     </button>

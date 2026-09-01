@@ -42,6 +42,25 @@
   --color-lu-accent-hover: #b1a6ff;
   --color-lu-accent-soft: rgba(160, 148, 248, 0.14);
   --color-lu-accent-ring: rgba(160, 148, 248, 0.55);
+
+  /* ── Motion — eine benannte Leiter statt verstreuter Zahlen ──
+     Dauer und Kurve standen bisher als Literale in den Komponenten. Erhoben
+     wurde, was tatsächlich benutzt wird (framer-motion + Tailwind, Stand 2.6.7):
+
+       0.12s ×12  →  --motion-fast   Mikro-Feedback (Hover, Toggle, Badge)
+       0.15s ×21  →  --motion-base   Haus-Standard (Ein-/Ausblenden, Listen)
+       0.20s  ×7  →  --motion-base   (auf den Standard gerundet)
+       0.30s  ×5  →  --motion-slow   Flächen (Dialog, Panel, Slide-over)
+
+     --motion-ease ist die Kurve, die `ease-out`/`transition-colors` in diesem
+     Haus meinen: schnell los, weich aus. Vier Tokens, mehr braucht die App
+     nicht — wer eine fünfte Dauer will, nimmt eine dieser Stufen.
+     Die JS-Seite (framer-motion liest keine CSS-Variablen) spiegelt die
+     gleiche Leiter in src/components/ui/motion.ts. */
+  --motion-fast: 120ms;
+  --motion-base: 150ms;
+  --motion-slow: 300ms;
+  --motion-ease: cubic-bezier(0.2, 0, 0, 1);
 }
 
 /* ─────────────────────────────────────────────────────────────────────
@@ -473,3 +492,55 @@ input[type="range"]::-webkit-slider-thumb {
   40% { opacity: 1; }
 }
 .lu-band-dot { animation: lu-band-dot 1.2s ease-in-out infinite; }
+
+/* ─────────────────────────────────────────────────────────────────────
+   „Bewegung reduzieren" respektieren (Audit Welle 2)
+
+   Für einen Teil der Nutzer ist das keine Geschmacksfrage: großflächige
+   Bewegung löst Übelkeit und Schwindel aus. Bisher lief trotz gesetzter
+   Systemeinstellung die volle Animation.
+
+   ENTSCHEIDUNG: nicht auf null. Ein Dialog, der ohne jede Andeutung
+   dasteht, liest sich wie ein Darstellungsfehler — man sieht nicht, ob er
+   gerade aufging oder schon die ganze Zeit da war. Stattdessen wird alles
+   auf eine sehr kurze Ein-/Ausblendung zusammengezogen (--motion-fast,
+   120 ms, linear): kurz genug, dass nichts mehr über den Schirm wandert,
+   lang genug, dass die Zustandsänderung sichtbar bleibt.
+
+   Endlos laufende Zierde (Shimmer, pulsierende Punkte) wird dagegen ganz
+   angehalten — Dauerbewegung hat keine Rückmeldefunktion, sie ist nur
+   Dekoration, und genau sie ist das Problem.
+
+   framer-motion animiert an CSS vorbei (inline Transforms per JS), diese
+   Regel erreicht es also NICHT. Dafür sitzt <MotionConfig reducedMotion="user">
+   an der App-Wurzel (src/App.tsx).
+   ───────────────────────────────────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: var(--motion-fast) !important;
+    transition-timing-function: linear !important;
+    /* `iteration-count: 1` beendet auch Dauerschleifen. Ohne das würde die
+       gekürzte Dauer aus einem 1,6-s-Shimmer ein Stroboskop mit acht Durch-
+       läufen pro Sekunde machen — schlimmer als der Ausgangszustand. */
+    animation-duration: var(--motion-fast) !important;
+    animation-iteration-count: 1 !important;
+    animation-timing-function: linear !important;
+    scroll-behavior: auto !important;
+  }
+
+  /* AUSNAHME: der Ladekringel ist keine Zierde, er ist die einzige Auskunft
+     darüber, dass die App noch arbeitet und nicht hängt. Er läuft weiter,
+     aber langsam und gleichförmig (1,5 s statt 1 s) — eine kleine, ortsfeste
+     Drehung ist vestibulär unkritisch, ein eingefrorener Spinner dagegen
+     eine Falschaussage. Gleiches gilt für die Skelett-Pulse. */
+  .animate-spin {
+    animation-duration: 1.5s !important;
+    animation-iteration-count: infinite !important;
+  }
+  .animate-pulse {
+    animation-duration: 3s !important;
+    animation-iteration-count: infinite !important;
+  }
+}

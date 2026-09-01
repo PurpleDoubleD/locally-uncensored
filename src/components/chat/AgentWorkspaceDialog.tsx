@@ -130,7 +130,7 @@ export function AgentWorkspaceDialog({
   const phase: 'pick' | 'extras' = draft ? 'extras' : 'pick'
 
   return (
-    <Modal open={open} onClose={onClose} title="">
+    <Modal open={open} onClose={onClose} title="" ariaLabel="Agent workspace">
       <div className="space-y-4">
         <div className="text-center space-y-1">
           <h3 className="text-base font-semibold text-gray-900 dark:text-white">
