@@ -121,6 +121,13 @@ fn windows_bash_candidates() -> Vec<String> {
 /// machine (see the tests at the bottom of this file).
 fn build_candidates(git_exes: &[String], roots: &[PathBuf], bash_on_path: &[String]) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
+    // Compared as strings, case-insensitively, because that is the question a
+    // Windows path actually poses (`C:\Program Files` and `c:\program files`
+    // are one directory, and `Path` would call them two). Every input here
+    // comes from `where` or from an environment variable, so the separators
+    // are already the platform's own and a `/`-vs-`\` spelling of one path
+    // cannot arise. A duplicate that slipped through would cost one wasted
+    // existence check and nothing else — the first usable candidate wins.
     let add = |p: PathBuf, out: &mut Vec<String>| {
         let s = p.to_string_lossy().to_string();
         if !out.iter().any(|e| e.eq_ignore_ascii_case(&s)) {
@@ -322,8 +329,21 @@ mod tests {
         assert!(!is_wsl_alias_stub(r"C:\WindowsAppsBackup\bin\bash.exe"));
     }
 
-    /// Unix-shaped paths on purpose: the ORDER and the derivation are what is
-    /// being tested, and `Path::join` is the only separator-aware part.
+    /// Every comparison in these fixtures goes through `Path`, never through
+    /// the string.
+    ///
+    /// The inputs are Unix-shaped on purpose — the ORDER and the derivation
+    /// are the subject, not the separator — but `PathBuf::join` writes the
+    /// PLATFORM's separator, so on Windows `/opt/Git` + `bin` comes back as
+    /// `/opt/Git\bin\bash.exe`: the same path, a different string. Asserting
+    /// on the string turned this test red on the Windows box while the
+    /// resolver under it was correct. `Path` compares components, and both
+    /// slashes are separators there, so the question is asked in the form
+    /// both platforms can answer.
+    fn same_path(a: &str, b: &str) -> bool {
+        Path::new(a) == Path::new(b)
+    }
+
     #[test]
     fn git_comes_first_the_install_roots_next_and_path_last() {
         let candidates = build_candidates(
@@ -333,33 +353,52 @@ mod tests {
         );
 
         // Derived from git: one level up from cmd\ is the install root.
-        assert_eq!(candidates[0], "/opt/Git/bin/bash.exe");
-        assert_eq!(candidates[1], "/opt/Git/usr/bin/bash.exe");
+        assert_eq!(Path::new(&candidates[0]), Path::new("/opt/Git/bin/bash.exe"));
+        assert_eq!(Path::new(&candidates[1]), Path::new("/opt/Git/usr/bin/bash.exe"));
         // ...and it keeps walking up, because git.exe is not always in cmd\.
-        assert!(candidates.contains(&"/opt/bin/bash.exe".to_string()));
+        assert!(
+            candidates.iter().any(|c| same_path(c, "/opt/bin/bash.exe")),
+            "the walk up stopped too early: {candidates:?}",
+        );
         // The install roots come after everything git could tell us.
         let root_pos = candidates
             .iter()
-            .position(|c| c == "/Program Files/Git/bin/bash.exe")
+            .position(|c| same_path(c, "/Program Files/Git/bin/bash.exe"))
             .expect("the install root is a candidate");
         assert!(root_pos > 1, "the roots must not outrank git's own location");
         // PATH is last, so a WSL stub can never win a race it only leads
         // because it happens to come first on PATH.
-        assert_eq!(candidates.last().unwrap(), "/WindowsApps/bash.exe");
-        assert!(is_wsl_alias_stub(candidates.last().unwrap()));
+        let last = candidates.last().unwrap();
+        assert!(
+            same_path(last, "/WindowsApps/bash.exe"),
+            "PATH must come last, got {last}",
+        );
+        assert!(is_wsl_alias_stub(last));
     }
 
     #[test]
     fn a_candidate_is_never_listed_twice() {
+        // The duplicate that PATH contributes is built with the same `join`
+        // the resolver uses, so it is byte-identical to git's own candidate on
+        // every platform. Spelling it out as a literal would only prove that
+        // two separators differ, which is a fact about the fixture and not
+        // about the resolver.
+        let from_git = PathBuf::from("/opt/Git")
+            .join("bin")
+            .join(BASH_EXE)
+            .to_string_lossy()
+            .to_string();
         let candidates = build_candidates(
             &["/opt/Git/cmd/git.exe".to_string(), "/opt/Git/cmd/git.exe".to_string()],
-            &[PathBuf::from("/opt")],
-            &["/opt/Git/bin/bash.exe".to_string()],
+            &[PathBuf::from("/Program Files"), PathBuf::from("/Program Files")],
+            &[from_git],
         );
-        let mut seen = candidates.clone();
-        seen.sort();
-        seen.dedup();
-        assert_eq!(seen.len(), candidates.len(), "duplicate candidates: {candidates:?}");
+
+        for (i, a) in candidates.iter().enumerate() {
+            for b in &candidates[i + 1..] {
+                assert!(!same_path(a, b), "{a} is listed twice in {candidates:?}");
+            }
+        }
     }
 
     #[test]
