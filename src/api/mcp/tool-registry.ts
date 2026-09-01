@@ -1,6 +1,6 @@
 // Dynamic Tool Registry — MCP-shaped, replaces hardcoded AGENT_TOOL_DEFS
 
-import type { MCPToolDefinition, PermissionMap, PermissionLevel } from './types'
+import type { MCPToolDefinition, PermissionMap, PermissionLevel, ToolArgs } from './types'
 import type { OllamaTool } from '../../types/agent-mode'
 import type { ToolDefinition } from '../providers/types'
 import { MUTATING_TOOLS } from '../../lib/mutating-tools'
@@ -15,18 +15,30 @@ import type { AgentRunContext } from '../agent-context'
  * goalposts mid-call. Tools that do not care simply ignore it.
  */
 type ToolExecutor = (
-  args: Record<string, any>,
+  args: ToolArgs,
   run?: AgentRunContext,
   signal?: AbortSignal,
 ) => Promise<string>
 /** The pre-2.6.6 shape, still accepted from external servers and tests. */
-type LegacyToolExecutor = (args: Record<string, any>) => Promise<string>
+type LegacyToolExecutor = (args: ToolArgs) => Promise<string>
 /**
  * External-tool executor gets the tool name too, because one MCP server
  * owns many tools and routes by name. The registry wraps it into a
  * per-tool ToolExecutor closure so the Map lookup stays {name → executor}.
  */
-type ExternalToolExecutor = (toolName: string, args: Record<string, any>) => Promise<string>
+type ExternalToolExecutor = (toolName: string, args: ToolArgs) => Promise<string>
+
+/**
+ * The flat shape the Hermes/XML tool prompt wants: the definition's own
+ * JSON-Schema under `parameters`, no wrapper. `any` here meant the prompt
+ * builder could be handed anything at all — including `undefined` — and the
+ * `<tools>` block would have silently advertised a tool with no parameters.
+ */
+export interface HermesToolDef {
+  name: string
+  description: string
+  parameters: MCPToolDefinition['inputSchema']
+}
 
 interface RegisteredTool {
   definition: MCPToolDefinition
@@ -70,14 +82,14 @@ export class ToolRegistry {
    * Warnung weg.
    */
   private retiredRunner:
-    | ((name: string, args: Record<string, any>, run?: AgentRunContext) => Promise<string | null>)
+    | ((name: string, args: ToolArgs, run?: AgentRunContext) => Promise<string | null>)
     | null = null
 
   // ── Registration ──────────────────────────────────────────────
 
   /** Siehe `retiredRunner`. Wird von registerBuiltinTools() verdrahtet. */
   setRetiredRunner(
-    run: (name: string, args: Record<string, any>, run?: AgentRunContext) => Promise<string | null>,
+    run: (name: string, args: ToolArgs, run?: AgentRunContext) => Promise<string | null>,
   ) {
     this.retiredRunner = run
   }
@@ -128,7 +140,7 @@ export class ToolRegistry {
         continue
       }
       const bound: ToolExecutor = isTwoArg
-        ? (args: Record<string, any>) =>
+        ? (args: ToolArgs) =>
             (executor as ExternalToolExecutor)(name, args)
         : (executor as LegacyToolExecutor)
       this.tools.set(name, {
@@ -209,7 +221,7 @@ export class ToolRegistry {
 
   async execute(
     name: string,
-    args: Record<string, any>,
+    args: ToolArgs,
     maxRetries = 1,
     run?: AgentRunContext,
     signal?: AbortSignal,
@@ -290,7 +302,7 @@ export class ToolRegistry {
     }))
   }
 
-  toHermesToolDefs(permissions: PermissionMap): { name: string; description: string; parameters: any }[] {
+  toHermesToolDefs(permissions: PermissionMap): HermesToolDef[] {
     return this.getAvailableTools(permissions).map(t => ({
       name: t.name,
       description: t.description,

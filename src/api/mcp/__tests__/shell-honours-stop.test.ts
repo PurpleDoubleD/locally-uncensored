@@ -21,10 +21,10 @@ import { readFileSync } from 'node:fs'
 import { resolve, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-const backendCalls: { cmd: string; body: any }[] = []
+const backendCalls: { cmd: string; body: Record<string, unknown> }[] = []
 
 vi.mock('../../backend', () => ({
-  backendCall: vi.fn(async (cmd: string, body: any) => {
+  backendCall: vi.fn(async (cmd: string, body: Record<string, unknown>) => {
     backendCalls.push({ cmd, body })
     if (cmd === 'shell_execute') return { stdout: 'ran', stderr: '', exitCode: 0 }
     if (cmd === 'shell_task_start') return { id: 'task-1' }
@@ -41,6 +41,22 @@ vi.mock('../../../lib/workflow-engine', () => ({ WorkflowEngine: class {} }))
 
 import { registerBuiltinTools } from '../builtin-tools'
 import { ToolRegistry } from '../tool-registry'
+import type { AgentRunContext } from '../../agent-context'
+
+/** A complete run context — the shape the executors are really handed. */
+function makeRun(over: Partial<AgentRunContext> = {}): AgentRunContext {
+  return {
+    token: 'test-run',
+    chatId: null,
+    conversationId: null,
+    workspace: null,
+    artifactMode: false,
+    readOnlyShellTurn: false,
+    mode: null,
+    artifacts: [],
+    ...over,
+  }
+}
 
 const registry = new ToolRegistry()
 registerBuiltinTools(registry)
@@ -68,7 +84,7 @@ describe('shell_execute honours the run\'s Stop', () => {
   it('reads the signal off the run object too, for a nested sub-agent loop', async () => {
     const ctrl = new AbortController()
     ctrl.abort()
-    await registry.execute('shell_execute', { command: 'ls' }, 1, { abortSignal: ctrl.signal } as any)
+    await registry.execute('shell_execute', { command: 'ls' }, 1, makeRun({ abortSignal: ctrl.signal }))
     expect(ran()).toHaveLength(0)
   })
 

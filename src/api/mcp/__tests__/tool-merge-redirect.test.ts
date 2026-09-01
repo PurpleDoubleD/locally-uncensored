@@ -12,10 +12,10 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
-const backendCalls: { cmd: string; body: any }[] = []
+const backendCalls: { cmd: string; body: Record<string, unknown> }[] = []
 
 vi.mock('../../backend', () => ({
-  backendCall: vi.fn(async (cmd: string, body: any) => {
+  backendCall: vi.fn(async (cmd: string, body: Record<string, unknown>) => {
     backendCalls.push({ cmd, body })
     if (cmd === 'shell_execute') {
       return { stdout: '# branch.head master\n', stderr: '', exitCode: 0 }
@@ -35,6 +35,7 @@ vi.mock('../../../lib/workflow-engine', () => ({ WorkflowEngine: class {} }))
 import { runRetiredTool, RETIRED_TOOL_NAMES, registerBuiltinTools } from '../builtin-tools'
 import { ToolRegistry } from '../tool-registry'
 import { DEFAULT_PERMISSIONS } from '../types'
+import type { ToolArgs } from '../types'
 import { setReadOnlyShellTurn } from '../../agent-context'
 
 beforeEach(() => {
@@ -91,7 +92,7 @@ describe('the read-only gate lives at the executor now', () => {
 describe('shell_execute refuses by COMMAND on a read-only turn (E7 priority)', () => {
   const registry = new ToolRegistry()
   registerBuiltinTools(registry)
-  const shell = (args: Record<string, any>) => registry.execute('shell_execute', args)
+  const shell = (args: ToolArgs) => registry.execute('shell_execute', args)
 
   it('the reviewer can still look at the diff', async () => {
     setReadOnlyShellTurn(true)
@@ -139,7 +140,7 @@ describe('retired names survive the step executor (executeParallel)', () => {
   registerBuiltinTools(registry)
   const runtime = {
     getTool: (name: string) => registry.resolveExecutable(name),
-    execute: ((name: string, args: Record<string, any>) => registry.execute(name, args)) as any,
+    execute: (name: string, args: ToolArgs) => registry.execute(name, args),
     // awaitApproval is required (audit AGT-1); this fixture exercises the
     // redirect path, not the gate.
     awaitApproval: async () => true,

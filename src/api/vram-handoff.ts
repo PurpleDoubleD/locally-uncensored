@@ -45,6 +45,7 @@
  */
 
 import { backendCall, ollamaUrl, localFetch, isOllamaLocal, isWindows } from './backend'
+import type { ComfyApiGraph } from '../types/comfy-graph'
 import { listRunningModels, loadModel, unloadModel } from './ollama'
 import { startBundledEngine } from './engine'
 import { useSettingsStore } from '../stores/settingsStore'
@@ -633,7 +634,7 @@ function cancelledFor(seq: number): boolean {
  * reloaded into the same VRAM by the hand-off's finally. Both sides could OOM.
  */
 async function submitCancellable(
-  workflow: Record<string, unknown>,
+  workflow: ComfyApiGraph,
   seq: number,
 ): Promise<string | typeof CANCELLED> {
   if (cancelledFor(seq)) return CANCELLED

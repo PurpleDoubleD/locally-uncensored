@@ -1,6 +1,10 @@
 // Built-in tool definitions + executors — replaces hardcoded AGENT_TOOL_DEFS
 
-import type { JSONSchemaProp, MCPToolDefinition } from './types'
+import type { JSONSchemaProp, MCPToolDefinition, ToolArgs } from './types'
+import type {
+  ShellExecResult, FsReadResult, FsWriteResult, FsListResult, FsSearchResult,
+  WebSearchResult, WebFetchResult, ProcessListResult, ScreenshotResult, CurrentTimeResult,
+} from '../../types/bridge'
 import type { ToolRegistry } from './tool-registry'
 import { backendCall, fetchExternal } from '../backend'
 import { getActiveChatId, getActiveConversationId, getActiveWorkspace, isChatArtifactMode, captureChatArtifact, isReadOnlyShellTurn } from '../agent-context'
@@ -17,6 +21,8 @@ import { getVideoStatus, listVideoModels, generateVideo as generateMlxVideo, get
 import { pathToFileUrl } from '../../lib/local-media-url'
 import { RETIRED_MUTATING_NAMES } from '../../lib/retired-tools'
 import { resolveMlxModel, defaultMlxImageModel } from '../../lib/mlx-model-match'
+import type { Runner } from '../agents/test-runner'
+import type { VramHandoffArgs } from '../vram-handoff'
 
 /**
  * Helper: current chat id (+ folder workspace) as a fragment to spread into
@@ -39,6 +45,34 @@ function chatCtx(run?: AgentRunContext): { chatId?: string; workingDirectory?: s
     return { chatId: id, workingDirectory: ws.path }
   }
   return { chatId: id }
+}
+
+/**
+ * Argument readers.
+ *
+ * A tool's `args` come from the MODEL: the declared `inputSchema` is a hint in
+ * a prompt, not a contract anything enforces before the executor runs. So a
+ * `path` can arrive as a number and `background` as the string "false". These
+ * three are the only sanctioned way into that object — each one checks the
+ * type it promises instead of trusting the schema.
+ */
+function argString(args: ToolArgs, ...keys: string[]): string {
+  for (const key of keys) {
+    const v = args[key]
+    if (typeof v === 'string' && v) return v
+  }
+  return ''
+}
+
+function argNumber(args: ToolArgs, key: string): number | undefined {
+  const v = args[key]
+  return typeof v === 'number' && Number.isFinite(v) ? v : undefined
+}
+
+/** `undefined` rather than '' — for the many payload fields that mean "unset". */
+function argOptString(args: ToolArgs, key: string): string | undefined {
+  const v = args[key]
+  return typeof v === 'string' && v ? v : undefined
 }
 
 // ── Tool Definitions ────────────────────────────────────────────
@@ -412,10 +446,10 @@ const BUILTIN_TOOLS: MCPToolDefinition[] = [
 
 // ── Executors ────────────────────────────────────────────────────
 
-async function executeWebSearch(args: Record<string, any>): Promise<string> {
+async function executeWebSearch(args: ToolArgs): Promise<string> {
   const { useSettingsStore } = await import('../../stores/settingsStore')
   const searchSettings = useSettingsStore.getState().settings
-  const data = await backendCall('web_search', {
+  const data = await backendCall<WebSearchResult>('web_search', {
     query: args.query,
     count: args.maxResults || 5,
     provider: searchSettings.searchProvider || 'auto',
@@ -424,7 +458,7 @@ async function executeWebSearch(args: Record<string, any>): Promise<string> {
   })
   if (Array.isArray(data.results) && data.results.length > 0) {
     const lines = data.results
-      .map((r: any, i: number) => `${i + 1}. ${r.title}\n   ${r.url}\n   ${r.snippet}`)
+      .map((r, i) => `${i + 1}. ${r.title}\n   ${r.url}\n   ${r.snippet}`)
       .join('\n\n')
     // When the configured paid provider failed we still return free-tier
     // results, but say why the configured one didn't answer — a silently
@@ -441,8 +475,8 @@ async function executeWebSearch(args: Record<string, any>): Promise<string> {
   return JSON.stringify(data)
 }
 
-async function executeWebFetch(args: Record<string, any>): Promise<string> {
-  const url = args.url
+async function executeWebFetch(args: ToolArgs): Promise<string> {
+  const url = argString(args, 'url')
   if (!url) return 'Error: No URL provided'
 
   // Preferred path: use the Rust `web_fetch` command which strips HTML
@@ -451,10 +485,7 @@ async function executeWebFetch(args: Record<string, any>): Promise<string> {
   // ~4 000 chars of a half-cleaned body — that's why the agent kept
   // complaining it "only sees the header" of the page.
   try {
-    const data = await backendCall<{ url: string; status: number; contentType: string; title: string; text: string; truncated: boolean }>(
-      'web_fetch',
-      { url }
-    )
+    const data = await backendCall<WebFetchResult>('web_fetch', { url })
     const parts: string[] = []
     if (data.title) parts.push(`Title: ${data.title}`)
     parts.push(`URL: ${data.url}`)
@@ -467,7 +498,7 @@ async function executeWebFetch(args: Record<string, any>): Promise<string> {
     // Fallback: legacy fetchExternal + htmlToText (used in browser / dev mode
     // where the Rust command isn't reachable).
     try {
-      const maxLength = args.maxLength || 24000
+      const maxLength = argNumber(args, 'maxLength') || 24000
       const html = await fetchExternal(url)
       const text = htmlToText(html)
       if (text.length > maxLength) return text.substring(0, maxLength) + '\n\n[...truncated]'
@@ -478,8 +509,8 @@ async function executeWebFetch(args: Record<string, any>): Promise<string> {
   }
 }
 
-async function executeFileRead(args: Record<string, any>, run?: AgentRunContext): Promise<string> {
-  const data = await backendCall('fs_read', { path: args.path, ...chatCtx(run) })
+async function executeFileRead(args: ToolArgs, run?: AgentRunContext): Promise<string> {
+  const data = await backendCall<FsReadResult>('fs_read', { path: args.path, ...chatCtx(run) })
   // A binary file comes back as a marker with its size, never as content.
   // Handing the model raw bytes-as-text is a corruption trap: it treats them as
   // content and a later file_write persists that string, mangling the file.
@@ -494,7 +525,7 @@ async function executeFileRead(args: Record<string, any>, run?: AgentRunContext)
 }
 
 /** Last path segment, defaulting to file.txt. */
-function artifactBaseName(p: any): string {
+function artifactBaseName(p: unknown): string {
   const raw = typeof p === 'string' && p.trim() ? p.trim() : 'file.txt'
   return raw.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || 'file.txt'
 }
@@ -514,7 +545,7 @@ function mimeForName(name: string): string {
   return map[ext] || 'text/plain'
 }
 
-async function executeFileWrite(args: Record<string, any>, run?: AgentRunContext): Promise<string> {
+async function executeFileWrite(args: ToolArgs, run?: AgentRunContext): Promise<string> {
   const content = typeof args.content === 'string' ? args.content : String(args.content ?? '')
   // Plain-chat artifact mode (ChatGPT-style, David 2026-06-12): in the NORMAL
   // chat, a "file write" must NOT touch disk — capture it so it renders inline
@@ -525,7 +556,7 @@ async function executeFileWrite(args: Record<string, any>, run?: AgentRunContext
     captureChatArtifact(name, content, mimeForName(name), run)
     return `Created "${name}" (${formatBytes(content.length)}). It is shown to the user right here in the chat with a preview and a Download button — nothing was written to disk. Do not call file_read on it; just tell the user it's ready.`
   }
-  const data = await backendCall('fs_write', { path: args.path, content, ...chatCtx(run) })
+  const data = await backendCall<FsWriteResult>('fs_write', { path: args.path, content, ...chatCtx(run) })
   // Rust returns {status: 'saved'|'unchanged', path: <absolute>, bytes}. Surface
   // the real path so the model (and the file-change event) knows WHERE the write
   // landed — especially important when chatId is None and Rust routes a relative
@@ -537,23 +568,23 @@ async function executeFileWrite(args: Record<string, any>, run?: AgentRunContext
   return JSON.stringify(data)
 }
 
-async function executeFileEdit(args: Record<string, any>, run?: AgentRunContext): Promise<string> {
+async function executeFileEdit(args: ToolArgs, run?: AgentRunContext): Promise<string> {
   // Plain-chat artifact mode has no files on disk — file_edit makes no sense
   // there. Steer to file_write (which captures a document artifact) instead of
   // silently reaching into the agent sandbox.
   if (isChatArtifactMode(run)) {
     return 'file_edit is not available in plain chat (there are no files on disk here). Use file_write to create or replace a document.'
   }
-  const path = typeof args.path === 'string' ? args.path : ''
+  const path = argString(args, 'path')
   if (!path) return 'Error: file_edit requires a "path".'
-  const oldString = typeof args.old_string === 'string' ? args.old_string : ''
-  const newString = typeof args.new_string === 'string' ? args.new_string : ''
+  const oldString = argString(args, 'old_string')
+  const newString = argString(args, 'new_string')
 
   // Read the CURRENT content (workspace-aware). file_edit only edits an
   // existing text file — for a new file the model must use file_write.
-  let data: any
+  let data: FsReadResult
   try {
-    data = await backendCall('fs_read', { path, ...chatCtx(run) })
+    data = await backendCall<FsReadResult>('fs_read', { path, ...chatCtx(run) })
   } catch (e) {
     return `Error: file_edit could not read ${path}: ${e instanceof Error ? e.message : String(e)}. To create a new file use file_write.`
   }
@@ -576,14 +607,14 @@ async function executeFileEdit(args: Record<string, any>, run?: AgentRunContext)
     }
   }
 
-  const w = await backendCall('fs_write', { path, content: res.content, ...chatCtx(run) })
+  const w = await backendCall<FsWriteResult>('fs_write', { path, content: res.content, ...chatCtx(run) })
   if (w.status === 'saved' && w.path) return `Edited ${w.path} (1 replacement).`
   if (w.status === 'unchanged' && w.path) return `No change written to ${w.path} (content already matched).`
   return JSON.stringify(w)
 }
 
-async function executeFileList(args: Record<string, any>, run?: AgentRunContext): Promise<string> {
-  const data = await backendCall('fs_list', {
+async function executeFileList(args: ToolArgs, run?: AgentRunContext): Promise<string> {
+  const data = await backendCall<FsListResult>('fs_list', {
     path: args.path,
     recursive: args.recursive || false,
     pattern: args.pattern || null,
@@ -598,14 +629,14 @@ async function executeFileList(args: Record<string, any>, run?: AgentRunContext)
   })
   if (Array.isArray(data.entries)) {
     return data.entries
-      .map((e: any) => `${e.isDir ? '[DIR]' : ''} ${e.name} (${formatBytes(e.size)})  ${e.path}`)
+      .map((e) => `${e.isDir ? '[DIR]' : ''} ${e.name} (${formatBytes(e.size)})  ${e.path}`)
       .join('\n')
   }
   return JSON.stringify(data)
 }
 
-async function executeFileSearch(args: Record<string, any>, run?: AgentRunContext): Promise<string> {
-  const data = await backendCall('fs_search', {
+async function executeFileSearch(args: ToolArgs, run?: AgentRunContext): Promise<string> {
+  const data = await backendCall<FsSearchResult>('fs_search', {
     path: args.path,
     pattern: args.pattern,
     max_results: args.maxResults || 50,
@@ -613,8 +644,8 @@ async function executeFileSearch(args: Record<string, any>, run?: AgentRunContex
   })
   if (Array.isArray(data.results)) {
     return data.results
-      .map((r: any) => {
-        const matches = r.matches?.map((m: any) => `  L${m.line}: ${m.text}`).join('\n') || ''
+      .map((r) => {
+        const matches = r.matches?.map((m) => `  L${m.line}: ${m.text}`).join('\n') || ''
         return `${r.file}\n${matches}`
       })
       .join('\n\n')
@@ -623,7 +654,7 @@ async function executeFileSearch(args: Record<string, any>, run?: AgentRunContex
 }
 
 async function executeShellExecute(
-  args: Record<string, any>,
+  args: ToolArgs,
   run?: AgentRunContext,
   signal?: AbortSignal,
 ): Promise<string> {
@@ -640,18 +671,18 @@ async function executeShellExecute(
   const abort = signal ?? run?.abortSignal
   if (abort?.aborted) return 'Cancelled: the user stopped the run before this command started.'
   // Background-task actions: the three shell_task_* tools folded in (2.6.6).
-  const task = typeof args.task === 'string' ? args.task : ''
+  const task = argString(args, 'task')
   if (task === 'list') return executeShellTaskList()
   if (task === 'status' || task === 'kill') {
     if (task === 'kill' && isReadOnlyShellTurn(run)) {
       return 'Refused: this turn is read-only (/review, Code-Review Mode or Plan mode); killing a task changes state.'
     }
-    const id = args.task_id ?? args.id
+    const id = argString(args, 'task_id', 'id')
     if (!id) return `shell_execute: task "${task}" needs a task_id.`
     return task === 'status' ? executeShellTaskStatus({ id }) : executeShellTaskKill({ id })
   }
 
-  const command = typeof args.command === 'string' ? args.command.trim() : ''
+  const command = argString(args, 'command').trim()
   if (!command) return 'shell_execute: `command` is required (or pass task: "status" | "list" | "kill").'
 
   const { rejectShellCommand, commandTimeoutMs, commandKind, isReadOnlyCommand } = await import(
@@ -672,14 +703,14 @@ async function executeShellExecute(
 
   // An explicit timeout wins; otherwise a recognised test run keeps the old
   // run_tests budget (300 s) instead of the shell default.
-  const timeout = args.timeout || commandTimeoutMs(command, 120000)
-  const data = await backendCall('shell_execute', {
+  const timeout = argNumber(args, 'timeout') || commandTimeoutMs(command, 120000)
+  const data = await backendCall<ShellExecResult>('shell_execute', {
     command,
     args: args.args || null,
     cwd: args.cwd || null,
     timeout,
     shell: args.shell || null,
-    stdin: typeof args.stdin === 'string' && args.stdin ? args.stdin : null,
+    stdin: argOptString(args, 'stdin') ?? null,
     ...chatCtx(run),
   })
   const output = data.stdout || ''
@@ -718,7 +749,7 @@ async function executeShellExecute(
 }
 
 async function executeCodeExecute(
-  args: Record<string, any>,
+  args: ToolArgs,
   run?: AgentRunContext,
   signal?: AbortSignal,
 ): Promise<string> {
@@ -726,7 +757,7 @@ async function executeCodeExecute(
   if ((signal ?? run?.abortSignal)?.aborted) {
     return 'Cancelled: the user stopped the run before this code ran.'
   }
-  const data = await backendCall('execute_code', { code: args.code, timeout: 30000, ...chatCtx(run) })
+  const data = await backendCall<ShellExecResult>('execute_code', { code: args.code, timeout: 30000, ...chatCtx(run) })
   const output = data.stdout || ''
   const err = data.stderr || ''
   if (data.timedOut) return `Timed out.\n${err}`
@@ -734,8 +765,13 @@ async function executeCodeExecute(
   return output || (err ? `stderr: ${err}` : 'Done.')
 }
 
-async function runShell(command: string, cwd: string | undefined, timeout = 60000, run?: AgentRunContext) {
-  return backendCall('shell_execute', {
+async function runShell(
+  command: string,
+  cwd: string | undefined,
+  timeout = 60000,
+  run?: AgentRunContext,
+): Promise<ShellExecResult> {
+  return backendCall<ShellExecResult>('shell_execute', {
     command,
     args: null,
     cwd: cwd || null,
@@ -746,14 +782,18 @@ async function runShell(command: string, cwd: string | undefined, timeout = 6000
 }
 
 async function executeShellExecuteBg(
-  args: Record<string, any>,
+  args: ToolArgs,
   run?: AgentRunContext,
   signal?: AbortSignal,
 ): Promise<string> {
   const { bgStart, bgKill } = await import('../agents/bg-tasks')
   // Thread the chat context through, or the task starts in LU's own directory
   // instead of the workspace the foreground shell tool uses.
-  const { id } = await bgStart({ command: args.command, cwd: args.cwd, ...chatCtx(run) })
+  const { id } = await bgStart({
+    command: argString(args, 'command'),
+    cwd: argOptString(args, 'cwd'),
+    ...chatCtx(run),
+  })
   // A detached task outlives the turn that started it BY DESIGN, but it must
   // not outlive the user pressing Stop: nothing polls it after the run ends, so
   // an unattended `npm run build`/deploy script would keep writing to the repo
@@ -770,18 +810,19 @@ async function executeShellExecuteBg(
   return `Task started: ${id}. Use shell_task_status to poll, shell_task_kill to cancel.`
 }
 
-async function executeShellTaskStatus(args: Record<string, any>): Promise<string> {
+async function executeShellTaskStatus(args: ToolArgs): Promise<string> {
   const { bgStatus, renderBgStatusOneLine } = await import('../agents/bg-tasks')
-  const s = await bgStatus(args.id)
+  const s = await bgStatus(argString(args, 'id'))
   const head = renderBgStatusOneLine(s)
   const tail = s.output_tail ? `\n---\n${s.output_tail}` : ''
   return `${head}${tail}`
 }
 
-async function executeShellTaskKill(args: Record<string, any>): Promise<string> {
+async function executeShellTaskKill(args: ToolArgs): Promise<string> {
   const { bgKill } = await import('../agents/bg-tasks')
-  const r = await bgKill(args.id)
-  return r.cancelled ? `Cancelled ${args.id}.` : `${args.id}: already finished.`
+  const id = argString(args, 'id')
+  const r = await bgKill(id)
+  return r.cancelled ? `Cancelled ${id}.` : `${id}: already finished.`
 }
 
 async function executeShellTaskList(): Promise<string> {
@@ -791,9 +832,9 @@ async function executeShellTaskList(): Promise<string> {
   return tasks.map(renderBgStatusOneLine).join('\n')
 }
 
-async function executeGitStatus(args: Record<string, any>, run?: AgentRunContext): Promise<string> {
+async function executeGitStatus(args: ToolArgs, run?: AgentRunContext): Promise<string> {
   const { parseGitStatus, renderGitStatus } = await import('../agents/git-tools')
-  const data = await runShell('git status --porcelain=2 --branch', args.cwd, undefined, run)
+  const data = await runShell('git status --porcelain=2 --branch', argOptString(args, 'cwd'), undefined, run)
   if (data.exitCode && data.exitCode !== 0) {
     return `git_status failed: ${data.stderr || data.stdout || `exit ${data.exitCode}`}`
   }
@@ -801,15 +842,20 @@ async function executeGitStatus(args: Record<string, any>, run?: AgentRunContext
   return renderGitStatus(parsed)
 }
 
-async function executeGitCommit(args: Record<string, any>, run?: AgentRunContext): Promise<string> {
+async function executeGitCommit(args: ToolArgs, run?: AgentRunContext): Promise<string> {
   const { buildGitCommitCommand } = await import('../agents/git-tools')
+  // `files` is shell-quoted per entry downstream, so a non-string in the list
+  // would have been interpolated as "[object Object]" into a `git add`.
+  const files = Array.isArray(args.files)
+    ? args.files.filter((f): f is string => typeof f === 'string')
+    : undefined
   const cmd = buildGitCommitCommand({
-    message: args.message,
-    files: Array.isArray(args.files) ? args.files : undefined,
+    message: argString(args, 'message'),
+    files,
     allTracked: !!args.allTracked,
   })
   if (!cmd) return 'git_commit: a non-empty `message` is required.'
-  const data = await runShell(cmd, args.cwd, undefined, run)
+  const data = await runShell(cmd, argOptString(args, 'cwd'), undefined, run)
   const output = `${data.stdout || ''}\n${data.stderr || ''}`.trim()
   if (data.exitCode && data.exitCode !== 0) {
     return `git_commit failed (exit ${data.exitCode}):\n${output}`
@@ -818,14 +864,16 @@ async function executeGitCommit(args: Record<string, any>, run?: AgentRunContext
   return m ? `Committed on ${m[1]} as ${m[2]}.\n${output}` : output
 }
 
-async function executeGitPush(args: Record<string, any>, run?: AgentRunContext): Promise<string> {
+async function executeGitPush(args: ToolArgs, run?: AgentRunContext): Promise<string> {
   const { shellQuote } = await import('../agents/git-tools')
   const flags: string[] = []
   if (args.setUpstream) flags.push('-u')
-  if (args.remote) flags.push(shellQuote(args.remote))
-  if (args.branch) flags.push(shellQuote(args.branch))
+  const remote = argOptString(args, 'remote')
+  if (remote) flags.push(shellQuote(remote))
+  const branch = argOptString(args, 'branch')
+  if (branch) flags.push(shellQuote(branch))
   const cmd = `git push ${flags.join(' ')}`.trim()
-  const data = await runShell(cmd, args.cwd, 120000, run)
+  const data = await runShell(cmd, argOptString(args, 'cwd'), 120000, run)
   const output = `${data.stdout || ''}\n${data.stderr || ''}`.trim()
   if (data.exitCode && data.exitCode !== 0) {
     return `git_push failed (exit ${data.exitCode}):\n${output}`
@@ -833,11 +881,12 @@ async function executeGitPush(args: Record<string, any>, run?: AgentRunContext):
   return output || 'git push: ok.'
 }
 
-async function executeGitLog(args: Record<string, any>, run?: AgentRunContext): Promise<string> {
+async function executeGitLog(args: ToolArgs, run?: AgentRunContext): Promise<string> {
   const { parseGitLog } = await import('../agents/git-tools')
-  const limit = typeof args.limit === 'number' ? Math.max(1, Math.min(200, args.limit)) : 20
+  const rawLimit = argNumber(args, 'limit')
+  const limit = rawLimit === undefined ? 20 : Math.max(1, Math.min(200, rawLimit))
   const cmd = `git log --oneline -n ${limit}`
-  const data = await runShell(cmd, args.cwd, undefined, run)
+  const data = await runShell(cmd, argOptString(args, 'cwd'), undefined, run)
   if (data.exitCode && data.exitCode !== 0) {
     return `git_log failed: ${data.stderr || data.stdout || `exit ${data.exitCode}`}`
   }
@@ -846,13 +895,13 @@ async function executeGitLog(args: Record<string, any>, run?: AgentRunContext): 
   return entries.map((e) => `${e.sha} ${e.subject}`).join('\n')
 }
 
-async function executeGitDiff(args: Record<string, any>, run?: AgentRunContext): Promise<string> {
+async function executeGitDiff(args: ToolArgs, run?: AgentRunContext): Promise<string> {
   const { shellQuote } = await import('../agents/git-tools')
   const parts = ['git', 'diff']
   if (args.staged) parts.push('--cached')
   if (args.ref) parts.push(shellQuote(String(args.ref)))
   if (args.path) parts.push('--', shellQuote(String(args.path)))
-  const data = await runShell(parts.join(' '), args.cwd, 120000, run)
+  const data = await runShell(parts.join(' '), argOptString(args, 'cwd'), 120000, run)
   if (data.exitCode && data.exitCode !== 0 && data.exitCode !== 1) {
     return `git_diff failed: ${data.stderr || `exit ${data.exitCode}`}`
   }
@@ -861,9 +910,9 @@ async function executeGitDiff(args: Record<string, any>, run?: AgentRunContext):
   return out.length > 16000 ? `${out.slice(0, 16000)}\n…(truncated)` : out
 }
 
-async function executeProjectInit(args: Record<string, any>): Promise<string> {
+async function executeProjectInit(args: ToolArgs): Promise<string> {
   const { findRecipe, renderInitPlan, listRecipes } = await import('../agents/project-init')
-  const recipeId = typeof args.recipe === 'string' ? args.recipe.trim() : ''
+  const recipeId = argString(args, 'recipe').trim()
   if (!recipeId) {
     const list = listRecipes()
     return [
@@ -881,7 +930,7 @@ async function executeProjectInit(args: Record<string, any>): Promise<string> {
   return renderInitPlan(recipe)
 }
 
-async function executePrResume(args: Record<string, any>, run?: AgentRunContext): Promise<string> {
+async function executePrResume(args: ToolArgs, run?: AgentRunContext): Promise<string> {
   const { parsePrUrl, normalisePrJson, renderPrResume } = await import('../agents/pr-resume')
   const { shellQuote } = await import('../agents/git-tools')
   const loc = parsePrUrl(String(args.url ?? ''))
@@ -892,14 +941,14 @@ async function executePrResume(args: Record<string, any>, run?: AgentRunContext)
   const repo = shellQuote(`${loc.owner}/${loc.repo}`)
   const view = await runShell(
     `gh pr view ${loc.number} --repo ${repo} --json title,body,state,headRefName,baseRefName,author,comments`,
-    args.cwd,
+    argOptString(args, 'cwd'),
     60000,
     run,
   )
   if (view.exitCode && view.exitCode !== 0) {
     return `pr_resume: gh pr view failed (exit ${view.exitCode}): ${view.stderr || view.stdout || ''}`
   }
-  let raw: any
+  let raw: unknown
   try {
     raw = JSON.parse(view.stdout || '{}')
   } catch (e) {
@@ -908,7 +957,7 @@ async function executePrResume(args: Record<string, any>, run?: AgentRunContext)
   const meta = normalisePrJson(raw, String(args.url))
   const diff = await runShell(
     `gh pr diff ${loc.number} --repo ${repo}`,
-    args.cwd,
+    argOptString(args, 'cwd'),
     60000,
     run,
   )
@@ -918,15 +967,15 @@ async function executePrResume(args: Record<string, any>, run?: AgentRunContext)
   })
 }
 
-async function executeGhPrCreate(args: Record<string, any>, run?: AgentRunContext): Promise<string> {
+async function executeGhPrCreate(args: ToolArgs, run?: AgentRunContext): Promise<string> {
   const { buildGhPrCreateCommand } = await import('../agents/git-tools')
   const cmd = buildGhPrCreateCommand({
-    title: args.title,
-    body: args.body ?? '',
-    base: args.base,
+    title: argString(args, 'title'),
+    body: argString(args, 'body'),
+    base: argOptString(args, 'base'),
   })
   if (!cmd) return 'gh_pr_create: a non-empty `title` is required.'
-  const data = await runShell(cmd, args.cwd, 60000, run)
+  const data = await runShell(cmd, argOptString(args, 'cwd'), 60000, run)
   const output = `${data.stdout || ''}\n${data.stderr || ''}`.trim()
   if (data.exitCode && data.exitCode !== 0) {
     return `gh_pr_create failed (exit ${data.exitCode}):\n${output}`
@@ -936,18 +985,18 @@ async function executeGhPrCreate(args: Record<string, any>, run?: AgentRunContex
   return urlMatch ? `Opened PR: ${urlMatch[0]}\n${output}` : output
 }
 
-async function executeRunTests(args: Record<string, any>, run?: AgentRunContext): Promise<string> {
+async function executeRunTests(args: ToolArgs, run?: AgentRunContext): Promise<string> {
   const { commandForRunner, detectRunnerFromFiles, parseForRunner, renderResult } =
     await import('../agents/test-runner')
 
-  let runner = args.runner as Runner | undefined
-  let command = typeof args.command === 'string' ? args.command : ''
+  let runner = argRunner(args)
+  let command = argString(args, 'command')
 
   if (!command) {
     if (!runner) {
       // List the workspace root to find a config marker.
       try {
-        const listing = await backendCall('fs_list', {
+        const listing = await backendCall<FsListResult>('fs_list', {
           path: '.',
           recursive: false,
           ...chatCtx(run),
@@ -957,14 +1006,14 @@ async function executeRunTests(args: Record<string, any>, run?: AgentRunContext)
         // empty command → "could not detect a test runner" for every project,
         // so the advertised auto-detect never once fired.
         const names: string[] = Array.isArray(listing.entries)
-          ? listing.entries.map((it: any) => String(it.name ?? '')).filter(Boolean)
+          ? listing.entries.map((it) => it.name).filter(Boolean)
           : []
         runner = detectRunnerFromFiles(names)
       } catch {
         runner = 'unknown'
       }
     }
-    command = commandForRunner(runner as Runner)
+    command = commandForRunner(runner ?? 'unknown')
   }
   if (!command) {
     return 'run_tests: could not detect a test runner. Pass `command` or `runner` explicitly.'
@@ -974,11 +1023,11 @@ async function executeRunTests(args: Record<string, any>, run?: AgentRunContext)
     command,
     args: null,
     cwd: args.cwd || null,
-    timeout: args.timeout || 300000,
+    timeout: argNumber(args, 'timeout') || 300000,
     shell: null,
     ...chatCtx(run),
   }
-  const data = await backendCall('shell_execute', shellArgs)
+  const data = await backendCall<ShellExecResult>('shell_execute', shellArgs)
   if (data.timedOut) {
     return `Test run timed out after ${shellArgs.timeout / 1000}s. Partial output:\n${(data.stdout || '').slice(-2000)}`
   }
@@ -986,33 +1035,53 @@ async function executeRunTests(args: Record<string, any>, run?: AgentRunContext)
   const parsed = parseForRunner(runner ?? 'unknown', combined)
   return renderResult(parsed)
 }
-type Runner = 'vitest' | 'cargo' | 'pytest' | 'jest' | 'unknown'
+/**
+ * `runner` as the model may send it. A value the runner list does not know
+ * becomes 'unknown', which `commandForRunner` maps to the empty command — the
+ * same refusal an unrecognised string produced before, now without an `as`
+ * that let any string through as a Runner.
+ */
+function argRunner(args: ToolArgs): Runner | undefined {
+  const v = args.runner
+  if (!v) return undefined // absent: auto-detect from the workspace, as before
+  if (typeof v === 'string') {
+    switch (v) {
+      case 'vitest':
+      case 'cargo':
+      case 'pytest':
+      case 'jest':
+      case 'unknown':
+        return v
+    }
+  }
+  return 'unknown'
+}
 
 async function executeSystemInfo(): Promise<string> {
-  const data = await backendCall('system_info', {})
+  const data = await backendCall<Record<string, unknown>>('system_info', {})
   return Object.entries(data).map(([k, v]) => `${k}: ${v}`).join('\n')
 }
 
 async function executeProcessList(): Promise<string> {
-  const data = await backendCall('process_list', {})
+  const data = await backendCall<ProcessListResult>('process_list', {})
   if (Array.isArray(data.processes)) {
     return data.processes
       .slice(0, 30)
-      .map((p: any) => `${p.name} (PID: ${p.pid}) — ${formatBytes(p.memory)} RAM, ${p.cpu?.toFixed(1)}% CPU`)
+      .map((p) => `${p.name} (PID: ${p.pid}) — ${formatBytes(p.memory)} RAM, ${p.cpu?.toFixed(1)}% CPU`)
       .join('\n')
   }
   return JSON.stringify(data)
 }
 
 async function executeScreenshot(): Promise<string> {
-  const data = await backendCall('screenshot', {})
+  const data = await backendCall<ScreenshotResult>('screenshot', {})
   if (data.image) {
     return `[Screenshot captured: base64 PNG, ${Math.round(data.image.length / 1024)}KB]`
   }
   return JSON.stringify(data)
 }
 
-async function executeImageGenerate(args: Record<string, any>): Promise<string> {
+async function executeImageGenerate(args: ToolArgs): Promise<string> {
   // Feature EE (v2.5.0): the whole generation flow now goes through the VRAM
   // hand-off orchestrator. It resolves the image model (args.model or first
   // installed), decides whether the resident local text model has to be evicted
@@ -1021,12 +1090,10 @@ async function executeImageGenerate(args: Record<string, any>): Promise<string> 
   // model afterwards. The returned string keeps the EXACT F1 contract —
   // `Image generated: <file> (prompt: "...")\n<comfyui /view URL>` — so
   // ToolCallBlock renders it inline and useAgentChat feeds it back unchanged.
-  const prompt = args.prompt || args.description || ''
-  if (!prompt) return 'Error: No prompt provided for image generation.'
-  const settings = (args.settings && typeof args.settings === 'object') ? args.settings : {}
-  const flat: Record<string, any> = {}
-  for (const [k, v] of Object.entries(args)) if (k !== 'settings' && v !== undefined) flat[k] = v
-  const merged: Record<string, any> = { ...settings, ...flat }   // explicit flat args win; undefined never clobbers settings
+  const rawPrompt = args.prompt || args.description || ''
+  if (!rawPrompt) return 'Error: No prompt provided for image generation.'
+  const prompt = String(rawPrompt)
+  const merged = mergeMediaArgs(args)
 
   // Hard rule: on macOS, local image generation is Apple MLX only — ComfyUI
   // never runs there (see isMlxImageHost() / useCreate.ts's MLX image
@@ -1045,7 +1112,7 @@ async function executeImageGenerate(args: Record<string, any>): Promise<string> 
   return vramHandoffGenerate('image', merged)
 }
 
-async function executeVideoGenerate(args: Record<string, any>): Promise<string> {
+async function executeVideoGenerate(args: ToolArgs): Promise<string> {
   // Feature EE (v2.5.0): text-to-video via the same hand-off orchestrator.
   // Picks the first installed video model (or args.model), detects the video
   // backend (Wan / AnimateDiff), evicts the local text model from VRAM if it
@@ -1057,10 +1124,7 @@ async function executeVideoGenerate(args: Record<string, any>): Promise<string> 
   // defaults a gentle-motion prompt for video, normalizes a snake_case
   // input_image alias, and falls back to the last generated image — so the
   // "animate the image you just made" chain works even with a sloppy call.
-  const settings = (args.settings && typeof args.settings === 'object') ? args.settings : {}
-  const flat: Record<string, any> = {}
-  for (const [k, v] of Object.entries(args)) if (k !== 'settings' && v !== undefined) flat[k] = v
-  const merged: Record<string, any> = { ...settings, ...flat }   // explicit flat args win; undefined never clobbers settings
+  const merged = mergeMediaArgs(args)
 
   // Hard rule: on macOS, local video generation is Apple MLX only — ComfyUI
   // never runs there. Route around vram-handoff entirely (no VRAM juggling —
@@ -1096,7 +1160,7 @@ function sleep(ms: number): Promise<void> {
  * renders it inline; only the url is a local blob: URL instead of a ComfyUI
  * /view URL.
  */
-async function executeImageGenerateMlx(prompt: string, merged: Record<string, any>): Promise<string> {
+async function executeImageGenerateMlx(prompt: string, merged: VramHandoffArgs): Promise<string> {
   let installed: MlxImageModel[]
   try {
     installed = (await listMlxImageModels()).filter((m) => m.installed)
@@ -1160,7 +1224,7 @@ async function executeImageGenerateMlx(prompt: string, merged: Record<string, an
  * "init_image not found: ...", the same honest-rejection shape this codebase
  * uses for every other unsupported value, rather than silently ignoring it.
  */
-async function executeVideoGenerateMlx(prompt: string, merged: Record<string, any>): Promise<string> {
+async function executeVideoGenerateMlx(prompt: string, merged: VramHandoffArgs): Promise<string> {
   let status: Awaited<ReturnType<typeof getVideoStatus>>
   try {
     status = await getVideoStatus()
@@ -1242,7 +1306,7 @@ async function executeVideoGenerateMlx(prompt: string, merged: Record<string, an
   return 'Video generation timed out after 60 minutes; the generation was stopped.'
 }
 
-async function executeTodoWrite(args: Record<string, any>, run?: AgentRunContext): Promise<string> {
+async function executeTodoWrite(args: ToolArgs, run?: AgentRunContext): Promise<string> {
   // Purely conversation state: no backend call, no permission gate, nothing
   // that can fail on a machine. The one real failure is having no conversation
   // to attach the plan to, which happens when a tool runs outside a loop.
@@ -1259,12 +1323,9 @@ async function executeTodoWrite(args: Record<string, any>, run?: AgentRunContext
   return summarizeTodos(todos)
 }
 
-async function executeGetCurrentTime(_args: Record<string, any>): Promise<string> {
+async function executeGetCurrentTime(_args: ToolArgs): Promise<string> {
   try {
-    const data = await backendCall<{ unix: number; iso_local: string; iso_utc: string; timezone: string; timezone_offset: number }>(
-      'get_current_time',
-      {},
-    )
+    const data = await backendCall<CurrentTimeResult>('get_current_time', {})
     return `Local: ${data.iso_local} ${data.timezone}\nUTC:   ${data.iso_utc}\nUnix:  ${data.unix}`
   } catch (e) {
     return `Error: ${e instanceof Error ? e.message : String(e)}`
@@ -1273,8 +1334,8 @@ async function executeGetCurrentTime(_args: Record<string, any>): Promise<string
 
 let _workflowDepth = 0
 
-async function executeRunWorkflow(args: Record<string, any>): Promise<string> {
-  const workflowName = args.name
+async function executeRunWorkflow(args: ToolArgs): Promise<string> {
+  const workflowName = argString(args, 'name')
   if (!workflowName) return 'Error: No workflow name provided'
   if (_workflowDepth >= 5) return 'Error: Maximum workflow nesting depth (5) exceeded'
 
@@ -1316,6 +1377,29 @@ async function executeRunWorkflow(args: Record<string, any>): Promise<string> {
 }
 
 // ── Helpers ─────────────────────────────────────────────────────
+
+/**
+ * Fold a media tool's call into the one settings object the generation
+ * pipeline takes: the nested `settings` first, then the flat top-level args on
+ * top (an explicit flat argument wins; `undefined` never clobbers a setting).
+ *
+ * The result is a `VramHandoffArgs`, whose named fields the pipeline reads
+ * with its own `typeof` guards and whose index signature carries everything
+ * else. The keys are copied one by one rather than spread because a spread
+ * would have to claim the arbitrary foreign values match the named fields;
+ * writing through the index signature claims nothing that isn't true.
+ */
+function mergeMediaArgs(args: ToolArgs): VramHandoffArgs {
+  const rawSettings = args.settings
+  const settings: Record<string, unknown> =
+    rawSettings && typeof rawSettings === 'object' ? { ...rawSettings } : {}
+  const merged: VramHandoffArgs = {}
+  for (const [k, v] of Object.entries(settings)) merged[k] = v
+  for (const [k, v] of Object.entries(args)) {
+    if (k !== 'settings' && v !== undefined) merged[k] = v
+  }
+  return merged
+}
 
 function formatBytes(bytes: number): string {
   if (bytes === 0) return '0 B'
@@ -1362,7 +1446,7 @@ function htmlToText(html: string): string {
 
 const EXECUTOR_MAP: Record<
   string,
-  (args: Record<string, any>, run?: AgentRunContext, signal?: AbortSignal) => Promise<string>
+  (args: ToolArgs, run?: AgentRunContext, signal?: AbortSignal) => Promise<string>
 > = {
   todo_write: executeTodoWrite,
   web_search: executeWebSearch,
@@ -1425,7 +1509,7 @@ const RETIRED_HINT: Record<string, string> = {
   shell_task_list: 'shell_execute with task: "list"',
 }
 
-const RETIRED_EXECUTORS: Record<string, (args: Record<string, any>, run?: AgentRunContext) => Promise<string>> = {
+const RETIRED_EXECUTORS: Record<string, (args: ToolArgs, run?: AgentRunContext) => Promise<string>> = {
   git_status: executeGitStatus,
   git_log: executeGitLog,
   git_diff: executeGitDiff,
@@ -1465,7 +1549,7 @@ export const RETIRED_EXECUTOR_NAMES: ReadonlySet<string> = new Set(Object.keys(R
  */
 export async function runRetiredTool(
   name: string,
-  args: Record<string, any>,
+  args: ToolArgs,
   run?: AgentRunContext,
 ): Promise<string | null> {
   const exec = RETIRED_EXECUTORS[name]

@@ -12,19 +12,16 @@ import {
   type LocalOpParams,
 } from '../dynamic-workflow'
 import { classifyModel, galleryTypeForFile, resolveLocalOpPick, type ClassifiedModel } from '../comfyui'
+import type { ComfyApiGraph, ComfyApiNode } from '../../types/comfy-graph'
 
 /**
- * One node of a ComfyUI prompt graph, the way the builders under test emit it.
- * The builders are still declared `Record<string, any>` (dynamic-workflow.ts
- * is another agent's file this round), so the shape is pinned HERE: every
- * assertion below now reads a checked field instead of an `any` that would
- * have swallowed a renamed key as `undefined === undefined`.
+ * The builders now declare their own graph shape (types/comfy-graph.ts), so
+ * the assertions below read THAT type instead of a local stand-in — a renamed
+ * key or a builder that stops emitting `inputs` at all is a compile error here,
+ * not an `undefined === undefined` that quietly passes.
  */
-interface ComfyNode {
-  class_type: string
-  inputs: Record<string, unknown>
-}
-type ComfyGraph = Record<string, ComfyNode>
+type ComfyNode = ComfyApiNode
+type ComfyGraph = ComfyApiGraph
 
 /** The node of this class_type — fails loudly when the graph has none. */
 function nodeOfType(wf: ComfyGraph, classType: string): ComfyNode {
@@ -35,7 +32,7 @@ function nodeOfType(wf: ComfyGraph, classType: string): ComfyNode {
 
 /** A numeric input, checked rather than assumed. */
 function numInput(node: ComfyNode, key: string): number {
-  const v = node.inputs[key]
+  const v = node.inputs?.[key]
   if (typeof v !== 'number') {
     throw new Error(`${node.class_type}.inputs.${key} is not a number: ${String(v)}`)
   }
@@ -44,7 +41,7 @@ function numInput(node: ComfyNode, key: string): number {
 
 /** An array input (a ComfyUI link `[nodeId, slot]`, or a literal list). */
 function arrInput(node: ComfyNode, key: string): unknown[] {
-  const v = node.inputs[key]
+  const v = node.inputs?.[key]
   if (!Array.isArray(v)) {
     throw new Error(`${node.class_type}.inputs.${key} is not an array: ${String(v)}`)
   }
@@ -136,8 +133,8 @@ describe('buildMusicWorkflow', () => {
     expect(types).toContain('EmptyAceStepLatentAudio')
     expect(types).toContain('VAEDecodeAudio')
     expect(types).toContain('SaveAudioMP3')
-    expect(nodeOfType(wf, 'EmptyAceStepLatentAudio').inputs.seconds).toBe(45)
-    expect(nodeOfType(wf, 'TextEncodeAceStepAudio').inputs.lyrics).toBe('la la')
+    expect(nodeOfType(wf, 'EmptyAceStepLatentAudio').inputs?.seconds).toBe(45)
+    expect(nodeOfType(wf, 'TextEncodeAceStepAudio').inputs?.lyrics).toBe('la la')
   })
 
   it('routes ACE 1.5 checkpoints through the 1.5 node pair with a zeroed negative', () => {
@@ -176,7 +173,7 @@ describe('buildS2VWorkflow', () => {
     for (const t of ['LoadAudio', 'AudioEncoderLoader', 'AudioEncoderEncode', 'WanSoundImageToVideo', 'CreateVideo', 'SaveVideo']) {
       expect(types).toContain(t)
     }
-    expect(nodeOfType(wf, 'CreateVideo').inputs.audio).toBeTruthy()
+    expect(nodeOfType(wf, 'CreateVideo').inputs?.audio).toBeTruthy()
     const s2vNode = nodeOfType(wf, 'WanSoundImageToVideo')
     // length stays on the 4k+1 grid
     expect((numInput(s2vNode, 'length') - 1) % 4).toBe(0)
@@ -216,10 +213,10 @@ describe('buildMotionWorkflow', () => {
       expect(types).toContain(t)
     }
     const trim = nodeOfType(wf, 'TrimVideoLatent')
-    expect(Array.isArray(trim.inputs.trim_amount)).toBe(true)
+    expect(Array.isArray(trim.inputs?.trim_amount)).toBe(true)
     expect(arrInput(trim, 'trim_amount')[1]).toBe(3)
     const components = Object.entries(wf).find(([, n]) => n.class_type === 'GetVideoComponents')![0]
-    expect(nodeOfType(wf, 'CreateVideo').inputs.audio).toEqual([components, 1])
+    expect(nodeOfType(wf, 'CreateVideo').inputs?.audio).toEqual([components, 1])
   })
 
   it('routes VACE models through WanVaceToVideo with the skeleton as control video', () => {

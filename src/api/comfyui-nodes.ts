@@ -9,12 +9,22 @@ import { readComboOptions } from './comfyui-enum'
 // nicht, also ist ein ganz normaler statischer Import hier die ehrliche Form.
 import { classifyModel, MODEL_TYPE_DEFAULTS } from './comfyui'
 import type { ModelType } from './comfyui'
+import type { ComfyInputValue } from '../types/comfy-graph'
 
 // ─── Types ───
 
+/**
+ * One node's declared inputs, straight from ComfyUI's `/object_info`.
+ *
+ * Each value is an input SPEC, not a value, and its shape depends on the node
+ * and on the ComfyUI version: `["INT", { default: 20 }]`, `[["euler","dpmpp_2m"]]`
+ * (legacy combo) or `["COMBO", { options: [...] }]` (current). Nothing here may
+ * assume which — `readComboOptions` (comfyui-enum.ts) is the one reader that
+ * knows all three shapes, and it takes `unknown` for exactly that reason.
+ */
 export interface NodeInputSpec {
-  required: Record<string, any>
-  optional?: Record<string, any>
+  required: Record<string, ComfyInputValue>
+  optional?: Record<string, ComfyInputValue>
 }
 
 export interface NodeMetadata {

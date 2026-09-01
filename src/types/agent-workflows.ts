@@ -23,7 +23,10 @@ export interface WorkflowStep {
 
   // tool step: execute specific tool
   toolName?: string
-  toolArgs?: Record<string, any>
+  /** Static args merged with the interpolated `toolArgTemplates` at run time.
+   *  Same `unknown`-valued shape the tool executors receive (mcp/types.ToolArgs)
+   *  — a saved workflow's args are JSON the user or an import wrote. */
+  toolArgs?: Record<string, unknown>
   toolArgTemplates?: Record<string, string>  // supports {{variable}} interpolation
 
   // condition step: branch based on output
@@ -86,7 +89,7 @@ export interface StepResult {
   error?: string
   toolCalls?: Array<{
     name: string
-    args: Record<string, any>
+    args: Record<string, unknown>
     result: string
   }>
 }

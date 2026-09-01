@@ -5,22 +5,107 @@
  * and communicate via stdin/stdout JSON-RPC 2.0.
  */
 
-import type { MCPToolDefinition, MCPServerConfig } from './types'
+import type { Child } from '@tauri-apps/plugin-shell'
+import type { MCPToolDefinition, MCPServerConfig, ToolArgs } from './types'
 import { log } from '../../lib/logger'
+import { isRecord, prop, asString, asNumber, asRecordArray, errorText } from '../../types/json-guards'
 
-// JSON-RPC message types
+// ── JSON-RPC message types ──────────────────────────────────────
+//
+// Everything arriving on stdout was written by a THIRD-PARTY process. The
+// request side we build ourselves and can type exactly; the response side is
+// `unknown` until `parseJsonRpcResponse` below has looked at it.
+
 interface JsonRpcRequest {
   jsonrpc: '2.0'
   id: number
   method: string
-  params?: any
+  params?: unknown
 }
 
 interface JsonRpcResponse {
   jsonrpc: '2.0'
-  id: number
-  result?: any
-  error?: { code: number; message: string; data?: any }
+  /** Absent on a notification — the server may talk without being asked. */
+  id?: number
+  result?: unknown
+  error?: { code: number; message: string; data?: unknown }
+}
+
+/**
+ * Human-readable text for whatever a server put in `error`.
+ *
+ * The spec says an object with a `message`; real servers also send a bare
+ * string, and one sends a number. Since this text is the ONLY thing the user
+ * ever learns about the failure, a non-conforming value is rendered rather
+ * than discarded — that is strictly better than the `Error: undefined` the
+ * pre-typing code produced for exactly these lines.
+ */
+function jsonRpcErrorMessage(raw: unknown): string {
+  if (isRecord(raw)) {
+    const msg = asString(raw.message)
+    if (msg) return msg
+  }
+  return errorText(raw) || 'MCP server reported an error'
+}
+
+/**
+ * Narrow one parsed stdout line to a JSON-RPC response, or give up.
+ *
+ * Only the fields this client actually reads are required to be well-formed:
+ * an `id` that can address a pending request, and an `error` — which is
+ * honoured whenever it is PRESENT, whatever its shape. That is the load-bearing
+ * rule here: a server that answers `"error": "boom"` has failed, and treating
+ * the line as anything but a rejection would resolve the pending request with
+ * `undefined` and tell the model the tool ran. Only `undefined`/`null` — i.e.
+ * no error at all — is a success.
+ *
+ * Anything that is not a record, or carries no usable `id`, is a notification
+ * or noise and is ignored.
+ */
+function parseJsonRpcResponse(v: unknown): JsonRpcResponse | null {
+  if (!isRecord(v)) return null
+  const id = asNumber(v.id)
+  const rawError = v.error
+  let error: JsonRpcResponse['error']
+  if (rawError != null) {
+    error = {
+      code: (isRecord(rawError) ? asNumber(rawError.code) : undefined) ?? 0,
+      message: jsonRpcErrorMessage(rawError),
+      data: isRecord(rawError) ? rawError.data : rawError,
+    }
+  }
+  return { jsonrpc: '2.0', id, result: v.result, error }
+}
+
+/**
+ * Does this look like the JSON-Schema object a tool's `inputSchema` must be?
+ *
+ * Checked at the boundary: it is an object, its `type` says `'object'`, its
+ * `properties` is an object, and `required` — when present — is an array of
+ * strings. The property schemas INSIDE are deliberately not re-validated:
+ * `inputSchema` is forwarded verbatim to the model as the tool's `parameters`,
+ * and a real MCP server may legitimately use `anyOf` / `oneOf` / `$ref`, which
+ * `JSONSchemaProp` does not model. Rewriting those would change what the model
+ * is told the tool takes; dropping them would be worse.
+ *
+ * A server that sends a string, an array or a `properties: []` there gets the
+ * empty schema below instead — previously that value went straight into the
+ * prompt.
+ */
+function isToolInputSchema(v: unknown): v is MCPToolDefinition['inputSchema'] {
+  if (!isRecord(v)) return false
+  if (v.type !== 'object') return false
+  if (!isRecord(v.properties)) return false
+  if (v.required !== undefined
+      && !(Array.isArray(v.required) && v.required.every((r) => typeof r === 'string'))) return false
+  return true
+}
+
+/** The schema a tool gets when the server did not send a usable one. */
+const EMPTY_INPUT_SCHEMA: MCPToolDefinition['inputSchema'] = {
+  type: 'object',
+  properties: {},
+  required: [],
 }
 
 export class MCPExternalClient {
@@ -32,10 +117,10 @@ export class MCPExternalClient {
    * server failed to connect with "Cannot read properties of undefined
    * (reading 'write')".
    */
-  private child: any = null
+  private child: Child | null = null
   private requestId = 0
   private pendingRequests = new Map<number, {
-    resolve: (value: any) => void
+    resolve: (value: unknown) => void
     reject: (error: Error) => void
     timer: ReturnType<typeof setTimeout>
   }>()
@@ -133,14 +218,24 @@ export class MCPExternalClient {
 
       // Discover tools
       const toolsResult = await this.sendRequest('tools/list', {})
-      const tools: MCPToolDefinition[] = (toolsResult.tools || []).map((t: any) => ({
-        name: t.name,
-        description: t.description || '',
-        inputSchema: t.inputSchema || { type: 'object', properties: {}, required: [] },
-        category: 'workflow' as const, // External tools default to workflow category
-        source: 'external' as const,
-        serverId: this.config.id,
-      }))
+      const tools: MCPToolDefinition[] = []
+      for (const t of asRecordArray(prop(toolsResult, 'tools'))) {
+        const toolName = asString(t.name)
+        // A tool with no name cannot be looked up, called or unregistered — it
+        // used to land in the registry under the key `undefined`.
+        if (!toolName) {
+          log.warn(`[MCP:${this.config.name}] ignoring a tool with no name in tools/list`)
+          continue
+        }
+        tools.push({
+          name: toolName,
+          description: asString(t.description) || '',
+          inputSchema: isToolInputSchema(t.inputSchema) ? t.inputSchema : EMPTY_INPUT_SCHEMA,
+          category: 'workflow', // External tools default to workflow category
+          source: 'external',
+          serverId: this.config.id,
+        })
+      }
 
       this.registered = true
       return tools
@@ -157,17 +252,19 @@ export class MCPExternalClient {
     }
   }
 
-  async callTool(name: string, args: Record<string, any>): Promise<string> {
+  async callTool(name: string, args: ToolArgs): Promise<string> {
     if (!this.connected) throw new Error('Not connected')
 
     const result = await this.sendRequest('tools/call', { name, arguments: args })
 
-    // MCP returns content array
-    if (Array.isArray(result.content)) {
-      return result.content
-        .map((c: any) => {
-          if (c.type === 'text') return c.text
-          if (c.type === 'image') return `[Image: ${c.mimeType}]`
+    // MCP returns a content array of `{ type, ... }` blocks.
+    const content = prop(result, 'content')
+    if (Array.isArray(content)) {
+      return content
+        .map((c: unknown) => {
+          const type = prop(c, 'type')
+          if (type === 'text') return asString(prop(c, 'text')) ?? ''
+          if (type === 'image') return `[Image: ${String(prop(c, 'mimeType'))}]`
           return JSON.stringify(c)
         })
         .join('\n')
@@ -195,7 +292,7 @@ export class MCPExternalClient {
 
   // ── Private ─────────────────────────────────────────────────
 
-  private sendRequest(method: string, params?: any): Promise<any> {
+  private sendRequest(method: string, params?: unknown): Promise<unknown> {
     return new Promise((resolve, reject) => {
       if (!this.child) {
         reject(new Error('Not connected'))
@@ -236,20 +333,24 @@ export class MCPExternalClient {
     for (const line of lines) {
       const trimmed = line.trim()
       if (!trimmed) continue
+      let parsed: unknown
       try {
-        const response: JsonRpcResponse = JSON.parse(trimmed)
-        const pending = this.pendingRequests.get(response.id)
-        if (pending) {
-          this.pendingRequests.delete(response.id)
-          clearTimeout(pending.timer)
-          if (response.error) {
-            pending.reject(new Error(response.error.message))
-          } else {
-            pending.resolve(response.result)
-          }
-        }
+        parsed = JSON.parse(trimmed)
       } catch {
-        // Not JSON — might be a notification, ignore
+        // Not JSON — a server that logs to stdout, ignore.
+        continue
+      }
+      const response = parseJsonRpcResponse(parsed)
+      if (!response || response.id === undefined) continue // notification or noise
+      const pending = this.pendingRequests.get(response.id)
+      if (pending) {
+        this.pendingRequests.delete(response.id)
+        clearTimeout(pending.timer)
+        if (response.error) {
+          pending.reject(new Error(response.error.message))
+        } else {
+          pending.resolve(response.result)
+        }
       }
     }
   }

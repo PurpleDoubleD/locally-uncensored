@@ -17,6 +17,8 @@
  * Namen, damit kein Aufrufer und kein Test seinen Importpfad ändern muss.
  */
 
+import type { ComfyApiNode, ComfyLinkRef } from '../types/comfy-graph'
+
 // ─── Output filename slug (David 2026-06-11) ───
 //
 // Generated media used to be `locally_uncensored_00123_.png` /
@@ -59,10 +61,10 @@ export function promptFilenamePrefix(prompt: string | undefined, isVideo: boolea
  *  the node's own defaults except tile_size, halved for the low-VRAM cards
  *  this exists for. Image decodes stay on plain VAEDecode. */
 export function videoDecodeNode(
-  samplesRef: [string, number],
-  vaeRef: [string, number],
+  samplesRef: ComfyLinkRef,
+  vaeRef: ComfyLinkRef,
   hasTiled: boolean,
-): Record<string, any> {
+): ComfyApiNode {
   return hasTiled
     ? {
         class_type: 'VAEDecodeTiled',

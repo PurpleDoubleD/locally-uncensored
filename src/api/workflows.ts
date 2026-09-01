@@ -11,57 +11,65 @@ import type {
   WorkflowSource,
   ParameterMap,
 } from '../types/workflows'
+import type {
+  ComfyApiGraph, ComfyApiNode, ComfyInputValue, ComfyNodeInputs,
+  ComfyWebGraph, ComfyWebNode,
+} from '../types/comfy-graph'
+import {
+  apiNodes, isComfyApiGraph, isComfyWebGraph, isComfyWebNode,
+  inputNumber, linkTarget,
+} from '../types/comfy-graph'
+import { prop } from '../types/json-guards'
 
 // ─── Validation ───
+//
+// The JSON walked here arrives from a file the user picked or a download, so
+// no field is guaranteed. The shapes and the guards live in
+// types/comfy-graph.ts; nothing below reads a field it has not narrowed first.
 
-// A node of the API-format graph. The JSON arrives from a file the user picked
-// or a download, so no field is guaranteed; every walk over a graph narrows
-// through this guard before it reads one.
-interface WorkflowNode {
-  class_type?: string
-  inputs?: Record<string, any>
-}
-
-function isWorkflowNode(value: unknown): value is WorkflowNode {
-  return !!value && typeof value === 'object'
-}
-
-export function validateWorkflowJson(json: unknown): json is Record<string, any> {
+/**
+ * Accepts either ComfyUI graph format. Kept as a predicate over the API shape
+ * because that is what every caller goes on to build; a web-format file passes
+ * here and is converted by `resolveWorkflowJson` before it is used.
+ */
+export function validateWorkflowJson(json: unknown): json is ComfyApiGraph {
   if (!json || typeof json !== 'object' || Array.isArray(json)) return false
-  const obj = json as Record<string, any>
   // API format: { "1": { class_type: "...", inputs: {...} }, ... }
-  if (Object.values(obj).some(
-    (node) => node && typeof node === 'object' && typeof node.class_type === 'string'
-  )) return true
+  if (isComfyApiGraph(json)) return true
   // Web/UI format: { nodes: [...], links: [...] }
-  if (Array.isArray(obj.nodes) && obj.nodes.some((n: any) => n && typeof n.type === 'string')) return true
-  return false
+  return isComfyWebGraph(json)
 }
 
 // Convert ComfyUI web/UI format to API format
-function convertWebToApiFormat(webWorkflow: Record<string, any>): Record<string, any> {
-  const nodes: any[] = webWorkflow.nodes
-  const links: any[] = webWorkflow.links || []
-  const apiWorkflow: Record<string, any> = {}
+function convertWebToApiFormat(webWorkflow: ComfyWebGraph): ComfyApiGraph {
+  const links: unknown[] = Array.isArray(webWorkflow.links) ? webWorkflow.links : []
+  const apiWorkflow: ComfyApiGraph = {}
 
   // Build link lookup: linkId -> { sourceNodeId, sourceSlot }
   const linkMap: Record<number, { sourceNodeId: number; sourceSlot: number }> = {}
   for (const link of links) {
     // link format: [linkId, sourceNodeId, sourceSlot, targetNodeId, targetSlot, type]
     if (Array.isArray(link) && link.length >= 4) {
-      linkMap[link[0]] = { sourceNodeId: link[1], sourceSlot: link[2] }
+      const [id, sourceNodeId, sourceSlot] = link
+      if (typeof id === 'number' && typeof sourceNodeId === 'number' && typeof sourceSlot === 'number') {
+        linkMap[id] = { sourceNodeId, sourceSlot }
+      }
     }
   }
 
-  for (const node of nodes) {
-    if (!node || !node.type || typeof node.id !== 'number') continue
-    const inputs: Record<string, any> = {}
+  for (const raw of webWorkflow.nodes) {
+    // A canvas graph can hold a malformed entry; the rest still converts.
+    if (!isComfyWebNode(raw) || !raw.type) continue
+    const node: ComfyWebNode = raw
+    const inputs: Record<string, ComfyInputValue> = {}
 
     // Process connected inputs (from links - these are reliable)
     if (Array.isArray(node.inputs)) {
       for (const input of node.inputs) {
-        if (input.link != null && linkMap[input.link]) {
-          const { sourceNodeId, sourceSlot } = linkMap[input.link]
+        if (!input || typeof input.name !== 'string') continue
+        const linkId = input.link
+        if (linkId != null && linkMap[linkId]) {
+          const { sourceNodeId, sourceSlot } = linkMap[linkId]
           inputs[input.name] = [String(sourceNodeId), sourceSlot]
         }
       }
@@ -70,8 +78,8 @@ function convertWebToApiFormat(webWorkflow: Record<string, any>): Record<string,
     // Map widget_values using ComfyUI's object_info-based approach:
     // We map ONLY for node types we understand well. For unknown nodes,
     // we skip widget values and let injectParameters handle the important ones.
-    const ct = node.type as string
-    const widgetValues = node.widgets_values || []
+    const ct = node.type
+    const widgetValues = Array.isArray(node.widgets_values) ? node.widgets_values : []
     mapWidgetValues(ct, widgetValues, inputs, node)
 
     apiWorkflow[String(node.id)] = {
@@ -85,7 +93,12 @@ function convertWebToApiFormat(webWorkflow: Record<string, any>): Record<string,
 
 // Map widget_values to named inputs. Conservative: only map what we're sure about.
 // injectParameters will override model/prompt/seed/steps/cfg/etc. anyway.
-function mapWidgetValues(classType: string, values: any[], inputs: Record<string, any>, node?: any) {
+function mapWidgetValues(
+  classType: string,
+  values: ComfyInputValue[],
+  inputs: Record<string, ComfyInputValue>,
+  node?: ComfyWebNode,
+) {
   if (!values || values.length === 0) return
 
   // For nodes where widget order is well-known and stable:
@@ -162,11 +175,12 @@ function mapWidgetValues(classType: string, values: any[], inputs: Record<string
       // For unknown node types: try to use node.widgets if available
       // to map by name, otherwise skip widget values entirely.
       // injectParameters handles the critical params.
-      if (node?.widgets) {
+      if (Array.isArray(node?.widgets)) {
         for (let i = 0; i < Math.min(values.length, node.widgets.length); i++) {
           const widgetName = node.widgets[i]?.name
-          if (widgetName && values[i] != null) {
-            inputs[widgetName] = values[i]
+          const value = values[i]
+          if (widgetName && value != null) {
+            inputs[widgetName] = value
           }
         }
       }
@@ -206,14 +220,13 @@ export function extractSearchTerms(modelName: string, modelType: ModelType): str
 
 // ─── Parameter Auto-Detection ───
 
-export function autoDetectParameterMap(workflow: Record<string, any>): ParameterMap {
+export function autoDetectParameterMap(workflow: ComfyApiGraph): ParameterMap {
   const map: ParameterMap = {}
 
-  let ksamplerNode: any = null
+  let ksamplerNode: ComfyApiNode | null = null
 
-  for (const [nodeId, node] of Object.entries(workflow)) {
-    if (!node || typeof node !== 'object') continue
-    const ct = node.class_type as string
+  for (const [nodeId, node] of apiNodes(workflow)) {
+    const ct = node.class_type
     if (ct === 'KSampler' || ct === 'KSamplerAdvanced') {
       ksamplerNode = node
       map.seed = { nodeId, inputKey: 'seed' }
@@ -226,17 +239,15 @@ export function autoDetectParameterMap(workflow: Record<string, any>): Parameter
   }
 
   if (ksamplerNode?.inputs) {
-    const posConn = ksamplerNode.inputs.positive
-    const negConn = ksamplerNode.inputs.negative
-    if (Array.isArray(posConn)) {
-      const posNodeId = String(posConn[0])
+    const posNodeId = linkTarget(ksamplerNode.inputs.positive)
+    const negNodeId = linkTarget(ksamplerNode.inputs.negative)
+    if (posNodeId !== undefined) {
       const posNode = workflow[posNodeId]
       if (posNode?.class_type === 'CLIPTextEncode') {
         map.positivePrompt = { nodeId: posNodeId, inputKey: 'text' }
       }
     }
-    if (Array.isArray(negConn)) {
-      const negNodeId = String(negConn[0])
+    if (negNodeId !== undefined) {
       const negNode = workflow[negNodeId]
       if (negNode?.class_type === 'CLIPTextEncode') {
         map.negativePrompt = { nodeId: negNodeId, inputKey: 'text' }
@@ -244,9 +255,8 @@ export function autoDetectParameterMap(workflow: Record<string, any>): Parameter
     }
   }
 
-  for (const [nodeId, node] of Object.entries(workflow)) {
-    if (!node || typeof node !== 'object') continue
-    const ct = node.class_type as string
+  for (const [nodeId, node] of apiNodes(workflow)) {
+    const ct = node.class_type
 
     switch (ct) {
       case 'CheckpointLoaderSimple':
@@ -277,14 +287,14 @@ export function autoDetectParameterMap(workflow: Record<string, any>): Parameter
         map.frames = { nodeId, inputKey: 'length' }
         break
       case 'ImageResizeKJv2':
-        if (!map.width && typeof node.inputs?.width === 'number') {
+        if (!map.width && inputNumber(node, 'width') !== undefined) {
           map.width = {
             nodeId,
             inputKey: 'width',
           }
         }
 
-        if (!map.height && typeof node.inputs?.height === 'number') {
+        if (!map.height && inputNumber(node, 'height') !== undefined) {
           map.height = {
             nodeId,
             inputKey: 'height',
@@ -301,8 +311,8 @@ export function autoDetectParameterMap(workflow: Record<string, any>): Parameter
   }
 
   if (!map.positivePrompt) {
-    const clipNodes = Object.entries(workflow).filter(
-      ([, n]) => n?.class_type === 'CLIPTextEncode'
+    const clipNodes = apiNodes(workflow).filter(
+      ([, n]) => n.class_type === 'CLIPTextEncode'
     )
     if (clipNodes.length >= 1) {
       map.positivePrompt = { nodeId: clipNodes[0][0], inputKey: 'text' }
@@ -318,18 +328,27 @@ export function autoDetectParameterMap(workflow: Record<string, any>): Parameter
 // ─── Parameter Injection ───
 
 export async function injectParameters(
-  workflow: Record<string, any>,
+  workflow: ComfyApiGraph,
   paramMap: ParameterMap,
   params: GenerateParams | VideoParams,
   modelType: ModelType
-): Promise<Record<string, any>> {
-  const wf = JSON.parse(JSON.stringify(workflow))
+): Promise<ComfyApiGraph> {
+  // Deep clone: the caller's template must not be mutated. A JSON round-trip
+  // of a ComfyApiGraph is a ComfyApiGraph by construction.
+  const wf: ComfyApiGraph = JSON.parse(JSON.stringify(workflow))
 
-  const inject = (mapping: { nodeId: string; inputKey: string } | undefined, value: any) => {
+  const inject = (
+    mapping: { nodeId: string; inputKey: string } | undefined,
+    value: ComfyInputValue | undefined,
+  ) => {
     if (!mapping) return
     const node = wf[mapping.nodeId]
     if (node?.inputs) {
-      node.inputs[mapping.inputKey] = value
+      // Assigning undefined is deliberate and load-bearing: JSON.stringify
+      // drops the key, so the node falls back to ComfyUI's own default rather
+      // than keeping the template's value.
+      const inputs: ComfyNodeInputs = node.inputs
+      inputs[mapping.inputKey] = value
     }
   }
 
@@ -346,12 +365,11 @@ export async function injectParameters(
   // detection. Locate their source resize node at generation time so
   // users do not have to remove and re-import the workflow.
   if (!widthMapping || !heightMapping) {
-    const resizeEntry = Object.entries(wf).find(
+    const resizeEntry = apiNodes(wf).find(
       ([, node]) =>
-        isWorkflowNode(node) &&
         node.class_type === 'ImageResizeKJv2' &&
-        typeof node.inputs?.width === 'number' &&
-        typeof node.inputs?.height === 'number',
+        inputNumber(node, 'width') !== undefined &&
+        inputNumber(node, 'height') !== undefined,
     )
 
     if (resizeEntry) {
@@ -390,8 +408,8 @@ export async function injectParameters(
     // persisted parameterMap. Detect their LoadImage node at generation time
     // so users do not have to remove and re-import those workflows.
     if (!inputImageMapping) {
-      const loadImageEntry = Object.entries(wf).find(
-        ([, node]) => isWorkflowNode(node) && node.class_type === 'LoadImage',
+      const loadImageEntry = apiNodes(wf).find(
+        ([, node]) => node.class_type === 'LoadImage',
       )
 
       if (loadImageEntry) {
@@ -411,20 +429,19 @@ export async function injectParameters(
 
     // A VHS_VideoCombine left on save_output:false writes the clip to
     // ComfyUI's temp folder, where the gallery cannot play it back.
-    for (const node of Object.values(wf)) {
-      if (isWorkflowNode(node) && node.class_type === 'VHS_VideoCombine' && node.inputs) {
+    for (const [, node] of apiNodes(wf)) {
+      if (node.class_type === 'VHS_VideoCombine' && node.inputs) {
         node.inputs.save_output = true
       }
     }
   }
 
-  log.info('[workflows] Injected workflow nodes', { nodes: Object.entries(wf).map(([id, n]: [string, any]) =>
+  log.info('[workflows] Injected workflow nodes', { nodes: apiNodes(wf).map(([id, n]) =>
     `${id}: ${n.class_type} (${Object.keys(n.inputs || {}).join(', ')})`
   ).join(' | ') })
 
   // Auto-resolve VAE and CLIP loaders with real model files
-  for (const node of Object.values(wf)) {
-    if (!isWorkflowNode(node)) continue
+  for (const [, node] of apiNodes(wf)) {
     const ct = node.class_type
     try {
       if (ct === 'VAELoader' && node.inputs) {
@@ -449,10 +466,8 @@ export async function injectParameters(
 
 // ─── Detect workflow mode ───
 
-function detectWorkflowMode(workflow: Record<string, any>): 'image' | 'video' | 'both' {
-  const classTypes = Object.values(workflow)
-    .filter((n) => n && typeof n === 'object')
-    .map((n) => n.class_type as string)
+function detectWorkflowMode(workflow: ComfyApiGraph): 'image' | 'video' | 'both' {
+  const classTypes = apiNodes(workflow).map(([, n]) => n.class_type)
 
   const hasVideo = classTypes.some((ct) =>
     ['EmptyHunyuanLatentVideo', 'ADE_LoadAnimateDiffModel', 'VHS_VideoCombine', 'SaveAnimatedWEBP'].includes(ct)
@@ -468,10 +483,8 @@ function detectWorkflowMode(workflow: Record<string, any>): 'image' | 'video' | 
 
 // ─── Detect compatible model types from workflow ───
 
-function detectModelTypes(workflow: Record<string, any>): ModelType[] {
-  const classTypes = Object.values(workflow)
-    .filter((n) => n && typeof n === 'object')
-    .map((n) => n.class_type as string)
+function detectModelTypes(workflow: ComfyApiGraph): ModelType[] {
+  const classTypes = apiNodes(workflow).map(([, n]) => n.class_type)
 
   const types: ModelType[] = []
 
@@ -498,7 +511,7 @@ function detectModelTypes(workflow: Record<string, any>): ModelType[] {
 
 // ─── Fetch workflow from URL (supports JSON and ZIP) ───
 
-export async function fetchWorkflowFromUrl(url: string, apiKey?: string): Promise<Record<string, any>> {
+export async function fetchWorkflowFromUrl(url: string, apiKey?: string): Promise<ComfyApiGraph> {
   // Append CivitAI API key if provided and URL is from CivitAI (any host —
   // civitai.com or a mirror like civitai.red, GitHub #53).
   let finalUrl = url
@@ -561,47 +574,38 @@ export async function fetchWorkflowFromUrl(url: string, apiKey?: string): Promis
   throw new Error('Invalid workflow format. Expected ComfyUI API or web format.')
 }
 
-// Try to extract a valid API-format workflow from various JSON structures
-function resolveWorkflowJson(json: any): Record<string, any> | null {
-  if (!json || typeof json !== 'object') return null
+/**
+ * Try to extract a valid API-format workflow from the various JSON structures
+ * a downloaded or exported ComfyUI file can be wrapped in. `json` is whatever
+ * `JSON.parse` produced, so every branch narrows before it reads.
+ */
+function resolveWorkflowJson(json: unknown): ComfyApiGraph | null {
+  if (!json || typeof json !== 'object' || Array.isArray(json)) return null
 
   // Direct API format
-  if (isApiFormat(json)) return json
+  if (isComfyApiGraph(json)) return json
 
   // Web/UI format → convert
-  if (isWebFormat(json)) return convertWebToApiFormat(json)
+  if (isComfyWebGraph(json)) return convertWebToApiFormat(json)
 
-  // Wrapped in "prompt" or "workflow" key
+  // Wrapped in "prompt" / "workflow" / "output". The ComfyUI export wrapper
+  // `{ extra: {...}, prompt: {...} }` is the same 'prompt' branch — it used to
+  // have its own line that additionally demanded `extra`, i.e. a strict subset.
   for (const key of ['prompt', 'workflow', 'output']) {
-    if (json[key]) {
-      if (isApiFormat(json[key])) return json[key]
-      if (isWebFormat(json[key])) return convertWebToApiFormat(json[key])
-    }
+    const inner = prop(json, key)
+    if (!inner) continue
+    if (isComfyApiGraph(inner)) return inner
+    if (isComfyWebGraph(inner)) return convertWebToApiFormat(inner)
   }
 
-  // Extra wrapper from ComfyUI export: { "extra": {...}, "prompt": {...} }
-  if (json.extra && json.prompt && isApiFormat(json.prompt)) return json.prompt
-
   return null
-}
-
-function isApiFormat(obj: any): boolean {
-  if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return false
-  return Object.values(obj).some(
-    (node: any) => node && typeof node === 'object' && typeof node.class_type === 'string'
-  )
-}
-
-function isWebFormat(obj: any): boolean {
-  if (!obj || typeof obj !== 'object') return false
-  return Array.isArray(obj.nodes) && obj.nodes.some((n: any) => n && typeof n.type === 'string')
 }
 
 // ─── Parse imported workflow into a template ───
 
 export function parseImportedWorkflow(
   name: string,
-  workflow: Record<string, any>,
+  workflow: ComfyApiGraph,
   source: WorkflowSource = 'manual',
   sourceUrl?: string,
   description?: string,

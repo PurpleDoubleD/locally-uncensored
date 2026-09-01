@@ -14,17 +14,25 @@ import { MCPExternalClient } from '../external-client'
 import type { MCPServerConfig } from '../types'
 
 class Emitter {
-  private handlers: Record<string, ((data: any) => void)[]> = {}
-  on(event: string, fn: (data: any) => void) {
+  private handlers: Record<string, ((data: string) => void)[]> = {}
+  on(event: string, fn: (data: string) => void) {
     ;(this.handlers[event] ||= []).push(fn)
   }
-  emit(event: string, data?: any) {
+  emit(event: string, data = '') {
     for (const fn of this.handlers[event] || []) fn(data)
   }
 }
 
+/** One JSON-RPC request line as the fake server sees it. */
+interface FakeRequest {
+  jsonrpc?: string
+  id?: number
+  method?: string
+  params?: { arguments?: Record<string, unknown> }
+}
+
 /** Server behaviour a single test wants: id/method → response line. */
-type Responder = (req: any) => string | null
+type Responder = (req: FakeRequest) => string | null
 
 let lastServer: FakeServer | null = null
 let killCount = 0
@@ -104,7 +112,7 @@ const goodServer: Responder = (req) => {
     return JSON.stringify({
       jsonrpc: '2.0',
       id: req.id,
-      result: { content: [{ type: 'text', text: `sunny in ${req.params.arguments.city}` }] },
+      result: { content: [{ type: 'text', text: `sunny in ${String(req.params?.arguments?.city)}` }] },
     })
   }
   return null
@@ -162,6 +170,54 @@ describe('connecting to an external server', () => {
     responder = (req) => JSON.stringify({ jsonrpc: '2.0', id: req.id, error: { code: -32602, message: 'unknown city' } })
 
     await expect(client.callTool('get_forecast', { city: 'Atlantis' })).rejects.toThrow('unknown city')
+  })
+
+  /**
+   * A server that does not follow JSON-RPC still FAILED, and the only wrong
+   * answer is to call it a success.
+   *
+   * `if (response.error)` was true for any truthy value, so a bare-string error
+   * was at least rejected (with an unusable `Error: undefined`). Narrowing the
+   * field to a record turned exactly those lines into `resolve(undefined)` —
+   * the model was told the tool had run. The rule pinned here: any PRESENT
+   * error rejects, and the server's own text is what comes out.
+   */
+  it('rejects when `error` is a bare string, not a record', async () => {
+    const client = new MCPExternalClient(config)
+    await client.connect()
+    responder = (req) => JSON.stringify({ jsonrpc: '2.0', id: req.id, error: 'server exploded' })
+
+    await expect(client.callTool('get_forecast', { city: 'Atlantis' })).rejects.toThrow('server exploded')
+  })
+
+  it('rejects when `error` is a non-string primitive', async () => {
+    const client = new MCPExternalClient(config)
+    await client.connect()
+    responder = (req) => JSON.stringify({ jsonrpc: '2.0', id: req.id, error: 500 })
+
+    await expect(client.callTool('get_forecast', { city: 'Atlantis' })).rejects.toThrow('500')
+  })
+
+  it('rejects when `error` is a record without a message, naming what came back', async () => {
+    const client = new MCPExternalClient(config)
+    await client.connect()
+    responder = (req) => JSON.stringify({ jsonrpc: '2.0', id: req.id, error: { code: -32601 } })
+
+    await expect(client.callTool('get_forecast', { city: 'Atlantis' })).rejects.toThrow('-32601')
+  })
+
+  it('NEGATIVE CONTROL: `error: null` is not an error — the result still resolves', async () => {
+    const client = new MCPExternalClient(config)
+    await client.connect()
+    responder = (req) =>
+      JSON.stringify({
+        jsonrpc: '2.0',
+        id: req.id,
+        error: null,
+        result: { content: [{ type: 'text', text: 'still fine' }] },
+      })
+
+    expect(await client.callTool('get_forecast', { city: 'Berlin' })).toBe('still fine')
   })
 
   it('refuses to call a tool before connecting', async () => {

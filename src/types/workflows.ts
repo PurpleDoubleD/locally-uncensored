@@ -1,4 +1,5 @@
 import type { ModelType } from '../api/comfyui'
+import type { ComfyApiGraph } from './comfy-graph'
 
 export type WorkflowSource = 'civitai' | 'manual'
 
@@ -46,7 +47,7 @@ export interface WorkflowTemplate {
   sourceUrl?: string
   modelTypes: ModelType[]
   mode: 'image' | 'video' | 'both'
-  workflow: Record<string, any>
+  workflow: ComfyApiGraph
   parameterMap: ParameterMap
   installedAt: number
   thumbnailUrl?: string
@@ -61,5 +62,5 @@ export interface WorkflowSearchResult {
   modelTypes: ModelType[]
   mode: 'image' | 'video' | 'both'
   downloadUrl?: string
-  rawWorkflow?: Record<string, any>
+  rawWorkflow?: ComfyApiGraph
 }

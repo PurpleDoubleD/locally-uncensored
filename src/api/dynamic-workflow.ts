@@ -9,7 +9,44 @@ import {
   detectAvailableModels,
   type CategorizedNodes,
   type AvailableModels,
+  type NodeMetadata,
 } from './comfyui-nodes'
+import type { ComfyApiGraph, ComfyInputValue, ComfyNodeInputs } from '../types/comfy-graph'
+
+/**
+ * The `/object_info` node table as the LANE builders use it: they only ever ask
+ * whether a node class is installed, never what its schema says, so a presence
+ * map is the honest parameter type. `buildDynamicWorkflow` itself keeps the
+ * full `Record<string, NodeMetadata>` from getAllNodeInfo(), because it does
+ * read schemas (RMBG, the I2V conditioning node, LoraLoader's combo).
+ */
+type NodePresence = Record<string, unknown>
+
+/**
+ * Split one `/object_info` input spec into the two halves every caller wants.
+ *
+ * ComfyUI writes a spec as `[typeName, config]` (current) or `[[options]]`
+ * (legacy combo). Neither half is guaranteed, and a custom node can put
+ * anything there, so both come back optional. Combo OPTIONS are not read here
+ * — `readComboOptions` is the single reader that knows all three shapes.
+ */
+function specParts(spec: ComfyInputValue | undefined): {
+  typeName?: string
+  config?: { [k: string]: ComfyInputValue }
+} {
+  if (!Array.isArray(spec)) return {}
+  const head = spec[0]
+  const cfg = spec[1]
+  return {
+    typeName: typeof head === 'string' ? head : undefined,
+    config: typeof cfg === 'object' && cfg !== null && !Array.isArray(cfg) ? cfg : undefined,
+  }
+}
+
+/** The `default` a widget spec declares, or undefined when it declares none. */
+function specDefault(spec: ComfyInputValue | undefined): ComfyInputValue | undefined {
+  return specParts(spec).config?.default
+}
 
 // promptFilenamePrefix und videoDecodeNode wohnen in comfyui-graph.ts (siehe
 // dort). Re-Export, damit bestehende Importpfade unverändert bleiben.
@@ -348,7 +385,7 @@ function resolveOneLora(req: string, installed: string[]): string | null {
 export async function buildDynamicWorkflow(
   params: GenerateParams | VideoParams,
   modelType?: ModelType,
-): Promise<Record<string, any>> {
+): Promise<ComfyApiGraph> {
   const type = modelType || classifyModel(params.model)
   const isVideo = 'frames' in params
   const videoParams = params as VideoParams
@@ -411,7 +448,7 @@ export async function buildDynamicWorkflow(
 
   // ─── Standard Strategies (UNET/Checkpoint → CLIP → Latent → KSampler → VAEDecode) ───
 
-  const workflow: Record<string, any> = {}
+  const workflow: ComfyApiGraph = {}
   let n = 1 // node counter
 
   // ─── Phase 1: Model Loading ───
@@ -852,10 +889,10 @@ export async function buildDynamicWorkflow(
     }
     const loadId = String(n++)
     workflow[loadId] = { class_type: 'LoadImage', inputs: { image: (params as GenerateParams).inputImage } }
-    const required = (meta.input?.required ?? {}) as Record<string, any[]>
-    const optional = (meta.input?.optional ?? {}) as Record<string, any[]>
+    const required = meta.input?.required ?? {}
+    const optional = meta.input?.optional ?? {}
     const decl = { ...required, ...optional }
-    const inputs: Record<string, any> = {}
+    const inputs: ComfyNodeInputs = {}
     if (decl.positive) inputs.positive = positiveRef
     if (decl.negative) inputs.negative = negativeRef
     if (decl.vae) inputs.vae = [vaeSourceId, vaeOutputSlot]
@@ -874,7 +911,10 @@ export async function buildDynamicWorkflow(
       if (inputs[key] !== undefined) continue
       const combo = readComboOptions(spec)
       if (combo && combo.length) inputs[key] = combo[0]
-      else if (spec[1] && typeof spec[1] === 'object' && 'default' in spec[1]) inputs[key] = spec[1].default
+      else {
+        const dflt = specDefault(spec)
+        if (dflt !== undefined) inputs[key] = dflt
+      }
     }
     const i2vId = String(n++)
     workflow[i2vId] = { class_type: i2vNode, inputs, _meta: { title: 'I2V conditioning' } }
@@ -990,8 +1030,8 @@ export async function buildDynamicWorkflow(
 // (`rmbgMeta`) so the graph stays valid across RMBG versions instead of pinning
 // input names/enums we'd have to guess. The `background` widget is nudged toward
 // a transparent/alpha option so the result is a real RGBA cutout, not a matte.
-function buildRemoveBgWorkflow(params: GenerateParams, rmbgMeta: any): Record<string, any> {
-  const workflow: Record<string, any> = {}
+function buildRemoveBgWorkflow(params: GenerateParams, rmbgMeta: NodeMetadata): ComfyApiGraph {
+  const workflow: ComfyApiGraph = {}
   workflow['1'] = { class_type: 'LoadImage', inputs: { image: params.inputImage } }
 
   // Fill BOTH required AND optional widgets from the live schema. ComfyUI-RMBG
@@ -999,9 +1039,9 @@ function buildRemoveBgWorkflow(params: GenerateParams, rmbgMeta: any): Record<st
   // in INPUT_TYPES but its Python reads them as plain kwargs, so omitting them
   // throws "Error in batch processing: 'process_res' (RMBG)". Defaulting every
   // widget from object_info keeps the graph valid across RMBG versions.
-  const required: Record<string, any> = rmbgMeta?.input?.required ?? {}
-  const optional: Record<string, any> = rmbgMeta?.input?.optional ?? {}
-  const rmbgInputs: Record<string, any> = { image: ['1', 0] }
+  const required = rmbgMeta.input?.required ?? {}
+  const optional = rmbgMeta.input?.optional ?? {}
+  const rmbgInputs: ComfyNodeInputs = { image: ['1', 0] }
   for (const [name, spec] of Object.entries({ ...required, ...optional })) {
     if (name === 'image') continue
     const d = rmbgWidgetDefault(name, spec)
@@ -1023,9 +1063,13 @@ function buildRemoveBgWorkflow(params: GenerateParams, rmbgMeta: any): Record<st
 // declared default / first entry. Primitives → their declared default. A
 // non-widget connection input (some other IMAGE/MASK) can't be auto-wired, so
 // skip it — ComfyUI surfaces a clear error rather than us guessing wrong.
-function rmbgWidgetDefault(name: string, spec: any): { set: boolean; value?: any } {
-  const t = Array.isArray(spec) ? spec[0] : spec
-  const cfg = Array.isArray(spec) ? spec[1] : undefined
+function rmbgWidgetDefault(
+  name: string,
+  spec: ComfyInputValue | undefined,
+): { set: boolean; value?: ComfyInputValue } {
+  const { typeName, config: cfg } = specParts(spec)
+  // A bare (non-array) spec is its own type marker — RMBG has shipped both.
+  const t = typeName ?? (Array.isArray(spec) ? undefined : spec)
   // Both dropdown schemas, through the shared reader: a node that declares its
   // combos the newer way (["COMBO", {options: [...]}]) used to fall through to
   // "not a widget" here, and RMBG then rejected the graph for the missing
@@ -1045,7 +1089,7 @@ function rmbgWidgetDefault(name: string, spec: any): { set: boolean; value?: any
 }
 
 
-function addVideoOutput(workflow: Record<string, any>, n: number, decodeId: string, fps: number, nodes: CategorizedNodes, prompt?: string): number {
+function addVideoOutput(workflow: ComfyApiGraph, n: number, decodeId: string, fps: number, nodes: CategorizedNodes, prompt?: string): number {
   const saveId = String(n++)
   const prefix = promptFilenamePrefix(prompt, true)
   if (nodes.videoSavers.includes('VHS_VideoCombine')) {
@@ -1074,8 +1118,8 @@ function addVideoOutput(workflow: Record<string, any>, n: number, decodeId: stri
 // known-wrong graph around invites someone to just reopen the gate. Git history
 // has it if the lane is ever rebuilt, which needs a real generate to land.
 
-function buildSVDWorkflow(params: VideoParams, seed: number, nodes: CategorizedNodes): Record<string, any> {
-  const workflow: Record<string, any> = {}
+function buildSVDWorkflow(params: VideoParams, seed: number, nodes: CategorizedNodes): ComfyApiGraph {
+  const workflow: ComfyApiGraph = {}
   let n = 1
 
   const loaderId = String(n++)
@@ -1142,8 +1186,8 @@ export function snapWanLength(frames: number): number {
  * the source into the generation size, so the first frame matches the still
  * instead of being squished — the same fix proven on the SVD path.
  */
-function buildWan22Workflow(params: VideoParams, seed: number, nodes: CategorizedNodes, allNodes: Record<string, any>): Record<string, any> {
-  const workflow: Record<string, any> = {}
+function buildWan22Workflow(params: VideoParams, seed: number, nodes: CategorizedNodes, allNodes: NodePresence): ComfyApiGraph {
+  const workflow: ComfyApiGraph = {}
   let n = 1
 
   // Wan 2.2 dims snap to 32 (VAE spatial grid); length to 4k+1 (temporal stride 4).
@@ -1187,7 +1231,7 @@ function buildWan22Workflow(params: VideoParams, seed: number, nodes: Categorize
   workflow[shiftId] = { class_type: 'ModelSamplingSD3', inputs: { model: [wanModelSrc, 0], shift: 8.0 } }
 
   // Unified latent: a start_image is attached ONLY for an I2V request.
-  const latentInputs: Record<string, any> = { vae: [vaeId, 0], width, height, length, batch_size: 1 }
+  const latentInputs: ComfyNodeInputs = { vae: [vaeId, 0], width, height, length, batch_size: 1 }
   if (params.inputImage) {
     const imageId = String(n++)
     const scaleId = String(n++)
@@ -1248,7 +1292,7 @@ export interface LocalOpParams {
 const UPDATE_COMFY_HINT =
   'Update ComfyUI (Settings, AI Backends, Update ComfyUI), restart it, then generate again.'
 
-function requireNodes(allNodes: Record<string, any>, needed: string[], lane: string): void {
+function requireNodes(allNodes: NodePresence, needed: string[], lane: string): void {
   const missing = needed.filter((n) => !allNodes[n])
   if (missing.length > 0) {
     throw new WorkflowUnavailableError(
@@ -1260,7 +1304,7 @@ function requireNodes(allNodes: Record<string, any>, needed: string[], lane: str
 
 /** UNET loader that understands GGUF quants: .gguf files load through the
  *  city96 GGUF pack's UnetLoaderGGUF, everything else through core UNETLoader. */
-function addUnetLoader(workflow: Record<string, any>, id: string, model: string, allNodes: Record<string, any>): void {
+function addUnetLoader(workflow: ComfyApiGraph, id: string, model: string, allNodes: NodePresence): void {
   if (model.toLowerCase().endsWith('.gguf')) {
     if (!allNodes['UnetLoaderGGUF']) {
       throw new WorkflowUnavailableError(
@@ -1281,17 +1325,17 @@ function addUnetLoader(workflow: Record<string, any>, id: string, model: string,
  *  nodes (same family as the lanes themselves — present on any core new
  *  enough to run them). */
 function addVideoWithAudioOutput(
-  workflow: Record<string, any>,
+  workflow: ComfyApiGraph,
   n: number,
   decodeId: string,
   fps: number,
   audioSrc: [string, number] | null,
-  allNodes: Record<string, any>,
+  allNodes: NodePresence,
   prompt?: string,
 ): number {
   requireNodes(allNodes, ['CreateVideo', 'SaveVideo'], 'This video output')
   const createId = String(n++)
-  const inputs: Record<string, any> = { images: [decodeId, 0], fps }
+  const inputs: ComfyNodeInputs = { images: [decodeId, 0], fps }
   if (audioSrc) inputs.audio = audioSrc
   workflow[createId] = { class_type: 'CreateVideo', inputs }
   const saveId = String(n++)
@@ -1310,8 +1354,8 @@ function addVideoWithAudioOutput(
  * the negative prompt (cheap), 1.5 zero-outs the positive instead — its
  * encoder runs an LLM pass that would double the cost for no benefit.
  */
-export function buildMusicWorkflow(params: LocalOpParams, seed: number, allNodes: Record<string, any>): Record<string, any> {
-  const workflow: Record<string, any> = {}
+export function buildMusicWorkflow(params: LocalOpParams, seed: number, allNodes: NodePresence): ComfyApiGraph {
+  const workflow: ComfyApiGraph = {}
   let n = 1
   const isAce15 = /1[._-]?5/.test(params.model.toLowerCase().replace(/\.safetensors$/, '').replace(/^.*ace[_-]?step/, ''))
   const encodeNode = isAce15 ? 'TextEncodeAceStepAudio1.5' : 'TextEncodeAceStepAudio'
@@ -1388,8 +1432,8 @@ export function buildMusicWorkflow(params: LocalOpParams, seed: number, allNodes
  * a silent talking-head clip is useless. Uses the Wan 2.1 VAE + UMT5 encoder
  * (the S2V-14B pairing from the official release).
  */
-export function buildS2VWorkflow(params: LocalOpParams, seed: number, allNodes: Record<string, any>): Record<string, any> {
-  const workflow: Record<string, any> = {}
+export function buildS2VWorkflow(params: LocalOpParams, seed: number, allNodes: NodePresence): ComfyApiGraph {
+  const workflow: ComfyApiGraph = {}
   let n = 1
   requireNodes(
     allNodes,
@@ -1462,8 +1506,8 @@ export function buildS2VWorkflow(params: LocalOpParams, seed: number, allNodes: 
  * onnxruntime path works on every Windows box, no GPU wheel roulette).
  * The driving clip's own audio is carried over into the result.
  */
-export function buildMotionWorkflow(params: LocalOpParams, seed: number, allNodes: Record<string, any>): Record<string, any> {
-  const workflow: Record<string, any> = {}
+export function buildMotionWorkflow(params: LocalOpParams, seed: number, allNodes: NodePresence): ComfyApiGraph {
+  const workflow: ComfyApiGraph = {}
   let n = 1
   requireNodes(allNodes, ['LoadVideo', 'GetVideoComponents'], 'Motion control')
   if (!allNodes['DWPreprocessor']) {
@@ -1559,7 +1603,7 @@ export function buildMotionWorkflow(params: LocalOpParams, seed: number, allNode
 
 /** Entry point for the specialized local lanes — fetches the live node
  *  catalogue once and dispatches to the lane's builder. */
-export async function buildLocalOpWorkflow(params: LocalOpParams): Promise<Record<string, any>> {
+export async function buildLocalOpWorkflow(params: LocalOpParams): Promise<ComfyApiGraph> {
   const allNodes = await getAllNodeInfo()
   const seed = resolveRunSeed(params.seed)
   switch (params.op) {
@@ -1569,8 +1613,8 @@ export async function buildLocalOpWorkflow(params: LocalOpParams): Promise<Recor
   }
 }
 
-async function buildFramePackWorkflow(params: VideoParams, seed: number, nodes: CategorizedNodes): Promise<Record<string, any>> {
-  const workflow: Record<string, any> = {}
+async function buildFramePackWorkflow(params: VideoParams, seed: number, nodes: CategorizedNodes): Promise<ComfyApiGraph> {
+  const workflow: ComfyApiGraph = {}
   let n = 1
 
   const modelId = String(n++)

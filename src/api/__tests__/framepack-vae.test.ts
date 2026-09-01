@@ -110,16 +110,19 @@ describe('the built FramePack graph', () => {
 
   it('loads the 1.0 VAE, and both the encode and the decode read that one node', async () => {
     const wf = await buildDynamicWorkflow(params as never)
-    const vaeNodes = Object.entries(wf).filter(([, v]) => (v as { class_type: string }).class_type === 'VAELoader')
+    // buildDynamicWorkflow returns a typed ComfyApiGraph now, so these read
+    // real fields instead of casting each node back into a hand-written shape.
+    const vaeNodes = Object.entries(wf).filter(([, v]) => v.class_type === 'VAELoader')
     expect(vaeNodes).toHaveLength(1)
     const [vaeId, vaeNode] = vaeNodes[0]
-    expect((vaeNode as { inputs: { vae_name: string } }).inputs.vae_name).toBe(VAE_10)
+    expect(vaeNode.inputs?.vae_name).toBe(VAE_10)
 
     // One VAE for the whole graph: encoding the start frame with a different
     // VAE than the decode uses would be the same channel mismatch, one node on.
     for (const cls of ['VAEEncode', 'VAEDecode', 'VAEDecodeTiled']) {
-      for (const [, node] of Object.entries(wf).filter(([, v]) => (v as { class_type: string }).class_type === cls)) {
-        expect((node as { inputs: { vae: [string, number] } }).inputs.vae[0]).toBe(vaeId)
+      for (const [, node] of Object.entries(wf).filter(([, v]) => v.class_type === cls)) {
+        const vae = node.inputs?.vae
+        expect(Array.isArray(vae) && vae[0]).toBe(vaeId)
       }
     }
   })

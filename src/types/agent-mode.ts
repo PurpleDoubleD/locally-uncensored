@@ -33,10 +33,17 @@ export interface OllamaTool {
   function: {
     name: string
     description: string
+    /**
+     * The registry copies `MCPToolDefinition.inputSchema` in here verbatim
+     * (tool-registry.toOllamaTools), so the property map carries the same
+     * JSONSchemaProp shape rather than an untyped bag — which is what let the
+     * Hermes prompt builder be handed this object behind an `as any`.
+     */
     parameters: {
       type: 'object'
-      properties: Record<string, any>
+      properties: Record<string, JSONSchemaProp>
       required: string[]
+      additionalProperties?: boolean
     }
   }
 }

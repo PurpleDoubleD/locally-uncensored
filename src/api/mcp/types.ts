@@ -67,3 +67,14 @@ export interface MCPServerConfig {
   env?: Record<string, string>
   enabled: boolean
 }
+
+/**
+ * The argument object a tool executor receives.
+ *
+ * These values come from the MODEL, not from us: a JSON object the LLM emitted
+ * (or a retried/repaired variant of it). Nothing about the declared
+ * `inputSchema` is enforced before the executor runs, so every field is
+ * genuinely of unknown type until the executor checks it — which is exactly
+ * what `unknown` says and what `any` used to hide.
+ */
+export type ToolArgs = Record<string, unknown>

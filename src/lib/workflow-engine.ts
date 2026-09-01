@@ -22,6 +22,7 @@ import { useMemoryStore } from '../stores/memoryStore'
 // verbliebenen Aufrufer bestehen.
 import { toolRegistry } from '../api/mcp/tool-registry'
 import { DEFAULT_PERMISSIONS } from '../api/mcp/types'
+import type { ToolArgs } from '../api/mcp/types'
 import { streamProviderTurn } from './provider-stream'
 import { settleThinking } from './thinking-stripper'
 import { buildHermesToolPrompt, parseHermesToolCalls, stripToolCallTags, hasToolCallTags } from '../api/hermes-tool-calling'
@@ -275,7 +276,12 @@ export class WorkflowEngine {
       } else {
         // Hermes XML
         const hermesSystem = buildHermesToolPrompt(
-          allowedTools.map(t => ({ name: t.function.name, description: t.function.description, parameters: t.function.parameters as any, permission: 'auto' as const }))
+          allowedTools.map(t => ({
+            name: t.function.name,
+            description: t.function.description,
+            parameters: t.function.parameters,
+            permission: 'auto' as const,
+          }))
         )
         const hermesMessages = [{ role: 'system' as const, content: hermesSystem }, ...messages]
         // G32b: through the provider, not Ollama's /api/chat. hermes_xml is
@@ -330,7 +336,7 @@ export class WorkflowEngine {
     if (!step.toolName) throw new Error('Tool step missing toolName')
 
     // Build args from static + templates
-    const args: Record<string, any> = { ...(step.toolArgs || {}) }
+    const args: ToolArgs = { ...(step.toolArgs || {}) }
     if (step.toolArgTemplates) {
       for (const [key, template] of Object.entries(step.toolArgTemplates)) {
         args[key] = interpolate(template, this.variables)
