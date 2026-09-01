@@ -701,3 +701,90 @@ damit den Status von `tail` protokolliert, nicht den von `cargo`. Das Log
 sagte `exit=0`, während der Build in Wahrheit gescheitert war. Ein grünes
 Ergebnis, das gar nichts gemessen hat — genau die Form von Fehler, die ich
 in dieser Sitzung bei anderen dreimal gesucht habe.
+
+## Dieselbe Tür, dreimal — und zwei Gates, die schwiegen
+
+Diese Runde hat vier Dinge gezeigt, die alle dieselbe Form haben: eine Regel
+existiert, sie ist an einer Stelle angewandt, und niemand hat nachgesehen, wo
+sie sonst noch hingehört.
+
+**Die Tür.** Eine `fs-write`-Anfrage ohne brauchbare Pfadangabe machte aus der
+Käfigwurzel eine Datei. Im Dev-Server gefunden, dort geschlossen. Beim
+Nachsehen stand dieselbe Tür im Rust-Code noch offen — also im ausgelieferten
+Build, nicht nur in der Entwicklungsumgebung. Und beim Nachsehen dort fand
+sich eine **dritte**: `agent.rs file_write`, die Tür, die das *Modell*
+aufruft. Dazu eine vierte, halbe: `remote.rs` prüft `path.is_empty()`, fängt
+damit `""`, aber nicht `"."` und nicht `"unterordner/.."`.
+
+Die Prüfung, die gefehlt hat, war die ganze Zeit da — `is_workspace_root_path`
+steht seit jeher in derselben Datei und wird von `fs_list` benutzt. Sie taugt
+allerdings nicht als Wächter, und das in **beide** Richtungen: sie verfehlt
+`"unterordner/.."`, und sie erfindet Treffer bei `"  "` und `".\"`, die auf
+gewöhnliche Dateien im Käfig auflösen. Wer sie ohne Messung genommen hätte,
+hätte das Loch offengelassen und zwei gültige Schreibvorgänge abgewiesen.
+
+Drei Ebenen, an denen dieselbe missgebildete Anfrage hätte auffallen können —
+beim Modellaufruf, im Dev-Server, im Rust-Weg — und sie fiel an keiner auf.
+
+**Die Gates.** Ich hatte in meiner Aufstellung *ein* stummes Gate geführt:
+Lint. Es waren zwei. Clippy stand ebenfalls auf `continue-on-error`, und
+dahinter lagen 78 Warnstellen und ein Fehler. Der Kommentar darüber nannte
+sogar die Zeile — nur die falsche (`secret.rs:108` statt `:173`). Beide sind
+jetzt bezahlt; Clippy ist scharf, Lint wartet auf die letzten Fehler in
+`src/components`.
+
+Unter den 78 waren zwei Klassen, die keine Stilfragen sind. Bei einer davon
+lag ich falsch: `MutexGuard` über `await` gehalten klingt nach Deadlock, steht
+hier aber in `#[cfg(test)]`-Code mit einer Current-Thread-Runtime. Es kostete
+einen geparkten Thread je wartendem Test, nicht mehr. Der Agent hat das
+gemessen statt meine Einordnung zu übernehmen.
+
+**Die Plattform.** Derselbe Quelltext: Mac 7929 grün, Windows 8 rot. Alles
+Pfadtrennzeichen — und überwiegend in den Wachen, die *ich* in dieser Sitzung
+als Beweismittel eingezogen habe. Ein Beweismittel, das nur auf einer
+Plattform funktioniert, ist ein halbes. Die Ursache war fünfmal dieselbe
+handkopierte Dateisuche mit einem `?? ''`-Rückfall: ein leerer String ist
+keine Fehlermeldung, sondern eine leere Datei, und ob daraus rot oder still
+grün wurde, entschied allein die Zusicherung dahinter.
+
+Dazu ein Lint-Unterschied, den ich zuerst falsch gedeutet habe. Mac 60,
+Windows 206 — ich schrieb „Plattformunterschied". Falsch: der Auslöser ist,
+**ob jemand vorher gebaut hat**. `eslint.config.js` schloss `src-tauri/target`
+nie aus, und dort liegt nach einem Release-Bau generiertes JavaScript. Das ist
+schlimmer als ein Plattformunterschied, weil es sich auf derselben Maschine
+ändert.
+
+**Die Grenze.** Beim Zerlegen von `useCodex.ts` kam heraus, was der Teststil
+dieses Projekts kostet: 35 Testdateien lesen die Datei als Quelltext und
+heften **174 ihrer 2643 Zeilen** fest. Jede Zerlegung, die eine davon bewegt,
+braucht Änderungen an 35 fremden Dateien. Der schärfste Fall baut die Regel im
+Test nach — „Mirrors the workDir-prepend block" — und heftet dann die Quelle
+an, wodurch genau die Auslagerung verboten ist, die den Nachbau überflüssig
+machen würde.
+
+Das ist kein Fehler, den man wegräumt. Es ist der Preis dafür, dass diese
+Wachen Zusicherungen festhalten, die kein Laufzeittest erreicht. Man muss ihn
+nur kennen, bevor man den Rest von W-T3 plant.
+
+### Und was ich selbst falsch gemacht habe
+
+Vier Dinge, weil sie zum Bild gehören.
+
+Ich habe behauptet, Space Grotesk deklariere einen fetten Schnitt, den es
+nicht besitzt, und `font-bold` sei still wirkungslos. Der Agent hat es mit
+genau der Gegenprobe widerlegt, die ich selbst verlangt hatte: eine Regel
+„eine Datei je Deklaration" hätte nicht drei, sondern alle 39 Blöcke
+angeschwärzt, weil Inter und JetBrains Mono dasselbe tun. Es sind Variable
+Fonts; im Fenster gemessen springt die Deckung um 17 %.
+
+Ich habe `cargo test | tail > log; echo $?` geschrieben und damit den Status
+von `tail` protokolliert. Das Log sagte grün, der Bau war rot.
+
+Ich habe `python3 -c` in doppelte Anführungszeichen gesetzt, worauf die Shell
+die Backticks im Text als Kommandos ausführte und durch Leerstrings ersetzte.
+Übrig blieb ein Satz „hat und nennt nicht".
+
+Und ich habe eine Mutationssonde gefahren, die eine mehrzeilige Aufrufstelle
+mittendurch geschnitten hat. Der Bau brach, `cargo test` gab keine
+Ergebniszeile aus, und die Sonde maß nichts. Aufgefallen ist es nur, weil ich
+auf die Zeile *nach* dem Ergebnis geschaut habe.
