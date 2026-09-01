@@ -270,14 +270,19 @@ vor dem Verlassen des Rechners).
 |---|---|---|---|
 | Typfehler | 118 | **0** | 0 |
 | Importzyklen | 11 (Audit: 9) | **0** | 0 |
-| Boot-Chunk | 2016 kB | **714 kB** | < 800 |
+| Boot-Chunk | 2016 kB | **732 kB** | < 800 |
 | `INEFFECTIVE_DYNAMIC_IMPORT` | 11 | **0** | 0 |
-| `react-hooks/*` | 47 | **2** | 0 |
-| eslint gesamt | 1040 | 995 | — |
-| vitest Mac | 5405 | **6729 / 0 rot** | — |
-| vitest Windows | 8 rot | **6729 / 0 rot** | — |
-| cargo test Mac | 438 | **714 / 0 rot** | — |
-| cargo test Windows | 15 rot | **692 / 0 rot** | — |
+| `react-hooks/*` | 47 | **0** | 0 |
+| eslint gesamt | 1040 | 948 | — |
+| `no-explicit-any` | 827 | 564 | < 100 |
+| vitest Mac | 5405 | **6755 / 0 rot / 3 übersprungen** | — |
+| vitest Windows | 8 rot | **6755 / 0 rot / 3 übersprungen** | — |
+| cargo test Mac | 438 | **729 / 0 rot / 3 ignoriert** | — |
+| cargo test Windows | 15 rot, 11 ignoriert | **715 / 0 rot / 3 ignoriert** | — |
+
+Die drei ignorierten Rust-Tests sind auf beiden Maschinen **dieselben** und
+plattformunabhängig opt-in (Cloud-Inferenz, Installer, Proxy) — es gibt keine
+Windows-Ausnahme mehr.
 
 Drei Gates sind neu und **durch eine Sonde als scharf belegt**, nicht nur
 eingehängt: `typecheck` (Sonde: absichtlicher Typfehler → Exit 2), `cycles`
@@ -288,19 +293,56 @@ der Typecheck monatelang gar nichts geprüft hat.
 
 ### Ehrlich offen
 
-- **2 `react-hooks`-Verstöße in `SettingsPage.tsx`.** Der Agent ist vor deren
-  Abschluss ausgestiegen. Sie stehen hier als Rest, statt stillgelegt im Code.
-- **8 Rust-Tests sind auf Windows `#[cfg_attr(windows, ignore)]`** (`state.rs`,
-  `engine.rs`, `bg_tasks.rs`) — sie starten `sh`, `sleep`, `ps`, `pwd`. Das ist
-  dieselbe Klasse, die auf der TS-Seite bereits gelöst ist (Git Bash statt
-  WSL-Stub). Für einen Teil davon ist der ehrliche Weg allerdings kein
-  erzwungener Unix-Test, sondern ein Windows-Gegenstück über das dort benutzte
-  Job Object.
+- **`no-explicit-any` steht bei 564**, Audit-Ziel < 100. Provider-Schicht und
+  MCP-/Workflow-Schicht sind durch; der Rest liegt in Komponenten, Stores und
+  den grossen Test-Fixtures.
 - **16 e2e-Tests sind flaky** — sie bestehen nur im Retry. **Nicht von uns:**
   am unveränderten Ausgangsstand `10bfa0d7` fallen dieselben Tests mit
   identischer Meldung um (in einem separaten Arbeitsbaum gegengeprüft). Der
   Lauf endet mit Exit 0, weil Playwright Retries zulässt; ohne `--retries=0`
   sieht man es nicht.
-- **`no-explicit-any` steht bei 827** (149 Dateien), Audit-Ziel ist < 100.
 - **Design-Welle 2**: 2 von 7 Posten erledigt (Modal-Bedienbarkeit,
   Motion/reduced-motion). Welle 3 unberührt.
+
+## tech(M1) — die Hintergrund-Shell ignorierte den Shell-Namen
+
+`shell_task_start_impl` verzweigte auf die **Plattform** und baute auf Windows
+immer PowerShells `-NoProfile -NonInteractive -Command`, gleich welche Shell der
+Aufrufer benannt hatte. Der Vordergrund-Zwilling in `shell.rs` leitete die Form
+seit jeher aus dem Shell-*Namen* ab. Dieselbe Verzweigung stand zweimal im Code;
+einer wurde repariert, der andere nicht.
+
+Beide rufen jetzt `shell::shell_argv(windows, shell, command)`. `windows` ist ein
+**Parameter** statt eines `cfg!` im Rumpf — nur so ist die Windows-Form vom Mac
+aus prüfbar, und genau die war für jeden Nicht-Windows-Lauf unsichtbar.
+
+**Auf Windows als echter Bug bewiesen** (Mutationssonde, 2026-09-01): mit dem
+alten Zweig wieder eingesetzt wird `cmd` mit `-NoProfile -NonInteractive
+-Command echo …` gestartet, cmd.exe ignoriert die Flags vollständig und fällt in
+die **interaktive Eingabeaufforderung** — es druckt seinen Banner und wartet. Das
+Kommando lief nie. Der Paritätstest fängt das mit genau dieser Ausgabe im
+Fehlertext. Auf dem Mac fällt bei derselben Sonde nur der Strukturteil um (dort
+sind alter und neuer Pfad für `sh` identisch) — der Verhaltensteil ist der
+Windows-Beweis, und er ist gefahren.
+
+## tech(M-any) — Provider-Schicht typisiert, 7 Fehler fielen dabei heraus
+
+Die Grenze zu den drei fremden HTTP-APIs lag hinter `Record<string, any>` und
+handgeschriebenen Interfaces, die auf `JSON.parse` nur **behauptet** wurden. Neu
+ist `src/api/providers/wire.ts`: ein abhängigkeitsfreies Blattmodul mit Prüfern
+für alles, was hereinkommt. Was wir *senden*, bekam dagegen echte Interfaces und
+keine Guards — `sendChat`/`applyThinking` löschen Felder dieser Bodies
+namentlich, unter `any` hätte ein Tippfehler darin kompiliert und die Anfrage
+wäre still mit dem gerade abgelehnten Parameter rausgegangen.
+
+Mitgefundene echte Fehler: `const p: string = toolArgs.path` war eine Behauptung
+über Modell-Ausgabe (`{"path": 42}` warf einen TypeError aus der Tool-Schleife);
+`safeParseArgs` prüfte nur im Reparatur-, nicht im Erfolgszweig; dieselbe Klasse
+in Anthropics `flushToolUseBlocks`; zwei Non-null-Assertions auf selbst als
+optional deklarierte Felder; fünf Fixtures bauten `id: 'builtin'` als
+`ProviderConfig`, obwohl das eine Preset- und keine Provider-ID ist.
+
+**Verifikationsgrenze, ehrlich:** diese sieben Funde sind gefixt, aber **nicht
+einzeln durch einen Regressionstest festgenagelt** — die bestehenden Tests
+bleiben grün, wenn man den Fix zurücknimmt. Das ist als eigener Auftrag
+nachgezogen.
