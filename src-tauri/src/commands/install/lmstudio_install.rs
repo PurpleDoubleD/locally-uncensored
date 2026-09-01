@@ -35,35 +35,52 @@ use super::CREATE_NO_WINDOW;
 /// SHA-256 of the LM Studio installer at [`LMSTUDIO_INSTALLER_URL`].
 ///
 /// That URL is version-pinned and immutable (`0.3.16-6`), so its bytes never
-/// change and a digest here would be an integrity guarantee for an executable
-/// LU runs with `/S`.
+/// change and this digest is an integrity guarantee for an executable LU runs
+/// with `/S`.
 ///
-/// It is `None`, and it has to stay `None` until somebody fills it with a
-/// digest they measured from that exact file. A guessed or mistyped value does
-/// not weaken the check — it breaks every Windows LM Studio install outright.
-/// This was written on a machine that could not fetch the file to measure it,
-/// so the honest state is "not pinned yet". Measuring it is one command on a
-/// box that has the installer:
+/// MEASURED, not copied. On a real Windows machine, 2026-09-01, from that exact
+/// URL:
 ///
 /// ```text
-/// certutil -hashfile LM-Studio-0.3.16-6-x64.exe SHA256
+/// BYTES     = 221768208     (delta to LMSTUDIO_INSTALLER_BYTES: 0)
+/// SHA256    = 4c49a4ae378b6c1ae36b6cb7fd73b295a80af44f3d5c3e1da63c530342327208
+/// SIGNATURE = Valid, CN=Element Labs Inc., O=Element Labs Inc., Brooklyn NY US
 /// ```
 ///
-/// The vendor publishes no checksum to copy instead: `<url>.sha256`,
-/// `.sha256sum`, `.SHA256`, `.checksum` and the directory index all answer 404
-/// (checked 2026-09-01). So the digest can only come from the file itself, and
-/// a digest measured over the same unauthenticated channel the app downloads
-/// through is trust-on-first-use: it pins against a LATER substitution at that
-/// URL, not against a download that was already tampered with.
+/// A guessed or mistyped value here would not weaken the check — it would break
+/// every Windows LM Studio install outright. So it stayed `None` until someone
+/// could measure it, and this is that measurement.
 ///
-/// Until then the size checks and the Authenticode check below are what stands
-/// between the user and an unverified executable.
+/// WHAT THIS DIGEST IS AND IS NOT. The vendor publishes no checksum to compare
+/// against: `<url>.sha256`, `.sha256sum`, `.SHA256`, `.checksum` and the
+/// directory index all answer 404 (checked 2026-09-01). The digest therefore
+/// comes from the file itself, fetched over the same unauthenticated channel
+/// the app downloads through — trust-on-first-use. It pins against a LATER
+/// substitution at that URL; it cannot prove the first download was clean.
+///
+/// What closes that gap is the Authenticode check below, and the two are not
+/// redundant. The signature was `Valid` and chains to a CA-issued Extended
+/// Validation certificate for Element Labs Inc., the company behind LM Studio —
+/// an anchor that does NOT run through the download channel. Digest and
+/// signature answer two different questions: "are these the bytes we saw" and
+/// "did the publisher sign them". Neither alone is the answer.
+///
+/// The exact size match is corroboration, not a third check: it was established
+/// months earlier from the vendor's own `content-length` header, over the same
+/// channel, and a same-length forgery would pass it.
+///
+/// MAINTENANCE DUTY. `LMSTUDIO_INSTALLER_URL`, this constant and
+/// `LMSTUDIO_INSTALLER_BYTES` move together or not at all. If LM Studio ever
+/// re-uploads different bytes at this version-pinned path, the install fails
+/// loudly instead of silently running new, unchecked bytes. That is the
+/// intended direction.
 ///
 /// Ollama's installer gets no pin at all and cannot: its URL
 /// (`ollama.com/download/OllamaSetup.exe`) always serves the current release,
 /// so its bytes change with every version. Signature + size is the whole
 /// answer available there.
-const LMSTUDIO_INSTALLER_SHA256: Option<&str> = None;
+const LMSTUDIO_INSTALLER_SHA256: Option<&str> =
+    Some("4c49a4ae378b6c1ae36b6cb7fd73b295a80af44f3d5c3e1da63c530342327208");
 
 /// Exact byte count of the file at [`LMSTUDIO_INSTALLER_URL`].
 ///
@@ -230,9 +247,10 @@ pub fn install_lmstudio(state: State<'_, AppState>) -> Result<serde_json::Value,
                         return;
                     }
 
-                    // OI-8: verified before it is executed. See
-                    // LMSTUDIO_INSTALLER_SHA256 for why the digest pin is not filled
-                    // in yet and what filling it in takes.
+                    // OI-8: verified before it is executed. Digest, exact size
+                    // and Authenticode all have to agree; see
+                    // LMSTUDIO_INSTALLER_SHA256 for what each of the three
+                    // actually proves and what none of them does.
                     if let Err(e) = verify_downloaded_installer(
                         &installer_path,
                         LMSTUDIO_INSTALLER_SHA256,
@@ -453,15 +471,25 @@ mod tests {
     }
 
     #[test]
-    fn the_lmstudio_pin_is_either_absent_or_a_real_sha256() {
-        // Guard rail for whoever fills LMSTUDIO_INSTALLER_SHA256 in: a
-        // half-typed or truncated value there breaks every Windows install,
-        // and the failure would only ever show up on Windows.
-        if let Some(pin) = LMSTUDIO_INSTALLER_SHA256 {
-            let clean: String = pin.chars().filter(|c| !c.is_whitespace()).collect();
-            assert_eq!(clean.len(), 64, "pinned digest is not 64 hex chars: {pin}");
-            assert!(clean.chars().all(|c| c.is_ascii_hexdigit()), "not hex: {pin}");
-        }
+    fn the_lmstudio_digest_is_pinned_and_is_a_real_sha256() {
+        // Two assertions, and the first one is the one that changed.
+        //
+        // While the pin was `None` this test could only say "if there is a
+        // value, it looks like a digest" — it was a guard rail for whoever
+        // would fill it in. The value is filled in now (measured on a real
+        // Windows machine, 2026-09-01), so the test says the stronger thing:
+        // it has to STAY filled in. Dropping it back to `None` would silently
+        // downgrade an executed installer to size-plus-signature, and nobody
+        // running on macOS would notice — this whole path is Windows-only.
+        //
+        // The second assertion is the original guard rail and still earns its
+        // place: a half-typed or truncated digest breaks every Windows install
+        // outright, and that failure, too, would only ever show up on Windows.
+        let pin = LMSTUDIO_INSTALLER_SHA256
+            .expect("the digest pin was removed — see the constant's doc comment");
+        let clean: String = pin.chars().filter(|c| !c.is_whitespace()).collect();
+        assert_eq!(clean.len(), 64, "pinned digest is not 64 hex chars: {pin}");
+        assert!(clean.chars().all(|c| c.is_ascii_hexdigit()), "not hex: {pin}");
     }
 
 }
