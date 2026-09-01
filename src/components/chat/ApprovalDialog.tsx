@@ -2,6 +2,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { useState } from 'react'
 import { ChevronDown } from 'lucide-react'
 import type { AgentToolCall } from '../../types/agent-mode'
+import { MOTION_S } from '../ui/motion'
 
 interface Props {
   toolCall: AgentToolCall
@@ -36,14 +37,14 @@ export function ApprovalDialog({ toolCall, onApprove, onReject }: Props) {
         initial={{ opacity: 0, y: 4 }}
         animate={{ opacity: 1, y: 0 }}
         exit={{ opacity: 0, y: 4 }}
-        transition={{ duration: 0.12 }}
+        transition={{ duration: MOTION_S.fast }}
         className="mb-1.5 rounded-md border border-gray-200 dark:border-white/[0.08] bg-gray-50 dark:bg-white/[0.025] overflow-hidden"
       >
         <div className="flex items-center gap-2 px-2.5 py-1.5">
           <span className="text-[0.55rem] uppercase tracking-wider text-gray-500 dark:text-gray-500 font-medium">
             Approve
           </span>
-          <code className="text-[0.65rem] text-gray-700 dark:text-gray-300 font-medium truncate flex-1 min-w-0">
+          <code className="t-micro text-gray-700 dark:text-gray-300 font-medium truncate flex-1 min-w-0">
             {toolCall.toolName}
           </code>
           <button
@@ -59,13 +60,13 @@ export function ApprovalDialog({ toolCall, onApprove, onReject }: Props) {
           <div className="shrink-0 flex items-center gap-1 ml-1">
             <button
               onClick={onReject}
-              className="px-2 py-0.5 rounded text-[0.6rem] text-gray-600 dark:text-gray-400 hover:bg-black/5 dark:hover:bg-white/5 border border-gray-200 dark:border-white/10 transition-colors"
+              className="px-2 py-0.5 rounded t-micro text-gray-600 dark:text-gray-400 hover:bg-black/5 dark:hover:bg-white/5 border border-gray-200 dark:border-white/10 transition-colors"
             >
               Reject
             </button>
             <button
               onClick={onApprove}
-              className="px-2 py-0.5 rounded text-[0.6rem] text-gray-800 dark:text-gray-100 bg-gray-100 dark:bg-white/10 hover:bg-gray-200 dark:hover:bg-white/15 border border-gray-300 dark:border-white/15 transition-colors font-medium"
+              className="px-2 py-0.5 rounded t-micro text-gray-800 dark:text-gray-100 bg-gray-100 dark:bg-white/10 hover:bg-gray-200 dark:hover:bg-white/15 border border-gray-300 dark:border-white/15 transition-colors font-medium"
             >
               Approve
             </button>
@@ -81,7 +82,7 @@ export function ApprovalDialog({ toolCall, onApprove, onReject }: Props) {
               initial={{ height: 0, opacity: 0 }}
               animate={{ height: 'auto', opacity: 1 }}
               exit={{ height: 0, opacity: 0 }}
-              transition={{ duration: 0.15 }}
+              transition={{ duration: MOTION_S.base }}
               className="overflow-hidden border-t border-gray-200 dark:border-white/[0.06]"
             >
               <pre className="text-[0.55rem] leading-relaxed text-gray-600 dark:text-gray-400 px-2.5 py-1.5 max-h-[180px] overflow-auto scrollbar-thin whitespace-pre-wrap break-words">

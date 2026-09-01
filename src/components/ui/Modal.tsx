@@ -178,8 +178,7 @@ export function Modal({ open, onClose, title, children, hideHeader, maxWidth = '
               : { 'aria-label': ariaLabel || title || 'Dialog' })}
             tabIndex={-1}
             className={
-              `relative z-10 w-full outline-none ${panelRadius} ${panelPad} border border-gray-200 dark:border-white/10 ` +
-              'bg-white dark:bg-[#161719] shadow-2xl shadow-black/30 ' + maxWidth
+              `relative z-10 w-full outline-none ${panelRadius} ${panelPad} lu-elevated ` + maxWidth
             }
             initial={{ scale: 0.9, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}

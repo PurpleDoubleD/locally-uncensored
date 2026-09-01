@@ -43,7 +43,7 @@ export function WorkflowList({ onRun, onEdit, onCreate }: WorkflowListProps) {
         </div>
         <div className="flex-1 min-w-0">
           <p className="text-[0.7rem] font-medium text-gray-200 truncate">{workflow.name}</p>
-          <p className="text-[0.6rem] text-gray-500 truncate">{workflow.description}</p>
+          <p className="t-micro text-gray-500 truncate">{workflow.description}</p>
           <p className="text-[0.55rem] text-gray-600">{workflow.steps.length} steps</p>
         </div>
         <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
@@ -89,7 +89,7 @@ export function WorkflowList({ onRun, onEdit, onCreate }: WorkflowListProps) {
       {/* Built-in workflows */}
       {builtIn.length > 0 && (
         <div className="space-y-1">
-          <p className="text-[0.6rem] text-gray-500 uppercase tracking-wider px-1">Built-in</p>
+          <p className="t-micro text-gray-500 uppercase tracking-wider px-1">Built-in</p>
           {builtIn.map(renderWorkflow)}
         </div>
       )}
@@ -97,7 +97,7 @@ export function WorkflowList({ onRun, onEdit, onCreate }: WorkflowListProps) {
       {/* Custom workflows */}
       {custom.length > 0 && (
         <div className="space-y-1">
-          <p className="text-[0.6rem] text-gray-500 uppercase tracking-wider px-1">Custom</p>
+          <p className="t-micro text-gray-500 uppercase tracking-wider px-1">Custom</p>
           {custom.map(renderWorkflow)}
         </div>
       )}
@@ -109,7 +109,7 @@ export function WorkflowList({ onRun, onEdit, onCreate }: WorkflowListProps) {
       {/* Create button */}
       <button
         onClick={onCreate}
-        className="w-full flex items-center justify-center gap-1 py-1.5 rounded-lg bg-white/[0.03] border border-white/10 text-[0.65rem] text-gray-500 hover:text-gray-300 hover:border-white/20 transition-colors"
+        className="w-full flex items-center justify-center gap-1 py-1.5 rounded-lg bg-white/[0.03] border border-white/10 t-micro text-gray-500 hover:text-gray-300 hover:border-white/20 transition-colors"
       >
         <Plus size={10} /> Create Workflow
       </button>

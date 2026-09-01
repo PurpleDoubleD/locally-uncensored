@@ -178,12 +178,12 @@ export function CodexView() {
         {gitStatus && !gitStatus.installed && (
           <div className="flex items-center gap-2 px-3 py-1.5 border-b border-amber-500/20 bg-amber-500/[0.06]">
             <GitBranch size={12} className="text-amber-500 shrink-0" />
-            <span className="text-[0.6rem] text-amber-600 dark:text-amber-400/90 flex-1 leading-tight">
+            <span className="t-micro text-amber-600 dark:text-amber-400/90 flex-1 leading-tight">
               Git isn't installed. The coding agent needs it for diffs, commits and history.
             </span>
             <button
               onClick={() => openExternal(gitStatus.download_url)}
-              className="flex items-center gap-1 px-2 py-0.5 rounded text-[0.6rem] font-medium bg-amber-500/15 text-amber-600 dark:text-amber-300 hover:bg-amber-500/25 border border-amber-500/30 transition-colors"
+              className="flex items-center gap-1 px-2 py-0.5 rounded t-micro font-medium bg-amber-500/15 text-amber-600 dark:text-amber-300 hover:bg-amber-500/25 border border-amber-500/30 transition-colors"
             >
               <Download size={11} /> Install Git
             </button>
@@ -191,7 +191,7 @@ export function CodexView() {
               onClick={recheckGit}
               disabled={gitChecking}
               title="Re-check after installing Git"
-              className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[0.6rem] text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-white/5 transition-colors disabled:opacity-50"
+              className="flex items-center gap-1 px-1.5 py-0.5 rounded t-micro text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-white/5 transition-colors disabled:opacity-50"
             >
               <RefreshCw size={11} className={gitChecking ? 'animate-spin' : ''} />
             </button>
@@ -207,7 +207,7 @@ export function CodexView() {
         <div ref={scrollRef} className="flex-1 overflow-y-auto scrollbar-thin">
           {messages.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-full text-center">
-              <Code size={24} className="text-gray-300 dark:text-gray-700 mb-2" />
+              <Code size={28} className="text-gray-300 dark:text-gray-700 mb-2" />
               <p className="text-[0.7rem] text-gray-500 font-medium">Coding Agent</p>
               <p className="text-[0.55rem] text-gray-400 dark:text-gray-600 mt-0.5 max-w-[300px]">
                 Send a coding instruction. The coding agent will read your codebase, write code, and run commands.
@@ -230,7 +230,7 @@ export function CodexView() {
                   const warn = msg.notice === 'warn'
                   return (
                     <div key={msg.id} className="px-3 py-1" data-testid="codex-notice">
-                      <div className={`flex items-start gap-1.5 px-2 py-1 rounded border text-[0.6rem] leading-snug ${
+                      <div className={`flex items-start gap-1.5 px-2 py-1 rounded border t-micro leading-snug ${
                         warn
                           ? 'border-amber-300/70 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/10 text-amber-900 dark:text-amber-200'
                           : 'border-gray-200 dark:border-white/10 bg-gray-50/60 dark:bg-white/[0.02] text-gray-500 dark:text-gray-400'

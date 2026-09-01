@@ -183,10 +183,10 @@ export function CodeBlock({ code, language }: Props) {
   return (
     <div className="relative group rounded-lg overflow-hidden my-1.5 border border-gray-200 dark:border-white/5">
       <div className="flex items-center justify-between px-3 py-1 bg-gray-50 dark:bg-white/5 border-b border-gray-200 dark:border-white/5">
-        <span className="text-[0.6rem] text-gray-400 font-mono">{language || 'code'}</span>
+        <span className="t-micro text-gray-400 font-mono">{language || 'code'}</span>
         <button
           onClick={handleCopy}
-          className="flex items-center gap-1 text-[0.6rem] text-gray-400 hover:text-gray-700 dark:hover:text-white transition-colors"
+          className="flex items-center gap-1 t-micro text-gray-400 hover:text-gray-700 dark:hover:text-white transition-colors"
           aria-label="Copy code"
         >
           {copied ? <Check size={11} /> : <Copy size={11} />}

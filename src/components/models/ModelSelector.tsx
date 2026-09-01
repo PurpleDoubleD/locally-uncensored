@@ -21,6 +21,7 @@ import { noChatBackendEnabled } from '../../lib/provider-visibility'
 import { cloudTeaserModels } from '../../lib/cloud-teaser-models'
 import { ModelPickerSkeleton } from '../layout/ViewSkeletons'
 import type { AIModel } from '../../types/models'
+import { MOTION_S } from '../ui/motion'
 
 // ── Local-mode cloud discovery (2.5.8): an "LU Cloud" section at the list's
 // tail. Signed-in accounts show their real hosted chat models (the appMode
@@ -73,7 +74,7 @@ function CloudTeaserSection({ onOpen }: { onOpen: () => void }) {
             title="Runs on LU Cloud, tap to see plans"
           >
             <Cloud size={10} className="text-violet-500 dark:text-violet-200 shrink-0" />
-            <span className="text-[0.68rem] text-gray-400 truncate">
+            <span className="t-micro text-gray-400 truncate">
               {('displayName' in m && m.displayName) || displayModelName(m.name)}
             </span>
             <span className="ml-auto text-[0.5rem] text-violet-500 dark:text-violet-200">Cloud</span>
@@ -85,7 +86,7 @@ function CloudTeaserSection({ onOpen }: { onOpen: () => void }) {
           className="w-full flex items-center gap-2 px-2.5 py-1.5 text-left hover:bg-white/[0.04] transition-colors"
           title="See the whole hosted catalogue"
         >
-          <span className="text-[0.62rem] text-gray-500">
+          <span className="t-micro text-gray-500">
             {cloudMore} more cloud {cloudMore === 1 ? 'model' : 'models'}, see them all
           </span>
         </button>
@@ -97,7 +98,7 @@ function CloudTeaserSection({ onOpen }: { onOpen: () => void }) {
           title="Runs on LU Cloud, tap to see plans"
         >
           <Cloud size={10} className="text-violet-500 dark:text-violet-200 shrink-0" />
-          <span className="text-[0.68rem] text-gray-400">
+          <span className="t-micro text-gray-400">
             Frontier chat models, no GPU needed
           </span>
           <span className="ml-auto text-[0.5rem] text-violet-500 dark:text-violet-200">Cloud</span>
@@ -236,13 +237,13 @@ function LmStudioServerHint({ onStarted }: { onStarted: () => void }) {
       >
         <X size={10} />
       </button>
-      <p className="text-[0.6rem] text-gray-600 dark:text-gray-300 leading-snug mb-1.5 pr-5">
+      <p className="t-micro text-gray-600 dark:text-gray-300 leading-snug mb-1.5 pr-5">
         LM Studio is installed ({status.model_count} model{status.model_count === 1 ? '' : 's'} on disk) but its server isn't running. Start it to pick LM Studio models here.
       </p>
       <button
         onClick={handleStart}
         disabled={starting}
-        className="w-full flex items-center justify-center gap-1.5 px-2 py-1 rounded text-[0.62rem] bg-black/[0.06] dark:bg-white/[0.06] hover:bg-black/[0.1] dark:hover:bg-white/[0.12] text-gray-700 dark:text-gray-200 transition-colors disabled:opacity-50"
+        className="w-full flex items-center justify-center gap-1.5 px-2 py-1 rounded t-micro bg-black/[0.06] dark:bg-white/[0.06] hover:bg-black/[0.1] dark:hover:bg-white/[0.12] text-gray-700 dark:text-gray-200 transition-colors disabled:opacity-50"
       >
         {starting ? <Loader2 size={10} className="animate-spin" /> : <PlayCircle size={10} />}
         <span>{starting ? 'Starting LM Studio server…' : 'Start LM Studio Server'}</span>
@@ -879,13 +880,13 @@ export function ModelSelector({ openUpward = false, surface = 'chat' }: ModelSel
       <AnimatePresence>
         {open && (
           <motion.div
-            className={`absolute w-72 rounded-lg overflow-hidden z-50 bg-white dark:bg-[#363636] border border-black/10 dark:border-white/[0.08] shadow-2xl shadow-black/20 dark:shadow-black/50 ${
+            className={`absolute w-72 rounded-lg overflow-hidden z-50 lu-elevated ${
               openUpward ? 'bottom-full mb-1.5 right-0' : 'top-full mt-1.5 left-1/2 -translate-x-1/2'
             }`}
             initial={{ opacity: 0, y: openUpward ? 6 : -6, scale: 0.98 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: openUpward ? 6 : -6, scale: 0.98 }}
-            transition={{ duration: 0.12, ease: 'easeOut' }}
+            transition={{ duration: MOTION_S.fast, ease: 'easeOut' }}
           >
             {/* Bug Q v2.4.7 — surface "Start LM Studio Server" inline when
                 LM Studio is on disk but its server is off. wakeywakeynow's
@@ -912,7 +913,7 @@ export function ModelSelector({ openUpward = false, surface = 'chat' }: ModelSel
             {/* §18 — surfaced when an LM Studio auto-load (on select) failed,
                 so the user isn't left wondering why the model didn't switch. */}
             {selectError && (
-              <div className="mx-2 mt-2 px-2 py-1.5 rounded bg-red-500/10 border border-red-500/20 text-[0.6rem] text-red-600/90 dark:text-red-300/90 leading-snug">
+              <div className="mx-2 mt-2 px-2 py-1.5 rounded bg-red-500/10 border border-red-500/20 t-micro text-red-600/90 dark:text-red-300/90 leading-snug">
                 {selectError}
               </div>
             )}
@@ -922,25 +923,25 @@ export function ModelSelector({ openUpward = false, surface = 'chat' }: ModelSel
               {!inventoryLoaded && textModels.length === 0 && <ModelPickerSkeleton />}
               {inventoryLoaded && textModels.length === 0 && (
                 <div className="px-2.5 py-3 text-center">
-                  <p className="text-[0.65rem] text-gray-600">No models available</p>
+                  <p className="t-micro text-gray-600">No models available</p>
                   {/* An empty picker after the user switched the last backend
                       off in Settings used to say only that, which reads like a
                       machine with nothing installed (Nebenbefund 1, R9
                       re-measure). The reason and the way back belong here. */}
                   {noBackendEnabled ? (
                     <>
-                      <p className="mt-1 text-[0.6rem] text-amber-300/90 leading-snug text-left">
+                      <p className="mt-1 t-micro text-amber-300/90 leading-snug text-left">
                         No AI backend is enabled, so there is nothing to list. Open Settings, go to AI Backends, and press Enable on the backend you switched off, or Add Provider.
                       </p>
                       <button
                         onClick={() => { setOpen(false); openSettingsAt({ tab: 'backends' }) }}
-                        className="mt-2 inline-flex items-center gap-1 px-2 py-1 rounded bg-white/5 border border-white/10 text-[0.6rem] text-gray-300 hover:bg-white/10 transition-colors"
+                        className="mt-2 inline-flex items-center gap-1 px-2 py-1 rounded bg-white/5 border border-white/10 t-micro text-gray-300 hover:bg-white/10 transition-colors"
                       >
                         <SettingsIcon size={10} /> Open Settings
                       </button>
                     </>
                   ) : emptyReason && (
-                    <p className="mt-1 text-[0.6rem] text-amber-300/90 leading-snug text-left">{emptyReason}</p>
+                    <p className="mt-1 t-micro text-amber-300/90 leading-snug text-left">{emptyReason}</p>
                   )}
                 </div>
               )}
@@ -1138,7 +1139,7 @@ export function ModelSelector({ openUpward = false, surface = 'chat' }: ModelSel
                     finally { setUnloading(false) }
                   }}
                   disabled={unloading}
-                  className="w-full flex items-center justify-center gap-1.5 px-2 py-[5px] rounded text-[0.6rem] text-red-600/70 dark:text-red-500/60 hover:text-red-500 dark:hover:text-red-400 hover:bg-red-500/[0.06] transition-colors disabled:opacity-40"
+                  className="w-full flex items-center justify-center gap-1.5 px-2 py-[5px] rounded t-micro text-red-600/70 dark:text-red-500/60 hover:text-red-500 dark:hover:text-red-400 hover:bg-red-500/[0.06] transition-colors disabled:opacity-40"
                 >
                   {unloading ? <Loader2 size={10} className="animate-spin" /> : <Power size={10} />}
                   <span>{unloadDone ? 'Unloaded' : unloading ? 'Unloading...' : 'Unload all models'}</span>

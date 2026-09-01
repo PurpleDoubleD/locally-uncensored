@@ -106,7 +106,7 @@ export function StagedChangesPanel({ chatId }: Props) {
             <ChevronRight size={11} className="text-amber-700 dark:text-amber-400" />
           )}
           <FileText size={10} className="text-amber-700 dark:text-amber-400" />
-          <span className="text-[0.6rem] font-semibold text-amber-900 dark:text-amber-300">
+          <span className="t-micro font-semibold text-amber-900 dark:text-amber-300">
             Pending ({changes.length})
           </span>
         </span>

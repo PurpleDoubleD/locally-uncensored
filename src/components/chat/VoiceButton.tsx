@@ -126,7 +126,7 @@ export function VoiceButton({ onTranscript, onInterim, onRecordingChange, disabl
         >
           <MicOff size={14} />
         </button>
-        <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2 py-1 w-max max-w-[240px] bg-gray-800 dark:bg-gray-700 text-white text-[0.6rem] leading-snug rounded text-center opacity-0 group-hover/mic:opacity-100 transition-opacity pointer-events-none">
+        <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2 py-1 w-max max-w-[240px] bg-gray-800 dark:bg-gray-700 text-white t-micro leading-snug rounded text-center opacity-0 group-hover/mic:opacity-100 transition-opacity pointer-events-none">
           {hint}
         </div>
       </div>
@@ -173,7 +173,7 @@ export function VoiceButton({ onTranscript, onInterim, onRecordingChange, disabl
       {sttError && (
         <div
           role="alert"
-          className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2 py-1 w-max max-w-[240px] bg-red-600/95 dark:bg-red-500/90 text-white text-[0.6rem] leading-snug rounded text-center pointer-events-none z-10"
+          className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2 py-1 w-max max-w-[240px] bg-red-600/95 dark:bg-red-500/90 text-white t-micro leading-snug rounded text-center pointer-events-none z-10"
         >
           {sttError}
         </div>

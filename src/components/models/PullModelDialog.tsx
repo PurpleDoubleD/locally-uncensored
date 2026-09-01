@@ -31,7 +31,7 @@ export function PullModelDialog({ open, onClose }: Props) {
             placeholder="e.g. llama3.1:8b or mannix/llama3.1-8b-abliterated"
             className="w-full px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-white placeholder-gray-500 focus:outline-none focus:border-white/20 text-sm"
           />
-          <p className="text-[0.6rem] text-gray-500 mt-1">Progress appears in the download icon in the header.</p>
+          <p className="t-micro text-gray-500 mt-1">Progress appears in the download icon in the header.</p>
         </div>
 
         <GlowButton onClick={handlePull} disabled={!modelName.trim()} className="w-full flex items-center justify-center gap-2">

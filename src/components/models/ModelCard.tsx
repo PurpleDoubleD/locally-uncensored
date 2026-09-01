@@ -54,7 +54,7 @@ export function ModelCard({ model, isActive, onSelect, onDelete, onInfo, canDele
       {isActive && <span className="shrink-0 text-[0.5rem] text-blue-400 font-medium uppercase">Active</span>}
 
       {/* Compact meta — size · params · quant, dot-separated, mono figures */}
-      <span className="hidden md:flex items-center gap-1.5 shrink-0 text-[0.58rem] text-gray-500 lu-hud-num">
+      <span className="hidden md:flex items-center gap-1.5 shrink-0 t-micro text-gray-500 lu-hud-num">
         {model.size > 0 && <span>{formatBytes(model.size)}</span>}
         {model.type === 'text' && 'details' in model && model.details?.parameter_size && (
           <><span className="opacity-40">·</span><span>{model.details.parameter_size}</span></>

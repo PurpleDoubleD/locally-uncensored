@@ -23,6 +23,7 @@ import { ContextMenu } from '../ui/ContextMenu'
 import { buildMessageMenu, type MessageMenuHandlers } from '../ui/menu-actions'
 import { MONOGRAM, MONOGRAM_INVERT } from '../layout/brand'
 import { AVATAR_SLOT } from './avatar-slot'
+import { MOTION_S } from '../ui/motion'
 
 interface Props {
   message: Message
@@ -263,7 +264,7 @@ function MessageBubbleImpl({ message, onRegenerate, onEdit, pendingApprovalId, o
       }}
       initial={{ opacity: 0, y: 6 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.15 }}
+      transition={{ duration: MOTION_S.base }}
     >
       {/* Avatar — EIN Slot, zwei Inhalte (Audit §4, „Zwei Avatar-Systeme:
           Assistent rahmenlos, User als gerahmte Box").
@@ -466,7 +467,7 @@ function MessageBubbleImpl({ message, onRegenerate, onEdit, pendingApprovalId, o
                       screen has always flagged cut-offs; the chat did not, so a
                       truncated answer read as complete (David 2026-08-08). */}
                   {truncationNotice(message.finishReason) && (
-                    <div className="mt-1 inline-flex items-center gap-1 text-[0.6rem] text-amber-600/80 dark:text-amber-300/70">
+                    <div className="mt-1 inline-flex items-center gap-1 t-micro text-amber-600/80 dark:text-amber-300/70">
                       <Scissors size={9} className="shrink-0" />
                       <span>{truncationNotice(message.finishReason)}</span>
                     </div>
@@ -476,7 +477,7 @@ function MessageBubbleImpl({ message, onRegenerate, onEdit, pendingApprovalId, o
                       it is the model's text (G14-2); this labelled app notice
                       names the links that came from nowhere. */}
                   {unbackedLinksNotice(message.unbackedLinks) && (
-                    <div className="mt-1 flex items-start gap-1 text-[0.6rem] text-amber-600/80 dark:text-amber-300/70">
+                    <div className="mt-1 flex items-start gap-1 t-micro text-amber-600/80 dark:text-amber-300/70">
                       <Unlink size={9} className="mt-0.5 shrink-0" />
                       <span>{unbackedLinksNotice(message.unbackedLinks)}</span>
                     </div>
@@ -490,7 +491,7 @@ function MessageBubbleImpl({ message, onRegenerate, onEdit, pendingApprovalId, o
                       The amber card below survives because it is a labelled
                       app hint with an action, not prose posing as an answer. */}
                   {thoughtOnly && thoughtOnlyToolIntent && activeModel && isAgentCompatible(activeModel) && (
-                    <div className="mt-1 flex items-start gap-2 px-2 py-1.5 rounded-md border border-amber-400/30 bg-amber-500/10 text-[0.65rem] text-amber-700 dark:text-amber-200">
+                    <div className="mt-1 flex items-start gap-2 px-2 py-1.5 rounded-md border border-amber-400/30 bg-amber-500/10 t-micro text-amber-700 dark:text-amber-200">
                       <Wrench size={11} className="mt-0.5 shrink-0" />
                       <div className="flex-1">
                         <p className="font-medium">The model spent its whole reply deciding to call a tool, but Agent Mode is off, so it never said anything.</p>
@@ -505,7 +506,7 @@ function MessageBubbleImpl({ message, onRegenerate, onEdit, pendingApprovalId, o
                     </div>
                   )}
                   {suggestAgent && (
-                    <div className="mt-2 flex items-start gap-2 px-2 py-1.5 rounded-md border border-amber-400/30 bg-amber-500/10 text-[0.65rem] text-amber-700 dark:text-amber-200">
+                    <div className="mt-2 flex items-start gap-2 px-2 py-1.5 rounded-md border border-amber-400/30 bg-amber-500/10 t-micro text-amber-700 dark:text-amber-200">
                       <Wrench size={11} className="mt-0.5 shrink-0" />
                       <div className="flex-1">
                         <p className="font-medium">This model tried to call a tool, but Agent Mode is off for this chat.</p>

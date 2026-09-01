@@ -56,6 +56,18 @@ const CSS_CODE = nurCode(CSS)
 
 const DATEIEN = quelldateien(SRC)
 const ALL = DATEIEN.map(([, s]) => s).join('\n')
+/** Derselbe Text ohne Kommentare — sonst zaehlt eine Notiz als Call-Site. */
+const CODE = DATEIEN.map(([, s]) => nurCode(s)).join('\n')
+
+/**
+ * Die Verzeichnisse, die dieses Paket anfassen darf. Alles andere wird hier
+ * GEZAEHLT und nicht geaendert — eine Schranke, die fremde Dateien mitregelt,
+ * waere in einem Baum mit mehreren Haenden nur eine Quelle falscher roter
+ * Laeufe.
+ */
+const MEIN = (n: string) =>
+  /^components\/(chat\/|models\/|ui\/|agents\/|import\/)/.test(n)
+  && n !== 'components/chat/ChatView.tsx'
 
 // ── Die Radiusleiter, aufgeloest wie der Browser sie aufloest ──────────
 
@@ -248,22 +260,256 @@ describe('die Reiter der Kopfzeile stehen auf einer benannten Stufe', () => {
 // ── D-T11: transition-all ist gezaehlt und gedeckelt ───────────────────
 
 describe('transition-all darf nur schrumpfen', () => {
-  // Gemessen am 01.09.2026: 54 Fundstellen vorher, 42 nachher. Migriert
-  // wurden nur die, deren Zustandswechsel BEWEISBAR ausschliesslich
-  // Farbwerte betrifft (Rand immer vorhanden, nur Farbe wechselt).
+  // Gemessen: 54 vorher (Welle 1) → 42 → 33 (Welle 2). Migriert wird nur,
+  // wo der Zustandswechsel BEWEISBAR eng ist:
+  //   · nur Farbwerte                       → `transition-colors`
+  //   · Farbe + Deckkraft                   → `transition` (Tailwinds
+  //     kuratierte Liste; sie enthaelt opacity, aber KEINE Layoutmasse)
+  //   · nur eine Laenge, die wirklich laeuft → `transition-[width]`
+  //     (die drei Fortschrittsbalken) bzw. `transition-[width,height]`
+  //     (der Vorschau-Rahmen, dessen Kasten sich beim Umschalten aendert)
   // Ausdruecklich NICHT migriert: Stellen mit ring-Wechsel (box-shadow),
-  // mit Randbreite 0→1, mit opacity, und `.lu-primary`, dessen
-  // :disabled-Zustand `filter` und `opacity` animiert.
-  const SCHRANKE = 42
+  // mit Randbreite 0→1 und `.lu-primary`, dessen :disabled-Zustand
+  // `filter` und `opacity` animiert. In chat/ models/ ui/ agents/ import/
+  // bleibt genau EINE stehen: models/ModelCard.tsx wechselt `ring-1`.
+  const SCHRANKE = 33
 
   it(`hoechstens ${SCHRANKE} Fundstellen`, () => {
     const n = (ALL.match(/(?<![\w-])transition-all(?![\w-])/g) ?? []).length
     expect(n).toBeLessThanOrEqual(SCHRANKE)
   })
 
+  it('in den Verzeichnissen dieses Pakets ist genau eine uebrig, und sie ist benannt', () => {
+    const rest: string[] = []
+    for (const [name, src] of DATEIEN) {
+      if (!MEIN(name)) continue
+      for (const _ of src.matchAll(/(?<![\w-])transition-all(?![\w-])/g)) rest.push(name)
+    }
+    expect(rest).toEqual(['components/models/ModelCard.tsx'])
+  })
+
   it('die Motion-Leiter ist da, an die die naechste Stelle gehen kann', () => {
     for (const t of ['--motion-fast', '--motion-base', '--motion-slow', '--motion-ease']) {
       expect(CSS_CODE).toContain(t)
     }
+  })
+
+  it('und die JS-Seite der Leiter wird wirklich aufgerufen, nicht nur exportiert', () => {
+    // DAS war der eigentliche D-T11-Befund im JS: `MOTION_S` existierte
+    // seit Welle 1 in ui/motion.ts und hatte NULL Aufrufer — nur die
+    // beiden Federn wurden benutzt. Achtzehn Zahlenliterale standen
+    // daneben. Eine Leiter, die niemand betritt, ist keine Leiter.
+    const n = (CODE.match(/MOTION_S\./g) ?? []).length
+    expect(n).toBeGreaterThanOrEqual(23)
+  })
+
+  it('in diesen Verzeichnissen steht keine nackte Dauer mehr — ausser der einen, die keine ist', () => {
+    // Was uebrig bleibt, ist `duration: 1.5` an einer Endlosdrehung in
+    // chat/RAGPanel.tsx. Die Leiter beschreibt ZUSTANDSWECHSEL (120 / 150
+    // / 300 ms); ein Dauerlauf mit `repeat: Infinity` ist kein
+    // Zustandswechsel und gehoert nicht darauf.
+    const rest: string[] = []
+    for (const [name, src] of DATEIEN) {
+      if (!MEIN(name)) continue
+      for (const m of nurCode(src).matchAll(/duration:\s*([0-9.]+)/g)) {
+        rest.push(`${name}: ${m[1]}`)
+      }
+    }
+    expect(rest).toEqual(['components/chat/RAGPanel.tsx: 1.5'])
+  })
+
+  it('und keine nackte `duration-N`-Klasse — die Zahlen zeigen aufs Token', () => {
+    const rest: string[] = []
+    for (const [name, src] of DATEIEN) {
+      if (!MEIN(name)) continue
+      for (const m of nurCode(src).matchAll(/(?<![\w-])(?:[a-z-]+:)*duration-(\d+)(?![\w-])/g)) {
+        rest.push(`${name}: ${m[0]}`)
+      }
+    }
+    expect(rest).toEqual([])
+  })
+})
+
+// ── D-T07 (Fortsetzung): das Control-Band gehoert den drei Tokens ──────
+
+describe('was die Hoehe eines Bedienelements hat, nennt eine Stufe', () => {
+  /** `h-7` → 28, `h-[26px]` → 26, `h-[var(...)]`/`h-[90vh]` → null. */
+  function alsPx(klasse: string): number | null {
+    const px = klasse.match(/^h-\[(\d+(?:\.\d+)?)px\]$/)
+    if (px) return parseFloat(px[1])
+    const n = klasse.match(/^h-(\d+(?:\.\d+)?)$/)
+    return n ? parseFloat(n[1]) * 4 : null
+  }
+
+  /** Die drei Stufen, aus index.css gelesen statt abgeschrieben. */
+  const STUFEN = (() => {
+    const m = new Map<string, number>()
+    for (const t of CSS_CODE.matchAll(/--control-h-(sm|md|lg):\s*(\d+)px/g)) m.set(t[1], Number(t[2]))
+    return m
+  })()
+
+  it('es sind genau drei, und sie steigen', () => {
+    expect([...STUFEN.keys()].sort()).toEqual(['lg', 'md', 'sm'])
+    const v = ['sm', 'md', 'lg'].map((k) => STUFEN.get(k) as number)
+    expect(v).toEqual([26, 32, 40])
+  })
+
+  it('im Band 24–48px steht in diesen Verzeichnissen nur noch EIN Nicht-Token', () => {
+    // Das Band ist der Bereich, in dem ein Knopf, ein Feld oder ein
+    // Aufklapper wohnt — 24px ist unter der kleinsten Stufe, 48px ueber
+    // der groessten. Alles darin, was keine Stufe nennt, ist eine
+    // vierte Hoehe.
+    //
+    // Ist-Stand nach diesem Paket: ZWEI, und beide sind namentlich
+    // begruendet, nicht uebersehen.
+    //   · agents/WorkflowList.tsx `w-7 h-7` (28px) — eine gerundete
+    //     Kachel, in der ein Icon sitzt. Kein Bedienelement.
+    //   · chat/avatar-slot.ts `w-6 h-6` (24px) — der Platzhalter neben
+    //     einer Nachricht, dessen feste Grundflaeche eine eigene Wache
+    //     hat (chat/__tests__/eine-nachricht-eine-leiste.test.ts). Er
+    //     richtet sich an der Textzeile aus, nicht an der Controlleiter.
+    // Der Vorschau-Knopf in chat/HtmlPreviewFrame.tsx stand daneben auf
+    // denselben 28px und ist gezogen worden, weil er ein Knopf IST.
+    const treffer: string[] = []
+    for (const [name, src] of DATEIEN) {
+      if (!MEIN(name)) continue
+      for (const m of nurCode(src).matchAll(/(?<![\w-])(?:[a-z-]+:)*(h-\[[^\]]+\]|h-\d+(?:\.\d+)?)(?![\w-])/g)) {
+        const px = alsPx(m[1])
+        if (px !== null && px >= 24 && px <= 48) treffer.push(`${name}: ${m[1]}`)
+      }
+    }
+    expect(treffer.sort()).toEqual([
+      'components/agents/WorkflowList.tsx: h-7',
+      'components/chat/avatar-slot.ts: h-6',
+    ])
+  })
+
+  it('die Tokens werden wirklich aufgerufen, und zwar oft', () => {
+    const n = (CODE.match(/--control-h-(sm|md|lg)/g) ?? []).length
+    expect(n).toBeGreaterThanOrEqual(42)
+  })
+})
+
+// ── D-T08 (Fortsetzung): die 5px sind entschieden ──────────────────────
+
+describe('die 5px bekommen keine Stufe, sondern ein Ziel', () => {
+  it('die Leiter hat keine Sprosse zwischen 4 und 6', () => {
+    // Drei Stufen in zwei Pixeln waeren bei --ui-scale 1,15 rund ein
+    // Geraetepixel auseinander — dieselbe Aufloesung, in der D-T04 die
+    // vierzehn Schriftgroessen als Rauschen verworfen hat.
+    const leiter = effektiveLeiter()
+    const zwischen = [...leiter.values()].filter((v) => v > 4 && v < 6)
+    expect(zwischen).toEqual([])
+    expect(hausRadien().has('5')).toBe(false)
+  })
+
+  it('und in diesen Verzeichnissen steht keine rohe Pixel-Ecke mehr', () => {
+    // Was bleibt, ist `rounded-[calc(var(--radius-control)+2px)]` in
+    // chat/ChatInput.tsx: die Aussenecke des Composers, die aus der
+    // Innenecke ABGELEITET ist (konzentrische Radien). Das ist keine
+    // zweite Zahl, das ist dieselbe Zahl plus die Randstaerke.
+    const treffer: string[] = []
+    for (const [name, src] of DATEIEN) {
+      if (!MEIN(name)) continue
+      for (const m of nurCode(src).matchAll(/(?<![\w-])(?:[a-z-]+:)*rounded(?:-[a-z]+)?-\[([^\]]+)\]/g)) {
+        if (/^\d/.test(m[1])) treffer.push(`${name}: ${m[0]}`)
+      }
+    }
+    expect(treffer).toEqual([])
+  })
+
+  it('die 20 unerreichbaren 5px sind gedeckelt, nicht uebersehen', () => {
+    // components/layout/Sidebar.tsx gehoert in diesem Durchgang einem
+    // anderen Agenten. Die Entscheidung, wohin sie gehen (`rounded-md`,
+    // 6px), steht im D-T08-Kommentar von index.css; hier steht nur, dass
+    // die Zahl nicht wachsen darf.
+    const orte = DATEIEN
+      .filter(([, s]) => s.includes('rounded-[5px]'))
+      .map(([n]) => n)
+      .sort()
+    expect(orte).toEqual(['components/layout/Sidebar.tsx'])
+    const n = (ALL.match(/rounded-\[5px\]/g) ?? []).length
+    expect(n).toBeLessThanOrEqual(20)
+    // Und die Entscheidung steht wirklich da, statt nur hier behauptet zu sein.
+    expect(CSS).toContain('5px bekommt KEINE Stufe')
+  })
+})
+
+// ── D-T09 (Fortsetzung): EIN Aufrufer fuer „dieses Blatt schwebt" ──────
+
+describe('das Schwebeblatt kommt aus einem Rezept, nicht aus einer Kette', () => {
+  /** Jede Schattenstufe, die die App im CODE schreibt. */
+  const STUFEN = (() => {
+    const m = new Map<string, number>()
+    for (const [, src] of DATEIEN) {
+      for (const t of nurCode(src).matchAll(/(?<![\w-])(?:[a-z-]+:)*shadow-(2xs|xs|sm|md|lg|xl|2xl|none)(?![\w-])/g)) {
+        m.set(t[1], (m.get(t[1]) ?? 0) + 1)
+      }
+    }
+    return m
+  })()
+
+  it('die App schreibt hoechstens vier der sieben Tailwind-Stufen', () => {
+    expect([...STUFEN.keys()].sort()).toEqual(['2xl', 'lg', 'sm', 'xl'])
+  })
+
+  it('und keine Stufe, die dem Haus nicht gehoert', () => {
+    // `shadow-md`/`xs`/`2xs` sind Werkseinstellung: wer sie schriebe,
+    // bekaeme ohne Vorwarnung Tailwinds Hellmodus-Wert auf einer dunklen
+    // Flaeche. Genau dieser stille Halbbesitz ist der Befund.
+    for (const werk of ['md', 'xs', '2xs']) {
+      expect(STUFEN.has(werk), `shadow-${werk} ist Werkseinstellung und hat eine Call-Site`).toBe(false)
+    }
+    // Umgekehrt: jede Stufe, die geschrieben wird, ist im @theme-Block
+    // ueberschrieben — bis auf `sm`, das die Hausregel `.dark .shadow-sm`
+    // im Dunkeln abschaltet statt es zu ueberschreiben.
+    for (const stufe of STUFEN.keys()) {
+      if (stufe === 'sm') continue
+      expect(CSS_CODE, `--shadow-${stufe} wird geschrieben, aber nicht ueberschrieben`)
+        .toMatch(new RegExp(`--shadow-${stufe}:`))
+    }
+  })
+
+  it('`.lu-elevated` ist wirklich in Gebrauch und bringt Flaeche, Kante UND Schatten mit', () => {
+    const regel = CSS_CODE.match(/\.lu-elevated\s*\{([^}]*)\}/)?.[1] ?? ''
+    expect(regel, 'es gibt keine .lu-elevated-Regel').not.toBe('')
+    expect(regel).toContain('var(--color-lu-overlay)')
+    expect(regel).toContain('border:')
+    expect(regel).toContain('var(--shadow-xl)')
+    expect(CSS_CODE).toMatch(/\.light\s+\.lu-elevated/)
+    const n = (CODE.match(/(?<![\w-])lu-elevated(?![\w-])/g) ?? []).length
+    expect(n).toBeGreaterThanOrEqual(15)
+  })
+
+  it('kein Schwebeblatt dieser Verzeichnisse schreibt sich noch seine eigene Kette', () => {
+    // Der Befund in einer Zahl: zehn Blaetter, sechs Flaechen, drei
+    // Schatten, zwei Kanten. Jetzt: ein Rezept. Was uebrig bleibt, ist der
+    // Warn-Aufklapper mit eigener roter Kante — die Regel wuerde sie
+    // ueberschreiben, deshalb nimmt er nur das Flaechentoken.
+    const rest: string[] = []
+    for (const [name, src] of DATEIEN) {
+      if (!MEIN(name)) continue
+      for (const m of nurCode(src).matchAll(/(?<![\w-])(?:[a-z-]+:)*shadow-(xl|2xl)(?![\w-])/g)) {
+        rest.push(`${name}: ${m[0]}`)
+      }
+    }
+    expect(rest).toEqual(['components/chat/ContextDropdown.tsx: shadow-xl'])
+  })
+
+  it('und keine Call-Site laesst neben dem Rezept eine wirkungslose Klasse stehen', () => {
+    // `.lu-elevated` ist ungeschichtet und schlaegt jede Utility. Ein
+    // `bg-white` oder `shadow-xl` daneben waere eine Klasse ohne Wirkung —
+    // und beim naechsten Leser eine Falschaussage darueber, was die
+    // Flaeche traegt.
+    const tot: string[] = []
+    for (const [name, src] of DATEIEN) {
+      for (const zeile of nurCode(src).split('\n')) {
+        if (!/(?<![\w-])lu-elevated(?![\w-])/.test(zeile)) continue
+        for (const m of zeile.matchAll(/(?<![\w-])(?:dark:)?(bg-white(?![\w/-])|shadow-(?:sm|md|lg|xl|2xl))(?![\w-])/g)) {
+          tot.push(`${name}: ${m[0]}`)
+        }
+      }
+    }
+    expect(tot).toEqual([])
   })
 })

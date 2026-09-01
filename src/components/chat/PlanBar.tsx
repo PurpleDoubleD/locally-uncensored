@@ -91,7 +91,7 @@ export function PlanBar({ variant = 'header' }: Props) {
             </span>
             {!expanded && (
               <span
-                className="flex-1 min-w-0 truncate text-[0.6rem] text-gray-700 dark:text-gray-300"
+                className="flex-1 min-w-0 truncate t-micro text-gray-700 dark:text-gray-300"
                 title={headline.content}
               >
                 {headline.content}
@@ -122,7 +122,7 @@ export function PlanBar({ variant = 'header' }: Props) {
                   <Circle size={10} className="text-gray-600 shrink-0 mt-[1px]" />
                 )}
                 <span
-                  className={`text-[0.6rem] leading-snug ${
+                  className={`t-micro leading-snug ${
                     t.status === 'completed'
                       ? 'text-gray-500 line-through'
                       : t.status === 'in_progress'

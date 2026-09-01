@@ -109,23 +109,37 @@
                                    aufruft. Das Token existiert nur hier.
        --color-lu-overlay #363636  6 Fundstellen
 
-     Neu ist deshalb nur EINE Stufe, und zwar die meistbenutzte Flaeche der
-     App, die als einzige gar keinen Namen hatte. `--color-lu-raised`
-     bleibt vorerst stehen (Entfernen waere eine eigene Entscheidung), aber
-     es steht jetzt dran, dass es tot ist.
+     Neu war deshalb nur EINE Stufe, und zwar die meistbenutzte Flaeche der
+     App, die als einzige gar keinen Namen hatte.
+
+     ── Zweiter Durchgang, 01.09.2026 abends ──
+
+     `--color-lu-raised` ist jetzt GELOESCHT. Es stand hier mit dem
+     Vermerk „TOT: 0 Call-Sites", und ein Token, dessen einzige Aufgabe
+     es ist, sein eigenes Totsein zu dokumentieren, ist genau die Sorte
+     Stufe, die der Audit unter „16 Graustufen" zaehlt. Die Leiter hat
+     jetzt vier Stufen, und JEDE hat mindestens eine Call-Site — das
+     rechnet zwei-akzente-und-eine-leinwand.test.ts nach, in beide
+     Richtungen: keine Stufe ohne Aufruf, kein Aufruf ohne Stufe.
+
+     Nachgezaehlt am selben Tag, nachdem die Schwebeblaetter der App auf
+     `.lu-elevated` gezogen waren (siehe dort): im CODE — also mit
+     abgeschnittenen Kommentaren, sonst zaehlt man Prosa mit — standen
+     davor 15 dunkle Graustufen als Literal, danach 11. Verschwunden sind
+     #161719, #17171c, #1f1f1f und #262626 (dazu #2d2d2d hier oben): fuenf
+     Namen fuer EINE Rolle, naemlich „dieses Blatt schwebt".
 
      Diese Leiter ist DUNKEL. Es gibt bewusst kein `.light`-Gegenstueck:
      im Hellmodus zerfaellt #141414 in ZWEI Rollen, die dieselbe dunkle
      Zahl teilen — Fensterrahmen (`bg-gray-200`: Titlebar, Header,
-     AppShell) und Vollflaeche (`bg-white`: ViewSkeletons, Kontextmenues,
+     AppShell) und Vollflaeche (`bg-white`: ViewSkeletons,
      Create-Wurzel). Eine gespiegelte Leiter muesste sich fuer eine der
      beiden entscheiden und faerbte die andere falsch. Deshalb tragen alle
      Call-Sites weiterhin `dark:` und ihr eigenes Hell-Pendant. ── */
   --color-lu-canvas: #141414;   /* Leinwand, Titelleiste, Header */
   --color-lu-base: #202020;     /* zwei Modalflaechen, NICHT die Leinwand */
   --color-lu-panel: #262626;    /* sidebar, panels */
-  --color-lu-raised: #2d2d2d;   /* TOT: 0 Call-Sites (Stand 01.09.2026) */
-  --color-lu-overlay: #363636;  /* dropdowns, modals, popovers */
+  --color-lu-overlay: #363636;  /* Schwebeblatt — siehe .lu-elevated */
 
   /* ── Form: EINE Radiusleiter ────────────────────────────────────────
      D-T08. Vorher liefen zwei Systeme nebeneinander: die rem-abgeleitete
@@ -163,12 +177,74 @@
      daneben zu liegen.
 
      `--radius-3xl` ist geloescht: 0 Fundstellen, und im Browser als leere
-     Variable gemessen — die Klasse haette 0px ergeben. ── */
+     Variable gemessen — die Klasse haette 0px ergeben.
+
+     ── Und die 5px? Entschieden, nicht aufgezaehlt (Nachtrag 01.09.2026) ──
+
+     Der Absatz oben zaehlte `rounded-[5px]` (20x, alle in der Sidebar) als
+     Symptom auf und liess offen, wohin sie gehen. Das war eine Luecke: eine
+     Leiter, die eine Zahl nennt, ohne ihr eine Stufe oder ein Ziel zu geben,
+     laedt zur naechsten eckigen Klammer ein.
+
+     5px bekommt KEINE Stufe. Zwischen `rounded-sm` (4) und `rounded-md` (6)
+     liegen bei --ui-scale 1,15 genau 4,6 und 6,9 gerenderte Pixel; eine
+     Stufe dazwischen waere 5,75px und damit von beiden Nachbarn rund einen
+     Geraetepixel entfernt. Das ist dieselbe Aufloesung, in der D-T04 die
+     vierzehn Schriftgroessen in einem 4px-Band als Rauschen verworfen hat.
+     Drei Stufen in zwei Pixeln sind keine Leiter, sie sind ein Zittern.
+
+     Die 20 gehen auf `rounded-md` (6px), nicht auf `rounded-sm` (4px):
+     · Es sind Listenzeilen und Knoepfe, keine Punkte und Abzeichen — und
+       4px ist in dieser Leiter ausdruecklich die Nagelstufe fuer Letztere.
+     · Dieselbe Datei schreibt daneben `rounded-[8px]` (8x) und
+       `rounded-[10px]` (3x), also `rounded-lg` und `rounded-xl` unter
+       anderem Namen. Sie fuehrt eine private px-Leiter 5/8/10, von der
+       nur die 5 keinen Namen im Haus hat.
+     · Aufwaerts statt abwaerts, weil die Zeile im Pane mit 10px sitzt: 6
+       bleibt klar kleiner als der Rahmen und klar groesser als die
+       Nagelstufe.
+
+     `src/components/layout/Sidebar.tsx` gehoert in diesem Durchgang einem
+     anderen Agenten; die Zahl ist deshalb gedeckelt und nicht gezogen —
+     die Sperrklinke steht in radius-schatten-hoehe-und-bewegung.test.ts
+     auf 20 und darf nur sinken. ── */
   --radius-lg: var(--radius-control);
   --radius-xl: 10px;
   --radius-2xl: var(--radius-panel);
 
-  /* ── Depth: shadows tuned to be visible on dark backgrounds ── */
+  /* ── Tiefe: die Schattenleiter und was sie wirklich traegt (D-T09) ──
+     Tailwind liefert SIEBEN Stufen (2xs xs sm md lg xl 2xl). Dieses Haus
+     stimmt drei davon auf dunkle Flaechen ab — und genau daraus bestand
+     der Befund: eine Leiter, die zur Haelfte dem Haus und zur Haelfte der
+     Werkseinstellung gehoert, ohne dass man einer Call-Site ansieht,
+     welche Haelfte sie gerade erwischt.
+
+     Am 01.09.2026 im CODE nachgezaehlt (Kommentare abgeschnitten, sonst
+     zaehlt man Prosa mit):
+
+       shadow-sm   12x  WERK — und im Dunkeln per Hausregel abgeschaltet,
+                        siehe `.dark .shadow-sm` weiter unten
+       shadow-lg    3x  Haus
+       shadow-xl    6x  Haus
+       shadow-2xl   6x  Haus
+       shadow-md    0x  WERK — niemand ruft sie; wer es taete, bekaeme
+                        ohne Vorwarnung Tailwinds Hellmodus-Wert
+       2xs/xs       0x  dito
+
+     Die Antwort ist NICHT eine vierte Zahl, sondern EIN Aufrufer: fuer
+     „dieses Blatt schwebt" gibt es `.lu-elevated` (Flaeche + Kante +
+     Schatten aus einer Quelle, hell wie dunkel). Zehn Schwebeblaetter in
+     chat/ models/ ui/ agents/ sind darauf gezogen worden; vorher trugen
+     sie acht handgeschriebene Ketten mit sechs verschiedenen Flaechen und
+     drei verschiedenen Schattenstufen.
+
+     `--shadow-2xl` bleibt vorerst stehen, obwohl kein `var()` es aufruft
+     und alle sechs Utility-Call-Sites Schwebeblaetter sind, die auf
+     `.lu-elevated` gehoeren. Grund: die Zeile hier zu LOESCHEN entfernt
+     den Schatten nicht, sie faellt auf Tailwinds Werkswert zurueck — also
+     genau der stille Halbbesitz, den dieser Absatz beseitigt. Die Stufe
+     geht, wenn ihre letzte Call-Site geht, nicht vorher.
+     Bewacht von radius-schatten-hoehe-und-bewegung.test.ts. ── */
   --shadow-lg: 0 8px 24px -6px rgba(0, 0, 0, 0.6), 0 2px 6px -2px rgba(0, 0, 0, 0.4);
   --shadow-xl: 0 16px 48px -12px rgba(0, 0, 0, 0.7), 0 4px 12px -4px rgba(0, 0, 0, 0.5);
   --shadow-2xl: 0 24px 64px -16px rgba(0, 0, 0, 0.8);
@@ -782,8 +858,42 @@ input[type="range"]::-webkit-slider-thumb {
   letter-spacing: 0.01em;
 }
 
-/* Elevated surfaces — modals, dropdowns, popovers. Pairs the overlay bg
-   with a real shadow so floating layers actually float on dark. */
+/* ─────────────────────────────────────────────────────────────────────
+   `.lu-elevated` — DAS Schwebeblatt. Flaeche, Kante und Schatten aus einer
+   Quelle, hell wie dunkel (D-T06 + D-T09).
+
+   Der Befund war nicht „die Dropdowns sehen verschieden aus", sondern:
+   jedes Schwebeblatt schrieb sich seine eigene Kette. Am 01.09.2026 in
+   chat/ models/ ui/ agents/ nachgezaehlt — zehn Blaetter, und darin
+
+     sechs Flaechen    #161719 (Dialog) · #17171c (Menue) · #1a1a1a (2x
+                       Aufklapper) · #1f1f1f (Aufklapper) · #262626 (3x) ·
+                       #363636 (Aufklapper)
+     drei Schatten     shadow-lg · shadow-xl (5x) · shadow-2xl (2x)
+     zwei Kanten       border-gray-200/white-10 · black-10/white-[0.08]
+
+   Keine dieser Zahlen war eine Entscheidung; sie sind zu verschiedenen
+   Zeiten abgeschrieben worden. Das Kontextmenue stand sogar auf
+   `--color-lu-canvas`, also in der Farbe der LEINWAND — ein Blatt, das
+   ueber der Flaeche schwebt, in der Farbe der Flaeche darunter.
+
+   Jetzt tragen alle zehn diese eine Klasse. Warum die Flaeche HELLER wird
+   statt dunkler: im Dunkelmodus kommt Erhebung aus der Flaeche, nicht aus
+   dem Schatten — die Rechnung dazu steht unten bei `.dark .shadow-sm`
+   (ein Schatten schafft auf #141414 hoechstens 1,14:1, und das ist keine
+   Einstellungs-, sondern eine Arithmetikgrenze).
+
+   Was die Klasse NICHT setzt: den Radius. Der gehoert der Call-Site, weil
+   ein Dialog (`rounded-2xl`) und ein Menue (`rounded-md`) verschieden
+   gross sind. Und sie ist ungeschichtet — wer daneben `bg-white` oder
+   `shadow-xl` stehen laesst, schreibt eine Klasse ohne Wirkung; die
+   Sperrklinke in zwei-akzente-und-eine-leinwand.test.ts sucht genau das.
+
+   EINE dokumentierte Ausnahme in diesem Durchgang: der Warn-Aufklapper in
+   chat/ContextDropdown.tsx traegt `border-red-500/25` als Aussage („dieser
+   Kontext ist voll"). Diese Regel wuerde die Kante ueberschreiben, also
+   nimmt die Stelle nur das Flaechentoken und behaelt ihre eigene Kante.
+   ───────────────────────────────────────────────────────────────────── */
 .lu-elevated {
   background: var(--color-lu-overlay);
   border: 1px solid rgba(255, 255, 255, 0.08);
@@ -1025,6 +1135,49 @@ input[type="range"]::-webkit-slider-thumb {
    15px; `.t-micro` aendert daran nichts und rendert ebenfalls 15px.
    Ein `line-height` hier wuerde genau den Fehler wiederholen, der die
    anderen fuenf Klassen unbrauchbar macht.
+
+   ── Wie weit die Klasse gezogen wurde, und wo die Grenze liegt ──
+   (zweiter Durchgang, 01.09.2026 abends)
+
+   Der erste Durchgang hat die Klasse GEBAUT und neun Call-Sites gehabt.
+   Dieser hat sie GEZOGEN: 1008 -> 826 Fundstellen ueber src/, 25 -> 23
+   verschiedene Werte, `.t-*` von 152 auf 333 Nutzungen, davon 190 auf
+   `.t-micro`. Alles davon in chat/ models/ ui/ agents/ import/ — die
+   uebrigen Verzeichnisse gehoeren in diesem Durchgang anderen.
+
+   Die Grenze ist eine RECHNUNG und keine Ermuedung: `.t-micro` nimmt
+   genau das Band, das auf ihre 10px rundet, ± 1 CSS-Pixel —
+
+     0.58rem  9,28px      0.62rem  9,92px     0.68rem 10,88px
+     0.60rem  9,60px      0.65rem 10,40px     10px / 9px
+
+   — also hoechstens 1,15 gerenderte Pixel Unterschied. Was ausserhalb
+   liegt, BLEIBT stehen, und zwar mit Grund, nicht aus Nachlaessigkeit:
+
+     text-[0.55rem]  8,80px   96x   } kein Name unter 10; sie dorthin zu
+     text-[0.50rem]  8,00px   53x   } ziehen waere +14 bzw. +25 % — eine
+                                    } Entwurfsaenderung, keine Zusammen-
+                                    } fuehrung.
+     text-[0.70rem] 11,20px   50x   } 11 heisst `--text-mono` und wechselt
+                                    } die Schriftfamilie; 12 heisst
+                                    } `--text-control` und setzt lh 1.
+     text-[12px]             15x    } `.t-control` FRISST das
+                                    } `leading-relaxed`/`font-medium` der
+                                    } Call-Site (ungeschichtet, siehe
+                                    } oben). Der Tausch waere nicht
+                                    } folgenlos, sondern still.
+     text-[0.78rem] 12,48px    5x   } die Fliesstextgroesse der Antwort
+                                    } (MessageBubble, `.lu-caret` rechnet
+                                    } mit ihr) plus zwei Ueberschriften
+                                    } mit `font-semibold`.
+
+   Das ist der zweite Teil des Befunds und er ist NICHT behoben: die
+   fuenf Rezeptklassen stehen ungeschichtet und schlagen jede Utility der
+   Call-Site. Sie in `@layer components` zu heben waere die Reparatur —
+   im Baum nachgemessen betrifft sie genau drei Call-Sites (`t-control
+   font-medium`, `t-body leading-relaxed`, `t-body tracking-wide`, alle
+   in create/) und ist damit klein, aber sie ist eine eigene Aenderung
+   mit eigenem Sichttermin, nicht ein Nebensatz in diesem Paket.
    ───────────────────────────────────────────────────────────────────── */
 .t-micro   { font-size: var(--text-micro); }
 

@@ -38,8 +38,8 @@ export function LoopBar({ onStop }: Props) {
       <div className="w-full flex items-center gap-1.5 px-2 py-1 rounded-md border border-blue-500/25 bg-blue-500/[0.05]">
         <RefreshCw size={9} className="text-blue-400 shrink-0 animate-spin" style={{ animationDuration: '3s' }} />
         <span className="text-[0.55rem] uppercase tracking-wider text-gray-500 shrink-0">loop</span>
-        <span className="text-[0.6rem] text-gray-700 dark:text-gray-300 shrink-0">{passLabel}</span>
-        <span className="flex-1 min-w-0 truncate text-[0.6rem] text-gray-500" title={loop.task}>
+        <span className="t-micro text-gray-700 dark:text-gray-300 shrink-0">{passLabel}</span>
+        <span className="flex-1 min-w-0 truncate t-micro text-gray-500" title={loop.task}>
           {loop.task}
         </span>
         <span className="text-[0.55rem] text-gray-500 shrink-0 tabular-nums">
@@ -50,7 +50,7 @@ export function LoopBar({ onStop }: Props) {
           title="Stop the loop"
           className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[0.55rem] text-gray-600 dark:text-gray-300 hover:bg-gray-200/60 dark:hover:bg-white/10 transition-colors shrink-0"
         >
-          <Square size={7} /> stop
+          <Square size={8} /> stop
         </button>
       </div>
     </div>

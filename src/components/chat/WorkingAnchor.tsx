@@ -87,7 +87,7 @@ export function WorkingAnchor({ isRunning, label }: Props) {
         />
         <span className="lu-tool-shimmer t-control">{label ?? 'Working'}</span>
         {elapsed >= 1 && (
-          <span aria-hidden="true" className="lu-hud-num text-[0.6rem] text-gray-500 dark:text-gray-500">
+          <span aria-hidden="true" className="lu-hud-num t-micro text-gray-500 dark:text-gray-500">
             {formatElapsed(elapsed)}
           </span>
         )}

@@ -115,7 +115,7 @@ export function ChatbotImporter() {
     <div className="space-y-3">
       <div className="flex items-start gap-2.5 p-2.5 rounded-lg border border-blue-200 dark:border-blue-500/20 bg-blue-50 dark:bg-blue-500/[0.08] text-blue-900 dark:text-blue-200">
         <Upload size={14} className="mt-0.5 shrink-0" />
-        <div className="text-[0.65rem] leading-relaxed">
+        <div className="t-micro leading-relaxed">
           <strong>Import past conversations</strong> from ChatGPT, Claude, or Gemini exports. Each conversation lands in the active chat's RAG store, your local model can reference past turns just like any other document you upload. Stays on your machine.
         </div>
       </div>
@@ -148,14 +148,14 @@ export function ChatbotImporter() {
       {error && (
         <div className="flex items-start gap-2 p-2 rounded border border-red-500/20 bg-red-500/[0.06] text-red-300">
           <AlertTriangle size={12} className="mt-0.5 shrink-0" />
-          <span className="text-[0.6rem] whitespace-pre-wrap">{error}</span>
+          <span className="t-micro whitespace-pre-wrap">{error}</span>
           <button onClick={() => setError(null)} className="text-red-400 hover:text-red-200 ml-auto"><X size={10} /></button>
         </div>
       )}
 
       {conversations.length > 0 && (
         <>
-          <div className="flex items-center justify-between text-[0.6rem]">
+          <div className="flex items-center justify-between t-micro">
             <span className="text-gray-400">
               Detected: <strong>{PLATFORM_LABEL[detectedPlatform]}</strong>
               {' · '}
@@ -193,7 +193,7 @@ export function ChatbotImporter() {
                     className="mt-0.5"
                   />
                   <div className="flex-1 min-w-0">
-                    <div className="text-[0.65rem] text-gray-200 truncate">{c.title}</div>
+                    <div className="t-micro text-gray-200 truncate">{c.title}</div>
                     <div className="text-[0.55rem] text-gray-500">
                       {c.messageCount} message{c.messageCount === 1 ? '' : 's'}
                       {c.timestamp ? ` · ${new Date(c.timestamp).toLocaleDateString()}` : ''}
@@ -214,18 +214,18 @@ export function ChatbotImporter() {
               Import {selected.size} → RAG
             </button>
             {importProgress && (
-              <span className="text-[0.6rem] text-gray-400">
+              <span className="t-micro text-gray-400">
                 {importProgress.current} / {importProgress.total}
               </span>
             )}
             {!importing && doneCount > 0 && !error && (
-              <span className="text-[0.6rem] text-green-400 inline-flex items-center gap-1">
+              <span className="t-micro text-green-400 inline-flex items-center gap-1">
                 <CheckCircle2 size={10} /> {doneCount} imported
               </span>
             )}
           </div>
           {!conversationId && (
-            <div className="text-[0.6rem] text-amber-300 italic">
+            <div className="t-micro text-amber-300 italic">
               Open or create a chat first, imports attach to the active conversation's RAG store.
             </div>
           )}

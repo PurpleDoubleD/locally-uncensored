@@ -22,7 +22,7 @@ export function GoalBar() {
         <Target size={9} className="text-purple-400 shrink-0" />
         <span className="text-[0.55rem] uppercase tracking-wider text-gray-500 shrink-0">goal</span>
         <span
-          className="flex-1 min-w-0 truncate text-[0.6rem] text-gray-700 dark:text-gray-300"
+          className="flex-1 min-w-0 truncate t-micro text-gray-700 dark:text-gray-300"
           title={goal.text}
         >
           {goal.text}

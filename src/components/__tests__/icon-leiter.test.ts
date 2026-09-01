@@ -177,13 +177,33 @@ describe('die Leiter ist angewandt, wo dieses Paket hinreicht — und nur da', (
     // sie auch nicht darauf — 655 Call-Sites umzustellen ist ein eigenes
     // Paket mit eigenem Sichttermin, nicht ein Nebensatz in einem anderen.
     //
-    // Was das Paket erreicht hat: die 19 Groessen unterscheiden sich nicht
+    // Was Welle 1 erreicht hat: die 19 Groessen unterscheiden sich nicht
     // mehr im GEWICHT (das rechnen die Bloecke oben nach), nur noch in der
     // Groesse. Der Faktor 2,5 zwischen dem kleinsten und dem groessten
     // Strich ist weg, ohne dass eine dieser 655 Zeilen angefasst wurde.
     //
+    // ── Welle 2, 01.09.2026: 19 → 15 ──
+    //
+    // Vier Groessen sind ersatzlos verschwunden, weil sie ihre einzigen
+    // Fundstellen in chat/ models/ ui/ agents/ hatten:
+    //
+    //   7  → 8    zwei Mini-Glyphen (Stop-Quadrat, Schloss); 8 gab es
+    //             daneben schon 28 Mal.
+    //   22 → 28   drei Leerzustands-Glyphen in models/ModelManager.tsx
+    //   24 → 28   der Leerzustand in chat/CodexView.tsx …
+    //   32 → 28   … und der in chat/RAGPanel.tsx
+    //
+    // Das ist keine Rundung, sondern eine ROLLE: die Leerzustaende dieser
+    // App hatten vier verschiedene Glyphengroessen (22 / 24 / 32 und die
+    // 28 des Absturzschirms) fuer denselben Satz „hier ist noch nichts".
+    // Jetzt haben sie eine. 28 steht bewusst NICHT auf der Leiter — ein
+    // Leerzustands-Glyph ist keine Bedienflaeche, und ICON_LG (20) waere
+    // fuer ein Bild in der Mitte einer leeren Flaeche zu klein. Die zweite
+    // 24er-Fundstelle (der Warnkreis in ui/ErrorBoundary.tsx, inline neben
+    // Text) ist dagegen auf ICON_LG gegangen, weil sie eine ist.
+    //
     // Die Zahl hier ist eine Sperrklinke: sie darf sinken, nicht steigen.
-    // Wer eine ZWANZIGSTE Groesse erfindet, faellt hier durch und nimmt
+    // Wer eine SECHZEHNTE Groesse erfindet, faellt hier durch und nimmt
     // eine Leiterstufe.
     const sizes = new Set<number>()
     for (const [name, src] of FILES) {
@@ -193,9 +213,33 @@ describe('die Leiter ist angewandt, wo dieses Paket hinreicht — und nur da', (
       if (name.includes('three/')) continue // three.js `size` ist keine Icon-Groesse
       for (const m of src.matchAll(/\bsize=\{(\d+)\}/g)) sizes.add(Number(m[1]))
     }
-    expect(sizes.size).toBeLessThanOrEqual(19)
+    expect([...sizes].sort((a, b) => a - b).join(' ')).toBe('8 9 10 11 12 13 14 15 16 18 20 26 28 30 36')
+    expect(sizes.size).toBeLessThanOrEqual(15)
     // Und die Leiter ist wirklich in Gebrauch, nicht nur definiert.
     const onLadder = (ALL.match(/\bsize=\{ICON_(?:SM|MD|LG)\}/g) ?? []).length
-    expect(onLadder).toBeGreaterThanOrEqual(11)
+    expect(onLadder).toBeGreaterThanOrEqual(34)
+  })
+
+  it('die vier abgebauten Groessen sind wirklich weg, nicht nur seltener', () => {
+    // Ohne diese Haelfte waere die Schranke oben auch dann gruen, wenn
+    // jemand eine 7 gegen eine 21 tauscht.
+    for (const weg of [7, 22, 24, 32]) {
+      const orte = FILES
+        .filter(([name, src]) => !name.includes('three/') && new RegExp(`\\bsize=\\{${weg}\\}`).test(src))
+        .map(([n]) => n)
+      expect(orte, `size={${weg}} ist zurueck`).toEqual([])
+    }
+  })
+
+  it('die Leerzustaende dieser Verzeichnisse tragen EINE Groesse', () => {
+    // Das ist der eigentliche Fix hinter der Zahl. Er darf sich nicht
+    // still aufloesen, indem jemand eine der vier Stellen zurueckdreht.
+    for (const f of [
+      'components/models/ModelManager.tsx',
+      'components/chat/CodexView.tsx',
+      'components/chat/RAGPanel.tsx',
+    ]) {
+      expect(quelltext(FILES, f), `${f} hat keinen 28er-Leerzustand mehr`).toContain('size={28}')
+    }
   })
 })

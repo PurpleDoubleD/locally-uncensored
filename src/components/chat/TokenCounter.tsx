@@ -87,7 +87,7 @@ export function TokenCounter() {
     <span className={`inline-flex items-center gap-1.5 ${color}`} title={title}>
       <span className="block w-12 h-1 rounded-full bg-gray-200 dark:bg-white/10 overflow-hidden">
         <span
-          className={`block h-full rounded-full transition-all duration-300 ${barColor}`}
+          className={`block h-full rounded-full transition-[width] duration-[var(--motion-slow)] ${barColor}`}
           style={{ width: `${Math.min(ratio * 100, 100)}%` }}
         />
       </span>

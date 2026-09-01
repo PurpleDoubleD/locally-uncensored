@@ -61,7 +61,7 @@ export function FitHint({ fit, compact = false }: { fit: Fit; compact?: boolean 
     <span className="inline-flex items-center gap-1" title={meta.title}>
       <span className={`w-1.5 h-1.5 rounded-full ${meta.dot}`} />
       {!compact && (
-        <span className="text-[0.58rem] text-gray-500 dark:text-gray-400">
+        <span className="t-micro text-gray-500 dark:text-gray-400">
           {meta.label}
         </span>
       )}
@@ -109,18 +109,19 @@ export function FitHint({ fit, compact = false }: { fit: Fit; compact?: boolean 
  *  hat, aber jede Kachel bezahlt hat. Getragen wird die Erhebung vom Rand,
  *  den der Knopf ohnehin hat (Hairline-Elevation, wie es der Token-Diff des
  *  Audits fuer genau diese Stelle vorschlaegt). Echte Schatten bleiben den
- *  Flaechen, die wirklich schweben — das Aufklappmenue traegt weiter
- *  `shadow-xl`. */
+ *  Flaechen, die wirklich schweben — das Aufklappmenue nimmt dafuer seit
+ *  D-T06/D-T09 das Hausrezept `.lu-elevated` (Flaeche + Kante + Schatten
+ *  aus einer Quelle) statt einer eigenen Kette. */
 const TILE_ACTION =
-  'flex items-center gap-1 h-[var(--control-h-sm)] px-2.5 rounded-[var(--radius-control)] '
+  'flex items-center gap-1 h-[var(--control-h-sm)] px-2.5 rounded-lg '
   + 'bg-white dark:bg-white/10 hover:bg-gray-200 dark:hover:bg-white/[0.16] '
   + 'border border-gray-200 dark:border-white/[0.08] text-gray-800 dark:text-gray-100 '
-  + 'text-[0.62rem] font-semibold transition-colors'
+  + 't-micro font-semibold transition-colors'
 
 /** ANZEIGE — ein Zustand, den man lesen und nicht druecken kann. */
 const TILE_STATE =
-  'flex items-center gap-1 h-[var(--control-h-sm)] px-2 rounded-[var(--radius-control)] '
-  + 'bg-gray-100 dark:bg-white/[0.06] text-gray-600 dark:text-gray-300 text-[0.62rem] font-medium'
+  'flex items-center gap-1 h-[var(--control-h-sm)] px-2 rounded-lg '
+  + 'bg-gray-100 dark:bg-white/[0.06] text-gray-600 dark:text-gray-300 t-micro font-medium'
 
 // ─── Small chips ────────────────────────────────────────────────────
 
@@ -130,7 +131,7 @@ const TILE_STATE =
 export function SizePill({ sizeGB }: { sizeGB?: number }) {
   if (!sizeGB) return null
   return (
-    <span className="text-[0.58rem] px-1.5 py-0.5 rounded-md bg-gray-100 dark:bg-white/[0.06] text-gray-600 dark:text-gray-300 font-medium tabular-nums">
+    <span className="t-micro px-1.5 py-0.5 rounded-md bg-gray-100 dark:bg-white/[0.06] text-gray-600 dark:text-gray-300 font-medium tabular-nums">
       {sizeGB} GB
     </span>
   )
@@ -363,7 +364,7 @@ export function ModelTile({ variants, vramGb, isInstalled, dlState, onDownload, 
             <h3 className="text-[0.78rem] font-semibold text-gray-900 dark:text-white truncate">{groupTitle}</h3>
             <CapIcons model={sel} />
           </div>
-          <p className="text-[0.62rem] text-gray-500 dark:text-gray-400 leading-snug mt-0.5 line-clamp-2">{shortBlurb(sel)}</p>
+          <p className="t-micro text-gray-500 dark:text-gray-400 leading-snug mt-0.5 line-clamp-2">{shortBlurb(sel)}</p>
         </div>
         <button
           onClick={() => onInfo(sel)}
@@ -394,7 +395,7 @@ export function ModelTile({ variants, vramGb, isInstalled, dlState, onDownload, 
               <div
                 role="listbox"
                 aria-label={`Size and quality for ${groupTitle}`}
-                className="absolute z-30 left-0 top-full mt-1 w-56 rounded-lg border border-gray-200 dark:border-white/10 bg-white dark:bg-[#17171c] shadow-xl p-1"
+                className="absolute z-30 left-0 top-full mt-1 w-56 rounded-lg lu-elevated p-1"
               >
                 {variants.map(v => {
                   const vFit = computeFit(v.sizeGB, vramGb)
@@ -408,8 +409,8 @@ export function ModelTile({ variants, vramGb, isInstalled, dlState, onDownload, 
                       className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-left transition-colors hover:bg-gray-100 dark:hover:bg-white/[0.06] ${v.name === sel.name ? 'bg-gray-100 dark:bg-white/[0.06]' : ''}`}
                     >
                       <FitHint fit={vFit} compact />
-                      <span className="flex-1 text-[0.62rem] text-gray-800 dark:text-gray-200">{variantLabel(v)}</span>
-                      <span className="text-[0.58rem] text-gray-400 tabular-nums">{v.sizeGB} GB</span>
+                      <span className="flex-1 t-micro text-gray-800 dark:text-gray-200">{variantLabel(v)}</span>
+                      <span className="t-micro text-gray-400 tabular-nums">{v.sizeGB} GB</span>
                       {vInst && <Check size={ICON_SM} className="text-emerald-500/80" />}
                     </button>
                   )
@@ -442,7 +443,7 @@ export function ModelTile({ variants, vramGb, isInstalled, dlState, onDownload, 
               <Check size={ICON_SM} className="text-emerald-500/80" /> Installed
             </span>
           ) : downloading ? (
-            <span className="flex items-center gap-1.5 h-[var(--control-h-sm)] px-2 text-[0.62rem] text-gray-500 dark:text-gray-400">
+            <span className="flex items-center gap-1.5 h-[var(--control-h-sm)] px-2 t-micro text-gray-500 dark:text-gray-400">
               <Loader2 size={ICON_SM} className="animate-spin" /> Downloading…
             </span>
           ) : (
@@ -517,7 +518,7 @@ export function BundleTile({ bundle, vramGb, complete, downloading, hasErrors, o
             {bundle.hot && !complete && <HotMark />}
           </div>
           {bundle.description && (
-            <p className="text-[0.62rem] text-gray-500 dark:text-gray-400 leading-snug mt-0.5 line-clamp-2">{bundle.description}</p>
+            <p className="t-micro text-gray-500 dark:text-gray-400 leading-snug mt-0.5 line-clamp-2">{bundle.description}</p>
           )}
         </div>
         {bundle.url && (
@@ -543,7 +544,7 @@ export function BundleTile({ bundle, vramGb, complete, downloading, hasErrors, o
               <Check size={ICON_SM} className="text-emerald-500/80" /> Installed
             </span>
           ) : downloading ? (
-            <span className="flex items-center gap-1.5 h-[var(--control-h-sm)] px-2 text-[0.62rem] text-gray-500 dark:text-gray-400">
+            <span className="flex items-center gap-1.5 h-[var(--control-h-sm)] px-2 t-micro text-gray-500 dark:text-gray-400">
               <Loader2 size={ICON_SM} className="animate-spin" /> Installing…
             </span>
           ) : hasErrors ? (
@@ -554,7 +555,7 @@ export function BundleTile({ bundle, vramGb, complete, downloading, hasErrors, o
             <>
               <button
                 onClick={onRetry}
-                className="flex items-center gap-1 h-[var(--control-h-sm)] px-2 rounded-[var(--radius-control)] bg-red-100 dark:bg-red-500/15 hover:bg-red-200 dark:hover:bg-red-500/25 text-red-700 dark:text-red-400 text-[0.62rem] font-medium transition-colors"
+                className="flex items-center gap-1 h-[var(--control-h-sm)] px-2 rounded-lg bg-red-100 dark:bg-red-500/15 hover:bg-red-200 dark:hover:bg-red-500/25 text-red-700 dark:text-red-400 t-micro font-medium transition-colors"
                 title="Retry failed downloads"
               >
                 <RefreshCw size={ICON_SM} /> Retry
@@ -588,7 +589,7 @@ export function HardwareChip({ vramGb, ramGb }: { vramGb: number | null; ramGb: 
   if (!vramGb && !ramGb) return null
   return (
     <span
-      className="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg bg-gray-100 dark:bg-white/[0.04] border border-gray-200 dark:border-white/[0.06] text-[0.6rem] text-gray-600 dark:text-gray-300"
+      className="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg bg-gray-100 dark:bg-white/[0.04] border border-gray-200 dark:border-white/[0.06] t-micro text-gray-600 dark:text-gray-300"
       title="Detected hardware. Used for the 'runs on your PC' hints. Models are never hidden because of it."
     >
       <HardDrive size={ICON_SM} className="text-gray-400" />

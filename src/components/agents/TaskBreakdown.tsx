@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { Circle, Loader2, CheckCircle2, XCircle, ChevronDown, ChevronRight, Wrench } from 'lucide-react'
 import { ToolCallCard } from './ToolCallCard'
 import type { AgentTask, TaskStatus } from '../../types/agents'
+import { MOTION_S } from '../ui/motion'
 
 function StatusIcon({ status }: { status: TaskStatus }) {
   switch (status) {
@@ -63,7 +64,7 @@ export function TaskBreakdown({ tasks }: Props) {
               initial={{ opacity: 0, height: 0 }}
               animate={{ opacity: 1, height: 'auto' }}
               exit={{ opacity: 0, height: 0 }}
-              transition={{ duration: 0.2 }}
+              transition={{ duration: MOTION_S.base }}
             >
               <div
                 onClick={() => task.toolCalls.length > 0 && toggle(task.id)}
@@ -83,7 +84,7 @@ export function TaskBreakdown({ tasks }: Props) {
                   )}
                 </div>
                 {task.toolCalls.length > 0 && (
-                  <div className="flex items-center gap-1 text-[0.65rem] text-gray-500 flex-shrink-0">
+                  <div className="flex items-center gap-1 t-micro text-gray-500 flex-shrink-0">
                     <span>{task.toolCalls.length} call{task.toolCalls.length !== 1 ? 's' : ''}</span>
                     {expanded.has(task.id) ? (
                       <ChevronDown size={12} />
@@ -100,7 +101,7 @@ export function TaskBreakdown({ tasks }: Props) {
                     initial={{ opacity: 0, height: 0 }}
                     animate={{ opacity: 1, height: 'auto' }}
                     exit={{ opacity: 0, height: 0 }}
-                    transition={{ duration: 0.15 }}
+                    transition={{ duration: MOTION_S.base }}
                     className="ml-6 space-y-1.5 pb-1"
                   >
                     {task.toolCalls.map((tc) => (

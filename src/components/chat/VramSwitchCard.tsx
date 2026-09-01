@@ -21,6 +21,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { Loader2, Cpu, Check } from 'lucide-react'
 import { useVramHandoff } from '../../hooks/useVramHandoff'
 import type { HandoffPhase } from '../../api/vram-handoff'
+import { MOTION_S } from '../ui/motion'
 
 function copyFor(phase: HandoffPhase | null, kind: 'image' | 'video' | null, detail: string | null, evicted: boolean): { text: string; sub?: string; done?: boolean } {
   const what = kind === 'video' ? 'video' : 'image'
@@ -76,8 +77,8 @@ export function VramSwitchCard() {
           initial={{ opacity: 0, y: 4 }}
           animate={{ opacity: 1, y: 0 }}
           exit={{ opacity: 0, y: -4 }}
-          transition={{ duration: 0.15 }}
-          className="flex items-start gap-2 px-2.5 py-1.5 rounded-md border border-gray-200 dark:border-white/10 bg-gray-50 dark:bg-white/[0.05] text-[0.65rem] text-gray-700 dark:text-gray-200"
+          transition={{ duration: MOTION_S.base }}
+          className="flex items-start gap-2 px-2.5 py-1.5 rounded-md border border-gray-200 dark:border-white/10 bg-gray-50 dark:bg-white/[0.05] t-micro text-gray-700 dark:text-gray-200"
         >
           <span className="mt-0.5 shrink-0">
             {done ? <Check size={12} className="text-emerald-500" /> : <Loader2 size={12} className="animate-spin" />}

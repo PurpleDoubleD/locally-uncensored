@@ -293,7 +293,7 @@ export function ChatInput({ onSend, onStop, isGenerating, pendingApproval, onApp
       >
         {/* Slash-command autocomplete — floats above the composer */}
         {cmdMenu.length > 0 && (
-          <div className="absolute bottom-full left-0 right-0 mb-1.5 z-50 max-h-64 overflow-y-auto scrollbar-thin rounded-lg border border-gray-200 dark:border-white/10 bg-white dark:bg-[#1f1f1f] shadow-xl py-1">
+          <div className="absolute bottom-full left-0 right-0 mb-1.5 z-50 max-h-64 overflow-y-auto scrollbar-thin rounded-lg lu-elevated py-1">
             <div className="px-2.5 py-1 flex items-center gap-1 text-[0.5rem] uppercase tracking-widest text-gray-400 dark:text-gray-600">
               <Terminal size={9} /> Agent commands
             </div>
@@ -307,8 +307,8 @@ export function ChatInput({ onSend, onStop, isGenerating, pendingApproval, onApp
                 }`}
               >
                 <span className="text-[0.72rem] font-medium text-gray-800 dark:text-gray-100 shrink-0">/{cmd.name}</span>
-                {cmd.argHint && <span className="text-[0.6rem] text-gray-400 dark:text-gray-500 shrink-0">{cmd.argHint}</span>}
-                <span className="text-[0.6rem] text-gray-500 dark:text-gray-400 truncate ml-auto">{cmd.summary}</span>
+                {cmd.argHint && <span className="t-micro text-gray-400 dark:text-gray-500 shrink-0">{cmd.argHint}</span>}
+                <span className="t-micro text-gray-500 dark:text-gray-400 truncate ml-auto">{cmd.summary}</span>
               </button>
             ))}
           </div>
@@ -335,7 +335,7 @@ export function ChatInput({ onSend, onStop, isGenerating, pendingApproval, onApp
           {/* Non-image attach hint (GH #69) — the clip is images-only; PDFs, Word,
               and text files go through the Documents panel so the model can read them. */}
           {docHint && (
-            <div className="flex items-center gap-2 mb-1.5 px-2 py-1 rounded-md bg-amber-500/10 border border-amber-500/20 text-[0.62rem] text-amber-700 dark:text-amber-300">
+            <div className="flex items-center gap-2 mb-1.5 px-2 py-1 rounded-md bg-amber-500/10 border border-amber-500/20 t-micro text-amber-700 dark:text-amber-300">
               <span className="flex-1">The clip attaches images. To ask about a PDF, Word, or text file, add it in the Documents panel.</span>
               {onAttachDocs && (
                 <button
@@ -371,7 +371,7 @@ export function ChatInput({ onSend, onStop, isGenerating, pendingApproval, onApp
                   >
                     <X size={8} />
                   </button>
-                  <span className="absolute bottom-0 left-0 right-0 bg-black/60 text-[0.4rem] text-gray-300 text-center rounded-b-lg truncate px-0.5">
+                  <span className="absolute bottom-0 left-0 right-0 bg-black/60 text-[0.45rem] text-gray-300 text-center rounded-b-lg truncate px-0.5">
                     {img.name}
                   </span>
                 </div>
@@ -486,7 +486,7 @@ export function ChatInput({ onSend, onStop, isGenerating, pendingApproval, onApp
             <span
               data-testid="composer-cloud-state"
               title="Cloud mode: this message runs on LU's hosted GPUs and is billed to your lu-labs.ai credits. The Cloud switch up in the header turns it off."
-              className="flex items-center gap-1 px-1.5 py-1.5 rounded-md shrink-0 text-[0.6rem] font-medium bg-lu-cloud/15 text-lu-cloud dark:text-lu-cloud-lift border border-lu-cloud/30"
+              className="flex items-center gap-1 px-1.5 py-1.5 rounded-md shrink-0 t-micro font-medium bg-lu-cloud/15 text-lu-cloud dark:text-lu-cloud-lift border border-lu-cloud/30"
             >
               <img
                 src={MONOGRAM}
@@ -515,7 +515,7 @@ export function ChatInput({ onSend, onStop, isGenerating, pendingApproval, onApp
               Druck steht jetzt als eine Regel in index.css und laeuft ueber
               die `transition` von `.lu-control` weich aus; die beiden
               Knoepfe brauchen framer-motion dafuer nicht mehr. */}
-          <div className="shrink-0 w-[26px] h-[26px]" data-testid="composer-send-slot">
+          <div className="shrink-0 w-[var(--control-h-sm)] h-[var(--control-h-sm)]" data-testid="composer-send-slot">
             {isGenerating ? (
               <button
                 onClick={onStop}

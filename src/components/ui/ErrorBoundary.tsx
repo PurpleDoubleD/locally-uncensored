@@ -2,6 +2,7 @@ import { Component, type ReactNode } from 'react'
 import { AlertCircle, RefreshCw } from 'lucide-react'
 import { log } from '../../lib/logger'
 import { forceShowWindow, resetSettingsAndReload } from '../../lib/fatal-error'
+import { ICON_LG } from './icon-size'
 
 interface Props {
   children: ReactNode
@@ -87,7 +88,7 @@ export class ErrorBoundary extends Component<Props, State> {
       }
       return (
         <div className={this.props.fallbackClassName || 'flex flex-col items-center justify-center p-6 gap-3'}>
-          <AlertCircle size={24} className="text-red-400" />
+          <AlertCircle size={ICON_LG} className="text-red-400" />
           <p className="text-sm text-red-400 text-center">Something went wrong</p>
           <p className="text-xs text-gray-500 text-center max-w-[200px] break-words">
             {this.state.error?.message || 'Unknown error'}

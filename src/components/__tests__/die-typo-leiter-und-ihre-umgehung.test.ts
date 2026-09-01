@@ -78,18 +78,28 @@ const FUNDSTELLEN = [...WERTE.values()].reduce((a, b) => a + b, 0)
 
 // ── Die Sperrklinke ────────────────────────────────────────────────────
 //
-// Ist-Werte am 01.09.2026 NACH dieser Aenderung, gemessen mit genau dem
-// Zaehler oben:
+// Ist-Werte, gemessen mit genau dem Zaehler oben:
 //
-//   vorher   30 Werte / 1026 Fundstellen
-//   nachher  25 Werte / 1009 Fundstellen
+//   Welle 1 (Klasse gebaut)    30 Werte / 1026 Fundstellen
+//                              25 Werte / 1009 Fundstellen
+//   Welle 2 (Klasse gezogen)   23 Werte /  826 Fundstellen
 //
-// Verschwunden sind: `#7c3aed` und `#a78bfa` (jetzt Tokens, siehe
-// zwei-akzente-und-eine-leinwand.test.ts), `8px` (identisch zu 0.5rem),
-// `0.75rem` (identisch zu 12px) und `0.63rem` (die einzige Fundstelle
-// eines Wertes, den niemand entschieden hatte).
-const SCHRANKE_WERTE = 25
-const SCHRANKE_FUNDSTELLEN = 1009
+// Welle 1 hat `#7c3aed`/`#a78bfa` (jetzt Tokens), `8px` (identisch zu
+// 0.5rem), `0.75rem` (identisch zu 12px) und `0.63rem` abgebaut.
+//
+// Welle 2 hat 181 Fundstellen in chat/ models/ ui/ agents/ import/ auf
+// `.t-micro` gezogen und dabei zwei weitere Werte ganz beseitigt:
+// `0.58rem` (9,28px — im Band) und `0.4rem` (6,4px, 3 Fundstellen, 0,8px
+// neben `0.45rem`, das dieselbe Rolle traegt).
+//
+// Die Grenze ist eine Rechnung, keine Ermuedung: `.t-micro` nimmt das
+// Band, das auf ihre 10px rundet, ± 1 CSS-Pixel. Was ausserhalb liegt,
+// bleibt stehen — mit Grund, nachzulesen im `.t-micro`-Kommentar von
+// index.css. Der groesste Rest ist `0.55rem` (8,8px) und `0.5rem` (8px):
+// dorthin zu ziehen waere +14 bzw. +25 %, also ein Entwurf und keine
+// Zusammenfuehrung.
+const SCHRANKE_WERTE = 23
+const SCHRANKE_FUNDSTELLEN = 826
 
 describe('die Umgehung ist gedeckelt und darf nur schrumpfen', () => {
   it(`hoechstens ${SCHRANKE_WERTE} verschiedene arbitraere Schriftgroessen`, () => {
@@ -102,8 +112,8 @@ describe('die Umgehung ist gedeckelt und darf nur schrumpfen', () => {
     expect(FUNDSTELLEN).toBeLessThanOrEqual(SCHRANKE_FUNDSTELLEN)
   })
 
-  it('die fuenf abgebauten Werte sind wirklich weg', () => {
-    for (const weg of ['text-[8px]', 'text-[0.75rem]', 'text-[0.63rem]', 'text-[#7c3aed]', 'text-[#a78bfa]']) {
+  it('die sieben abgebauten Werte sind wirklich weg', () => {
+    for (const weg of ['text-[8px]', 'text-[0.75rem]', 'text-[0.63rem]', 'text-[#7c3aed]', 'text-[#a78bfa]', 'text-[0.58rem]', 'text-[0.4rem]']) {
       const treffer = DATEIEN.filter(([, s]) => s.includes(weg)).map(([n]) => n)
       expect(treffer, weg).toEqual([])
     }
@@ -146,11 +156,41 @@ describe('die neue Stufe ist keine neue Zahl', () => {
   })
 
   it('und sie wird wirklich benutzt, nicht nur definiert', () => {
+    // Welle 1 hat sie gebaut und auf 9 Call-Sites gebracht; Welle 2 hat die
+    // 179 Fundstellen des Bandes daraufgezogen. Diese Schranke ist die
+    // GEGENRICHTUNG zu den beiden oben: dort darf die Umgehung nur sinken,
+    // hier darf der Gebrauch der Leiter nur steigen. Ohne diese Haelfte
+    // waere ein Ersatz von `text-[0.6rem]` durch gar nichts auch gruen.
     const n = DATEIEN.reduce(
       (a, [, s]) => a + (s.match(/(?<![\w-])t-micro(?![\w-])/g) ?? []).length,
       0,
     )
-    expect(n).toBeGreaterThanOrEqual(9)
+    expect(n).toBeGreaterThanOrEqual(190)
+  })
+
+  it('das Band, das `.t-micro` nimmt, ist in MEINEN Verzeichnissen wirklich leer', () => {
+    // Die Regel ausgeschrieben: alles, was auf 10px ± 1 CSS-Pixel rundet,
+    // heisst `.t-micro`. In chat/ models/ ui/ agents/ import/ ist das
+    // vollstaendig durchgezogen; anderswo steht es noch, dort arbeiten
+    // andere.
+    const MEIN = (n: string) =>
+      /^components\/(chat\/|models\/|ui\/|agents\/|import\/)/.test(n)
+      && n !== 'components/chat/ChatView.tsx'
+    const band = (roh: string): number | null => {
+      const rem = roh.match(/^([\d.]+)rem$/)
+      if (rem) return parseFloat(rem[1]) * 16
+      const px = roh.match(/^([\d.]+)px$/)
+      return px ? parseFloat(px[1]) : null
+    }
+    const treffer: string[] = []
+    for (const [name, src] of DATEIEN) {
+      if (!MEIN(name)) continue
+      for (const m of src.matchAll(/(?<![\w-])(?:[a-z-]+:)*text-\[([^\]]+)\]/g)) {
+        const px = band(m[1])
+        if (px !== null && px >= 9 && px <= 11) treffer.push(`${name}: ${m[0]}`)
+      }
+    }
+    expect(treffer, 'im t-micro-Band und trotzdem in eckigen Klammern').toEqual([])
   })
 
   it('die drei alten Kleinstufen sind wirklich keine schlichten Stufen', () => {

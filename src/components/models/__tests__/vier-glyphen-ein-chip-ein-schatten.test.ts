@@ -185,7 +185,7 @@ describe('D-S23 · ein Bedienelement, das aussah wie eine Anzeige', () => {
     // Der Befund in einem Satz: gleiche Klassen, gleiche Stelle. Der Chip
     // traegt seine Flaeche, das Control traegt ein Rezept — kein einziges
     // gemeinsames Erscheinungsmerkmal ausser der Zeile, in der sie stehen.
-    const chip = TILES.match(/text-\[0\.58rem\] px-1\.5 py-0\.5 rounded-md bg-gray-100[^"]*/)?.[0] ?? ''
+    const chip = TILES.match(/t-micro px-1\.5 py-0\.5 rounded-md bg-gray-100[^"]*/)?.[0] ?? ''
     expect(chip).not.toBe('')
     expect(chip).not.toContain('lu-control')
     expect(TILES).not.toMatch(/className="flex items-center gap-1 px-1\.5 py-0\.5 rounded-md bg-gray-100/)
@@ -233,10 +233,20 @@ describe('D-S24 · der Schatten, den niemand je gesehen hat', () => {
     expect((TILES.match(/className=\{TILE_ACTION\}/g) ?? []).length).toBe(2)
   })
 
-  it('echte Erhebung bleibt, wo wirklich etwas schwebt', () => {
+  it('echte Erhebung bleibt, wo wirklich etwas schwebt — und kommt aus dem Rezept', () => {
     // Das Aufklappmenue liegt ueber der Kachel darunter — dort ist ein
-    // Schatten kein Dekor, sondern die Aussage.
-    expect(TILES).toContain('shadow-xl')
+    // Schatten kein Dekor, sondern die Aussage. Seit D-T06/D-T09 kommt sie
+    // nicht mehr aus einer handgeschriebenen Kette (`bg-[#17171c] border
+    // border-white/10 shadow-xl`), sondern aus `.lu-elevated`.
+    //
+    // `ohneKommentar` ist hier keine Kosmetik: die Vorfassung dieser
+    // Zusicherung las `expect(TILES).toContain('shadow-xl')` — und die
+    // Klasse stand ausser im Menue auch im Kommentar ueber TILE_ACTION.
+    // Sie waere gruen geblieben, haette man das Menue ersatzlos gestrichen.
+    const code = ohneKommentar(TILES)
+    expect(code).toContain('lu-elevated')
+    expect(code).not.toContain('shadow-xl')
+    expect(code).not.toContain('#17171c')
   })
 })
 

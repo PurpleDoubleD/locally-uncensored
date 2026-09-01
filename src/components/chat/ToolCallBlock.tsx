@@ -11,6 +11,7 @@ import { commandIcon } from '../../lib/shell-command-classify'
 import { requestGenerationCancel } from '../../api/vram-handoff'
 import { fileUrlToPath, readLocalFileAsBlobUrl, displayableMedia, type MediaRead } from '../../lib/local-media-url'
 import { hiddenFromTranscript } from '../../lib/transcript-visibility'
+import { MOTION_S } from '../ui/motion'
 
 // F1 (konata3602 commitment 2026-05-23) + render fix (konata3602 bug 2026-06-07)
 // — when image_generate / video_generate / screenshot produce a ComfyUI output,
@@ -298,7 +299,7 @@ function ToolCallBlockImpl({ toolCall, onApprove, onReject }: Props) {
           className="flex items-center gap-1.5 py-0.5 text-left hover:opacity-80 transition-opacity flex-1 min-w-0"
         >
           <ToolIcon size={10} className="text-gray-500 dark:text-gray-500 shrink-0" />
-          <span className={`text-[0.65rem] ${isRunning ? 'lu-tool-shimmer' : 'text-gray-600 dark:text-gray-400'}`}>{toolCall.toolName}</span>
+          <span className={`t-micro ${isRunning ? 'lu-tool-shimmer' : 'text-gray-600 dark:text-gray-400'}`}>{toolCall.toolName}</span>
           {isRunning && (
             <span className="flex items-center gap-[3px] shrink-0" aria-hidden>
               {[0, 1, 2].map((i) => (
@@ -366,7 +367,7 @@ function ToolCallBlockImpl({ toolCall, onApprove, onReject }: Props) {
           honest line beats a broken picture frame. */}
       {localMediaMissing && (
         <div className="pl-5 pt-0.5">
-          <span className="text-[0.6rem] text-gray-500 dark:text-gray-500">
+          <span className="t-micro text-gray-500 dark:text-gray-500">
             This render is no longer on disk.
           </span>
         </div>
@@ -404,7 +405,7 @@ function ToolCallBlockImpl({ toolCall, onApprove, onReject }: Props) {
                 <button
                   onClick={() => { void downloadComfyFile(p.filename, p.subfolder, p.type) }}
                   title="Download"
-                  className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[0.6rem] font-medium bg-blue-500/15 text-blue-500 hover:bg-blue-500/25 border border-blue-500/30 transition-colors"
+                  className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded t-micro font-medium bg-blue-500/15 text-blue-500 hover:bg-blue-500/25 border border-blue-500/30 transition-colors"
                 >
                   <Download size={11} /> Download
                 </button>
@@ -417,7 +418,7 @@ function ToolCallBlockImpl({ toolCall, onApprove, onReject }: Props) {
                 href={effectivePreviewUrl}
                 download={filename}
                 title="Download"
-                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[0.6rem] font-medium bg-blue-500/15 text-blue-500 hover:bg-blue-500/25 border border-blue-500/30 transition-colors"
+                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded t-micro font-medium bg-blue-500/15 text-blue-500 hover:bg-blue-500/25 border border-blue-500/30 transition-colors"
               >
                 <Download size={11} /> Download
               </a>
@@ -433,7 +434,7 @@ function ToolCallBlockImpl({ toolCall, onApprove, onReject }: Props) {
             initial={{ height: 0, opacity: 0 }}
             animate={{ height: 'auto', opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.15 }}
+            transition={{ duration: MOTION_S.base }}
             className="overflow-hidden"
           >
             <div className="pl-5 pb-1.5 space-y-1">
@@ -475,13 +476,13 @@ function ToolCallBlockImpl({ toolCall, onApprove, onReject }: Props) {
                 <div className="flex items-center gap-1.5 pt-1">
                   <button
                     onClick={(e) => { e.stopPropagation(); onApprove() }}
-                    className="flex items-center gap-1 px-2.5 py-1 rounded text-[0.6rem] font-medium text-emerald-700 dark:text-emerald-300 bg-emerald-500/10 dark:bg-emerald-500/10 hover:bg-emerald-500/15 dark:hover:bg-emerald-500/15 border border-emerald-500/20 dark:border-emerald-500/25 transition-colors"
+                    className="flex items-center gap-1 px-2.5 py-1 rounded t-micro font-medium text-emerald-700 dark:text-emerald-300 bg-emerald-500/10 dark:bg-emerald-500/10 hover:bg-emerald-500/15 dark:hover:bg-emerald-500/15 border border-emerald-500/20 dark:border-emerald-500/25 transition-colors"
                   >
                     <Check size={10} /> Approve
                   </button>
                   <button
                     onClick={(e) => { e.stopPropagation(); onReject() }}
-                    className="flex items-center gap-1 px-2.5 py-1 rounded text-[0.6rem] font-medium text-red-700 dark:text-red-300 bg-red-500/10 dark:bg-red-500/10 hover:bg-red-500/15 dark:hover:bg-red-500/15 border border-red-500/20 dark:border-red-500/25 transition-colors"
+                    className="flex items-center gap-1 px-2.5 py-1 rounded t-micro font-medium text-red-700 dark:text-red-300 bg-red-500/10 dark:bg-red-500/10 hover:bg-red-500/15 dark:hover:bg-red-500/15 border border-red-500/20 dark:border-red-500/25 transition-colors"
                   >
                     <X size={10} /> Reject
                   </button>

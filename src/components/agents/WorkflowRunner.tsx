@@ -70,7 +70,7 @@ export function WorkflowRunner({
       <div className="flex items-center justify-between">
         <div>
           <p className="text-[0.7rem] font-medium text-gray-200">{execution.workflowName}</p>
-          <p className="text-[0.6rem] text-gray-500">
+          <p className="t-micro text-gray-500">
             {execution.status === 'running' || execution.status === 'waiting_input'
               ? `Running... ${elapsed}s`
               : execution.status === 'completed'
@@ -112,16 +112,16 @@ export function WorkflowRunner({
             <div key={step.id} className="flex items-start gap-2">
               <Icon size={11} className={`mt-0.5 shrink-0 ${STATUS_COLORS[status]}`} />
               <div className="flex-1 min-w-0">
-                <p className={`text-[0.65rem] ${status === 'completed' || status === 'running' || status === 'waiting' ? 'text-gray-300' : 'text-gray-500'}`}>
+                <p className={`t-micro ${status === 'completed' || status === 'running' || status === 'waiting' ? 'text-gray-300' : 'text-gray-500'}`}>
                   {step.label}
                 </p>
                 {result?.output && status === 'completed' && (
-                  <p className="text-[0.6rem] text-gray-500 truncate mt-0.5">
+                  <p className="t-micro text-gray-500 truncate mt-0.5">
                     {result.output.substring(0, 100)}
                   </p>
                 )}
                 {result?.error && (
-                  <p className="text-[0.6rem] text-red-400/70 mt-0.5">{result.error}</p>
+                  <p className="t-micro text-red-400/70 mt-0.5">{result.error}</p>
                 )}
               </div>
             </div>
@@ -132,7 +132,7 @@ export function WorkflowRunner({
       {/* User input prompt */}
       {waitingForInput && (
         <div className="space-y-1.5 pt-1 border-t border-white/5">
-          <p className="text-[0.65rem] text-amber-400">{waitingForInput}</p>
+          <p className="t-micro text-amber-400">{waitingForInput}</p>
           <div className="flex gap-1.5">
             <input
               value={inputValue}
@@ -154,7 +154,7 @@ export function WorkflowRunner({
 
       {/* Error */}
       {execution.error && (
-        <p className="text-[0.65rem] text-red-400 bg-red-500/5 rounded px-2 py-1 border border-red-500/20">
+        <p className="t-micro text-red-400 bg-red-500/5 rounded px-2 py-1 border border-red-500/20">
           {execution.error}
         </p>
       )}

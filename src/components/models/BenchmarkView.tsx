@@ -59,7 +59,7 @@ export function BenchmarkView() {
     <div className="h-full overflow-y-auto scrollbar-thin">
       <div className="max-w-2xl mx-auto px-4 py-4">
         {benchError && (
-          <div className="mb-3 px-3 py-2 rounded-md bg-red-500/10 border border-red-500/25 text-[0.6rem] text-red-300 flex items-start gap-2">
+          <div className="mb-3 px-3 py-2 rounded-md bg-red-500/10 border border-red-500/25 t-micro text-red-300 flex items-start gap-2">
             <span className="flex-1">{benchError}</span>
             <button
               onClick={() => useBenchmarkStore.getState().setError(null)}
@@ -82,7 +82,7 @@ export function BenchmarkView() {
                 onClick={runPending}
                 disabled={isRunning}
                 title={`Benchmark the ${pending.length} model(s) with no result yet, one after another`}
-                className="flex items-center gap-1 px-2 py-1 rounded-md bg-gray-100 dark:bg-white/5 text-gray-600 dark:text-gray-400 text-[0.6rem] hover:bg-gray-200 dark:hover:bg-white/10 transition-colors disabled:opacity-30"
+                className="flex items-center gap-1 px-2 py-1 rounded-md bg-gray-100 dark:bg-white/5 text-gray-600 dark:text-gray-400 t-micro hover:bg-gray-200 dark:hover:bg-white/10 transition-colors disabled:opacity-30"
               >
                 <ListChecks size={11} />
                 Benchmark {pending.length} remaining
@@ -92,7 +92,7 @@ export function BenchmarkView() {
               <button
                 onClick={exportReport}
                 title="Download the table as Markdown"
-                className="flex items-center gap-1 px-2 py-1 rounded-md bg-gray-100 dark:bg-white/5 text-gray-600 dark:text-gray-400 text-[0.6rem] hover:bg-gray-200 dark:hover:bg-white/10 transition-colors"
+                className="flex items-center gap-1 px-2 py-1 rounded-md bg-gray-100 dark:bg-white/5 text-gray-600 dark:text-gray-400 t-micro hover:bg-gray-200 dark:hover:bg-white/10 transition-colors"
               >
                 <Download size={11} />
                 Export
@@ -103,7 +103,7 @@ export function BenchmarkView() {
                 onClick={() => { if (confirmClear) { clearResults(); setConfirmClear(false) } else setConfirmClear(true) }}
                 onBlur={() => setConfirmClear(false)}
                 title="Delete every recorded benchmark run"
-                className={`flex items-center gap-1 px-2 py-1 rounded-md text-[0.6rem] transition-colors ${
+                className={`flex items-center gap-1 px-2 py-1 rounded-md t-micro transition-colors ${
                   confirmClear
                     ? 'bg-red-500/20 text-red-500'
                     : 'bg-gray-100 dark:bg-white/5 text-gray-600 dark:text-gray-400 hover:bg-red-500/15 hover:text-red-500'
@@ -119,13 +119,13 @@ export function BenchmarkView() {
         {/* Results whose model is gone — the "out of whack" state from D#21. */}
         {stale.length > 0 && (
           <div className="mb-4 flex items-center justify-between gap-3 px-3 py-2 rounded-lg bg-amber-500/10 border border-amber-500/20">
-            <p className="text-[0.65rem] text-amber-600 dark:text-amber-400">
+            <p className="t-micro text-amber-600 dark:text-amber-400">
               {stale.length} model{stale.length === 1 ? '' : 's'} in this table {stale.length === 1 ? 'is' : 'are'} no longer installed:{' '}
               {stale.slice(0, 3).join(', ')}{stale.length > 3 ? ` and ${stale.length - 3} more` : ''}.
             </p>
             <button
               onClick={() => pruneMissing(names)}
-              className="shrink-0 px-2 py-1 rounded-md bg-amber-500/15 text-amber-600 dark:text-amber-400 text-[0.6rem] hover:bg-amber-500/25 transition-colors"
+              className="shrink-0 px-2 py-1 rounded-md bg-amber-500/15 text-amber-600 dark:text-amber-400 t-micro hover:bg-amber-500/25 transition-colors"
             >
               Remove them
             </button>
@@ -155,7 +155,7 @@ export function BenchmarkView() {
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center justify-between mb-1">
                         <span className="text-[0.7rem] text-gray-800 dark:text-gray-200 truncate font-medium">{entry.model}</span>
-                        <span className="text-[0.65rem] text-gray-600 dark:text-gray-400 font-mono shrink-0 ml-2 flex items-center gap-1">
+                        <span className="t-micro text-gray-600 dark:text-gray-400 font-mono shrink-0 ml-2 flex items-center gap-1">
                           <Zap size={10} className="text-amber-400" />
                           <span title="Useful throughput: the average rate multiplied by how often the answer was right. This is what the board is ordered by.">
                             {entry.score} t/s useful
@@ -169,7 +169,7 @@ export function BenchmarkView() {
                       </div>
                       <div className="w-full h-1.5 rounded-full bg-gray-200 dark:bg-white/5 overflow-hidden">
                         <div
-                          className={`h-full rounded-full transition-all duration-500 ${i === 0 ? 'bg-amber-400' : 'bg-gray-400 dark:bg-gray-500/60'}`}
+                          className={`h-full rounded-full transition-[width] duration-[var(--motion-slow)] ${i === 0 ? 'bg-amber-400' : 'bg-gray-400 dark:bg-gray-500/60'}`}
                           style={{ width: `${barWidth}%` }}
                         />
                       </div>
@@ -220,7 +220,7 @@ export function BenchmarkView() {
 
         {/* Model List with Bench Buttons */}
         <div className="space-y-1">
-          <h2 className="text-[0.65rem] font-semibold uppercase tracking-widest text-gray-500 mb-2">
+          <h2 className="t-micro font-semibold uppercase tracking-widest text-gray-500 mb-2">
             {textModels.length} Text Models
           </h2>
           {textModels.map((model) => {
@@ -245,7 +245,7 @@ export function BenchmarkView() {
                   {isThisRunning ? (
                     <button
                       onClick={stopBenchmark}
-                      className="flex items-center gap-1 px-2 py-1 rounded-md bg-red-500/15 text-red-500 text-[0.6rem] hover:bg-red-500/25 transition-colors"
+                      className="flex items-center gap-1 px-2 py-1 rounded-md bg-red-500/15 text-red-500 t-micro hover:bg-red-500/25 transition-colors"
                     >
                       <Square size={10} />
                       {currentStep}/{totalSteps}
@@ -254,7 +254,7 @@ export function BenchmarkView() {
                     <button
                       onClick={() => runBenchmark(model.name)}
                       disabled={isRunning}
-                      className="flex items-center gap-1 px-2 py-1 rounded-md bg-gray-100 dark:bg-white/5 text-gray-600 dark:text-gray-400 text-[0.6rem] hover:bg-gray-200 dark:hover:bg-white/10 hover:text-gray-900 dark:hover:text-gray-200 transition-colors disabled:opacity-30"
+                      className="flex items-center gap-1 px-2 py-1 rounded-md bg-gray-100 dark:bg-white/5 text-gray-600 dark:text-gray-400 t-micro hover:bg-gray-200 dark:hover:bg-white/10 hover:text-gray-900 dark:hover:text-gray-200 transition-colors disabled:opacity-30"
                     >
                       <Play size={10} />
                       Run Benchmark

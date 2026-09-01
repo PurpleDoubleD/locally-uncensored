@@ -125,6 +125,25 @@ describe('der Cloud-Akzent ist eine Rolle, keine zweite Marke', () => {
     expect(ALL).toContain('dark:text-lu-cloud-lift')
   })
 
+  it('auch der HAUS-Akzent steht nirgends mehr als Zahl', () => {
+    // Die Cloud-Haelfte war Welle 1. Diese hier ist die andere: #a094f8
+    // (Ruhe), #b1a6ff (Hover), #8b7cf0 (Hellmodus-Kante). Der Audit
+    // zaehlte 23 Fundstellen von #a094f8. Im CODE — Kommentare
+    // abgeschnitten, sonst zaehlt man die Kontrastrechnungen mit, die
+    // ueber diese Farben GESCHRIEBEN wurden — ist es null.
+    const orte: string[] = []
+    for (const [name, src] of DATEIEN) {
+      for (const m of nurCode(src).matchAll(/#(?:a094f8|b1a6ff|8b7cf0)/gi)) {
+        orte.push(`${name}: ${m[0]}`)
+      }
+    }
+    expect(orte).toEqual([])
+    // Und die Tokens gibt es wirklich, sie sind nicht mitgeloescht worden.
+    for (const t of ['lu-accent', 'lu-accent-hover', 'lu-accent-edge']) {
+      expect(CSS_CODE, `--color-${t} fehlt`).toMatch(new RegExp(`--color-${t}:`))
+    }
+  })
+
   it('das Brand-Kit-Violett kommt weiterhin nirgends vor', () => {
     // Der Audit fuehrte es als „die eigentliche Wahrheit". Es hat in
     // dieser App nie eine Call-Site gehabt, und es bekommt hier keine.
@@ -146,7 +165,6 @@ describe('die Leinwand hat einen Namen bekommen', () => {
       'components/layout/Header.tsx',
       'components/layout/Titlebar.tsx',
       'components/layout/ViewSkeletons.tsx',
-      'components/ui/ContextMenu.tsx',
     ]
     for (const f of erwartet) {
       const src = quelltext(DATEIEN, f)
@@ -156,6 +174,18 @@ describe('die Leinwand hat einen Namen bekommen', () => {
     // Titlebar zeichnet zwei Varianten desselben Balkens.
     const tb = quelltext(DATEIEN, 'components/layout/Titlebar.tsx')
     expect((tb.match(/dark:bg-lu-canvas/g) ?? []).length).toBe(2)
+  })
+
+  it('das Kontextmenue ist aus dieser Liste RAUS — und zwar nach oben', () => {
+    // Es stand hier als sechste Call-Site von `--color-lu-canvas`. Das war
+    // die richtige Antwort auf „welches Literal?" und die falsche auf
+    // „welche Rolle?": ein Menue, das ueber der Leinwand schwebt, in der
+    // FARBE der Leinwand liest sich nicht als schwebend. Seit D-T09 traegt
+    // es dasselbe Rezept wie die uebrigen neun Schwebeblaetter der App.
+    const cm = quelltext(DATEIEN, 'components/ui/ContextMenu.tsx')
+    expect(cm).toContain('lu-elevated')
+    expect(cm).not.toContain('dark:bg-lu-canvas')
+    expect(cm).not.toContain('dark:bg-[#141414]')
   })
 
   it('jede Call-Site behaelt ihr eigenes Hell-Gegenstueck — der Tausch ist folgenlos', () => {
@@ -184,6 +214,44 @@ describe('die Leinwand hat einen Namen bekommen', () => {
     ])
   })
 
+  it('die dunklen Graustufen im CODE sind gedeckelt — und meine Ecke ist leer', () => {
+    // Der Audit: „16 Graustufen". Gezaehlt werden hier alle Hex-Literale,
+    // deren drei Kanaele unter 0x40 liegen — also echte Flaechenfarben,
+    // keine Textfarben und keine Marken-Blaus. Kommentare sind
+    // abgeschnitten: eine Farbe, ueber die jemand SCHREIBT, ist keine
+    // Call-Site (genau dieser Fehler hat die erste Messung dieses Pakets
+    // um vier Werte danebenliegen lassen).
+    //
+    //   vorher   15   #000000 #0e0e0e #141414 #161616 #161719 #171717
+    //                 #17171c #1a1a1a #1b1b1b #1e1e1e #1f1f1f #202020
+    //                 #232323 #262626 #363636
+    //   nachher  11   die vier Schwebeblatt-Flaechen #161719 #17171c
+    //                 #1f1f1f #262626 sind weg (siehe .lu-elevated)
+    const grau = new Map<string, string[]>()
+    for (const [name, src] of DATEIEN) {
+      for (const m of nurCode(src).matchAll(/#[0-9a-fA-F]{6}\b/g)) {
+        const h = m[0].toLowerCase()
+        const k = [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16))
+        if (k.every((c) => c < 0x40)) grau.set(h, [...(grau.get(h) ?? []), name])
+      }
+    }
+    expect(grau.size, `Graustufen: ${[...grau.keys()].sort().join(' ')}`).toBeLessThanOrEqual(11)
+
+    // In den Verzeichnissen dieses Pakets bleibt genau EINE, und sie ist
+    // begruendet: der Absturzschirm in ui/ErrorBoundary.tsx malt mit
+    // `style={{...}}`, nicht mit Klassen. Er muss auch dann lesbar sein,
+    // wenn das Stylesheet der Grund des Absturzes war — ein `var(--…)`
+    // waere dort genau die Abhaengigkeit, die er nicht haben darf.
+    const meine: string[] = []
+    for (const [name, treffer] of grau) {
+      for (const datei of treffer) {
+        if (/^components\/(chat\/|models\/|ui\/|agents\/|import\/)/.test(datei)
+          && datei !== 'components/chat/ChatView.tsx') meine.push(`${datei}: ${name}`)
+      }
+    }
+    expect([...new Set(meine)].sort()).toEqual(['components/ui/ErrorBoundary.tsx: #171717'])
+  })
+
   it('es gibt bewusst KEINE gespiegelte Hell-Leiter', () => {
     // Der Vorschlag lautete, `--color-lu-*` im `.light`-Block zu spiegeln.
     // Nachgezaehlt zerfaellt #141414 im Hellmodus in zwei Rollen — die
@@ -201,13 +269,44 @@ describe('die Leinwand hat einen Namen bekommen', () => {
     expect(CSS_CODE).not.toMatch(/\.light\s*\{[^}]*--color-lu-(canvas|base|panel|raised|overlay)/)
   })
 
-  it('das tote Token steht als tot da', () => {
-    // --color-lu-raised hat 0 Call-Sites. Es zu entfernen waere eine
-    // eigene Entscheidung; es unbeschriftet stehen zu lassen war der
-    // Zustand, aus dem der Befund entstand.
+  it('das tote Token ist WEG, nicht als tot beschriftet', () => {
+    // Vorfassung: „es steht jetzt dran, dass es tot ist" — geprueft wurde,
+    // dass die Zeile `--color-lu-raised: #2d2d2d;` den Vermerk `0 Call-Sites`
+    // traegt. Das war die halbe Antwort. Ein Farbtoken ohne Aufrufer gibt
+    // Tailwind gar nicht erst aus (im Fenster als LEERE Variable gemessen):
+    // wer `bg-lu-raised` schreibt, bekommt keine Farbe UND keinen Fehler.
+    // Eine Stufe, die beim ersten Gebrauch still danebengreift, gehoert
+    // nicht beschriftet, sondern geloescht.
+    expect(CSS_CODE).not.toContain('--color-lu-raised')
+    expect(CSS_CODE).not.toContain('#2d2d2d')
     expect(ALL).not.toMatch(/(?<![\w-])(?:[a-z-]+:)*(?:bg|text|border|ring)-lu-raised(?![\w-])/)
-    const zeile = CSS.split('\n').find((z) => /^\s*--color-lu-raised:/.test(z)) ?? ''
-    expect(zeile, 'keine Deklarationszeile gefunden').not.toBe('')
-    expect(zeile).toContain('0 Call-Sites')
+  })
+
+  it('die Leiter geht in BEIDE Richtungen auf: jede Stufe hat einen Aufrufer', () => {
+    // Das ist die Sperrklinke hinter der Loeschung. Sie faellt, wenn jemand
+    // eine sechste Stufe erfindet, ohne sie zu benutzen — und ebenso, wenn
+    // jemand `bg-lu-irgendwas` schreibt, das es nicht gibt.
+    const stufen = [...CSS_CODE.matchAll(/--color-lu-(canvas|base|panel|raised|overlay|pane):/g)]
+      .map((m) => m[1])
+      .sort()
+    expect(stufen, 'die Flaechenleiter hat sich veraendert').toEqual(['base', 'canvas', 'overlay', 'panel'])
+
+    for (const stufe of stufen) {
+      const direkt = new RegExp(`(?<![\\w-])(?:[a-z-]+:)*(?:bg|text|border|ring)-lu-${stufe}(?![\\w-])`)
+      const ueberRezept = new RegExp(`var\\(--color-lu-${stufe}\\)`)
+      const genutzt = direkt.test(ALL) || ueberRezept.test(CSS_CODE)
+      expect(genutzt, `--color-lu-${stufe} hat keinen einzigen Aufrufer`).toBe(true)
+    }
+
+    // Und umgekehrt: keine Call-Site auf einer Stufe, die es nicht gibt.
+    const erfunden = new Set<string>()
+    for (const [, src] of DATEIEN) {
+      for (const m of src.matchAll(/(?<![\w-])(?:[a-z-]+:)*(?:bg|text|border|ring)-lu-([a-z]+)(?![\w-])/g)) {
+        // `lu-cloud`/`lu-accent`/`lu-on` sind Akzente, keine Flaechenstufen.
+        if (['cloud', 'accent', 'on', 'control', 'primary', 'elevated'].includes(m[1])) continue
+        if (!stufen.includes(m[1])) erfunden.add(m[1])
+      }
+    }
+    expect([...erfunden], 'Call-Site auf einer Flaechenstufe, die index.css nicht kennt').toEqual([])
   })
 })

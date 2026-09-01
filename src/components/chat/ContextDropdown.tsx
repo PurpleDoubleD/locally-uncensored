@@ -142,7 +142,7 @@ export function ContextDropdown({ children }: { children?: ReactNode }) {
   }
 
   const rowCls = (selected: boolean) =>
-    `flex items-center justify-between gap-3 text-left px-2 py-1 rounded-md text-[0.6rem] transition-colors ${
+    `flex items-center justify-between gap-3 text-left px-2 py-1 rounded-md t-micro transition-colors ${
       selected
         ? 'bg-gray-100 dark:bg-white/[0.08] text-gray-900 dark:text-white font-medium'
         : 'text-gray-500 hover:bg-gray-50 dark:hover:bg-white/[0.04] hover:text-gray-700 dark:hover:text-gray-200'
@@ -195,7 +195,7 @@ export function ContextDropdown({ children }: { children?: ReactNode }) {
         <div
           onClick={() => setApplyError(null)}
           title="Click to dismiss"
-          className="absolute right-0 top-full mt-1 z-50 w-64 p-2 rounded-md border border-red-500/25 bg-white dark:bg-[#1a1a1a] shadow-xl cursor-pointer"
+          className="absolute right-0 top-full mt-1 z-50 w-64 p-2 rounded-md border border-red-500/25 bg-white dark:bg-lu-overlay shadow-xl cursor-pointer"
         >
           <div className="flex items-start gap-1.5 text-red-500 dark:text-red-300">
             <AlertTriangle size={10} className="mt-0.5 shrink-0" />
@@ -208,7 +208,7 @@ export function ContextDropdown({ children }: { children?: ReactNode }) {
       {open && (
         <>
           <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-          <div className="absolute right-0 top-full mt-1 z-50 min-w-[140px] rounded-lg bg-white dark:bg-[#1a1a1a] border border-gray-200 dark:border-white/10 shadow-xl p-1 flex flex-col gap-0.5">
+          <div className="absolute right-0 top-full mt-1 z-50 min-w-[140px] rounded-lg lu-elevated p-1 flex flex-col gap-0.5">
             <button onClick={() => apply(0)} className={rowCls(selected === 0)}>
               <span>Auto{ctx.provider === 'ollama' ? ` · ${fmt(effectiveContextWindow(ctx.modelMax, 0))}` : ctx.provider === 'builtin' ? ' · 8K' : ''}</span>
               {selected === 0 && <Check size={10} />}

@@ -4,6 +4,7 @@ import { X, ExternalLink, RotateCw } from 'lucide-react'
 import { openExternal } from '../../api/backend'
 import { buildDocument, type Viewport } from '../../lib/html-preview'
 import { HtmlPreviewFrame, ViewportSwitcher } from './HtmlPreviewFrame'
+import { MOTION_S } from '../ui/motion'
 
 interface Props {
   code: string
@@ -48,15 +49,15 @@ export function HtmlPreviewModal({ code, language, onClose }: Props) {
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
-        transition={{ duration: 0.15 }}
+        transition={{ duration: MOTION_S.base }}
         onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
       >
         <motion.div
-          className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-white/10 rounded-lg shadow-2xl flex flex-col overflow-hidden w-full max-w-[95vw] h-[90vh] max-h-[900px]"
+          className="lu-elevated rounded-lg flex flex-col overflow-hidden w-full max-w-[95vw] h-[90vh] max-h-[900px]"
           initial={{ scale: 0.96, opacity: 0 }}
           animate={{ scale: 1, opacity: 1 }}
           exit={{ scale: 0.96, opacity: 0 }}
-          transition={{ duration: 0.15 }}
+          transition={{ duration: MOTION_S.base }}
         >
           {/* Header */}
           <div className="flex items-center justify-between gap-3 px-4 py-2.5 border-b border-gray-200 dark:border-white/10 bg-gray-50 dark:bg-white/[0.02]">
@@ -64,7 +65,7 @@ export function HtmlPreviewModal({ code, language, onClose }: Props) {
               <span className="text-xs font-semibold tracking-wider uppercase text-gray-500 dark:text-gray-400">
                 HTML Preview
               </span>
-              <span className="text-[0.6rem] text-gray-400 dark:text-gray-500 font-mono">
+              <span className="t-micro text-gray-400 dark:text-gray-500 font-mono">
                 {language || 'html'}
               </span>
             </div>

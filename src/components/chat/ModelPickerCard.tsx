@@ -62,7 +62,7 @@ function ModelList({ models, selected, onPick }: { models: string[]; selected: s
           key={m}
           type="button"
           onClick={(e) => { e.stopPropagation(); onPick(m) }}
-          className={`w-full text-left px-2 py-1 rounded border text-[0.6rem] transition-colors truncate ${
+          className={`w-full text-left px-2 py-1 rounded border t-micro transition-colors truncate ${
             m === selected
               ? 'border-blue-400/40 bg-blue-500/10 text-gray-900 dark:text-gray-100'
               : 'border-gray-200 dark:border-white/10 bg-gray-50 dark:bg-white/[0.03] text-gray-600 dark:text-gray-400 hover:border-gray-300 dark:hover:border-white/20'
@@ -109,7 +109,7 @@ export function ModelPickerCard({ request }: { request: ModelPickRequest }) {
 
   return (
     <div className="mt-1 ml-5 rounded-md border border-blue-400/25 bg-blue-500/[0.04] px-2.5 py-2 space-y-1.5" data-testid="model-picker-card">
-      <div className="text-[0.6rem] font-medium text-gray-700 dark:text-gray-300">
+      <div className="t-micro font-medium text-gray-700 dark:text-gray-300">
         Pick the {PICK_KIND_LABEL[request.kind]}
         <span className="ml-1 font-normal text-gray-500 dark:text-gray-500">runs before the VRAM swap</span>
       </div>
@@ -118,7 +118,7 @@ export function ModelPickerCard({ request }: { request: ModelPickRequest }) {
         <button
           type="button"
           onClick={(e) => { e.stopPropagation(); choose({ model: selected, save }) }}
-          className="flex items-center gap-1 px-2.5 py-1 rounded text-[0.6rem] font-medium text-blue-700 dark:text-blue-300 bg-blue-500/10 hover:bg-blue-500/15 border border-blue-500/25 transition-colors"
+          className="flex items-center gap-1 px-2.5 py-1 rounded t-micro font-medium text-blue-700 dark:text-blue-300 bg-blue-500/10 hover:bg-blue-500/15 border border-blue-500/25 transition-colors"
         >
           <Check size={10} /> Continue
         </button>

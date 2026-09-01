@@ -31,7 +31,7 @@ export function ConversationModelNote() {
 
   return (
     <span
-      className="hidden sm:flex items-center gap-1 h-[26px] px-2 rounded-md border border-white/[0.06] text-[0.6rem] text-gray-500 dark:text-gray-400 shrink-0"
+      className="hidden sm:flex items-center gap-1 h-[var(--control-h-sm)] px-2 rounded-md border border-white/[0.06] t-micro text-gray-500 dark:text-gray-400 shrink-0"
       title={`The answers in this chat were written by ${ran}. The picker beside this is what the next answer would run on.`}
     >
       <span className="opacity-70">answers:</span>

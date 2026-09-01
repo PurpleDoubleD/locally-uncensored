@@ -1032,7 +1032,7 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
                         <span className="text-sm font-medium text-gray-900 dark:text-white truncate">{model.name}</span>
                         {model.sizeGB && <span className="t-micro text-gray-400 flex-shrink-0">{model.sizeGB} GB</span>}
                       </div>
-                      {model.description && <p className="text-[11px] text-gray-500 line-clamp-1 mt-0.5">{model.description}</p>}
+                      {model.description && <p className="t-micro text-gray-500 line-clamp-1 mt-0.5">{model.description}</p>}
                       {isDl && dlState && dlState.total > 0 && (
                         <div className="mt-1.5">
                           <ProgressBar progress={(dlState.progress / dlState.total) * 100} />
@@ -1064,7 +1064,7 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
               weiter oben, nur mit der Zeilengeometrie der Trefferliste. */}
           {civitaiSearching && <CivitaiResultsSkeleton />}
           {!civitaiSearching && civitaiSearched && civitaiResults.length === 0 && (
-            <div className="text-center py-4 text-[11px] text-gray-500 leading-relaxed">
+            <div className="text-center py-4 t-micro text-gray-500 leading-relaxed">
               No matches for "{civitaiQuery}". Try a broader query, or add your CivitAI API key
               in the Workflow finder for the full catalog.
             </div>
@@ -1124,7 +1124,7 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
             <div className="space-y-1.5">
               <div className="flex items-center gap-1.5 px-1">
                 <Sparkles size={11} className="text-gray-400 dark:text-gray-500" />
-                <h3 className="text-[0.62rem] font-semibold uppercase tracking-[0.12em] text-gray-700 dark:text-gray-300">Start here</h3>
+                <h3 className="t-micro font-semibold uppercase tracking-[0.12em] text-gray-700 dark:text-gray-300">Start here</h3>
                 <span className="text-[0.55rem] text-gray-400 dark:text-gray-500">picked for your PC</span>
                 <div className="flex-1 h-px bg-gray-200 dark:bg-white/[0.06]" />
               </div>
@@ -1137,7 +1137,7 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
           <div className="space-y-1.5">
             {topPicks.length >= 2 && (
               <div className="flex items-center gap-1.5 px-1 pt-1">
-                <h3 className="text-[0.62rem] font-semibold uppercase tracking-[0.12em] text-gray-700 dark:text-gray-300">
+                <h3 className="t-micro font-semibold uppercase tracking-[0.12em] text-gray-700 dark:text-gray-300">
                   {subTab === 'uncensored' ? 'All unfiltered models' : 'All mainstream models'}
                 </h3>
                 <div className="flex-1 h-px bg-gray-200 dark:bg-white/[0.06]" />
@@ -1158,7 +1158,7 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
             <div className="space-y-1.5 mt-6">
               <div className="flex items-center gap-1.5 px-1">
                 <Search size={10} className="text-gray-400" />
-                <h3 className="text-[0.62rem] font-semibold uppercase tracking-[0.12em] text-gray-500">HuggingFace results</h3>
+                <h3 className="t-micro font-semibold uppercase tracking-[0.12em] text-gray-500">HuggingFace results</h3>
                 <div className="flex-1 h-px bg-gray-200 dark:bg-white/[0.06]" />
               </div>
               <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-2.5">
@@ -1201,7 +1201,7 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
             {infoRepoUrl(infoModel) && (
               <button
                 onClick={() => openExternal(infoRepoUrl(infoModel)!)}
-                className="flex items-center gap-1.5 text-[0.65rem] text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white transition-colors"
+                className="flex items-center gap-1.5 t-micro text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white transition-colors"
               >
                 <ExternalLink size={11} /> View on HuggingFace
               </button>

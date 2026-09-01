@@ -21,6 +21,7 @@ import { useShallow } from 'zustand/react/shallow'
 import { useRAG } from '../../hooks/useRAG'
 import { useRAGStore } from '../../stores/ragStore'
 import { formatBytes } from '../../lib/formatters'
+import { MOTION_S } from '../ui/motion'
 
 interface Props {
   conversationId: string | null
@@ -51,11 +52,11 @@ export function RAGPanel({ conversationId, onClose }: Props) {
   if (!conversationId) {
     return (
       <motion.div
-        className="w-[280px] shrink-0 h-full border-l border-gray-200 dark:border-white/5 bg-white dark:bg-[#363636] flex flex-col"
+        className="w-[280px] shrink-0 h-full border-l border-gray-200 dark:border-white/5 bg-white dark:bg-lu-overlay flex flex-col"
         initial={{ width: 0, opacity: 0 }}
         animate={{ width: 280, opacity: 1 }}
         exit={{ width: 0, opacity: 0 }}
-        transition={{ duration: 0.2 }}
+        transition={{ duration: MOTION_S.base }}
       >
         <div className="px-3 py-2.5 border-b border-gray-200 dark:border-white/5 flex items-center justify-between">
           <span className="text-xs font-medium text-gray-700 dark:text-gray-200">Document Chat</span>
@@ -71,11 +72,11 @@ export function RAGPanel({ conversationId, onClose }: Props) {
           )}
         </div>
         <div className="flex-1 flex flex-col items-center justify-center">
-          <MessageSquarePlus size={32} className="text-gray-300 dark:text-gray-600 mb-3" />
+          <MessageSquarePlus size={28} className="text-gray-300 dark:text-gray-600 mb-3" />
           <p className="text-sm text-gray-400 dark:text-gray-500 text-center px-6">
             Start a conversation first
           </p>
-          <p className="text-[0.6rem] text-gray-300 dark:text-gray-600 text-center px-6 mt-1">
+          <p className="t-micro text-gray-300 dark:text-gray-600 text-center px-6 mt-1">
             Document chat will be available once a conversation is active.
           </p>
         </div>
@@ -221,11 +222,11 @@ function RAGPanelInner({ conversationId, onClose }: { conversationId: string; on
 
   return (
     <motion.div
-      className="w-[280px] shrink-0 h-full border-l border-gray-200 dark:border-white/5 bg-white dark:bg-[#363636] flex flex-col"
+      className="w-[280px] shrink-0 h-full border-l border-gray-200 dark:border-white/5 bg-white dark:bg-lu-overlay flex flex-col"
       initial={{ width: 0, opacity: 0 }}
       animate={{ width: 280, opacity: 1 }}
       exit={{ width: 0, opacity: 0 }}
-      transition={{ duration: 0.2 }}
+      transition={{ duration: MOTION_S.base }}
     >
       {/* Header: Title + on/off toggle + Clear-all + Collapse */}
       <div className="px-3 py-2.5 border-b border-gray-200 dark:border-white/5 flex items-center justify-between gap-2">
@@ -279,7 +280,7 @@ function RAGPanelInner({ conversationId, onClose }: { conversationId: string; on
           >
             <div className="flex items-start gap-1.5 p-2 rounded-lg bg-yellow-500/10 border border-yellow-500/20">
               <AlertTriangle size={12} className="text-yellow-500 shrink-0 mt-0.5" />
-              <span className="text-[0.6rem] text-yellow-400 leading-tight">
+              <span className="t-micro text-yellow-400 leading-tight">
                 {contextWarning}
               </span>
             </div>
@@ -309,9 +310,9 @@ function RAGPanelInner({ conversationId, onClose }: { conversationId: string; on
             <div className="p-2.5 rounded-lg bg-gray-50 dark:bg-white/[0.03] border border-gray-200 dark:border-white/10 space-y-1.5">
               <div className="flex items-center gap-1.5">
                 <Download size={12} className="text-gray-500 dark:text-gray-300 shrink-0" />
-                <span className="text-[0.65rem] font-medium text-gray-700 dark:text-gray-200">Embedding model needed</span>
+                <span className="t-micro font-medium text-gray-700 dark:text-gray-200">Embedding model needed</span>
               </div>
-              <p className="text-[0.6rem] text-gray-500 dark:text-gray-400 leading-snug">
+              <p className="t-micro text-gray-500 dark:text-gray-400 leading-snug">
                 Document Chat needs <code className="font-mono px-1 rounded bg-gray-200 dark:bg-white/5">{embeddingModelReactive ?? 'nomic-embed-text'}</code> (274 MB). One-time download.
                 {embeddingQueuedCount > 0 && (
                   <span className="block mt-0.5 text-gray-400 dark:text-gray-500">
@@ -322,13 +323,13 @@ function RAGPanelInner({ conversationId, onClose }: { conversationId: string; on
               <div className="flex gap-1.5 pt-0.5">
                 <button
                   onClick={() => installEmbeddingAndDrainQueue()}
-                  className="flex-1 px-2 py-1 rounded text-[0.6rem] font-medium bg-gray-200 hover:bg-gray-300 dark:bg-white/10 dark:hover:bg-white/15 text-gray-800 dark:text-gray-100 transition-colors flex items-center justify-center gap-1"
+                  className="flex-1 px-2 py-1 rounded t-micro font-medium bg-gray-200 hover:bg-gray-300 dark:bg-white/10 dark:hover:bg-white/15 text-gray-800 dark:text-gray-100 transition-colors flex items-center justify-center gap-1"
                 >
                   <Download size={11} /> Download
                 </button>
                 <button
                   onClick={() => cancelEmbeddingInstall()}
-                  className="px-2 py-1 rounded text-[0.6rem] font-medium text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/5 transition-colors"
+                  className="px-2 py-1 rounded t-micro font-medium text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/5 transition-colors"
                 >
                   Cancel
                 </button>
@@ -353,7 +354,7 @@ function RAGPanelInner({ conversationId, onClose }: { conversationId: string; on
             <div className="p-2.5 rounded-lg bg-gray-50 dark:bg-white/[0.03] border border-gray-200 dark:border-white/10 space-y-1.5">
               <div className="flex items-center gap-1.5">
                 <Loader2 size={12} className="text-gray-500 dark:text-gray-300 animate-spin shrink-0" />
-                <span className="text-[0.6rem] text-gray-600 dark:text-gray-300 leading-tight truncate">
+                <span className="t-micro text-gray-600 dark:text-gray-300 leading-tight truncate">
                   {embeddingPullProgress?.status?.startsWith('downloading')
                     ? 'Downloading nomic-embed-text…'
                     : embeddingPullProgress?.status === 'success'
@@ -370,7 +371,7 @@ function RAGPanelInner({ conversationId, onClose }: { conversationId: string; on
                       animate={{
                         width: `${Math.min(100, (embeddingPullProgress.completed / embeddingPullProgress.total) * 100)}%`,
                       }}
-                      transition={{ duration: 0.2 }}
+                      transition={{ duration: MOTION_S.base }}
                     />
                   </div>
                   <p className="text-[0.55rem] text-gray-500 dark:text-gray-400 font-mono">
@@ -395,7 +396,7 @@ function RAGPanelInner({ conversationId, onClose }: { conversationId: string; on
       {!isEnabled && documents.length === 0 && (
         <div className="px-3 pt-2">
           <div className="p-2 rounded-lg bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10">
-            <p className="text-[0.6rem] text-gray-500 dark:text-gray-400 leading-relaxed">
+            <p className="t-micro text-gray-500 dark:text-gray-400 leading-relaxed">
               Upload documents and enable the toggle to chat with your files. The AI will use document content to answer your questions.
             </p>
           </div>
@@ -407,7 +408,7 @@ function RAGPanelInner({ conversationId, onClose }: { conversationId: string; on
         <div className="px-3 py-2">
           <div className="flex items-center gap-1.5 p-2 rounded-lg bg-blue-500/10 border border-blue-500/20">
             <Loader2 size={12} className="text-blue-400 animate-spin" />
-            <span className="text-[0.6rem] text-blue-400">Loading indexed documents...</span>
+            <span className="t-micro text-blue-400">Loading indexed documents...</span>
           </div>
         </div>
       )}
@@ -427,7 +428,7 @@ function RAGPanelInner({ conversationId, onClose }: { conversationId: string; on
           }
         >
           <Upload size={18} className={isDragging ? 'text-green-500' : 'text-gray-400'} />
-          <span className="text-[0.65rem] text-gray-500 dark:text-gray-400 text-center">
+          <span className="t-micro text-gray-500 dark:text-gray-400 text-center">
             Drop files here or click to upload
           </span>
           <span className="text-[0.55rem] text-gray-400 dark:text-gray-500">
@@ -455,7 +456,7 @@ function RAGPanelInner({ conversationId, onClose }: { conversationId: string; on
           >
             <div className="flex items-center gap-1.5 mb-1">
               <Loader2 size={12} className="text-green-500 animate-spin" />
-              <span className="text-[0.6rem] text-gray-500 dark:text-gray-400">
+              <span className="t-micro text-gray-500 dark:text-gray-400">
                 Indexing... {indexingProgress.current}/{indexingProgress.total}
               </span>
             </div>
@@ -464,7 +465,7 @@ function RAGPanelInner({ conversationId, onClose }: { conversationId: string; on
                 className="h-full bg-green-500 rounded-full"
                 initial={{ width: 0 }}
                 animate={{ width: progressPercent }}
-                transition={{ duration: 0.3 }}
+                transition={{ duration: MOTION_S.slow }}
               />
             </div>
           </motion.div>
@@ -480,7 +481,7 @@ function RAGPanelInner({ conversationId, onClose }: { conversationId: string; on
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
           >
-            <div className="flex items-center gap-1.5 text-[0.6rem] text-red-500">
+            <div className="flex items-center gap-1.5 t-micro text-red-500">
               <AlertCircle size={11} />
               <span>{error}</span>
             </div>
@@ -498,11 +499,11 @@ function RAGPanelInner({ conversationId, onClose }: { conversationId: string; on
               initial={{ opacity: 0, x: 20 }}
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: -20 }}
-              transition={{ duration: 0.15 }}
+              transition={{ duration: MOTION_S.base }}
             >
               {typeIcon(doc.type)}
               <div className="flex-1 min-w-0">
-                <p className="text-[0.65rem] text-gray-700 dark:text-gray-200 truncate">
+                <p className="t-micro text-gray-700 dark:text-gray-200 truncate">
                   {doc.name}
                 </p>
                 <p className="text-[0.55rem] text-gray-400">
@@ -511,7 +512,7 @@ function RAGPanelInner({ conversationId, onClose }: { conversationId: string; on
               </div>
               <button
                 onClick={() => removeDocument(doc.id)}
-                className="p-0.5 rounded opacity-0 group-hover:opacity-100 hover:bg-red-100 dark:hover:bg-red-500/15 text-gray-400 hover:text-red-500 transition-all"
+                className="p-0.5 rounded opacity-0 group-hover:opacity-100 hover:bg-red-100 dark:hover:bg-red-500/15 text-gray-400 hover:text-red-500 transition"
                 aria-label="Remove document"
               >
                 <Trash2 size={12} />
@@ -521,7 +522,7 @@ function RAGPanelInner({ conversationId, onClose }: { conversationId: string; on
         </AnimatePresence>
 
         {documents.length === 0 && !isIndexing && (
-          <p className="text-[0.6rem] text-gray-400 text-center py-4">
+          <p className="t-micro text-gray-400 text-center py-4">
             No documents added yet
           </p>
         )}
@@ -540,7 +541,7 @@ function RAGPanelInner({ conversationId, onClose }: { conversationId: string; on
             ) : (
               <ChevronRight size={12} className="text-gray-400" />
             )}
-            <span className="text-[0.6rem] font-medium text-gray-600 dark:text-gray-300">
+            <span className="t-micro font-medium text-gray-600 dark:text-gray-300">
               Retrieved Chunks ({safeChunks.length})
             </span>
           </button>

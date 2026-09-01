@@ -41,7 +41,7 @@ export function HtmlPreviewFrame({
       title={title}
       className={
         className ??
-        'bg-white border border-gray-200 dark:border-white/10 shadow-lg rounded transition-all'
+        'bg-white border border-gray-200 dark:border-white/10 shadow-lg rounded transition-[width,height]'
       }
       style={{
         width: viewport === 'desktop' ? '100%' : `${dims.width}px`,
@@ -83,7 +83,12 @@ function ViewportBtn({ icon: Icon, active, onClick, label, compact }: ViewportBt
     <button
       onClick={onClick}
       className={
-        `flex items-center justify-center ${compact ? 'w-5 h-5' : 'w-7 h-7'} rounded transition-colors ` +
+        // D-T07: der normale Knopf stand auf `w-7 h-7` (28px) — zwei Pixel neben
+        // `--control-h-sm`, der Hoehe, auf der `.lu-control` und der
+        // Modellwaehler schon stehen. Die kompakte Variante bleibt bei 20px:
+        // sie sitzt in einer Leiste, die selbst nur 26px hoch ist, und hat
+        // unterhalb der kleinsten Stufe bewusst keine Sprosse.
+        `flex items-center justify-center ${compact ? 'w-5 h-5' : 'w-[var(--control-h-sm)] h-[var(--control-h-sm)]'} rounded transition-colors ` +
         (active
           ? 'bg-white dark:bg-white/10 text-gray-900 dark:text-white shadow-sm'
           : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-white')

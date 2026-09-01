@@ -3,6 +3,7 @@ import { Loader2, Check, X } from 'lucide-react'
 import { GlowButton } from '../ui/GlowButton'
 import type { ToolCall } from '../../types/agents'
 import type { ToolArgs } from '../../api/mcp/types'
+import { MOTION_S } from '../ui/motion'
 
 interface Props {
   toolCall: ToolCall
@@ -31,8 +32,8 @@ export function ToolCallCard({ toolCall, onApprove, onReject }: Props) {
     <motion.div
       initial={{ opacity: 0, scale: 0.97 }}
       animate={{ opacity: 1, scale: 1 }}
-      transition={{ duration: 0.15 }}
-      className="glass-card rounded-lg p-3 dark:bg-[#363636] border border-white/5"
+      transition={{ duration: MOTION_S.base }}
+      className="glass-card rounded-lg p-3 dark:bg-lu-overlay border border-white/5"
     >
       {/* Tool Name */}
       <div className="flex items-center justify-between mb-2">
@@ -43,17 +44,17 @@ export function ToolCallCard({ toolCall, onApprove, onReject }: Props) {
           <Loader2 size={14} className="text-blue-400 animate-spin" />
         )}
         {isCompleted && (
-          <span className="text-[0.65rem] text-green-400 bg-green-500/10 px-1.5 py-0.5 rounded-full">
+          <span className="t-micro text-green-400 bg-green-500/10 px-1.5 py-0.5 rounded-full">
             completed
           </span>
         )}
         {isFailed && (
-          <span className="text-[0.65rem] text-red-400 bg-red-500/10 px-1.5 py-0.5 rounded-full">
+          <span className="t-micro text-red-400 bg-red-500/10 px-1.5 py-0.5 rounded-full">
             {toolCall.status === 'rejected' ? 'rejected' : 'failed'}
           </span>
         )}
         {isPending && (
-          <span className="text-[0.65rem] text-amber-400 bg-amber-500/10 px-1.5 py-0.5 rounded-full">
+          <span className="t-micro text-amber-400 bg-amber-500/10 px-1.5 py-0.5 rounded-full">
             awaiting approval
           </span>
         )}
@@ -82,7 +83,7 @@ export function ToolCallCard({ toolCall, onApprove, onReject }: Props) {
 
       {/* Duration */}
       {toolCall.duration !== undefined && (
-        <div className="text-[0.6rem] text-gray-500 mt-1">
+        <div className="t-micro text-gray-500 mt-1">
           {(toolCall.duration / 1000).toFixed(1)}s
         </div>
       )}

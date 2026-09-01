@@ -119,14 +119,14 @@ export function PluginsDropdown({
       {open && (
         <>
           <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-          <div className={`absolute right-0 z-50 w-56 rounded-lg bg-white dark:bg-[#262626] border border-gray-200 dark:border-white/10 shadow-xl py-1.5 ${openUpward ? 'bottom-full mb-1' : 'top-full mt-1'}`}>
+          <div className={`absolute right-0 z-50 w-56 rounded-lg lu-elevated py-1.5 ${openUpward ? 'bottom-full mb-1' : 'top-full mt-1'}`}>
 
             {/* ── Chat Tools toggle (v2.5.3) ──────────────── */}
             <div className="px-2.5">
               <div className="w-full flex items-center justify-between py-1.5 gap-2">
                 <div className="flex items-center gap-1.5 min-w-0">
                   <Wrench size={10} className={chatToolsEnabled ? 'text-blue-400' : 'text-gray-400'} />
-                  <span className="text-[0.6rem] font-medium text-gray-600 dark:text-gray-300">Chat Tools</span>
+                  <span className="t-micro font-medium text-gray-600 dark:text-gray-300">Chat Tools</span>
                   <span className="text-[0.5rem] text-gray-400 truncate">web · file · image · video</span>
                 </div>
                 <button
@@ -162,7 +162,7 @@ export function PluginsDropdown({
               >
                 <div className="flex items-center gap-1.5">
                   <Bone size={10} className={isCavemanActive ? 'text-amber-400' : 'text-gray-400'} />
-                  <span className="text-[0.6rem] font-medium text-gray-600 dark:text-gray-300">Caveman Mode</span>
+                  <span className="t-micro font-medium text-gray-600 dark:text-gray-300">Caveman Mode</span>
                 </div>
                 <div className="flex items-center gap-1">
                   <span className={`text-[0.55rem] ${isCavemanActive ? 'text-amber-400' : 'text-gray-500'}`}>
@@ -210,7 +210,7 @@ export function PluginsDropdown({
                   className="flex items-center gap-1.5 flex-1 min-w-0 text-left"
                 >
                   <User size={10} className={isPersonaActive ? 'text-green-400' : 'text-gray-400'} />
-                  <span className="text-[0.6rem] font-medium text-gray-600 dark:text-gray-300">Persona</span>
+                  <span className="t-micro font-medium text-gray-600 dark:text-gray-300">Persona</span>
                   <span className={`text-[0.55rem] truncate ${isPersonaActive ? 'text-green-400' : 'text-gray-500'}`}>
                     {activePersona?.name || 'Unrestricted'}
                   </span>
@@ -273,7 +273,7 @@ export function PluginsDropdown({
               >
                 <div className="flex items-center gap-1.5">
                   <Users size={10} className={isGroupActive ? 'text-purple-400' : 'text-gray-400'} />
-                  <span className="text-[0.6rem] font-medium text-gray-600 dark:text-gray-300">Group chat</span>
+                  <span className="t-micro font-medium text-gray-600 dark:text-gray-300">Group chat</span>
                   <span className={`text-[0.55rem] ${isGroupActive ? 'text-purple-400' : 'text-gray-500'}`}>
                     {isGroupActive ? `${groupModels.length} models` : 'Off'}
                   </span>

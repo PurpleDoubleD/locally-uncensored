@@ -220,7 +220,7 @@ export function AgentWorkspaceDialog({
                 className="w-3 h-3"
                 data-testid="agent-workspace-remember-default"
               />
-              <span className="text-[0.65rem] text-gray-600 dark:text-gray-400">
+              <span className="t-micro text-gray-600 dark:text-gray-400">
                 Remember as default. Future chats open here without asking.
               </span>
             </label>
@@ -228,7 +228,7 @@ export function AgentWorkspaceDialog({
         )}
 
         {error && (
-          <p className="text-[0.65rem] text-red-500 text-center">{error}</p>
+          <p className="t-micro text-red-500 text-center">{error}</p>
         )}
 
         <div className="flex items-center justify-end gap-2 pt-1">
@@ -276,7 +276,7 @@ function WorkspaceOption({ icon, title, body, monoBody, onClick, disabled }: Opt
           {title}
         </span>
         <span
-          className={`block text-[0.65rem] text-gray-500 truncate ${
+          className={`block t-micro text-gray-500 truncate ${
             monoBody ? 'font-mono' : ''
           }`}
         >
