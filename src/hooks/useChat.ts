@@ -657,10 +657,16 @@ export function useChat() {
       // thinking field, so the user sees a clean answer without a
       // planning preamble.
       // Server-declared think capability (resolved above, alongside the
-      // system-prompt injection): 'always'/'never' models get no
-      // reasoning_effort at all — the upstream reasons (or not) regardless,
-      // and forcing 'minimal' on an always-thinker can 4xx. 'toggle' and
-      // unknown fall through to the name-heuristic + settings switch.
+      // system-prompt injection): 'always' and 'never' models get no
+      // thinking BOOLEAN, because there is no switch to report. 'toggle' and
+      // unknown fall through to the name-heuristic plus the settings switch.
+      //
+      // That is not the same as getting no reasoning_effort (2.6.8). An
+      // 'always' model whose catalogue entry declares a ladder gets the chosen
+      // rung, defaulting to high, which is what the web app has done all along.
+      // Only a model without a declared ladder keeps deciding entirely for
+      // itself. A 'never' model is declared without a ladder, so nothing
+      // reaches it either way.
       const plainTextPlanner = isPlainTextPlanner(activeModel)
       const useThinking: boolean | undefined = canThink
         ? (settings.thinkingEnabled === false && plainTextPlanner

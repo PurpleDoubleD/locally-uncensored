@@ -166,6 +166,15 @@ describe('the effort rung reaches every surface, not only chat', () => {
   const agent = read('../../hooks/useAgentChat.ts')
   const codex = read('../../hooks/useCodex.ts')
 
+  it('and the comment above it does not claim the opposite any more', () => {
+    // It used to read "'always'/'never' models get no reasoning_effort at all",
+    // which stopped being true the moment an always-model with a declared
+    // ladder started receiving the rung. A comment that contradicts the code
+    // beneath it is how the next reader reintroduces the bug.
+    expect(chat).not.toMatch(/models get no[\s\S]{0,20}reasoning_effort at all/)
+    expect(chat).toMatch(/'always' model whose catalogue entry declares a ladder gets the chosen/)
+  })
+
   it('chat sends the rung and the ladder', () => {
     expect(chat).toContain('reasoningEffort: settings.reasoningEffort,')
     expect(chat).toMatch(/^\s*effortLevels,$/m)
