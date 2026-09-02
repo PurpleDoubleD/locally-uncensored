@@ -23,7 +23,7 @@ import { useSettingsStore } from '../../stores/settingsStore'
 import { useModelStore } from '../../stores/modelStore'
 import { StagedChangesPanel } from './StagedChangesPanel'
 import { SlashStepsBlock } from './SlashStepsBlock'
-import { User, Code, Eye, GitBranch, Download, RefreshCw, RotateCcw, Folder, Check, AlertTriangle } from 'lucide-react'
+import { User, Code, Eye, GitBranch, Download, RefreshCw, RotateCcw, Folder, FolderX, Check, AlertTriangle } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { checkGitInstalled, openExternal, type GitStatus } from '../../api/backend'
 import { CodexConfirmDialog } from './CodexConfirmDialog'
@@ -78,6 +78,16 @@ export function CodexView() {
   const activeModel = useModelStore((s) => s.activeModel)
   const createConversation = useChatStore((s) => s.createConversation)
   const codexWorkingDir = useCodexStore((s) => s.workingDirectory)
+  const clearWorkingDirectory = useCodexStore((s) => s.clearWorkingDirectory)
+  const anyThreadRunning = useCodexStore((s) =>
+    Object.values(s.threads).some((t) => t.status === 'running'),
+  )
+  // A8 (2.6.8): the same Remove sits in the explorer column, but that column
+  // can be collapsed, and two users looked for a way out of their folder and
+  // found none. The header always shows the folder, so it also carries the way
+  // to give it back. Locked, not hidden, while a coding turn is in flight.
+  const removeFolderLocked =
+    anyThreadRunning || Object.values(generatingMap).some(Boolean)
 
   // Git availability for the Codex view (v2.5.0). Codex shells out to git for
   // git_status/diff/commit/log; if git is missing those tools fail. Probe on
@@ -142,6 +152,21 @@ export function CodexView() {
             <Folder size={9} className="shrink-0 opacity-70" />
             <span className="truncate">{codexWorkingDir || 'sandbox · ~/agent-workspace'}</span>
           </span>
+          {codexWorkingDir && (
+            <button
+              onClick={() => { if (!removeFolderLocked) clearWorkingDirectory() }}
+              disabled={removeFolderLocked}
+              data-testid="codex-remove-folder"
+              title={
+                removeFolderLocked
+                  ? 'Wait for the current run to finish, then you can remove the folder.'
+                  : 'Remove this folder. The agent falls back to its own sandbox under ~/agent-workspace until you pick a new one.'
+              }
+              className="p-0.5 rounded text-gray-400 dark:text-gray-600 hover:text-red-500 dark:hover:text-red-400 hover:bg-gray-100 dark:hover:bg-white/5 disabled:opacity-30 disabled:hover:text-gray-400 transition-colors shrink-0"
+            >
+              <FolderX size={9} />
+            </button>
+          )}
           <div className="flex-1" />
           {/* New coding session — aborts any running loop and starts a fresh
               chat/thread (keeps the working directory). David 2026-06-04:
@@ -207,9 +232,10 @@ export function CodexView() {
               <p className="text-[0.55rem] text-gray-400 dark:text-gray-600 mt-0.5 max-w-[300px]">
                 Send a coding instruction. The coding agent will read your codebase, write code, and run commands.
               </p>
-              {!thread?.workingDirectory && (
-                <p className="text-[0.55rem] text-amber-500/70 mt-2">
-                  Set a working directory in the file tree panel →
+              {!codexWorkingDir && (
+                <p className="text-[0.55rem] text-amber-500/70 mt-2" data-testid="codex-no-folder-hint">
+                  No folder set. The agent works in its own sandbox under ~/agent-workspace.
+                  Pick a project with "Select folder..." in the file tree panel on the right.
                 </p>
               )}
             </div>

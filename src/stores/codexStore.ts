@@ -48,7 +48,20 @@ interface CodexState {
   planApprovalByConversation: Record<string, CodexPlanApproval>
 
   setChatMode: (mode: ChatMode) => void
+  /**
+   * Pick the folder the agent works in. It also re-pins every EXISTING thread,
+   * because a thread copies the folder once at init and never looked at the
+   * store again: a mis-click used to stay the agent's root for the rest of the
+   * conversation, no matter what the picker said afterwards (A8, 2.6.8).
+   */
   setWorkingDirectory: (dir: string) => void
+  /**
+   * Give the folder back. Same re-pin as above, so the current conversation
+   * falls back to its per-chat sandbox instead of staying attached to a tree
+   * the user never meant to open. The empty string is persisted on purpose:
+   * a restart must not resurrect the folder (A8, 2.6.8).
+   */
+  clearWorkingDirectory: () => void
   bumpFileTreeVersion: () => void
 
   /**
@@ -76,6 +89,35 @@ function omit<T>(map: Record<string, T>, key: string): Record<string, T> {
   return next
 }
 
+/**
+ * Point every open thread at `dir`.
+ *
+ * `initThread` copies the store's folder into the thread ONCE, and the run
+ * resolver prefers `thread.workingDirectory` over the store. Without this the
+ * store and the thread drift apart the moment the user picks again, which is
+ * exactly what A8 reads like from the outside: the picker says one folder, the
+ * agent keeps walking the old one, and clearing the store changes nothing.
+ *
+ * Returns the SAME object when there is nothing to change, so a no-op set does
+ * not re-render every subscriber.
+ */
+function pinThreads(
+  threads: Record<string, CodexThread>,
+  dir: string,
+): Record<string, CodexThread> {
+  let changed = false
+  const next: Record<string, CodexThread> = {}
+  for (const [id, thread] of Object.entries(threads)) {
+    if (thread.workingDirectory === dir) {
+      next[id] = thread
+      continue
+    }
+    next[id] = { ...thread, workingDirectory: dir }
+    changed = true
+  }
+  return changed ? next : threads
+}
+
 export const useCodexStore = create<CodexState>()(
   persist(
     (set, get) => ({
@@ -89,7 +131,13 @@ export const useCodexStore = create<CodexState>()(
       planApprovalByConversation: {},
 
       setChatMode: (mode) => set({ chatMode: mode }),
-      setWorkingDirectory: (dir) => set({ workingDirectory: dir }),
+      setWorkingDirectory: (dir) =>
+        set((state) => ({ workingDirectory: dir, threads: pinThreads(state.threads, dir) })),
+      // '' and not `undefined`: partialize writes this key on every change, so
+      // the empty string is what lands in localStorage and what a restart reads
+      // back. Deleting the key would let an older persisted value survive.
+      clearWorkingDirectory: () =>
+        set((state) => ({ workingDirectory: '', threads: pinThreads(state.threads, '') })),
       bumpFileTreeVersion: () => set((state) => ({ fileTreeVersion: state.fileTreeVersion + 1 })),
 
       chooseCodexMode: (conversationId, mode, runActive) =>

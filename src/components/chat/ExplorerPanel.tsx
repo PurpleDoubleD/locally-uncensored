@@ -36,8 +36,10 @@ import {
   PanelRightClose,
   PanelRightOpen,
   RefreshCw,
+  X,
 } from 'lucide-react'
 import { useCodexStore } from '../../stores/codexStore'
+import { useGenerationStore } from '../../stores/generationStore'
 import { useUIStore } from '../../stores/uiStore'
 import { backendCall, isTauri, isMacOS } from '../../api/backend'
 import {
@@ -67,7 +69,19 @@ interface Props {
 export function ExplorerPanel({ onApprovePlan }: Props) {
   const root = useCodexStore((s) => s.workingDirectory)
   const setWorkingDirectory = useCodexStore((s) => s.setWorkingDirectory)
+  const clearWorkingDirectory = useCodexStore((s) => s.clearWorkingDirectory)
   const fileTreeVersion = useCodexStore((s) => s.fileTreeVersion)
+
+  // A8 (2.6.8): the folder is GLOBAL, so removing it while any coding turn is
+  // in flight would pull the rug out from under a run in another chat as well.
+  // Locked with a reason on the button while that is the case, not hidden.
+  const anyTurnGenerating = useGenerationStore((s) =>
+    Object.values(s.generating).some(Boolean),
+  )
+  const anyThreadRunning = useCodexStore((s) =>
+    Object.values(s.threads).some((t) => t.status === 'running'),
+  )
+  const runActive = anyTurnGenerating || anyThreadRunning
 
   const width = useUIStore((s) => s.explorerWidth)
   const collapsed = useUIStore((s) => s.explorerCollapsed)
@@ -158,6 +172,15 @@ export function ExplorerPanel({ onApprovePlan }: Props) {
     if (picked) setWorkingDirectory(picked)
   }
 
+  // Give the folder back (A8). Users reported no way out of a folder they had
+  // opened by mistake, one of them was ready to reinstall the app over it.
+  // Clearing the store also unpins every open thread, so the CURRENT chat falls
+  // back to its own sandbox instead of keeping the tree it was born with.
+  const removeFolder = () => {
+    if (runActive) return
+    clearWorkingDirectory()
+  }
+
   const startDrag = (e: React.PointerEvent) => {
     e.preventDefault()
     const startX = e.clientX
@@ -231,6 +254,21 @@ export function ExplorerPanel({ onApprovePlan }: Props) {
             <span className="text-[0.5rem] text-gray-400 dark:text-gray-600 flex-1">Select folder...</span>
           )}
         </button>
+        {root && (
+          <button
+            onClick={removeFolder}
+            disabled={runActive}
+            data-testid="explorer-remove-folder"
+            title={
+              runActive
+                ? 'Wait for the current run to finish, then you can remove the folder.'
+                : 'Remove this folder. The agent falls back to its own sandbox until you pick a new one.'
+            }
+            className="p-1 rounded hover:bg-gray-100 dark:hover:bg-white/5 text-gray-400 dark:text-gray-600 hover:text-red-500 dark:hover:text-red-400 disabled:opacity-30 disabled:hover:text-gray-400 transition-colors shrink-0"
+          >
+            <X size={10} />
+          </button>
+        )}
         <button
           onClick={refresh}
           disabled={!root}
@@ -251,7 +289,13 @@ export function ExplorerPanel({ onApprovePlan }: Props) {
 
       <div className={`overflow-y-auto scrollbar-thin p-1 ${selected ? 'max-h-[45%] shrink-0' : 'flex-1 min-h-0'}`}>
         {!root ? (
-          <p className="text-[0.5rem] text-gray-400 dark:text-gray-600 px-1 py-2">Click above to set a folder</p>
+          <p
+            data-testid="explorer-no-folder"
+            className="text-[0.5rem] text-gray-400 dark:text-gray-600 px-1 py-2 leading-relaxed"
+          >
+            No folder. The agent works in its own sandbox under ~/agent-workspace.
+            Click "Select folder..." above to point it at a project.
+          </p>
         ) : error ? (
           <p className="text-[0.5rem] text-red-500/80 px-1 py-2 break-words">{error}</p>
         ) : !rootListing ? (
