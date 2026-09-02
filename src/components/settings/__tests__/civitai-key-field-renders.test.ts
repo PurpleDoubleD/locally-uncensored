@@ -97,3 +97,51 @@ describe('the field exists and writes to the store', () => {
     expect(text).toMatch(/system credential store/)
   })
 })
+
+// ── A14 review 8: a key field that cannot be mistaken for a folder field ────
+//
+// From the Windows follow-up: the Model Storage folder field and this one sat
+// directly under each other, two bare text boxes in a row, and a tester saved
+// a filesystem path as his API key. Nothing said no, the path went into the OS
+// credential store, every CivitAI download kept failing with a bare 400, and
+// the field showed a row of dots that looked exactly like a key that was there.
+
+describe('the field says what belongs in it', () => {
+  it('the empty field shows the shape of a key, not the word none', () => {
+    show()
+    const field = screen.getByLabelText('CivitAI API key') as HTMLInputElement
+    expect(field.placeholder).toMatch(/^[0-9a-f]{32}$/)
+    expect(field.placeholder).not.toBe('(none)')
+  })
+
+  it('a pasted Windows path is called out instead of silently stored', () => {
+    show()
+    const field = screen.getByLabelText('CivitAI API key')
+    fireEvent.change(field, { target: { value: 'G:\\AI\\Models' } })
+    expect(screen.getByTestId('civitai-key-looks-wrong').textContent)
+      .toContain('That looks like a folder, not a key')
+    // And it names where that value actually belongs.
+    expect(screen.getByTestId('civitai-key-looks-wrong').textContent).toContain('Model Storage')
+  })
+
+  it('a pasted Unix path too', () => {
+    show()
+    fireEvent.change(screen.getByLabelText('CivitAI API key'), { target: { value: '/Users/dev/lu-e2e-models' } })
+    expect(screen.getByTestId('civitai-key-looks-wrong')).toBeTruthy()
+  })
+
+  // NEGATIVE CONTROL, and the important one: a real key must never trip this.
+  // A key the user cannot save without a warning beside it is a feature he
+  // stops trusting.
+  it('stays quiet for a real key', () => {
+    show()
+    fireEvent.change(screen.getByLabelText('CivitAI API key'), { target: { value: '3f9a1c7d5e2b48f06a1d9c3e7b52f8a4' } })
+    expect(screen.queryByTestId('civitai-key-looks-wrong')).toBeNull()
+  })
+
+  // NEGATIVE CONTROL: an empty field is not a mistake, it is the default.
+  it('stays quiet on an empty field', () => {
+    show()
+    expect(screen.queryByTestId('civitai-key-looks-wrong')).toBeNull()
+  })
+})

@@ -11,7 +11,7 @@
  * Run: npx vitest run src/lib/__tests__/lu-engine-groups.test.ts
  */
 import { describe, it, expect } from 'vitest'
-import { splitLuEngineRows, groupInstalledByProvider, dropDuplicateLuEngineRows, LU_ENGINE_GROUP } from '../lu-engine-rows'
+import { splitLuEngineRows, groupInstalledByProvider, dropDuplicateLuEngineRows, needsLuEngineHeading, LU_ENGINE_GROUP } from '../lu-engine-rows'
 
 const lu = (n: string) => ({ name: `openai::${n}`, model: n, provider: 'openai', providerName: 'LU Engine' })
 const luOld = (n: string) => ({ name: `openai::${n}`, model: n, provider: 'openai', providerName: 'Built-in Engine' })
@@ -120,5 +120,42 @@ describe('de-duplication asks about the FILE, never about the model', () => {
     expect(dropDuplicateLuEngineRows([row], lmsHas('gemma-3-4b-it@q8_0'))).toEqual([row])
     // An abliterated finetune is a different model, same quant or not.
     expect(dropDuplicateLuEngineRows([row], lmsHas('qwen2.5-0.5b-instruct-abliterated@q8_0'))).toEqual([row])
+  })
+})
+
+// ── A14 review 7: the heading is the warning, so it cannot be optional ──────
+
+describe('when the LU Engine heading has to be drawn', () => {
+  const luGroup = groupInstalledByProvider([lu('a')])
+  const ollamaGroup = groupInstalledByProvider([ollama('a')])
+  const both = groupInstalledByProvider([lu('a'), ollama('b')])
+
+  // THE REVIEW FINDING. A user whose only local models are GGUFs in the LU
+  // Engine folder, with Ollama or LM Studio in front, got one unlabelled list
+  // and a click that moved his chat backend without a word of warning.
+  it('one LU Engine group under a foreign backend still gets its heading', () => {
+    expect(needsLuEngineHeading(luGroup, false)).toBe(true)
+  })
+
+  it('and so does a list with more than one backend in it, either way round', () => {
+    expect(needsLuEngineHeading(both, false)).toBe(true)
+    expect(needsLuEngineHeading(both, true)).toBe(true)
+  })
+
+  // NEGATIVE CONTROL: a plain Ollama box looks exactly as it did before. A
+  // heading over the only list there names nothing the user did not know.
+  it('a single foreign group draws none', () => {
+    expect(needsLuEngineHeading(ollamaGroup, false)).toBe(false)
+    expect(needsLuEngineHeading(ollamaGroup, true)).toBe(false)
+  })
+
+  // NEGATIVE CONTROL: with the LU Engine itself in front there is no switch to
+  // warn about, so its own single group needs no heading either.
+  it('and neither does the LU Engine when it is already the chat backend', () => {
+    expect(needsLuEngineHeading(luGroup, true)).toBe(false)
+  })
+
+  it('an empty list needs nothing', () => {
+    expect(needsLuEngineHeading([], false)).toBe(false)
   })
 })

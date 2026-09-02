@@ -98,6 +98,25 @@ export interface ProviderGroup<T> {
 }
 
 /**
+ * Must the LU Engine heading be drawn even though there is only one group.
+ *
+ * A14 review 7: the render dropped every heading at one group, which is right
+ * for a plain Ollama box and wrong for the exact machine this whole change is
+ * about. A user whose only local models are GGUFs in the LU Engine folder,
+ * with Ollama or LM Studio in front and nothing of their own installed, saw
+ * one unlabelled list and a click that moved his chat backend without a word
+ * of warning. The heading is the warning, so it is drawn whenever a foreign
+ * backend holds the chat, group count be damned.
+ */
+export function needsLuEngineHeading<T extends InstalledModelLike>(
+  groups: ProviderGroup<T>[],
+  luEngineHoldsChat: boolean,
+): boolean {
+  if (groups.length > 1) return true
+  return !luEngineHoldsChat && groups.some((g) => g.label === LU_ENGINE_GROUP)
+}
+
+/**
  * Installed rows grouped by the backend that serves them, LU Engine first.
  *
  * First because it is the group whose rows carry a consequence: on a machine

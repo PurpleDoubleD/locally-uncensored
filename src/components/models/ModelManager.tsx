@@ -21,7 +21,7 @@ import { MlxMediaSettings } from '../settings/MlxMediaSettings'
 import { backendCall } from '../../api/backend'
 import { customModelDirs } from '../../api/engine'
 import { counterView } from '../../lib/inventory-counter'
-import { groupInstalledByProvider } from '../../lib/lu-engine-rows'
+import { groupInstalledByProvider, needsLuEngineHeading } from '../../lib/lu-engine-rows'
 import type { InstalledModelLike } from '../../lib/lmstudio-match'
 import type { ModelCategory, AIModel } from '../../types/models'
 
@@ -60,6 +60,9 @@ export function ModelManager() {
   } = useModels()
   const { setView, openSettingsAt } = useUIStore()
   const ollamaEnabled = useProviderStore(s => s.providers.ollama.enabled)
+  // A14: whether the LU Engine itself is serving the chat. Decides whether its
+  // group needs a heading even when it is the only group (review 7).
+  const luEngineHoldsChat = useProviderStore(s => s.providers.openai.enabled && s.providers.openai.managed === true)
   const [pullOpen, setPullOpen] = useState(false)
   const [infoOpen, setInfoOpen] = useState(false)
   const [modelInfo, setModelInfo] = useState<any>(null)
@@ -412,10 +415,15 @@ export function ModelManager() {
                             no heading: there is nothing to tell apart then. */}
                         {(() => {
                           const providerGroups = groupInstalledByProvider(shown as unknown as InstalledModelLike[])
+                          // One group normally draws no heading. The exception
+                          // is an LU Engine group while another backend holds
+                          // the chat: then the heading is not decoration, it is
+                          // the warning that a click here moves the backend.
+                          const showHeadings = needsLuEngineHeading(providerGroups, luEngineHoldsChat)
                           let drawn = 0
                           return providerGroups.map(({ label, models: rows }) => (
                             <div key={label} className="space-y-1.5">
-                              {providerGroups.length > 1 && (
+                              {showHeadings && (
                                 <p className="px-1 pt-1 text-[0.55rem] font-medium uppercase tracking-widest text-gray-500 dark:text-gray-500">
                                   {label}
                                 </p>

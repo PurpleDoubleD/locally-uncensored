@@ -15,7 +15,8 @@
  * provider keys and the HuggingFace token live.
  */
 import { useEffect, useState } from 'react'
-import { KeyRound, Check } from 'lucide-react'
+import { KeyRound, Check, AlertTriangle } from 'lucide-react'
+import { looksLikeAFolderPath, CIVITAI_KEY_PLACEHOLDER, CIVITAI_KEY_LOOKS_WRONG } from '../../lib/civitai-key-shape'
 import { useWorkflowStore } from '../../stores/workflowStore'
 import { openExternal } from '../../api/backend'
 
@@ -55,7 +56,7 @@ export function CivitaiApiKeySetting() {
           value={draft}
           onChange={(e) => { setDraft(e.target.value); setSaved(false) }}
           onBlur={save}
-          placeholder="(none)"
+          placeholder={CIVITAI_KEY_PLACEHOLDER}
           spellCheck={false}
           autoComplete="off"
           aria-label="CivitAI API key"
@@ -77,6 +78,12 @@ export function CivitaiApiKeySetting() {
           </button>
         )}
       </div>
+      {looksLikeAFolderPath(draft) && (
+        <div data-testid="civitai-key-looks-wrong" className="flex items-start gap-1.5 text-[0.6rem] leading-relaxed text-amber-600 dark:text-amber-400">
+          <AlertTriangle size={11} className="shrink-0 mt-0.5" />
+          <span>{CIVITAI_KEY_LOOKS_WRONG}</span>
+        </div>
+      )}
       <button
         onClick={() => { void openExternal(CIVITAI_KEY_PAGE) }}
         className="text-[0.6rem] text-purple-500 hover:text-purple-400 transition-colors"

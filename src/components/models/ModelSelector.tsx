@@ -971,8 +971,11 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
 
               {groups.map(({ family, models: groupModels }) => (
                 <div key={family}>
-                  {/* Section header */}
-                  {groups.length > 1 && (
+                  {/* Section header. One group normally draws none; an LU
+                      Engine group under a foreign chat backend draws one
+                      anyway, because that heading is the warning that picking
+                      from it moves the backend (A14 review 7). */}
+                  {(groups.length > 1 || (!luEngineHoldsChat && family === LU_ENGINE_GROUP)) && (
                     <div className="px-2.5 pt-2 pb-0.5">
                       <span className="text-[0.55rem] font-medium uppercase tracking-widest text-gray-600">
                         {family}

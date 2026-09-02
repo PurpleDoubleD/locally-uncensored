@@ -1625,10 +1625,16 @@ export function SettingsPage() {
             <HfDownloadPathSetting />
             <LmStudioFolderSetting />
             <ImportLocalModels />
-            {/* goonerforporn (Discord #bug-reports, 2026-08-28): the store knew
-                the key, the changelog named it, and no component ever set it.
-                It sits with the other credential-shaped model settings, which
-                is also the place the refused-download message points at. */}
+          </Section>
+
+          {/* goonerforporn (Discord #bug-reports, 2026-08-28): the store knew
+              the key, the changelog named it, and no component ever set it.
+              A14 review 8, Windows follow-up: it then sat directly under the
+              Model Storage folder field, two bare text boxes in a row, and a
+              tester saved a filesystem path as his API key. A credential and a
+              folder do not belong in one list, so the key has a section of its
+              own now, and the field says what a key looks like. */}
+          <Section title="CivitAI API key">
             <CivitaiApiKeySetting />
           </Section>
 
