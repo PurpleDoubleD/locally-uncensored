@@ -19,6 +19,7 @@ import { checkComfyConnection, refreshComfyModels } from '../../api/comfyui'
 import { isMlxImageHost } from '../../api/mlx-image'
 import { MlxMediaSettings } from '../settings/MlxMediaSettings'
 import { backendCall } from '../../api/backend'
+import { customModelDirs } from '../../api/engine'
 import { counterView } from '../../lib/inventory-counter'
 import type { ModelCategory, AIModel } from '../../types/models'
 
@@ -116,7 +117,10 @@ export function ModelManager() {
       if (model && (model.type === 'image' || model.type === 'video')) {
         // ComfyUI file model (cpl.sardinas7489, Discord): delete the file from
         // the models tree, then rescan so the enum and the list drop it.
-        await backendCall('delete_comfy_model', { filename: name })
+        // The folder the user named under Model Storage goes along: ComfyUI
+        // lists files from it now (GH #122) and LU does not delete out of it,
+        // so the backend needs it to say that instead of "was not found".
+        await backendCall('delete_comfy_model', { filename: name, extraDirs: customModelDirs() })
         // Nebenbefund 2 of the R8 re-measure: the rescan below is the slow
         // part (ComfyUI re-reads its model tree, then a reachability probe,
         // two /object_info reads and a stat over every remaining file), and

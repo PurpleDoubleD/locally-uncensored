@@ -43,6 +43,64 @@ fn safe_subfolder(subfolder: &str) -> Result<(), String> {
 }
 
 #[cfg(test)]
+mod delete_message_tests {
+    use super::not_ours_to_delete;
+
+    fn scratch(name: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir()
+            .join("lu-delete-msg")
+            .join(format!("{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// The button used to end in a flat "was not found" for a LoRA that lives
+    /// in the user's own folder, which reads like a bug. LU still does not
+    /// delete it: the folder is his.
+    #[test]
+    fn a_file_in_the_users_own_folder_is_named_as_such() {
+        let root = scratch("own-folder");
+        std::fs::create_dir_all(root.join("loras")).unwrap();
+        std::fs::write(root.join("loras").join("pixelart.safetensors"), b"x").unwrap();
+
+        let msg = not_ours_to_delete(
+            "pixelart.safetensors",
+            "pixelart.safetensors",
+            &[root.to_string_lossy().to_string()],
+        );
+        assert!(msg.contains("your own model folder"), "{msg}");
+        assert!(msg.contains(&root.join("loras").display().to_string()), "{msg}");
+        assert!(msg.contains("Remove the file there"), "{msg}");
+
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    /// Negative control: a name that is in no folder at all keeps the short
+    /// answer. Blaming the custom folder for every miss would be its own lie.
+    #[test]
+    fn a_file_that_is_nowhere_keeps_the_short_answer() {
+        let root = scratch("own-folder-empty");
+        std::fs::create_dir_all(root.join("loras")).unwrap();
+
+        let msg = not_ours_to_delete(
+            "ghost.safetensors",
+            "ghost.safetensors",
+            &[root.to_string_lossy().to_string()],
+        );
+        assert_eq!(msg, "ghost.safetensors was not found in the ComfyUI models folders");
+
+        // And with no custom folder set at all.
+        let msg = not_ours_to_delete("ghost.safetensors", "ghost.safetensors", &[]);
+        assert_eq!(msg, "ghost.safetensors was not found in the ComfyUI models folders");
+        let msg = not_ours_to_delete("ghost.safetensors", "ghost.safetensors", &["  ".to_string()]);
+        assert_eq!(msg, "ghost.safetensors was not found in the ComfyUI models folders");
+
+        std::fs::remove_dir_all(&root).ok();
+    }
+}
+
+#[cfg(test)]
 mod civitai_auth_tests {
     use super::{download_http_error, is_civitai_host};
 
@@ -205,13 +263,50 @@ const MODEL_SUBDIRS: &[&str] = &[
     "controlnet", "upscale_models", "embeddings", "style_models",
 ];
 
+/// Why a file ComfyUI listed is not in the ComfyUI models tree.
+///
+/// Two different answers, and the difference is the whole point: a file in the
+/// user's own folder is there because he put it there, and LU deleting out of
+/// a folder it does not own would be worse than the button not working.
+pub(crate) fn not_ours_to_delete(filename: &str, base: &str, extra_dirs: &[String]) -> String {
+    for raw in extra_dirs {
+        let trimmed = raw.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let root = Path::new(trimmed);
+        for (_, folder) in crate::commands::custom_models::comfy_shaped_subdirs(root) {
+            if folder.join(base).is_file() {
+                return format!(
+                    "{} sits in your own model folder ({}). LU does not delete from a folder you keep yourself. Remove the file there and it disappears from this list.",
+                    filename,
+                    folder.display(),
+                );
+            }
+        }
+    }
+    format!("{} was not found in the ComfyUI models folders", filename)
+}
+
 /// Delete one installed model file from the ComfyUI models tree (the Model
 /// Hub's trash action — cpl.sardinas7489, Discord 2026-07-19: a 27 GB video
 /// model his PC couldn't run had no in-app way back out). The name is the
 /// ComfyUI enum entry; we jail-check it and look for the single file match
 /// across the known model subdirs.
+///
+/// `extraDirs` is the folder the user named under Model Storage. LU tells
+/// ComfyUI about the ComfyUI-shaped subfolders in it (GH #122), so ComfyUI now
+/// lists files that are NOT ours to delete. It stays that way on purpose: a
+/// folder the user keeps by hand is his. The button used to end in a flat
+/// "was not found", which reads like a bug; it names the folder now and says
+/// the file has to go from there.
+#[allow(non_snake_case)]
 #[tauri::command]
-pub fn delete_comfy_model(filename: String, state: State<'_, AppState>) -> Result<serde_json::Value, String> {
+pub fn delete_comfy_model(
+    filename: String,
+    extraDirs: Option<Vec<String>>,
+    state: State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
     let comfy_path = state
         .comfy_path
         .lock()
@@ -236,7 +331,11 @@ pub fn delete_comfy_model(filename: String, state: State<'_, AppState>) -> Resul
         }
     }
     match hits.len() {
-        0 => Err(format!("{} was not found in the ComfyUI models folders", filename)),
+        0 => Err(not_ours_to_delete(
+            &filename,
+            &base,
+            &extraDirs.unwrap_or_default(),
+        )),
         1 => {
             let f = &hits[0];
             let bytes = fs::metadata(f).map(|m| m.len()).unwrap_or(0);
