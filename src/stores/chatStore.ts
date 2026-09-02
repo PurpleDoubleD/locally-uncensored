@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { v4 as uuid } from 'uuid'
-import type { Conversation, Message, ChatArtifact } from '../types/chat'
+import type { Conversation, Message, ChatArtifact, CompactionRecord } from '../types/chat'
 import type { AgentBlock } from '../types/agent-mode'
 import { idbStorage } from '../lib/idbStorage'
 import { coalescedJSONStorage } from '../lib/coalescedStorage'
@@ -13,6 +13,7 @@ import { useTodoStore } from './todoStore'
 import { usePermissionStore } from './permissionStore'
 import { useStagedChangesStore } from './stagedChangesStore'
 import { useCodexStore } from './codexStore'
+import { useAgentTaskStore } from './agentTaskStore'
 import { log } from '../lib/logger'
 import { isRecord, prop } from '../types/json-guards'
 
@@ -82,6 +83,11 @@ export function dropConversationSideState(id: string): void {
     ['permissions', () => usePermissionStore.getState().clearConversationOverrides(id)],
     ['staged-changes', () => useStagedChangesStore.getState().clear(id)],
     ['codex', () => useCodexStore.getState().dropConversation(id)],
+    // 2.6.8: Hintergrundagenten. Diese Zeile fehlte, und sie ist die einzige
+    // in der Liste, die etwas ABBRICHT statt nur zu vergessen — ein
+    // delegierter Agent laeuft in einem eigenen Versprechen weiter, auch wenn
+    // sein Chat weg ist.
+    ['agent-tasks', () => useAgentTaskStore.getState().clearConv(id)],
   ]
   for (const [what, run] of steps) {
     try { run() } catch (err) {
@@ -116,6 +122,8 @@ interface ChatState {
    *  chat, and bumping it would jump the chat to the top of the sidebar. */
   setActiveConversationModel: (model: string) => void
   addMessage: (conversationId: string, message: Message) => void
+  /** Append a compaction record (2.6.8). Newest last; only the newest is applied. */
+  recordCompaction: (conversationId: string, record: CompactionRecord) => void
   insertMessageBefore: (conversationId: string, beforeId: string, message: Message) => void
   insertMessagesBefore: (conversationId: string, beforeId: string, messages: Message[]) => void
   updateMessageContent: (conversationId: string, messageId: string, content: string) => void
@@ -273,6 +281,18 @@ export const useChatStore = create<ChatState>()(
             ),
           }
         }),
+
+      recordCompaction: (conversationId, record) =>
+        set((state) => ({
+          conversations: state.conversations.map((c) =>
+            c.id === conversationId
+              // updatedAt deliberately NOT touched: a compaction changes what
+              // is SENT, not what the user wrote, and bumping it would reorder
+              // the sidebar as if the chat had new activity.
+              ? { ...c, compactions: [...(c.compactions ?? []), record] }
+              : c
+          ),
+        })),
 
       addMessage: (conversationId, message) =>
         set((state) => ({

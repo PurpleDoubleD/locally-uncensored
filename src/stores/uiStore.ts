@@ -46,6 +46,29 @@ export function clampExplorerWidth(width: number, viewportWidth: number): number
   return Math.round(Math.min(Math.max(width, EXPLORER_MIN_WIDTH), max))
 }
 
+/**
+ * Geometrie des Agenten-Panels (2.6.8).
+ *
+ * Schmaler als der Explorer: dort steht ein verschachtelter Pfad, hier eine
+ * Zielzeile und ein Zustand. 240 statt 280, Boden 180.
+ *
+ * Die Klemme ist bewusst DIESELBE Rechnung wie beim Explorer und keine
+ * gemeinsame Funktion mit zwei Parametersaetzen: die beiden Panels teilen
+ * heute die Regel "nie mehr als das halbe Fenster", aber nicht ihren Grund.
+ * Ein Explorer darf breit werden, weil Pfade lang sind; dieses Panel soll es
+ * gar nicht wollen. Eine geteilte Funktion haette die zweite Begruendung
+ * unsichtbar gemacht.
+ */
+export const AGENT_PANEL_DEFAULT_WIDTH = 240
+export const AGENT_PANEL_MIN_WIDTH = 180
+
+export function clampAgentPanelWidth(width: number, viewportWidth: number): number {
+  if (!Number.isFinite(width)) return AGENT_PANEL_DEFAULT_WIDTH
+  const half = Math.floor((Number.isFinite(viewportWidth) ? viewportWidth : 0) / 2)
+  const max = Math.max(AGENT_PANEL_MIN_WIDTH, half)
+  return Math.round(Math.min(Math.max(width, AGENT_PANEL_MIN_WIDTH), max))
+}
+
 interface UIState {
   currentView: View
   sidebarOpen: boolean
@@ -59,6 +82,10 @@ interface UIState {
    *  flip lands, then cleared. Never persisted: it describes one click, not a
    *  preference. */
   pendingCloudModel: string | null
+  /** Agent panel width in px, persisted. */
+  agentPanelWidth: number
+  /** Agent panel collapsed to its rail, persisted. */
+  agentPanelCollapsed: boolean
   /** Explorer panel width in px, persisted. */
   explorerWidth: number
   /** Explorer panel collapsed to its rail, persisted. */
@@ -75,6 +102,8 @@ interface UIState {
   setCloudGateOpen: (open: boolean) => void
   setCloudTeaser: (target: CloudTeaserTarget | null) => void
   setPendingCloudModel: (name: string | null) => void
+  setAgentPanelWidth: (width: number, viewportWidth: number) => void
+  setAgentPanelCollapsed: (collapsed: boolean) => void
   setExplorerWidth: (width: number, viewportWidth: number) => void
   setExplorerCollapsed: (collapsed: boolean) => void
 }
@@ -87,6 +116,10 @@ export const useUIStore = create<UIState>()(
       cloudGateOpen: false,
       cloudTeaser: null,
       pendingCloudModel: null,
+      agentPanelWidth: AGENT_PANEL_DEFAULT_WIDTH,
+      // Zugeklappt ist die Vorgabe: das Panel soll sich melden, wenn etwas
+      // laeuft, und sonst keinen Platz nehmen.
+      agentPanelCollapsed: true,
       explorerWidth: EXPLORER_DEFAULT_WIDTH,
       explorerCollapsed: false,
       settingsFocus: null,
@@ -106,6 +139,9 @@ export const useUIStore = create<UIState>()(
       setCloudGateOpen: (open) => set({ cloudGateOpen: open }),
       setCloudTeaser: (target) => set({ cloudTeaser: target }),
       setPendingCloudModel: (name) => set({ pendingCloudModel: name }),
+      setAgentPanelWidth: (width, viewportWidth) =>
+        set({ agentPanelWidth: clampAgentPanelWidth(width, viewportWidth) }),
+      setAgentPanelCollapsed: (collapsed) => set({ agentPanelCollapsed: collapsed }),
       setExplorerWidth: (width, viewportWidth) =>
         set({ explorerWidth: clampExplorerWidth(width, viewportWidth) }),
       setExplorerCollapsed: (collapsed) => set({ explorerCollapsed: collapsed }),
@@ -120,6 +156,12 @@ export const useUIStore = create<UIState>()(
       partialize: (state) => ({
         explorerWidth: state.explorerWidth,
         explorerCollapsed: state.explorerCollapsed,
+        // 2.6.8: die zwei Felder des Agenten-Panels. Geometrie ist eine
+        // Vorliebe und ueberlebt einen Neustart; die AUFGABEN selbst tun das
+        // ausdruecklich nicht (siehe agentTaskStore) — ein wiederhergestelltes
+        // "laeuft" waere eine Luege ueber den Zustand der Maschine.
+        agentPanelWidth: state.agentPanelWidth,
+        agentPanelCollapsed: state.agentPanelCollapsed,
       }),
     },
   ),

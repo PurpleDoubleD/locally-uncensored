@@ -74,6 +74,11 @@ const PFLICHT: Record<string, Record<string, string>> = {
   pr_resume: { url: 'https://github.com/o/r/pull/1' },
   image_generate: { prompt: 'ein hund' },
   run_workflow: { name: 'Research Topic' },
+  // 2.6.8: message_agent schickt nichts an die Bruecke, aber die Regel gilt
+  // trotzdem — eine Pflichtangabe, die niemand prueft, ist eine Pflichtangabe
+  // nur auf dem Papier. Der Ausgang ist hier ein Satz an das Modell statt ein
+  // unterbundener Bridge-Aufruf, und genau das prueft die Reihe unten.
+  message_agent: { task_id: 'task-1-abcdef', message: 'halte dich kurz' },
 }
 
 /**

@@ -13,6 +13,12 @@ import { useAgentWorkflowStore } from '../../stores/agentWorkflowStore'
 import { WorkflowEngine } from '../../lib/workflow-engine'
 import type { StepResult } from '../../types/agent-workflows'
 import { DELEGATE_TASK_TOOL_DEF, buildDelegateExecutor } from '../agents/sub-agent'
+import {
+  CHECK_TASKS_TOOL_DEF,
+  MESSAGE_AGENT_TOOL_DEF,
+  buildCheckTasksExecutor,
+  buildMessageAgentExecutor,
+} from '../agents/agent-task-tools'
 import { applyUniqueEdit } from '../../lib/surgical-edit'
 import { sliceFileReadResult } from '../../lib/file-read-window'
 import { writeTodos, summarizeTodos } from '../../stores/todoStore'
@@ -471,8 +477,11 @@ const BUILTIN_TOOLS: MCPToolDefinition[] = [
     source: 'builtin',
   },
 
-  // Sub-agent delegation (Phase 13 v2.4.0).
+  // Sub-agent delegation (Phase 13 v2.4.0), plus die beiden Werkzeuge, mit
+  // denen ein Hauptagent seine Hintergrundagenten erreicht (2.6.8).
   DELEGATE_TASK_TOOL_DEF,
+  CHECK_TASKS_TOOL_DEF,
+  MESSAGE_AGENT_TOOL_DEF,
 
   // Local clock — so the agent never googles "what day is it".
 ]
@@ -1586,6 +1595,8 @@ const EXECUTOR_MAP: Record<
   video_generate: executeVideoGenerate,
   run_workflow: executeRunWorkflow,
   delegate_task: buildDelegateExecutor(),
+  check_tasks: buildCheckTasksExecutor(),
+  message_agent: buildMessageAgentExecutor(),
 }
 
 export function registerBuiltinTools(registry: ToolRegistry) {

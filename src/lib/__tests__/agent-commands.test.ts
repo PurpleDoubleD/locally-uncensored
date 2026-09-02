@@ -12,8 +12,14 @@ import {
   LOOP_DONE_MARKER,
   LOOP_CONTINUE_MARKER,
   loopPassSaysDone,
+  commandInScope,
 } from '../agent-commands'
 import { MUTATING_TOOLS } from '../mutating-tools'
+import { readFileSync, readdirSync } from 'node:fs'
+import { join } from 'node:path'
+
+/** Die drei Hooks, die einen lokal behandelten Befehl ausfuehren muessen. */
+const HOOKS = join(__dirname, '..', '..', 'hooks')
 
 // The 2.5.9 set. Kept as an explicit list rather than a count so a rename or an
 // accidental drop fails loudly instead of quietly changing a number.
@@ -21,6 +27,8 @@ const EXPECTED = [
   // steer
   'goal', 'loop',
   // understand
+  // context
+  'compact',
   'plan', 'explain', 'find', 'diff', 'log', 'todo',
   // change
   'fix', 'types', 'test', 'refactor', 'clean', 'optimize',
@@ -58,11 +66,54 @@ describe('AGENT_COMMANDS registry', () => {
     }
   })
 
-  it('marks only /goal as handled locally', () => {
-    // Everything else must reach a model; a second locally-handled command
-    // would need its own branch in three hooks and would silently no-op if it
-    // did not get one.
-    expect(AGENT_COMMANDS.filter((c) => c.handledLocally).map((c) => c.name)).toEqual(['goal'])
+  // Diese Sperre stand als "nur /goal ist lokal behandelt" da, mit der
+  // Begruendung: ein zweiter solcher Befehl braeuchte einen eigenen Zweig in
+  // drei Hooks und wuerde still nichts tun, wenn er keinen bekommt.
+  //
+  // Der zweite ist jetzt da (/compact, 2.6.8). Die Namensliste zu erweitern
+  // haette die Sperre entwertet — sie haette dann nur noch gezaehlt. Also
+  // prueft sie ab hier das, wovor ihr eigener Kommentar gewarnt hat: dass
+  // JEDER lokal behandelte Befehl in allen drei Hooks tatsaechlich einen
+  // Zweig hat. Das ist die Zusicherung, die "still nichts tun" verhindert.
+  it('jeder lokal behandelte Befehl hat einen Zweig in JEDEM Hook, der Befehle liest', () => {
+    // Die Hook-Liste wird ABGELEITET, nicht aufgezaehlt. Der erste Entwurf
+    // dieser Sperre nannte drei Dateien fest und verlangte damit einen Zweig
+    // in useAgentChat.ts — das liest aber gar keine Befehle, es bekommt vom
+    // useChat bereits Aufbereitetes. Ein Zweig dort waere Code ohne Aufrufer
+    // gewesen, also genau der Defekt, den dieses Projekt an anderer Stelle
+    // schon einmal aufgeraeumt hat. Wer spaeter parseAgentCommand in einen
+    // weiteren Hook holt, wird von dieser Fassung automatisch miterfasst.
+    const alle = readdirSync(HOOKS).filter((f) => f.endsWith('.ts'))
+    const leser = alle
+      .map((f) => ({ f, src: readFileSync(join(HOOKS, f), 'utf8') }))
+      .filter(({ src }) => /\bparseAgentCommand\s*\(/.test(src))
+    expect(leser.map((h) => h.f).sort()).toEqual(['useChat.ts', 'useCodex.ts'])
+
+    const lokal = AGENT_COMMANDS.filter((c) => c.handledLocally)
+    expect(lokal.length).toBeGreaterThan(1)
+    for (const c of lokal) {
+      for (const { f, src } of leser) {
+        expect(src.includes(`'${c.name}'`), `${f} hat keinen Zweig fuer /${c.name}`).toBe(true)
+      }
+    }
+  })
+
+  // Die Reichweite: genau ein Befehl darf im normalen Chat erscheinen, und es
+  // ist der eine, der ohne Werkzeuge auskommt. Jeder andere wuerde dort eine
+  // Arbeit versprechen, die die Oberflaeche nicht ausfuehren kann.
+  it('nur /compact reicht bis in den normalen Chat', () => {
+    const imChat = AGENT_COMMANDS.filter((c) => commandInScope(c, 'chat')).map((c) => c.name)
+    expect(imChat).toEqual(['compact'])
+    expect(AGENT_COMMANDS.every((c) => commandInScope(c, 'agent'))).toBe(true)
+  })
+
+  it('das Menue und der Parser folgen derselben Reichweite', () => {
+    expect(matchAgentCommands('/', 'chat').map((c) => c.name)).toEqual(['compact'])
+    expect(matchAgentCommands('/', 'agent').length).toBe(AGENT_COMMANDS.length)
+    // Ein Agentenbefehl im normalen Chat ist kein Befehl, sondern Text.
+    expect(parseAgentCommand('/fix den login', 'chat')).toBeNull()
+    expect(parseAgentCommand('/fix den login', 'agent')).not.toBeNull()
+    expect(parseAgentCommand('/compact die datenbank', 'chat')?.args).toBe('die datenbank')
   })
 
   it('an argument the user typed always reaches the expansion', () => {

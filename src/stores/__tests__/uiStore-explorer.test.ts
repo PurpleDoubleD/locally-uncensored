@@ -42,11 +42,23 @@ import {
 } from '../uiStore'
 
 describe('what the ui store writes to disk', () => {
-  it('persists exactly explorerWidth and explorerCollapsed', () => {
+  it('persistiert genau die vier Geometriefelder der beiden Panels', () => {
+    // 2.6.8: das Agenten-Panel bringt seine zwei mit. Die Liste bleibt
+    // ausgeschrieben und wird nicht aus dem Zustand abgeleitet — sie ist eine
+    // ERLAUBNIS, keine Beschreibung. Jedes weitere Feld hier muss jemand
+    // hinschreiben und dabei begruenden, warum es einen Neustart ueberleben
+    // soll; das ist der ganze Zweck dieser Zeile.
+    //
+    // Was ausdruecklich NICHT dazugehoert: die Aufgaben selbst. Die liegen in
+    // agentTaskStore und werden gar nicht persistiert, weil eine
+    // wiederhergestellte Zeile mit "laeuft" ueber den Zustand der Maschine
+    // luegen wuerde — samt einem Abbrechen-Knopf, der nichts mehr abbricht.
     const partialize = useUIStore.persist.getOptions().partialize
     expect(partialize).toBeTypeOf('function')
     const written = partialize!(useUIStore.getState()) as Record<string, unknown>
-    expect(Object.keys(written).sort()).toEqual(['explorerCollapsed', 'explorerWidth'])
+    expect(Object.keys(written).sort()).toEqual([
+      'agentPanelCollapsed', 'agentPanelWidth', 'explorerCollapsed', 'explorerWidth',
+    ])
   })
 
   it('counter-test: nothing that steers the app start comes along', () => {
@@ -59,20 +71,32 @@ describe('what the ui store writes to disk', () => {
     expect(Object.values(written).every((v) => typeof v !== 'function')).toBe(true)
   })
 
-  it('keeps writing only those two after the state moved', () => {
-    useUIStore.setState({ currentView: 'settings', cloudGateOpen: true, explorerCollapsed: true, explorerWidth: 333 })
+  it('schreibt auch nach einer Zustandsaenderung nur diese vier', () => {
+    useUIStore.setState({
+      currentView: 'settings', cloudGateOpen: true,
+      explorerCollapsed: true, explorerWidth: 333,
+      agentPanelCollapsed: false, agentPanelWidth: 222,
+    })
     const written = useUIStore.persist.getOptions().partialize!(useUIStore.getState()) as Record<string, unknown>
-    expect(written).toEqual({ explorerWidth: 333, explorerCollapsed: true })
+    expect(written).toEqual({
+      explorerWidth: 333, explorerCollapsed: true,
+      agentPanelWidth: 222, agentPanelCollapsed: false,
+    })
   })
 
-  it('and that is what actually lands in storage', () => {
+  it('und genau das landet auch wirklich im Speicher', () => {
     useUIStore.setState({ currentView: 'benchmark', cloudGateOpen: true })
     useUIStore.getState().setExplorerWidth(420, 1600)
     useUIStore.getState().setExplorerCollapsed(true)
+    useUIStore.getState().setAgentPanelWidth(260, 1600)
+    useUIStore.getState().setAgentPanelCollapsed(false)
     const raw = memory.getItem('locally-uncensored-ui')
     expect(raw).toBeTruthy()
     const parsed = JSON.parse(raw!)
-    expect(parsed.state).toEqual({ explorerWidth: 420, explorerCollapsed: true })
+    expect(parsed.state).toEqual({
+      explorerWidth: 420, explorerCollapsed: true,
+      agentPanelWidth: 260, agentPanelCollapsed: false,
+    })
   })
 })
 

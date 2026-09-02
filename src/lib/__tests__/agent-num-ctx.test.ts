@@ -12,7 +12,7 @@ vi.mock('../../api/providers', () => ({
   getProviderForModel: vi.fn(),
 }))
 
-import { resolveAgentNumCtx } from '../agent-num-ctx'
+import { resolveAgentNumCtx, resolveAgentNumCtxWithConfidence } from '../agent-num-ctx'
 import { AGENT_CONTEXT_CAP, DEFAULT_CONTEXT_CAP } from '../context-window'
 import { getModelContextCached } from '../../api/ollama'
 import { getModelMaxTokens } from '../context-compaction'
@@ -175,5 +175,83 @@ describe('resolveAgentNumCtx — one num_ctx per model, per turn', () => {
       await resolveAgentNumCtx('qwen2.5-coder:14b', 'ollama', 0)
       expect(providerFor).not.toHaveBeenCalled()
     })
+  })
+})
+
+
+// ── Gemessen oder geraten ─────────────────────────────────────────────────
+
+describe('resolveAgentNumCtxWithConfidence — die Zahl sagt nicht, woher sie kommt', () => {
+  beforeEach(() => {
+    probe.mockReset()
+    catalog.mockReset()
+    loadedCtx = 'absent'
+    providerFor.mockReset()
+    providerFor.mockImplementation((name: string) => ({
+      provider: loadedCtx === 'absent'
+        ? {}
+        : { loadedContextLength: vi.fn(async () => loadedCtx) },
+      modelId: name.includes('::') ? name.split('::').slice(1).join('::') : name,
+    }))
+  })
+
+  /**
+   * WARUM ES DIESE AUSKUNFT GEBEN MUSS: der Auto-Ausloeser zieht eine
+   * Sicherheitsmarge ab, solange der Nenner geraten ist, und erschloss sich
+   * das bis 2026-09-02 aus der ZAHL — `window !== 8192`. Genau die beiden
+   * Faelle hier unten fielen dabei auf die falsche Seite.
+   */
+  it('nennt ein wirklich gemessenes 8192er-Fenster GEMESSEN', () => {
+    // Der Fall, an dem das Raten scheiterte. 8192 ist Ollamas Voreinstellung
+    // und ein voellig legitimer Wert; wer ihn als "geraten" liest, faengt bei
+    // diesem Modell dauerhaft acht Prozentpunkte zu frueh an zusammenzufassen.
+    probe.mockResolvedValue(8192)
+    return resolveAgentNumCtxWithConfidence('llama3:8b', 'ollama', undefined).then((r) => {
+      expect(r.ctx).toBe(8192)
+      expect(r.gemessen).toBe(true)
+    })
+  })
+
+  it('nennt den Notboden nach einem Fehlschlag GERATEN', async () => {
+    // Dieselbe Zahl, andere Herkunft. Nur hier ist die Marge richtig.
+    probe.mockRejectedValue(new Error('Ollama antwortet nicht'))
+    const r = await resolveAgentNumCtxWithConfidence('llama3:8b', 'ollama', undefined)
+    expect(r.ctx).toBe(8192)
+    expect(r.gemessen).toBe(false)
+  })
+
+  it('zaehlt einen Override des Nutzers als gemessen — er hat es ja gesagt', async () => {
+    const r = await resolveAgentNumCtxWithConfidence('llama3:8b', 'ollama', 32768)
+    expect(r).toEqual({ ctx: 32768, gemessen: true })
+    expect(probe).not.toHaveBeenCalled()
+  })
+
+  it('nennt einen leeren Katalog GERATEN, auch wenn eine Zahl herauskommt', async () => {
+    // Der Cloud-Zweig faellt ebenfalls auf 8192 zurueck, nur still.
+    catalog.mockResolvedValue(undefined)
+    const r = await resolveAgentNumCtxWithConfidence('anthropic::x', 'anthropic', undefined)
+    expect(r.ctx).toBe(8192)
+    expect(r.gemessen).toBe(false)
+  })
+
+  it('nennt eine Katalog-Antwort GEMESSEN', async () => {
+    // Die Gegenprobe zum leeren Katalog. Ohne sie waere "gemessen" im
+    // Cloud-Zweig dauerhaft falsch, ohne dass ein Test es merkt: die Zahl
+    // stimmt ja, nur die Marge waere zu gross und jedes Cloud-Gespraech
+    // wuerde zu frueh zusammengefasst.
+    catalog.mockResolvedValue(200_000)
+    const r = await resolveAgentNumCtxWithConfidence('anthropic::x', 'anthropic', undefined)
+    expect(r.ctx).toBe(200_000)
+    expect(r.gemessen).toBe(true)
+  })
+
+  it('gibt dieselbe Zahl heraus wie der schlanke Weg', async () => {
+    // Sonst haetten wir zwei Fenster-Aufloeser statt einem — genau der
+    // Zustand, den der Kommentar in maybeAutoCompact ausschliesst.
+    probe.mockResolvedValue(16384)
+    const a = await resolveAgentNumCtx('llama3:8b', 'ollama', undefined)
+    probe.mockResolvedValue(16384)
+    const b = await resolveAgentNumCtxWithConfidence('llama3:8b', 'ollama', undefined)
+    expect(b.ctx).toBe(a)
   })
 })
