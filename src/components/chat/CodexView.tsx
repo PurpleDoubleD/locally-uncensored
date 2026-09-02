@@ -18,6 +18,7 @@ import { PluginsDropdown } from './PluginsDropdown'
 import { CodexModeDropdown } from './CodexModeDropdown'
 import { ModelSelector } from '../models/ModelSelector'
 import { GoalBar } from './GoalBar'
+import { LuEngineSwitchBar } from './LuEngineSwitchBar'
 import { LoopBar } from './LoopBar'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { useModelStore } from '../../stores/modelStore'
@@ -569,7 +570,7 @@ export function CodexView() {
           // No plan lives here. The prompt window is the prompt window
           // (David, 2026-08-22): the plan and its Approve-and-run card sit
           // at the bottom of the Explorer column on the right.
-          composerAbove={<><LoopBar onStop={stopCodex} /><GoalBar /></>}
+          composerAbove={<><LuEngineSwitchBar /><LoopBar onStop={stopCodex} /><GoalBar /></>}
           // Ask / Bypass / Plan sits here, in the CODE composer only (plan
           // C1). ChatInput stays surface-neutral, so the Chat tab inherits
           // nothing from it. Plugins used to ride along here and now lives in

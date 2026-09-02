@@ -21,6 +21,7 @@ import { cloudTeaserModels } from '../../lib/cloud-teaser-models'
 import { splitLuEngineRows, LU_ENGINE_GROUP } from '../../lib/lu-engine-rows'
 import { isBuiltinEngineEntry, type InstalledModelLike } from '../../lib/lmstudio-match'
 import { ensureLuEngineIsChatProvider, LU_ENGINE_SWITCH_NOTE } from '../../api/lu-engine-switch'
+import { useLuEngineSwitchStore } from '../../stores/luEngineSwitchStore'
 import type { AIModel } from '../../types/models'
 
 // ── Local-mode cloud discovery (2.5.8): an "LU Cloud" section at the list's
@@ -545,10 +546,6 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
   // inline "loading…" state on the row and blocks a second click.
   const [selectingLms, setSelectingLms] = useState<string | null>(null)
   const [selectError, setSelectError] = useState<string | null>(null)
-  // A14: the one line that says the pick moved the chat backend. Not an error,
-  // so it does not share the red banner: the switch is what the user asked for
-  // by pressing Use, he just has to be told it happened.
-  const [switchNote, setSwitchNote] = useState<string | null>(null)
   // VRAM load state for Ollama rows — parity with `lmsLoaded` above, so
   // every LOCAL model shows a clear on/off load toggle (not just LM Studio).
   // Sourced from /api/ps on dropdown open.
@@ -743,10 +740,15 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
         || isBuiltinEngineEntry(model as unknown as InstalledModelLike)) {
       if (selectingLms || togglingLms) return
       setSelectError(null)
-      setSwitchNote(null)
       setSelectingLms(id)
       try {
-        if (ensureLuEngineIsChatProvider()) setSwitchNote(LU_ENGINE_SWITCH_NOTE)
+        // Announced BEFORE the start is attempted and NOT into this dropdown,
+        // which the pick closes a few lines further down. It goes to the
+        // standing status row above the composer, so it survives both the
+        // close on success and the error banner on failure (A14 review 2).
+        if (ensureLuEngineIsChatProvider()) {
+          useLuEngineSwitchStore.getState().announce(LU_ENGINE_SWITCH_NOTE)
+        }
         const swapped = await activateBuiltinModel(model.name)
         if (swapped) {
           // Raw store set — the useModels wrapper would fire a second
@@ -939,11 +941,6 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
               </div>
             )}
 
-            {switchNote && !selectError && (
-              <div data-testid="lu-engine-switch-note" className="mx-2 mt-2 px-2 py-1.5 rounded bg-white/5 border border-white/10 text-[0.6rem] text-gray-600 dark:text-gray-300 leading-snug">
-                {switchNote}
-              </div>
-            )}
 
             {/* Scrollable model list */}
             <div className="py-1 max-h-[280px] overflow-y-auto scrollbar-thin">

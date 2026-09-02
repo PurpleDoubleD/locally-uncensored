@@ -73,7 +73,11 @@ describe('the plan moved into the panel (C2)', () => {
     // C1 had put the plan APPROVAL card here (a button plus the plan text the
     // user is approving). It went down into the panel too on 2026-08-22: the
     // prompt window is the prompt window.
-    expect(src).toMatch(/composerAbove=\{<><LoopBar onStop=\{stopCodex\} \/><GoalBar \/><\/>\}/)
+    // Matched on what must be there rather than on the exact list: A14 added
+    // the LU Engine switch line to this row, and pinning the literal would
+    // turn every future status line into a failure of THIS claim. The claim is
+    // that no plan lives here, and the two lines below are the whole of it.
+    expect(src).toMatch(/composerAbove=\{<>.*<LoopBar onStop=\{stopCodex\} \/><GoalBar \/><\/>\}/)
     expect(src).not.toMatch(/PlanBar/)
     expect(src).not.toMatch(/PlanApprovalBar/)
   })
