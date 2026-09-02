@@ -659,8 +659,39 @@ fn wait_for_health_or_exit(state: &AppState, port: u16, timeout: Duration) -> He
     HealthWait::TimedOut
 }
 
+/// The shared object the dynamic loader could not find, if that is why the
+/// sidecar never got as far as its own logging.
+///
+/// The Linux sidecar is not static: the ELF in the shipped deb carries
+/// `DT_NEEDED libvulkan.so.1` and `DT_NEEDED libgomp.so.1`. On a machine
+/// without them the process is spawned, ld.so refuses it, and the only thing
+/// on stderr is one line of the form
+///
+///   lu-llama-server: error while loading shared libraries: libvulkan.so.1:
+///   cannot open shared object file: No such file or directory
+///
+/// That line has to be read BEFORE `stderr_blames_the_gpu`, which matches on
+/// the substring "vulkan" and would otherwise send a user whose loader is
+/// short one package off to set GPU Layers to 0, a setting that cannot help
+/// a binary that never started.
+fn stderr_names_a_missing_system_library(stderr: &str) -> Option<String> {
+    const MARKER: &str = "error while loading shared libraries:";
+    for line in stderr.lines() {
+        // to_ascii_lowercase keeps byte lengths, so the index maps back.
+        let lower = line.to_ascii_lowercase();
+        let Some(at) = lower.find(MARKER) else { continue };
+        let lib = line[at + MARKER.len()..].split(':').next().unwrap_or("").trim();
+        if !lib.is_empty() {
+            return Some(lib.to_string());
+        }
+    }
+    None
+}
+
 /// Markers in llama-server's stderr that point at the GPU rather than at the
-/// model file or the app. Lower-cased input.
+/// model file or the app. Lower-cased input. Read only after
+/// `stderr_names_a_missing_system_library`: "libvulkan.so.1" contains
+/// "vulkan" and is a packaging problem, not a graphics-card problem.
 fn stderr_blames_the_gpu(stderr: &str) -> bool {
     const MARKERS: &[&str] = &[
         "cuda",
@@ -709,12 +740,16 @@ pub(crate) fn start_failure_message(failure: &StartFailure, port: u16, budget: D
             "Port {port} answers health checks, but the engine this app just started exited immediately. Another llama-server (likely left over from a previous session or crash) is occupying the port. Quit that process or reboot, then try again."
         )
     } else if failure.died {
-        let hint = if stderr_blames_the_gpu(&failure.stderr) {
-            " This looks like a graphics-card problem. Open Settings, Built-in Engine and set GPU Layers to 0 to run on the CPU, then try again."
+        let hint = if let Some(lib) = stderr_names_a_missing_system_library(&failure.stderr) {
+            format!(
+                " A system library the built-in engine needs is missing on this machine: {lib}. Install it with your package manager (Debian and Ubuntu: sudo apt install libvulkan1 libgomp1; Fedora: sudo dnf install vulkan-loader libgomp), then try again. The current Linux package asks for both, so reinstalling from it also pulls them in."
+            )
+        } else if stderr_blames_the_gpu(&failure.stderr) {
+            " This looks like a graphics-card problem. Open Settings, Built-in Engine and set GPU Layers to 0 to run on the CPU, then try again.".to_string()
         } else if stderr_blames_the_model(&failure.stderr) {
-            " The engine refused the model file. Open Models, Discover and install a different quant."
+            " The engine refused the model file. Open Models, Discover and install a different quant.".to_string()
         } else {
-            " Reinstall Locally Uncensored if this keeps happening, or pick a different backend in Settings, AI Backends."
+            " Reinstall Locally Uncensored if this keeps happening, or pick a different backend in Settings, AI Backends.".to_string()
         };
         format!("The built-in engine started and exited again before it could serve on port {port}. It was tried twice.{hint}")
     } else {
@@ -2150,6 +2185,51 @@ mod tests {
         let msg = start_failure_message(&f, 8127, Duration::from_secs(220));
         assert!(msg.contains("did not become healthy on port 8127 within 220s"), "{msg}");
         assert!(!msg.contains("exited"), "{msg}");
+    }
+
+    #[test]
+    fn a_dead_start_names_the_missing_library_instead_of_the_graphics_card() {
+        // The Linux deb shipped a sidecar with DT_NEEDED libvulkan.so.1 and
+        // DT_NEEDED libgomp.so.1 while its Depends named neither, so on a box
+        // without those packages this is the ONLY thing the engine ever says.
+        // "libvulkan.so.1" contains "vulkan", so before the loader line was
+        // read first the user was told to set GPU Layers to 0, which cannot
+        // help a binary the loader refused to start.
+        let f = StartFailure {
+            died: true,
+            port_taken: false,
+            stderr: "lu-llama-server: error while loading shared libraries: libvulkan.so.1: cannot open shared object file: No such file or directory".into(),
+        };
+        let msg = start_failure_message(&f, 8127, Duration::from_secs(60));
+        assert!(msg.contains("libvulkan.so.1"), "{msg}");
+        assert!(msg.contains("apt install libvulkan1 libgomp1"), "{msg}");
+        assert!(!msg.contains("GPU Layers"), "{msg}");
+        // The engine's own last words still ride along for a bug report.
+        assert!(msg.contains("cannot open shared object file"), "{msg}");
+    }
+
+    #[test]
+    fn a_missing_library_is_read_off_the_loader_line_and_nowhere_else() {
+        assert_eq!(
+            stderr_names_a_missing_system_library(
+                "lu-llama-server: error while loading shared libraries: libgomp.so.1: cannot open shared object file: No such file or directory"
+            )
+            .as_deref(),
+            Some("libgomp.so.1"),
+        );
+        // Negative control: a real Vulkan fault from a loaded binary is NOT a
+        // packaging problem and has to keep the graphics-card hint.
+        assert_eq!(stderr_names_a_missing_system_library("ggml_vulkan: no devices found"), None);
+        let f = StartFailure {
+            died: true,
+            port_taken: false,
+            stderr: "ggml_vulkan: no devices found".into(),
+        };
+        let msg = start_failure_message(&f, 8127, Duration::from_secs(60));
+        assert!(msg.contains("GPU Layers to 0"), "{msg}");
+        assert!(!msg.contains("apt install"), "{msg}");
+        // And an empty stderr names no library at all.
+        assert_eq!(stderr_names_a_missing_system_library(""), None);
     }
 
     #[test]
