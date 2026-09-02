@@ -11,7 +11,7 @@
  * `backendCall` maps camelCase args → snake_case Rust params (Tauri).
  */
 
-import { backendCall } from './backend'
+import { backendCall, isMacOS, isWindows } from './backend'
 import { syncBuiltinEnginePort } from './builtin-ensure'
 import { trackEngineSwap } from './engine-swap-gate'
 import { prefixModelName } from './providers'
@@ -276,19 +276,29 @@ export function lastScanDirs(): ScannedDir[] {
 
 /** Same folder, written two ways. Windows arrives with backslashes and any
  *  case, and `C:\\` and `c:/` are one folder; the trailing separator is noise
- *  on every platform. Only ever used to find the row for a folder WE asked to
- *  be scanned, so folding case cannot pull in a stranger's folder. */
+ *  on every platform.
+ *
+ *  The case fold follows Rust's `bundled_scan_dirs`, which folds on Windows
+ *  and macOS and NOT on Linux: `/mnt/Models` and `/mnt/models` really are two
+ *  folders on ext4, and folding them here would let this answer a question
+ *  about one folder with the verdict about the other. */
 function samePath(a: string, b: string): boolean {
-  const key = (p: string) => String(p ?? '').replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase()
+  const fold = isWindows() || isMacOS()
+  const key = (p: string) => {
+    const normalised = String(p ?? '').replace(/\\/g, '/').replace(/\/+$/, '')
+    return fold ? normalised.toLowerCase() : normalised
+  }
   return key(a) === key(b)
 }
 
-/** The user's own folder from the last listing, or null when none was set (or
- *  when it was the app folder under another name, which Rust folds away).
+/** The user's own folder from the last listing, or null when none was set or
+ *  when the answer says nothing about it.
  *
  *  Matched by path rather than by position: the app dir is row 0 today, but a
  *  row read off an index is a row that silently reports the wrong folder the
- *  moment that stops being true. */
+ *  moment that stops being true. A folder that IS the app folder under another
+ *  spelling is folded away by Rust, so the match then lands on row 0, which is
+ *  the same folder and the right verdict for it. */
 export function lastCustomScanDir(): ScannedDir | null {
   const wanted = customModelDirs()[0]
   if (!wanted) return null
