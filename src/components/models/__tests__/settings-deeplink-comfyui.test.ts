@@ -80,8 +80,10 @@ describe('the hint button walks the whole route', () => {
   })
 
   it('and unfolds the ComfyUI section for it', () => {
+    // A15 added a second reason to arrive open (a run in flight), so the focus
+    // is one arm of the condition now rather than the whole of it.
     expect(settingsPage).toMatch(
-      /<Section title="ComfyUI \(Image & Video\)" defaultOpen=\{entryFocus\?\.section === 'comfyui'\}>/,
+      /<Section title="ComfyUI \(Image & Video\)" defaultOpen=\{entryFocus\?\.section === 'comfyui' \|\|/,
     )
   })
 

@@ -61,6 +61,7 @@ export const RELEASE_NOTES: ReleaseNote[] = [
           'The prompt history in Create can be cleared. Every entry has its own remove button, and Clear all at the top of the list wipes the lot after a second click.',
           'Settings shows the port the built-in engine really runs on, the Model Storage folder says when it could not be read or was too big to scan, and a ComfyUI install or repair can be cancelled from Settings and keeps showing its progress while you look at other settings.',
           'On the Mac, LU stopped searching your whole home folder for a ComfyUI it never runs there. That search touched the Desktop and Music folders, so macOS asked for access to Apple Music and to the Desktop at first launch, and the window sat on LOADING while the search ran. On Windows and Linux the same search moved off the main thread, so a slow disk no longer freezes the window.',
+          'Error messages from Windows arrive in English, a ComfyUI requirements.txt that cannot be used is named instead of silently skipped, and the LU Engine returns to its default port on every restart.',
         ],
       },
       {

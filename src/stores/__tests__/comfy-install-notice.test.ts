@@ -89,3 +89,15 @@ describe('a repair that had to skip the requirements.txt says so at the end', ()
     expect(store().notice).toBe('')
   })
 })
+
+describe('the ComfyUI section opens itself while a run is on screen', () => {
+  it('opens for every phase that is not idle, and stays shut for idle', async () => {
+    const { comfySectionShouldOpen } = await import('../comfyInstallStore')
+    for (const phase of ['checking', 'python', 'comfyui', 'repair', 'error'] as const) {
+      expect(comfySectionShouldOpen(phase)).toBe(true)
+    }
+    // Negative control: a settings page with nothing running must not force the
+    // section open, or the accordion would be no accordion at all.
+    expect(comfySectionShouldOpen('idle')).toBe(false)
+  })
+})

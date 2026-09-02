@@ -67,7 +67,8 @@ describe('the notes table', () => {
     // that is finally read, the CivitAI key field, the HIP SDK on Windows with
     // its vram_total mix-up, the Linux packages that name libvulkan1, the
     // Coding Agent working directory, Document Chat in Cloud mode, the prompt
-    // history that clears, and the side panel that folds away. Each anchor
+    // history that clears, the side panel that folds away, and the ComfyUI
+    // requirements.txt that is named when it cannot be used. Each anchor
     // below names one of them, so a note that forgets one fails here.
     // The house formula for hardware nobody here owns is pinned too: a claim
     // we could not run on real hardware says so in those words.
@@ -87,6 +88,7 @@ describe('the notes table', () => {
       'repair environment', 'model storage', 'civitai', 'hip sdk',
       'vram_total', 'libvulkan1', 'working directory', 'document chat',
       'prompt history', 'side panel', 'researched rather than proven', 'apple music', 'too big to scan',
+      'requirements.txt',
     ]) {
       expect(prose, `${shipping}: nothing about "${anchor}"`).toContain(anchor)
     }

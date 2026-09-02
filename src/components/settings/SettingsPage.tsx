@@ -53,7 +53,7 @@ import { ProviderSettings } from './ProviderConfig'
 import { BuiltinEngineSettings } from './BuiltinEngineSettings'
 import { MlxMediaSettings } from './MlxMediaSettings'
 import { useProviderStore } from '../../stores/providerStore'
-import { useComfyInstallStore } from '../../stores/comfyInstallStore'
+import { useComfyInstallStore, comfySectionShouldOpen } from '../../stores/comfyInstallStore'
 import { PermissionSettings } from './PermissionSettings'
 import { MCPServerSettings } from './MCPServerSettings'
 import { WorkflowList } from '../agents/WorkflowList'
@@ -1574,7 +1574,12 @@ export function SettingsPage() {
             // models" hint: the Start button it names lives in here, so the
             // section arrives open instead of costing one more click the hint
             // never mentioned.
-            <Section title="ComfyUI (Image & Video)" defaultOpen={entryFocus?.section === 'comfyui'}>
+            // A15: and open as well while an install, an update or a repair is
+            // in flight, or while a failure is still on screen. Read without
+            // subscribing, because the value is only ever wanted at the moment
+            // this Section mounts, which is the moment a section switch brings
+            // it back.
+            <Section title="ComfyUI (Image & Video)" defaultOpen={entryFocus?.section === 'comfyui' || comfySectionShouldOpen(useComfyInstallStore.getState().phase)}>
               {settings.appMode === 'cloud' && (
                 <p className="text-[0.55rem] text-gray-500 leading-snug pb-1">
                   Local mode only. Cloud renders run on lu-labs.ai and never use ComfyUI.
