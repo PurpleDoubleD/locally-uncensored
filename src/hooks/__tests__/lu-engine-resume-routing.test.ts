@@ -110,8 +110,9 @@ describe('the boot resume goes to the right process', () => {
 describe('the once-per-session flag is raised on the attempt, not on the success', () => {
   it('a machine with no sidecar does not re-attempt the resume on every refresh', async () => {
     managedBuiltin = true
-    // No sidecar: the command has no route and throws, the way it does in the
-    // web and remote-bridge builds and on a broken install.
+    // No sidecar, and the backend SAYS so: the command is not in this build's
+    // invoke handler, which is the web and remote-bridge case and a broken
+    // install. A refusal is an answer, so the one shot is spent.
     listBundledModels.mockRejectedValue(new Error('command list_bundled_models not found'))
     const refresh = await bootAndRefresh()
     expect(startBundledEmbed).not.toHaveBeenCalled()
@@ -137,6 +138,52 @@ describe('the once-per-session flag is raised on the attempt, not on the success
     // ...and exactly once, however often the list is refreshed afterwards.
     bundledEngineStatus.mockClear()
     await refresh()
+    await refresh()
+    expect(bundledEngineStatus).not.toHaveBeenCalled()
+  })
+})
+
+// ── A14 second review 3: a launch race is not an answer ─────────────────────
+
+describe('a call that never got through does not spend the one shot', () => {
+  it('a timeout on the first refresh leaves the resume owed', async () => {
+    managedBuiltin = true
+    // The moment this actually runs: right after launch, antivirus scanning
+    // the fresh install, the command layer still coming up behind the window.
+    // Spending the shot here left the engine the user had running yesterday
+    // dead until he re-picked the model by hand, which is GH #118 again.
+    listBundledModels.mockRejectedValue(new Error('invoke timed out after 5000ms'))
+    const refresh = await bootAndRefresh()
+    expect(bundledEngineStatus).not.toHaveBeenCalled()
+
+    // Half a second later the backend is up and the next refresh gets through.
+    listBundledModels.mockResolvedValue([CHAT, EMBED])
+    await refresh()
+    expect(bundledEngineStatus, 'the resume was still owed').toHaveBeenCalled()
+    expect(startBundledEmbed).toHaveBeenCalledWith(EMBED.path)
+
+    // And now it is spent, so it does not run a third time.
+    bundledEngineStatus.mockClear()
+    await refresh()
+    expect(bundledEngineStatus).not.toHaveBeenCalled()
+  })
+
+  it('a dead transport counts the same as a timeout', async () => {
+    managedBuiltin = true
+    listBundledModels.mockRejectedValue(new Error('Failed to fetch'))
+    const refresh = await bootAndRefresh()
+    listBundledModels.mockResolvedValue([CHAT, EMBED])
+    await refresh()
+    expect(bundledEngineStatus).toHaveBeenCalled()
+  })
+
+  // NEGATIVE CONTROL: the refusal really must still spend it, or the web build
+  // asks the same dead question on every single model refresh forever.
+  it('but a plain refusal still spends it', async () => {
+    managedBuiltin = true
+    listBundledModels.mockRejectedValue(new Error('Unknown command list_bundled_models'))
+    const refresh = await bootAndRefresh()
+    listBundledModels.mockResolvedValue([CHAT, EMBED])
     await refresh()
     expect(bundledEngineStatus).not.toHaveBeenCalled()
   })

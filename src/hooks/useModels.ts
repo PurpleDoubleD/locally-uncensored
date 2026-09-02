@@ -15,7 +15,11 @@ import { log } from '../lib/logger'
 import { cloudModelRow } from '../lib/cloud-model-row'
 import { runEngineResume } from '../lib/engine-resume-policy'
 import { engineStartIsWorthRetrying } from '../lib/engine-start-failure'
+import { commandIsUnavailable } from '../lib/engine-command-availability'
 import { dropDuplicateLuEngineRows } from '../lib/lu-engine-rows'
+import { isBuiltinEngineEntry, type InstalledModelLike } from '../lib/lmstudio-match'
+import { ensureLuEngineIsChatProvider, LU_ENGINE_SWITCH_NOTE } from '../api/lu-engine-switch'
+import { useLuEngineSwitchStore } from '../stores/luEngineSwitchStore'
 import { useModelStore } from '../stores/modelStore'
 import { useProviderStore } from '../stores/providerStore'
 import { useSettingsStore } from '../stores/settingsStore'
@@ -242,17 +246,27 @@ export function useModels() {
       // the web and remote-bridge builds, which have no sidecar to start,
       // still get nothing and are unchanged.
       //
-      // A14 review 6: the once-per-session flag is raised BEFORE the call, not
-      // after a successful one. fetchModels runs from several mounted
-      // components and on every refresh event, so raising it afterwards meant
-      // a machine without a sidecar (web, remote bridge, a broken install)
-      // re-attempted the whole resume on every single refresh, forever.
+      // A14 review 6 and its follow-up: the once-per-session flag is spent on
+      // an ANSWER, not on an attempt and not on a success.
+      //
+      //  - answered with a list  the resume runs, once, and never again.
+      //  - answered "no such command"  this build has no sidecar, so the shot
+      //    is spent too and the web, bridge and broken-install cases stop
+      //    re-attempting the whole resume on every refresh forever.
+      //  - no answer at all (timeout, dead transport)  nothing was learned,
+      //    so nothing is spent. This is the launch race: the command layer
+      //    coming up behind the window. Spending the shot there left the
+      //    engine the user had running yesterday dead for the session.
       const firstPassThisSession = !builtinResumeAttempted
-      builtinResumeAttempted = true
       let bundledRaw: BundledModel[] | null = null
+      let backendAnswered = false
       try {
         bundledRaw = await listBundledModels()
-      } catch { /* engine command unavailable, non-critical */ }
+        backendAnswered = true
+      } catch (e) {
+        backendAnswered = commandIsUnavailable(e)
+      }
+      if (backendAnswered) builtinResumeAttempted = true
       if (bundledRaw) {
         const bundled = bundledToAIModels(bundledRaw).filter(m => !isEmbeddingModel(m.name))
         // One file, one row: with the folder pointed at ~/.lmstudio/models,
@@ -454,14 +468,28 @@ export function useModels() {
     return models.filter((m: AIModel) => m.type === filter)
   }
 
-  // Selecting a built-in model must also swap the loaded GGUF: the managed
-  // engine serves one model per process, so activation → swap_bundled_model.
+  // Selecting an LU Engine model must also swap the loaded GGUF: the managed
+  // engine serves one model per process, so activation means swap_bundled_model.
   // Other providers just set the active model as before.
+  //
+  // A14 second review: this did half the job and the half it skipped was the
+  // whole point. The guard was "is the openai slot already ours", so a click
+  // on an LU Engine card under Installed while Ollama held the chat wrote
+  // openai::<gguf> into the store, unloaded the Ollama model to make room, and
+  // then started nothing and switched nothing. The user was left on a model
+  // that answered from nowhere. Same route as the picker and the Use button
+  // now: hand the slot over, say so, then start.
   const activateModel = useCallback((name: string) => {
+    const row = useModelStore.getState().models.find((m) => m.name === name)
+    if (isBuiltinEngineEntry(row as unknown as InstalledModelLike | undefined)) {
+      if (ensureLuEngineIsChatProvider()) {
+        useLuEngineSwitchStore.getState().announce(LU_ENGINE_SWITCH_NOTE)
+      }
+    }
     setActiveModel(name)
     const cfg = useProviderStore.getState().providers.openai
     if (cfg.enabled && cfg.managed && getProviderIdFromModel(name) === 'openai') {
-      void activateBuiltinModel(name).catch(() => { /* engine unavailable — non-critical */ })
+      void activateBuiltinModel(name).catch(() => { /* engine unavailable, non-critical */ })
     }
   }, [setActiveModel])
 
