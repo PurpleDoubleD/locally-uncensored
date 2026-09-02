@@ -35,6 +35,8 @@ import {
 
 const GLM53 = ['low', 'medium', 'high', 'max']
 const MOST = ['low', 'medium', 'high']
+// As the server declares it: the off values ride along in the upstream's own
+// list, and they are not rungs.
 const QWEN38_27B = ['minimal', 'low', 'medium']
 
 describe('clamping the wish onto the rungs a model really has', () => {
@@ -87,21 +89,42 @@ describe('no ladder means no change', () => {
   })
 })
 
-describe("'none' is the off switch and never a rung", () => {
-  it('a server that sends none among the levels does not get it offered', () => {
+describe("'none' and 'minimal' are off values and never rungs", () => {
+  it('a server that sends them among the levels does not get them offered', () => {
     expect(effortChoices(['none', 'low', 'high'])).toEqual(['low', 'high'])
+    expect(effortChoices(QWEN38_27B)).toEqual(['low', 'medium'])
+    expect(effortChoices(['none', 'minimal'])).toEqual([])
+    expect(hasEffortLadder(['none', 'minimal'])).toBe(false)
+  })
+
+  it('THE RULE: clamping never answers with an off value, whatever the ladder says', () => {
+    // A ladder of ['minimal','low','medium'] with a wish of 'max' has exactly
+    // one honest answer, and 'minimal' is not it: it would read as a rung in
+    // the composer while meaning "stop thinking" on the wire.
+    expect(clampEffort(QWEN38_27B, 'max')).toBe('medium')
+    expect(clampEffort(QWEN38_27B, 'low')).toBe('low')
+    // An off value as the WISH is not a rung either, so it falls through the
+    // unknown-wish path rather than being honoured as "think barely".
+    expect(clampEffort(QWEN38_27B, 'minimal')).toBe('medium')
+    expect(clampEffort(['minimal', 'medium'], 'low')).toBe('medium')
     expect(clampEffort(['none', 'low'], 'max')).toBe('low')
+  })
+
+  it('and a ladder of nothing but off values is no ladder at all', () => {
+    expect(clampEffort(['none', 'minimal'], 'low')).toBe(DEFAULT_EFFORT)
+    expect(nextEffort(['minimal'], 'low')).toBe(DEFAULT_EFFORT)
   })
 
   it('nothing on this ladder ever answers none, on any wish', () => {
     for (const wish of ['none', 'minimal', 'low', 'medium', 'high', 'max', 'ludicrous']) {
-      expect(clampEffort(GLM53, wish)).not.toBe('none')
-      expect(nextEffort(GLM53, wish)).not.toBe('none')
+      for (const ladder of [GLM53, MOST, QWEN38_27B, ['none', 'minimal', 'high']]) {
+        expect(['none', 'minimal']).not.toContain(clampEffort(ladder, wish))
+        expect(['none', 'minimal']).not.toContain(nextEffort(ladder, wish))
+      }
     }
   })
 
-  it('and minimal is not offered either, the Think button already says off', () => {
-    expect(effortChoices(QWEN38_27B)).toEqual(['low', 'medium'])
+  it('the four rungs are the whole ladder', () => {
     expect(EFFORT_STEPS).toEqual(['low', 'medium', 'high', 'max'])
   })
 })
@@ -136,6 +159,7 @@ describe('labels and the type guard', () => {
   it('knows a real rung from a stored typo', () => {
     expect(isEffortLevel('high')).toBe(true)
     expect(isEffortLevel('none')).toBe(false)
+    expect(isEffortLevel('minimal')).toBe(false)
     expect(isEffortLevel('xhigh')).toBe(false)
   })
 })

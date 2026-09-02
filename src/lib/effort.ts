@@ -21,13 +21,21 @@
  * in the customer's chat window and costs more tokens than sending nothing.
  */
 
-/** Ascending, cheapest first. The off switch is not part of it. */
-const RANK: Record<string, number> = { minimal: 0, low: 1, medium: 2, high: 3, max: 4 }
+/**
+ * Ascending, cheapest first, and it holds the rungs and NOTHING else.
+ *
+ * 'none' and 'minimal' are both ways of saying off, not quiet rungs at the
+ * bottom. They are filtered out of a declared ladder on the way in, so a server
+ * that lists them cannot make the composer offer an off switch that contradicts
+ * the Think button, and clamping can never answer with one either. That is the
+ * difference between "think a little" and "do not think", and on GLM 5.3 the
+ * second one costs MORE than sending no parameter at all.
+ */
+const RANK: Record<string, number> = { low: 0, medium: 1, high: 2, max: 3 }
 
 /**
- * The rungs the composer offers. 'minimal' is not one of them: it is another
- * way of saying off, and two controls that both claim to turn thinking off is
- * how a user ends up disbelieving both.
+ * The rungs the composer offers, which is every rung there is: two controls
+ * that both claim to turn thinking off is how a user ends up disbelieving both.
  */
 export const EFFORT_STEPS = ['low', 'medium', 'high', 'max'] as const
 
