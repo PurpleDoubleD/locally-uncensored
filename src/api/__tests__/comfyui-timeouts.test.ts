@@ -22,6 +22,7 @@ const localFetch = vi.fn()
 vi.mock('../backend', () => ({
   localFetch: (...a: unknown[]) => localFetch(...a),
   comfyuiUrl: (p: string) => `http://localhost:8188${p}`,
+  isMacOS: () => false,
 }))
 
 import {
