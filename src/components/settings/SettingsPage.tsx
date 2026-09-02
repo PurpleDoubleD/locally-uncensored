@@ -63,6 +63,7 @@ import { isMlxImageHost } from '../../api/mlx-image'
 import { ArrowUpCircle, KeyRound, RefreshCw } from 'lucide-react'
 import { CLOUD_BASE } from '../../api/cloud/config'
 import { formatBytes } from '../../lib/formatters'
+import { syncCustomModelDir } from '../../lib/custom-model-dir'
 
 // ── User profile picture (Appearance) ───────────────────────────
 // Self-contained like HfDownloadPathSetting. Stores the picture as a
@@ -252,33 +253,59 @@ function WorkflowSection() {
   )
 }
 
-// ── Model Storage (HF GGUF download path override) ─────────────
+// ── Model Storage (the user's own model folder) ─────────────────
+//
+// GH #122 (zrmdsxa) + Discord "Read me first" (ever.noob): this folder was a
+// download TARGET and nothing else. Models already sitting in it were never
+// looked at, and the copy above the field said nothing about that, so the
+// Models tab stayed empty beside a folder full of models. It is read now
+// (lib/custom-model-dir.ts), and the copy says what it does.
 
 function HfDownloadPathSetting() {
   const override = useSettingsStore(s => s.settings.hfDownloadPathOverride)
   const updateSettings = useSettingsStore(s => s.updateSettings)
   const [draft, setDraft] = useState(override)
+  const [comfyFolders, setComfyFolders] = useState<string[] | null>(null)
   useEffect(() => { setDraft(override) }, [override])
+
+  // Both directions of the folder: our own GGUF scan reads it on the next
+  // model refresh, and the ComfyUI-shaped subfolders in it are handed to
+  // ComfyUI. Runs on mount too, so a folder set by an older build reaches
+  // ComfyUI without the user having to touch the field again.
+  useEffect(() => {
+    let alive = true
+    void syncCustomModelDir(override).then((folders) => { if (alive) setComfyFolders(folders) })
+    return () => { alive = false }
+  }, [override])
+
+  function apply(next: string) {
+    setDraft(next)
+    updateSettings({ hfDownloadPathOverride: next })
+    // The Models tab is the surface this setting is about: refresh it now
+    // instead of after the next navigation.
+    window.dispatchEvent(new CustomEvent('lu-models-refresh'))
+  }
 
   async function pickFolder() {
     try {
       const chosen = await backendCall<string | null>('pick_folder')
-      if (chosen) { setDraft(chosen); updateSettings({ hfDownloadPathOverride: chosen }) }
+      if (chosen) apply(chosen)
     } catch {}
   }
 
   return (
     <div className="space-y-2 py-1">
       <div className="text-[0.6rem] text-gray-500 leading-relaxed">
-        Custom location for downloaded GGUFs. Leave empty to auto-detect from your active provider's models folder (e.g. <code className="font-mono">~/.lmstudio/models</code> for LM Studio). Ollama is unaffected, it manages its own blob store; LU pulls Ollama models via <code className="font-mono">ollama pull</code> regardless of this setting.
+        Your own model folder. LU downloads GGUFs here, and it also reads this folder: every <code className="font-mono">.gguf</code> in it, up to four levels down, is listed under Installed and can be loaded straight from there. Leave empty to auto-detect from your active provider's models folder (e.g. <code className="font-mono">~/.lmstudio/models</code> for LM Studio). Ollama is unaffected, it manages its own blob store; LU pulls Ollama models via <code className="font-mono">ollama pull</code> regardless of this setting.
       </div>
       <div className="flex items-center gap-2">
         <input
           type="text"
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
-          onBlur={() => updateSettings({ hfDownloadPathOverride: draft.trim() })}
+          onBlur={() => apply(draft.trim())}
           placeholder="(auto-detect)"
+          aria-label="Your own model folder"
           className="flex-1 px-2 py-1 rounded bg-transparent border border-white/8 text-[0.65rem] text-gray-700 dark:text-gray-300 font-mono focus:outline-none focus:border-white/20"
         />
         <button
@@ -289,13 +316,23 @@ function HfDownloadPathSetting() {
         </button>
         {override && (
           <button
-            onClick={() => { setDraft(''); updateSettings({ hfDownloadPathOverride: '' }) }}
+            onClick={() => apply('')}
             className="px-2.5 py-1 rounded-md text-[0.6rem] text-gray-500 hover:text-red-400 transition-colors"
           >
             Reset
           </button>
         )}
       </div>
+      {/* Image and video models are a different question and the text says so
+          rather than implying the folder covers them: that inventory comes out
+          of ComfyUI's own lists, so LU can only hand ComfyUI the folder. */}
+      {override && comfyFolders !== null && (
+        <div className="text-[0.6rem] text-gray-500 leading-relaxed">
+          {comfyFolders.length > 0
+            ? <>Image and video: LU passes <code className="font-mono">{comfyFolders.join(', ')}</code> from this folder to ComfyUI. Takes effect the next time LU starts ComfyUI, and only for a ComfyUI that LU starts.</>
+            : <>Image and video models in this folder stay invisible: ComfyUI lists only its own folders. Name the subfolders like ComfyUI does (<code className="font-mono">checkpoints</code>, <code className="font-mono">loras</code>, <code className="font-mono">vae</code>, …) and LU hands them over.</>}
+        </div>
+      )}
     </div>
   )
 }

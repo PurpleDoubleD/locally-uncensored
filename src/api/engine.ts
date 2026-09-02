@@ -203,9 +203,27 @@ export async function bundledEmbedLaneReady(): Promise<boolean> {
   }
 }
 
-/** List downloaded GGUFs in the app models dir. Refreshes the name→path map. */
+/**
+ * Every folder the GGUF scan walks: the app models dir (Rust adds that one)
+ * plus the folder the user named under Settings → Model Storage.
+ *
+ * GH #122 (zrmdsxa, 2026-08-28): that setting was a download TARGET and
+ * nothing else. A GGUF already sitting in it was never looked at, so the
+ * Models tab stayed empty next to a folder full of models. Empty setting →
+ * empty list, which is exactly the shipped single-folder scan.
+ */
+export function customModelDirs(): string[] {
+  const dir = useSettingsStore.getState().settings.hfDownloadPathOverride?.trim() || ''
+  return dir ? [dir] : []
+}
+
+/** List downloaded GGUFs in the app models dir and in the user's own model
+ *  folder. Refreshes the name→path map. */
 export async function listBundledModels(): Promise<BundledModel[]> {
-  const res = await backendCall<{ dir: string; models: BundledModel[] }>('list_bundled_models')
+  const res = await backendCall<{ dir: string; dirs?: string[]; models: BundledModel[] }>(
+    'list_bundled_models',
+    { extraDirs: customModelDirs() },
+  )
   const models = res?.models ?? []
   pathByName.clear()
   ctxTrainByName.clear()

@@ -280,6 +280,8 @@ fn main() {
             commands::engine::swap_bundled_model,
             commands::engine::list_bundled_models,
             commands::engine::list_importable_models,
+            // The user's own model folder, handed to ComfyUI (GH #122)
+            commands::custom_models::sync_custom_model_paths,
             commands::engine::import_local_model,
             // Built-in embeddings server (bundled llama-server --embeddings, P5)
             commands::engine::start_bundled_embed,
