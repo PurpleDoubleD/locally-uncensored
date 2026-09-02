@@ -65,7 +65,12 @@ import { ArrowUpCircle, KeyRound, RefreshCw } from 'lucide-react'
 import { CLOUD_BASE } from '../../api/cloud/config'
 import { formatBytes } from '../../lib/formatters'
 import { syncCustomModelDir, type CustomModelDirResult } from '../../lib/custom-model-dir'
-import { listBundledModels, lastCustomScanDir, type ScannedDir } from '../../api/engine'
+import { listBundledModels, lastCustomScanDir, lastScanDirs, type ScannedDir } from '../../api/engine'
+import { lmStudioModelDir } from '../../api/model-folders'
+import {
+  luEngineFolderPlaceholder, lmStudioFolderNote, lmStudioFolderPath,
+  type LmStudioModelDir,
+} from '../../lib/model-storage-rows'
 import { CivitaiApiKeySetting } from './CivitaiApiKeySetting'
 
 // ── User profile picture (Appearance) ───────────────────────────
@@ -270,17 +275,29 @@ export function HfDownloadPathSetting() {
   const [draft, setDraft] = useState(override)
   const [comfy, setComfy] = useState<CustomModelDirResult | null>(null)
   const [scan, setScan] = useState<ScannedDir | null>(null)
+  // The folder LU reads while the field is empty. Row 0 of the listing is the
+  // app's own models dir, which is exactly the folder the LU Engine loads
+  // from, so the empty field can name it instead of saying "(auto-detect)"
+  // and leaving the user to guess.
+  const [autoDir, setAutoDir] = useState('')
   useEffect(() => { setDraft(override) }, [override])
 
   // How the GGUF scan itself fared in that folder. A folder too big to finish
   // within the budget returns a real but partial list, and the only person who
   // can do anything about that is the one who chose the folder.
+  //
+  // Runs with and without an override since 2.6.8: without one there is no
+  // scan verdict to show, but the listing is still the only place the app dir
+  // is known, and the placeholder needs it.
   useEffect(() => {
     let alive = true
-    if (!override) { setScan(null); return }
     void listBundledModels()
-      .then(() => { if (alive) setScan(lastCustomScanDir()) })
-      .catch(() => { if (alive) setScan(null) })
+      .then(() => {
+        if (!alive) return
+        setScan(override ? lastCustomScanDir() : null)
+        setAutoDir(lastScanDirs()[0]?.path ?? '')
+      })
+      .catch(() => { if (alive) { setScan(null); setAutoDir('') } })
     return () => { alive = false }
   }, [override])
 
@@ -320,8 +337,9 @@ export function HfDownloadPathSetting() {
 
   return (
     <div className="space-y-2 py-1">
+      <p className="text-[0.62rem] font-semibold text-gray-700 dark:text-gray-300">LU Engine folder</p>
       <div className="text-[0.6rem] text-gray-500 leading-relaxed">
-        Your own model folder. LU downloads GGUFs here, and it also reads this folder: every <code className="font-mono">.gguf</code> in it, up to four levels down, is listed under Installed and can be loaded straight from there. Leave empty to auto-detect from your active provider's models folder (e.g. <code className="font-mono">~/.lmstudio/models</code> for LM Studio). Ollama is unaffected, it manages its own blob store; LU pulls Ollama models via <code className="font-mono">ollama pull</code> regardless of this setting.
+        LU downloads GGUFs here and reads every <code className="font-mono">.gguf</code> in it, up to four levels down. Models here run on the LU Engine.
       </div>
       <div className="flex items-center gap-2">
         <input
@@ -329,8 +347,8 @@ export function HfDownloadPathSetting() {
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           onBlur={() => apply(draft.trim())}
-          placeholder="(auto-detect)"
-          aria-label="Your own model folder"
+          placeholder={luEngineFolderPlaceholder(autoDir)}
+          aria-label="LU Engine folder"
           className="flex-1 px-2 py-1 rounded bg-transparent border border-white/8 text-[0.65rem] text-gray-700 dark:text-gray-300 font-mono focus:outline-none focus:border-white/20"
         />
         <button
@@ -431,7 +449,45 @@ function CustomModelDirNote({ result }: { result: CustomModelDirResult }) {
 // download them a second time. The backend hard links the GGUF into the app
 // models dir, zero copy; Ollama and LM Studio keep working untouched.
 
-function ImportLocalModels() {
+// ── Model Storage, row 2: LM Studio's folder ────────────────────
+//
+// Read-only on purpose. LU does not own this folder and cannot move it, so a
+// field here would be a lie with a Browse button on it. What the user needs is
+// the answer to "is THIS the folder I was about to set", and that is a path
+// and a sentence about who owns it.
+
+export function LmStudioFolderSetting() {
+  // null = not asked yet. Distinguished from "not installed" so the row never
+  // flashes the wrong verdict for the length of one backend round trip.
+  const [dir, setDir] = useState<LmStudioModelDir | null>(null)
+  useEffect(() => {
+    let alive = true
+    void lmStudioModelDir().then((d) => { if (alive) setDir(d) })
+    return () => { alive = false }
+  }, [])
+
+  const path = lmStudioFolderPath(dir)
+  return (
+    <div className="space-y-1 py-1 border-t border-white/5 mt-2 pt-2">
+      <p className="text-[0.62rem] font-semibold text-gray-700 dark:text-gray-300">LM Studio folder</p>
+      {path && (
+        <code data-testid="lmstudio-folder-path" className="block text-[0.6rem] text-gray-400 font-mono break-all select-text">{path}</code>
+      )}
+      <div data-testid="lmstudio-folder-note" className="text-[0.6rem] text-gray-500 leading-relaxed">
+        {lmStudioFolderNote(dir)}
+      </div>
+    </div>
+  )
+}
+
+// ── Model Storage, row 3: Ollama ────────────────────────────────
+//
+// No path at all, and that is the point of the row. Ollama keeps its models in
+// a content-addressed blob store under names no human picked, so there is
+// nothing to set and nothing worth printing; what there IS is a way to link
+// those blobs into LU, which is the scan below.
+
+export function ImportLocalModels() {
   const [candidates, setCandidates] = useState<import('../../api/engine').ImportCandidate[] | null>(null)
   const [scanning, setScanning] = useState(false)
   const [busyPath, setBusyPath] = useState<string | null>(null)
@@ -468,6 +524,10 @@ function ImportLocalModels() {
 
   return (
     <div className="space-y-2 py-1 border-t border-white/5 mt-2 pt-2">
+      <p className="text-[0.62rem] font-semibold text-gray-700 dark:text-gray-300">Ollama</p>
+      <div data-testid="ollama-store-note" className="text-[0.6rem] text-gray-500 leading-relaxed">
+        Ollama keeps its own model store. LU pulls Ollama models with <code className="font-mono">ollama pull</code>; a folder cannot be set here.
+      </div>
       <div className="text-[0.6rem] text-gray-500 leading-relaxed">
         Already have models in Ollama or LM Studio? Link them into LU without downloading or copying anything. The file stays where it is; both apps keep working.
       </div>
@@ -1551,6 +1611,7 @@ export function SettingsPage() {
 
           <Section title="Model Storage">
             <HfDownloadPathSetting />
+            <LmStudioFolderSetting />
             <ImportLocalModels />
             {/* goonerforporn (Discord #bug-reports, 2026-08-28): the store knew
                 the key, the changelog named it, and no component ever set it.

@@ -1203,6 +1203,48 @@ pub fn detect_model_path(provider: String) -> Result<serde_json::Value, String> 
     }
 }
 
+/// Where LM Studio keeps its models, and whether LM Studio is on this machine
+/// at all. Reads only: nothing is created.
+///
+/// `detect_model_path` cannot answer this. It is a DOWNLOAD TARGET, so for
+/// Ollama and LM Studio it creates the folder when it is missing, which is
+/// right for a download and wrong for a panel whose whole job is to say
+/// "LM Studio is not installed". Asking it here would create
+/// `~/.lmstudio/models` on a machine that has never seen LM Studio and then
+/// report that folder as evidence of an install.
+///
+/// Installed is answered from the folder first because that is free on every
+/// platform, and only then from `os_paths::lmstudio_installed()`, which knows
+/// the `lms` CLI and the app bundle. A user who has LM Studio but has not
+/// downloaded a model yet is therefore still recognised.
+#[tauri::command]
+pub fn lmstudio_model_dir() -> Result<serde_json::Value, String> {
+    let home = dirs::home_dir().ok_or("Cannot find home directory")?;
+    let found = lmstudio_dir_in(&home);
+    let installed = found.is_some() || crate::os_paths::lmstudio_installed();
+    Ok(serde_json::json!({
+        "installed": installed,
+        "path": found.map(|p| p.to_string_lossy().to_string()),
+    }))
+}
+
+/// The LM Studio models folder under a given home, or None. Creates nothing.
+///
+/// Split out from the command so the "creates nothing" half can be proven
+/// against a throwaway home directory instead of the tester's own.
+///
+/// Same two candidates and the same order as detect_model_path: LM Studio
+/// 0.3.x writes ~/.lmstudio/models on all three platforms, 0.2.x used
+/// ~/.cache/lm-studio/models.
+pub fn lmstudio_dir_in(home: &Path) -> Option<PathBuf> {
+    [
+        home.join(".lmstudio").join("models"),
+        home.join(".cache").join("lm-studio").join("models"),
+    ]
+    .into_iter()
+    .find(|p| p.is_dir())
+}
+
 #[allow(non_snake_case)]
 #[tauri::command]
 pub async fn download_model_to_path(
@@ -1422,6 +1464,39 @@ pub async fn check_model_sizes(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_lm_studio_row_looks_and_never_creates() {
+        // A14: Model Storage has to be able to say "LM Studio is not
+        // installed". detect_model_path cannot answer that, because it is a
+        // download target and calls create_dir_all on the way out, so asking
+        // it would conjure ~/.lmstudio/models on a machine that has never seen
+        // LM Studio and then report that folder as proof of an install.
+        let home = tempfile::tempdir().expect("tempdir");
+        let h = home.path();
+
+        // Nothing there: no answer, and nothing left behind.
+        assert!(lmstudio_dir_in(h).is_none());
+        assert!(!h.join(".lmstudio").exists(), "the look created a folder");
+        assert!(!h.join(".cache").exists(), "the look created a folder");
+
+        // The 0.2.x location alone is still an answer.
+        let legacy = h.join(".cache").join("lm-studio").join("models");
+        fs::create_dir_all(&legacy).expect("legacy dir");
+        assert_eq!(lmstudio_dir_in(h).as_deref(), Some(legacy.as_path()));
+
+        // With both present the modern one wins, same order as detect_model_path.
+        let modern = h.join(".lmstudio").join("models");
+        fs::create_dir_all(&modern).expect("modern dir");
+        assert_eq!(lmstudio_dir_in(h).as_deref(), Some(modern.as_path()));
+
+        // NEGATIVE CONTROL: a FILE named like the folder is not a folder, and
+        // must not be reported as one.
+        let other = tempfile::tempdir().expect("tempdir");
+        fs::create_dir_all(other.path().join(".lmstudio")).expect("parent");
+        fs::write(other.path().join(".lmstudio").join("models"), b"x").expect("file");
+        assert!(lmstudio_dir_in(other.path()).is_none());
+    }
 
     #[test]
     fn a_full_drive_is_named_before_the_first_byte() {
