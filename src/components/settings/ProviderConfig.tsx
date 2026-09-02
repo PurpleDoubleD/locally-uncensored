@@ -68,12 +68,19 @@ export function providerSlotView(id: ProviderId, config: ProviderConfig): SlotVi
         : PROVIDER_PRESETS.find(p => p.providerId === 'openai' && (p.name === config.name || p.baseUrl === config.baseUrl)) ||
           PROVIDER_PRESETS.find(p => p.id === 'custom-openai')!
   if (config.managed) {
+    // A13, Windows counter-check 2026-09-02: "nothing to configure" was true
+    // and useless. The engine starts its walk at 8127 and moves to the next
+    // free port when that one is held, and this row is where the address of a
+    // backend belongs. It is the live slot URL, which api/engine keeps on the
+    // port the engine really holds.
     return {
       label: preset.name || config.name,
       presetId: preset.id,
       endpointEditable: false,
       needsKey: false,
-      note: 'Built-in engine, runs locally, nothing to configure.',
+      note: config.baseUrl
+        ? `Built-in engine, runs locally on ${config.baseUrl}, nothing to configure.`
+        : 'Built-in engine, runs locally, nothing to configure.',
     }
   }
   return {
