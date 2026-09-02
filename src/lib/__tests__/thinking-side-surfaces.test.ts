@@ -167,23 +167,27 @@ describe('the effort rung reaches every surface, not only chat', () => {
   const codex = read('../../hooks/useCodex.ts')
 
   it('chat sends the rung and the ladder', () => {
-    expect(chat).toContain('reasoningEffort: settings.reasoningEffort ?? effortDefault')
+    expect(chat).toContain('reasoningEffort: settings.reasoningEffort,')
     expect(chat).toMatch(/^\s*effortLevels,$/m)
+    expect(chat).toMatch(/^\s*effortDefault,$/m)
   })
 
   it('agent mode sends them too', () => {
-    expect(agent).toContain('reasoningEffort: settings.reasoningEffort ?? agentEffortDefault')
+    expect(agent).toContain('reasoningEffort: settings.reasoningEffort,')
     expect(agent).toContain('effortLevels: agentEffortLevels')
+    expect(agent).toContain('effortDefault: agentEffortDefault')
   })
 
   it('and the coding agent, the surface with the largest token bill', () => {
-    expect(codex).toContain('reasoningEffort: settings.reasoningEffort ?? cxEffort.fallback')
+    expect(codex).toContain('reasoningEffort: settings.reasoningEffort,')
     expect(codex).toContain('effortLevels: cxEffort.levels')
+    expect(codex).toContain('effortDefault: cxEffort.fallback')
   })
 
   it('all three read the ladder off the model row the server filled in', () => {
     for (const src of [chat, agent, codex]) {
       expect(src).toMatch(/'effortLevels' in \w+ \? \w+\.effortLevels : undefined/)
+      expect(src).toMatch(/'effortDefault' in \w+ \? \w+\.effortDefault : undefined/)
     }
   })
 })

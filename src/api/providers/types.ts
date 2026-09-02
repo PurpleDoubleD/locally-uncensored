@@ -158,10 +158,16 @@ export interface ChatOptions {
   /**
    * The rungs the ACTIVE model declares, ascending, straight from the server
    * catalogue. The caller passes them because the model row is what knows
-   * them; the provider clamps the wish onto them and walks them down if the
-   * upstream still refuses. Absent = no ladder = old behaviour.
+   * them; the provider clamps the wish onto them. Absent = no ladder = old
+   * behaviour.
    */
   effortLevels?: string[]
+  /**
+   * The rung the MODEL declares as its own default. Consulted only where the
+   * wish is off the ladder, and only downward: the user's wish is the wish, and
+   * a model default above it would quietly upgrade the bill.
+   */
+  effortDefault?: string
   // Bug AA v2.5.0 — Kj103x Discord 2026-05-27. Ollama defaults `num_ctx` to
   // 2048 if you don't pass it in /api/chat options, which silently caps RAG
   // and long-turn chats even though the loaded model supports way more. When

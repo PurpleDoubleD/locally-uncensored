@@ -977,8 +977,9 @@ export function useCodex() {
           thinking: thinkOptCx as unknown as boolean,
           // The Coding Agent is the third caller that builds its own options,
           // and the one where a forgotten field costs the most tokens.
-          reasoningEffort: settings.reasoningEffort ?? cxEffort.fallback,
+          reasoningEffort: settings.reasoningEffort,
           effortLevels: cxEffort.levels,
+          effortDefault: cxEffort.fallback,
           signal: abort.signal,
         }
         // Hoisted to the top of the step (2.6.7 Denk-Audit): the prompt

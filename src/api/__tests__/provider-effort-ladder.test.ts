@@ -79,6 +79,24 @@ describe('the rung the user picked is the rung that goes out', () => {
     expect(bodyOf(spy, 0).reasoning_effort).toBe('max')
   })
 
+  it("a wish off the ladder falls back to the model's own default", async () => {
+    const spy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(ok())
+    await new OpenAIProvider(makeConfig()).chatWithTools(
+      'e-fallback', [{ role: 'user', content: 'hi' }], [],
+      { thinking: true, reasoningEffort: 'high', effortLevels: ['low', 'medium', 'max'], effortDefault: 'low' },
+    )
+    expect(bodyOf(spy, 0).reasoning_effort).toBe('low')
+  })
+
+  it('but a model default ABOVE the wish never upgrades the bill', async () => {
+    const spy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(ok())
+    await new OpenAIProvider(makeConfig()).chatWithTools(
+      'e-fallback-up', [{ role: 'user', content: 'hi' }], [],
+      { thinking: true, reasoningEffort: 'low', effortLevels: ['medium', 'high', 'max'], effortDefault: 'max' },
+    )
+    expect(bodyOf(spy, 0).reasoning_effort).toBe('medium')
+  })
+
   it('a wish above the model ladder is clamped before it leaves, not refused there', async () => {
     const spy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(ok())
     await new OpenAIProvider(makeConfig()).chatWithTools(

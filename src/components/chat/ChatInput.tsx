@@ -103,7 +103,7 @@ export function ChatInput({ onSend, onStop, isGenerating, pendingApproval, onApp
   const effortLevels = activeModelMeta && 'effortLevels' in activeModelMeta ? activeModelMeta.effortLevels : undefined
   const effortDefault = activeModelMeta && 'effortDefault' in activeModelMeta ? activeModelMeta.effortDefault : undefined
   const effortSteps = effortChoices(effortLevels)
-  const effortNow = clampEffort(effortLevels, reasoningEffort ?? effortDefault ?? DEFAULT_EFFORT)
+  const effortNow = clampEffort(effortLevels, reasoningEffort ?? DEFAULT_EFFORT, effortDefault)
   // Only while thinking is really happening. 'always' models keep their Think
   // button locked on, so the rung is live there without the button being.
   const thinkingIsOn = thinkLockedOn || (thinkingEnabled && canThink)

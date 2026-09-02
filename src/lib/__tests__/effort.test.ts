@@ -73,6 +73,42 @@ describe('clamping the wish onto the rungs a model really has', () => {
   })
 })
 
+describe("the model's own default is the fallback, and only downward", () => {
+  // The global setting is the user's wish. The model's declared default is
+  // consulted where the wish is off the ladder, because at that point the
+  // model knows better than our arithmetic does.
+  it('a wish off the ladder lands on the model default', () => {
+    expect(clampEffort(['low', 'medium', 'max'], 'high', 'low')).toBe('low')
+  })
+
+  it('THE GUARD: a default above the wish is ignored, it would upgrade the bill', () => {
+    // Ladder without 'low', user asked for 'low', model says 'max'. Honouring
+    // the default here would charge a user who asked for the cheapest rung the
+    // most expensive one, silently.
+    expect(clampEffort(['medium', 'high', 'max'], 'low', 'max')).toBe('medium')
+    expect(clampEffort(['medium', 'high', 'max'], 'low', 'max')).not.toBe('max')
+  })
+
+  it('a default that is not on the ladder is no help and is skipped', () => {
+    expect(clampEffort(['low', 'medium'], 'max', 'high')).toBe('medium')
+    expect(clampEffort(['low', 'medium'], 'max', 'nonsense')).toBe('medium')
+  })
+
+  it('a wish ON the ladder is never overruled by the default', () => {
+    expect(clampEffort(['low', 'medium', 'high'], 'low', 'high')).toBe('low')
+  })
+
+  it('and an unknown wish takes the default before it takes ours', () => {
+    expect(clampEffort(['low', 'medium', 'high'], 'ludicrous', 'low')).toBe('low')
+    expect(clampEffort(['low', 'medium', 'high'], 'ludicrous')).toBe('high')
+  })
+
+  it('no fallback at all behaves exactly as before', () => {
+    expect(clampEffort(MOST, 'max')).toBe('high')
+    expect(clampEffort(['medium', 'high'], 'low')).toBe('medium')
+  })
+})
+
 describe('no ladder means no change', () => {
   it('an absent ladder answers with the rung this client has always sent', () => {
     expect(clampEffort(undefined, 'low')).toBe('high')

@@ -71,16 +71,32 @@ export function effortChoices(levels: readonly string[] | undefined): EffortLeve
 /**
  * The wish, clamped onto the rungs this model really has.
  *
- * Down before up: a wish above the model's top rung becomes that top rung
- * (asking Qwen3.8 27B for 'max' would 400), and only a wish below the cheapest
- * rung is rounded up. No ladder at all returns DEFAULT_EFFORT, which is what
- * the client sent before any of this existed.
+ * Who decides what: the global setting is the USER'S wish and always wins where
+ * the model can honour it. `fallback` is the model's own declared default
+ * (`reasoning_effort_default`) and is consulted only where the wish is off the
+ * ladder, because at that point the model's opinion is better than our
+ * arithmetic. It can only ever make the request CHEAPER: a fallback above the
+ * wish is ignored, or a model declaring `max` would quietly upgrade a user who
+ * asked for `low` and hand them the bill.
+ *
+ * Down before up otherwise: a wish above the model's top rung becomes that top
+ * rung, and only a wish below the cheapest rung is rounded up. No ladder at all
+ * returns DEFAULT_EFFORT, which is what the client sent before any of this
+ * existed.
  */
-export function clampEffort(levels: readonly string[] | undefined, wanted: string): string {
+export function clampEffort(
+  levels: readonly string[] | undefined,
+  wanted: string,
+  fallback?: string,
+): string {
   const ladder = known(levels)
   if (ladder.length === 0) return DEFAULT_EFFORT
   if (ladder.includes(wanted)) return wanted
   const rank = RANK[wanted]
+  // The model's own default, but never as an upgrade.
+  if (fallback && ladder.includes(fallback) && (rank === undefined || RANK[fallback] <= rank)) {
+    return fallback
+  }
   // A word we do not know is treated as the default wish, never as "the most
   // the model can do": on GLM 5.3 an invalid value silently means max, and
   // guessing upward is the one guess the customer pays for.

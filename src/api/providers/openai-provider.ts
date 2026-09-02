@@ -317,7 +317,7 @@ export class OpenAIProvider implements ProviderClient {
     // up to seven posts for one message, and leave a downgrade in the memory
     // that nothing ever clears.
     const wanted = ladder
-      ? clampEffort(levels, options?.reasoningEffort ?? DEFAULT_EFFORT)
+      ? clampEffort(levels, options?.reasoningEffort ?? DEFAULT_EFFORT, options?.effortDefault)
       : DEFAULT_EFFORT
     const walked = OpenAIProvider.effortMemory.get(this.effortKey(model, 'on', wanted))
     return walked?.on === 'omit' ? undefined : wanted

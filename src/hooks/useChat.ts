@@ -689,8 +689,9 @@ export function useChat() {
         // The rung, and the rungs this model has. Sent on every turn so Chat,
         // Agent mode and the Coding Agent cannot drift apart; the provider
         // clamps the wish onto the ladder and ignores both without one.
-        reasoningEffort: settings.reasoningEffort ?? effortDefault,
+        reasoningEffort: settings.reasoningEffort,
         effortLevels,
+        effortDefault,
         signal: abort.signal,
       }
 

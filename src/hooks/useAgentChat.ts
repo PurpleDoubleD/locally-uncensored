@@ -792,8 +792,9 @@ export function useAgentChat() {
           maxTokens: settings.maxTokens || undefined,
           contextWindow: agentCtx,
           thinking: thinkOpt as unknown as boolean,
-          reasoningEffort: settings.reasoningEffort ?? agentEffortDefault,
+          reasoningEffort: settings.reasoningEffort,
           effortLevels: agentEffortLevels,
+          effortDefault: agentEffortDefault,
           signal: abort.signal,
         }
 
