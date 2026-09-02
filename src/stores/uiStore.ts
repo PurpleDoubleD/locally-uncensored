@@ -69,6 +69,41 @@ export function clampAgentPanelWidth(width: number, viewportWidth: number): numb
   return Math.round(Math.min(Math.max(width, AGENT_PANEL_MIN_WIDTH), max))
 }
 
+/**
+ * Geometrie der Chatspalte links (D1, 02.09.2026).
+ *
+ * David: "Der left Sidepanel bei Chat Agent und Code ist Textmaessig als
+ * Sessionname und Datum nicht sauber bis zum Ende durchgezogen bzw dynamisch
+ * mit vergroesserung anpassend." Die erste Haelfte war der harte
+ * `truncate(title, 30)` in der Zeile, den der CSS-Schnitt ersetzt hat. Die
+ * zweite konnte gar nicht erfuellt sein: die Spalte war auf 250 px
+ * festgenagelt, es gab also keine Vergroesserung, an die sich etwas haette
+ * anpassen koennen. `--ui-scale` hilft nicht — `zoom` skaliert Kasten und Text
+ * gemeinsam und aendert das VERHAELTNIS nicht.
+ *
+ * EIN DRITTEL statt der Haelfte, die Explorer und Agenten-Panel nehmen, und
+ * das ist keine Nachlaessigkeit: die beiden sind ARBEITSFLAECHEN — ein
+ * verschachtelter Pfad darf lang sein, eine Agentenzeile auch. Diese Spalte
+ * ist NAVIGATION. Eine Navigation, die das halbe Fenster nimmt, hat den Zweck
+ * verfehlt, fuer den man sie aufzieht.
+ *
+ * Dazu eine absolute Decke: ein Sitzungsname braucht nie mehr als 480 px, und
+ * auf einem 4K-Schirm waere ein Drittel sonst ueber 1200 px — eine Zahl, die
+ * nur entsteht, weil niemand sie aufgeschrieben hat.
+ */
+export const SIDEBAR_DEFAULT_WIDTH = 250
+export const SIDEBAR_MIN_WIDTH = 200
+export const SIDEBAR_MAX_WIDTH = 480
+
+export function clampSidebarWidth(width: number, viewportWidth: number): number {
+  if (!Number.isFinite(width)) return SIDEBAR_DEFAULT_WIDTH
+  const third = Math.floor((Number.isFinite(viewportWidth) ? viewportWidth : 0) / 3)
+  // Der Boden gewinnt gegen das Drittel: in einem sehr schmalen Fenster fiele
+  // die Spalte sonst zusammen, und dann sind die Zeilen gar nicht mehr lesbar.
+  const max = Math.max(SIDEBAR_MIN_WIDTH, Math.min(third, SIDEBAR_MAX_WIDTH))
+  return Math.round(Math.min(Math.max(width, SIDEBAR_MIN_WIDTH), max))
+}
+
 interface UIState {
   currentView: View
   sidebarOpen: boolean
@@ -82,6 +117,8 @@ interface UIState {
    *  flip lands, then cleared. Never persisted: it describes one click, not a
    *  preference. */
   pendingCloudModel: string | null
+  /** Breite der Chatspalte links in px, persistiert. */
+  sidebarWidth: number
   /** Agent panel width in px, persisted. */
   agentPanelWidth: number
   /** Agent panel collapsed to its rail, persisted. */
@@ -102,6 +139,7 @@ interface UIState {
   setCloudGateOpen: (open: boolean) => void
   setCloudTeaser: (target: CloudTeaserTarget | null) => void
   setPendingCloudModel: (name: string | null) => void
+  setSidebarWidth: (width: number, viewportWidth: number) => void
   setAgentPanelWidth: (width: number, viewportWidth: number) => void
   setAgentPanelCollapsed: (collapsed: boolean) => void
   setExplorerWidth: (width: number, viewportWidth: number) => void
@@ -116,6 +154,7 @@ export const useUIStore = create<UIState>()(
       cloudGateOpen: false,
       cloudTeaser: null,
       pendingCloudModel: null,
+      sidebarWidth: SIDEBAR_DEFAULT_WIDTH,
       agentPanelWidth: AGENT_PANEL_DEFAULT_WIDTH,
       // Zugeklappt ist die Vorgabe: das Panel soll sich melden, wenn etwas
       // laeuft, und sonst keinen Platz nehmen.
@@ -139,6 +178,9 @@ export const useUIStore = create<UIState>()(
       setCloudGateOpen: (open) => set({ cloudGateOpen: open }),
       setCloudTeaser: (target) => set({ cloudTeaser: target }),
       setPendingCloudModel: (name) => set({ pendingCloudModel: name }),
+      setSidebarWidth: (width, viewportWidth) =>
+        set({ sidebarWidth: clampSidebarWidth(width, viewportWidth) }),
+
       setAgentPanelWidth: (width, viewportWidth) =>
         set({ agentPanelWidth: clampAgentPanelWidth(width, viewportWidth) }),
       setAgentPanelCollapsed: (collapsed) => set({ agentPanelCollapsed: collapsed }),
@@ -162,6 +204,10 @@ export const useUIStore = create<UIState>()(
         // "laeuft" waere eine Luege ueber den Zustand der Maschine.
         agentPanelWidth: state.agentPanelWidth,
         agentPanelCollapsed: state.agentPanelCollapsed,
+        // Dieselbe Begruendung: eine gezogene Spaltenbreite ist eine Vorliebe.
+        // Ohne diese Zeile waere jede Ziehbewegung beim naechsten Start
+        // vergessen — der haeufigste Weg, so eine Funktion nutzlos zu machen.
+        sidebarWidth: state.sidebarWidth,
       }),
     },
   ),

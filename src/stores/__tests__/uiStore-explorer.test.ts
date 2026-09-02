@@ -42,7 +42,7 @@ import {
 } from '../uiStore'
 
 describe('what the ui store writes to disk', () => {
-  it('persistiert genau die vier Geometriefelder der beiden Panels', () => {
+  it('persistiert genau die fuenf Geometriefelder der drei Flaechen', () => {
     // 2.6.8: das Agenten-Panel bringt seine zwei mit. Die Liste bleibt
     // ausgeschrieben und wird nicht aus dem Zustand abgeleitet — sie ist eine
     // ERLAUBNIS, keine Beschreibung. Jedes weitere Feld hier muss jemand
@@ -53,11 +53,23 @@ describe('what the ui store writes to disk', () => {
     // agentTaskStore und werden gar nicht persistiert, weil eine
     // wiederhergestellte Zeile mit "laeuft" ueber den Zustand der Maschine
     // luegen wuerde — samt einem Abbrechen-Knopf, der nichts mehr abbricht.
+    //
+    // 02.09.2026, das fuenfte Feld — und hier steht die Begruendung, die diese
+    // Liste verlangt: `sidebarWidth` ist die gezogene Breite der Chatspalte
+    // links (D1, David: "bzw dynamisch mit vergroesserung anpassend"). Sie
+    // gehoert in dieselbe Klasse wie die anderen vier: eine VORLIEBE ueber die
+    // Geometrie, die niemand nach jedem Start neu einstellen will. Sie steuert
+    // keinen Startzustand — die Spalte kommt so breit zurueck, wie der Mensch
+    // sie gezogen hat, und das ist das ganze Versprechen.
+    //
+    // `sidebarOpen` steht dagegen weiter im Gegentest unten: OB die Spalte
+    // offen ist, entscheidet der Start, nicht das Gedaechtnis.
     const partialize = useUIStore.persist.getOptions().partialize
     expect(partialize).toBeTypeOf('function')
     const written = partialize!(useUIStore.getState()) as Record<string, unknown>
     expect(Object.keys(written).sort()).toEqual([
       'agentPanelCollapsed', 'agentPanelWidth', 'explorerCollapsed', 'explorerWidth',
+      'sidebarWidth',
     ])
   })
 
@@ -71,16 +83,18 @@ describe('what the ui store writes to disk', () => {
     expect(Object.values(written).every((v) => typeof v !== 'function')).toBe(true)
   })
 
-  it('schreibt auch nach einer Zustandsaenderung nur diese vier', () => {
+  it('schreibt auch nach einer Zustandsaenderung nur diese fuenf', () => {
     useUIStore.setState({
       currentView: 'settings', cloudGateOpen: true,
       explorerCollapsed: true, explorerWidth: 333,
       agentPanelCollapsed: false, agentPanelWidth: 222,
+      sidebarWidth: 310,
     })
     const written = useUIStore.persist.getOptions().partialize!(useUIStore.getState()) as Record<string, unknown>
     expect(written).toEqual({
       explorerWidth: 333, explorerCollapsed: true,
       agentPanelWidth: 222, agentPanelCollapsed: false,
+      sidebarWidth: 310,
     })
   })
 
@@ -90,12 +104,14 @@ describe('what the ui store writes to disk', () => {
     useUIStore.getState().setExplorerCollapsed(true)
     useUIStore.getState().setAgentPanelWidth(260, 1600)
     useUIStore.getState().setAgentPanelCollapsed(false)
+    useUIStore.getState().setSidebarWidth(310, 1600)
     const raw = memory.getItem('locally-uncensored-ui')
     expect(raw).toBeTruthy()
     const parsed = JSON.parse(raw!)
     expect(parsed.state).toEqual({
       explorerWidth: 420, explorerCollapsed: true,
       agentPanelWidth: 260, agentPanelCollapsed: false,
+      sidebarWidth: 310,
     })
   })
 })

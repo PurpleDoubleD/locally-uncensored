@@ -23,6 +23,8 @@ export function Sidebar() {
   const renameConversation = useChatStore((s) => s.renameConversation)
   const setActiveConversation = useChatStore((s) => s.setActiveConversation)
   const sidebarOpen = useUIStore((s) => s.sidebarOpen)
+  const sidebarWidth = useUIStore((s) => s.sidebarWidth)
+  const setSidebarWidth = useUIStore((s) => s.setSidebarWidth)
   const setView = useUIStore((s) => s.setView)
   const activeModel = useModelStore((s) => s.activeModel)
   const getActivePersona = useSettingsStore((s) => s.getActivePersona)
@@ -60,6 +62,10 @@ export function Sidebar() {
     rowCache.current = next
     return next
   })
+  // Waehrend des Ziehens laeuft KEINE Animation: framer-motion faehrt sonst
+  // jede Zwischenbreite ueber 0,15 s an, und der Griff haengt sichtbar hinter
+  // dem Zeiger zurueck. Das Auf- und Zuklappen behaelt seine Animation.
+  const [ziehend, setZiehend] = useState(false)
   const [search, setSearch] = useState('')
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editTitle, setEditTitle] = useState('')
@@ -315,12 +321,46 @@ export function Sidebar() {
     <AnimatePresence>
       {sidebarOpen && (
         <motion.aside
-          className="w-[250px] h-full rounded-[10px] bg-white dark:bg-[#1e1e1e] ring-1 ring-black/[0.04] dark:ring-white/[0.05] flex flex-col z-20 overflow-hidden"
+          className="relative h-full rounded-[10px] bg-white dark:bg-[#1e1e1e] ring-1 ring-black/[0.04] dark:ring-white/[0.05] flex flex-col z-20 overflow-hidden"
           initial={{ width: 0, opacity: 0 }}
-          animate={{ width: 250, opacity: 1 }}
+          animate={{ width: sidebarWidth, opacity: 1 }}
           exit={{ width: 0, opacity: 0 }}
-          transition={{ duration: 0.15 }}
+          transition={{ duration: ziehend ? 0 : 0.15 }}
         >
+          {/* Ziehgriff — D1, zweite Haelfte (David, 02.09.2026: "bzw dynamisch
+              mit vergroesserung anpassend").
+
+              Die Spalte war auf 250 px festgenagelt, es gab also gar keine
+              Vergroesserung, an die sich der Titel haette anpassen koennen.
+              Erst zusammen mit dem CSS-Schnitt in der Zeile ergibt das etwas:
+              waere dort noch `truncate(title, 30)`, endete der Name auch in
+              einer 480-px-Spalte nach 30 Zeichen und liesse den Rest leer.
+
+              `-mr-0.5` legt die 1-px-Flaeche halb ueber die Kante, damit sie
+              greifbar ist, ohne dass die Spalte 1 px breiter aussieht — genau
+              wie der Griff des Agenten-Panels, nur spiegelverkehrt: das steht
+              rechts und wird durch Ziehen NACH LINKS breiter, diese Spalte
+              steht links und wird durch Ziehen NACH RECHTS breiter. */}
+          <div
+            onPointerDown={(e) => {
+              e.preventDefault()
+              setZiehend(true)
+              const startX = e.clientX
+              const startWidth = sidebarWidth
+              const onMove = (ev: PointerEvent) =>
+                setSidebarWidth(startWidth + (ev.clientX - startX), window.innerWidth)
+              const onUp = () => {
+                setZiehend(false)
+                window.removeEventListener('pointermove', onMove)
+                window.removeEventListener('pointerup', onUp)
+              }
+              window.addEventListener('pointermove', onMove)
+              window.addEventListener('pointerup', onUp)
+            }}
+            title="Drag to resize"
+            data-testid="sidebar-resize-handle"
+            className="absolute right-0 top-0 h-full w-1 -mr-0.5 z-10 cursor-col-resize hover:bg-blue-500/40 active:bg-blue-500/60 transition-colors"
+          />
           {/* Mode Tabs (Chat | Code | Remote) — icon-only, like uselu.
               Labels live in title/aria-label for accessibility.
 
