@@ -509,6 +509,38 @@ pub(crate) fn useful_tail(text: &str) -> String {
     lines[lines.len().saturating_sub(3)..].join(" | ")
 }
 
+/// The dead ends that are neither the network nor the disk, and that the one
+/// generic step sent people to look in the wrong place for. A2 stage one
+/// (aikabatzu, aldrich_ironhart, Z0mbieK, Discord and GH #121, 2026-08-27 and
+/// 2026-08-29): "Setting up the trainer environment failed. Check that you are
+/// online" while online, with the firewall off, confirmed by a second user.
+const REDIST_NEXT_STEP: &str = "A Microsoft Visual C++ runtime library is missing, and PyTorch cannot load without it. Install the current Visual C++ Redistributable for x64 from https://learn.microsoft.com/cpp/windows/latest-supported-vc-redist, restart Windows, then press Set up trainer in Character Studio.";
+const NATIVE_NEXT_STEP: &str = "PyTorch is on disk but its native libraries will not load. Install the current Visual C++ Redistributable for x64 from https://learn.microsoft.com/cpp/windows/latest-supported-vc-redist, update the graphics driver, restart Windows, then press Set up trainer in Character Studio.";
+const PYTHON_VERSION_NEXT_STEP: &str = "No wheel exists for the Python version LU is using here. Install Python 3.10, 3.11 or 3.12 from python.org with 'Add to PATH' checked, then press Set up trainer in Character Studio.";
+const PERMISSION_NEXT_STEP: &str = "Windows refused to write into the Python folder. Close every open Python, Jupyter or IDE debugger, and if the problem stays, install Python for your user instead of for all users, then press Set up trainer in Character Studio.";
+const PEP668_NEXT_STEP: &str = "This Python refuses installs outside a virtual environment and the venv module is missing. Install it from your package manager (python3-venv on Debian and Ubuntu, python-virtualenv on Arch, python3-virtualenv on Fedora), then press Set up trainer in Character Studio.";
+
+/// The way out that fits what actually failed. The old code offered exactly
+/// one, "check that you are online and that the drive has room", for every
+/// failure class there is.
+pub(crate) fn next_step_for_log(log: &str, fallback: &'static str) -> &'static str {
+    use crate::commands::install::PipFailureKind as K;
+    if out_of_disk(log) {
+        return DISK_NEXT_STEP;
+    }
+    match crate::commands::install::pip_failure_kind(log) {
+        K::MissingRuntimeLibrary => REDIST_NEXT_STEP,
+        K::NativeLoadFailure | K::TorchWithoutGpuSupport => NATIVE_NEXT_STEP,
+        K::NoMatchingWheel => PYTHON_VERSION_NEXT_STEP,
+        K::Permission => PERMISSION_NEXT_STEP,
+        K::ExternallyManaged => PEP668_NEXT_STEP,
+        K::DiskFull => DISK_NEXT_STEP,
+        // Network failures and everything we cannot name keep the old text.
+        // Naming the network for a failure that is not one is the whole bug.
+        _ => fallback,
+    }
+}
+
 /// One shape for every dead end in the trainer environment: what is wrong, what
 /// to press, and a short tail that says why. In that order, because the user
 /// reads the first sentence and the last one.
@@ -516,8 +548,8 @@ pub(crate) fn useful_tail(text: &str) -> String {
 /// Before this, a repair that never finished put the raw process error into the
 /// status line instead, which on a full disk meant fifteen `Moving to ...`
 /// lines and no next step at all.
-pub(crate) fn env_failure_message(diagnosis: &str, fallback_step: &str, log: &str) -> String {
-    let step = if out_of_disk(log) { DISK_NEXT_STEP } else { fallback_step };
+pub(crate) fn env_failure_message(diagnosis: &str, fallback_step: &'static str, log: &str) -> String {
+    let step = next_step_for_log(log, fallback_step);
     let head = diagnosis.trim();
     let head = if head.is_empty() { String::new() } else { format!("{head} ") };
     format!("{head}{step} Last steps: {}", useful_tail(log))
@@ -2158,6 +2190,89 @@ mod shutdown_tests {
             .expect("end of the install thread");
         assert!(knopf.contains("env_broken.store(true, Ordering::SeqCst)"), "{knopf}");
         assert!(knopf.contains("install_failed_message"), "{knopf}");
+    }
+
+    // ── A2 stage one: the setup step told everyone to check the network ────
+    //
+    // aikabatzu (Discord #general, 2026-08-27), confirmed by aldrich_ironhart
+    // and by Z0mbieK in GH #121 on 2026-08-29: "Setting up the trainer
+    // environment failed. Check that you are online" while online, with the
+    // firewall off. Every failure class ended in that one sentence, because
+    // there was only one sentence.
+
+    #[test]
+    fn a_missing_visual_cpp_runtime_does_not_send_the_customer_to_the_router() {
+        use super::install_failed_message;
+        let log = "torch install failed (exit Some(1)).\nImportError: VCOMP140.DLL was not found";
+        let msg = install_failed_message(log);
+        assert!(msg.contains("Visual C++"), "the real cause is unnamed: {msg}");
+        assert!(msg.contains("latest-supported-vc-redist"), "no way to get it: {msg}");
+        assert!(msg.contains("Set up trainer"), "no button: {msg}");
+        assert!(!msg.contains("Check that you are online"), "still blames the network: {msg}");
+    }
+
+    #[test]
+    fn a_dll_that_will_not_load_names_the_runtime_and_the_driver() {
+        use super::install_failed_message;
+        let log = "torch install failed (exit Some(1)).\nOSError: [WinError 1114] A dynamic link library (DLL) initialization routine failed. Error loading \"c10.dll\"";
+        let msg = install_failed_message(log);
+        assert!(msg.contains("Visual C++"), "{msg}");
+        assert!(msg.to_lowercase().contains("driver"), "{msg}");
+        assert!(!msg.contains("Check that you are online"), "{msg}");
+    }
+
+    #[test]
+    fn an_unsupported_python_is_named_as_such() {
+        use super::install_failed_message;
+        let msg = install_failed_message(
+            "torch install failed (exit Some(1)).\nERROR: Could not find a version that satisfies the requirement torch",
+        );
+        assert!(msg.contains("3.10, 3.11 or 3.12"), "{msg}");
+        assert!(!msg.contains("Check that you are online"), "{msg}");
+    }
+
+    #[test]
+    fn a_real_network_failure_still_gets_the_network_sentence() {
+        // Negative control. The point is not to stop saying "check that you
+        // are online", it is to stop saying it when it is not true.
+        use super::install_failed_message;
+        for log in [
+            "torch install failed (exit Some(1)).\nConnectionResetError: connection reset by peer",
+            "torch install failed (exit Some(1)).\nReadTimeoutError: read timed out",
+            "torch install failed (exit Some(1)).\nsomething nobody has a rule for",
+        ] {
+            let msg = install_failed_message(log);
+            assert!(msg.contains("online") && msg.contains("room"), "lost the usual two: {msg}");
+        }
+    }
+
+    #[test]
+    fn the_full_drive_still_wins_over_every_other_verdict() {
+        // Negative control for the ordering: a disk-full log also carries the
+        // word "permission" often enough, and the disk sentence is the one
+        // with the measured number in it.
+        use super::next_step_for_log;
+        let step = next_step_for_log(
+            "OSError: [Errno 28] No space left on device\nPermissionError while rolling back",
+            "FALLBACK",
+        );
+        assert!(step.contains("7 GB"), "{step}");
+    }
+
+    #[test]
+    fn every_replacement_step_still_names_the_button() {
+        use super::next_step_for_log;
+        for log in [
+            "VCOMP140.DLL was not found",
+            "[WinError 1114] initialization routine failed",
+            "ERROR: Could not find a version that satisfies the requirement torch",
+            "PermissionError: [Errno 13] Permission denied",
+            "error: externally-managed-environment",
+        ] {
+            let step = next_step_for_log(log, "FALLBACK");
+            assert_ne!(step, "FALLBACK", "no verdict for {log:?}");
+            assert!(step.contains("Set up trainer"), "{log:?} has no way out: {step}");
+        }
     }
 
     #[test]
