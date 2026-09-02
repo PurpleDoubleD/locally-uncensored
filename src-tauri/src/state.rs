@@ -60,6 +60,15 @@ pub struct InstallState {
     #[serde(default)]
     pub phase: String,
     pub logs: Vec<String>,
+    /// One sentence a finished run leaves behind, for the cases where "it
+    /// worked" is not the whole truth. A15, Windows Nachlauf 02.09.: a
+    /// requirements.txt that pip cannot install is skipped and the run carries
+    /// on with LU's own package list, which is right, but the run then ended on
+    /// a green panel with no word about the file that was passed over. The
+    /// panel already had a place for a closing line (the cancel notice); this
+    /// is how the backend fills it.
+    #[serde(default)]
+    pub notice: String,
     pub download_progress: u64,
     pub download_total: u64,
     pub download_speed: f64,
@@ -71,6 +80,7 @@ impl Default for InstallState {
             status: "idle".to_string(),
             phase: String::new(),
             logs: Vec::new(),
+            notice: String::new(),
             download_progress: 0,
             download_total: 0,
             download_speed: 0.0,

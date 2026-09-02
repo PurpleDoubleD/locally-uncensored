@@ -85,6 +85,11 @@ export function comfyInstallPolling(): boolean {
 interface InstallStatusPayload {
   status?: string
   logs?: string[]
+  /** One closing line the backend wants kept after the run. A15, Windows
+   *  Nachlauf 02.09.: a ComfyUI requirements.txt pip cannot install is skipped
+   *  and the run finishes on LU's own package list, which used to end in a
+   *  green idle panel that said nothing about the file it passed over. */
+  notice?: string
   download_progress?: number
   download_total?: number
   download_speed?: number
@@ -158,7 +163,7 @@ export const useComfyInstallStore = create<ComfyInstallState>()((set, get) => {
       })
       if (data.status === 'complete') {
         stopTimer()
-        set({ phase: 'idle', kind: null, cancelling: false })
+        set({ phase: 'idle', kind: null, cancelling: false, notice: String(data.notice ?? '') })
       } else if (data.status === 'cancelled') {
         // A cancel the user asked for is not a failure.
         stopTimer()

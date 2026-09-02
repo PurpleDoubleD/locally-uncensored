@@ -578,6 +578,56 @@ pub(crate) fn pip_failure_hint(kind: PipFailureKind, text: &str) -> String {
     }
 }
 
+/// Why a requirements.txt could not be installed, in a few words.
+///
+/// A15, Windows Nachlauf 02.09.: a requirements.txt whose first line named a
+/// package that does not exist made `pip install -r` fail, the run went on with
+/// LU's own package list, and it ended on "Environment repaired" with nothing
+/// said. The fallback itself is right, because a core whose file will not
+/// resolve must not block a rebuild. The silence is not: the user is left with
+/// a ComfyUI missing whatever that file asked for on top of our list.
+pub(crate) fn requirements_failure_reason(pip_output: &str) -> &'static str {
+    match pip_failure_kind(pip_output) {
+        PipFailureKind::NoMatchingWheel => "pip found no installable version for a package it names",
+        PipFailureKind::Network
+        | PipFailureKind::Timeout
+        | PipFailureKind::Ssl
+        | PipFailureKind::Forbidden
+        | PipFailureKind::RateLimited => "pip could not reach the package index",
+        PipFailureKind::Permission => "pip was not allowed to write the packages",
+        PipFailureKind::DiskFull => "the disk ran out of space",
+        PipFailureKind::ExternallyManaged => "this Python refuses installs outside a venv",
+        PipFailureKind::PipBroken | PipFailureKind::PythonWithoutSsl => {
+            "pip in this environment is not usable"
+        }
+        PipFailureKind::MissingRuntimeLibrary
+        | PipFailureKind::NativeLoadFailure
+        | PipFailureKind::TorchWithoutGpuSupport => {
+            "a package in it will not load on this machine"
+        }
+        PipFailureKind::Unknown => "pip exited with an error",
+    }
+}
+
+/// The live log line that names the fallback while it happens.
+pub(crate) fn requirements_fallback_log(folder: &str, reason: &str) -> String {
+    format!(
+        "requirements.txt in {} could not be used ({}), installing LU's own package list instead.",
+        folder, reason
+    )
+}
+
+/// The line the finished run leaves behind, so the fallback survives the last
+/// poll. Without it the panel goes back to idle and every word about the
+/// skipped file scrolls away with the log.
+pub(crate) fn requirements_fallback_notice(folder: &str, reason: &str) -> String {
+    format!(
+        "The requirements.txt in {} could not be used ({}), so LU installed its own package \
+         list instead. Anything that file asks for on top of that list is not installed.",
+        folder, reason
+    )
+}
+
 fn diagnose_pip_error_inner(stderr: &str) -> String {
     let snippet: String = stderr.chars().take(400).collect();
     let hint = pip_failure_hint(pip_failure_kind(stderr), stderr);
@@ -1758,6 +1808,7 @@ pub fn install_comfyui(
 
     install.status = "installing".to_string();
     install.logs.clear();
+    install.notice.clear();
     install.logs.push("Starting ComfyUI installation...".to_string());
     drop(install);
 
@@ -1823,6 +1874,11 @@ pub fn install_comfyui(
                 s.logs.push(msg.to_string());
             }
         };
+
+        // Set when `pip install -r requirements.txt` failed and the run carried
+        // on with LU's own package list. Folder plus reason, so the live log
+        // line and the line the finished run leaves behind agree (A15).
+        let mut requirements_fallback: Option<(String, &'static str)> = None;
 
         let cancelled = || cancel_flag.load(Ordering::SeqCst);
 
@@ -2065,7 +2121,7 @@ pub fn install_comfyui(
                     return;
                 }
                 Err(f) => {
-                    let diagnosis = f.diagnosis;
+                    let diagnosis = f.diagnosis.clone();
                     // A python.org install under Program Files has an
                     // admin-only site-packages, and without a venv the first
                     // wheel that is not already there dies on it. The same
@@ -2097,6 +2153,14 @@ pub fn install_comfyui(
                         // gone is the old "non-critical" verdict, which called
                         // a broken environment a finished one.
                         println!("[Install] Requirements install warning: {}", diagnosis);
+                        let reason = requirements_failure_reason(if f.stderr.is_empty() {
+                            &diagnosis
+                        } else {
+                            &f.stderr
+                        });
+                        let folder = target_dir.display().to_string();
+                        requirements_fallback = Some((folder.clone(), reason));
+                        update("installing", &requirements_fallback_log(&folder, reason));
                         update(
                             "installing",
                             &format!(
@@ -2156,6 +2220,11 @@ pub fn install_comfyui(
             );
         }
 
+        if let Some((folder, reason)) = requirements_fallback.as_ref() {
+            if let Ok(mut s) = install_status.lock() {
+                s.notice = requirements_fallback_notice(folder, reason);
+            }
+        }
         update("complete", "ComfyUI installed successfully!");
     });
 
@@ -2220,6 +2289,7 @@ pub fn repair_comfyui_env(state: State<'_, AppState>) -> Result<serde_json::Valu
         }
         install.status = "installing".to_string();
         install.logs.clear();
+        install.notice.clear();
         install.logs.push("Repairing the ComfyUI environment...".to_string());
     }
     info!("comfyui env repair start");
@@ -2243,6 +2313,11 @@ pub fn repair_comfyui_env(state: State<'_, AppState>) -> Result<serde_json::Valu
                 s.logs.push(msg.to_string());
             }
         };
+
+        // Set when `pip install -r requirements.txt` failed and the run carried
+        // on with LU's own package list. Folder plus reason, so the live log
+        // line and the line the finished run leaves behind agree (A15).
+        let mut requirements_fallback: Option<(String, &'static str)> = None;
 
         // A broken venv must go entirely: pip inside it would report the
         // damaged packages as already satisfied, which is the exact dead end
@@ -2319,16 +2394,29 @@ pub fn repair_comfyui_env(state: State<'_, AppState>) -> Result<serde_json::Valu
                 "--no-input",
                 "-r", reqs_str.as_str(),
             ];
-            match pip_install_streaming_with_retry_cancellable(&req_args, &venv_py, 3, &install_status, Some(&cancel_flag)) {
+            match pip_install_streaming_with_retry_raw(&req_args, &venv_py, 3, &install_status, Some(&cancel_flag)) {
                 Ok(()) => update("installing", "Dependencies installed."),
-                Err(d) if d == "cancelled" => {
+                Err(f) if f.diagnosis == "cancelled" => {
                     update("cancelled", "Repair cancelled during the requirements install.");
                     return;
                 }
-                Err(d) => update(
-                    "installing",
-                    &format!("Not every dependency installed. Checking what is really missing.\n\n{}", d),
-                ),
+                Err(f) => {
+                    let reason = requirements_failure_reason(if f.stderr.is_empty() {
+                        &f.diagnosis
+                    } else {
+                        &f.stderr
+                    });
+                    let folder = comfy_dir.display().to_string();
+                    requirements_fallback = Some((folder.clone(), reason));
+                    update("installing", &requirements_fallback_log(&folder, reason));
+                    update(
+                        "installing",
+                        &format!(
+                            "Not every dependency installed. Checking what is really missing.\n\n{}",
+                            f.diagnosis
+                        ),
+                    );
+                }
             }
         }
 
@@ -2349,6 +2437,11 @@ pub fn repair_comfyui_env(state: State<'_, AppState>) -> Result<serde_json::Valu
             }
         }
 
+        if let Some((folder, reason)) = requirements_fallback.as_ref() {
+            if let Ok(mut s) = install_status.lock() {
+                s.notice = requirements_fallback_notice(folder, reason);
+            }
+        }
         update(
             "complete",
             "Environment repaired. ComfyUI now runs from its own venv; start it again.",
@@ -2364,6 +2457,10 @@ pub fn install_comfyui_status(state: State<'_, AppState>) -> Result<serde_json::
     Ok(serde_json::json!({
         "status": install.status,
         "logs": install.logs,
+        // Empty for every run that has nothing to add. A finished run that had
+        // to skip the ComfyUI requirements.txt puts its one closing line here,
+        // because the log itself is dropped the moment the panel goes idle.
+        "notice": install.notice,
         "download_progress": install.download_progress,
         "download_total": install.download_total,
         "download_speed": install.download_speed,
@@ -2386,6 +2483,7 @@ pub fn update_comfyui(state: State<'_, AppState>) -> Result<serde_json::Value, S
         }
         install.status = "installing".to_string();
         install.logs.clear();
+        install.notice.clear();
         install.logs.push("Updating ComfyUI...".to_string());
     }
 
@@ -2441,6 +2539,11 @@ pub fn update_comfyui(state: State<'_, AppState>) -> Result<serde_json::Value, S
                 s.logs.push(msg.to_string());
             }
         };
+
+        // Set when `pip install -r requirements.txt` failed and the run carried
+        // on with LU's own package list. Folder plus reason, so the live log
+        // line and the line the finished run leaves behind agree (A15).
+        let mut requirements_fallback: Option<(String, &'static str)> = None;
 
         #[cfg(target_os = "windows")]
         {
@@ -2512,7 +2615,7 @@ pub fn update_comfyui(state: State<'_, AppState>) -> Result<serde_json::Value, S
                 "--no-input",
                 "-r", reqs_str.as_str(),
             ];
-            match pip_install_streaming_with_retry_cancellable(
+            match pip_install_streaming_with_retry_raw(
                 &req_args,
                 &python_bin,
                 3,
@@ -2520,15 +2623,26 @@ pub fn update_comfyui(state: State<'_, AppState>) -> Result<serde_json::Value, S
                 Some(&cancel_flag),
             ) {
                 Ok(()) => update("installing", "Dependencies updated."),
-                Err(diagnosis) if diagnosis == "cancelled" => {
+                Err(f) if f.diagnosis == "cancelled" => {
                     update("cancelled", "Update cancelled during the requirements install.");
                     return;
                 }
-                Err(diagnosis) => {
-                    println!("[Update] Requirements warning: {}", diagnosis);
+                Err(f) => {
+                    println!("[Update] Requirements warning: {}", f.diagnosis);
+                    let reason = requirements_failure_reason(if f.stderr.is_empty() {
+                        &f.diagnosis
+                    } else {
+                        &f.stderr
+                    });
+                    let folder = comfy_dir.display().to_string();
+                    requirements_fallback = Some((folder.clone(), reason));
+                    update("installing", &requirements_fallback_log(&folder, reason));
                     update(
                         "installing",
-                        &format!("Not every dependency updated. Checking what is really missing.\n\n{}", diagnosis),
+                        &format!(
+                            "Not every dependency updated. Checking what is really missing.\n\n{}",
+                            f.diagnosis
+                        ),
                     );
                 }
             }
@@ -2549,6 +2663,11 @@ pub fn update_comfyui(state: State<'_, AppState>) -> Result<serde_json::Value, S
         }
 
         println!("[Update] ComfyUI update complete");
+        if let Some((folder, reason)) = requirements_fallback.as_ref() {
+            if let Ok(mut s) = install_status.lock() {
+                s.notice = requirements_fallback_notice(folder, reason);
+            }
+        }
         update(
             "complete",
             "ComfyUI updated. Restart ComfyUI to load the new nodes.",
@@ -4842,6 +4961,67 @@ mod tests {
         let msg = venv_removal_error(Path::new("/tmp/ComfyUI/venv"), &e);
         assert!(msg.contains("the venv path is not a directory"), "got: {msg}");
         assert!(msg.starts_with("Could not remove the old venv at /tmp/ComfyUI/venv: "), "got: {msg}");
+    }
+
+    // ── A15: a requirements.txt that was passed over gets said out loud ──
+
+    /// The exact pip output the counter-check produced by putting an invented
+    /// package on line 1 of ComfyUI's requirements.txt.
+    const INVENTED_PACKAGE: &str = "ERROR: Could not find a version that satisfies the \
+        requirement lu-gegenprobe-gibt-es-nicht-4711==9.9.9 (from versions: none)\n\
+        ERROR: No matching distribution found for lu-gegenprobe-gibt-es-nicht-4711==9.9.9";
+
+    #[test]
+    fn a_requirements_file_pip_cannot_resolve_is_named_with_its_reason() {
+        let reason = requirements_failure_reason(INVENTED_PACKAGE);
+        assert_eq!(reason, "pip found no installable version for a package it names");
+        let line = requirements_fallback_log("C:\\Users\\ddrob\\ComfyUI", reason);
+        assert!(line.starts_with("requirements.txt in C:\\Users\\ddrob\\ComfyUI could not be used ("), "got: {line}");
+        assert!(line.ends_with("installing LU's own package list instead."), "got: {line}");
+        assert!(line.contains(reason), "got: {line}");
+    }
+
+    #[test]
+    fn the_closing_line_says_what_is_missing_afterwards() {
+        let notice = requirements_fallback_notice(
+            "C:\\Users\\ddrob\\ComfyUI",
+            requirements_failure_reason(INVENTED_PACKAGE),
+        );
+        assert!(notice.contains("C:\\Users\\ddrob\\ComfyUI"), "got: {notice}");
+        assert!(notice.contains("LU installed its own package list instead"), "got: {notice}");
+        // The half the report asked for: the user has to learn that ComfyUI is
+        // now short of whatever that file wanted.
+        assert!(notice.contains("is not installed"), "got: {notice}");
+    }
+
+    /// Every pip failure gets a reason, and none of them reads as a sentence
+    /// fragment inside "could not be used (...)".
+    #[test]
+    fn every_pip_failure_has_a_short_lowercase_reason() {
+        for output in [
+            INVENTED_PACKAGE,
+            "ERROR: Connection broken: ConnectionResetError",
+            "ERROR: Could not install packages due to an OSError: [Errno 13] Permission denied",
+            "OSError: [Errno 28] No space left on device",
+            "error: externally-managed-environment",
+            "read timed out",
+            "",
+        ] {
+            let r = requirements_failure_reason(output);
+            assert!(!r.is_empty());
+            assert!(r.chars().next().unwrap().is_lowercase(), "capitalised: {r}");
+            assert!(!r.ends_with('.'), "the reason carries its own full stop: {r}");
+        }
+    }
+
+    /// Negative control: a run with nothing to add leaves no closing line, so
+    /// the panel is not decorated with a warning after a clean rebuild.
+    #[test]
+    fn a_run_that_used_the_requirements_file_leaves_no_notice() {
+        let fresh = crate::state::InstallState::default();
+        assert!(fresh.notice.is_empty());
+        let json = serde_json::to_value(&fresh).expect("serialises");
+        assert_eq!(json["notice"], serde_json::json!(""));
     }
 
     // ── PyTorch-Kanalwahl (W2-Befund 16.08., comfy_kitchen braucht 2.6+) ─
