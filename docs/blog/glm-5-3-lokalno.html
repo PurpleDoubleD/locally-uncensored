@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="ru" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Можно ли запустить GLM-5.3 локально: честный расчёт по железу</title>
+<meta name="description" content="Веса GLM-5.3-Flash открыты 27 августа 2026 года, старшей модели 28 августа. Реальные размеры квантов, почему старшая модель работает в llama.cpp, а меньшая Flash нет, и одна настройка, решающая вопрос пригодности.">
+<meta name="keywords" content="glm 5.3 локально, запустить glm 5.3, glm 5.3 требования, glm 5.3 видеопамять, glm 5.3 gguf, glm 5.3 без цензуры, локальный ии без цензуры, glm 5.3 flash">
+<meta property="og:title" content="Можно ли запустить GLM-5.3 локально: честный расчёт по железу">
+<meta property="og:description" content="216,7 ГБ для наименьшей старшей сборки, 93,1 ГБ для Flash. Реальные цифры, проверенные по файлам.">
+<meta property="og:image" content="https://raw.githubusercontent.com/PurpleDoubleD/locally-uncensored/master/docs/social-preview.png">
+<meta property="og:url" content="https://locallyuncensored.com/blog/glm-5-3-lokalno.html">
+<meta property="og:type" content="article">
+<meta property="og:locale" content="ru_RU">
+<meta property="article:published_time" content="2026-09-02">
+<meta property="article:author" content="PurpleDoubleD">
+<meta property="article:tag" content="ИИ">
+<meta property="article:tag" content="GLM 5.3">
+<meta property="article:tag" content="Руководство">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Можно ли запустить GLM-5.3 локально: честный расчёт по железу">
+<meta name="twitter:description" content="216,7 ГБ для наименьшей старшей сборки, 93,1 ГБ для Flash. Реальные цифры, проверенные по файлам.">
+<meta name="twitter:image" content="https://raw.githubusercontent.com/PurpleDoubleD/locally-uncensored/master/docs/social-preview.png">
+<link rel="canonical" href="https://locallyuncensored.com/blog/glm-5-3-lokalno.html">
+<link rel="alternate" hreflang="en" href="https://locallyuncensored.com/blog/run-glm-5-3-locally.html">
+<link rel="alternate" hreflang="de" href="https://locallyuncensored.com/blog/glm-5-3-lokal-nutzen.html">
+<link rel="alternate" hreflang="ru" href="https://locallyuncensored.com/blog/glm-5-3-lokalno.html">
+<link rel="alternate" hreflang="x-default" href="https://locallyuncensored.com/blog/run-glm-5-3-locally.html">
+<meta name="robots" content="index, follow">
+<meta name="theme-color" content="#0a0a0a">
+<link rel="icon" href="../favicon.png">
+<script type="application/ld+json">
+{"@context": "https://schema.org", "@type": "BlogPosting", "headline": "Можно ли запустить GLM-5.3 локально: честный расчёт по железу", "description": "Сколько места на диске и памяти реально нужно GLM-5.3 и GLM-5.3-Flash, проверено по репозиториям моделей и исходному коду llama.cpp, а не по анонсу.", "image": "https://raw.githubusercontent.com/PurpleDoubleD/locally-uncensored/master/docs/social-preview.png", "datePublished": "2026-09-02", "dateModified": "2026-09-02", "inLanguage": "ru", "author": {"@type": "Person", "name": "PurpleDoubleD", "url": "https://github.com/PurpleDoubleD"}, "publisher": {"@type": "Organization", "name": "Locally Uncensored", "url": "https://locallyuncensored.com/"}, "mainEntityOfPage": {"@type": "WebPage", "@id": "https://locallyuncensored.com/blog/glm-5-3-lokalno.html"}, "keywords": "glm 5.3 локально, запустить glm 5.3, glm 5.3 требования, glm 5.3 видеопамять, glm 5.3 gguf, glm 5.3 без цензуры, локальный ии без цензуры, glm 5.3 flash"}
+</script>
+<script type="application/ld+json">
+{"@context": "https://schema.org", "@type": "FAQPage", "mainEntity": [{"@type": "Question", "name": "Можно ли запустить GLM-5.3 на обычном компьютере?", "acceptedAnswer": {"@type": "Answer", "text": "Нет. Наименьшая квантованная сборка GLM-5.3 весит 216,7 ГБ, наименьшая сборка GLM-5.3-Flash 93,1 ГБ, и это размеры загрузки без учёта контекста и кеша. Flash становится возможной при 128 ГБ общей памяти, старшей модели нужно около 256 ГБ и больше. Обычной видеокарты не хватит ни для одной из них."}}, {"@type": "Question", "name": "Сколько видеопамяти требуется для GLM-5.3?", "acceptedAnswer": {"@type": "Answer", "text": "Больше, чем даёт любая потребительская видеокарта. Только веса наименьшей сборки занимают 216,7 ГБ, поэтому модель запускают на машинах с большой общей памятью, а не на GPU. Размер файла при этом лишь нижняя граница: контекстное окно и его кеш требуют памяти дополнительно."}}, {"@type": "Question", "name": "В чём разница между GLM-5.3 и GLM-5.3-Flash?", "acceptedAnswer": {"@type": "Answer", "text": "У GLM-5.3 753,9 миллиарда параметров, собственная лицензия Z.ai и только текст. У GLM-5.3-Flash 320,8 миллиарда параметров, из них 18 миллиардов активны на токен, лицензия MIT и встроенное понимание изображений. Контекстное окно у обеих 1 048 576 токенов. Flash это та модель, которая помещается на машины поменьше."}}, {"@type": "Question", "name": "Работает ли GLM-5.3 в llama.cpp?", "acceptedAnswer": {"@type": "Answer", "text": "Старшая GLM-5.3 работает, потому что её архитектура glm-dsa входит в основную ветку llama.cpp со времён GLM-5.2. GLM-5.3-Flash пока нет: она использует новую архитектуру glm5next, которая на 2 сентября 2026 года всё ещё ожидала pull request 27754. Проверьте текущее состояние перед пересборкой, оно быстро меняется."}}, {"@type": "Question", "name": "Когда были опубликованы веса GLM-5.3?", "acceptedAnswer": {"@type": "Answer", "text": "Веса GLM-5.3-Flash появились на Hugging Face 27 августа 2026 года в 10:33 UTC, а веса старшей GLM-5.3 28 августа 2026 года в 15:22 UTC. Сначала Z.ai отдала обе модели через собственный API и придержала веса ради проверки безопасности и упрочнения. Пакет GGUF от Unsloth для Flash датирован 26 августа 2026 года, это нижняя граница для Flash."}}, {"@type": "Question", "name": "GLM-5.3 это открытый исходный код?", "acceptedAnswer": {"@type": "Answer", "text": "Лишь отчасти. GLM-5.3-Flash выходит под лицензией MIT и разрешает свободное коммерческое использование, изменение и распространение. Старшая GLM-5.3 не под MIT: она поставляется под собственной лицензией glm-5.3 от Z.ai, которую следует прочитать перед коммерческим применением."}}, {"@type": "Question", "name": "Есть ли GLM-5.3 без цензуры?", "acceptedAnswer": {"@type": "Answer", "text": "Для GLM-5.3-Flash да. Лицензия MIT прямо разрешает дообучение и аблитерацию, и первые пакеты GGUF без цензуры появились в день публикации весов. Для старшей GLM-5.3 это определяется собственной лицензией Z.ai, а размер минимум 216,7 ГБ в любом случае ограничивает практическое применение раньше."}}]}
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@200;300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/assets/lu.css">
+<script defer src="/assets/lu.js"></script>
+  <script data-goatcounter="https://lu-uncensored.goatcounter.com/count" async src="//gc.zgo.at/count.js"></script>
+</head>
+<body>
+
+<nav class="lu-nav">
+  <a class="lu-nav-brand" href="/" aria-label="Locally Uncensored">
+    <span class="lu-mono" data-mono="nav" data-size="40" aria-hidden="true"></span>
+    <span class="lu-nav-word">Locally <span class="accent">Uncensored</span></span>
+  </a>
+  <div class="lu-nav-links" id="lu-nav-links">
+    <a class="lu-nav-link" href="/">Home</a>
+    <a class="lu-nav-link" href="/blog/">Blog</a>
+    <a class="lu-nav-link" href="/guide/">Guide</a>
+    <a class="lu-nav-link" href="/remote-access/">Remote</a>
+  </div>
+  <div class="lu-nav-right">
+    <a class="lu-nav-icon" href="https://github.com/PurpleDoubleD/locally-uncensored" title="GitHub" aria-label="GitHub"><svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5C5.37.5 0 5.87 0 12.5c0 5.3 3.44 9.8 8.21 11.39.6.11.82-.26.82-.58 0-.29-.01-1.04-.02-2.05-3.34.73-4.04-1.61-4.04-1.61-.55-1.39-1.33-1.76-1.33-1.76-1.09-.75.08-.73.08-.73 1.2.08 1.84 1.24 1.84 1.24 1.07 1.83 2.81 1.3 3.5.99.11-.78.42-1.3.76-1.6-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.13-.3-.54-1.52.11-3.18 0 0 1.01-.32 3.3 1.23a11.5 11.5 0 0 1 6.01 0c2.29-1.55 3.3-1.23 3.3-1.23.65 1.66.24 2.88.12 3.18.77.84 1.23 1.91 1.23 3.22 0 4.61-2.8 5.63-5.48 5.92.43.37.81 1.1.81 2.22 0 1.6-.01 2.9-.01 3.29 0 .32.21.7.82.58A12.01 12.01 0 0 0 24 12.5C24 5.87 18.63.5 12 .5Z"/></svg><span class="lu-nav-badge">1000+&#8202;⭐</span></a>
+    <a class="lu-nav-icon discord" href="https://locallyuncensored.com/discord" target="_blank" rel="noopener" title="Discord" aria-label="Discord"><svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M20.32 4.37A19.8 19.8 0 0 0 15.45 3c-.2.36-.44.85-.6 1.23a18.3 18.3 0 0 0-5.7 0c-.16-.38-.4-.87-.6-1.23a19.7 19.7 0 0 0-4.87 1.37C.55 8.9-.32 13.3.11 17.63a19.9 19.9 0 0 0 6 3.03c.48-.66.9-1.36 1.27-2.1-.7-.26-1.36-.58-1.99-.96.17-.12.33-.25.49-.38a14.2 14.2 0 0 0 12.24 0c.16.13.32.26.49.38-.63.38-1.3.7-2 .96.37.74.8 1.44 1.27 2.1a19.8 19.8 0 0 0 6-3.03c.5-5.03-.85-9.39-3.55-13.26ZM8.02 15c-1.18 0-2.15-1.09-2.15-2.42 0-1.34.95-2.43 2.15-2.43 1.2 0 2.17 1.09 2.15 2.43 0 1.33-.95 2.42-2.15 2.42Zm7.96 0c-1.18 0-2.15-1.09-2.15-2.42 0-1.34.95-2.43 2.15-2.43 1.2 0 2.17 1.09 2.15 2.43 0 1.33-.94 2.42-2.15 2.42Z"/></svg><span class="lu-nav-badge">430+&#8202;<span style="font-size:0.715em">🟢</span></span></a>
+    <span class="lu-nav-sep"></span>
+    <div class="switch" id="theme-switch" role="button" aria-label="Toggle theme"></div>
+    <a class="lu-nav-dl" href="https://github.com/PurpleDoubleD/locally-uncensored/releases/latest"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m0 0 4-4m-4 4-4-4"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>Download</a>
+    <button type="button" class="lu-nav-toggle" aria-label="Menu"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+  </div>
+</nav>
+<div class="container lu-doc">
+  <div class="breadcrumb"><a href="../">Locally Uncensored</a> / <a href="./">Blog</a> / Эта статья</div>
+
+  <p class="post-langs" style="margin:0 0 1.1rem;font-size:0.92rem;opacity:0.75">Язык: <a href="run-glm-5-3-locally.html" hreflang="en">English</a> &middot; <a href="glm-5-3-lokal-nutzen.html" hreflang="de">Deutsch</a> &middot; <strong>Русский</strong></p>
+
+  <div class="post-meta">
+    <span class="post-tag">Руководство</span>
+    <span>2 сентября 2026</span>
+    <span>&middot;</span>
+    <span>9 мин чтения</span>
+  </div>
+
+  <article>
+    <h1>Можно ли запустить GLM-5.3 локально: честный расчёт по железу</h1>
+
+    <p><strong>Короткий ответ:</strong> на вашем компьютере почти наверняка нет. Наименьшая рабочая сборка старшей модели весит <strong>216,7 ГБ</strong>, наименьшая сборка более лёгкой GLM-5.3-Flash <strong>93,1 ГБ</strong>. Это размеры загрузки, ещё без контекста и кеша. Если у вас видеокарта на 24 ГБ, этот релиз не про вашу машину, и никакая квантизация этого не изменит.</p>
+
+    <p>Это честная версия. Всё остальное на этой странице служит обоснованием, проверенным по самим файлам, а не по анонсу.</p>
+
+    <h2>Что вышло и когда</h2>
+
+    <p>Z.ai сначала открыла доступ к GLM-5.3 через собственный API, а веса придержала. Дату этого запуска API мы не нашли ни в одном первоисточнике, поэтому здесь её нет. Сами веса задокументированы: <strong>GLM-5.3-Flash открыта 27 августа 2026 года в 10:33 UTC</strong>, <strong>старшая GLM-5.3 28 августа 2026 года в 15:22 UTC</strong>. Одна неточность остаётся: пакет GGUF от Unsloth для Flash датирован 26 августа 2026 года, а собрать GGUF из ещё не опубликованных весов невозможно. Значит, для Flash нижняя граница это 26 августа.</p>
+
+    <p>Причиной задержки компания называет проверку безопасности и упрочнение, и прямо объясняет суть: модель стала заметно лучше находить и эксплуатировать уязвимости в программном обеспечении. Это одинаково помогает и защитникам, и атакующим, как только веса становятся общедоступными.</p>
+
+    <p>Вышли две модели, и общего у них меньше, чем можно подумать по названию.</p>
+
+    <table>
+      <thead><tr><th></th><th>GLM-5.3</th><th>GLM-5.3-Flash</th></tr></thead>
+      <tbody>
+        <tr><td>Параметров</td><td>753,9 млрд</td><td>320,8 млрд</td></tr>
+        <tr><td>активных на токен</td><td>не опубликовано</td><td>18 млрд</td></tr>
+        <tr><td>Контекстное окно</td><td>1 048 576 токенов</td><td>1 048 576 токенов</td></tr>
+        <tr><td>Исходные веса</td><td>756 ГБ</td><td>328 ГБ</td></tr>
+        <tr><td>Лицензия</td><td>собственная, не MIT</td><td><strong>MIT</strong></td></tr>
+        <tr><td>Понимает изображения</td><td>нет</td><td><strong>да, изначально</strong></td></tr>
+      </tbody>
+    </table>
+
+    <p>Разница в лицензиях весит больше, чем кажется в день релиза. <strong>Flash выходит под MIT</strong>: коммерческое использование, изменение и распространение без чьего-либо разрешения. Старшая модель нет. Она поставляется на собственных условиях Z.ai, и если вы строите на ней продукт, этот текст стоит прочитать, а не пролистать.</p>
+
+    <h2>Сколько это занимает на диске</h2>
+
+    <p>Дома никто не запускает исходные веса. Запускают квантованную сборку, и такие появились в течение нескольких часов. Пакет Unsloth для Flash датирован 26 августа 2026 года, для старшей модели 28 августа, а со 2 сентября 2026 года есть сборки MLX старшей модели под именем <code>mlx-community/GLM-5.3-4bit</code>. Ниже реальные размеры пакетов Unsloth, считанные вечером 28 августа 2026 года.</p>
+
+    <h3>GLM-5.3, старшая модель</h3>
+    <table>
+      <thead><tr><th>Квант</th><th>Размер загрузки</th><th>реально для</th></tr></thead>
+      <tbody>
+        <tr><td><strong>UD-IQ1_S</strong></td><td><strong>216,7 ГБ</strong></td><td>256 ГБ, и будет тесно</td></tr>
+        <tr><td>UD-IQ1_M</td><td>228,5 ГБ</td><td>256 ГБ, запаса меньше</td></tr>
+        <tr><td>UD-Q2_K_XL</td><td>253,9 ГБ</td><td>от 384 ГБ</td></tr>
+        <tr><td>UD-Q3_K_XL</td><td>343,0 ГБ</td><td>512 ГБ</td></tr>
+        <tr><td>UD-Q4_K_XL</td><td>467,3 ГБ</td><td>сервер, а не компьютер</td></tr>
+      </tbody>
+    </table>
+
+    <h3>GLM-5.3-Flash</h3>
+    <table>
+      <thead><tr><th>Квант</th><th>Размер загрузки</th><th>реально для</th></tr></thead>
+      <tbody>
+        <tr><td><strong>UD-IQ1_S</strong></td><td><strong>93,1 ГБ</strong></td><td>128 ГБ общей памяти</td></tr>
+        <tr><td>UD-IQ1_M</td><td>97,6 ГБ</td><td>128 ГБ</td></tr>
+        <tr><td>UD-Q2_K_XL</td><td>108,7 ГБ</td><td>128 ГБ, становится тесно</td></tr>
+        <tr><td>UD-IQ3_XXS</td><td>120,4 ГБ</td><td>128 ГБ только с коротким контекстом</td></tr>
+        <tr><td>UD-Q3_K_XL</td><td>147,5 ГБ</td><td>от 192 ГБ</td></tr>
+        <tr><td>UD-IQ4_XS</td><td>156,8 ГБ</td><td>192 ГБ</td></tr>
+        <tr><td>UD-Q4_K_XL</td><td>199,7 ГБ</td><td>256 ГБ</td></tr>
+      </tbody>
+    </table>
+
+    <p>Для Flash есть второй файл, если нужно, чтобы модель видела изображения: <code>mmproj-F16.gguf</code>, 1,13 ГБ. Скачивайте его вместе с моделью. Без него Flash остаётся сильной текстовой моделью, которая молча ничего не видит, и никакого сообщения об ошибке при этом не будет.</p>
+
+    <p><strong>Это размеры файлов, а не требования к памяти.</strong> Веса задают только нижнюю границу. Контекстное окно и его кеш требуют места сверх этого, а у модели, заявляющей миллион токенов, этот кеш далеко не погрешность. Сборка, которая с запасом легла на диск, ещё не помещается в оперативную память.</p>
+
+    <h2>Ловушка, которая переворачивает всё</h2>
+
+    <p><strong>Старшая модель на 754 миллиарда параметров работает в обычном актуальном llama.cpp. Меньшая Flash нет.</strong> Кто не знает этого заранее, теряет на этом целый вечер.</p>
+
+    <p>Это звучит наоборот, пока не знаешь причину. GLM-5.3 архитектурно совпадает с GLM-5.2: те же 78 слоёв, те же 256 экспертов, то же окно на миллион токенов и ровно то же число параметров вплоть до последней цифры. Это то же тело с другим дообучением. Поэтому её архитектура <code>glm-dsa</code> поддерживается со времён GLM-5.2 и не требует ничего нового.</p>
+
+    <p>По-настоящему новой здесь оказалась именно Flash. Она объявляет себя как <code>glm5next</code>, и этой архитектуры <strong>нет в основной ветке llama.cpp</strong>. Карточка модели Unsloth отсылает к <a href="https://github.com/ggml-org/llama.cpp/pull/27754" rel="nofollow noopener" target="_blank">pull request 27754</a> либо к их собственному настольному приложению.</p>
+
+    <p>Мы снова проверили основную ветку 2 сентября 2026 года: в ней есть <code>chatglm</code>, <code>glm4</code>, <code>glm4moe</code> и <code>glm-dsa</code>, но нет <code>glm5next</code>. Pull request 27754 в этот день был всё ещё открыт. Это может измениться, возможно, ещё до того, как вы это прочтёте. <strong>Проверьте перед пересборкой.</strong> Если ваш llama.cpp встречает загрузку Flash ошибкой о неизвестной архитектуре, дело именно в этом, и вы ничего не настроили неправильно.</p>
+
+    <h2>Одна настройка, которая решает вопрос скорости</h2>
+
+    <p>GLM-5.3 принимает параметр <code>reasoning_effort</code> с тремя значениями: <code>low</code>, <code>high</code> и <code>max</code>.</p>
+
+    <p>Если его не передать, вы получите <code>max</code>. Если ошибиться в написании, вы тоже получите <code>max</code>. Промежуточного значения по умолчанию нет, предупреждения тоже. На модели такого размера это означает долгое и дорогое размышление над каждым сообщением, и это самая частая причина, по которой сильная модель кажется непригодной. Начинайте с <code>low</code> и повышайте, когда задача этого заслуживает.</p>
+
+    <h2>Обе модели теперь работают в LU Labs Cloud</h2>
+
+    <p>Если цифры выше исключают вашу машину, это обычный исход, а не ваша ошибка. Обходной путь есть: обе модели входят в каталог LU Labs Cloud. <strong>GLM-5.3-Flash доступна в плане Hosted, то есть в любом плане</strong>, а старшая GLM-5.3 в планах Pro и Max. Они появляются в выборе модели в веб-приложении и в настольном приложении под Windows, Linux и Mac.</p>
+
+    <p>Поскольку обе модели думают перед каждым ответом, рядом с кнопкой Brain появилась кнопка <strong>Effort</strong> с четырьмя ступенями: Low, Medium, High и Max. Она задаёт, сколько модель размышляет перед ответом. Более высокая ступень даёт больше выходных токенов и потому стоит больше кредитов, так что Low это разумная настройка по умолчанию, а Max стоит давать задаче, которая того заслуживает. Кнопка работает для любой рассуждающей модели в каталоге, не только для GLM.</p>
+
+    <p>Инструменты работают нативно у обеих моделей, так что режим агента и агент для кода действуют как обычно, а Flash принимает изображения.</p>
+
+    <h2>Есть ли версия без цензуры</h2>
+
+    <p>Для Flash да, и юридически чисто. Лицензия MIT разрешает дообучение и аблитерацию без разрешения, и первые сборки сообщества появились в тот же день, что и веса, включая пакеты GGUF без цензуры.</p>
+
+    <p>У старшей модели вместо MIT действует собственная лицензия Z.ai, поэтому то, что вы вправе опубликовать, определяется этим текстом, а не привычкой. А при 216,7 ГБ для наименьшей сборки практический предел почти для всех наступает раньше юридического.</p>
+
+    <p>Если вам нужен именно локальный ИИ без цензуры, честная рекомендация такая: берите модель, рассчитанную на обычное железо. Наше <a href="run-uncensored-ai-locally.html">руководство по локальному ИИ без цензуры</a> перечисляет те, что действительно помещаются, а <a href="how-to-run-qwen-3-8-27b-locally.html">Qwen 3.8 27B</a> сейчас лучший компромисс для одной видеокарты.</p>
+
+    <h2>Что мы не проверяли</h2>
+
+    <p>Z.ai публикует прирост GLM-5.3 относительно GLM-5.2, в том числе рост CyberGym с 77,2 до 84,5 процента и ExploitBench с 24,4 до 54,4 процента. Обе цифры принадлежат производителю, получены в его собственной среде тестирования, с его настройками и опубликованы в день релиза о его же продукте.</p>
+
+    <p>Мы их не воспроизводили, и на момент написания этого не сделал никто за пределами Z.ai. Считайте их указанием направления, а не доказательством. Все данные на этой странице о размерах файлов, параметрах, архитектурах и лицензиях, напротив, взяты из репозиториев моделей и исходного кода llama.cpp, а не из анонса.</p>
+
+    <hr>
+
+    <p><em>Locally Uncensored распространяется под AGPL-3.0 и бесплатен. Разработка <a href="https://github.com/PurpleDoubleD">PurpleDoubleD</a>.</em></p>
+  </article>
+
+  <div class="post-footer">
+    <p>Run the models that actually fit your machine, privately and uncensored.</p>
+    <a href="https://github.com/PurpleDoubleD/locally-uncensored" class="cta-btn" target="_blank">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z"/></svg>
+      Get Started on GitHub
+    </a>
+  </div>
+</div>
+
+<footer>
+  <div class="footer-row footer-meta"><span>&copy; 2026 &middot; Locally Uncensored &middot; AGPL-3.0</span></div>
+  <div class="footer-row footer-links">
+    <a href="https://locallyuncensored.com/blog/">Blog</a>
+    <a href="https://locallyuncensored.com/guide/">Guide</a>
+    <a href="https://locallyuncensored.com/remote-access/">Remote access</a>
+    <a href="https://locallyuncensored.com/discord" target="_blank" rel="noopener">Discord</a>
+    <a href="https://github.com/PurpleDoubleD/locally-uncensored">GitHub</a>
+    <a href="https://github.com/PurpleDoubleD/locally-uncensored/discussions">Discussions</a>
+    <a href="https://github.com/PurpleDoubleD/locally-uncensored/issues">Issues</a>
+    <a href="https://reddit.com/user/GroundbreakingMall54">Reddit</a>
+    <a href="https://www.linkedin.com/in/david-drobnitza-locallyuncensored/" rel="me noopener" target="_blank">LinkedIn</a>
+  </div>
+</footer>
+</body>
+</html>

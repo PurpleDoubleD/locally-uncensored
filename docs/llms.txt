@@ -130,6 +130,9 @@ Locally Uncensored is a free, open-source (AGPL-3.0) local AI studio for the des
 - Can You Run Kimi K3 Locally (hardware math): https://locallyuncensored.com/blog/can-you-run-kimi-k3-locally.html
 - Kimi K3 vs Kimi K2.6: https://locallyuncensored.com/blog/kimi-k3-vs-kimi-k2-6.html
 - Ling 3.0 Flash Explained (124B MoE, 5.1B active, MIT): https://locallyuncensored.com/blog/ling-3-0-flash-explained.html
+- Can You Run GLM-5.3 Locally (hardware math for the 754B flagship and 321B Flash): https://locallyuncensored.com/blog/run-glm-5-3-locally.html
+- GLM-5.3 lokal nutzen (German guide): https://locallyuncensored.com/blog/glm-5-3-lokal-nutzen.html
+- Можно ли запустить GLM-5.3 локально (Russian guide): https://locallyuncensored.com/blog/glm-5-3-lokalno.html
 - How to Run Ling 3.0 Flash Locally (GGUF sizes, hardware): https://locallyuncensored.com/blog/how-to-run-ling-3-0-flash-locally.html
 - How to Run Qwen 3.8 27B Locally (Apache 2.0, real GGUF sizes, template trap): https://locallyuncensored.com/blog/how-to-run-qwen-3-8-27b-locally.html
 - Qwen 3.8 Max Explained (2.4T flagship, weights out since Aug 12, custom licence): https://locallyuncensored.com/blog/qwen-3-8-max-explained.html

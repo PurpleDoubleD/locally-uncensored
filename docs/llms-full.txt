@@ -59,6 +59,9 @@ Yes. Locally Uncensored is the local AI app in its class that bundles image gene
 ### Is there a German guide? / Gibt es einen deutschen Guide?
 Ja. Der deutsche Einsteiger-Guide zu unzensierter lokaler KI: https://locallyuncensored.com/blog/unzensierte-ki-lokal.html. Die App-Oberflaeche ist englisch, die Modelle (Qwen, Llama, Gemma) antworten fliessend auf Deutsch.
 
+### Can I run GLM-5.3 or GLM-5.3-Flash locally?
+Only on very large machines. The GLM-5.3 flagship has 753.9 billion parameters and its smallest quantised build is 216.7 GB; GLM-5.3-Flash has 320.8 billion parameters with 18 billion active per token and starts at 93.1 GB, plus a 1.13 GB mmproj file if you want it to read images. Those are file sizes before context and cache. The flagship runs in a stock llama.cpp build because its glm-dsa architecture has been in the main branch since GLM-5.2; Flash reports itself as glm5next and was still waiting on pull request 27754 on 2 September 2026. Flash is MIT licensed, the flagship ships under Z.ai's own glm-5.3 licence. Both are available hosted in LU Labs Cloud, Flash on every plan and the flagship on Pro. Full guide: https://locallyuncensored.com/blog/run-glm-5-3-locally.html
+
 ### Can I run Kimi K3 locally?
 No: Kimi K3 is a ~2.8 trillion parameter Mixture-of-Experts model, and now that the weights are public the sizes are measured: the smallest 1-bit GGUF is 466 GB and Q4 is 1.5 TB, which is datacenter hardware. Hosted access exists on DeepInfra and in LU Labs Cloud on every plan. Run strong mid-size open models (Qwen, GLM, Gemma, Ling 3.0 Flash) locally in Locally Uncensored instead. Full guide: https://locallyuncensored.com/blog/can-you-run-kimi-k3-locally.html
 
@@ -183,5 +186,8 @@ A correctness release. Most of it is things that looked like they worked and did
 - How to Run DeepSeek V4 Flash Locally: https://locallyuncensored.com/blog/how-to-run-deepseek-v4-flash-locally.html
 - DeepSeek V4 Flash in the Cloud: https://locallyuncensored.com/blog/deepseek-v4-flash-cloud.html
 - DeepSeek V4 Flash vs V4 Pro: https://locallyuncensored.com/blog/deepseek-v4-flash-vs-v4-pro.html
+- Can You Run GLM-5.3 Locally: https://locallyuncensored.com/blog/run-glm-5-3-locally.html
+- GLM-5.3 lokal nutzen (Deutsch): https://locallyuncensored.com/blog/glm-5-3-lokal-nutzen.html
+- Можно ли запустить GLM-5.3 локально (Русский): https://locallyuncensored.com/blog/glm-5-3-lokalno.html
 - Source code: https://github.com/PurpleDoubleD/locally-uncensored
 - Discord: https://locallyuncensored.com/discord
