@@ -59,6 +59,7 @@ export const RELEASE_NOTES: ReleaseNote[] = [
           'The Linux packages ask for the libraries the built-in engine links against. The deb and the rpm named the desktop libraries but not libvulkan1 and libgomp1, so on a machine without them the install went through, the engine then died in the loader, and the message blamed your graphics card. The missing library is named now, together with the command that installs it. If you run the AppImage instead, it needs the Vulkan loader (libvulkan1) from your system, because an AppImage cannot carry that one itself.',
           'The Coding Agent\'s working directory can be removed again. There is a Remove button beside the folder picker and one in the header, both are locked while a run is going, and picking a different folder moves the current chat over to it.',
           'The prompt history in Create can be cleared. Every entry has its own remove button, and Clear all at the top of the list wipes the lot after a second click.',
+          'On the Mac, LU stopped searching your whole home folder for a ComfyUI it never runs there. That search touched the Desktop and Music folders, so macOS asked for access to Apple Music and to the Desktop at first launch, and the window sat on LOADING while the search ran. On Windows and Linux the same search moved off the main thread, so a slow disk no longer freezes the window.',
         ],
       },
       {

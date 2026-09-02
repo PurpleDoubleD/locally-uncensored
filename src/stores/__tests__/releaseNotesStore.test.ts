@@ -86,7 +86,7 @@ describe('the notes table', () => {
       'effort', 'glm 5.3', 'installed', 'built-in engine', '8127',
       'repair environment', 'model storage', 'civitai', 'hip sdk',
       'vram_total', 'libvulkan1', 'working directory', 'document chat',
-      'prompt history', 'side panel', 'researched rather than proven',
+      'prompt history', 'side panel', 'researched rather than proven', 'apple music',
     ]) {
       expect(prose, `${shipping}: nothing about "${anchor}"`).toContain(anchor)
     }

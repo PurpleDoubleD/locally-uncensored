@@ -590,6 +590,13 @@ fn resolve_comfyui_path(input: &str) -> Option<String> {
     None
 }
 
+/// Whether find_comfyui_path may look beyond the explicit sources (env var,
+/// app config) and search the disk. False on macOS: ComfyUI is never used
+/// there, and the search would trip the Desktop and Music permission dialogs.
+pub(crate) fn comfyui_disk_search_allowed() -> bool {
+    !cfg!(target_os = "macos")
+}
+
 pub fn find_comfyui_path() -> Option<String> {
     // 1. Check environment variable
     if let Ok(env_path) = std::env::var("COMFYUI_PATH") {
@@ -612,6 +619,18 @@ pub fn find_comfyui_path() -> Option<String> {
                 }
             }
         }
+    }
+
+    // 3. Filesystem search. macOS never runs ComfyUI (local media is MLX
+    // only, see auto_start_comfyui), so on a Mac the search ends with the
+    // explicit sources above. Walking the disk there is not only wasted
+    // time: the deep home walk below crosses ~/Desktop and ~/Music, and
+    // macOS answers the first touch of each with a permission dialog ("LU
+    // wants to access Apple Music" / "the Desktop folder"). Seen on the
+    // 2.6.8 test bundle at launch, while the window still said LOADING,
+    // because check_model_sizes and find_comfyui both land here.
+    if !comfyui_disk_search_allowed() {
+        return None;
     }
 
     let home = dirs::home_dir().unwrap_or_default();
@@ -1782,7 +1801,10 @@ pub fn is_local_host(host: &str) -> bool {
     matches!(h.as_str(), "localhost" | "127.0.0.1" | "::1" | "0.0.0.0" | "")
 }
 
-#[tauri::command]
+// `async`: find_comfyui_path can walk the whole home directory (minutes on
+// a big disk). As a plain command it ran on the main thread and froze the
+// window at LOADING for as long as the walk took.
+#[tauri::command(async)]
 pub fn find_comfyui() -> Result<serde_json::Value, String> {
     match find_comfyui_path() {
         Some(path) => {
@@ -2267,6 +2289,15 @@ pub fn auto_start_comfyui(state: &AppState) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The Mac never runs ComfyUI, so it must never search the disk for one:
+    /// the home walk crosses ~/Desktop and ~/Music and macOS turns the first
+    /// touch of each into a permission dialog at launch.
+    #[test]
+    fn comfyui_disk_search_is_off_on_macos_and_on_elsewhere() {
+        assert_eq!(comfyui_disk_search_allowed(), !cfg!(target_os = "macos"));
+    }
+
 
     // ── E16: a start that fails has to say so ────────────────────────────
     //
