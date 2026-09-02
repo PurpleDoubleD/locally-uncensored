@@ -105,7 +105,12 @@ mod chunked {
     }
 
     pub fn set(account: &str, value: &str) -> Result<(), String> {
-        if value.encode_utf16().count() <= MAX_UNITS {
+        // MAX_UNITS is usize::MAX off Windows, so clippy calls this comparison
+        // absurd there. It is the honest shape: only Windows chunks, and the
+        // bound belongs next to the platform that needs it.
+        #[allow(clippy::absurd_extreme_comparisons)]
+        let fits_in_head = value.encode_utf16().count() <= MAX_UNITS;
+        if fits_in_head {
             entry(account)?.set_password(value).map_err(|e| e.to_string())?;
             // Drop every chunk: this value lives in the head alone now.
             let _ = sweep_chunks_from(account, 0);
