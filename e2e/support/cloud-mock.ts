@@ -150,6 +150,23 @@ export async function routeCloud(page: Page, scenario: CloudScenario): Promise<v
               reasoning_effort_levels: ['low', 'medium', 'high'],
               reasoning_effort_default: 'high',
             },
+            {
+              // A model that always reasons, with its own ladder: the Think
+              // button renders locked on and the effort control is live beside
+              // it. Without an entry of this shape the mocked catalogue could
+              // only ever exercise the toggle case.
+              id: 'zai-org/GLM-5.3-Flash',
+              object: 'model',
+              owned_by: 'lu-labs',
+              name: 'GLM 5.3 Flash',
+              context_length: 1048576,
+              max_output_length: 8192,
+              input_modalities: ['text', 'image'],
+              think: 'always',
+              supports_tools: true,
+              reasoning_effort_levels: ['low', 'medium', 'high', 'max'],
+              reasoning_effort_default: 'high',
+            },
           ],
         }),
       )
