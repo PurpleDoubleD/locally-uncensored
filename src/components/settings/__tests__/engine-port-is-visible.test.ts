@@ -62,9 +62,14 @@ describe('the line itself', () => {
     expect(enginePortLine(null, 8127)).toBe('Engine not running')
   })
 
-  it('says nothing rather than something wrong when the port is nonsense', () => {
-    expect(enginePortLine({ running: true, port: 0 }, 8127)).toBe('Engine not running')
-    expect(enginePortLine({ running: true, port: '8127' }, 8127)).toBe('Engine not running')
+  // Review 2026-09-02: a running engine with an unusable port used to read as
+  // "Engine not running", which sends the reader hunting for a dead process
+  // while chat keeps answering.
+  it('separates a missing port from a missing engine', () => {
+    expect(enginePortLine({ running: true, port: 0 }, 8127)).toBe('Port unknown')
+    expect(enginePortLine({ running: true, port: '8127' }, 8127)).toBe('Port unknown')
+    expect(enginePortLine({ running: true }, 8127)).toBe('Port unknown')
+    expect(enginePortLine({ running: false, port: 0 }, 8127)).toBe('Engine not running')
   })
 })
 
@@ -82,6 +87,11 @@ describe('Built-in Engine (expert) shows it', () => {
   it('says the engine is down instead of naming a port nobody listens on', async () => {
     expect(await panel({ running: false, healthy: false, port: 8127, model_path: null }))
       .toBe('Engine not running')
+  })
+
+  it('admits it does not know the port rather than declaring the engine dead', async () => {
+    expect(await panel({ running: true, healthy: true, port: null, model_path: 'C:\\m\\phi.gguf' }))
+      .toBe('Port unknown')
   })
 })
 

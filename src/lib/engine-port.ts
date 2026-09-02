@@ -90,7 +90,11 @@ export function enginePortLine(
   status: { running?: boolean; port?: unknown } | null | undefined,
   preferred: number,
 ): string {
-  if (!status?.running || !isPort(status.port)) return 'Engine not running'
+  if (!status?.running) return 'Engine not running'
+  // Review 2026-09-02: a running engine whose port did not survive the trip is
+  // not a stopped engine. Saying so would send the reader looking for a dead
+  // process while chat keeps answering, so this gets its own answer.
+  if (!isPort(status.port)) return 'Port unknown'
   if (status.port === preferred) return `Port: ${status.port}`
   return `Port: ${status.port} (${preferred} was taken)`
 }

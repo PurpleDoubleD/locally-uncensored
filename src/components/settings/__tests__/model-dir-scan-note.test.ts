@@ -108,4 +108,17 @@ describe('Model Storage shows it under the path', () => {
     await noteFor('unreachable')
     expect(screen.queryByText(/Check that the drive is connected/)).toBeNull()
   })
+
+  it('says nothing twice about a path that is no folder either', async () => {
+    await noteFor('unusable')
+    expect(screen.queryByText(/That is not a full path/)).toBeNull()
+  })
+
+  // Review 2026-09-02: truncated is NOT the same case. The folder is readable,
+  // the walk only ran out of budget, and what LU hands to ComfyUI is
+  // unaffected, so swallowing the handoff line there hid a true sentence.
+  it('keeps the ComfyUI handoff line next to the size warning', async () => {
+    expect(await noteFor('truncated')).toContain('too big to scan completely')
+    expect(screen.getByText(/passes/)).toBeTruthy()
+  })
 })

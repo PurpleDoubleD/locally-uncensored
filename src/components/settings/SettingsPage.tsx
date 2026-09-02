@@ -294,10 +294,14 @@ export function HfDownloadPathSetting() {
     return () => { alive = false }
   }, [override])
 
-  // One line, and only when there is something to say. It also swallows the
-  // ComfyUI handoff note below: a folder that cannot be read has one problem,
-  // not two, and two amber lines saying the same thing read as two faults.
+  // One line, and only when there is something to say.
   const scanNote = modelDirScanNote(scan?.status)
+  // A folder that cannot be read at all has one problem, not two, so the
+  // ComfyUI handoff note steps aside for those two verdicts: it would say the
+  // same thing in different words. `truncated` is a different matter. The
+  // folder IS readable, the walk simply ran out of budget, and what LU hands
+  // to ComfyUI is unaffected by that, so both lines belong on screen.
+  const scanHidesHandoff = scan?.status === 'unreachable' || scan?.status === 'unusable'
 
   function apply(next: string) {
     setDraft(next)
@@ -349,7 +353,7 @@ export function HfDownloadPathSetting() {
           {scanNote}
         </div>
       )}
-      {override && comfy !== null && !scanNote && <CustomModelDirNote result={comfy} />}
+      {override && comfy !== null && !scanHidesHandoff && <CustomModelDirNote result={comfy} />}
     </div>
   )
 }
