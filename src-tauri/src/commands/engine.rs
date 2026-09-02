@@ -1476,8 +1476,13 @@ pub async fn stop_bundled_engine(app: AppHandle) -> Result<serde_json::Value, St
 pub async fn bundled_engine_status(app: AppHandle) -> Result<serde_json::Value, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let state = app.state::<AppState>();
-        // A handle whose process died is not a running engine (A15).
-        let probe = live_sidecar(&mut state.bundled_engine.lock().unwrap());
+        // Probed inside its own block so the lock is provably gone before the
+        // match below, whose arms make a blocking /health call.
+        let probe = {
+            let mut guard = state.bundled_engine.lock().unwrap();
+            // A handle whose process died is not a running engine (A15).
+            live_sidecar(&mut guard)
+        };
         match probe {
             Some((port, model_path, ctx)) => serde_json::json!({
                 "running": true,
@@ -1929,10 +1934,8 @@ pub(crate) fn reap_dead_engine(slot: &mut Option<BundledEngine>) -> bool {
     if gone {
         if let Some(mut e) = slot.take() {
             let _ = e.child.wait();
-            println!(
-                "[Engine] the built-in engine on port {} is gone, clearing the handle",
-                e.port
-            );
+            // Said for both sidecars, so the wording names neither.
+            println!("[Engine] the sidecar on port {} is gone, clearing the handle", e.port);
         }
     }
     gone
@@ -2117,9 +2120,15 @@ pub async fn bundled_embed_status(app: AppHandle) -> Result<serde_json::Value, S
     tauri::async_runtime::spawn_blocking(move || {
         let state = app.state::<AppState>();
         // Probe OUTSIDE the lock: holding it across a blocking HTTP call made
-        // every other engine command queue behind the status poll.
-        // Same as the chat engine: a killed sidecar is not a running one.
-        let probe = live_sidecar(&mut state.bundled_embed.lock().unwrap());
+        // every other engine command queue behind the status poll. The guard is
+        // dropped at the end of THIS block, which is the whole point of the
+        // block; a `match` on the lock expression itself would hold it for the
+        // length of every arm, and one of those arms probes /health.
+        let probe = {
+            let mut guard = state.bundled_embed.lock().unwrap();
+            // Same as the chat engine: a killed sidecar is not a running one.
+            live_sidecar(&mut guard)
+        };
         match probe {
             Some((port, model_path, _ctx)) => serde_json::json!({
                 "running": true,

@@ -611,15 +611,16 @@ pub(crate) fn requirements_failure_reason(pip_output: &str) -> &'static str {
 
 /// The same question asked of a whole pip failure rather than of its text.
 ///
-/// A15 review: an empty `stderr` means pip never wrote any, so the process
-/// could not be started or could not be reaped. Classifying the diagnosis in
-/// that case comes out as "pip exited with an error", which is precisely what
-/// did not happen.
+/// The stage decides, not the emptiness of the log. A pip that never started
+/// says so; a pip that ran is judged on what it printed, and a run that printed
+/// nothing at all still exited with an error rather than failing to start.
 pub(crate) fn requirements_failure_reason_for(f: &PipFailure) -> &'static str {
-    if f.stderr.is_empty() {
-        return "pip could not be started";
+    match f.stage {
+        PipStage::NotStarted => "pip could not be started",
+        // It ran. Whatever it left behind is what decides, and a run that left
+        // nothing behind still exited with an error.
+        PipStage::Ran => requirements_failure_reason(&f.stderr),
     }
-    requirements_failure_reason(&f.stderr)
 }
 
 /// The live log line that names the fallback while it happens.
@@ -641,12 +642,13 @@ pub(crate) fn requirements_fallback_log(folder: &str, reason: &str) -> String {
 pub(crate) fn finished_notice(
     done: &str,
     fallback: Option<&(String, &'static str)>,
-) -> String {
+) -> (String, &'static str) {
     match fallback {
-        Some((folder, reason)) => {
-            format!("{} {}", done, requirements_fallback_notice(folder, reason))
-        }
-        None => done.to_string(),
+        Some((folder, reason)) => (
+            format!("{} {}", done, requirements_fallback_notice(folder, reason)),
+            "warn",
+        ),
+        None => (done.to_string(), "ok"),
     }
 }
 
@@ -1477,12 +1479,30 @@ fn verify_and_heal_environment(
 pub(crate) struct PipFailure {
     pub(crate) diagnosis: String,
     pub(crate) stderr: String,
+    /// How far the run got. A15 review: this used to be inferred from an empty
+    /// `stderr`, which is true for a spawn that failed and equally true for a
+    /// pip that ran, printed nothing and exited non-zero, and for a `try_wait`
+    /// that failed on a live process. Two of those three were then reported as
+    /// "pip could not be started", which is a lie the log cannot correct.
+    pub(crate) stage: PipStage,
+}
+
+/// How far a failed pip run got before it failed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PipStage {
+    /// No process. The spawn failed, or the cancel arrived before pip was ever
+    /// asked to start.
+    NotStarted,
+    /// pip was a live process. It may have exited non-zero, printed nothing, or
+    /// refused to be reaped, but it ran.
+    Ran,
 }
 
 impl PipFailure {
-    /// A failure with no pip log behind it: cancelled, or pip never started.
-    fn bare(diagnosis: &str) -> Self {
-        PipFailure { diagnosis: diagnosis.to_string(), stderr: String::new() }
+    /// A failure with no pip log behind it. The stage says whether that is
+    /// because pip never started or because it left nothing behind.
+    fn bare(stage: PipStage, diagnosis: &str) -> Self {
+        PipFailure { diagnosis: diagnosis.to_string(), stderr: String::new(), stage }
     }
 }
 
@@ -1510,7 +1530,7 @@ pub(crate) fn pip_install_streaming_with_retry_raw(
 
     for attempt in 1..=max_attempts {
         if cancel.as_ref().map(|c| c.load(Ordering::SeqCst)).unwrap_or(false) {
-            return Err(PipFailure::bare("cancelled"));
+            return Err(PipFailure::bare(PipStage::NotStarted, "cancelled"));
         }
         if attempt > 1 {
             push_install_log(
@@ -1523,7 +1543,7 @@ pub(crate) fn pip_install_streaming_with_retry_raw(
             // Sleep in 1-second chunks so cancel reacts within ~1s.
             for _ in 0..delay_seconds {
                 if cancel.as_ref().map(|c| c.load(Ordering::SeqCst)).unwrap_or(false) {
-                    return Err(PipFailure::bare("cancelled"));
+                    return Err(PipFailure::bare(PipStage::NotStarted, "cancelled"));
                 }
                 std::thread::sleep(std::time::Duration::from_secs(1));
             }
@@ -1548,10 +1568,15 @@ pub(crate) fn pip_install_streaming_with_retry_raw(
 
         let mut child = match cmd.spawn() {
             Ok(c) => c,
-            Err(e) => return Err(PipFailure::bare(&format!(
-                "Could not start pip ({}). Is Python on PATH?",
-                os_error::english(&e)
-            ))),
+            Err(e) => {
+                return Err(PipFailure::bare(
+                    PipStage::NotStarted,
+                    &format!(
+                        "Could not start pip ({}). Is Python on PATH?",
+                        os_error::english(&e)
+                    ),
+                ))
+            }
         };
 
         let stdout = child.stdout.take();
@@ -1614,7 +1639,7 @@ pub(crate) fn pip_install_streaming_with_retry_raw(
                 let _ = child.wait();
                 let _ = stdout_handle.join();
                 let _ = stderr_handle.join();
-                return Err(PipFailure::bare("cancelled"));
+                return Err(PipFailure::bare(PipStage::Ran, "cancelled"));
             }
             match child.try_wait() {
                 Ok(Some(s)) => break s,
@@ -1641,10 +1666,10 @@ pub(crate) fn pip_install_streaming_with_retry_raw(
                     std::thread::sleep(std::time::Duration::from_millis(200));
                 }
                 Err(e) => {
-                    return Err(PipFailure::bare(&format!(
-                        "pip wait failed: {}",
-                        os_error::english(&e)
-                    )))
+                    return Err(PipFailure::bare(
+                        PipStage::Ran,
+                        &format!("pip wait failed: {}", os_error::english(&e)),
+                    ))
                 }
             }
         };
@@ -1673,6 +1698,7 @@ pub(crate) fn pip_install_streaming_with_retry_raw(
             return Err(PipFailure {
                 diagnosis: diagnose_pip_error_for(&last_stderr, Some(python_bin)),
                 stderr: last_stderr,
+                stage: PipStage::Ran,
             });
         }
     }
@@ -1684,6 +1710,7 @@ pub(crate) fn pip_install_streaming_with_retry_raw(
             diagnose_pip_error_for(&last_stderr, Some(python_bin))
         ),
         stderr: last_stderr,
+        stage: PipStage::Ran,
     })
 }
 
@@ -1842,6 +1869,7 @@ pub fn install_comfyui(
     install.status = "installing".to_string();
     install.logs.clear();
     install.notice.clear();
+    install.notice_kind.clear();
     install.logs.push("Starting ComfyUI installation...".to_string());
     drop(install);
 
@@ -2250,10 +2278,12 @@ pub fn install_comfyui(
         }
 
         if let Ok(mut s) = install_status.lock() {
-            s.notice = finished_notice(
+            let (line, kind) = finished_notice(
                 "Install finished. ComfyUI is ready to start.",
                 requirements_fallback.as_ref(),
             );
+            s.notice = line;
+            s.notice_kind = kind.to_string();
         }
         update("complete", "ComfyUI installed successfully!");
     });
@@ -2320,6 +2350,7 @@ pub fn repair_comfyui_env(state: State<'_, AppState>) -> Result<serde_json::Valu
         install.status = "installing".to_string();
         install.logs.clear();
         install.notice.clear();
+        install.notice_kind.clear();
         install.logs.push("Repairing the ComfyUI environment...".to_string());
     }
     info!("comfyui env repair start");
@@ -2464,10 +2495,12 @@ pub fn repair_comfyui_env(state: State<'_, AppState>) -> Result<serde_json::Valu
         }
 
         if let Ok(mut s) = install_status.lock() {
-            s.notice = finished_notice(
+            let (line, kind) = finished_notice(
                 "Repair finished. ComfyUI is ready.",
                 requirements_fallback.as_ref(),
             );
+            s.notice = line;
+            s.notice_kind = kind.to_string();
         }
         update(
             "complete",
@@ -2488,6 +2521,7 @@ pub fn install_comfyui_status(state: State<'_, AppState>) -> Result<serde_json::
         // to skip the ComfyUI requirements.txt puts its one closing line here,
         // because the log itself is dropped the moment the panel goes idle.
         "notice": install.notice,
+        "notice_kind": install.notice_kind,
         "download_progress": install.download_progress,
         "download_total": install.download_total,
         "download_speed": install.download_speed,
@@ -2511,6 +2545,7 @@ pub fn update_comfyui(state: State<'_, AppState>) -> Result<serde_json::Value, S
         install.status = "installing".to_string();
         install.logs.clear();
         install.notice.clear();
+        install.notice_kind.clear();
         install.logs.push("Updating ComfyUI...".to_string());
     }
 
@@ -2687,10 +2722,12 @@ pub fn update_comfyui(state: State<'_, AppState>) -> Result<serde_json::Value, S
 
         println!("[Update] ComfyUI update complete");
         if let Ok(mut s) = install_status.lock() {
-            s.notice = finished_notice(
+            let (line, kind) = finished_notice(
                 "Update finished. Restart ComfyUI to load the new nodes.",
                 requirements_fallback.as_ref(),
             );
+            s.notice = line;
+            s.notice_kind = kind.to_string();
         }
         update(
             "complete",
@@ -5044,11 +5081,14 @@ mod tests {
     fn a_fresh_install_state_carries_no_closing_line() {
         let fresh = crate::state::InstallState::default();
         assert!(fresh.notice.is_empty());
+        assert!(fresh.notice_kind.is_empty());
         let json = serde_json::to_value(&fresh).expect("serialises");
         assert_eq!(json["notice"], serde_json::json!(""));
+        assert_eq!(json["notice_kind"], serde_json::json!(""));
     }
 
-    /// David, 03.09.: a run that worked says so, every time.
+    /// David, 03.09.: a run that worked says so, every time. And it does not
+    /// say it in the colour of a warning (A15 review).
     #[test]
     fn a_run_that_worked_leaves_a_closing_line_of_its_own() {
         for done in [
@@ -5056,42 +5096,66 @@ mod tests {
             "Repair finished. ComfyUI is ready.",
             "Update finished. Restart ComfyUI to load the new nodes.",
         ] {
-            assert_eq!(finished_notice(done, None), done);
+            let (line, kind) = finished_notice(done, None);
+            assert_eq!(line, done);
+            assert_eq!(kind, "ok");
         }
     }
 
     /// And a run that had to skip the requirements.txt says both halves, in
-    /// that order: it finished, and here is what it could not use.
+    /// that order: it finished, and here is what it could not use. That one is
+    /// a warning.
     #[test]
     fn a_finished_run_that_skipped_the_file_says_both_halves() {
         let fallback = (
             "C:\\Users\\ddrob\\ComfyUI".to_string(),
             requirements_failure_reason(INVENTED_PACKAGE),
         );
-        let line = finished_notice("Repair finished. ComfyUI is ready.", Some(&fallback));
+        let (line, kind) = finished_notice("Repair finished. ComfyUI is ready.", Some(&fallback));
         assert!(line.starts_with("Repair finished. ComfyUI is ready. "), "got: {line}");
         assert!(line.contains("could not be used"), "got: {line}");
         assert!(line.contains("C:\\Users\\ddrob\\ComfyUI"), "got: {line}");
         // Negative control on the substitution: the success half is not
         // replaced by the warning, which is what a run that finished deserves.
         assert!(line.contains("Repair finished"), "got: {line}");
+        assert_eq!(kind, "warn");
     }
 
     /// A pip that never started is not a pip that exited with an error.
     #[test]
     fn a_pip_that_never_ran_is_not_reported_as_a_pip_that_failed() {
-        let never_ran = PipFailure::bare("Could not start pip (not found). Is Python on PATH?");
+        let never_ran = PipFailure::bare(
+            PipStage::NotStarted,
+            "Could not start pip (not found). Is Python on PATH?",
+        );
         assert_eq!(requirements_failure_reason_for(&never_ran), "pip could not be started");
         // Negative control: a real pip failure keeps its own classification and
         // does not fall into the "could not be started" arm.
         let really_failed = PipFailure {
             diagnosis: "whatever the hint says".to_string(),
             stderr: INVENTED_PACKAGE.to_string(),
+            stage: PipStage::Ran,
         };
         assert_eq!(
             requirements_failure_reason_for(&really_failed),
             "pip found no installable version for a package it names"
         );
+    }
+
+    /// The two cases the empty-stderr shortcut used to get wrong. Both are a
+    /// pip that RAN, so neither may claim it could not be started.
+    #[test]
+    fn a_pip_that_ran_is_never_reported_as_one_that_could_not_start() {
+        // The reaping failed on a live child. pip was there.
+        let wait_failed = PipFailure::bare(PipStage::Ran, "pip wait failed: interrupted");
+        assert_eq!(requirements_failure_reason_for(&wait_failed), "pip exited with an error");
+        // And a silent non-zero exit: it ran, it failed, it printed nothing.
+        let silent = PipFailure {
+            diagnosis: String::new(),
+            stderr: String::new(),
+            stage: PipStage::Ran,
+        };
+        assert_eq!(requirements_failure_reason_for(&silent), "pip exited with an error");
     }
 
     // ── PyTorch-Kanalwahl (W2-Befund 16.08., comfy_kitchen braucht 2.6+) ─

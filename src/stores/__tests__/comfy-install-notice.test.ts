@@ -117,15 +117,65 @@ describe('the ComfyUI section opens itself while a run is on screen', () => {
 })
 
 describe('a run that simply worked still says so', () => {
-  it('keeps the closing line of a clean repair', async () => {
+  it('keeps the closing line of a clean repair, and does not dress it as a warning', async () => {
     await repairThatEndsWith({
       status: 'complete',
       logs: ['All packages import cleanly.'],
       notice: 'Repair finished. ComfyUI is ready.',
+      notice_kind: 'ok',
     })
     expect(store().phase).toBe('idle')
     expect(store().notice).toBe('Repair finished. ComfyUI is ready.')
+    expect(store().noticeKind).toBe('ok')
     const { comfySectionShouldOpen } = await import('../comfyInstallStore')
     expect(comfySectionShouldOpen(store())).toBe(true)
+  })
+
+  it('marks the line as a warning when the run had to skip the file', async () => {
+    // Negative control for the test above: the colour is not a constant.
+    await repairThatEndsWith({ status: 'complete', logs: ['x'], notice: SKIPPED, notice_kind: 'warn' })
+    expect(store().noticeKind).toBe('warn')
+  })
+
+  it('treats a cancelled run as a warning, whoever asked for it', async () => {
+    // A half rebuilt venv is not good news, and the backend sends no kind for
+    // a cancel: the store decides that one.
+    await repairThatEndsWith({ status: 'cancelled', logs: ['stopped'] })
+    expect(store().phase).toBe('idle')
+    expect(store().noticeKind).toBe('warn')
+    expect(store().notice).toContain('Repair cancelled')
+  })
+
+  it('falls back to ok for a backend that names no kind', async () => {
+    await repairThatEndsWith({ status: 'complete', logs: ['x'], notice: 'Repair finished.' })
+    expect(store().noticeKind).toBe('ok')
+  })
+})
+
+describe('the closing line can be put away', () => {
+  it('clears the line and lets the section fold up again', async () => {
+    const { comfySectionShouldOpen } = await import('../comfyInstallStore')
+    await repairThatEndsWith({
+      status: 'complete',
+      logs: ['x'],
+      notice: 'Repair finished. ComfyUI is ready.',
+      notice_kind: 'ok',
+    })
+    expect(comfySectionShouldOpen(store())).toBe(true)
+
+    store().clearNotice()
+    expect(store().notice).toBe('')
+    expect(store().noticeKind).toBe('ok')
+    // The point of the dismiss: without it one finished run kept the section
+    // unfolding itself on every visit for the rest of the session.
+    expect(comfySectionShouldOpen(store())).toBe(false)
+  })
+
+  it('leaves everything else alone', async () => {
+    // Negative control: dismissing a message is not a reset.
+    await repairThatEndsWith({ status: 'complete', logs: ['a', 'b'], notice: SKIPPED, notice_kind: 'warn' })
+    store().clearNotice()
+    expect(store().logs).toEqual(['a', 'b'])
+    expect(store().phase).toBe('idle')
   })
 })

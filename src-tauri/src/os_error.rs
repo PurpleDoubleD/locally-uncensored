@@ -457,10 +457,12 @@ mod drift_guard {
         // git clone both polled their child and rendered the poll's own error
         // straight into the progress card.
         ".try_wait()", ".wait()",
-        // Asking the platform where our own folders are. Tauri answers this
-        // one with its own error, but that error wraps an io::Error on the
-        // paths that touch the disk, and the Piper voices lookup rendered it
-        // raw (A15 review).
+        // Asking the platform where our own folders are. In tauri 2.10 this
+        // fails with `Error::UnknownPath`, which carries no io::Error and is
+        // English already, so today the guard changes nothing here. It is in
+        // the list because the call is a platform lookup: the day a tauri
+        // release words it from the OS, or wraps one, the Piper voices lookup
+        // would have carried it raw again (A15 review).
         ".app_data_dir()",
     ];
 
