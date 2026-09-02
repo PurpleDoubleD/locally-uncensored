@@ -47,6 +47,7 @@ const { useAgentLoopStore } = await import('../../../stores/agentLoopStore')
 const { useAgentModeStore } = await import('../../../stores/agentModeStore')
 const { useSettingsStore } = await import('../../../stores/settingsStore')
 const { useChatStore } = await import('../../../stores/chatStore')
+const { useUIStore } = await import('../../../stores/uiStore')
 const { DEFAULT_SETTINGS } = await import('../../../lib/constants')
 
 const WINDOWS_PATH = 'C:\\Users\\dielitakira\\Documents\\huge-tree'
@@ -68,12 +69,22 @@ beforeEach(() => {
   useAgentModeStore.setState({ workspaces: {} })
   useSettingsStore.setState({ settings: { ...DEFAULT_SETTINGS } })
   useChatStore.setState({ conversations: [], activeConversationId: null })
+  useUIStore.setState({ explorerCollapsed: false })
 })
 afterEach(() => cleanup())
 
 describe('the header shows the folder, so it also gives it back', () => {
   it('carries a Remove control while a folder is set', async () => {
     act(() => useCodexStore.getState().setWorkingDirectory(WINDOWS_PATH))
+    await show()
+    expect(removeButton()).not.toBeNull()
+  })
+
+  it('stays reachable while the explorer column is collapsed (S7, the other half)', async () => {
+    // The column hides its own Remove control when collapsed; the header is
+    // the exit the report asked for, so it must not depend on that state.
+    act(() => useCodexStore.getState().setWorkingDirectory(WINDOWS_PATH))
+    act(() => useUIStore.getState().setExplorerCollapsed(true))
     await show()
     expect(removeButton()).not.toBeNull()
   })
