@@ -18,29 +18,56 @@
 import { backendCall } from '../api/backend'
 import { log } from './logger'
 
+/**
+ * What the folder is worth right now.
+ *
+ * `unusable` is a relative path or a `~` the OS never expands, `unreachable` is
+ * a folder LU cannot read (an unplugged drive, a dead network mount). Both used
+ * to be silence: no folders, no file, no word about it.
+ */
+export type CustomModelDirStatus =
+  | 'off'
+  | 'ok'
+  | 'unusable'
+  | 'unreachable'
+  /** This host never starts a ComfyUI, so there is nobody to hand the folder
+   *  to. The Mac, where local media is MLX. */
+  | 'unsupported'
+  | 'unknown'
+
 export interface CustomModelPathSync {
+  /** Whether a config file is on disk for ComfyUI to read. */
   written: boolean
+  status: CustomModelDirStatus
   file: string
-  /** ComfyUI folder names found in the folder, e.g. `['loras', 'vae']`. */
+  /** ComfyUI folder names handed over, e.g. `['loras', 'vae']`. */
+  folders: string[]
+}
+
+export interface CustomModelDirResult {
+  status: CustomModelDirStatus
   folders: string[]
 }
 
 /**
- * Register (or clear) the folder with ComfyUI. Returns the folder names that
- * were handed over, `[]` when there were none.
+ * Register (or clear) the folder with ComfyUI, and report back what it is
+ * worth.
  *
- * Never throws: an older backend without the command, or a folder that has
- * gone away with the drive it lived on, costs the handover and nothing else.
- * The GGUF scan is a separate path and keeps working either way.
+ * Never throws: an older backend without the command costs the handover and
+ * nothing else, and says `unknown` rather than inventing a verdict. The GGUF
+ * scan is a separate path and keeps working either way.
  */
-export async function syncCustomModelDir(dir: string | undefined | null): Promise<string[]> {
+export async function syncCustomModelDir(
+  dir: string | undefined | null,
+): Promise<CustomModelDirResult> {
+  const trimmed = (dir ?? '').trim()
   try {
     const res = await backendCall<CustomModelPathSync>('sync_custom_model_paths', {
-      dir: (dir ?? '').trim(),
+      dir: trimmed,
     })
-    return res?.folders ?? []
+    return { status: res?.status ?? 'unknown', folders: res?.folders ?? [] }
   } catch (err) {
     log.warn('[models] custom model folder not handed to ComfyUI', { err })
-    return []
+    return { status: 'unknown', folders: [] }
   }
 }

@@ -63,7 +63,7 @@ import { isMlxImageHost } from '../../api/mlx-image'
 import { ArrowUpCircle, KeyRound, RefreshCw } from 'lucide-react'
 import { CLOUD_BASE } from '../../api/cloud/config'
 import { formatBytes } from '../../lib/formatters'
-import { syncCustomModelDir } from '../../lib/custom-model-dir'
+import { syncCustomModelDir, type CustomModelDirResult } from '../../lib/custom-model-dir'
 import { CivitaiApiKeySetting } from './CivitaiApiKeySetting'
 
 // ── User profile picture (Appearance) ───────────────────────────
@@ -266,7 +266,7 @@ function HfDownloadPathSetting() {
   const override = useSettingsStore(s => s.settings.hfDownloadPathOverride)
   const updateSettings = useSettingsStore(s => s.updateSettings)
   const [draft, setDraft] = useState(override)
-  const [comfyFolders, setComfyFolders] = useState<string[] | null>(null)
+  const [comfy, setComfy] = useState<CustomModelDirResult | null>(null)
   useEffect(() => { setDraft(override) }, [override])
 
   // Both directions of the folder: our own GGUF scan reads it on the next
@@ -275,7 +275,7 @@ function HfDownloadPathSetting() {
   // ComfyUI without the user having to touch the field again.
   useEffect(() => {
     let alive = true
-    void syncCustomModelDir(override).then((folders) => { if (alive) setComfyFolders(folders) })
+    void syncCustomModelDir(override).then((res) => { if (alive) setComfy(res) })
     return () => { alive = false }
   }, [override])
 
@@ -324,16 +324,50 @@ function HfDownloadPathSetting() {
           </button>
         )}
       </div>
-      {/* Image and video models are a different question and the text says so
-          rather than implying the folder covers them: that inventory comes out
-          of ComfyUI's own lists, so LU can only hand ComfyUI the folder. */}
-      {override && comfyFolders !== null && (
-        <div className="text-[0.6rem] text-gray-500 leading-relaxed">
-          {comfyFolders.length > 0
-            ? <>Image and video: LU passes <code className="font-mono">{comfyFolders.join(', ')}</code> from this folder to ComfyUI. Takes effect the next time LU starts ComfyUI, and only for a ComfyUI that LU starts.</>
-            : <>Image and video models in this folder stay invisible: ComfyUI lists only its own folders. Name the subfolders like ComfyUI does (<code className="font-mono">checkpoints</code>, <code className="font-mono">loras</code>, <code className="font-mono">vae</code>, …) and LU hands them over.</>}
-        </div>
-      )}
+      {override && comfy !== null && <CustomModelDirNote result={comfy} />}
+    </div>
+  )
+}
+
+/**
+ * What became of the folder, in one line.
+ *
+ * A path the OS cannot use, or a drive that is not there, used to be silence:
+ * no models, no file, no word about it. And image and video are a different
+ * question from chat, because that inventory comes out of ComfyUI's own lists,
+ * so LU can only hand ComfyUI the folder. On the Mac it cannot even do that:
+ * local media there is MLX and LU never starts a ComfyUI, so promising one
+ * would be a lie (Rust answers `unsupported` for that host).
+ */
+function CustomModelDirNote({ result }: { result: CustomModelDirResult }) {
+  const cls = "text-[0.6rem] leading-relaxed"
+  if (result.status === 'unusable') {
+    return (
+      <div className={`${cls} text-amber-600 dark:text-amber-400`}>
+        That is not a full path, so nothing can be read from it. Use a complete path such as <code className="font-mono">C:\AI\Models</code> or <code className="font-mono">/mnt/models</code>. A leading <code className="font-mono">~</code> is a shell shorthand the app does not expand.
+      </div>
+    )
+  }
+  if (result.status === 'unreachable') {
+    return (
+      <div className={`${cls} text-amber-600 dark:text-amber-400`}>
+        LU cannot read that folder. Check that the drive is connected and the path is spelled the way the system spells it.
+      </div>
+    )
+  }
+  if (result.status === 'unsupported') {
+    return (
+      <div className={`${cls} text-gray-500`}>
+        Chat models in this folder are read. Image and video on the Mac run on Apple MLX, not ComfyUI, so image models in this folder are not picked up. Install those under Local Media (Apple MLX).
+      </div>
+    )
+  }
+  if (result.status === 'unknown') return null
+  return (
+    <div className={`${cls} text-gray-500`}>
+      {result.folders.length > 0
+        ? <>Image and video: LU passes <code className="font-mono">{result.folders.join(', ')}</code> from this folder to ComfyUI. Takes effect the next time LU starts ComfyUI, and only for a ComfyUI that LU starts.</>
+        : <>Image and video models in this folder stay invisible: ComfyUI lists only its own folders. Name the subfolders like ComfyUI does (<code className="font-mono">checkpoints</code>, <code className="font-mono">loras</code>, <code className="font-mono">vae</code>, …) and LU hands them over.</>}
     </div>
   )
 }

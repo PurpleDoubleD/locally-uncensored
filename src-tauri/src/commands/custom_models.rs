@@ -60,14 +60,22 @@ pub(crate) fn comfy_shaped_subdirs(root: &Path) -> Vec<(&'static str, PathBuf)> 
 /// could place. Absolute paths per key rather than one `base_path`, because the
 /// two layouts above can be mixed inside one folder.
 ///
-/// Windows paths are quoted, so a drive letter's colon and the backslashes
-/// cannot be read as YAML syntax. A path with a `"` in it is dropped rather
-/// than escaped: no model folder needs one, and a half-escaped path would make
-/// ComfyUI fail to parse the whole file and lose the other folders with it.
+/// SINGLE quotes, and every `'` inside the path doubled. A double-quoted YAML
+/// scalar treats the backslash as an escape character, so a Windows path is not
+/// a string there at all: PyYAML reads `"G:\AI\Models\loras"` as
+/// `unknown escape character 'A'` and `"D:\text_encoders"` as `D:<TAB>ext_...`.
+/// ComfyUI's `load_extra_path_config` runs without a try/except, so a file like
+/// that does not cost the folder mapping, it costs ComfyUI: the Windows user
+/// this whole fix exists for would have been left without one. A single-quoted
+/// scalar has no escapes at all, which is exactly what a path needs.
+///
+/// A path carrying a line break or another control character is dropped instead
+/// of quoted. No model folder has one, and a broken line would take the other
+/// folders in the file down with it.
 pub(crate) fn build_extra_model_paths_yaml(root: &Path) -> Option<String> {
     let found: Vec<(&str, PathBuf)> = comfy_shaped_subdirs(root)
         .into_iter()
-        .filter(|(_, p)| !p.to_string_lossy().contains('"'))
+        .filter(|(_, p)| !p.to_string_lossy().chars().any(|c| c.is_control()))
         .collect();
     if found.is_empty() {
         return None;
@@ -78,9 +86,20 @@ pub(crate) fn build_extra_model_paths_yaml(root: &Path) -> Option<String> {
          lu_custom_models:\n",
     );
     for (key, path) in found {
-        s.push_str(&format!("  {}: \"{}\"\n", key, path.to_string_lossy()));
+        s.push_str(&yaml_path_line(key, &path));
     }
     Some(s)
+}
+
+/// One `key: path` line. The single place the quoting rule above lives, so a
+/// test can hold a literal Windows path against the SHIPPED formatting instead
+/// of against a copy of it.
+pub(crate) fn yaml_path_line(key: &str, path: &Path) -> String {
+    format!(
+        "  {}: '{}'\n",
+        key,
+        path.to_string_lossy().replace('\'', "''")
+    )
 }
 
 /// Where the generated file lives: beside the app's own models dir, never
@@ -107,45 +126,114 @@ pub fn extra_model_paths_arg() -> Option<PathBuf> {
     }
 }
 
+/// Is this a path we can even ask the file system about?
+///
+/// A relative path would resolve against whatever the app's working directory
+/// happens to be, and `~/models` is a shell convention the OS does not expand.
+/// Both used to produce silence: no folders, no file, no word about it.
+pub(crate) fn is_usable_root(root: &Path) -> bool {
+    !root.as_os_str().is_empty() && root.is_absolute()
+}
+
+/// One syscall that answers "is the folder there and readable" before the
+/// per-key stats run. On a dead network drive every stat blocks for the SMB
+/// timeout, so asking twenty times what one call already answered is twenty
+/// times the wait.
+pub(crate) fn root_reachable(root: &Path) -> bool {
+    std::fs::read_dir(root).is_ok()
+}
+
+/// What the folder is currently worth to ComfyUI.
+pub(crate) fn folder_status(root: &Path) -> &'static str {
+    if !is_usable_root(root) {
+        "unusable"
+    } else if !root_reachable(root) {
+        "unreachable"
+    } else {
+        "ok"
+    }
+}
+
 /// Write (or remove) the extra-model-paths file for the folder under Model
 /// Storage. Idempotent, and safe to call on every settings change.
 ///
-/// Reports what it did, so the Settings panel can name the folders it found
-/// instead of claiming a success the user cannot check.
+/// ASYNC + spawn_blocking, like `list_bundled_models`: a synchronous Tauri
+/// command runs on the MAIN thread, and this one stats a path the user chose.
+/// Point it at a network drive that went away and the whole window freezes
+/// until the mount times out. Same pattern, same reason.
 #[tauri::command]
-pub fn sync_custom_model_paths(dir: Option<String>) -> Result<serde_json::Value, String> {
+pub async fn sync_custom_model_paths(dir: Option<String>) -> Result<serde_json::Value, String> {
+    tokio::task::spawn_blocking(move || sync_custom_model_paths_blocking(dir.as_deref()))
+        .await
+        .map_err(|e| format!("sync_custom_model_paths task: {e}"))?
+}
+
+/// Reports what it did, so the Settings panel can name the folders it found,
+/// or say why there were none, instead of claiming a success the user cannot
+/// check.
+pub(crate) fn sync_custom_model_paths_blocking(
+    dir: Option<&str>,
+) -> Result<serde_json::Value, String> {
     let file = extra_model_paths_file()?;
-    let trimmed = dir.unwrap_or_default().trim().to_string();
-    let yaml = if trimmed.is_empty() {
-        None
+    // The Mac runs local media on MLX and never starts ComfyUI
+    // (process::comfy_supported_here), so there is nobody to hand the folder
+    // to. Say that instead of writing a file no process will ever open, and
+    // clear one an earlier build may have left behind.
+    if !crate::commands::process::comfy_supported_here() {
+        let mut res = sync_custom_model_paths_to(&file, None)?;
+        res["status"] = serde_json::json!("unsupported");
+        return Ok(res);
+    }
+    sync_custom_model_paths_to(&file, dir)
+}
+
+/// The same work against a named file. The target is a parameter so the tests
+/// write into a temp file of their own: the real one lives in the app data dir
+/// and belongs to the installed app, not to a test run.
+pub(crate) fn sync_custom_model_paths_to(
+    file: &Path,
+    dir: Option<&str>,
+) -> Result<serde_json::Value, String> {
+    let trimmed = dir.unwrap_or("").trim().to_string();
+    let (status, folders, yaml) = if trimmed.is_empty() {
+        ("off", Vec::new(), None)
     } else {
-        build_extra_model_paths_yaml(Path::new(&trimmed))
+        let root = Path::new(&trimmed);
+        match folder_status(root) {
+            "ok" => {
+                let found = comfy_shaped_subdirs(root);
+                let names: Vec<String> = found.iter().map(|(k, _)| k.to_string()).collect();
+                let yaml = build_extra_model_paths_yaml(root);
+                // The names come from the same walk that produced the file, so
+                // a folder that was dropped for an unquotable path can never be
+                // reported as handed over.
+                let names = if yaml.is_some() { names } else { Vec::new() };
+                ("ok", names, yaml)
+            }
+            other => (other, Vec::new(), None),
+        }
     };
-    let folders: Vec<String> = if trimmed.is_empty() {
-        Vec::new()
-    } else {
-        comfy_shaped_subdirs(Path::new(&trimmed))
-            .into_iter()
-            .map(|(k, _)| k.to_string())
-            .collect()
-    };
-    match yaml {
+    match &yaml {
         Some(text) => {
-            std::fs::write(&file, text)
+            std::fs::write(file, text)
                 .map_err(|e| format!("Write model paths file: {}", crate::os_error::english(&e)))?;
         }
         None => {
-            // A folder that stopped being ComfyUI-shaped must not keep feeding
-            // ComfyUI the old paths, so the file goes away with it.
+            // A folder that stopped being ComfyUI-shaped, or that went away
+            // with its drive, must not keep feeding ComfyUI the old paths.
             if file.exists() {
-                std::fs::remove_file(&file).map_err(|e| {
+                std::fs::remove_file(file).map_err(|e| {
                     format!("Remove model paths file: {}", crate::os_error::english(&e))
                 })?;
             }
         }
     }
     Ok(serde_json::json!({
-        "written": !folders.is_empty(),
+        // True only when a file is on disk for ComfyUI to read. It used to be
+        // derived from the folder list, which said "written" for a folder whose
+        // only mappable path had been dropped.
+        "written": yaml.is_some(),
+        "status": status,
         "file": file.to_string_lossy(),
         "folders": folders,
     }))
@@ -199,21 +287,168 @@ mod tests {
         assert!(build_extra_model_paths_yaml(&root).is_none());
     }
 
+    /// The bug this file exists to avoid, held against a real YAML parser
+    /// rather than against a count of quote characters.
+    ///
+    /// A double-quoted YAML scalar treats the backslash as an escape, so the
+    /// shipped writer produced a file PyYAML refuses: `unknown escape
+    /// character 'A'` for `G:\AI\...`, and a silent `D:<TAB>ext_encoders` for
+    /// `D:\text_encoders`. ComfyUI reads that file without a try/except, so the
+    /// Windows user this fix is for would have lost ComfyUI itself.
     #[test]
-    fn yaml_quotes_the_path_and_names_every_folder() {
+    fn a_literal_windows_path_survives_a_real_yaml_parser() {
+        for raw in [
+            r"G:\AI\Models",
+            r"C:\Users\bob\models",
+            r"D:",
+            // The apostrophe is the one character a single-quoted scalar has to
+            // handle, and a real folder can carry one.
+            r"E:\Bob's Models",
+        ] {
+            let root = PathBuf::from(raw);
+            // The folders are built by hand here: these paths do not exist on
+            // the machine running the test, and the question is the QUOTING.
+            let found = vec![
+                ("loras", root.join("loras")),
+                ("text_encoders", root.join("text_encoders")),
+                ("vae", root.join("vae")),
+            ];
+            let mut yaml = String::from("lu_custom_models:\n");
+            for (key, path) in &found {
+                yaml.push_str(&yaml_path_line(key, path));
+            }
+
+            let parsed: serde_yaml::Value =
+                serde_yaml::from_str(&yaml).unwrap_or_else(|e| panic!("{raw}: {e}\n{yaml}"));
+            let block = parsed.get("lu_custom_models").expect("block missing");
+            for (key, path) in &found {
+                let got = block.get(*key).and_then(|v| v.as_str()).unwrap_or("");
+                assert_eq!(
+                    got,
+                    path.to_string_lossy(),
+                    "{raw}: {key} came back mangled",
+                );
+            }
+        }
+    }
+
+    /// Negative control for the same parser: the shipped double-quoted form is
+    /// genuinely broken, so the test above is not passing by accident.
+    #[test]
+    fn the_old_double_quoted_form_would_have_broken_comfyui() {
+        let broken = "lu_custom_models:\n  loras: \"G:\\AI\\Models\\loras\"\n";
+        assert!(
+            serde_yaml::from_str::<serde_yaml::Value>(broken).is_err(),
+            "a double-quoted Windows path must not parse: {broken}",
+        );
+        // And the quieter half: this one parses, into the wrong string.
+        let silent = "lu_custom_models:\n  text_encoders: \"D:\\text_encoders\"\n";
+        let parsed: serde_yaml::Value = serde_yaml::from_str(silent).expect("parses");
+        let got = parsed["lu_custom_models"]["text_encoders"].as_str().unwrap();
+        assert_ne!(got, r"D:\text_encoders");
+        assert!(got.contains('\t'), "the \\t escape ate the folder name: {got:?}");
+    }
+
+    #[test]
+    fn the_generated_file_parses_and_names_every_folder() {
         let root = tmp("yaml");
         std::fs::create_dir_all(root.join("loras")).unwrap();
         std::fs::create_dir_all(root.join("vae")).unwrap();
         let text = build_extra_model_paths_yaml(&root).unwrap();
         assert!(text.starts_with("# Written by Locally Uncensored"));
-        assert!(text.contains("lu_custom_models:\n"));
-        assert!(text.contains(&format!("  loras: \"{}\"\n", root.join("loras").display())));
-        assert!(text.contains(&format!("  vae: \"{}\"\n", root.join("vae").display())));
-        // Every value is quoted, so a Windows `G:\...` cannot be read as YAML.
-        for line in text.lines().filter(|l| l.starts_with("  ")) {
-            let value = line.split_once(": ").unwrap().1;
-            assert!(value.starts_with('"') && value.ends_with('"'), "unquoted: {line}");
-        }
+
+        let parsed: serde_yaml::Value = serde_yaml::from_str(&text).expect("must parse");
+        let block = &parsed["lu_custom_models"];
+        assert_eq!(block["loras"].as_str().unwrap(), root.join("loras").to_string_lossy());
+        assert_eq!(block["vae"].as_str().unwrap(), root.join("vae").to_string_lossy());
+    }
+
+    // ── The folder the user typed, before any stat ────────────────────────
+
+    #[test]
+    fn a_relative_path_or_a_tilde_is_refused_instead_of_silently_doing_nothing() {
+        assert!(!is_usable_root(Path::new("models")));
+        assert!(!is_usable_root(Path::new("../models")));
+        assert!(!is_usable_root(Path::new("~/models")));
+        assert!(!is_usable_root(Path::new("")));
+        assert_eq!(folder_status(Path::new("~/models")), "unusable");
+    }
+
+    /// Negative control: a real absolute folder is usable and reachable, so the
+    /// guard above cannot be refusing everything.
+    #[test]
+    fn a_real_absolute_folder_passes_both_guards() {
+        let root = tmp("guards");
+        assert!(is_usable_root(&root));
+        assert!(root_reachable(&root));
+        assert_eq!(folder_status(&root), "ok");
+    }
+
+    #[test]
+    fn a_folder_that_is_gone_reads_as_unreachable_not_as_empty() {
+        let root = tmp("vanished");
+        std::fs::remove_dir_all(&root).unwrap();
+        assert!(is_usable_root(&root));
+        assert!(!root_reachable(&root));
+        assert_eq!(folder_status(&root), "unreachable");
+    }
+
+    // ── What the Settings panel is told ───────────────────────────────────
+
+    #[test]
+    fn the_sync_reports_the_folders_it_wrote_and_says_written_only_then() {
+        let root = tmp("sync-ok");
+        std::fs::create_dir_all(root.join("loras")).unwrap();
+        let file = tmp("sync-ok-out").join("lu_extra_model_paths.yaml");
+        let res = sync_custom_model_paths_to(&file, Some(root.to_str().unwrap())).unwrap();
+        assert_eq!(res["status"], "ok");
+        assert_eq!(res["written"], true);
+        assert_eq!(res["folders"][0], "loras");
+        let on_disk = std::fs::read_to_string(&file).unwrap();
+        let parsed: serde_yaml::Value = serde_yaml::from_str(&on_disk).expect("must parse");
+        assert_eq!(
+            parsed["lu_custom_models"]["loras"].as_str().unwrap(),
+            root.join("loras").to_string_lossy(),
+        );
+    }
+
+    /// Negative control, and the bug in the first cut: a folder ComfyUI cannot
+    /// use wrote no file and still reported `written: true`, and the same call
+    /// has to take an older file away with it.
+    #[test]
+    fn a_flat_folder_writes_nothing_says_so_and_clears_an_older_file() {
+        let file = tmp("sync-clear-out").join("lu_extra_model_paths.yaml");
+        let good = tmp("sync-clear-good");
+        std::fs::create_dir_all(good.join("vae")).unwrap();
+        sync_custom_model_paths_to(&file, Some(good.to_str().unwrap())).unwrap();
+        assert!(file.exists(), "precondition: a file was written");
+
+        let flat = tmp("sync-clear-flat");
+        std::fs::write(flat.join("sdxl.safetensors"), b"x").unwrap();
+        let res = sync_custom_model_paths_to(&file, Some(flat.to_str().unwrap())).unwrap();
+        assert_eq!(res["status"], "ok", "the folder itself is readable");
+        assert_eq!(res["written"], false);
+        assert_eq!(res["folders"].as_array().unwrap().len(), 0);
+        assert!(!file.exists(), "the old file must not keep feeding ComfyUI");
+    }
+
+    #[test]
+    fn an_unreachable_or_relative_folder_is_named_as_such_and_writes_nothing() {
+        let gone = tmp("sync-gone");
+        std::fs::remove_dir_all(&gone).unwrap();
+        let file = tmp("sync-bad-out").join("lu_extra_model_paths.yaml");
+        let res = sync_custom_model_paths_to(&file, Some(gone.to_str().unwrap())).unwrap();
+        assert_eq!(res["status"], "unreachable");
+        assert_eq!(res["written"], false);
+
+        let res = sync_custom_model_paths_to(&file, Some("~/models")).unwrap();
+        assert_eq!(res["status"], "unusable");
+        assert_eq!(res["written"], false);
+
+        // Negative control: no folder at all is not a fault, it is "off".
+        let res = sync_custom_model_paths_to(&file, Some("   ")).unwrap();
+        assert_eq!(res["status"], "off");
+        assert_eq!(res["written"], false);
     }
 
     /// Negative control: a missing folder is not an error and not a config.

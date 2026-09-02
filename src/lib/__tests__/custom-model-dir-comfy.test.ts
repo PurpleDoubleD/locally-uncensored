@@ -31,25 +31,33 @@ beforeEach(() => { backendCall.mockReset() })
 
 describe('handing the folder to ComfyUI', () => {
   it('names the folder and reports back what ComfyUI will get', async () => {
-    backendCall.mockResolvedValue({ written: true, file: '/data/lu_extra_model_paths.yaml', folders: ['loras', 'vae'] })
-    const folders = await syncCustomModelDir('  G:\\AI\\Models  ')
+    backendCall.mockResolvedValue({ written: true, status: 'ok', file: '/data/lu_extra_model_paths.yaml', folders: ['loras', 'vae'] })
+    const res = await syncCustomModelDir('  G:\\AI\\Models  ')
     expect(backendCall).toHaveBeenCalledWith('sync_custom_model_paths', { dir: 'G:\\AI\\Models' })
-    expect(folders).toEqual(['loras', 'vae'])
+    expect(res).toEqual({ status: 'ok', folders: ['loras', 'vae'] })
   })
 
   it('clears the registration when the folder is unset', async () => {
-    backendCall.mockResolvedValue({ written: false, file: '/data/lu_extra_model_paths.yaml', folders: [] })
-    expect(await syncCustomModelDir('')).toEqual([])
+    backendCall.mockResolvedValue({ written: false, status: 'off', file: '/data/lu_extra_model_paths.yaml', folders: [] })
+    expect(await syncCustomModelDir('')).toEqual({ status: 'off', folders: [] })
     expect(backendCall).toHaveBeenCalledWith('sync_custom_model_paths', { dir: '' })
-    expect(await syncCustomModelDir(null)).toEqual([])
+    expect(await syncCustomModelDir(null)).toEqual({ status: 'off', folders: [] })
+  })
+
+  it('carries a folder that cannot be read through as its own verdict', async () => {
+    backendCall.mockResolvedValue({ written: false, status: 'unreachable', file: '/x', folders: [] })
+    expect(await syncCustomModelDir('Z:\\gone')).toEqual({ status: 'unreachable', folders: [] })
+    backendCall.mockResolvedValue({ written: false, status: 'unusable', file: '/x', folders: [] })
+    expect(await syncCustomModelDir('~/models')).toEqual({ status: 'unusable', folders: [] })
   })
 
   // Negative control: an older backend that does not know the command, or a
-  // drive that went away, costs the handover and NOTHING else. The GGUF scan
-  // is a separate path and must keep working.
+  // drive that went away, costs the handover and NOTHING else. It must not
+  // invent a verdict either, so the panel stays quiet instead of accusing the
+  // folder. The GGUF scan is a separate path and must keep working.
   it('stays quiet when the backend cannot do it', async () => {
     backendCall.mockRejectedValue(new Error('Unknown backend command: sync_custom_model_paths'))
-    await expect(syncCustomModelDir('G:\\AI\\Models')).resolves.toEqual([])
+    await expect(syncCustomModelDir('G:\\AI\\Models')).resolves.toEqual({ status: 'unknown', folders: [] })
   })
 })
 
@@ -68,11 +76,24 @@ describe('the Model Storage copy tells the truth', () => {
   })
 
   it('is honest that image and video go through ComfyUI', () => {
-    expect(src).toMatch(/passes <code className="font-mono">\{comfyFolders\.join/)
+    expect(src).toMatch(/passes <code className="font-mono">\{result\.folders\.join/)
     expect(src).toMatch(/only for a ComfyUI that LU starts/)
     // And says plainly what happens when the folder is not ComfyUI-shaped,
     // instead of leaving a silent no-op behind.
     expect(src).toMatch(/stay invisible/)
+  })
+
+  it('does not promise ComfyUI on a host that never starts one', () => {
+    // The Mac runs local media on MLX. The promise used to render there too.
+    expect(src).toMatch(/result\.status === 'unsupported'/)
+    expect(src).toMatch(/run on Apple MLX, not ComfyUI/)
+  })
+
+  it('says why a folder produced nothing instead of going quiet', () => {
+    expect(src).toMatch(/result\.status === 'unusable'/)
+    expect(src).toMatch(/result\.status === 'unreachable'/)
+    expect(src).toMatch(/That is not a full path/)
+    expect(src).toMatch(/Check that the drive is connected/)
   })
 
   it('hands the folder over whenever the setting changes', () => {

@@ -89,3 +89,6 @@ codegen-units = 1
 lto = true
 opt-level = "s"
 strip = true
+
+[dev-dependencies]
+serde_yaml = "0.9.34"
