@@ -17,6 +17,7 @@ interface DetectedGpu {
   source: string
   /** Set when the card was found but its compute stack was not. */
   note?: string | null
+  note_severity?: string | null
 }
 
 type GpuVendor = 'auto' | 'nvidia' | 'amd' | 'intel'
@@ -181,8 +182,21 @@ export function HardwareSettings() {
                         and selectable, and the line says what LU could not
                         verify, so nobody rebuilds a working install chasing
                         a driver problem that is not there (numbrain). */}
+                    {/* Amber is the colour of "LU could not confirm this".
+                        A correctly installed ROCm named in that colour reads as
+                        a fault and produced a support question of its own
+                        (hypocritical_rj asked what the yellow line meant), so a
+                        note that only states a healthy fact is muted instead.
+                        Unknown severity keeps the warning colour: the notes
+                        that predate this field are all warnings. */}
                     {g.note && (
-                      <div className="text-[0.55rem] text-amber-500/80 mt-0.5 leading-relaxed">{g.note}</div>
+                      <div
+                        className={`text-[0.55rem] mt-0.5 leading-relaxed ${
+                          g.note_severity === 'info' ? 'text-gray-500' : 'text-amber-500/80'
+                        }`}
+                      >
+                        {g.note}
+                      </div>
                     )}
                   </div>
                 </label>

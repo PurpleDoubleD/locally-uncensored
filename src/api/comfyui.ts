@@ -1,4 +1,4 @@
-import { comfyuiUrl, localFetch, fetchLocalhostBytes, isTauri, backendCall } from "./backend"
+import { comfyuiUrl, localFetch, fetchLocalhostBytes, isTauri, backendCall, isMacOS } from "./backend"
 import { log } from "../lib/logger"
 import { LU_CLIENT_PREFIX } from "./comfyui-ws"
 import { nodeComboOptions } from "./comfyui-enum"
@@ -584,13 +584,26 @@ function isCpuDevice(dev: any): boolean {
  * Apple's `mps` device is NOT excluded. Unified memory really is the VRAM
  * there, so the number is right for the machine it comes from.
  *
+ * `unifiedMemory` is the same point one step further, and it is the reason
+ * macOS passes true. `detect_macos` reports no size at all, so /system_stats is
+ * the ONLY VRAM source on a Mac, and a ComfyUI started with --cpu reports a cpu
+ * device there. Dropping it would have turned the fit check on every such Mac
+ * into "GPU unknown" and taken the "Fits my PC" filter with it. On a machine
+ * where the graphics unit and the processor share one pool, the pool is the
+ * honest answer for both, which is exactly what makes the Windows case wrong:
+ * there the card has its own memory and the CPU figure is a different number
+ * about a different thing.
+ *
  * Pure and exported so the case above can be a test instead of a screenshot.
  */
-export function pickDeviceVramBytes(devices: unknown): number | null {
+export function pickDeviceVramBytes(
+  devices: unknown,
+  opts: { unifiedMemory?: boolean } = {},
+): number | null {
   if (!Array.isArray(devices)) return null
   let best = 0
   for (const dev of devices) {
-    if (isCpuDevice(dev)) continue
+    if (!opts.unifiedMemory && isCpuDevice(dev)) continue
     const bytes = (dev as any)?.vram_total
     if (typeof bytes === 'number' && Number.isFinite(bytes) && bytes > best) best = bytes
   }
@@ -604,7 +617,7 @@ export async function getSystemVRAM(): Promise<number | null> {
     if (!res.ok) return null
     const data = await res.json()
     // ComfyUI returns top-level devices[].vram_total in bytes
-    const vramBytes = pickDeviceVramBytes(data?.devices)
+    const vramBytes = pickDeviceVramBytes(data?.devices, { unifiedMemory: isMacOS() })
     if (vramBytes !== null) {
       cachedVRAM = Math.round(vramBytes / (1024 * 1024 * 1024)) // bytes → GB
       return cachedVRAM

@@ -21,6 +21,9 @@
  * Run: npx vitest run src/api/__tests__/fit-check-never-shows-system-ram.test.ts
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { readFileSync } from 'fs'
+import { fileURLToPath } from 'url'
+import { dirname, join } from 'path'
 import { createElement } from 'react'
 import { render, screen, cleanup } from '@testing-library/react'
 
@@ -32,11 +35,15 @@ vi.mock('../backend', () => ({
   fetchLocalhostBytes: vi.fn(),
   isTauri: () => false,
   backendCall: vi.fn(),
+  isMacOS: () => false,
 }))
 
 import { pickDeviceVramBytes } from '../comfyui'
 import { HardwareChip } from '../../components/models/ModelTiles'
 import { comfyErrorHint } from '../vram-handoff'
+
+const __filename = fileURLToPath(import.meta.url)
+const __dirname = dirname(__filename)
 
 const GB = 1024 * 1024 * 1024
 
@@ -103,6 +110,30 @@ describe('the CPU pseudo-device is not a graphics card', () => {
   })
 })
 
+describe('a Mac shares one pool, so the CPU entry is the answer there', () => {
+  // Review catch: detect_macos reports no size at all, so /system_stats is the
+  // ONLY VRAM source on a Mac. ComfyUI started with --cpu reports a cpu device
+  // there, and filtering it would have left every such Mac reading
+  // "GPU unknown" and lost the "Fits my PC" filter with it.
+  it('keeps the CPU device when the memory is unified', () => {
+    expect(pickDeviceVramBytes(CPU_ONLY, { unifiedMemory: true })).toBe(62 * GB)
+  })
+
+  it('still prefers a real device over the shared pool', () => {
+    const mps = [{ name: 'mps', type: 'mps', index: 0, vram_total: 96 * GB }]
+    expect(pickDeviceVramBytes([...CPU_ONLY, ...mps], { unifiedMemory: true })).toBe(96 * GB)
+  })
+
+  it('does not soften the rule for anything else', () => {
+    // NEGATIVE CONTROL: this is Zhorts' box, where the card has its own memory
+    // and the CPU number is a different figure about a different thing. The
+    // flag is off there and the 62 stays out.
+    expect(pickDeviceVramBytes(CPU_ONLY)).toBeNull()
+    expect(pickDeviceVramBytes(CPU_ONLY, {})).toBeNull()
+    expect(pickDeviceVramBytes(CPU_ONLY, { unifiedMemory: false })).toBeNull()
+  })
+})
+
 describe('the hardware chip', () => {
   it('says unknown for the side nothing measured', () => {
     render(createElement(HardwareChip, { vramGb: null, ramGb: 62 }))
@@ -123,6 +154,26 @@ describe('the hardware chip', () => {
   it('stays away entirely when nothing at all is known', () => {
     const { container } = render(createElement(HardwareChip, { vramGb: null, ramGb: null }))
     expect(container.textContent).toBe('')
+  })
+})
+
+describe('a healthy ROCm install is not painted as a fault', () => {
+  // hypocritical_rj (help-chat "GPU Detection", 26.08.) opened a thread just to
+  // ask whether the yellow line was a problem. Amber is the colour of "LU could
+  // not confirm this", and a correct install has to stop wearing it.
+  const settings = () => readFileSync(join(__dirname, '../../components/settings/HardwareSettings.tsx'), 'utf8')
+
+  it('hangs the colour off the severity the backend sent', () => {
+    expect(settings()).toMatch(/g\.note_severity === 'info' \? 'text-gray-500' : 'text-amber-500\/80'/)
+  })
+
+  it('leaves every older note in the warning colour', () => {
+    // NEGATIVE CONTROL: the notes that predate the field carry no severity, and
+    // they are all warnings, so an unknown severity must not fall to the muted
+    // branch. The comparison is against 'info' for exactly that reason.
+    expect(settings()).not.toMatch(/note_severity === 'warn'/)
+    // And the unconditional amber that was here is gone.
+    expect(settings()).not.toMatch(/className="text-\[0\.55rem\] text-amber-500\/80 mt-0\.5/)
   })
 })
 
@@ -155,6 +206,18 @@ describe('hipErrorInvalidValue names the architecture instead of the error', () 
     const other = comfyErrorHint('KSampler', 'RuntimeError', 'hipErrorNoBinaryForGPU: Unable to find code object', 'gfx1030')
     expect(other).toContain('no compute kernels')
     expect(other).not.toContain('hipErrorInvalidValue')
+  })
+
+  it('is the only branch that needs the architecture at all', () => {
+    // Review catch: the lookup used to run before every branch, so an
+    // out-of-memory message waited on detect_gpus shelling out to the vendor
+    // tools. The gate at the call site is the source of truth, so it is checked
+    // here as source rather than guessed at.
+    const call = readFileSync(join(__dirname, '../vram-handoff.ts'), 'utf8')
+    expect(call).toMatch(/\/hiperrorinvalidvalue\/i\.test\(raw\) \? await getAmdGpuArch\(\)/)
+    // NEGATIVE CONTROL: an unconditional await would put the probe in front of
+    // every ComfyUI failure there is.
+    expect(call).not.toMatch(/const arch = await getAmdGpuArch\(\)\.catch/)
   })
 
   it('says nothing about HIP for an error that is not about HIP', () => {

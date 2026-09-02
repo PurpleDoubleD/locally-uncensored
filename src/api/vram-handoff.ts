@@ -1489,10 +1489,14 @@ async function pollAndExtract(promptId: string, prompt: string, kindLabel: strin
           || history.status.messages?.map((m: any) => m?.[1]?.message).filter(Boolean).join(' | ')
           || history.status.messages?.[0]?.[1]?.message
           || 'Unknown ComfyUI error'
-        // The architecture only matters for one branch and costs one cached
-        // Tauri call, which is cheaper than the render that just failed.
-        const arch = await getAmdGpuArch().catch(() => null)
-        const hint = comfyErrorHint(errEntry?.node_type, errEntry?.exception_type, String(rawMsg), arch)
+        // The architecture only matters for the hipErrorInvalidValue branch, so
+        // it is only fetched for that branch. detect_gpus shells out to several
+        // vendor tools, each bounded at five seconds, and putting that in front
+        // of EVERY ComfyUI failure would have delayed an out-of-memory message
+        // or a missing-node message by seconds for nothing.
+        const raw = String(rawMsg)
+        const arch = /hiperrorinvalidvalue/i.test(raw) ? await getAmdGpuArch().catch(() => null) : null
+        const hint = comfyErrorHint(errEntry?.node_type, errEntry?.exception_type, raw, arch)
         return `${kindLabel} generation failed: ${rawMsg}${hint ? `\n\n${hint}` : ''}`
       }
       const projected = pace.projectedTotalMs()
