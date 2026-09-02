@@ -30,12 +30,15 @@ vi.mock('../../../api/backend', () => ({
   setComfyHost: vi.fn(),
 }))
 
-const { ComfyUISettings, COMFY_CANCEL_NOTICE } = await import('../SettingsPage')
+const { ComfyUISettings } = await import('../SettingsPage')
+const { COMFY_CANCEL_NOTICE, useComfyInstallStore } = await import('../../../stores/comfyInstallStore')
 
 /** What `install_comfyui_status` answers next. */
 let installStatus: { status: string; logs: string[] } = { status: 'installing', logs: ['pip install torch'] }
 
 beforeEach(() => {
+  // The run outlives the mount now, so it also outlives a test.
+  useComfyInstallStore.getState().reset()
   installStatus = { status: 'installing', logs: ['pip install torch'] }
   backendCall.mockReset()
   backendCall.mockImplementation(async (cmd: string) => {
@@ -46,7 +49,7 @@ beforeEach(() => {
     return {}
   })
 })
-afterEach(() => { cleanup(); vi.useRealTimers() })
+afterEach(() => { cleanup(); useComfyInstallStore.getState().reset(); vi.useRealTimers() })
 
 /** Mount the panel and get past the "Checking..." first status read. */
 async function mountPanel() {
