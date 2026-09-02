@@ -113,3 +113,48 @@ describe('a repair started in Settings survives leaving the section', () => {
     expect(backendCall.mock.calls.filter(([cmd]) => cmd === 'install_comfyui_status').length).toBe(before + 1)
   })
 })
+
+/**
+ * Review 2026-09-02 (blocker): with the state outliving the mount, `error`
+ * outlives it too. The three start buttons hung on `phase === 'idle'` and
+ * nothing but a fresh run cleared the phase, so a failed install or repair was
+ * a dead end until the app was restarted. Before the store, leaving the
+ * section threw the failure away and the buttons came back.
+ */
+describe('a failed run stays escapable', () => {
+  it('offers Repair environment again after a failure, across a remount', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    const first = await mountPanel()
+    await act(async () => { fireEvent.click(screen.getByText('Repair environment')) })
+
+    installStatus = { status: 'error', logs: ['ERROR: pip could not build wheels'] }
+    await act(async () => { await vi.advanceTimersByTimeAsync(2000) })
+    expect(screen.getByText('Install failed')).toBeTruthy()
+
+    // The user leaves for Providers and comes back, the old escape hatch.
+    first.unmount()
+    await mountPanel()
+
+    expect(screen.getByText('Install failed')).toBeTruthy()
+    const again = screen.getByText('Repair environment')
+    expect((again as HTMLButtonElement).disabled).toBe(false)
+    // And pressing it really starts a second run instead of doing nothing.
+    await act(async () => { fireEvent.click(again) })
+    expect(backendCall.mock.calls.filter(([cmd]) => cmd === 'repair_comfyui_env').length).toBe(2)
+    expect(screen.queryByText('Install failed')).toBeNull()
+  })
+
+  it('clears the card on Dismiss without starting anything', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    await mountPanel()
+    await act(async () => { fireEvent.click(screen.getByText('Repair environment')) })
+    installStatus = { status: 'error', logs: ['ERROR: pip could not build wheels'] }
+    await act(async () => { await vi.advanceTimersByTimeAsync(2000) })
+
+    await act(async () => { fireEvent.click(screen.getByText('Dismiss')) })
+    expect(screen.queryByText('Install failed')).toBeNull()
+    expect(screen.queryByText(/pip could not build wheels/)).toBeNull()
+    expect(backendCall.mock.calls.filter(([cmd]) => cmd === 'repair_comfyui_env').length).toBe(1)
+    expect(comfyInstallPolling()).toBe(false)
+  })
+})

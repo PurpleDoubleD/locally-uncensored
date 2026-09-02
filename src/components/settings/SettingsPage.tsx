@@ -539,6 +539,11 @@ export function ComfyUISettings() {
   const installDl = useComfyInstallStore((s) => s.dl)
   const cancelling = useComfyInstallStore((s) => s.cancelling)
   const installNotice = useComfyInstallStore((s) => s.notice)
+  // A failed run must not be a dead end. The phase stays `error` until
+  // something clears it, and with the state outliving the mount the old escape
+  // hatch (leave the section, lose the useState) is gone. So the start buttons
+  // stay reachable on `error` too, and the card carries a Dismiss.
+  const installIdle = installPhase === 'idle' || installPhase === 'error'
 
   useEffect(() => {
     let cancelled = false
@@ -778,12 +783,12 @@ export function ComfyUISettings() {
         {/* GH #98: a from-source install whose Python env broke (shared system
             Python, dead torch) needs a rebuild, not a re-install — pip reports
             broken packages as already satisfied. Rebuilds ComfyUI/venv. */}
-        {status?.found && !status?.running && installPhase === 'idle' && (
+        {status?.found && !status?.running && installIdle && (
           <button onClick={handleRepair} title="Rebuild the Python environment in an isolated venv (~2 GB). Models, outputs and custom nodes are left alone." className="px-2 py-1 rounded text-[0.6rem] bg-amber-500/10 text-amber-400 hover:bg-amber-500/20 transition-colors">
             Repair environment
           </button>
         )}
-        {(!status?.found || status?.complete === false) && installPhase === 'idle' && (
+        {(!status?.found || status?.complete === false) && installIdle && (
           <button
             onClick={() => {
               // andy_38747 (Discord): let the Path field double as the install
@@ -798,7 +803,7 @@ export function ComfyUISettings() {
             {status?.complete === false ? 'Re-install ComfyUI' : 'Install ComfyUI'}
           </button>
         )}
-        {status?.found && status?.complete !== false && installPhase === 'idle' && (
+        {status?.found && status?.complete !== false && installIdle && (
           // 2.5.8: the specialized local lanes (music / talking character /
           // motion) need node families that ship with current cores — this is
           // the one-click git pull + dependency refresh the lane errors point
@@ -832,6 +837,15 @@ export function ComfyUISettings() {
                       {installPhase === 'error' && 'Install failed'}
                     </>}
               </span>
+              {installPhase === 'error' && (
+                <button
+                  onClick={() => useComfyInstallStore.getState().reset()}
+                  title="Clear this message"
+                  className="ml-auto px-1.5 py-[1px] rounded border border-white/15 text-[0.55rem] text-gray-400 hover:text-gray-200 hover:bg-white/10 transition-colors"
+                >
+                  Dismiss
+                </button>
+              )}
               {(installPhase === 'comfyui' || installPhase === 'repair') && (
                 <button
                   onClick={handleCancelInstall}
