@@ -10,7 +10,9 @@
  * and CivitAI answered with a bare 400 nobody could act on.
  *
  * Masked on purpose: this is a credential, and a settings page is a screen
- * people share in support threads.
+ * people share in support threads. The value itself goes into the OS vault
+ * where there is one (workflowStore.hydrateCivitaiApiKey), the same place the
+ * provider keys and the HuggingFace token live.
  */
 import { useEffect, useState } from 'react'
 import { KeyRound, Check } from 'lucide-react'
@@ -43,8 +45,9 @@ export function CivitaiApiKeySetting() {
       <div className="text-[0.6rem] text-gray-500 leading-relaxed">
         Used for the CivitAI search on the Models page and for the downloads it starts. Most CivitAI
         downloads are refused without a key, which is the HTTP 400 or 401 you see on a download that
-        never begins. Create one on your CivitAI account page under API Keys. It is stored on this
-        machine and sent to CivitAI only.
+        never begins. Create one on your CivitAI account page under API Keys. It goes into your
+        system credential store where the OS has one, stays on this machine, and is sent to CivitAI
+        only.
       </div>
       <div className="flex items-center gap-2">
         <input

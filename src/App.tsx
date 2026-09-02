@@ -22,6 +22,13 @@ function App() {
         const stored = await secretGet(HF_TOKEN_ACCOUNT).catch(() => null)
         if (stored) await applyHfToken(stored).catch(() => {})
       })
+
+      // Same store of record for the CivitAI key, on every platform that has a
+      // vault. This also moves an existing plaintext key out of localStorage,
+      // once, on the first boot after the update.
+      import('./stores/workflowStore').then(({ hydrateCivitaiApiKey }) => {
+        hydrateCivitaiApiKey().catch(() => {})
+      })
     }
 
     // Probe local Whisper (STT) once at boot and push the result into the voice

@@ -20,6 +20,11 @@ vi.mock('../../../api/backend', () => ({
   backendCall: vi.fn(),
   isTauri: () => true,
   isMacOS: () => false,
+  // The store reaches for the OS vault; no vault in a test process, and the
+  // vault path itself is proven in stores/__tests__/civitai-key-keychain.
+  secretGet: vi.fn().mockRejectedValue(new Error('no keychain here')),
+  secretSet: vi.fn(),
+  secretDelete: vi.fn(),
 }))
 
 import { CivitaiApiKeySetting, CIVITAI_KEY_PAGE } from '../CivitaiApiKeySetting'
@@ -82,10 +87,13 @@ describe('the field exists and writes to the store', () => {
     expect(screen.queryByText('Remove')).toBeNull()
   })
 
-  it('explains in English why the key matters', () => {
+  it('explains in English why the key matters, and where it is kept', () => {
     show()
     const text = document.body.textContent ?? ''
     expect(text).toMatch(/Most CivitAI downloads are refused without a key/)
     expect(text).toMatch(/HTTP 400 or 401/)
+    // Where it goes is part of the answer: it is a credential, and it is not
+    // sitting in plain text any more.
+    expect(text).toMatch(/system credential store/)
   })
 })
