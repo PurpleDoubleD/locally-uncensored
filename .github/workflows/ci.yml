@@ -120,6 +120,25 @@ jobs:
           esac
           ls -la src-tauri/bin/
 
+      # tauri-build also resolves bundle.resources, and ../dist only exists
+      # after a frontend build. This job runs no npm at all, so build.rs bailed
+      # with "resource path `../dist` doesn't exist" before it ever reached the
+      # crate. A placeholder is enough: nothing here loads the bundle, it only
+      # has to be a directory that exists.
+      - name: Stub the frontend bundle for build.rs
+        shell: bash
+        run: |
+          mkdir -p dist
+          printf '<!doctype html><title>ci placeholder</title>' > dist/index.html
+
       - name: Cargo check
         working-directory: src-tauri
         run: cargo check
+
+      # The Rust suite never ran in CI. The guard that keeps the bundled
+      # sidecar off a path Debian owns (GitHub #120) is a Rust test, so it
+      # could have gone red for a release without anyone noticing. It is a
+      # single binary target, so `--bin` is the whole suite.
+      - name: Cargo test
+        working-directory: src-tauri
+        run: cargo test --bin locally-uncensored

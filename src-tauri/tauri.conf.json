@@ -87,14 +87,18 @@
         "depends": [
           "libwebkit2gtk-4.1-0",
           "libgtk-3-0",
-          "libayatana-appindicator3-1"
+          "libayatana-appindicator3-1",
+          "libvulkan1",
+          "libgomp1"
         ]
       },
       "rpm": {
         "depends": [
           "webkit2gtk4.1",
           "gtk3",
-          "libappindicator-gtk3"
+          "libappindicator-gtk3",
+          "libvulkan.so.1()(64bit)",
+          "libgomp.so.1()(64bit)"
         ]
       }
     }

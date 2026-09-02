@@ -715,8 +715,81 @@ fn wait_for_health_or_exit(state: &AppState, port: u16, timeout: Duration) -> He
     HealthWait::TimedOut
 }
 
+/// The shared object the dynamic loader could not find, if that is why the
+/// sidecar never got as far as its own logging.
+///
+/// The Linux sidecar is not static: the ELF in the shipped deb carries
+/// `DT_NEEDED libvulkan.so.1` and `DT_NEEDED libgomp.so.1`. On a machine
+/// without them the process is spawned, ld.so refuses it, and the only thing
+/// on stderr is one line of the form
+///
+///   lu-llama-server: error while loading shared libraries: libvulkan.so.1:
+///   cannot open shared object file: No such file or directory
+///
+/// That line has to be read BEFORE `stderr_blames_the_gpu`, which matches on
+/// the substring "vulkan" and would otherwise send a user whose loader is
+/// short one package off to set GPU Layers to 0, a setting that cannot help
+/// a binary that never started.
+fn stderr_names_a_missing_system_library(stderr: &str) -> Option<String> {
+    const MARKER: &str = "error while loading shared libraries:";
+    for line in stderr.lines() {
+        // to_ascii_lowercase keeps byte lengths, so the index maps back.
+        let lower = line.to_ascii_lowercase();
+        let Some(at) = lower.find(MARKER) else { continue };
+        let lib = line[at + MARKER.len()..].split(':').next().unwrap_or("").trim();
+        if !lib.is_empty() {
+            return Some(lib.to_string());
+        }
+    }
+    None
+}
+
+/// The command that installs a soname, for the two libraries the sidecar
+/// actually links against. Anything else returns `None` on purpose: a guessed
+/// package name sends the user to a package that may not exist.
+fn install_commands_for(lib: &str) -> Option<(&'static str, &'static str)> {
+    // (Debian and Ubuntu package, Fedora package). Other RPM distributions
+    // name these differently, which is why the sentence below points them at
+    // the library instead of at a name.
+    match lib {
+        "libvulkan.so.1" => Some(("libvulkan1", "vulkan-loader")),
+        "libgomp.so.1" => Some(("libgomp1", "libgomp")),
+        _ => None,
+    }
+}
+
+/// What to tell a user whose loader is short one library.
+///
+/// `on_linux` is passed in rather than read from `cfg!` inside so both
+/// branches are testable on every platform. On anything but Linux the apt and
+/// dnf lines would be noise: the wording this is triggered by is ld.so's, and
+/// macOS dyld and the Windows loader say something else entirely.
+///
+/// The last sentence only promises the deb and the rpm. The AppImage carries
+/// no dependencies at all, and libvulkan.so.1 is on the AppImage exclude list
+/// by design (the loader has to come from the host so it can see the host's
+/// ICDs), so "reinstall and it comes along" would be a lie there.
+pub(crate) fn missing_library_hint(lib: &str, on_linux: bool) -> String {
+    let head = format!(
+        " A system library the built-in engine needs is missing on this machine: {lib}."
+    );
+    if !on_linux {
+        return format!("{head} Install the package that provides it, then try again.");
+    }
+    match install_commands_for(lib) {
+        Some((deb, rpm)) => format!(
+            "{head} Debian and Ubuntu: sudo apt install {deb}. Fedora: sudo dnf install {rpm}. On other distributions, install the package that provides {lib}. If you installed LU from the .deb or the .rpm, reinstalling also pulls it in."
+        ),
+        None => format!(
+            "{head} Install the package that provides {lib} with your package manager, then try again."
+        ),
+    }
+}
+
 /// Markers in llama-server's stderr that point at the GPU rather than at the
-/// model file or the app. Lower-cased input.
+/// model file or the app. Lower-cased input. Read only after
+/// `stderr_names_a_missing_system_library`: "libvulkan.so.1" contains
+/// "vulkan" and is a packaging problem, not a graphics-card problem.
 fn stderr_blames_the_gpu(stderr: &str) -> bool {
     const MARKERS: &[&str] = &[
         "cuda",
@@ -806,7 +879,14 @@ pub(crate) fn start_failure_message(failure: &StartFailure, port: u16, budget: D
         format!(
             "Port {port} answers health checks, but the engine this app just started exited immediately. Another llama-server (likely left over from a previous session or crash) is occupying the port. Quit that process or reboot, then try again."
         )
-    } else if failure.died && stderr_blames_the_gpu(&failure.stderr) && !stderr_blames_the_port(&failure.stderr) {
+    } else if failure.died
+        && stderr_names_a_missing_system_library(&failure.stderr).is_none()
+        && stderr_blames_the_gpu(&failure.stderr)
+        && !stderr_blames_the_port(&failure.stderr)
+    {
+        // A missing system library is asked before the card: the loader line
+        // "error while loading shared libraries: libvulkan.so.1" carries the
+        // word vulkan, and GPU Layers 0 does not install a library.
         // The graphics card is asked BEFORE the port, because the port branch
         // used to swallow a CUDA out-of-memory whose allocation happened to
         // contain 10048, and the GPU-Layers way out is the one setting in this
@@ -820,10 +900,12 @@ pub(crate) fn start_failure_message(failure: &StartFailure, port: u16, budget: D
             "The built-in engine could not open port {port}. Another program holds it, or the port sits in a range this system has reserved. The app already tried the next free ports and got the same answer. Close that program or reboot, then try again."
         )
     } else if failure.died {
-        let hint = if stderr_blames_the_model(&failure.stderr) {
-            " The engine refused the model file. Open Models, Discover and install a different quant."
+        let hint = if let Some(lib) = stderr_names_a_missing_system_library(&failure.stderr) {
+            missing_library_hint(&lib, cfg!(target_os = "linux"))
+        } else if stderr_blames_the_model(&failure.stderr) {
+            " The engine refused the model file. Open Models, Discover and install a different quant.".to_string()
         } else {
-            " Reinstall Locally Uncensored if this keeps happening, or pick a different backend in Settings, AI Backends."
+            " Reinstall Locally Uncensored if this keeps happening, or pick a different backend in Settings, AI Backends.".to_string()
         };
         format!("The built-in engine started and exited again before it could serve on port {port}. It was tried twice.{hint}")
     } else {
@@ -836,6 +918,28 @@ pub(crate) fn start_failure_message(failure: &StartFailure, port: u16, budget: D
         head
     } else {
         format!("{head}\n\n{}", failure.stderr)
+    }
+}
+
+/// The message the embeddings server hands back when it never became healthy.
+///
+/// The embeddings server is a second run of the SAME sidecar, so the missing
+/// library that kills the chat engine kills this one too. It builds its
+/// message itself and never went through `start_failure_message`, so
+/// Document Chat used to answer a missing libvulkan.so.1 with a raw stderr
+/// tail and no way out. It gets the same sentence now. The rest of
+/// `start_failure_message` stays out of here on purpose: this path has
+/// already refused a stranger on the port above and does not retry, so the
+/// port and retry wording would not be true.
+pub(crate) fn embed_start_failure_message(timeout_error: &str, stderr_tail: &str) -> String {
+    let hint = stderr_names_a_missing_system_library(stderr_tail)
+        .map(|lib| missing_library_hint(&lib, cfg!(target_os = "linux")))
+        .unwrap_or_default();
+    let head = format!("{timeout_error}{hint}");
+    if stderr_tail.is_empty() {
+        head
+    } else {
+        format!("{head}\n\n{stderr_tail}")
     }
 }
 
@@ -1685,7 +1789,7 @@ fn start_bundled_embed_blocking(
             .map(|(buf, _)| tail_lines(&super::shell::captured_text(&buf), 12))
             .unwrap_or_default();
         stop_embed_locked(state);
-        return Err(if why.is_empty() { e } else { format!("{e}\n\n{why}") });
+        return Err(embed_start_failure_message(&e, &why));
     }
 
     // Same stranger-on-the-port guard as the chat engine: a healthy probe is
@@ -2103,14 +2207,43 @@ mod tests {
             names.contains(&stem),
             "the config bundles {names:?} but the app looks for {stem}",
         );
-        // Negative control: the four binaries Debian's llama.cpp-tools puts
-        // in /usr/bin. None of them may be a name we bundle.
-        for owned in ["llama-server", "llama-cli", "llama-bench", "llama-quantize"] {
+        // The rule is positive, not a list of four forbidden llama names:
+        // every SIDECAR the bundler drops into /usr/bin carries our prefix,
+        // so the NEXT one cannot walk into #120 either. It is a rule about
+        // externalBin only. The main binary lands in /usr/bin too, as
+        // locally-uncensored without the prefix, and that name is the deb
+        // package's own, so nothing else can claim it. Same rule as
+        // src/lib/__tests__/linux-package-owns-its-paths.test.ts, which is
+        // the copy CI actually runs.
+        fn is_ours(name: &str) -> bool {
+            let stem = name.strip_suffix(".exe").unwrap_or(name);
+            stem.strip_prefix("lu-").is_some_and(|rest| !rest.is_empty())
+        }
+        for bundled in &names {
             assert!(
-                !names.contains(&owned),
-                "{owned} is owned by llama.cpp-tools in /usr/bin, dpkg would refuse the install",
+                is_ours(bundled),
+                "{bundled} would land in /usr/bin under a name we do not own",
             );
         }
+        // Negative control: binaries a distribution package already puts in
+        // /usr/bin. None of them may be a name we bundle, and none of them
+        // passes the rule above.
+        for owned in [
+            "llama-server",
+            "llama-cli",
+            "llama-bench",
+            "llama-quantize",
+            "llama-embedding",
+            "ffmpeg",
+        ] {
+            assert!(
+                !names.contains(&owned),
+                "{owned} is owned by a distribution package in /usr/bin, dpkg would refuse the install",
+            );
+            assert!(!is_ours(owned), "the rule has to reject {owned}");
+        }
+        assert!(is_ours("lu-llama-server") && is_ours("lu-llama-server.exe"));
+        assert!(!is_ours("lu-"), "a bare prefix is not a name");
     }
 
     #[test]
@@ -2524,6 +2657,112 @@ mod tests {
         let msg = start_failure_message(&f, 8127, Duration::from_secs(220));
         assert!(msg.contains("did not become healthy on port 8127 within 220s"), "{msg}");
         assert!(!msg.contains("exited"), "{msg}");
+    }
+
+    #[test]
+    fn a_dead_start_names_the_missing_library_instead_of_the_graphics_card() {
+        // The Linux deb shipped a sidecar with DT_NEEDED libvulkan.so.1 and
+        // DT_NEEDED libgomp.so.1 while its Depends named neither, so on a box
+        // without those packages this is the ONLY thing the engine ever says.
+        // "libvulkan.so.1" contains "vulkan", so before the loader line was
+        // read first the user was told to set GPU Layers to 0, which cannot
+        // help a binary the loader refused to start.
+        let f = StartFailure {
+            died: true,
+            port_taken: false,
+            stderr: "lu-llama-server: error while loading shared libraries: libvulkan.so.1: cannot open shared object file: No such file or directory".into(),
+        };
+        let msg = start_failure_message(&f, 8127, Duration::from_secs(60));
+        assert!(msg.contains("libvulkan.so.1"), "{msg}");
+        assert!(!msg.contains("GPU Layers"), "{msg}");
+        // The engine's own last words still ride along for a bug report.
+        assert!(msg.contains("cannot open shared object file"), "{msg}");
+    }
+
+    #[test]
+    fn the_install_advice_fits_the_library_and_never_guesses_a_package_name() {
+        // Both sonames the shipped sidecar carries get a real command.
+        let vulkan = missing_library_hint("libvulkan.so.1", true);
+        assert!(vulkan.contains("sudo apt install libvulkan1"), "{vulkan}");
+        assert!(vulkan.contains("sudo dnf install vulkan-loader"), "{vulkan}");
+        let gomp = missing_library_hint("libgomp.so.1", true);
+        assert!(gomp.contains("sudo apt install libgomp1"), "{gomp}");
+        assert!(gomp.contains("sudo dnf install libgomp"), "{gomp}");
+        // openSUSE and Mageia call these something else, so nobody is left
+        // without a way out: the library is named as well as the packages.
+        assert!(vulkan.contains("other distributions"), "{vulkan}");
+        // The promise is scoped to the two packages that actually carry
+        // dependencies. The AppImage has none, and it excludes the Vulkan
+        // loader on purpose, so it must not be swept into the sentence.
+        assert!(vulkan.contains("from the .deb or the .rpm"), "{vulkan}");
+        assert!(!vulkan.contains("The current Linux package"), "{vulkan}");
+
+        // Negative control: an unknown soname gets no command at all, because
+        // a guessed package name is worse than none.
+        let unknown = missing_library_hint("libfoobar.so.9", true);
+        assert!(unknown.contains("package that provides libfoobar.so.9"), "{unknown}");
+        assert!(!unknown.contains("apt install"), "{unknown}");
+        assert!(!unknown.contains("dnf install"), "{unknown}");
+
+        // Negative control: off Linux nobody is sent to apt or dnf. The
+        // trigger wording is ld.so's, macOS and Windows word it differently.
+        let elsewhere = missing_library_hint("libvulkan.so.1", false);
+        assert!(elsewhere.contains("libvulkan.so.1"), "{elsewhere}");
+        assert!(!elsewhere.contains("apt"), "{elsewhere}");
+        assert!(!elsewhere.contains("dnf"), "{elsewhere}");
+    }
+
+    #[test]
+    fn the_embeddings_server_gets_the_same_diagnosis_as_the_chat_engine() {
+        // Same sidecar, same loader, same missing package. Document Chat used
+        // to answer this with the raw stderr tail alone.
+        let msg = embed_start_failure_message(
+            "Built-in engine did not become healthy on port 8128 within 60s",
+            "lu-llama-server: error while loading shared libraries: libgomp.so.1: cannot open shared object file: No such file or directory",
+        );
+        assert!(msg.contains("libgomp.so.1"), "{msg}");
+        assert!(msg.contains("A system library the built-in engine needs is missing"), "{msg}");
+        // The engine's own last words survive for a bug report.
+        assert!(msg.contains("cannot open shared object file"), "{msg}");
+        // No port or retry wording from the chat path: this one refuses a
+        // stranger earlier and never retries, so that would not be true.
+        assert!(!msg.contains("tried twice"), "{msg}");
+
+        // Negative control: an ordinary slow load keeps the plain message and
+        // gains no packaging advice.
+        let slow = embed_start_failure_message(
+            "Built-in engine did not become healthy on port 8128 within 60s",
+            "load_tensors: loading model tensors",
+        );
+        assert!(!slow.contains("A system library"), "{slow}");
+        assert!(slow.contains("load_tensors"), "{slow}");
+        // And an empty tail leaves no dangling blank lines.
+        let bare = embed_start_failure_message("timed out", "");
+        assert_eq!(bare, "timed out");
+    }
+
+    #[test]
+    fn a_missing_library_is_read_off_the_loader_line_and_nowhere_else() {
+        assert_eq!(
+            stderr_names_a_missing_system_library(
+                "lu-llama-server: error while loading shared libraries: libgomp.so.1: cannot open shared object file: No such file or directory"
+            )
+            .as_deref(),
+            Some("libgomp.so.1"),
+        );
+        // Negative control: a real Vulkan fault from a loaded binary is NOT a
+        // packaging problem and has to keep the graphics-card hint.
+        assert_eq!(stderr_names_a_missing_system_library("ggml_vulkan: no devices found"), None);
+        let f = StartFailure {
+            died: true,
+            port_taken: false,
+            stderr: "ggml_vulkan: no devices found".into(),
+        };
+        let msg = start_failure_message(&f, 8127, Duration::from_secs(60));
+        assert!(msg.contains("GPU Layers to 0"), "{msg}");
+        assert!(!msg.contains("apt install"), "{msg}");
+        // And an empty stderr names no library at all.
+        assert_eq!(stderr_names_a_missing_system_library(""), None);
     }
 
     #[test]
