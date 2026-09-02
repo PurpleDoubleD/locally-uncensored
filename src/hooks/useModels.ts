@@ -15,6 +15,7 @@ import { log } from '../lib/logger'
 import { cloudModelRow } from '../lib/cloud-model-row'
 import { runEngineResume } from '../lib/engine-resume-policy'
 import { engineStartIsWorthRetrying } from '../lib/engine-start-failure'
+import { dropDuplicateLuEngineRows } from '../lib/lu-engine-rows'
 import { useModelStore } from '../stores/modelStore'
 import { useProviderStore } from '../stores/providerStore'
 import { useSettingsStore } from '../stores/settingsStore'
@@ -230,25 +231,34 @@ export function useModels() {
           allModels.push(...result.value.filter(m => !isEmbeddingModel(m.name)))
         }
       }
-      // Built-in engine model list (downloaded GGUFs). Guarded: a missing/older
-      // backend or non-Tauri dev context just yields no built-in models.
-      if (managedBuiltin) {
-        try {
-          const bundledRaw = await listBundledModels()
-          const bundled = bundledToAIModels(bundledRaw)
-          allModels.push(...bundled.filter(m => !isEmbeddingModel(m.name)))
-          if (!builtinResumeAttempted) {
-            builtinResumeAttempted = true
-            void resumeBuiltinEngines(bundledRaw)
-          }
-        } catch { /* engine command unavailable — non-critical */ }
-      } else if (!builtinResumeAttempted) {
-        // Non-builtin chat backend (LM Studio etc.): still resume the bundled
-        // embeddings server when its GGUF exists, so RAG survives a relaunch.
-        builtinResumeAttempted = true
-        try {
-          void resumeEmbedServer(await listBundledModels())
-        } catch { /* engine command unavailable — non-critical */ }
+      // LU Engine model list (the downloaded GGUFs and the user's own folder).
+      //
+      // A14 (2.6.8): asked whether or not the LU Engine is the active chat
+      // backend. It used to be asked only while it was, so on David's Mac with
+      // Ollama in front, the GGUF in his own model folder existed on disk,
+      // Model Storage promised in writing that the folder is read, and the
+      // file appeared nowhere. The command answering at all IS the presence
+      // check for the engine: it is a Tauri command with no bridge route, so
+      // the web and remote-bridge builds, which have no sidecar to start,
+      // still get nothing and are unchanged.
+      let bundledRaw: BundledModel[] | null = null
+      try {
+        bundledRaw = await listBundledModels()
+      } catch { /* engine command unavailable — non-critical */ }
+      if (bundledRaw) {
+        const bundled = bundledToAIModels(bundledRaw).filter(m => !isEmbeddingModel(m.name))
+        // One file, one row: with the folder pointed at ~/.lmstudio/models,
+        // LM Studio lists the model over its own API and the folder walk finds
+        // the same file. The row that is already serving the chat wins.
+        allModels.push(...dropDuplicateLuEngineRows(bundled, allModels))
+        if (!builtinResumeAttempted) {
+          builtinResumeAttempted = true
+          // Unchanged in both directions: the chat engine is only resumed when
+          // it holds the slot, and the embeddings server is resumed when it
+          // does not, so RAG survives a relaunch under a foreign backend.
+          if (managedBuiltin) void resumeBuiltinEngines(bundledRaw)
+          else void resumeEmbedServer(bundledRaw)
+        }
       }
       const ollamaEnabled = useProviderStore.getState().providers.ollama.enabled
       const hasOllamaModels = allModels.some(m => m.provider === 'ollama')

@@ -18,6 +18,9 @@ import { lmStudioSlotUpdate, adoptionReplacesBuiltinEngine } from '../../lib/lms
 import { nextProbeDelayMs } from '../../lib/probe-backoff'
 import { noChatBackendEnabled } from '../../lib/provider-visibility'
 import { cloudTeaserModels } from '../../lib/cloud-teaser-models'
+import { splitLuEngineRows, LU_ENGINE_GROUP } from '../../lib/lu-engine-rows'
+import { isBuiltinEngineEntry, type InstalledModelLike } from '../../lib/lmstudio-match'
+import { ensureLuEngineIsChatProvider, LU_ENGINE_SWITCH_NOTE } from '../../api/lu-engine-switch'
 import type { AIModel } from '../../types/models'
 
 // ── Local-mode cloud discovery (2.5.8): an "LU Cloud" section at the list's
@@ -542,6 +545,10 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
   // inline "loading…" state on the row and blocks a second click.
   const [selectingLms, setSelectingLms] = useState<string | null>(null)
   const [selectError, setSelectError] = useState<string | null>(null)
+  // A14: the one line that says the pick moved the chat backend. Not an error,
+  // so it does not share the red banner: the switch is what the user asked for
+  // by pressing Use, he just has to be told it happened.
+  const [switchNote, setSwitchNote] = useState<string | null>(null)
   // VRAM load state for Ollama rows — parity with `lmsLoaded` above, so
   // every LOCAL model shows a clear on/off load toggle (not just LM Studio).
   // Sourced from /api/ps on dropdown open.
@@ -721,16 +728,25 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
       return
     }
 
-    // Built-in engine rows (ENG-4): swap the GGUF (await) BEFORE activating —
+    // LU Engine rows (ENG-4): swap the GGUF (await) BEFORE activating —
     // same contract as the LM Studio path above. A failed llama-server start
     // keeps the dropdown open and shows the real reason (Rust appends the
     // stderr tail) instead of activating a model that can't answer. Idempotent
     // when the model is already loaded (the Rust side compares argv + health).
-    if (isManagedBuiltinActive() && getProviderIdFromModel(model.name) === 'openai') {
+    //
+    // A14: the second half of the condition is the case where the LU Engine is
+    // listed but not in front. The rows are visible now on a machine where
+    // Ollama or LM Studio holds the chat, and a row you can see and cannot use
+    // would be worse than the old invisibility, so the pick takes the slot
+    // first and says so.
+    if ((isManagedBuiltinActive() && getProviderIdFromModel(model.name) === 'openai')
+        || isBuiltinEngineEntry(model as unknown as InstalledModelLike)) {
       if (selectingLms || togglingLms) return
       setSelectError(null)
+      setSwitchNote(null)
       setSelectingLms(id)
       try {
+        if (ensureLuEngineIsChatProvider()) setSwitchNote(LU_ENGINE_SWITCH_NOTE)
         const swapped = await activateBuiltinModel(model.name)
         if (swapped) {
           // Raw store set — the useModels wrapper would fire a second
@@ -791,6 +807,9 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
     return () => document.removeEventListener('mousedown', handler)
   }, [])
 
+  // Read reactively, not through isManagedBuiltinActive(): the grouping below
+  // has to redraw the moment a pick hands the slot to the engine.
+  const luEngineHoldsChat = useProviderStore((s) => s.providers.openai.enabled && s.providers.openai.managed === true)
   const activeModelObj = models.find((m) => m.name === activeModel)
   const activeDisplayName = activeModel
     ? (activeModelObj && 'displayName' in activeModelObj && activeModelObj.displayName) ||
@@ -811,7 +830,20 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
     ? allTextModels.filter((m) => m.name === activeModel || canUseTools({ name: m.name, supportsTools: m.supportsTools }))
     : allTextModels
   const hiddenForCode = allTextModels.length - textModels.length
-  const groups = groupByFamily(textModels)
+  // A14: while another backend holds the chat, the LU Engine rows are set
+  // apart under their own heading instead of blending into the family groups,
+  // because picking one of them moves the chat backend and a heading is the
+  // cheapest place to say that before the click. While the LU Engine IS the
+  // chat backend nothing is set apart and the picker groups by family exactly
+  // as it always has: there is no consequence to warn about then, and lineage
+  // is what people pick by.
+  const luEngineSplit = luEngineHoldsChat ? { luEngine: [], rest: textModels } : splitLuEngineRows(textModels)
+  const groups: { family: string; models: AIModel[] }[] = [
+    ...(luEngineSplit.luEngine.length > 0
+      ? [{ family: LU_ENGINE_GROUP, models: luEngineSplit.luEngine }]
+      : []),
+    ...groupByFamily(luEngineSplit.rest),
+  ]
   const hasOllamaModels = textModels.some(m => ('provider' in m && m.provider === 'ollama') || !('provider' in m))
   textModelsEmptyRef.current = textModels.length === 0
 
@@ -904,6 +936,12 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
             {selectError && (
               <div className="mx-2 mt-2 px-2 py-1.5 rounded bg-red-500/10 border border-red-500/20 text-[0.6rem] text-red-600/90 dark:text-red-300/90 leading-snug">
                 {selectError}
+              </div>
+            )}
+
+            {switchNote && !selectError && (
+              <div data-testid="lu-engine-switch-note" className="mx-2 mt-2 px-2 py-1.5 rounded bg-white/5 border border-white/10 text-[0.6rem] text-gray-600 dark:text-gray-300 leading-snug">
+                {switchNote}
               </div>
             )}
 

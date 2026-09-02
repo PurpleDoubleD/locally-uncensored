@@ -1,0 +1,52 @@
+/**
+ * Handing the shared local slot to the LU Engine because the user picked one
+ * of its models.
+ *
+ * A14 (2.6.8), David: on a Mac with Ollama as the chat backend, a GGUF in the
+ * LU Engine folder is listed now, and Use on it has to do the whole job. Half
+ * a job would be worse than the old invisibility: a tile that starts an engine
+ * nothing routes to, or a picked model that answers from Ollama.
+ *
+ * "The LU Engine is not set up at all" is not a separate case. `ProviderId` is
+ * a fixed set of four slots and every OpenAI-protocol backend shares the
+ * `openai` one, so there is no such thing as adding a fifth entry: taking the
+ * slot IS setting the engine up. That is why this goes through the same
+ * `slotTakeoverUpdate` the provider card uses, which also leaves the backend
+ * it displaces on a standby card with an Enable button, so the way back is the
+ * one the user already knows.
+ */
+
+import { useProviderStore } from '../stores/providerStore'
+import { PROVIDER_PRESETS } from './providers/types'
+import { slotTakeoverUpdate } from '../lib/openai-slot-handover'
+import { LU_ENGINE_NAME } from '../lib/engine-name'
+
+/** What the user is told when the pick moved his chat backend. */
+export const LU_ENGINE_SWITCH_NOTE = 'Switched your chat provider to the LU Engine for this model.'
+
+/** The shipped address of the engine. The real port is written back by
+ *  `syncBuiltinEnginePort` as soon as it starts, exactly as it is for a
+ *  takeover from the provider card. */
+const FALLBACK_BASE_URL = 'http://127.0.0.1:8127/v1'
+
+/**
+ * Make the LU Engine the backend of the shared local slot.
+ *
+ * Returns true when it was NOT already, which is precisely when the user has
+ * to be told. An engine that already holds the slot is left completely alone:
+ * writing the same config again would restart the standby bookkeeping and
+ * could drop a card that is still owed.
+ */
+export function ensureLuEngineIsChatProvider(): boolean {
+  const { providers, setProviderConfig } = useProviderStore.getState()
+  const slot = providers.openai
+  if (slot.enabled && slot.managed === true) return false
+  const preset = PROVIDER_PRESETS.find((p) => p.id === 'builtin')
+  setProviderConfig('openai', slotTakeoverUpdate(slot, {
+    name: LU_ENGINE_NAME,
+    baseUrl: preset?.baseUrl || FALLBACK_BASE_URL,
+    isLocal: true,
+    managed: true,
+  }))
+  return true
+}

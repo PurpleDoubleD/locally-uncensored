@@ -28,6 +28,7 @@ import { BUILTIN_BACKEND_ID } from '../../lib/onboarding-backend'
 import type { InstalledModelLike } from '../../lib/lmstudio-match'
 import { findInstalledForDiscoverModel } from '../../lib/discover-installed'
 import { isBuiltinEngineEntry } from '../../lib/lmstudio-match'
+import { ensureLuEngineIsChatProvider, LU_ENGINE_SWITCH_NOTE } from '../../api/lu-engine-switch'
 import { resolveTextDownloadTarget } from '../../lib/text-download-target'
 import { hfUrlToOllamaRef, hfUrlToLmStudioSubdir, parseHfUrl, extractGgufQuant, isShardedOrIncompatibleGguf } from '../../lib/hf-to-provider'
 import { GlassCard } from '../ui/GlassCard'
@@ -240,9 +241,16 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
     const name = entry?.name
     if (!name || usingModel) return
     setInstallError(null)
+    setSwitchNote(null)
     setUsingModel(name)
     try {
       if (isBuiltinEngineEntry(entry)) {
+        // A14: the LU Engine's GGUFs are listed even while Ollama or LM Studio
+        // holds the chat, so Use has to hand the slot over first. It has to be
+        // FIRST: diagnoseBuiltinEngine answers nothing at all for a slot that
+        // is not ours, so the old order would repair nothing and then activate
+        // a model no request routes to.
+        if (ensureLuEngineIsChatProvider()) setSwitchNote(LU_ENGINE_SWITCH_NOTE)
         const diagnosis = await diagnoseBuiltinEngine({ repair: true, preferModel: name })
         if (!diagnosis.ok && diagnosis.reason) setInstallError(diagnosis.reason)
       }
@@ -257,6 +265,8 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
 
   const [installingBundle, setInstallingBundle] = useState<string | null>(null)
   const [installError, setInstallError] = useState<string | null>(null)
+  // A14: the pick moved the chat backend. Not an error, so its own quiet line.
+  const [switchNote, setSwitchNote] = useState<string | null>(null)
   // Confirmation gate for multi-part (sharded) downloads — these sets routinely
   // run hundreds of GB across many files, so we never start them silently.
   const [confirmDownload, setConfirmDownload] = useState<{ name: string; files: HfGgufFile[]; targetDir: string; totalGB: number; note?: string } | null>(null)
@@ -754,6 +764,16 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
               {tier.desc && <span className={`text-[9px] ml-1 ${vramTier === tier.key ? 'text-gray-600 dark:text-gray-400' : 'text-gray-400 dark:text-gray-500'}`}>{tier.desc}</span>}
             </button>
           ))}
+        </div>
+      )}
+
+      {/* A14: the pick took the chat backend with it, and says so. */}
+      {switchNote && (
+        <div data-testid="lu-engine-switch-note" className="flex items-center gap-2 p-3 rounded-lg bg-white/5 border border-white/10 text-gray-600 dark:text-gray-300 text-sm">
+          <span className="flex-1">{switchNote}</span>
+          <button onClick={() => setSwitchNote(null)} className="text-gray-500 hover:text-gray-300 shrink-0" aria-label="Dismiss">
+            <X size={14} />
+          </button>
         </div>
       )}
 
