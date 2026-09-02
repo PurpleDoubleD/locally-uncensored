@@ -13,6 +13,7 @@ import {
 import { parseNDJSONStream } from '../api/stream'
 import { log } from '../lib/logger'
 import { cloudModelRow } from '../lib/cloud-model-row'
+import { RESUME_ATTEMPTS, resumeBackoffMs } from '../lib/engine-resume-policy'
 import { useModelStore } from '../stores/modelStore'
 import { useProviderStore } from '../stores/providerStore'
 import { useSettingsStore } from '../stores/settingsStore'
@@ -34,18 +35,39 @@ import type { PullProgress, AIModel, ModelCategory, ImageModel, VideoModel, Clou
 // starts a server that reports running:false.
 let builtinResumeAttempted = false
 
+// GH #118: the boot resume used to be a single shot, and a failure was
+// swallowed without a word. The one moment it runs is the worst moment to ask
+// a machine for a GPU: right after login, with the antivirus scanning the
+// fresh install and the graphics driver still settling. A start that loses
+// that race left the user with a dead 127.0.0.1 port and no second attempt
+// until they re-picked the model by hand. Bounded on purpose, because the
+// other failure (a model this box genuinely cannot load) must not turn into an
+// endless restart loop. The policy lives in lib/engine-resume-policy.
+const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
+
 async function resumeBuiltinEngines(bundled: BundledModel[]) {
-  try {
-    const status = await bundledEngineStatus()
-    const { activeModel } = useModelStore.getState()
-    if (
-      !status.running && activeModel &&
-      getProviderIdFromModel(activeModel) === 'openai' &&
-      bundled.some((m) => prefixModelName('openai', m.name) === activeModel)
-    ) {
-      await activateBuiltinModel(activeModel)
+  for (let attempt = 0; attempt < RESUME_ATTEMPTS; attempt++) {
+    try {
+      const status = await bundledEngineStatus()
+      if (status.running) break
+      const { activeModel } = useModelStore.getState()
+      if (
+        !activeModel ||
+        getProviderIdFromModel(activeModel) !== 'openai' ||
+        !bundled.some((m) => prefixModelName('openai', m.name) === activeModel)
+      ) {
+        break // nothing to resume, and no number of retries changes that
+      }
+      // False means the GGUF is gone from disk. Retrying cannot conjure it.
+      if (await activateBuiltinModel(activeModel)) break
+      break
+    } catch (err) {
+      log.warn('[useModels] built-in engine resume failed', { attempt: attempt + 1, err })
+      const delay = resumeBackoffMs(attempt)
+      if (delay === null) break
+      await wait(delay)
     }
-  } catch { /* engine unavailable — non-critical */ }
+  }
   await resumeEmbedServer(bundled)
 }
 
