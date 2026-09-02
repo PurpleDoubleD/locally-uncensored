@@ -23,11 +23,19 @@ export interface LmStudioModelDir {
  * "(auto-detect)" on its own answered the wrong question. The user is not
  * asking whether the app detects something, he is asking which folder is being
  * read while the field is empty, and the app knows that folder: it is row 0 of
- * the last listing, the app's own models dir. So the placeholder names it.
+ * the last listing, the app's own models dir.
+ *
+ * A14 review 4: it is named for what it IS, not as an "auto" anything. There
+ * is no detection going on and nothing is derived from the active provider;
+ * an empty field simply means LU uses the folder it owns. Saying "auto" there
+ * next to a paragraph about four folder levels invited the reading that the
+ * four levels apply to this folder, and they do not: the app folder is walked
+ * two levels deep (MAX_SCAN_DEPTH), the folder the user names four
+ * (MAX_CUSTOM_SCAN_DEPTH).
  */
 export function luEngineFolderPlaceholder(autoDir: string | null | undefined): string {
   const dir = (autoDir ?? '').trim()
-  return dir ? `(auto: ${dir})` : '(auto-detect)'
+  return dir ? `Leave empty and LU uses its own folder: ${dir}` : 'Leave empty and LU uses its own folder'
 }
 
 /** The role line under the LM Studio row. */

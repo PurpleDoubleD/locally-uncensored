@@ -289,10 +289,24 @@ export const useProviderStore = create<ProviderState>()(
         // are what the provider card and the standby card print, so both are
         // relabelled here. Only that exact name is touched, so a backend the
         // user named himself is left alone.
+        //
+        // This relabel MUST STAY WHILE OLD STORES EXIST. It is not a one-off
+        // migration that a version bump retires: `version` is still 1 and the
+        // blob is merged, not rewritten in place, so a machine that has not
+        // been opened since 2.6.7 arrives here with the old name on its very
+        // next launch, whenever that is. Deleting this puts "Built-in Engine"
+        // back on that user's provider card. The READ side (isLuEngineName)
+        // has to stay for the same reason, for rows recorded in old chats.
+        //
+        // Defensive on purpose: a hand-edited or truncated blob can carry a
+        // null entry, and a merge that throws takes the whole provider store
+        // down to defaults, which is every API key the user typed.
         for (const id of Object.keys(merged) as ProviderId[]) {
-          const cfg = renameLegacyEngine(merged[id])
-          const displaced = cfg.displaced ? renameLegacyEngine(cfg.displaced) : undefined
-          if (cfg !== merged[id] || displaced !== cfg.displaced) {
+          const raw = merged[id]
+          if (!raw || typeof raw !== 'object') continue
+          const cfg = renameLegacyEngine(raw)
+          const displaced = cfg.displaced ? renameLegacyEngine(cfg.displaced) : cfg.displaced
+          if (cfg !== raw || displaced !== cfg.displaced) {
             merged[id] = displaced ? { ...cfg, displaced } : cfg
           }
         }

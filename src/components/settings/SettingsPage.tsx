@@ -340,7 +340,7 @@ export function HfDownloadPathSetting() {
     <div className="space-y-2 py-1">
       <p className="text-[0.62rem] font-semibold text-gray-700 dark:text-gray-300">LU Engine folder</p>
       <div className="text-[0.6rem] text-gray-500 leading-relaxed">
-        LU downloads GGUFs here and reads every <code className="font-mono">.gguf</code> in it, up to four levels down. Models here run on the LU Engine.
+        LU downloads GGUFs here and reads every <code className="font-mono">.gguf</code> in a folder you set, up to four levels down. Models here run on the LU Engine. Leave it empty and LU uses its own folder instead, the one named below.
       </div>
       <div className="flex items-center gap-2">
         <input

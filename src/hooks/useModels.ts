@@ -241,6 +241,14 @@ export function useModels() {
       // check for the engine: it is a Tauri command with no bridge route, so
       // the web and remote-bridge builds, which have no sidecar to start,
       // still get nothing and are unchanged.
+      //
+      // A14 review 6: the once-per-session flag is raised BEFORE the call, not
+      // after a successful one. fetchModels runs from several mounted
+      // components and on every refresh event, so raising it afterwards meant
+      // a machine without a sidecar (web, remote bridge, a broken install)
+      // re-attempted the whole resume on every single refresh, forever.
+      const firstPassThisSession = !builtinResumeAttempted
+      builtinResumeAttempted = true
       let bundledRaw: BundledModel[] | null = null
       try {
         bundledRaw = await listBundledModels()
@@ -251,8 +259,7 @@ export function useModels() {
         // LM Studio lists the model over its own API and the folder walk finds
         // the same file. The row that is already serving the chat wins.
         allModels.push(...dropDuplicateLuEngineRows(bundled, allModels))
-        if (!builtinResumeAttempted) {
-          builtinResumeAttempted = true
+        if (firstPassThisSession) {
           // Unchanged in both directions: the chat engine is only resumed when
           // it holds the slot, and the embeddings server is resumed when it
           // does not, so RAG survives a relaunch under a foreign backend.

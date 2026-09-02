@@ -172,3 +172,45 @@ describe('a store written before the rename opens under the new name', () => {
     expect(store.getState().providers.openai.name).toBe('LU Engine')
   })
 })
+
+// ── A14 review 5: the merge must survive a damaged blob ─────────────────────
+
+describe('a broken lu-providers blob does not cost the user his keys', () => {
+  afterEach(() => { vi.unstubAllGlobals() })
+  beforeEach(() => { vi.resetModules() })
+
+  // A merge that throws takes the whole provider store down to defaults, and
+  // that is every API key the user ever typed. A null entry is what a
+  // hand-edited or truncated blob looks like.
+  it('steps over a null provider entry instead of throwing', async () => {
+    installLocalStorage({
+      'lu-providers': JSON.stringify({
+        version: 1,
+        state: {
+          providers: {
+            openai: null,
+            anthropic: { id: 'anthropic', name: 'Anthropic', enabled: true, baseUrl: 'https://api.anthropic.com', apiKey: 'sk-kept', isLocal: false },
+          },
+        },
+      }),
+    })
+    const store = await freshStore()
+    // The key on the healthy entry survived, which is the whole point.
+    expect(store.getState().providers.anthropic.apiKey).toBe('sk-kept')
+  })
+
+  it('and over a displaced memory that is not an object', async () => {
+    installLocalStorage({
+      'lu-providers': JSON.stringify({
+        version: 1,
+        state: {
+          providers: {
+            openai: { id: 'openai', name: 'Built-in Engine', enabled: true, baseUrl: 'http://127.0.0.1:8127/v1', apiKey: '', isLocal: true, managed: true, displaced: 'nonsense' },
+          },
+        },
+      }),
+    })
+    const store = await freshStore()
+    expect(store.getState().providers.openai.name).toBe('LU Engine')
+  })
+})

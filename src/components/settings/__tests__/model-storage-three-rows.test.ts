@@ -81,17 +81,29 @@ describe('row 1: the folder the user sets belongs to the LU Engine and says so',
     render(createElement(HfDownloadPathSetting))
     await settle()
     const field = screen.getByLabelText('LU Engine folder') as HTMLInputElement
-    expect(field.placeholder).toBe(`(auto: ${APP_DIR})`)
+    expect(field.placeholder).toBe(`Leave empty and LU uses its own folder: ${APP_DIR}`)
+  })
+
+  // A14 review 4: the two folders are walked to different depths, the app's
+  // own two levels and the one you name four, so the paragraph has to say
+  // which of them the four belong to. It said "reads every .gguf in it, up to
+  // four levels down" over a field whose placeholder named the app folder.
+  it('says the four levels belong to the folder you set', async () => {
+    render(createElement(HfDownloadPathSetting))
+    await settle()
+    expect(screen.getByText(/in a folder you set, up to four levels down/)).toBeTruthy()
+    expect(screen.getByText(/LU uses its own folder instead/)).toBeTruthy()
   })
 
   // NEGATIVE CONTROL: with no folder known there is nothing to name, and the
-  // placeholder must not print "(auto: )" at the user.
-  it('falls back to the old wording when the listing knows no folder', async () => {
+  // placeholder must not print a dangling colon at the user.
+  it('names no folder when the listing knows none', async () => {
     dirs = []
     render(createElement(HfDownloadPathSetting))
     await settle()
     const field = screen.getByLabelText('LU Engine folder') as HTMLInputElement
-    expect(field.placeholder).toBe('(auto-detect)')
+    expect(field.placeholder).toBe('Leave empty and LU uses its own folder')
+    expect(field.placeholder).not.toContain(':')
   })
 
   // NEGATIVE CONTROL: the sentences that moved to the other two rows are gone

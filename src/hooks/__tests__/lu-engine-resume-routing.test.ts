@@ -49,11 +49,12 @@ vi.mock('../../api/providers', async () => {
   const actual = await vi.importActual<typeof import('../../api/providers')>('../../api/providers')
   return { ...actual, getEnabledProviders: () => [] }
 })
+const listBundledModels = vi.fn(async () => [CHAT, EMBED])
 vi.mock('../../api/engine', async () => {
   const actual = await vi.importActual<typeof import('../../api/engine')>('../../api/engine')
   return {
     ...actual,
-    listBundledModels: vi.fn(async () => [CHAT, EMBED]),
+    listBundledModels: (...a: unknown[]) => listBundledModels(...(a as [])),
     isManagedBuiltinActive: () => managedBuiltin,
     bundledEngineStatus,
     bundledEmbedStatus,
@@ -62,18 +63,24 @@ vi.mock('../../api/engine', async () => {
   }
 })
 
-/** One fresh app session. */
+/** One fresh app session. Returns a way to refresh again in the SAME session. */
 async function bootAndRefresh() {
   vi.resetModules()
   const { useModels } = await import('../useModels')
   const { result } = renderHook(() => useModels())
-  await act(async () => { await result.current.fetchModels() })
-  // The resumes are fired without await on purpose, so the list is not held
-  // hostage by a cold engine start. Let those microtasks land.
-  await act(async () => { await new Promise((r) => setTimeout(r, 0)) })
+  const refresh = async () => {
+    await act(async () => { await result.current.fetchModels() })
+    // The resumes are fired without await on purpose, so the list is not held
+    // hostage by a cold engine start. Let those microtasks land.
+    await act(async () => { await new Promise((r) => setTimeout(r, 0)) })
+  }
+  await refresh()
+  return refresh
 }
 
 beforeEach(() => {
+  listBundledModels.mockReset()
+  listBundledModels.mockResolvedValue([CHAT, EMBED])
   bundledEngineStatus.mockClear()
   bundledEmbedStatus.mockClear()
   startBundledEmbed.mockClear()
@@ -95,5 +102,42 @@ describe('the boot resume goes to the right process', () => {
     await bootAndRefresh()
     expect(bundledEngineStatus).toHaveBeenCalled()
     expect(startBundledEmbed).toHaveBeenCalledWith(EMBED.path)
+  })
+})
+
+// ── A14 review 6: the boot resume is a BOOT resume ──────────────────────────
+
+describe('the once-per-session flag is raised on the attempt, not on the success', () => {
+  it('a machine with no sidecar does not re-attempt the resume on every refresh', async () => {
+    managedBuiltin = true
+    // No sidecar: the command has no route and throws, the way it does in the
+    // web and remote-bridge builds and on a broken install.
+    listBundledModels.mockRejectedValue(new Error('command list_bundled_models not found'))
+    const refresh = await bootAndRefresh()
+    expect(startBundledEmbed).not.toHaveBeenCalled()
+    expect(bundledEngineStatus).not.toHaveBeenCalled()
+
+    // fetchModels runs from several mounted components and on every refresh
+    // event. With the flag raised only after a SUCCESSFUL call, the engine
+    // that starts answering an hour into the session would get a boot resume
+    // an hour after boot, evicting Ollama's residents and dropping ComfyUI's
+    // VRAM cache for a start nobody asked for.
+    listBundledModels.mockResolvedValue([CHAT, EMBED])
+    await refresh()
+    expect(bundledEngineStatus, 'a boot resume an hour after boot').not.toHaveBeenCalled()
+    expect(startBundledEmbed).not.toHaveBeenCalled()
+  })
+
+  // NEGATIVE CONTROL: the boot resume must still happen at boot. A flag raised
+  // too eagerly would turn this whole mechanism off.
+  it('but the first pass of a working session still resumes', async () => {
+    managedBuiltin = true
+    const refresh = await bootAndRefresh()
+    expect(bundledEngineStatus).toHaveBeenCalled()
+    // ...and exactly once, however often the list is refreshed afterwards.
+    bundledEngineStatus.mockClear()
+    await refresh()
+    await refresh()
+    expect(bundledEngineStatus).not.toHaveBeenCalled()
   })
 })
