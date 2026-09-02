@@ -145,6 +145,47 @@ describe('a cold start does not strand the button (S1)', () => {
     await vi.waitFor(() => expect(state().getAttribute('data-lane')).toBe('bundled'))
   })
 
+  it('a lane that stays missing is asked TWICE, not eleven times (review 1)', async () => {
+    // The defect: the retry called the measurement, which scheduled another
+    // retry on another negative answer. One measurement became eleven over ten
+    // windows, and every cloud user without an embedding lane would have polled
+    // four backend calls every three seconds forever, for an answer that does
+    // not change on its own.
+    vi.useFakeTimers()
+    cloud()
+    probe.mockResolvedValue({ lane: 'none', endpoint: null })
+    render(createElement(Probe))
+    await vi.waitFor(() => expect(state().getAttribute('data-needs-setup')).toBe('true'))
+    expect(probe).toHaveBeenCalledTimes(1)
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(EMBED_LANE_RETRY_MS * 10 + 500)
+    })
+    expect(probe).toHaveBeenCalledTimes(2)
+  })
+
+  it('a refresh event earns one more look, and only one', async () => {
+    vi.useFakeTimers()
+    cloud()
+    probe.mockResolvedValue({ lane: 'none', endpoint: null })
+    render(createElement(Probe))
+    await vi.waitFor(() => expect(probe).toHaveBeenCalledTimes(1))
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(EMBED_LANE_RETRY_MS * 3)
+    })
+    expect(probe).toHaveBeenCalledTimes(2)
+
+    await act(async () => {
+      window.dispatchEvent(new CustomEvent('lu-models-refresh'))
+    })
+    await vi.waitFor(() => expect(probe).toHaveBeenCalledTimes(3))
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(EMBED_LANE_RETRY_MS * 5)
+    })
+    // The refresh bought exactly one retry, not a new poll.
+    expect(probe).toHaveBeenCalledTimes(4)
+  })
+
   it('does not keep re-asking once the answer is good', async () => {
     // Negative control on the retry: it exists for the boot race, not as a poll.
     vi.useFakeTimers()
@@ -156,5 +197,68 @@ describe('a cold start does not strand the button (S1)', () => {
       await vi.advanceTimersByTimeAsync(EMBED_LANE_RETRY_MS * 4)
     })
     expect(probe).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('nothing keeps running after the last consumer leaves (review 2)', () => {
+  it('unmounting cancels the pending retry', async () => {
+    vi.useFakeTimers()
+    cloud()
+    probe.mockResolvedValue({ lane: 'none', endpoint: null })
+    const view = render(createElement(Probe))
+    await vi.waitFor(() => expect(probe).toHaveBeenCalledTimes(1))
+
+    view.unmount()
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(EMBED_LANE_RETRY_MS * 3 + 500)
+    })
+    // Measured before the fix: one measurement became four after unmount.
+    expect(probe).toHaveBeenCalledTimes(1)
+  })
+
+  it('the refresh listener goes with it, so a stray event wakes nothing', async () => {
+    cloud()
+    probe.mockResolvedValue({ lane: 'bundled', endpoint: null })
+    const view = render(createElement(Probe))
+    await waitFor(() => expect(probe).toHaveBeenCalledTimes(1))
+
+    view.unmount()
+    await act(async () => {
+      window.dispatchEvent(new CustomEvent('lu-models-refresh'))
+    })
+    expect(probe).toHaveBeenCalledTimes(1)
+  })
+
+  it('switching from Cloud to Local stops the measuring for good', async () => {
+    vi.useFakeTimers()
+    cloud()
+    probe.mockResolvedValue({ lane: 'none', endpoint: null })
+    render(createElement(Probe))
+    await vi.waitFor(() => expect(probe).toHaveBeenCalledTimes(1))
+
+    await act(async () => {
+      useSettingsStore.setState({ settings: { ...DEFAULT_SETTINGS, appMode: 'local' } })
+    })
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(EMBED_LANE_RETRY_MS * 4)
+      window.dispatchEvent(new CustomEvent('lu-models-refresh'))
+    })
+    expect(probe).toHaveBeenCalledTimes(1)
+    // And the button is plain again, because local mode does not read a lane.
+    expect(state().getAttribute('data-needs-setup')).toBe('false')
+  })
+
+  it('a later mount still gets its own fresh look', async () => {
+    // Negative control on the teardown: it must stop the poll, not the feature.
+    vi.useFakeTimers()
+    cloud()
+    probe.mockResolvedValue({ lane: 'none', endpoint: null })
+    const first = render(createElement(Probe))
+    await vi.waitFor(() => expect(probe).toHaveBeenCalledTimes(1))
+    first.unmount()
+
+    probe.mockResolvedValue({ lane: 'bundled', endpoint: null })
+    render(createElement(Probe))
+    await vi.waitFor(() => expect(state().getAttribute('data-lane')).toBe('bundled'))
   })
 })

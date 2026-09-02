@@ -42,6 +42,19 @@ import { getOllamaBase, isOllamaLocal } from './backend'
  */
 export type EmbedLane = 'bundled' | 'ollama-local' | 'ollama-remote' | 'none'
 
+/**
+ * How long any UI-path probe may wait on Ollama.
+ *
+ * The base URL points wherever the user set it. A LAN box that is simply off
+ * does not refuse the connection, it swallows it, and `checkConnection` without
+ * a budget inherits the Rust proxy default of 300000 ms. That froze the Docs
+ * tooltip, the install button and the privacy paragraph for five minutes, the
+ * paragraph because it waits for a measured lane before it renders at all.
+ * Three seconds is generous for a reachable host on a LAN and short enough that
+ * an unreachable one is just an answer (review point 3).
+ */
+export const EMBED_PROBE_TIMEOUT_MS = 3000
+
 export interface EmbedLaneInfo {
   lane: EmbedLane
   /** The host the text would travel to, set only for `ollama-remote`. */
@@ -85,7 +98,7 @@ export async function embeddingLane(embeddingModel: string): Promise<EmbedLaneIn
   // The bundled lane is the only one rag.ts will use here, so a pulled Ollama
   // model is not an answer to this question.
   if (isManagedBuiltinActive()) return { lane: 'none', endpoint: null }
-  if (!(await checkConnection())) return { lane: 'none', endpoint: null }
+  if (!(await checkConnection(EMBED_PROBE_TIMEOUT_MS))) return { lane: 'none', endpoint: null }
   try {
     const models = await listModels()
     const has = models.some(

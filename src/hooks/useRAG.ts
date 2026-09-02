@@ -3,7 +3,7 @@ import { useShallow } from "zustand/react/shallow"
 import { useRAGStore } from "../stores/ragStore"
 import { indexDocument, retrieveContext } from "../api/rag"
 import { isManagedBuiltinActive } from "../api/engine"
-import { builtinEmbedReady, embeddingBackendReady } from "../api/embed-availability"
+import { builtinEmbedReady, embeddingBackendReady, EMBED_PROBE_TIMEOUT_MS } from "../api/embed-availability"
 import { installBundledEmbedModel } from "../api/embed-install"
 import { getModelContext, pullModelTauri, checkConnection } from "../api/ollama"
 import { useModelStore } from "../stores/modelStore"
@@ -129,7 +129,7 @@ export function useRAG(conversationId: string | null) {
     // had no working install path from this card. Ask whether Ollama is
     // actually reachable, and fall to the bundled GGUF when it is not, which is
     // the lane rag.ts would take anyway.
-    const ollamaReachable = isManagedBuiltinActive() ? false : await checkConnection()
+    const ollamaReachable = isManagedBuiltinActive() ? false : await checkConnection(EMBED_PROBE_TIMEOUT_MS)
     if (isManagedBuiltinActive() || !ollamaReachable) {
       try {
         await installBundledEmbedModel((completed, total) =>
@@ -196,7 +196,7 @@ export function useRAG(conversationId: string | null) {
           setEmbeddingInstallPrompt(true)
           return null
         }
-        const ollamaUp = await checkConnection()
+        const ollamaUp = await checkConnection(EMBED_PROBE_TIMEOUT_MS)
         if (!ollamaUp) {
           throw new Error(
             "No embedding backend is running. Start the built-in engine (or Ollama) and try again."

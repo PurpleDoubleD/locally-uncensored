@@ -206,6 +206,24 @@ describe('a retrieval that fails is said out loud, not swallowed (S4)', () => {
     expect(useRAGStore.getState().retrievalError).toBe(RETRIEVAL_FAILED_MESSAGE)
   })
 
+  it('switching Document Chat off clears the notice too', async () => {
+    // Nebenbefund from the review: it was only cleared inside the retrieval
+    // block, so a user who read the warning and switched RAG off kept a stale
+    // alarm over a composer that is no longer searching any documents.
+    const convId = seed([chunk(0, HIT)])
+    useRAGStore.getState().setRetrievalError(RETRIEVAL_FAILED_MESSAGE)
+    useRAGStore.getState().setRagEnabled(convId, false)
+    expect(useRAGStore.getState().retrievalError).toBeNull()
+  })
+
+  it('switching it back ON does not resurrect or invent a notice', async () => {
+    // Negative control on the same line: enabling must leave the field alone.
+    const convId = seed([chunk(0, HIT)])
+    useRAGStore.getState().setRetrievalError(RETRIEVAL_FAILED_MESSAGE)
+    useRAGStore.getState().setRagEnabled(convId, true)
+    expect(useRAGStore.getState().retrievalError).toBe(RETRIEVAL_FAILED_MESSAGE)
+  })
+
   it('a later good turn clears the notice', async () => {
     // Negative control: a sticky warning would be its own bug, telling the user
     // their documents are broken forever after one hiccup.

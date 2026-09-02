@@ -18,6 +18,7 @@ let bundled: { name: string; path: string }[] = []
 let ollamaUp = true
 let ollamaModels: { name: string }[] = []
 let base = 'http://localhost:11434'
+const connectionArgs: (number | undefined)[] = []
 
 vi.mock('../backend', () => ({
   backendCall: async (cmd: string) => {
@@ -36,7 +37,10 @@ vi.mock('../backend', () => ({
 }))
 
 vi.mock('../ollama', () => ({
-  checkConnection: async () => ollamaUp,
+  checkConnection: async (timeoutMs?: number) => {
+    connectionArgs.push(timeoutMs)
+    return ollamaUp
+  },
   listModels: async () => ollamaModels,
 }))
 
@@ -48,7 +52,12 @@ vi.mock('../../stores/providerStore', () => ({
   },
 }))
 
-import { embeddingLane, embeddingBackendReady, laneIsOnThisMachine } from '../embed-availability'
+import {
+  embeddingLane,
+  embeddingBackendReady,
+  laneIsOnThisMachine,
+  EMBED_PROBE_TIMEOUT_MS,
+} from '../embed-availability'
 
 beforeEach(() => {
   embedRunning = false
@@ -56,6 +65,7 @@ beforeEach(() => {
   ollamaUp = true
   ollamaModels = []
   base = 'http://localhost:11434'
+  connectionArgs.length = 0
 })
 
 describe('the probe reports WHERE the text would go, not just whether it can go', () => {
@@ -116,5 +126,33 @@ describe('the probe reports WHERE the text would go, not just whether it can go'
     expect(await embeddingBackendReady('nomic-embed-text')).toBe(true)
     ollamaModels = []
     expect(await embeddingBackendReady('nomic-embed-text')).toBe(false)
+  })
+})
+
+describe('the probe never hangs the UI on a dead host (review 3)', () => {
+  it('asks Ollama with a short budget instead of the proxy default', async () => {
+    // Without a budget the Rust proxy waits 300000 ms. A LAN box that is simply
+    // switched off does not refuse the connection, it swallows it, so the Docs
+    // tooltip, the install button and the privacy paragraph all froze for five
+    // minutes. The paragraph froze hardest: it does not render until a lane is
+    // measured at all.
+    base = 'http://192.168.0.54:11434'
+    ollamaModels = [{ name: 'nomic-embed-text' }]
+    await embeddingLane('nomic-embed-text')
+    expect(connectionArgs).toEqual([EMBED_PROBE_TIMEOUT_MS])
+    expect(EMBED_PROBE_TIMEOUT_MS).toBeLessThanOrEqual(3000)
+  })
+
+  it('a host that never answers is simply "no lane", not a five minute wait', async () => {
+    ollamaUp = false
+    expect((await embeddingLane('nomic-embed-text')).lane).toBe('none')
+  })
+
+  it('the bundled lane short-circuits and never asks Ollama at all', async () => {
+    // Negative control: the timeout matters only on the path that uses it, and
+    // the everyday case must not pay for a network probe it does not need.
+    embedRunning = true
+    await embeddingLane('nomic-embed-text')
+    expect(connectionArgs).toEqual([])
   })
 })

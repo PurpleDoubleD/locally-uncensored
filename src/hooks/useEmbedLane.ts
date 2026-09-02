@@ -14,8 +14,18 @@
  *
  *  - `lu-models-refresh`, which is what a finished embed install already fires
  *    (api/embed-install.ts) and what useModels listens to for the same reason.
- *  - one delayed retry after a negative answer, because the boot race resolves
+ *  - ONE delayed retry after a negative answer, because the boot race resolves
  *    in seconds and nobody should have to restart the app to see it.
+ *
+ * "One" is the load-bearing word, and the first cut got it wrong: the retry
+ * called measure(), which scheduled another retry on another negative answer, so
+ * one measurement became eleven over ten windows. Every cloud user without an
+ * embedding lane would have polled bundled_embed_status, list_bundled_models,
+ * checkConnection and listModels every three seconds, forever, for an answer
+ * that was not going to change on its own. The arm below fires once per mount
+ * and once per refresh event, and the whole thing is torn down when the last
+ * subscriber leaves, so switching from Cloud to Local does not carry a poll
+ * along with it (review points 1 and 2).
  */
 import { useEffect, useState } from 'react'
 import { useRAGStore } from '../stores/ragStore'
@@ -28,6 +38,9 @@ export const EMBED_LANE_RETRY_MS = 3000
 let current: EmbedLaneInfo | null = null
 let inflight: Promise<void> | null = null
 let retryTimer: ReturnType<typeof setTimeout> | null = null
+/** Spent for this mount / this refresh. Reset only where a new reason to look
+ *  again exists, never by the retry itself. */
+let retryUsed = false
 let listenerArmed = false
 const subscribers = new Set<(v: EmbedLaneInfo | null) => void>()
 
@@ -50,9 +63,12 @@ function measure(): Promise<void> {
       inflight = null
     }
     publish()
-    if (current?.lane === 'none' && retryTimer === null) {
+    if (current?.lane === 'none' && !retryUsed && retryTimer === null && subscribers.size > 0) {
+      retryUsed = true
       retryTimer = setTimeout(() => {
         retryTimer = null
+        // Nobody is looking any more: do not spend the round trip.
+        if (subscribers.size === 0) return
         void measure()
       }, EMBED_LANE_RETRY_MS)
     }
@@ -61,9 +77,23 @@ function measure(): Promise<void> {
 }
 
 function onRefresh() {
+  // A real event happened, so one more look is earned.
+  retryUsed = false
   current = null
   publish()
   void measure()
+}
+
+/** Stop everything this module started. Called when the last subscriber goes,
+ *  which is also what a switch from Cloud to Local looks like from here. */
+function teardown() {
+  if (retryTimer) clearTimeout(retryTimer)
+  retryTimer = null
+  retryUsed = false
+  if (listenerArmed) {
+    window.removeEventListener('lu-models-refresh', onRefresh)
+    listenerArmed = false
+  }
 }
 
 /** Test seam: the cache is module state on purpose (one per app), so a test
@@ -71,13 +101,8 @@ function onRefresh() {
 export function __resetEmbedLaneForTests(): void {
   current = null
   inflight = null
-  if (retryTimer) clearTimeout(retryTimer)
-  retryTimer = null
   subscribers.clear()
-  if (listenerArmed) {
-    window.removeEventListener('lu-models-refresh', onRefresh)
-    listenerArmed = false
-  }
+  teardown()
 }
 
 /**
@@ -93,15 +118,23 @@ export function useEmbedLane(active: boolean): EmbedLaneInfo | null {
       setValue(null)
       return
     }
+    // A fresh mount is a fresh reason to look, so it gets its own retry.
+    const fresh = subscribers.size === 0
+    if (fresh) retryUsed = false
     subscribers.add(setValue)
     if (!listenerArmed) {
       listenerArmed = true
       window.addEventListener('lu-models-refresh', onRefresh)
     }
     setValue(current)
-    if (current === null) void measure()
+    // Never measured yet, or the cache holds a NO and this is a new mount: a
+    // user who left Cloud mode, installed an engine and came back must not read
+    // a stale refusal. A cached YES is kept; nothing about it goes stale in a
+    // way that hurts, and a real change fires lu-models-refresh anyway.
+    if (current === null || (fresh && current.lane === 'none')) void measure()
     return () => {
       subscribers.delete(setValue)
+      if (subscribers.size === 0) teardown()
     }
   }, [active])
 

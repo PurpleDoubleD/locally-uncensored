@@ -401,9 +401,20 @@ export async function unloadAllModels(): Promise<number> {
   return running.length
 }
 
-export async function checkConnection(): Promise<boolean> {
+/**
+ * Is Ollama answering.
+ *
+ * `timeoutMs` matters more than it looks. Without one the Rust proxy applies its
+ * own default of 300000 ms, and the base URL is user-configurable, so a LAN host
+ * that is switched off does not refuse the connection, it swallows it: the probe
+ * sits there for five minutes. Anything on a UI path has to pass a short budget
+ * (see EMBED_PROBE_TIMEOUT_MS). A timeout counts as "not reachable", which is
+ * the honest reading, because a backend that cannot answer in three seconds
+ * cannot serve an embedding request either.
+ */
+export async function checkConnection(timeoutMs?: number): Promise<boolean> {
   try {
-    await localFetch(ollamaUrl("/tags"))
+    await localFetch(ollamaUrl("/tags"), timeoutMs ? { timeoutMs } : undefined)
     return true
   } catch {
     return false

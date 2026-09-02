@@ -28,12 +28,17 @@ vi.mock('../../api/engine', () => ({
 vi.mock('../../api/embed-availability', () => ({
   builtinEmbedReady: async () => false,
   embeddingBackendReady: async () => false,
+  EMBED_PROBE_TIMEOUT_MS: 3000,
 }))
 vi.mock('../../api/embed-install', () => ({
   installBundledEmbedModel: (...a: any[]) => installBundled(...(a as [])),
 }))
+const connectionArgs: (number | undefined)[] = []
 vi.mock('../../api/ollama', () => ({
-  checkConnection: async () => ollamaUp,
+  checkConnection: async (timeoutMs?: number) => {
+    connectionArgs.push(timeoutMs)
+    return ollamaUp
+  },
   getModelContext: async () => 8192,
   pullModelTauri: (...a: any[]) => pullTauri(...(a as [])),
 }))
@@ -49,6 +54,7 @@ beforeEach(() => {
   ollamaUp = true
   installBundled.mockClear()
   pullTauri.mockClear()
+  connectionArgs.length = 0
 })
 
 async function install() {
@@ -74,6 +80,15 @@ describe('the install card reaches a real shop from wherever it was opened', () 
     expect(await install()).toBe(true)
     expect(installBundled).toHaveBeenCalledTimes(1)
     expect(pullTauri).not.toHaveBeenCalled()
+  })
+
+  it('the reachability question carries a short budget, not the 5 minute default', async () => {
+    // Review point 3: the install button sat on the same unbounded probe, so a
+    // dead LAN host froze the card for five minutes before it did anything.
+    managed = false
+    ollamaUp = true
+    await install()
+    expect(connectionArgs).toEqual([3000])
   })
 
   it('Ollama running: still `ollama pull`, because that is the lane rag.ts would use', async () => {

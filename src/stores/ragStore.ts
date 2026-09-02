@@ -155,6 +155,10 @@ export const useRAGStore = create<RAGState>()(
       setRagEnabled: (conversationId, enabled) =>
         set((state) => ({
           ragEnabled: { ...state.ragEnabled, [conversationId]: enabled },
+          // Switching Document Chat off answers the complaint. Leaving "your
+          // documents could not be searched" standing over a composer that is
+          // no longer searching documents is just a stale alarm.
+          retrievalError: enabled ? state.retrievalError : null,
         })),
 
       setEmbeddingModel: (model) => set({ embeddingModel: model }),
