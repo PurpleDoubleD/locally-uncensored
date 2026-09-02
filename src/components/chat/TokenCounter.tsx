@@ -67,7 +67,7 @@ export function TokenCounter() {
     : ctx.provider === 'ollama'
       ? 'Ollama num_ctx'
       : ctx.provider === 'builtin'
-        ? 'built-in engine loaded context'
+        ? 'LU Engine loaded context'
         : 'model context'
   const capped = ctx.sendWindow > 0 && ctx.contextWindow > ctx.sendWindow
   const capNote = capped

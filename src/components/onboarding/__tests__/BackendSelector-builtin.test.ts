@@ -31,8 +31,8 @@ describe('BackendSelector built-in engine awareness', () => {
     expect(src).toMatch(/providers\.openai\.managed\s*===\s*true/)
   })
 
-  it('relabels the dismiss action to keep the built-in engine', () => {
-    expect(src).toMatch(/Keep built-in engine/i)
+  it('relabels the dismiss action to keep the LU Engine', () => {
+    expect(src).toMatch(/Keep LU Engine/i)
   })
 
   it('still persists the opt-out and can enable a picked external backend', () => {

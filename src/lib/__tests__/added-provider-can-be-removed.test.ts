@@ -63,13 +63,13 @@ const JAN_IN_SLOT: HandoverSlot = {
 
 describe('THE FIX: a backend put into the local slot can be taken off again', () => {
   it('the measured state offers a Remove, and it names a way back', () => {
-    expect(standbyOccupant(JAN_IN_SLOT)?.name).toBe('Built-in Engine')
+    expect(standbyOccupant(JAN_IN_SLOT)?.name).toBe('LU Engine')
     expect(occupantIsRemovable(JAN_IN_SLOT)).toBe(true)
   })
 
   it('Remove puts the slot back exactly as it stood before the takeover', () => {
     const update = slotRemoveOccupantUpdate(JAN_IN_SLOT)!
-    expect(update.name).toBe('Built-in Engine')
+    expect(update.name).toBe('LU Engine')
     expect(update.baseUrl).toBe(BUILTIN.baseUrl)
     expect(update.managed).toBe(true)
     expect(update.isLocal).toBe(true)
@@ -95,7 +95,7 @@ describe('THE FIX: a backend put into the local slot can be taken off again', ()
     const after = { ...swapped, ...slotForgetStandbyUpdate(swapped)! } as HandoverSlot
     expect(standbyOccupant(after)).toBeNull()
     // and the slot itself was not touched
-    expect(after.name).toBe('Built-in Engine')
+    expect(after.name).toBe('LU Engine')
     expect(after.enabled).toBe(true)
   })
 
@@ -133,11 +133,11 @@ describe('NEGATIVE CONTROL: what must stay un-removable', () => {
 
   it('the R10 and R11 mechanics are unchanged by all of this', () => {
     // takeover still remembers
-    expect(slotTakeoverUpdate(SHIPPED, JAN).displaced?.name).toBe('Built-in Engine')
+    expect(slotTakeoverUpdate(SHIPPED, JAN).displaced?.name).toBe('LU Engine')
     // a slot that was already off is still not remembered as displaced
     expect(slotTakeoverUpdate({ ...SHIPPED, enabled: false }, JAN).displaced).toBeUndefined()
     // and handback still returns the swap patch
-    expect(slotHandbackUpdate(JAN_IN_SLOT)!.name).toBe('Built-in Engine')
+    expect(slotHandbackUpdate(JAN_IN_SLOT)!.name).toBe('LU Engine')
   })
 })
 

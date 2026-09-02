@@ -615,7 +615,7 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
         try {
           await startBundledEngine(`${targetDir}/${realName}`)
         } catch (e) {
-          setInstallError(`Model downloaded, but the built-in engine failed to start: ${e instanceof Error ? e.message : String(e)}`)
+          setInstallError(`Model downloaded, but the LU Engine failed to start: ${e instanceof Error ? e.message : String(e)}`)
         }
       }
       // Outside the built-in branch too: an LM Studio or openai-compat download

@@ -233,7 +233,7 @@ function LmStudioServerHint({ onStarted }: { onStarted: () => void }) {
       </button>
       {replacesBuiltinEngine && (
         <p className="text-[0.55rem] text-gray-500 dark:text-gray-400 mt-1 leading-snug">
-          This also makes LM Studio your local chat backend in place of the built-in engine. You can switch back under Settings, AI Backends, Providers.
+          This also makes LM Studio your local chat backend in place of the LU Engine. You can switch back under Settings, AI Backends, Providers.
         </p>
       )}
       {startError && (
@@ -741,7 +741,7 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
         }
         setOpen(false)
       } catch (e) {
-        setSelectError(`Couldn't start the built-in engine with "${displayModelName(model.name)}": ${e instanceof Error ? e.message : String(e)}`)
+        setSelectError(`Couldn't start the LU Engine with "${displayModelName(model.name)}": ${e instanceof Error ? e.message : String(e)}`)
       } finally {
         setSelectingLms(null)
       }
@@ -887,7 +887,7 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
                 letting an empty local section read as a bug (G20). */}
             {appMode === 'cloud' && (
               <div className="px-2.5 py-1.5 border-b border-black/5 dark:border-white/[0.06] text-[0.55rem] text-gray-500">
-                Cloud mode shows hosted models only. Switch the app to Local mode to use Ollama, LM Studio or the Built-in Engine.
+                Cloud mode shows hosted models only. Switch the app to Local mode to use Ollama, LM Studio or the LU Engine.
               </div>
             )}
 

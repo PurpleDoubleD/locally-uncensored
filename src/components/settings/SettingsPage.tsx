@@ -1560,7 +1560,7 @@ export function SettingsPage() {
           </Section>
 
           {builtinManaged && (
-            <Section title="Built-in Engine (expert)">
+            <Section title="LU Engine (expert)">
               <BuiltinEngineSettings />
             </Section>
           )}

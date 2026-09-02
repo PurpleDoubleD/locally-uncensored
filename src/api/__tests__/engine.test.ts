@@ -109,7 +109,7 @@ describe('bundledToAIModels', () => {
       model: 'qwen2.5-0.5b',
       type: 'text',
       provider: 'openai',
-      providerName: 'Built-in Engine',
+      providerName: 'LU Engine',
     })
     expect(models[1].name).toBe('openai::llama3')
   })

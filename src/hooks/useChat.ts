@@ -139,7 +139,7 @@ async function runGroupTurn(convId: string, model: string, allModels: string[], 
         useChatStore.getState().updateMessageContent(
           convId,
           assistantMessage.id,
-          `Loading ${toLoad} into the built-in engine for this turn...`,
+          `Loading ${toLoad} into the LU Engine for this turn...`,
         )
         await ensureBuiltinEngineAlive(model)
         // A stop during the load must not leave the loading line standing in

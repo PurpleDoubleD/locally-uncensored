@@ -93,7 +93,7 @@ describe('THE FIX: Disable on the slot holder says the backend is disabled', () 
     // and switching it back on clears the mark rather than dragging it along
     expect(back.disabledByUser).toBe(false)
     const reEnabled = { ...afterDisable, ...back } as HandoverSlot
-    expect(standbyOccupant(reEnabled)?.name).toBe('Built-in Engine')
+    expect(standbyOccupant(reEnabled)?.name).toBe('LU Engine')
     expect(standbyOccupant(reEnabled)?.disabledByUser).toBeUndefined()
   })
 })
@@ -104,7 +104,7 @@ describe('NEGATIVE CONTROL: everything R10, R11 and R13 settled', () => {
     // with no local backend at all.
     const patch = slotDisableOccupantUpdate(JAN_IN_SLOT)!
     const after = listWith({ ...JAN_IN_SLOT, ...patch } as HandoverSlot)
-    expect(after.openai.name).toBe('Built-in Engine')
+    expect(after.openai.name).toBe('LU Engine')
     expect(after.openai.managed).toBe(true)
     expect(after.openai.enabled).toBe(true)
     expect(noChatBackendEnabled(after, 'local')).toBe(false)
@@ -140,7 +140,7 @@ describe('NEGATIVE CONTROL: everything R10, R11 and R13 settled', () => {
   it('Add Provider still labels the backend it pushed out STANDBY', () => {
     const pane = read('src/components/settings/ProviderConfig.tsx')
     expect(pane).toMatch(/took over the local OpenAI compatible slot/)
-    expect(standbyOccupant(JAN_IN_SLOT)?.name).toBe('Built-in Engine')
+    expect(standbyOccupant(JAN_IN_SLOT)?.name).toBe('LU Engine')
     expect(standbyOccupant(JAN_IN_SLOT)?.disabledByUser).toBeUndefined()
   })
 

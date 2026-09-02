@@ -106,7 +106,7 @@ export function BackendSelector({ open, backends, onClose }: Props) {
             engine already works out of the box and stays active if skipped. */}
         {builtinActive && (
           <p className="text-[0.65rem] text-gray-500 text-center leading-relaxed">
-            You're already set up with the built-in engine. Switching is optional.
+            You're already set up with the LU Engine. Switching is optional.
           </p>
         )}
 
@@ -158,7 +158,7 @@ export function BackendSelector({ open, backends, onClose }: Props) {
             onClick={dismiss}
             className="px-4 py-1.5 rounded-lg text-[0.7rem] text-gray-400 hover:text-white hover:bg-white/10 transition-colors"
           >
-            {builtinActive ? 'Keep built-in engine' : 'Skip'}
+            {builtinActive ? 'Keep LU Engine' : 'Skip'}
           </button>
           <button
             onClick={handleConfirm}

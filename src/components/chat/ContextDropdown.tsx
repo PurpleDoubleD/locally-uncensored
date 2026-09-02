@@ -114,7 +114,7 @@ export function ContextDropdown() {
       <button
         onClick={() => setOpen((o) => !o)}
         disabled={busy}
-        title={`Context window: ${ctx.provider === 'lmstudio' ? "LM Studio's loaded context" : ctx.provider === 'builtin' ? "the built-in engine's loaded context" : 'Ollama num_ctx'}. Changing it reloads the model so it takes effect now.`}
+        title={`Context window: ${ctx.provider === 'lmstudio' ? "LM Studio's loaded context" : ctx.provider === 'builtin' ? "the LU Engine's loaded context" : 'Ollama num_ctx'}. Changing it reloads the model so it takes effect now.`}
         className="flex items-center gap-1 px-1.5 py-0.5 rounded border border-gray-200 dark:border-white/[0.06] hover:border-gray-400 dark:hover:border-white/15 text-gray-500 transition-colors text-[0.55rem] font-mono tabular-nums disabled:opacity-60"
       >
         {busy ? <Loader2 size={9} className="animate-spin" /> : null}

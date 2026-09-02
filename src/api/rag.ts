@@ -118,7 +118,7 @@ export async function generateEmbeddings(
     // of the missing part (measured on the Windows box, 2026-08-15).
     if (!(await bundledEmbedStatus().then((s) => s.running).catch(() => false))) {
       throw new Error(
-        "No embedding model is installed for the built-in engine. Open Document Chat and use the install card to download it (84 MB), then drop the file again."
+        "No embedding model is installed for the LU Engine. Open Document Chat and use the install card to download it (84 MB), then drop the file again."
       )
     }
     return embedViaBuiltin(texts, model)

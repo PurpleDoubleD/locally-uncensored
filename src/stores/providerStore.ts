@@ -10,6 +10,7 @@ import { persist } from 'zustand/middleware'
 import type { ProviderId, ProviderConfig } from '../api/providers/types'
 import { clearProviderCache } from '../api/providers/registry'
 import { onLocalSlotChanged } from '../lib/builtin-slot-eviction'
+import { LU_ENGINE_NAME, renameLegacyEngine } from '../lib/engine-name'
 import { secretGet, secretSet, secretDelete } from '../api/backend'
 import { CLOUD_BASE } from '../api/cloud/config'
 
@@ -71,7 +72,7 @@ const DEFAULT_PROVIDERS: Record<ProviderId, ProviderConfig> = {
   },
   openai: {
     id: 'openai',
-    name: 'Built-in Engine',
+    name: LU_ENGINE_NAME,
     enabled: true,
     baseUrl: 'http://127.0.0.1:8127/v1',
     apiKey: '',
@@ -281,10 +282,24 @@ export const useProviderStore = create<ProviderState>()(
       // hit an undefined config after an update.
       merge: (persisted: unknown, current: ProviderState): ProviderState => {
         const p = (persisted ?? {}) as Partial<ProviderState>
+        const merged = { ...DEFAULT_PROVIDERS, ...(p.providers ?? {}) }
+        // 2.6.8 (A14): every store written before the rename carries the label
+        // "Built-in Engine" on the openai slot, and a second copy of it in the
+        // `displaced` memory when another backend pushed the engine aside. Both
+        // are what the provider card and the standby card print, so both are
+        // relabelled here. Only that exact name is touched, so a backend the
+        // user named himself is left alone.
+        for (const id of Object.keys(merged) as ProviderId[]) {
+          const cfg = renameLegacyEngine(merged[id])
+          const displaced = cfg.displaced ? renameLegacyEngine(cfg.displaced) : undefined
+          if (cfg !== merged[id] || displaced !== cfg.displaced) {
+            merged[id] = displaced ? { ...cfg, displaced } : cfg
+          }
+        }
         return {
           ...current,
           ...p,
-          providers: { ...DEFAULT_PROVIDERS, ...(p.providers ?? {}) },
+          providers: merged,
         }
       },
       // Don't persist transient state, only configs + user's "don't show again" preference.

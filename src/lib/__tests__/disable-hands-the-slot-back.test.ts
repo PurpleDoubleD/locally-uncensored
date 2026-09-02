@@ -68,7 +68,7 @@ describe('THE FIX: Disable on the slot holder gives the slot back', () => {
     // what it does: the waiting engine takes the slot
     const patch = slotHandbackUpdate(JAN_IN_SLOT)!
     const newWay = listWith({ ...JAN_IN_SLOT, ...patch } as HandoverSlot)
-    expect(newWay.openai.name).toBe('Built-in Engine')
+    expect(newWay.openai.name).toBe('LU Engine')
     expect(newWay.openai.managed).toBe(true)
     expect(newWay.openai.enabled).toBe(true)
     expect(noChatBackendEnabled(newWay, 'local')).toBe(false)

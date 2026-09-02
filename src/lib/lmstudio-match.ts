@@ -18,6 +18,8 @@
 // missing one, and would otherwise wrongly mark every quant sibling of a model
 // (e.g. all 7 "Qwen 3.6 27B" rows) as installed from a single download.
 
+import { isLuEngineName } from './engine-name'
+
 export interface InstalledModelLike {
   provider?: string
   providerName?: string
@@ -71,13 +73,14 @@ function isLmStudioEntry(m: InstalledModelLike): boolean {
 }
 
 /**
- * A built-in-engine entry. `bundledToAIModels` stamps every downloaded GGUF
- * with `provider: 'openai'` and `providerName: 'Built-in Engine'`, and its
- * `model` is the file stem, so the same filename matcher fits it exactly.
+ * An LU Engine entry. `bundledToAIModels` stamps every downloaded GGUF with
+ * `provider: 'openai'` and `providerName: 'LU Engine'` ('Built-in Engine'
+ * before 2.6.8, still on disk in older chats), and its `model` is the file
+ * stem, so the same filename matcher fits it exactly.
  */
 export function isBuiltinEngineEntry(m: InstalledModelLike | null | undefined): boolean {
   if (!m || m.provider !== 'openai') return false
-  return (m.providerName || '').toLowerCase().includes('built-in engine')
+  return isLuEngineName(m.providerName)
 }
 
 /**

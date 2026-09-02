@@ -61,7 +61,7 @@ beforeEach(() => {
 
 const managedProvider = () =>
   new OpenAIProvider({
-    id: 'openai', name: 'Built-in Engine', enabled: true,
+    id: 'openai', name: 'LU Engine', enabled: true,
     baseUrl: MANAGED_URL, apiKey: '', isLocal: true, managed: true,
   } as never)
 
@@ -142,7 +142,7 @@ describe('ensureBuiltinEngineAlive waits the swap out before probing', () => {
 describe('a transport failure that still gets through is labelled in English', () => {
   it('rewrites the exact body the proxy hands back as a 503', () => {
     const out = explainEngineTransportMessage(RAW, MANAGED_URL)
-    expect(out).toMatch(/built-in engine is not answering on 127\.0\.0\.1:8127/i)
+    expect(out).toMatch(/LU Engine is not answering on 127\.0\.0\.1:8127/i)
     expect(out).toMatch(/still loading a model/i)
     expect(out).not.toContain('proxy_localhost_stream_chunked')
   })
@@ -152,7 +152,7 @@ describe('a transport failure that still gets through is labelled in English', (
       'proxy_localhost: error sending request for url (http://127.0.0.1:8127/v1/models)',
       MANAGED_URL,
     )
-    expect(out).toMatch(/built-in engine is not answering/i)
+    expect(out).toMatch(/LU Engine is not answering/i)
   })
 
   // NEGATIVE CONTROL: a real answer from the server keeps the server's own
@@ -183,7 +183,7 @@ describe('the provider really hands the plain sentence on (wiring)', () => {
     const err = await managedProvider()
       .chatWithTools('Hermes', [{ role: 'user', content: 'hi' }] as never, [] as never)
       .then(() => null, (e: Error) => e)
-    expect(err?.message).toMatch(/built-in engine is not answering/i)
+    expect(err?.message).toMatch(/LU Engine is not answering/i)
     expect(err?.message).not.toContain('proxy_localhost_stream_chunked')
   })
 

@@ -62,7 +62,7 @@ describe('the notes table', () => {
     // green while the branch moves on, so the shipping note is pinned to the
     // headline features of the release it ships with. For 2.6.8 those are the
     // effort control on reasoning models, GLM 5.3 in the cloud catalogue, the
-    // engine that steps off a taken 8127, the model that stays Installed, the
+    // built-in engine renamed to LU Engine, the engine that steps off a taken 8127, the model that stays Installed, the
     // ComfyUI installer that repairs its own environment, the model folder
     // that is finally read, the CivitAI key field, the HIP SDK on Windows with
     // its vram_total mix-up, the Linux packages that name libvulkan1, the
@@ -83,7 +83,7 @@ describe('the notes table', () => {
       .join('\n')
       .toLowerCase()
     for (const anchor of [
-      'effort', 'glm 5.3', 'installed', 'built-in engine', '8127',
+      'effort', 'glm 5.3', 'installed', 'lu engine', '8127',
       'repair environment', 'model storage', 'civitai', 'hip sdk',
       'vram_total', 'libvulkan1', 'working directory', 'document chat',
       'prompt history', 'side panel', 'researched rather than proven', 'apple music', 'too big to scan',

@@ -117,9 +117,9 @@ describe('ModelSelector LM Studio banner', () => {
     expect(refetch).toBeGreaterThan(adopt)
   })
 
-  it('says out loud that the built-in engine loses the slot, and names the way back', () => {
+  it('says out loud that the LU Engine loses the slot, and names the way back', () => {
     expect(src).toContain('adoptionReplacesBuiltinEngine')
-    expect(src).toMatch(/This also makes LM Studio your local chat backend in place of the built-in engine/)
+    expect(src).toMatch(/This also makes LM Studio your local chat backend in place of the LU Engine/)
     expect(src).toMatch(/Settings, AI Backends, Providers/)
   })
 })

@@ -26,7 +26,7 @@ import { isGroupChat } from '../../lib/group-chat'
 export function groupCostHintText(models: number, builtinSpeakers = 0): string {
   const base = `1 round = ${models} answers = ${models}x the cost`
   return builtinSpeakers >= 2
-    ? `${base}, and the built-in engine reloads between local speakers`
+    ? `${base}, and the LU Engine reloads between local speakers`
     : base
 }
 

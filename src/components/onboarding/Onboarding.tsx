@@ -18,6 +18,7 @@ import { pullModelTauri, checkConnection as checkOllama } from '../../api/ollama
 import { hfUrlToOllamaRef, hfUrlToLmStudioSubdir } from '../../lib/hf-to-provider'
 import { startBundledEngine, startBundledEmbed } from '../../api/engine'
 import { BUILTIN_BACKEND_ID, classifyOnboardingBackend, resolveOnboardingBackend } from '../../lib/onboarding-backend'
+import { LU_ENGINE_NAME } from '../../lib/engine-name'
 import { version as currentVersion } from '../../../package.json'
 import { useReleaseNotesStore } from '../../stores/releaseNotesStore'
 
@@ -235,7 +236,7 @@ export function Onboarding() {
     if (useBuiltinPath) {
       destDir = await detectProviderModelPath(BUILTIN_BACKEND_ID)
       if (!destDir) {
-        setDownloadError('Could not create the built-in engine model folder. Check app permissions and retry.')
+        setDownloadError('Could not create the LU Engine model folder. Check app permissions and retry.')
         return
       }
     } else if (!useOllamaPath) {
@@ -316,7 +317,7 @@ export function Onboarding() {
           try {
             await startBundledEngine(`${destDir}/${model.filename}`)
           } catch (e) {
-            setDownloadError(`Model downloaded, but the built-in engine failed to start: ${e instanceof Error ? e.message : String(e)}`)
+            setDownloadError(`Model downloaded, but the LU Engine failed to start: ${e instanceof Error ? e.message : String(e)}`)
           }
         } else {
           // LM Studio etc.: nest under <user>/<repo>/ so the scanner finds
@@ -370,7 +371,7 @@ export function Onboarding() {
   const selectBackendAndContinue = () => {
     if (selectedBackend === BUILTIN_BACKEND_ID) {
       setProviderConfig('openai', {
-        enabled: true, name: 'Built-in Engine',
+        enabled: true, name: LU_ENGINE_NAME,
         baseUrl: 'http://127.0.0.1:8127/v1', isLocal: true, managed: true,
       })
     } else if (selectedBackend === 'ollama') {
@@ -840,7 +841,7 @@ export function Onboarding() {
                 >
                   <Cpu size={16} className={selectedBackend === BUILTIN_BACKEND_ID ? (isDark ? 'text-white' : 'text-gray-900') : 'text-gray-500'} />
                   <div className="flex-1 min-w-0">
-                    <p className="text-[0.72rem] font-medium">Built-in Engine</p>
+                    <p className="text-[0.72rem] font-medium">LU Engine</p>
                     <p className={`text-[0.55rem] ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>Runs on your machine · nothing to install</p>
                   </div>
                   {selectedBackend === BUILTIN_BACKEND_ID && <Check size={14} className="text-green-400 shrink-0" />}
@@ -1800,7 +1801,7 @@ export function Onboarding() {
               {pulledModels.length > 0
                 ? `${pulledModels.length} model${pulledModels.length > 1 ? 's' : ''} installed. You're ready to go.`
                 : selectedBackend === BUILTIN_BACKEND_ID
-                ? 'The built-in engine is ready. Install a model anytime from the Models tab.'
+                ? 'The LU Engine is ready. Install a model anytime from the Models tab.'
                 : detectedBackends.length > 0
                 ? `Connected to ${detectedBackends.find(b => b.id === selectedBackend)?.name || detectedBackends[0].name}. You're ready to go.`
                 : 'You can configure backends and install models anytime from Settings and the Models tab.'}

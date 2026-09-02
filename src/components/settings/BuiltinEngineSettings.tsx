@@ -84,7 +84,7 @@ export function BuiltinEngineSettings() {
       <div className="flex items-start gap-2.5 p-2.5 rounded-lg border border-amber-200 dark:border-amber-500/20 bg-amber-50 dark:bg-amber-500/[0.08] text-amber-900 dark:text-amber-200">
         <Zap size={14} className="mt-0.5 shrink-0" />
         <div className="text-[0.65rem] leading-relaxed">
-          <strong>Expert settings for the built-in engine.</strong> The defaults match what LU shipped with and are right for most machines. Every start of the engine uses these values; a running engine needs Apply &amp; Restart below.
+          <strong>Expert settings for the LU Engine.</strong> The defaults match what LU shipped with and are right for most machines. Every start of the engine uses these values; a running engine needs Apply &amp; Restart below.
         </div>
       </div>
 

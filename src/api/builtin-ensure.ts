@@ -102,7 +102,7 @@ export function explainEngineTransportMessage(message: string, baseUrl: string):
   // now instead of in the chat bubble. House rule: no raw Rust error in front
   // of a user.
   log.warn('[builtin-engine] transport failure hidden behind a plain sentence', { raw: msg, host })
-  return `The built-in engine is not answering on ${host}. It is either still loading a model, failed to start, or was shut down. Wait for the model to finish loading and send again, or open Settings, AI Backends, Built-in Engine and start it there.`
+  return `The LU Engine is not answering on ${host}. It is either still loading a model, failed to start, or was shut down. Wait for the model to finish loading and send again, or open Settings, AI Backends, LU Engine and start it there.`
 }
 
 /** True when the `openai` slot is the app-managed built-in engine. */
@@ -243,7 +243,7 @@ async function loadBuiltinModel(modelName: string): Promise<void> {
     // on Windows 10 — they gave up on the built-in engine and moved to
     // Ollama). Say what is actually wrong instead.
     throw new Error(
-      `The built-in engine has no model file named "${bare}". It may have been deleted, moved, or the download did not finish. Open Models, install it again, then pick it in the chat.`,
+      `The LU Engine has no model file named "${bare}". It may have been deleted, moved, or the download did not finish. Open Models, install it again, then pick it in the chat.`,
     )
   }
 
@@ -447,7 +447,7 @@ export async function diagnoseBuiltinEngine(
     return {
       ok: false,
       repaired: false,
-      reason: `The built-in engine is not running and its model folder could not be read: ${errText(e)}`,
+      reason: `The LU Engine is not running and its model folder could not be read: ${errText(e)}`,
     }
   }
 
@@ -457,7 +457,7 @@ export async function diagnoseBuiltinEngine(
       ok: false,
       repaired: false,
       reason:
-        'The built-in engine is installed but has no chat model to load yet. Open Models, Discover and install one, then test again.',
+        'The LU Engine is installed but has no chat model to load yet. Open Models, Discover and install one, then test again.',
     }
   }
 
@@ -465,7 +465,7 @@ export async function diagnoseBuiltinEngine(
     return {
       ok: false,
       repaired: false,
-      reason: `The built-in engine is not running. ${runnable.length} model${runnable.length === 1 ? ' is' : 's are'} installed. Pick one in the chat model picker to start the engine.`,
+      reason: `The LU Engine is not running. ${runnable.length} model${runnable.length === 1 ? ' is' : 's are'} installed. Pick one in the chat model picker to start the engine.`,
     }
   }
 
@@ -483,7 +483,7 @@ export async function diagnoseBuiltinEngine(
     return {
       ok: false,
       repaired: false,
-      reason: `The built-in engine has no model file named "${bare}". It may have been deleted, moved, or the download did not finish. Open Models and install it again.`,
+      reason: `The LU Engine has no model file named "${bare}". It may have been deleted, moved, or the download did not finish. Open Models and install it again.`,
     }
   }
   try {
@@ -502,7 +502,7 @@ export async function diagnoseBuiltinEngine(
     return {
       ok: false,
       repaired: false,
-      reason: `The built-in engine could not start "${pick.name}": ${errText(e)}`,
+      reason: `The LU Engine could not start "${pick.name}": ${errText(e)}`,
     }
   }
 }
