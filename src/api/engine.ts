@@ -145,7 +145,11 @@ export async function bundledEngineStatus() {
   return status
 }
 
-/** Swap the loaded model (stop → start on the same port).
+/** Swap the loaded model (stop, then start again).
+ *
+ * The port is NOT preserved. A15: handing the current port back in turned a
+ * one-off collision into a permanent move, so the Rust side picks the port
+ * fresh on every swap, starting at ENGINE_PORT.
  *
  * This is the call the model picker makes on every activation, and the one the
  * counter-check raced: two switches in a row, then a send into the restart gap.

@@ -279,7 +279,7 @@ pub(crate) fn write_atomic(target: &Path, bytes: &[u8]) -> Result<(), String> {
     fs::write(&tmp, bytes).map_err(|e| format!("Write error: {}", os_error::english(&e)))?;
     if let Err(e) = fs::rename(&tmp, target) {
         let _ = fs::remove_file(&tmp);
-        return Err(format!("Write error (rename): {}", e));
+        return Err(format!("Write error (rename): {}", os_error::english(&e)));
     }
     Ok(())
 }

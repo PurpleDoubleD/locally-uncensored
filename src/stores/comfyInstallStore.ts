@@ -24,6 +24,11 @@ export type ComfyInstallPhase = 'idle' | 'checking' | 'python' | 'comfyui' | 're
  *  and they need different sentences when they end. */
 export type ComfyInstallKind = 'install' | 'update' | 'repair'
 
+/** How a closing line reads. 'warn' is amber, 'ok' is not. A15 review: the
+ *  panel painted every closing line amber, so "Repair finished. ComfyUI is
+ *  ready." arrived in the colour of a warning. */
+export type ComfyNoticeKind = 'ok' | 'warn'
+
 /** What the user is told once a cancelled run has really stopped. A cancel
  *  that leaves the panel blank reads as "nothing happened", and after a repair
  *  that is a lie: the venv is half rebuilt at that point. */
@@ -57,6 +62,27 @@ export const LOST_CONTACT = 'Lost contact with the installer. Check the log and 
 /** The same for the winget step that runs before it. */
 export const LOST_CONTACT_PYTHON = 'Lost contact with the Python installer. Check the log and try again.'
 
+/** True while the ComfyUI section has something the user must not miss: a run
+ *  in flight, a failure nobody has dismissed yet, or the closing line a run
+ *  left behind.
+ *
+ *  A15, Windows Nachlauf 02.09.: the section is an ordinary accordion, so a
+ *  trip to General and back folded it up again while a twenty minute repair was
+ *  still running. The progress itself survives the remount (that is what this
+ *  store is for), but it survives behind a closed lid, and a user who does not
+ *  think to open it sees an app that looks idle.
+ *
+ *  Review 03.09.: the first cut asked about the phase alone, and the panel
+ *  renders the closing line only while the phase is idle. So the one state the
+ *  line exists in was the one state that folded the section shut, and the
+ *  result of a run that had just taken eight minutes was gone on the next
+ *  section switch. Both halves are asked about now. */
+export function comfySectionShouldOpen(
+  run: { phase: ComfyInstallPhase; notice: string },
+): boolean {
+  return run.phase !== 'idle' || run.notice !== ''
+}
+
 /** The one poll in flight, module level so it outlives every mount. */
 let timer: ReturnType<typeof setInterval> | null = null
 
@@ -85,6 +111,14 @@ export function comfyInstallPolling(): boolean {
 interface InstallStatusPayload {
   status?: string
   logs?: string[]
+  /** One closing line the backend wants kept after the run. A15, Windows
+   *  Nachlauf 02.09.: a ComfyUI requirements.txt pip cannot install is skipped
+   *  and the run finishes on LU's own package list, which used to end in a
+   *  green idle panel that said nothing about the file it passed over. */
+  notice?: string
+  /** How that line reads: 'ok' for a run that simply worked, 'warn' for one
+   *  that finished with something the user has to know. */
+  notice_kind?: string
   download_progress?: number
   download_total?: number
   download_speed?: number
@@ -98,8 +132,14 @@ interface ComfyInstallState {
   error: string
   /** Cancel requested, run not stopped yet. */
   cancelling: boolean
-  /** The one line left behind after a cancelled run. */
+  /** The one line a finished or cancelled run leaves behind. */
   notice: string
+  /** Whether that line is good news or not, which decides its colour. */
+  noticeKind: ComfyNoticeKind
+  /** Put the closing line away. Review 03.09.: nothing ever cleared it, so a
+   *  single finished run kept the section unfolding itself on every visit for
+   *  the rest of the session. */
+  clearNotice: () => void
   /** Install ComfyUI, installing Python first when the box has none. */
   runInstall: (installPath: string) => Promise<void>
   /** git pull plus a dependency refresh on an existing checkout. */
@@ -120,6 +160,7 @@ const IDLE = {
   error: '',
   cancelling: false,
   notice: '',
+  noticeKind: 'ok' as ComfyNoticeKind,
 }
 
 export const useComfyInstallStore = create<ComfyInstallState>()((set, get) => {
@@ -158,11 +199,24 @@ export const useComfyInstallStore = create<ComfyInstallState>()((set, get) => {
       })
       if (data.status === 'complete') {
         stopTimer()
-        set({ phase: 'idle', kind: null, cancelling: false })
+        set({
+          phase: 'idle',
+          kind: null,
+          cancelling: false,
+          notice: String(data.notice ?? ''),
+          noticeKind: data.notice_kind === 'warn' ? 'warn' : 'ok',
+        })
       } else if (data.status === 'cancelled') {
         // A cancel the user asked for is not a failure.
         stopTimer()
-        set({ phase: 'idle', kind: null, cancelling: false, notice: COMFY_CANCEL_NOTICE[kind] })
+        set({
+          phase: 'idle',
+          kind: null,
+          cancelling: false,
+          notice: COMFY_CANCEL_NOTICE[kind],
+          // A half rebuilt venv is not good news, whoever asked for it.
+          noticeKind: 'warn',
+        })
       } else if (data.status === 'error') {
         stopTimer()
         const lastLog = data.logs?.length ? String(data.logs[data.logs.length - 1]) : ''
@@ -300,6 +354,8 @@ export const useComfyInstallStore = create<ComfyInstallState>()((set, get) => {
         set({ cancelling: false, error: err instanceof Error ? err.message : 'Could not cancel the run' })
       }
     },
+
+    clearNotice: () => set({ notice: '', noticeKind: 'ok' }),
 
     reset: () => {
       stopTimer()

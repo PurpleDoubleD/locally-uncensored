@@ -2127,7 +2127,7 @@ pub fn auto_start_ollama(state: &AppState) {
             *state.ollama_process.lock().unwrap() = Some(child);
             println!("[Ollama] Started");
         }
-        Err(e) => println!("[Ollama] Failed to start: {}", e),
+        Err(e) => println!("[Ollama] Failed to start: {}", os_error::english(&e)),
     }
 }
 

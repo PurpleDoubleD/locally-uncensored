@@ -199,6 +199,22 @@ pub fn is_pep668_protected(python_bin: &str) -> bool {
 /// boxes that haven't installed the `python-virtualenv` package this can
 /// fail with `No module named venv` — we surface that with an actionable
 /// hint pointing at the right pacman / apt invocation.
+/// The card the user reads when Repair environment cannot delete the old venv.
+///
+/// A15, Windows Nachlauf 02.09.: this exact sentence carried the German
+/// "Der Prozess kann nicht auf die Datei zugreifen, da sie von einem anderen
+/// Prozess verwendet wird. (os error 32)" into an English app, because it
+/// rendered the `io::Error` itself and Windows answers FormatMessageW in the
+/// system language. Split out of the caller so the wording is testable without
+/// a locked folder, and without Windows.
+pub(crate) fn venv_removal_error(venv_dir: &Path, e: &std::io::Error) -> String {
+    format!(
+        "Could not remove the old venv at {}: {}. Close anything using it and retry.",
+        venv_dir.display(),
+        os_error::io_english(e)
+    )
+}
+
 pub fn create_comfyui_venv(comfyui_dir: &Path, python_bin: &str) -> Result<PathBuf, String> {
     let venv_dir = comfyui_dir.join("venv");
     // venv is idempotent: re-running on an existing dir just no-ops, but be
@@ -560,6 +576,91 @@ pub(crate) fn pip_failure_hint(kind: PipFailureKind, text: &str) -> String {
              3.10, 3.11, or 3.12. Reinstall a supported Python version.".to_string(),
         PipFailureKind::Unknown => String::new(),
     }
+}
+
+/// Why a requirements.txt could not be installed, in a few words.
+///
+/// A15, Windows Nachlauf 02.09.: a requirements.txt whose first line named a
+/// package that does not exist made `pip install -r` fail, the run went on with
+/// LU's own package list, and it ended on "Environment repaired" with nothing
+/// said. The fallback itself is right, because a core whose file will not
+/// resolve must not block a rebuild. The silence is not: the user is left with
+/// a ComfyUI missing whatever that file asked for on top of our list.
+pub(crate) fn requirements_failure_reason(pip_output: &str) -> &'static str {
+    match pip_failure_kind(pip_output) {
+        PipFailureKind::NoMatchingWheel => "pip found no installable version for a package it names",
+        PipFailureKind::Network
+        | PipFailureKind::Timeout
+        | PipFailureKind::Ssl
+        | PipFailureKind::Forbidden
+        | PipFailureKind::RateLimited => "pip could not reach the package index",
+        PipFailureKind::Permission => "pip was not allowed to write the packages",
+        PipFailureKind::DiskFull => "the disk ran out of space",
+        PipFailureKind::ExternallyManaged => "this Python refuses installs outside a venv",
+        PipFailureKind::PipBroken | PipFailureKind::PythonWithoutSsl => {
+            "pip in this environment is not usable"
+        }
+        PipFailureKind::MissingRuntimeLibrary
+        | PipFailureKind::NativeLoadFailure
+        | PipFailureKind::TorchWithoutGpuSupport => {
+            "a package in it will not load on this machine"
+        }
+        PipFailureKind::Unknown => "pip exited with an error",
+    }
+}
+
+/// The same question asked of a whole pip failure rather than of its text.
+///
+/// The stage decides, not the emptiness of the log. A pip that never started
+/// says so; a pip that ran is judged on what it printed, and a run that printed
+/// nothing at all still exited with an error rather than failing to start.
+pub(crate) fn requirements_failure_reason_for(f: &PipFailure) -> &'static str {
+    match f.stage {
+        PipStage::NotStarted => "pip could not be started",
+        // It ran. Whatever it left behind is what decides, and a run that left
+        // nothing behind still exited with an error.
+        PipStage::Ran => requirements_failure_reason(&f.stderr),
+    }
+}
+
+/// The live log line that names the fallback while it happens.
+pub(crate) fn requirements_fallback_log(folder: &str, reason: &str) -> String {
+    format!(
+        "requirements.txt in {} could not be used ({}), installing LU's own package list instead.",
+        folder, reason
+    )
+}
+
+/// The line every finished run leaves behind.
+///
+/// David, 03.09.: a run that worked has to say so. The cancel already had a
+/// closing sentence and the success had none, so the abort was better labelled
+/// than the success (A13 Befund 1a), and three full repairs of six to eight
+/// minutes each ended with the card simply vanishing. The requirements hint is
+/// appended rather than substituted: the run did finish, and the user needs
+/// both halves of that.
+pub(crate) fn finished_notice(
+    done: &str,
+    fallback: Option<&(String, &'static str)>,
+) -> (String, &'static str) {
+    match fallback {
+        Some((folder, reason)) => (
+            format!("{} {}", done, requirements_fallback_notice(folder, reason)),
+            "warn",
+        ),
+        None => (done.to_string(), "ok"),
+    }
+}
+
+/// The half sentence about a requirements.txt the run had to pass over. Without
+/// it the panel goes back to idle and every word about the skipped file scrolls
+/// away with the log.
+pub(crate) fn requirements_fallback_notice(folder: &str, reason: &str) -> String {
+    format!(
+        "The requirements.txt in {} could not be used ({}), so LU installed its own package \
+         list instead. Anything that file asks for on top of that list is not installed.",
+        folder, reason
+    )
 }
 
 fn diagnose_pip_error_inner(stderr: &str) -> String {
@@ -1378,12 +1479,30 @@ fn verify_and_heal_environment(
 pub(crate) struct PipFailure {
     pub(crate) diagnosis: String,
     pub(crate) stderr: String,
+    /// How far the run got. A15 review: this used to be inferred from an empty
+    /// `stderr`, which is true for a spawn that failed and equally true for a
+    /// pip that ran, printed nothing and exited non-zero, and for a `try_wait`
+    /// that failed on a live process. Two of those three were then reported as
+    /// "pip could not be started", which is a lie the log cannot correct.
+    pub(crate) stage: PipStage,
+}
+
+/// How far a failed pip run got before it failed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PipStage {
+    /// No process. The spawn failed, or the cancel arrived before pip was ever
+    /// asked to start.
+    NotStarted,
+    /// pip was a live process. It may have exited non-zero, printed nothing, or
+    /// refused to be reaped, but it ran.
+    Ran,
 }
 
 impl PipFailure {
-    /// A failure with no pip log behind it: cancelled, or pip never started.
-    fn bare(diagnosis: &str) -> Self {
-        PipFailure { diagnosis: diagnosis.to_string(), stderr: String::new() }
+    /// A failure with no pip log behind it. The stage says whether that is
+    /// because pip never started or because it left nothing behind.
+    fn bare(stage: PipStage, diagnosis: &str) -> Self {
+        PipFailure { diagnosis: diagnosis.to_string(), stderr: String::new(), stage }
     }
 }
 
@@ -1411,7 +1530,7 @@ pub(crate) fn pip_install_streaming_with_retry_raw(
 
     for attempt in 1..=max_attempts {
         if cancel.as_ref().map(|c| c.load(Ordering::SeqCst)).unwrap_or(false) {
-            return Err(PipFailure::bare("cancelled"));
+            return Err(PipFailure::bare(PipStage::NotStarted, "cancelled"));
         }
         if attempt > 1 {
             push_install_log(
@@ -1424,7 +1543,7 @@ pub(crate) fn pip_install_streaming_with_retry_raw(
             // Sleep in 1-second chunks so cancel reacts within ~1s.
             for _ in 0..delay_seconds {
                 if cancel.as_ref().map(|c| c.load(Ordering::SeqCst)).unwrap_or(false) {
-                    return Err(PipFailure::bare("cancelled"));
+                    return Err(PipFailure::bare(PipStage::NotStarted, "cancelled"));
                 }
                 std::thread::sleep(std::time::Duration::from_secs(1));
             }
@@ -1449,7 +1568,15 @@ pub(crate) fn pip_install_streaming_with_retry_raw(
 
         let mut child = match cmd.spawn() {
             Ok(c) => c,
-            Err(e) => return Err(PipFailure::bare(&format!("Could not start pip ({}). Is Python on PATH?", e))),
+            Err(e) => {
+                return Err(PipFailure::bare(
+                    PipStage::NotStarted,
+                    &format!(
+                        "Could not start pip ({}). Is Python on PATH?",
+                        os_error::english(&e)
+                    ),
+                ))
+            }
         };
 
         let stdout = child.stdout.take();
@@ -1512,7 +1639,7 @@ pub(crate) fn pip_install_streaming_with_retry_raw(
                 let _ = child.wait();
                 let _ = stdout_handle.join();
                 let _ = stderr_handle.join();
-                return Err(PipFailure::bare("cancelled"));
+                return Err(PipFailure::bare(PipStage::Ran, "cancelled"));
             }
             match child.try_wait() {
                 Ok(Some(s)) => break s,
@@ -1538,7 +1665,12 @@ pub(crate) fn pip_install_streaming_with_retry_raw(
                     }
                     std::thread::sleep(std::time::Duration::from_millis(200));
                 }
-                Err(e) => return Err(PipFailure::bare(&format!("pip wait failed: {}", e))),
+                Err(e) => {
+                    return Err(PipFailure::bare(
+                        PipStage::Ran,
+                        &format!("pip wait failed: {}", os_error::english(&e)),
+                    ))
+                }
             }
         };
         let _ = stdout_handle.join();
@@ -1566,6 +1698,7 @@ pub(crate) fn pip_install_streaming_with_retry_raw(
             return Err(PipFailure {
                 diagnosis: diagnose_pip_error_for(&last_stderr, Some(python_bin)),
                 stderr: last_stderr,
+                stage: PipStage::Ran,
             });
         }
     }
@@ -1577,6 +1710,7 @@ pub(crate) fn pip_install_streaming_with_retry_raw(
             diagnose_pip_error_for(&last_stderr, Some(python_bin))
         ),
         stderr: last_stderr,
+        stage: PipStage::Ran,
     })
 }
 
@@ -1734,6 +1868,8 @@ pub fn install_comfyui(
 
     install.status = "installing".to_string();
     install.logs.clear();
+    install.notice.clear();
+    install.notice_kind.clear();
     install.logs.push("Starting ComfyUI installation...".to_string());
     drop(install);
 
@@ -1800,6 +1936,11 @@ pub fn install_comfyui(
             }
         };
 
+        // Set when `pip install -r requirements.txt` failed and the run carried
+        // on with LU's own package list. Folder plus reason, so the live log
+        // line and the line the finished run leaves behind agree (A15).
+        let mut requirements_fallback: Option<(String, &'static str)> = None;
+
         let cancelled = || cancel_flag.load(Ordering::SeqCst);
 
         if cancelled() {
@@ -1839,7 +1980,7 @@ pub fn install_comfyui(
         let mut clone_child = match cmd.spawn() {
             Ok(c) => c,
             Err(e) => {
-                let err = format!("Git is not installed or not in PATH: {}", e);
+                let err = format!("Git is not installed or not in PATH: {}", os_error::english(&e));
                 println!("[Install] {}", err);
                 update("error", &err);
                 return;
@@ -1856,7 +1997,7 @@ pub fn install_comfyui(
                 Ok(Some(s)) => break s,
                 Ok(None) => std::thread::sleep(std::time::Duration::from_millis(250)),
                 Err(e) => {
-                    update("error", &format!("git wait failed: {}", e));
+                    update("error", &format!("git wait failed: {}", os_error::english(&e)));
                     return;
                 }
             }
@@ -2041,7 +2182,7 @@ pub fn install_comfyui(
                     return;
                 }
                 Err(f) => {
-                    let diagnosis = f.diagnosis;
+                    let diagnosis = f.diagnosis.clone();
                     // A python.org install under Program Files has an
                     // admin-only site-packages, and without a venv the first
                     // wheel that is not already there dies on it. The same
@@ -2073,6 +2214,10 @@ pub fn install_comfyui(
                         // gone is the old "non-critical" verdict, which called
                         // a broken environment a finished one.
                         println!("[Install] Requirements install warning: {}", diagnosis);
+                        let reason = requirements_failure_reason_for(&f);
+                        let folder = target_dir.display().to_string();
+                        requirements_fallback = Some((folder.clone(), reason));
+                        update("installing", &requirements_fallback_log(&folder, reason));
                         update(
                             "installing",
                             &format!(
@@ -2132,6 +2277,14 @@ pub fn install_comfyui(
             );
         }
 
+        if let Ok(mut s) = install_status.lock() {
+            let (line, kind) = finished_notice(
+                "Install finished. ComfyUI is ready to start.",
+                requirements_fallback.as_ref(),
+            );
+            s.notice = line;
+            s.notice_kind = kind.to_string();
+        }
         update("complete", "ComfyUI installed successfully!");
     });
 
@@ -2196,6 +2349,8 @@ pub fn repair_comfyui_env(state: State<'_, AppState>) -> Result<serde_json::Valu
         }
         install.status = "installing".to_string();
         install.logs.clear();
+        install.notice.clear();
+        install.notice_kind.clear();
         install.logs.push("Repairing the ComfyUI environment...".to_string());
     }
     info!("comfyui env repair start");
@@ -2220,6 +2375,11 @@ pub fn repair_comfyui_env(state: State<'_, AppState>) -> Result<serde_json::Valu
             }
         };
 
+        // Set when `pip install -r requirements.txt` failed and the run carried
+        // on with LU's own package list. Folder plus reason, so the live log
+        // line and the line the finished run leaves behind agree (A15).
+        let mut requirements_fallback: Option<(String, &'static str)> = None;
+
         // A broken venv must go entirely: pip inside it would report the
         // damaged packages as already satisfied, which is the exact dead end
         // this command exists to break.
@@ -2230,14 +2390,7 @@ pub fn repair_comfyui_env(state: State<'_, AppState>) -> Result<serde_json::Valu
                 "Removing the old venv (models, outputs and custom nodes stay untouched)...",
             );
             if let Err(e) = std::fs::remove_dir_all(&venv_dir) {
-                update(
-                    "error",
-                    &format!(
-                        "Could not remove the old venv at {}: {}. Close anything using it and retry.",
-                        venv_dir.display(),
-                        e
-                    ),
-                );
+                update("error", &venv_removal_error(&venv_dir, &e));
                 return;
             }
         }
@@ -2302,16 +2455,25 @@ pub fn repair_comfyui_env(state: State<'_, AppState>) -> Result<serde_json::Valu
                 "--no-input",
                 "-r", reqs_str.as_str(),
             ];
-            match pip_install_streaming_with_retry_cancellable(&req_args, &venv_py, 3, &install_status, Some(&cancel_flag)) {
+            match pip_install_streaming_with_retry_raw(&req_args, &venv_py, 3, &install_status, Some(&cancel_flag)) {
                 Ok(()) => update("installing", "Dependencies installed."),
-                Err(d) if d == "cancelled" => {
+                Err(f) if f.diagnosis == "cancelled" => {
                     update("cancelled", "Repair cancelled during the requirements install.");
                     return;
                 }
-                Err(d) => update(
-                    "installing",
-                    &format!("Not every dependency installed. Checking what is really missing.\n\n{}", d),
-                ),
+                Err(f) => {
+                    let reason = requirements_failure_reason_for(&f);
+                    let folder = comfy_dir.display().to_string();
+                    requirements_fallback = Some((folder.clone(), reason));
+                    update("installing", &requirements_fallback_log(&folder, reason));
+                    update(
+                        "installing",
+                        &format!(
+                            "Not every dependency installed. Checking what is really missing.\n\n{}",
+                            f.diagnosis
+                        ),
+                    );
+                }
             }
         }
 
@@ -2332,6 +2494,14 @@ pub fn repair_comfyui_env(state: State<'_, AppState>) -> Result<serde_json::Valu
             }
         }
 
+        if let Ok(mut s) = install_status.lock() {
+            let (line, kind) = finished_notice(
+                "Repair finished. ComfyUI is ready.",
+                requirements_fallback.as_ref(),
+            );
+            s.notice = line;
+            s.notice_kind = kind.to_string();
+        }
         update(
             "complete",
             "Environment repaired. ComfyUI now runs from its own venv; start it again.",
@@ -2347,6 +2517,11 @@ pub fn install_comfyui_status(state: State<'_, AppState>) -> Result<serde_json::
     Ok(serde_json::json!({
         "status": install.status,
         "logs": install.logs,
+        // Empty for every run that has nothing to add. A finished run that had
+        // to skip the ComfyUI requirements.txt puts its one closing line here,
+        // because the log itself is dropped the moment the panel goes idle.
+        "notice": install.notice,
+        "notice_kind": install.notice_kind,
         "download_progress": install.download_progress,
         "download_total": install.download_total,
         "download_speed": install.download_speed,
@@ -2369,6 +2544,8 @@ pub fn update_comfyui(state: State<'_, AppState>) -> Result<serde_json::Value, S
         }
         install.status = "installing".to_string();
         install.logs.clear();
+        install.notice.clear();
+        install.notice_kind.clear();
         install.logs.push("Updating ComfyUI...".to_string());
     }
 
@@ -2425,6 +2602,11 @@ pub fn update_comfyui(state: State<'_, AppState>) -> Result<serde_json::Value, S
             }
         };
 
+        // Set when `pip install -r requirements.txt` failed and the run carried
+        // on with LU's own package list. Folder plus reason, so the live log
+        // line and the line the finished run leaves behind agree (A15).
+        let mut requirements_fallback: Option<(String, &'static str)> = None;
+
         #[cfg(target_os = "windows")]
         {
             let probe = windows_git_probe();
@@ -2466,7 +2648,7 @@ pub fn update_comfyui(state: State<'_, AppState>) -> Result<serde_json::Value, S
                 return;
             }
             Err(e) => {
-                update("error", &format!("Could not run git: {}", e));
+                update("error", &format!("Could not run git: {}", os_error::english(&e)));
                 return;
             }
         }
@@ -2495,7 +2677,7 @@ pub fn update_comfyui(state: State<'_, AppState>) -> Result<serde_json::Value, S
                 "--no-input",
                 "-r", reqs_str.as_str(),
             ];
-            match pip_install_streaming_with_retry_cancellable(
+            match pip_install_streaming_with_retry_raw(
                 &req_args,
                 &python_bin,
                 3,
@@ -2503,15 +2685,22 @@ pub fn update_comfyui(state: State<'_, AppState>) -> Result<serde_json::Value, S
                 Some(&cancel_flag),
             ) {
                 Ok(()) => update("installing", "Dependencies updated."),
-                Err(diagnosis) if diagnosis == "cancelled" => {
+                Err(f) if f.diagnosis == "cancelled" => {
                     update("cancelled", "Update cancelled during the requirements install.");
                     return;
                 }
-                Err(diagnosis) => {
-                    println!("[Update] Requirements warning: {}", diagnosis);
+                Err(f) => {
+                    println!("[Update] Requirements warning: {}", f.diagnosis);
+                    let reason = requirements_failure_reason_for(&f);
+                    let folder = comfy_dir.display().to_string();
+                    requirements_fallback = Some((folder.clone(), reason));
+                    update("installing", &requirements_fallback_log(&folder, reason));
                     update(
                         "installing",
-                        &format!("Not every dependency updated. Checking what is really missing.\n\n{}", diagnosis),
+                        &format!(
+                            "Not every dependency updated. Checking what is really missing.\n\n{}",
+                            f.diagnosis
+                        ),
                     );
                 }
             }
@@ -2532,6 +2721,14 @@ pub fn update_comfyui(state: State<'_, AppState>) -> Result<serde_json::Value, S
         }
 
         println!("[Update] ComfyUI update complete");
+        if let Ok(mut s) = install_status.lock() {
+            let (line, kind) = finished_notice(
+                "Update finished. Restart ComfyUI to load the new nodes.",
+                requirements_fallback.as_ref(),
+            );
+            s.notice = line;
+            s.notice_kind = kind.to_string();
+        }
         update(
             "complete",
             "ComfyUI updated. Restart ComfyUI to load the new nodes.",
@@ -2558,7 +2755,7 @@ fn download_file_blocking(
         .connect_timeout(std::time::Duration::from_secs(30))
         .timeout(std::time::Duration::from_secs(7200))
         .build()
-        .map_err(|e| format!("HTTP client error: {}", e))?;
+        .map_err(|e| format!("HTTP client error: {}", os_error::english(&e)))?;
 
     let response = client.get(url).send().map_err(|e| format!("Request failed: {}", os_error::english(&e)))?;
 
@@ -2580,11 +2777,14 @@ fn download_file_blocking(
     let mut buf = [0u8; 65536]; // 64KB chunks
 
     loop {
-        let n = reader.read(&mut buf).map_err(|e| format!("Read error: {}", e))?;
+        let n = reader
+            .read(&mut buf)
+            .map_err(|e| format!("Read error: {}", os_error::english(&e)))?;
         if n == 0 {
             break;
         }
-        std::io::Write::write_all(&mut file, &buf[..n]).map_err(|e| format!("Write: {}", e))?;
+        std::io::Write::write_all(&mut file, &buf[..n])
+            .map_err(|e| format!("Write: {}", os_error::english(&e)))?;
         downloaded += n as u64;
 
         if last_update.elapsed().as_millis() > 500 {
@@ -2929,7 +3129,7 @@ fn install_ollama_windows_impl<F: Fn(&str, &str)>(
             update("starting", &format!("Installer finished (code {}). Starting Ollama...", code));
         }
         Err(e) => {
-            update("error", &format!("Could not run installer: {}", e));
+            update("error", &format!("Could not run installer: {}", os_error::english(&e)));
             return;
         }
     }
@@ -3454,7 +3654,7 @@ pub fn install_lmstudio(state: State<'_, AppState>) -> Result<serde_json::Value,
             match cmd.output() {
                 Ok(_) => println!("[LMStudio] Installer finished"),
                 Err(e) => {
-                    let err = format!("Could not run installer: {}", e);
+                    let err = format!("Could not run installer: {}", os_error::english(&e));
                     println!("[LMStudio] {}", err);
                     update("error", &err);
                     return;
@@ -4003,7 +4203,7 @@ pub fn install_python(state: State<'_, AppState>) -> Result<serde_json::Value, S
                         "Could not run winget: {}. winget ships with Windows 10/11 — \
                          if it's missing, run 'Get App Installer' from the Microsoft \
                          Store (free) and retry.",
-                        e
+                        os_error::english(&e)
                     ),
                 );
                 return;
@@ -4047,7 +4247,7 @@ pub fn install_python(state: State<'_, AppState>) -> Result<serde_json::Value, S
         let exit_status = match child.wait() {
             Ok(s) => s,
             Err(e) => {
-                update("error", &format!("winget wait failed: {}", e));
+                update("error", &format!("winget wait failed: {}", os_error::english(&e)));
                 return;
             }
         };
@@ -4374,7 +4574,7 @@ pub fn install_tts(
     let voices_dir = app
         .path()
         .app_data_dir()
-        .map_err(|e| format!("no app data dir: {}", e))?
+        .map_err(|e| format!("no app data dir: {}", os_error::english(&e)))?
         .join("piper_voices");
 
     let install_state = state.tts_install.clone();
@@ -4454,7 +4654,7 @@ pub fn install_tts(
                         );
                     }
                     Err(e) => {
-                        update("error", &format!("Voice download could not start: {}", e));
+                        update("error", &format!("Voice download could not start: {}", os_error::english(&e)));
                     }
                 }
             }
@@ -4669,7 +4869,8 @@ fn move_aside_broken_node_dir(target_dir: &std::path::Path) -> Result<PathBuf, S
         format!(
             "The folder {} exists but is not a valid git checkout, and it could \
              not be moved aside: {}. Delete it manually and try again.",
-            target_dir.display(), e
+            target_dir.display(),
+            os_error::english(&e)
         )
     })?;
     Ok(backup)
@@ -4778,6 +4979,184 @@ fn is_permission_denied_pip_error(output: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── A15: the repair card speaks English, whatever Windows speaks ────
+
+    /// What code 32 reads as on the machine the test runs on. Windows means
+    /// ERROR_SHARING_VIOLATION, which is the code from the box; every unix
+    /// errno 32 is EPIPE. Both answers are ours, and neither is read off the
+    /// operating system.
+    #[cfg(windows)]
+    const VENV_BUSY: &str = "the file is in use by another process (os error 32)";
+    #[cfg(not(windows))]
+    const VENV_BUSY: &str = "broken pipe (os error 32)";
+
+    #[test]
+    fn a_venv_held_by_another_process_is_reported_in_our_words() {
+        let dir = PathBuf::from("C:\\Users\\ddrob\\ComfyUI\\venv");
+        let e = std::io::Error::from_raw_os_error(32);
+        let msg = venv_removal_error(&dir, &e);
+        assert_eq!(
+            msg,
+            format!(
+                "Could not remove the old venv at {}: {}. Close anything using it and retry.",
+                dir.display(),
+                VENV_BUSY
+            )
+        );
+        // The finding itself: on the German box this sentence carried
+        // "Der Prozess kann nicht auf die Datei zugreifen ...". Whatever this
+        // machine's language calls code 32, that wording is not in here.
+        assert!(!msg.contains(&e.to_string()), "the system wording survived: {msg}");
+        assert!(msg.is_ascii(), "a localised message would not be ascii: {msg}");
+    }
+
+    /// Negative control: an error Rust worded itself is already English, and
+    /// rewriting it would only lose the detail it carries.
+    #[test]
+    fn a_venv_failure_rust_worded_itself_is_passed_through_unchanged() {
+        let e = std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "the venv path is not a directory",
+        );
+        let msg = venv_removal_error(Path::new("/tmp/ComfyUI/venv"), &e);
+        assert!(msg.contains("the venv path is not a directory"), "got: {msg}");
+        assert!(msg.starts_with("Could not remove the old venv at /tmp/ComfyUI/venv: "), "got: {msg}");
+    }
+
+    // ── A15: a requirements.txt that was passed over gets said out loud ──
+
+    /// The exact pip output the counter-check produced by putting an invented
+    /// package on line 1 of ComfyUI's requirements.txt.
+    const INVENTED_PACKAGE: &str = "ERROR: Could not find a version that satisfies the \
+        requirement lu-gegenprobe-gibt-es-nicht-4711==9.9.9 (from versions: none)\n\
+        ERROR: No matching distribution found for lu-gegenprobe-gibt-es-nicht-4711==9.9.9";
+
+    #[test]
+    fn a_requirements_file_pip_cannot_resolve_is_named_with_its_reason() {
+        let reason = requirements_failure_reason(INVENTED_PACKAGE);
+        assert_eq!(reason, "pip found no installable version for a package it names");
+        let line = requirements_fallback_log("C:\\Users\\ddrob\\ComfyUI", reason);
+        assert!(line.starts_with("requirements.txt in C:\\Users\\ddrob\\ComfyUI could not be used ("), "got: {line}");
+        assert!(line.ends_with("installing LU's own package list instead."), "got: {line}");
+        assert!(line.contains(reason), "got: {line}");
+    }
+
+    #[test]
+    fn the_closing_line_says_what_is_missing_afterwards() {
+        let notice = requirements_fallback_notice(
+            "C:\\Users\\ddrob\\ComfyUI",
+            requirements_failure_reason(INVENTED_PACKAGE),
+        );
+        assert!(notice.contains("C:\\Users\\ddrob\\ComfyUI"), "got: {notice}");
+        assert!(notice.contains("LU installed its own package list instead"), "got: {notice}");
+        // The half the report asked for: the user has to learn that ComfyUI is
+        // now short of whatever that file wanted.
+        assert!(notice.contains("is not installed"), "got: {notice}");
+    }
+
+    /// Every pip failure gets a reason, and none of them reads as a sentence
+    /// fragment inside "could not be used (...)".
+    #[test]
+    fn every_pip_failure_has_a_short_lowercase_reason() {
+        for output in [
+            INVENTED_PACKAGE,
+            "ERROR: Connection broken: ConnectionResetError",
+            "ERROR: Could not install packages due to an OSError: [Errno 13] Permission denied",
+            "OSError: [Errno 28] No space left on device",
+            "error: externally-managed-environment",
+            "read timed out",
+            "",
+        ] {
+            let r = requirements_failure_reason(output);
+            assert!(!r.is_empty());
+            assert!(r.chars().next().unwrap().is_lowercase(), "capitalised: {r}");
+            assert!(!r.ends_with('.'), "the reason carries its own full stop: {r}");
+        }
+    }
+
+    /// Negative control on the state itself: nothing is carried over from a
+    /// run that never happened.
+    #[test]
+    fn a_fresh_install_state_carries_no_closing_line() {
+        let fresh = crate::state::InstallState::default();
+        assert!(fresh.notice.is_empty());
+        assert!(fresh.notice_kind.is_empty());
+        let json = serde_json::to_value(&fresh).expect("serialises");
+        assert_eq!(json["notice"], serde_json::json!(""));
+        assert_eq!(json["notice_kind"], serde_json::json!(""));
+    }
+
+    /// David, 03.09.: a run that worked says so, every time. And it does not
+    /// say it in the colour of a warning (A15 review).
+    #[test]
+    fn a_run_that_worked_leaves_a_closing_line_of_its_own() {
+        for done in [
+            "Install finished. ComfyUI is ready to start.",
+            "Repair finished. ComfyUI is ready.",
+            "Update finished. Restart ComfyUI to load the new nodes.",
+        ] {
+            let (line, kind) = finished_notice(done, None);
+            assert_eq!(line, done);
+            assert_eq!(kind, "ok");
+        }
+    }
+
+    /// And a run that had to skip the requirements.txt says both halves, in
+    /// that order: it finished, and here is what it could not use. That one is
+    /// a warning.
+    #[test]
+    fn a_finished_run_that_skipped_the_file_says_both_halves() {
+        let fallback = (
+            "C:\\Users\\ddrob\\ComfyUI".to_string(),
+            requirements_failure_reason(INVENTED_PACKAGE),
+        );
+        let (line, kind) = finished_notice("Repair finished. ComfyUI is ready.", Some(&fallback));
+        assert!(line.starts_with("Repair finished. ComfyUI is ready. "), "got: {line}");
+        assert!(line.contains("could not be used"), "got: {line}");
+        assert!(line.contains("C:\\Users\\ddrob\\ComfyUI"), "got: {line}");
+        // Negative control on the substitution: the success half is not
+        // replaced by the warning, which is what a run that finished deserves.
+        assert!(line.contains("Repair finished"), "got: {line}");
+        assert_eq!(kind, "warn");
+    }
+
+    /// A pip that never started is not a pip that exited with an error.
+    #[test]
+    fn a_pip_that_never_ran_is_not_reported_as_a_pip_that_failed() {
+        let never_ran = PipFailure::bare(
+            PipStage::NotStarted,
+            "Could not start pip (not found). Is Python on PATH?",
+        );
+        assert_eq!(requirements_failure_reason_for(&never_ran), "pip could not be started");
+        // Negative control: a real pip failure keeps its own classification and
+        // does not fall into the "could not be started" arm.
+        let really_failed = PipFailure {
+            diagnosis: "whatever the hint says".to_string(),
+            stderr: INVENTED_PACKAGE.to_string(),
+            stage: PipStage::Ran,
+        };
+        assert_eq!(
+            requirements_failure_reason_for(&really_failed),
+            "pip found no installable version for a package it names"
+        );
+    }
+
+    /// The two cases the empty-stderr shortcut used to get wrong. Both are a
+    /// pip that RAN, so neither may claim it could not be started.
+    #[test]
+    fn a_pip_that_ran_is_never_reported_as_one_that_could_not_start() {
+        // The reaping failed on a live child. pip was there.
+        let wait_failed = PipFailure::bare(PipStage::Ran, "pip wait failed: interrupted");
+        assert_eq!(requirements_failure_reason_for(&wait_failed), "pip exited with an error");
+        // And a silent non-zero exit: it ran, it failed, it printed nothing.
+        let silent = PipFailure {
+            diagnosis: String::new(),
+            stderr: String::new(),
+            stage: PipStage::Ran,
+        };
+        assert_eq!(requirements_failure_reason_for(&silent), "pip exited with an error");
+    }
 
     // ── PyTorch-Kanalwahl (W2-Befund 16.08., comfy_kitchen braucht 2.6+) ─
 

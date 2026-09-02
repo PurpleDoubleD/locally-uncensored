@@ -53,7 +53,7 @@ import { ProviderSettings } from './ProviderConfig'
 import { BuiltinEngineSettings } from './BuiltinEngineSettings'
 import { MlxMediaSettings } from './MlxMediaSettings'
 import { useProviderStore } from '../../stores/providerStore'
-import { useComfyInstallStore } from '../../stores/comfyInstallStore'
+import { useComfyInstallStore, comfySectionShouldOpen } from '../../stores/comfyInstallStore'
 import { PermissionSettings } from './PermissionSettings'
 import { MCPServerSettings } from './MCPServerSettings'
 import { WorkflowList } from '../agents/WorkflowList'
@@ -543,6 +543,10 @@ export function ComfyUISettings() {
   const installDl = useComfyInstallStore((s) => s.dl)
   const cancelling = useComfyInstallStore((s) => s.cancelling)
   const installNotice = useComfyInstallStore((s) => s.notice)
+  // A15 review: every closing line used to be amber, so a repair that simply
+  // worked reported itself in the colour of a warning.
+  const installNoticeKind = useComfyInstallStore((s) => s.noticeKind)
+  const clearInstallNotice = useComfyInstallStore((s) => s.clearNotice)
   // A failed run must not be a dead end. The phase stays `error` until
   // something clears it, and with the state outliving the mount the old escape
   // hatch (leave the section, lose the useState) is gone. So the start buttons
@@ -825,7 +829,30 @@ export function ComfyUISettings() {
           </p>
         )}
         {installNotice && installPhase === 'idle' && (
-          <p className="w-full text-[0.55rem] text-amber-500 dark:text-amber-400 leading-relaxed">{installNotice}</p>
+          <div className="w-full flex items-start gap-1.5">
+            <p
+              data-testid="comfy-install-notice"
+              data-kind={installNoticeKind}
+              className={`flex-1 text-[0.55rem] leading-relaxed ${
+                installNoticeKind === 'warn'
+                  ? 'text-amber-500 dark:text-amber-400'
+                  : 'text-emerald-600 dark:text-emerald-400'
+              }`}
+            >
+              {installNotice}
+            </p>
+            {/* Review 03.09.: nothing ever put this line away, so one finished
+                run kept unfolding the section on every visit for the rest of
+                the session. */}
+            <button
+              onClick={clearInstallNotice}
+              aria-label="Dismiss this message"
+              title="Dismiss"
+              className="shrink-0 p-0.5 rounded text-gray-500 hover:text-gray-300 hover:bg-white/5 transition-colors"
+            >
+              <X size={10} />
+            </button>
+          </div>
         )}
         {installPhase !== 'idle' && (
           <div className="w-full mt-2 space-y-1">
@@ -1574,7 +1601,12 @@ export function SettingsPage() {
             // models" hint: the Start button it names lives in here, so the
             // section arrives open instead of costing one more click the hint
             // never mentioned.
-            <Section title="ComfyUI (Image & Video)" defaultOpen={entryFocus?.section === 'comfyui'}>
+            // A15: and open as well while an install, an update or a repair is
+            // in flight, or while a failure is still on screen. Read without
+            // subscribing, because the value is only ever wanted at the moment
+            // this Section mounts, which is the moment a section switch brings
+            // it back.
+            <Section title="ComfyUI (Image & Video)" defaultOpen={entryFocus?.section === 'comfyui' || comfySectionShouldOpen(useComfyInstallStore.getState())}>
               {settings.appMode === 'cloud' && (
                 <p className="text-[0.55rem] text-gray-500 leading-snug pb-1">
                   Local mode only. Cloud renders run on lu-labs.ai and never use ComfyUI.
