@@ -61,7 +61,7 @@ export function findInstalledForDiscoverModel(
   if (model.ollamaModel) {
     const tag = model.ollamaModel.toLowerCase()
     if (installedOllamaTags.includes(tag)) return ollamaEntry(tag)
-    // Ollama appends `:latest` to bare model names — accept either form
+    // Ollama appends `:latest` to bare model names, accept either form
     if (!tag.includes(':') && installedOllamaTags.includes(`${tag}:latest`)) {
       return ollamaEntry(`${tag}:latest`)
     }
