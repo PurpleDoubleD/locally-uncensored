@@ -217,14 +217,43 @@ export function customModelDirs(): string[] {
   return dir ? [dir] : []
 }
 
+/** How one scanned folder fared. `truncated` is a real answer: the walk has a
+ *  wall-clock deadline and an entry budget per folder, because `fetchModels`
+ *  awaits it and four levels below a home directory is tens of thousands of
+ *  directory reads. A partial list within a few seconds beats a complete one
+ *  nobody waited for, as long as the panel says it is partial. */
+export interface ScannedDir {
+  path: string
+  status: 'ok' | 'truncated' | 'unreachable' | 'unusable'
+}
+
+// The folders the LAST listing walked, app dir first. Kept here rather than
+// returned, so no call site has to change to ignore it; Model Storage is the
+// one surface that asks.
+let lastDirs: ScannedDir[] = []
+
+/** What the last `listBundledModels()` walked, and how each folder fared. */
+export function lastScanDirs(): ScannedDir[] {
+  return lastDirs
+}
+
+/** The user's own folder from the last listing, or null when none was set (or
+ *  when it was the app folder under another name, which Rust folds away). */
+export function lastCustomScanDir(): ScannedDir | null {
+  return lastDirs[1] ?? null
+}
+
 /** List downloaded GGUFs in the app models dir and in the user's own model
  *  folder. Refreshes the name→path map. */
 export async function listBundledModels(): Promise<BundledModel[]> {
-  const res = await backendCall<{ dir: string; dirs?: string[]; models: BundledModel[] }>(
+  const res = await backendCall<{ dir: string; dirs?: ScannedDir[]; models: BundledModel[] }>(
     'list_bundled_models',
     { extraDirs: customModelDirs() },
   )
   const models = res?.models ?? []
+  // An older backend answers without `dirs`; an empty list then says "nothing
+  // known about the folders", which is the truth and renders no line.
+  lastDirs = Array.isArray(res?.dirs) ? res.dirs : []
   pathByName.clear()
   ctxTrainByName.clear()
   for (const m of models) {

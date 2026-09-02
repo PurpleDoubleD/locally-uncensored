@@ -89,6 +89,11 @@ describe('the Model Storage copy tells the truth', () => {
     expect(src).toMatch(/run on Apple MLX, not ComfyUI/)
   })
 
+  it('says when the folder was too large to read to the end', () => {
+    expect(src).toMatch(/scan\?\.status === 'truncated'/)
+    expect(src).toMatch(/too large to read to the end/)
+  })
+
   it('says why a folder produced nothing instead of going quiet', () => {
     expect(src).toMatch(/result\.status === 'unusable'/)
     expect(src).toMatch(/result\.status === 'unreachable'/)

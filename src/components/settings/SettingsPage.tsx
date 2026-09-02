@@ -64,6 +64,7 @@ import { ArrowUpCircle, KeyRound, RefreshCw } from 'lucide-react'
 import { CLOUD_BASE } from '../../api/cloud/config'
 import { formatBytes } from '../../lib/formatters'
 import { syncCustomModelDir, type CustomModelDirResult } from '../../lib/custom-model-dir'
+import { listBundledModels, lastCustomScanDir, type ScannedDir } from '../../api/engine'
 import { CivitaiApiKeySetting } from './CivitaiApiKeySetting'
 
 // ── User profile picture (Appearance) ───────────────────────────
@@ -267,7 +268,20 @@ function HfDownloadPathSetting() {
   const updateSettings = useSettingsStore(s => s.updateSettings)
   const [draft, setDraft] = useState(override)
   const [comfy, setComfy] = useState<CustomModelDirResult | null>(null)
+  const [scan, setScan] = useState<ScannedDir | null>(null)
   useEffect(() => { setDraft(override) }, [override])
+
+  // How the GGUF scan itself fared in that folder. A folder too big to finish
+  // within the budget returns a real but partial list, and the only person who
+  // can do anything about that is the one who chose the folder.
+  useEffect(() => {
+    let alive = true
+    if (!override) { setScan(null); return }
+    void listBundledModels()
+      .then(() => { if (alive) setScan(lastCustomScanDir()) })
+      .catch(() => { if (alive) setScan(null) })
+    return () => { alive = false }
+  }, [override])
 
   // Both directions of the folder: our own GGUF scan reads it on the next
   // model refresh, and the ComfyUI-shaped subfolders in it are handed to
@@ -324,6 +338,11 @@ function HfDownloadPathSetting() {
           </button>
         )}
       </div>
+      {override && scan?.status === 'truncated' && (
+        <div className="text-[0.6rem] leading-relaxed text-amber-600 dark:text-amber-400">
+          That folder is too large to read to the end, so the list below it is what LU found before it stopped. Point this at the folder that actually holds the models rather than at a whole drive.
+        </div>
+      )}
       {override && comfy !== null && <CustomModelDirNote result={comfy} />}
     </div>
   )

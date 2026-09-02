@@ -23,13 +23,21 @@ vi.mock('../backend', () => ({
   isMacOS: () => false,
 }))
 
-import { customModelDirs, listBundledModels, bundledToAIModels } from '../engine'
+import { customModelDirs, listBundledModels, bundledToAIModels, lastScanDirs, lastCustomScanDir } from '../engine'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { DEFAULT_SETTINGS } from '../../lib/constants'
 
 /** The path exactly as Windows hands it over: drive letter, backslashes,
  *  a space in a folder name. All three were in the issue's screenshots. */
 const WINDOWS_FOLDER = 'G:\\AI\\Models'
+
+/** What Rust answers for a folder it walked to the end. */
+function okDirs() {
+  return [
+    { path: '/app/models', status: 'ok' },
+    { path: WINDOWS_FOLDER, status: 'ok' },
+  ]
+}
 
 function setFolder(dir: string) {
   useSettingsStore.setState({ settings: { ...DEFAULT_SETTINGS, hfDownloadPathOverride: dir } })
@@ -45,7 +53,7 @@ describe('the folder under Model Storage reaches the scan', () => {
     setFolder(WINDOWS_FOLDER)
     expect(customModelDirs()).toEqual([WINDOWS_FOLDER])
 
-    backendCall.mockResolvedValue({ dir: '/app/models', dirs: ['/app/models', WINDOWS_FOLDER], models: [] })
+    backendCall.mockResolvedValue({ dir: '/app/models', dirs: okDirs(), models: [] })
     await listBundledModels()
 
     expect(backendCall).toHaveBeenCalledWith('list_bundled_models', {
@@ -77,7 +85,7 @@ describe('a model found in that folder is an Installed row', () => {
     setFolder(WINDOWS_FOLDER)
     backendCall.mockResolvedValue({
       dir: '/app/models',
-      dirs: ['/app/models', WINDOWS_FOLDER],
+      dirs: okDirs(),
       models: [
         {
           name: 'Cydonia-24B-v4.1-Q4_K_M',
@@ -105,7 +113,50 @@ describe('a model found in that folder is an Installed row', () => {
   // Negative control: an empty folder is an empty list, not an invented row.
   it('invents nothing when the folder holds no GGUF', async () => {
     setFolder(WINDOWS_FOLDER)
-    backendCall.mockResolvedValue({ dir: '/app/models', dirs: ['/app/models', WINDOWS_FOLDER], models: [] })
+    backendCall.mockResolvedValue({ dir: '/app/models', dirs: okDirs(), models: [] })
     expect(bundledToAIModels(await listBundledModels())).toEqual([])
+  })
+})
+
+describe('the panel is told how the scan fared, not only what it found', () => {
+  it('carries the per-folder verdict through', async () => {
+    setFolder(WINDOWS_FOLDER)
+    backendCall.mockResolvedValue({
+      dir: '/app/models',
+      dirs: [
+        { path: '/app/models', status: 'ok' },
+        { path: WINDOWS_FOLDER, status: 'truncated' },
+      ],
+      models: [{ name: 'partial', path: 'G:\\AI\\Models\\partial.gguf', size: 1, loaded: false }],
+    })
+    await listBundledModels()
+    expect(lastScanDirs()).toHaveLength(2)
+    // The user's own folder is the one the panel talks about, never the app's.
+    expect(lastCustomScanDir()).toEqual({ path: WINDOWS_FOLDER, status: 'truncated' })
+    // And a truncated walk still returns what it did find.
+    expect(await listBundledModels()).toHaveLength(1)
+  })
+
+  // Negative control: an older backend answers without the field, and the
+  // panel must then say nothing rather than accuse the folder.
+  it('claims nothing when the backend does not report folders', async () => {
+    setFolder(WINDOWS_FOLDER)
+    backendCall.mockResolvedValue({ dir: '/app/models', models: [] })
+    await listBundledModels()
+    expect(lastScanDirs()).toEqual([])
+    expect(lastCustomScanDir()).toBeNull()
+  })
+
+  // Negative control: with no folder of his own there is no second row, so the
+  // panel has nothing to report either.
+  it('has no custom row when no folder is set', async () => {
+    setFolder('')
+    backendCall.mockResolvedValue({
+      dir: '/app/models',
+      dirs: [{ path: '/app/models', status: 'ok' }],
+      models: [],
+    })
+    await listBundledModels()
+    expect(lastCustomScanDir()).toBeNull()
   })
 })

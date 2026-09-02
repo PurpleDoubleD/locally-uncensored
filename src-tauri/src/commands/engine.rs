@@ -326,13 +326,90 @@ pub(crate) fn split_shard_stem(stem: &str) -> Option<(&str, u32, u32)> {
 // this one-root door, so a change to the walk still has to survive them.
 #[allow(dead_code)]
 pub(crate) fn scan_gguf_models(dir: &Path) -> Vec<BundledModel> {
-    scan_gguf_roots(&[ScanRoot { dir, max_depth: MAX_SCAN_DEPTH }])
+    scan_gguf_roots(&[ScanRoot { dir, max_depth: MAX_SCAN_DEPTH }]).models
 }
 
 /// One folder the GGUF scan walks, and how deep it may go there.
 pub(crate) struct ScanRoot<'a> {
     pub dir: &'a Path,
     pub max_depth: usize,
+}
+
+/// How one root fared. The Model Storage panel reads this, because "no models"
+/// and "I could not finish looking" are different answers and the user is the
+/// only one who can act on the difference.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RootStatus {
+    /// Walked to the end, within the budget.
+    Ok,
+    /// The deadline or the entry budget ran out. What was found is real, the
+    /// list is not complete.
+    Truncated,
+    /// `read_dir` on the root itself failed: gone, unplugged, unreadable.
+    Unreachable,
+    /// Not a path the OS can resolve on its own: relative, or a shell `~`.
+    Unusable,
+}
+
+impl RootStatus {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            RootStatus::Ok => "ok",
+            RootStatus::Truncated => "truncated",
+            RootStatus::Unreachable => "unreachable",
+            RootStatus::Unusable => "unusable",
+        }
+    }
+}
+
+/// What a scan of several roots produced, and how each root fared.
+pub(crate) struct ScanOutcome {
+    pub models: Vec<BundledModel>,
+    /// One entry per root, in the order the roots were given.
+    pub statuses: Vec<RootStatus>,
+}
+
+/// Wall-clock ceiling for ONE root.
+///
+/// The walk has no idea what it was pointed at. Four levels below `C:\` or a
+/// home directory is tens of thousands of `read_dir` calls, and `fetchModels`
+/// awaits this: the Models tab, every picker and onboarding sit and wait for it.
+/// A partial answer within a few seconds beats a complete one nobody stayed for,
+/// and the panel says the answer is partial.
+const SCAN_DEADLINE: Duration = Duration::from_secs(5);
+
+/// Directory entries one root may look at. A second ceiling because a fast
+/// local SSD can burn a very long list well inside the deadline, and because a
+/// symlink loop is bounded by this and not by the clock.
+const SCAN_ENTRY_BUDGET: usize = 20_000;
+
+/// The ceilings for one root, carried down the walk.
+struct ScanBudget {
+    deadline: Instant,
+    entries_left: usize,
+    truncated: bool,
+}
+
+impl ScanBudget {
+    fn new() -> Self {
+        Self {
+            deadline: Instant::now() + SCAN_DEADLINE,
+            entries_left: SCAN_ENTRY_BUDGET,
+            truncated: false,
+        }
+    }
+
+    /// True while there is room for one more entry. Flips `truncated` the first
+    /// time there is not, so the caller can say so instead of reporting a short
+    /// list as the whole truth.
+    fn take(&mut self) -> bool {
+        if self.entries_left == 0 || Instant::now() >= self.deadline {
+            self.truncated = true;
+            return false;
+        }
+        self.entries_left -= 1;
+        true
+    }
 }
 
 /// The same scan over SEVERAL folders, in priority order.
@@ -344,18 +421,30 @@ pub(crate) struct ScanRoot<'a> {
 /// be loaded at all. The app models dir is root 0 and still wins every name
 /// collision, so adding a custom folder can never displace what the app
 /// installed itself.
-pub(crate) fn scan_gguf_roots(roots: &[ScanRoot]) -> Vec<BundledModel> {
+pub(crate) fn scan_gguf_roots(roots: &[ScanRoot]) -> ScanOutcome {
     // (root index, model). The index is the first tie-break below, so an
     // earlier root always wins a duplicate name.
     let mut ranked: Vec<(usize, BundledModel)> = Vec::new();
+    let mut statuses: Vec<RootStatus> = Vec::with_capacity(roots.len());
     for (rank, root) in roots.iter().enumerate() {
+        if !crate::commands::custom_models::is_usable_root(root.dir) {
+            statuses.push(RootStatus::Unusable);
+            continue;
+        }
+        // One call answers "is it there and readable" before the walk, so a
+        // dead mount costs one timeout instead of one per directory.
+        if std::fs::read_dir(root.dir).is_err() {
+            statuses.push(RootStatus::Unreachable);
+            continue;
+        }
         let mut out = Vec::new();
         // (dir, base, total) → (part-numbers seen, path of part 1, byte sum).
         // The directory is part of the key: two unrelated split sets that share
         // a base name in different subfolders must never merge into one entry.
         let mut sets: std::collections::HashMap<(PathBuf, String, u32), (Vec<u32>, Option<String>, u64)> =
             std::collections::HashMap::new();
-        scan_gguf_dir(root.dir, 0, root.max_depth, &mut out, &mut sets);
+        let mut budget = ScanBudget::new();
+        scan_gguf_dir(root.dir, 0, root.max_depth, &mut budget, &mut out, &mut sets);
         for ((_dir, base, total), (mut parts, first_path, size)) in sets {
             parts.sort_unstable();
             parts.dedup();
@@ -368,6 +457,7 @@ pub(crate) fn scan_gguf_roots(roots: &[ScanRoot]) -> Vec<BundledModel> {
                 });
             }
         }
+        statuses.push(if budget.truncated { RootStatus::Truncated } else { RootStatus::Ok });
         ranked.extend(out.into_iter().map(|m| (rank, m)));
     }
     // A name is the picker id, so it has to be unique. The earlier root wins,
@@ -381,9 +471,9 @@ pub(crate) fn scan_gguf_roots(roots: &[ScanRoot]) -> Vec<BundledModel> {
             .then(depth(&a.1.path).cmp(&depth(&b.1.path)))
             .then(a.1.path.cmp(&b.1.path))
     });
-    let mut out: Vec<BundledModel> = ranked.into_iter().map(|(_, m)| m).collect();
-    out.dedup_by(|a, b| a.name == b.name);
-    out
+    let mut models: Vec<BundledModel> = ranked.into_iter().map(|(_, m)| m).collect();
+    models.dedup_by(|a, b| a.name == b.name);
+    ScanOutcome { models, statuses }
 }
 
 /// How far below the app models dir the scan walks. 0 alone was the shipped
@@ -408,6 +498,7 @@ fn scan_gguf_dir(
     dir: &Path,
     depth: usize,
     max_depth: usize,
+    budget: &mut ScanBudget,
     out: &mut Vec<BundledModel>,
     sets: &mut std::collections::HashMap<(PathBuf, String, u32), (Vec<u32>, Option<String>, u64)>,
 ) {
@@ -416,10 +507,16 @@ fn scan_gguf_dir(
         Err(_) => return,
     };
     for entry in entries.flatten() {
+        // Both ceilings are asked per entry, so a folder the walk should never
+        // have been pointed at costs seconds instead of minutes, and a symlink
+        // that points back up the tree cannot spin forever.
+        if !budget.take() {
+            return;
+        }
         let path = entry.path();
         if path.is_dir() {
             if depth < max_depth {
-                scan_gguf_dir(&path, depth + 1, max_depth, out, sets);
+                scan_gguf_dir(&path, depth + 1, max_depth, budget, out, sets);
             }
             continue;
         }
@@ -453,7 +550,15 @@ fn scan_gguf_dir(
         if name.is_empty() {
             continue;
         }
-        let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
+        // fs::metadata FOLLOWS the link, entry.metadata() does not. A GGUF
+        // reached through a symlink otherwise reports the size of the link
+        // itself, a hundred-odd bytes, and the HuggingFace cache is built
+        // exactly that way: snapshots/<rev>/model.gguf is a link into blobs/.
+        // The card would have shown a 14 GB model as 116 bytes.
+        let size = std::fs::metadata(&path)
+            .or_else(|_| entry.metadata())
+            .map(|m| m.len())
+            .unwrap_or(0);
         if let Some((base, part, total)) = split_shard_stem(&name) {
             let parent = path.parent().map(Path::to_path_buf).unwrap_or_default();
             let slot = sets
@@ -1198,7 +1303,9 @@ fn list_bundled_models_blocking(
             max_depth: if i == 0 { MAX_SCAN_DEPTH } else { MAX_CUSTOM_SCAN_DEPTH },
         })
         .collect();
-    let models: Vec<serde_json::Value> = scan_gguf_roots(&roots)
+    let outcome = scan_gguf_roots(&roots);
+    let models: Vec<serde_json::Value> = outcome
+        .models
         .into_iter()
         .map(|m| {
             let is_loaded = loaded.as_deref() == Some(m.path.as_str());
@@ -1216,12 +1323,19 @@ fn list_bundled_models_blocking(
             })
         })
         .collect();
+    // Every folder that was asked, app dir first, WITH how it fared. "No
+    // models" and "I could not finish looking" are different answers, and the
+    // Model Storage panel is where the user can act on the difference.
+    let dir_rows: Vec<serde_json::Value> = dirs
+        .iter()
+        .zip(outcome.statuses.iter())
+        .map(|(d, st)| {
+            serde_json::json!({ "path": d.to_string_lossy(), "status": st.as_str() })
+        })
+        .collect();
     Ok(serde_json::json!({
         "dir": dir.to_string_lossy(),
-        // Every folder that was actually walked, app dir first. The Model
-        // Storage panel says which ones those were instead of leaving the
-        // user to guess whether his folder was read.
-        "dirs": dirs.iter().map(|d| d.to_string_lossy().to_string()).collect::<Vec<_>>(),
+        "dirs": dir_rows,
         "models": models,
     }))
 }
@@ -2152,7 +2266,7 @@ mod tests {
         std::fs::create_dir_all(&four).unwrap();
         std::fs::write(four.join("Rocinante-12B-Q6_K.gguf"), b"bb").unwrap();
 
-        let models = scan_gguf_roots(&roots(&app, &custom));
+        let models = scan_gguf_roots(&roots(&app, &custom)).models;
         let names: Vec<&str> = models.iter().map(|m| m.name.as_str()).collect();
         assert_eq!(names, vec!["Cydonia-24B-v4.1-Q4_K_M", "Rocinante-12B-Q6_K"]);
         // The path is absolute and points into the user's folder, which is
@@ -2188,7 +2302,7 @@ mod tests {
         std::fs::write(nested.join("dup.gguf"), b"a").unwrap();
         std::fs::write(custom.join("dup.gguf"), b"bb").unwrap();
 
-        let models = scan_gguf_roots(&roots(&app, &custom));
+        let models = scan_gguf_roots(&roots(&app, &custom)).models;
         assert_eq!(models.len(), 1, "one id per name");
         assert!(
             models[0].path.contains("app-dup"),
@@ -2210,7 +2324,7 @@ mod tests {
         // model and must not be offered.
         std::fs::write(custom.join("Half-00001-of-00003.gguf"), b"c").unwrap();
 
-        let models = scan_gguf_roots(&roots(&app, &custom));
+        let models = scan_gguf_roots(&roots(&app, &custom)).models;
         let names: Vec<&str> = models.iter().map(|m| m.name.as_str()).collect();
         assert_eq!(names, vec!["Big"]);
         assert_eq!(models[0].size, 3, "the set weighs both parts");
@@ -2241,6 +2355,131 @@ mod tests {
                 PathBuf::from("/mnt/second"),
             ],
         );
+    }
+
+    // ── The scan has to come back (S1, S6) ────────────────────────────────
+
+    #[test]
+    fn a_root_that_is_gone_or_relative_is_named_and_costs_the_others_nothing() {
+        let app = scratch("status-app");
+        std::fs::write(app.join("real.gguf"), b"a").unwrap();
+        let gone = scratch("status-gone");
+        std::fs::remove_dir_all(&gone).unwrap();
+        let relative = PathBuf::from("some/relative/models");
+
+        let outcome = scan_gguf_roots(&[
+            ScanRoot { dir: &app, max_depth: MAX_SCAN_DEPTH },
+            ScanRoot { dir: &gone, max_depth: MAX_CUSTOM_SCAN_DEPTH },
+            ScanRoot { dir: &relative, max_depth: MAX_CUSTOM_SCAN_DEPTH },
+        ]);
+        assert_eq!(
+            outcome.statuses,
+            vec![RootStatus::Ok, RootStatus::Unreachable, RootStatus::Unusable],
+        );
+        // The app folder still answered, which is the point: one bad root is
+        // not allowed to cost the list.
+        assert_eq!(outcome.models.len(), 1);
+        assert_eq!(outcome.models[0].name, "real");
+
+        std::fs::remove_dir_all(&app).ok();
+    }
+
+    #[test]
+    fn a_folder_too_big_for_the_budget_returns_what_it_has_and_says_so() {
+        // The entry budget is the ceiling that does not depend on how fast the
+        // disk is, so it is the one a test can hold.
+        let app = scratch("budget-app");
+        let big = scratch("budget-big");
+        for i in 0..(SCAN_ENTRY_BUDGET + 50) {
+            std::fs::write(big.join(format!("m{i:05}.gguf")), b"a").unwrap();
+        }
+
+        let outcome = scan_gguf_roots(&[
+            ScanRoot { dir: &app, max_depth: MAX_SCAN_DEPTH },
+            ScanRoot { dir: &big, max_depth: MAX_CUSTOM_SCAN_DEPTH },
+        ]);
+        assert_eq!(outcome.statuses, vec![RootStatus::Ok, RootStatus::Truncated]);
+        // What came back is real, there is just not all of it.
+        assert!(!outcome.models.is_empty());
+        assert!(outcome.models.len() <= SCAN_ENTRY_BUDGET);
+
+        std::fs::remove_dir_all(&app).ok();
+        std::fs::remove_dir_all(&big).ok();
+    }
+
+    /// Negative control: a folder that fits reports Ok and the complete list.
+    /// Without this, "truncated" above could just be the scan's normal answer.
+    #[test]
+    fn a_folder_inside_the_budget_reports_ok_and_everything_in_it() {
+        let app = scratch("budget-small-app");
+        let small = scratch("budget-small");
+        for i in 0..10 {
+            std::fs::write(small.join(format!("m{i}.gguf")), b"a").unwrap();
+        }
+        let outcome = scan_gguf_roots(&[
+            ScanRoot { dir: &app, max_depth: MAX_SCAN_DEPTH },
+            ScanRoot { dir: &small, max_depth: MAX_CUSTOM_SCAN_DEPTH },
+        ]);
+        assert_eq!(outcome.statuses, vec![RootStatus::Ok, RootStatus::Ok]);
+        assert_eq!(outcome.models.len(), 10);
+
+        std::fs::remove_dir_all(&app).ok();
+        std::fs::remove_dir_all(&small).ok();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_model_reached_through_a_symlink_reports_the_models_size() {
+        // The HuggingFace cache layout: the real bytes sit in blobs/, and
+        // snapshots/<rev>/<name>.gguf is a link to them. entry.metadata() does
+        // not follow the link and reported the link's own size.
+        let app = scratch("symlink-app");
+        let custom = scratch("symlink-custom");
+        let blobs = custom.join("blobs");
+        let snap = custom.join("snapshots").join("abc123");
+        std::fs::create_dir_all(&blobs).unwrap();
+        std::fs::create_dir_all(&snap).unwrap();
+        let real = blobs.join("deadbeef");
+        std::fs::write(&real, vec![7u8; 4096]).unwrap();
+        std::os::unix::fs::symlink(&real, snap.join("Cydonia-Q4_K_M.gguf")).unwrap();
+
+        let outcome = scan_gguf_roots(&[
+            ScanRoot { dir: &app, max_depth: MAX_SCAN_DEPTH },
+            ScanRoot { dir: &custom, max_depth: MAX_CUSTOM_SCAN_DEPTH },
+        ]);
+        let found = outcome
+            .models
+            .iter()
+            .find(|m| m.name == "Cydonia-Q4_K_M")
+            .expect("the linked model must be listed");
+        assert_eq!(found.size, 4096, "the link's own size is not the model's");
+
+        std::fs::remove_dir_all(&app).ok();
+        std::fs::remove_dir_all(&custom).ok();
+    }
+
+    /// Negative control for the same walk: a symlink pointing back at its own
+    /// parent must not spin. The entry budget is what stops it.
+    #[cfg(unix)]
+    #[test]
+    fn a_symlink_loop_ends_instead_of_running_forever() {
+        let app = scratch("loop-app");
+        let custom = scratch("loop-custom");
+        let inner = custom.join("inner");
+        std::fs::create_dir_all(&inner).unwrap();
+        std::fs::write(inner.join("real.gguf"), b"abc").unwrap();
+        std::os::unix::fs::symlink(&custom, inner.join("back")).unwrap();
+
+        let started = Instant::now();
+        let outcome = scan_gguf_roots(&[
+            ScanRoot { dir: &app, max_depth: MAX_SCAN_DEPTH },
+            ScanRoot { dir: &custom, max_depth: MAX_CUSTOM_SCAN_DEPTH },
+        ]);
+        assert!(started.elapsed() < SCAN_DEADLINE * 3, "the walk did not come back");
+        assert!(outcome.models.iter().any(|m| m.name == "real"));
+
+        std::fs::remove_dir_all(&app).ok();
+        std::fs::remove_dir_all(&custom).ok();
     }
 
     /// Negative control: no custom folder set leaves the list exactly as it
