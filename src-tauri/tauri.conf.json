@@ -97,8 +97,8 @@
           "webkit2gtk4.1",
           "gtk3",
           "libappindicator-gtk3",
-          "vulkan-loader",
-          "libgomp"
+          "libvulkan.so.1()(64bit)",
+          "libgomp.so.1()(64bit)"
         ]
       }
     }

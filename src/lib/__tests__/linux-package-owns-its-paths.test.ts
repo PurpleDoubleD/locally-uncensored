@@ -45,7 +45,11 @@ const conf = JSON.parse(readFileSync(resolve(root, 'src-tauri/tauri.conf.json'),
   }
 }
 
-/** Prefix every binary we drop into /usr/bin has to carry. */
+/**
+ * Prefix every SIDECAR we drop into /usr/bin has to carry. The main binary
+ * goes there too, as locally-uncensored, but that is the deb package's own
+ * name and no other package can own it.
+ */
 const OURS = 'lu-'
 
 /** Is this a file name we may put into a shared system bin directory? */
@@ -62,10 +66,16 @@ export function missingFrom(depends: string[], required: string[]): string[] {
 const externalBin = conf.bundle?.externalBin ?? []
 const names = externalBin.map((b) => b.split('/').pop() ?? b)
 
-// The shared objects the Vulkan build of the sidecar links against, and the
-// package that provides each one. Read off the shipped binary, not guessed.
+// The shared objects the Vulkan build of the sidecar links against, and what
+// each package manager has to be told. Read off the shipped binary, not
+// guessed. Debian and Ubuntu have carried libvulkan1 and libgomp1 under those
+// names across every release the app supports, so the deb names packages.
+// RPM does not have one name: the loader is vulkan-loader on Fedora,
+// libvulkan1 on openSUSE and lib64vulkan1 on Mageia. Every RPM distribution
+// does provide the soname though, and that is the form rpmbuild generates for
+// automatic dependencies anyway, so the rpm asks for the library instead.
 const DEB_RUNTIME = ['libvulkan1', 'libgomp1']
-const RPM_RUNTIME = ['vulkan-loader', 'libgomp']
+const RPM_RUNTIME = ['libvulkan.so.1()(64bit)', 'libgomp.so.1()(64bit)']
 
 describe('the bundled binaries claim only paths we own', () => {
   it('ships at least one external binary, so the rules below are not vacuous', () => {
@@ -127,8 +137,21 @@ describe('the Linux packages pull in what the engine links against', () => {
     expect(missingFrom(depends, ['libwebkit2gtk-4.1-0', 'libgtk-3-0'])).toEqual([])
   })
 
+  it('asks the rpm for a soname and not for one distributions name of it', () => {
+    const depends = conf.bundle?.linux?.rpm?.depends ?? []
+    // Negative control: a Fedora-only package name would leave openSUSE and
+    // Mageia users with an rpm that refuses to install.
+    for (const distroOnly of ['vulkan-loader', 'libgomp', 'lib64vulkan1']) {
+      expect(depends).not.toContain(distroOnly)
+    }
+    for (const soname of RPM_RUNTIME) {
+      expect(soname).toMatch(/^lib.+\.so\.\d+\(\)\(64bit\)$/)
+    }
+  })
+
   it('negative control: the check fails on the dependency list 2.6.7 shipped', () => {
     const asShipped = ['libwebkit2gtk-4.1-0', 'libgtk-3-0', 'libayatana-appindicator3-1']
     expect(missingFrom(asShipped, DEB_RUNTIME)).toEqual(DEB_RUNTIME)
+    expect(missingFrom(asShipped, RPM_RUNTIME)).toEqual(RPM_RUNTIME)
   })
 })

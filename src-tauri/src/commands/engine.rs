@@ -1970,8 +1970,11 @@ mod tests {
             "the config bundles {names:?} but the app looks for {stem}",
         );
         // The rule is positive, not a list of four forbidden llama names:
-        // everything the bundler drops into /usr/bin carries our prefix, so
-        // the NEXT sidecar cannot walk into #120 either. Same rule as
+        // every SIDECAR the bundler drops into /usr/bin carries our prefix,
+        // so the NEXT one cannot walk into #120 either. It is a rule about
+        // externalBin only. The main binary lands in /usr/bin too, as
+        // locally-uncensored without the prefix, and that name is the deb
+        // package's own, so nothing else can claim it. Same rule as
         // src/lib/__tests__/linux-package-owns-its-paths.test.ts, which is
         // the copy CI actually runs.
         fn is_ours(name: &str) -> bool {
