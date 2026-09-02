@@ -1476,12 +1476,8 @@ pub async fn stop_bundled_engine(app: AppHandle) -> Result<serde_json::Value, St
 pub async fn bundled_engine_status(app: AppHandle) -> Result<serde_json::Value, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let state = app.state::<AppState>();
-        let probe = {
-            let mut guard = state.bundled_engine.lock().unwrap();
-            // A handle whose process died is not a running engine (A15).
-            reap_dead_engine(&mut guard);
-            guard.as_ref().map(|e| (e.port, e.model_path.clone(), e.ctx))
-        };
+        // A handle whose process died is not a running engine (A15).
+        let probe = live_sidecar(&mut state.bundled_engine.lock().unwrap());
         match probe {
             Some((port, model_path, ctx)) => serde_json::json!({
                 "running": true,
@@ -1942,6 +1938,18 @@ pub(crate) fn reap_dead_engine(slot: &mut Option<BundledEngine>) -> bool {
     gone
 }
 
+/// What a status command should report for a sidecar slot: the port, the model
+/// and the context, with a handle whose process is gone cleared first.
+///
+/// A15 review: the chat engine got the reaping and the embeddings server did
+/// not, so an embed sidecar killed from outside kept answering "running" on
+/// 8128 exactly the way the chat engine used to on 8127. Both status commands
+/// go through this one function now, so the two cannot drift apart again.
+pub(crate) fn live_sidecar(slot: &mut Option<BundledEngine>) -> Option<(u16, String, Option<u32>)> {
+    reap_dead_engine(slot);
+    slot.as_ref().map(|e| (e.port, e.model_path.clone(), e.ctx))
+}
+
 pub(crate) fn stop_engine_locked(state: &AppState) -> bool {
     let mut guard = state.bundled_engine.lock().unwrap();
     if let Some(mut engine) = guard.take() {
@@ -2110,12 +2118,10 @@ pub async fn bundled_embed_status(app: AppHandle) -> Result<serde_json::Value, S
         let state = app.state::<AppState>();
         // Probe OUTSIDE the lock: holding it across a blocking HTTP call made
         // every other engine command queue behind the status poll.
-        let probe = {
-            let guard = state.bundled_embed.lock().unwrap();
-            guard.as_ref().map(|e| (e.port, e.model_path.clone()))
-        };
+        // Same as the chat engine: a killed sidecar is not a running one.
+        let probe = live_sidecar(&mut state.bundled_embed.lock().unwrap());
         match probe {
-            Some((port, model_path)) => serde_json::json!({
+            Some((port, model_path, _ctx)) => serde_json::json!({
                 "running": true,
                 "healthy": engine_healthy(port),
                 "port": port,
@@ -2986,6 +2992,50 @@ mod tests {
         assert!(!reap_dead_engine(&mut slot), "a live engine was declared dead");
         assert!(slot.is_some());
         assert_eq!(slot.as_ref().unwrap().port, DEFAULT_ENGINE_PORT);
+
+        let mut engine = slot.take().unwrap();
+        let _ = engine.child.kill();
+        let _ = engine.child.wait();
+    }
+
+    #[test]
+    #[cfg_attr(target_os = "windows", ignore = "uses sh")]
+    fn a_status_read_reports_nothing_for_a_sidecar_whose_process_is_gone() {
+        // The embeddings server had no reaping at all, so a killed sidecar kept
+        // answering "running" on 8128 the way the chat engine used to on 8127.
+        // Both status commands go through live_sidecar now, so this covers the
+        // pair (A15 review).
+        let mut child = std::process::Command::new("sh")
+            .args(["-c", "exit 0"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("spawn a child that exits immediately");
+        let _ = child.wait();
+        let mut slot = engine_around(child, DEFAULT_EMBED_PORT);
+
+        assert_eq!(live_sidecar(&mut slot), None, "a dead sidecar was reported as running");
+        assert!(slot.is_none(), "the handle survived its process");
+    }
+
+    #[test]
+    #[cfg_attr(target_os = "windows", ignore = "uses sh")]
+    fn a_status_read_reports_a_sidecar_that_is_really_there() {
+        // Negative control for the test above: live_sidecar must not simply
+        // answer None.
+        let child = std::process::Command::new("sh")
+            .args(["-c", "sleep 30"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("spawn a long lived child");
+        let mut slot = engine_around(child, DEFAULT_EMBED_PORT);
+
+        let seen = live_sidecar(&mut slot);
+        assert_eq!(seen.as_ref().map(|(p, _, _)| *p), Some(DEFAULT_EMBED_PORT));
+        assert!(slot.is_some());
 
         let mut engine = slot.take().unwrap();
         let _ = engine.child.kill();

@@ -457,6 +457,11 @@ mod drift_guard {
         // git clone both polled their child and rendered the poll's own error
         // straight into the progress card.
         ".try_wait()", ".wait()",
+        // Asking the platform where our own folders are. Tauri answers this
+        // one with its own error, but that error wraps an io::Error on the
+        // paths that touch the disk, and the Piper voices lookup rendered it
+        // raw (A15 review).
+        ".app_data_dir()",
     ];
 
     /// The other half of the same rule: the error is not mapped, it is MATCHED.
