@@ -805,6 +805,28 @@ pub(crate) fn start_failure_message(failure: &StartFailure, port: u16, budget: D
     }
 }
 
+/// The message the embeddings server hands back when it never became healthy.
+///
+/// The embeddings server is a second run of the SAME sidecar, so the missing
+/// library that kills the chat engine kills this one too. It builds its
+/// message itself and never went through `start_failure_message`, so
+/// Document Chat used to answer a missing libvulkan.so.1 with a raw stderr
+/// tail and no way out. It gets the same sentence now. The rest of
+/// `start_failure_message` stays out of here on purpose: this path has
+/// already refused a stranger on the port above and does not retry, so the
+/// port and retry wording would not be true.
+pub(crate) fn embed_start_failure_message(timeout_error: &str, stderr_tail: &str) -> String {
+    let hint = stderr_names_a_missing_system_library(stderr_tail)
+        .map(|lib| missing_library_hint(&lib, cfg!(target_os = "linux")))
+        .unwrap_or_default();
+    let head = format!("{timeout_error}{hint}");
+    if stderr_tail.is_empty() {
+        head
+    } else {
+        format!("{head}\n\n{stderr_tail}")
+    }
+}
+
 // ── Commands ─────────────────────────────────────────────────────────────────
 
 /// Start (or reuse) the managed chat engine for `model_path`. Idempotent: if
@@ -1591,7 +1613,7 @@ fn start_bundled_embed_blocking(
             .map(|(buf, _)| tail_lines(&super::shell::captured_text(&buf), 12))
             .unwrap_or_default();
         stop_embed_locked(state);
-        return Err(if why.is_empty() { e } else { format!("{e}\n\n{why}") });
+        return Err(embed_start_failure_message(&e, &why));
     }
 
     // Same stranger-on-the-port guard as the chat engine: a healthy probe is
@@ -2307,6 +2329,35 @@ mod tests {
         assert!(elsewhere.contains("libvulkan.so.1"), "{elsewhere}");
         assert!(!elsewhere.contains("apt"), "{elsewhere}");
         assert!(!elsewhere.contains("dnf"), "{elsewhere}");
+    }
+
+    #[test]
+    fn the_embeddings_server_gets_the_same_diagnosis_as_the_chat_engine() {
+        // Same sidecar, same loader, same missing package. Document Chat used
+        // to answer this with the raw stderr tail alone.
+        let msg = embed_start_failure_message(
+            "Built-in engine did not become healthy on port 8128 within 60s",
+            "lu-llama-server: error while loading shared libraries: libgomp.so.1: cannot open shared object file: No such file or directory",
+        );
+        assert!(msg.contains("libgomp.so.1"), "{msg}");
+        assert!(msg.contains("A system library the built-in engine needs is missing"), "{msg}");
+        // The engine's own last words survive for a bug report.
+        assert!(msg.contains("cannot open shared object file"), "{msg}");
+        // No port or retry wording from the chat path: this one refuses a
+        // stranger earlier and never retries, so that would not be true.
+        assert!(!msg.contains("tried twice"), "{msg}");
+
+        // Negative control: an ordinary slow load keeps the plain message and
+        // gains no packaging advice.
+        let slow = embed_start_failure_message(
+            "Built-in engine did not become healthy on port 8128 within 60s",
+            "load_tensors: loading model tensors",
+        );
+        assert!(!slow.contains("A system library"), "{slow}");
+        assert!(slow.contains("load_tensors"), "{slow}");
+        // And an empty tail leaves no dangling blank lines.
+        let bare = embed_start_failure_message("timed out", "");
+        assert_eq!(bare, "timed out");
     }
 
     #[test]
