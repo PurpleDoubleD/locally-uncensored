@@ -12,6 +12,7 @@ import {
 } from '../api/comfyui'
 import { parseNDJSONStream } from '../api/stream'
 import { log } from '../lib/logger'
+import { cloudModelRow } from '../lib/cloud-model-row'
 import { useModelStore } from '../stores/modelStore'
 import { useProviderStore } from '../stores/providerStore'
 import { useSettingsStore } from '../stores/settingsStore'
@@ -188,21 +189,11 @@ export function useModels() {
                 contextLength: pm.contextLength, supportsTools: pm.supportsTools,
               }
             }
-            const prefixedName = prefixModelName(pm.provider, pm.id)
-            return {
-              name: prefixedName, model: pm.id, size: 0, type: 'text' as const,
-              provider: pm.provider, providerName: pm.providerName,
-              contextLength: pm.contextLength, supportsTools: pm.supportsTools, supportsVision: pm.supportsVision,
-              thinkMode: pm.thinkMode,
-              // The effort ladder rides along field by field, like thinkMode.
-              // The Ollama branch above is the standing warning: a literal that
-              // rebuilds the model and stops one field short is how a server
-              // answer dies quietly halfway to the composer.
-              effortLevels: pm.effortLevels,
-              effortDefault: pm.effortDefault,
-              // Friendly server label (LU Cloud) — pickers prefer it over the id.
-              displayName: pm.name !== pm.id ? pm.name : undefined,
-            } satisfies CloudModel
+            // ONE place decides what a cloud row carries (lib/cloud-model-row).
+            // The Ollama branch above is the standing warning: a literal that
+            // rebuilds the model and stops one field short is how a server
+            // answer dies quietly halfway to the composer.
+            return cloudModelRow(pm) satisfies CloudModel
           })
         })
       )

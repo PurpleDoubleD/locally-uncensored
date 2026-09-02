@@ -774,19 +774,42 @@ export class OpenAIProvider implements ProviderClient {
       // (['tool_use', ...]); one fetch covers all models. Backends without
       // the enhanced API leave the map empty → optimistic as before.
       const { lanCaps, serverTools } = await this.liveToolCaps()
-      return Promise.all(models.map(async m => ({
-        id: m.id,
-        name: m.id,
-        provider: 'openai' as const,
-        providerName: this.config.name,
-        contextLength:
-          KNOWN_CONTEXT[m.id] ??
-          (await this.probeContextFromServer(m.id)) ??
-          guessContextFromName(m.id),
-        supportsTools: lanCaps.has(m.id)
-          ? lanCaps.get(m.id)!.includes('tool_use')
-          : (serverTools ?? m.supports_tools ?? true),
-      })))
+      return Promise.all(models.map(async m => {
+        // A catalogue answer is a catalogue answer wherever the server sits.
+        // This branch used to keep ONLY the id and the tool flag, which was
+        // fine while "LAN" meant LM Studio and llama.cpp, and wrong the moment
+        // LU Cloud ran on localhost:3000: every model arrived with the raw id
+        // for a name, no think mode (so the Think button rendered grey on a
+        // model that always reasons), no vision flag and no effort ladder (so
+        // the composer drew no effort control at all). Measured on the 2.6.8
+        // Mac bundle, 2026-09-02.
+        if (m.context_length && m.context_length > 0) {
+          catalogContext.set(this.catalogKey(m.id), m.context_length)
+        }
+        return {
+          id: m.id,
+          name: m.name ?? m.id,
+          provider: 'openai' as const,
+          providerName: this.config.name,
+          // The declared window comes BEFORE the probe: a server that already
+          // answered the question in its listing must not be asked again per
+          // model. That probe is what fired a GET /models/<id> at LU Cloud for
+          // every entry, collected a 404 each time, and stretched one listing
+          // to between eight and twenty-one seconds.
+          contextLength:
+            KNOWN_CONTEXT[m.id] ??
+            (m.context_length && m.context_length > 0 ? m.context_length : undefined) ??
+            (await this.probeContextFromServer(m.id)) ??
+            guessContextFromName(m.id),
+          supportsTools: lanCaps.has(m.id)
+            ? lanCaps.get(m.id)!.includes('tool_use')
+            : (serverTools ?? m.supports_tools ?? true),
+          supportsVision: m.input_modalities?.includes('image') || undefined,
+          thinkMode: m.think,
+          effortLevels: m.reasoning_effort_levels,
+          effortDefault: m.reasoning_effort_default,
+        }
+      }))
     }
 
     return models.map(m => {
