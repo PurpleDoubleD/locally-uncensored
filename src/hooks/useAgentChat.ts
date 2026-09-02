@@ -24,6 +24,7 @@ import { useModelStore } from '../stores/modelStore'
 import { useSettingsStore } from '../stores/settingsStore'
 import { useRAGStore } from '../stores/ragStore'
 import { retrieveContext } from '../api/rag'
+import { buildRagSuffix } from '../lib/rag-prompt'
 import { toolRegistry } from '../api/mcp'
 import { usePermissionStore } from '../stores/permissionStore'
 import { CODEX_CONFIRM_TOOLS, codexConfirmEnabled } from './codexShellGate'
@@ -432,17 +433,12 @@ export function useAgentChat() {
       if (chunks.length > 0) {
         try {
           const { context: ragContext } = await retrieveContext(userContent, chunks, ragState.embeddingModel)
-          if (ragContext.chunks.length > 0) {
-            const contextBlock = ragContext.chunks
-              .map((c: any, i: number) => `[Source ${i + 1}]\n${c.content}`)
-              .join('\n\n')
-            // Retrieval is the most volatile thing in the whole prompt:
-            // every turn pulls different chunks. In front of the persona it
-            // put a fresh byte at offset 0 and made the upstream prefix cache
-            // miss the ENTIRE prompt on every RAG turn, so it rides at the end
-            // now, behind persona and memory (plan A5).
-            ragSuffix = `\n\nUse the following document context to help answer the user's question. If the context is not relevant, ignore it and answer normally.\n\n---\n${contextBlock}\n---`
-          }
+          // Same builder plain chat uses (lib/rag-prompt.ts), so the two
+          // surfaces cannot drift apart. It rides at the END of the prompt,
+          // behind persona and memory, because retrieval changes every turn and
+          // at offset 0 it cost the upstream prefix cache the whole prompt
+          // (plan A5).
+          ragSuffix = buildRagSuffix(ragContext.chunks)
         } catch (err) {
           log.error('RAG retrieval failed', { err })
         }

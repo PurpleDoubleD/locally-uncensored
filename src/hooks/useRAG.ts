@@ -2,33 +2,15 @@ import { useCallback, useEffect, useRef } from "react"
 import { useShallow } from "zustand/react/shallow"
 import { useRAGStore } from "../stores/ragStore"
 import { indexDocument, retrieveContext } from "../api/rag"
-import {
-  isManagedBuiltinActive,
-  bundledEmbedStatus,
-  bundledEmbedLaneReady,
-} from "../api/engine"
+import { isManagedBuiltinActive } from "../api/engine"
+import { builtinEmbedReady, embeddingBackendReady } from "../api/embed-availability"
 import { installBundledEmbedModel } from "../api/embed-install"
-import { getModelContext, listModels, pullModelTauri, checkConnection } from "../api/ollama"
+import { getModelContext, pullModelTauri, checkConnection } from "../api/ollama"
 import { useModelStore } from "../stores/modelStore"
 import type { DocumentMeta, RAGContext } from "../types/rag"
 import { log } from "../lib/logger"
 
 const EMPTY_DOCS: DocumentMeta[] = []
-
-/** True when the bundled lane can serve indexing without Ollama: its server is
- *  up, or the built-in engine is active and an embedding GGUF is installed for
- *  it (see `bundledEmbedLaneReady`, which is the same question rag.ts answers
- *  when it routes). */
-async function builtinEmbedReady(): Promise<boolean> {
-  if (!isManagedBuiltinActive()) {
-    try {
-      return (await bundledEmbedStatus()).running
-    } catch {
-      return false
-    }
-  }
-  return bundledEmbedLaneReady()
-}
 
 export function useRAG(conversationId: string | null) {
   const {
@@ -110,21 +92,7 @@ export function useRAG(conversationId: string | null) {
    * prompt rather than blocking.
    */
   const ensureEmbeddingModel = useCallback(async (): Promise<boolean> => {
-    if (await builtinEmbedReady()) return true
-    // The bundled lane is the only one rag.ts will use here, so a pulled
-    // Ollama model is not an answer to this question.
-    if (isManagedBuiltinActive()) return false
-    const { embeddingModel } = useRAGStore.getState()
-    const ollamaUp = await checkConnection()
-    if (!ollamaUp) return false
-    try {
-      const models = await listModels()
-      return models.some(
-        (m) => m.name === embeddingModel || m.name === embeddingModel + ":latest"
-      )
-    } catch {
-      return false
-    }
+    return embeddingBackendReady(useRAGStore.getState().embeddingModel)
   }, [])
 
   /**
