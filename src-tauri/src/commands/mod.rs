@@ -2,6 +2,7 @@ pub mod agent;
 pub mod bg_tasks;
 pub mod repo_map;
 pub mod comfy_ws;
+pub mod custom_models;
 pub mod download;
 pub mod engine;
 pub mod filesystem;

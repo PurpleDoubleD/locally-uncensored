@@ -2,6 +2,7 @@ import { backendCall, fetchExternal } from "./backend"
 import { getCheckpoints, getDiffusionModels, getVAEModels, getCLIPModels, getGgufUnetModels, getAnimateDiffModels, getLoraModels, filterPartialFiles, refreshComfyModels } from "./comfyui"
 import type { ProviderId } from "./providers/types"
 import { log } from "../lib/logger"
+import { useWorkflowStore } from "../stores/workflowStore"
 
 export interface DiscoverModel {
   name: string
@@ -58,8 +59,45 @@ export interface DownloadProgress {
 
 // ─── Download API ───
 
+/**
+ * Is this URL served by CivitAI? Host comparison, never a substring of the
+ * whole URL: `https://evil.test/?x=civitai.com` must not collect the user's
+ * API key. Mirrors `is_civitai_host` in `src-tauri/src/commands/download.rs`,
+ * which gates the same key a second time on its way onto the wire.
+ */
+const CIVITAI_HOSTS = ['civitai.com', 'civitai.red']
+
+export function isCivitaiUrl(url: string): boolean {
+  let host: string
+  try {
+    host = new URL(url).hostname.toLowerCase()
+  } catch {
+    return false
+  }
+  return CIVITAI_HOSTS.some((h) => host === h || host.endsWith(`.${h}`))
+}
+
+/**
+ * The user's CivitAI API key, for a CivitAI URL and no other.
+ *
+ * goonerforporn (Discord #bug-reports, 2026-08-28): downloads from the CivitAI
+ * search died in 400s because they went out anonymous. The key was in the store
+ * and read by the search, and by nothing on the download path.
+ */
+export function civitaiAuthToken(url: string): string | null {
+  if (!isCivitaiUrl(url)) return null
+  const key = useWorkflowStore.getState().civitaiApiKey?.trim()
+  return key ? key : null
+}
+
 export async function startModelDownload(url: string, subfolder: string, filename: string, expectedBytes?: number): Promise<{ status: string; id: string; error?: string }> {
-  return backendCall("download_model", { url, subfolder, filename, expectedBytes: expectedBytes ?? null })
+  return backendCall("download_model", {
+    url,
+    subfolder,
+    filename,
+    expectedBytes: expectedBytes ?? null,
+    authToken: civitaiAuthToken(url),
+  })
 }
 
 export async function getDownloadProgress(): Promise<Record<string, DownloadProgress>> {
@@ -79,7 +117,7 @@ export async function cancelDownload(id: string): Promise<void> {
 }
 
 export async function resumeDownload(id: string, url: string, subfolder: string): Promise<void> {
-  await backendCall("resume_download", { id, url, subfolder })
+  await backendCall("resume_download", { id, url, subfolder, authToken: civitaiAuthToken(url) })
 }
 
 // ─── Custom Node Installation ───
@@ -2413,10 +2451,13 @@ export async function searchCivitaiModels(
       // back near-empty for users who expected to find e.g. unfiltered SDXL forks.
       nsfw: 'true',
     })
-    // Adding the user's API key as a bearer token unlocks the full catalog and
-    // lifts the per-IP rate limit. Falls back to anon access if no key is set.
-    const url = `https://${host}/api/v1/models?${params}${apiKey ? `&token=${encodeURIComponent(apiKey)}` : ''}`
-    const text = await fetchExternal(url)
+    // The user's API key unlocks the full catalog and lifts the per-IP rate
+    // limit. It travels as an Authorization header, NOT as `&token=` in the
+    // URL: the URL is what the error text and the log line quote, and the log
+    // scrubber cannot see a secret that is just another substring of a URL.
+    // No key set is still a valid, anonymous search.
+    const url = `https://${host}/api/v1/models?${params}`
+    const text = await fetchExternal(url, apiKey ?? null)
     const data = JSON.parse(text)
     const items: any[] = data.items ?? []
 

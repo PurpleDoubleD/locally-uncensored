@@ -240,10 +240,57 @@ export async function bundledEmbedLaneReady(): Promise<boolean> {
   }
 }
 
-/** List downloaded GGUFs in the app models dir. Refreshes the name→path map. */
+/**
+ * Every folder the GGUF scan walks: the app models dir (Rust adds that one)
+ * plus the folder the user named under Settings → Model Storage.
+ *
+ * GH #122 (zrmdsxa, 2026-08-28): that setting was a download TARGET and
+ * nothing else. A GGUF already sitting in it was never looked at, so the
+ * Models tab stayed empty next to a folder full of models. Empty setting →
+ * empty list, which is exactly the shipped single-folder scan.
+ */
+export function customModelDirs(): string[] {
+  const dir = useSettingsStore.getState().settings.hfDownloadPathOverride?.trim() || ''
+  return dir ? [dir] : []
+}
+
+/** How one scanned folder fared. `truncated` is a real answer: the walk has a
+ *  wall-clock deadline and an entry budget per folder, because `fetchModels`
+ *  awaits it and four levels below a home directory is tens of thousands of
+ *  directory reads. A partial list within a few seconds beats a complete one
+ *  nobody waited for, as long as the panel says it is partial. */
+export interface ScannedDir {
+  path: string
+  status: 'ok' | 'truncated' | 'unreachable' | 'unusable'
+}
+
+// The folders the LAST listing walked, app dir first. Kept here rather than
+// returned, so no call site has to change to ignore it; Model Storage is the
+// one surface that asks.
+let lastDirs: ScannedDir[] = []
+
+/** What the last `listBundledModels()` walked, and how each folder fared. */
+export function lastScanDirs(): ScannedDir[] {
+  return lastDirs
+}
+
+/** The user's own folder from the last listing, or null when none was set (or
+ *  when it was the app folder under another name, which Rust folds away). */
+export function lastCustomScanDir(): ScannedDir | null {
+  return lastDirs[1] ?? null
+}
+
+/** List downloaded GGUFs in the app models dir and in the user's own model
+ *  folder. Refreshes the name→path map. */
 export async function listBundledModels(): Promise<BundledModel[]> {
-  const res = await backendCall<{ dir: string; models: BundledModel[] }>('list_bundled_models')
+  const res = await backendCall<{ dir: string; dirs?: ScannedDir[]; models: BundledModel[] }>(
+    'list_bundled_models',
+    { extraDirs: customModelDirs() },
+  )
   const models = res?.models ?? []
+  // An older backend answers without `dirs`; an empty list then says "nothing
+  // known about the folders", which is the truth and renders no line.
+  lastDirs = Array.isArray(res?.dirs) ? res.dirs : []
   pathByName.clear()
   ctxTrainByName.clear()
   for (const m of models) {

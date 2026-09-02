@@ -43,6 +43,180 @@ fn safe_subfolder(subfolder: &str) -> Result<(), String> {
 }
 
 #[cfg(test)]
+mod delete_message_tests {
+    use super::not_ours_to_delete;
+
+    fn scratch(name: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir()
+            .join("lu-delete-msg")
+            .join(format!("{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// The button used to end in a flat "was not found" for a LoRA that lives
+    /// in the user's own folder, which reads like a bug. LU still does not
+    /// delete it: the folder is his.
+    #[test]
+    fn a_file_in_the_users_own_folder_is_named_as_such() {
+        let root = scratch("own-folder");
+        std::fs::create_dir_all(root.join("loras")).unwrap();
+        std::fs::write(root.join("loras").join("pixelart.safetensors"), b"x").unwrap();
+
+        let msg = not_ours_to_delete(
+            "pixelart.safetensors",
+            "pixelart.safetensors",
+            &[root.to_string_lossy().to_string()],
+        );
+        assert!(msg.contains("your own model folder"), "{msg}");
+        assert!(msg.contains(&root.join("loras").display().to_string()), "{msg}");
+        assert!(msg.contains("Remove the file there"), "{msg}");
+
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    /// Negative control: a name that is in no folder at all keeps the short
+    /// answer. Blaming the custom folder for every miss would be its own lie.
+    #[test]
+    fn a_file_that_is_nowhere_keeps_the_short_answer() {
+        let root = scratch("own-folder-empty");
+        std::fs::create_dir_all(root.join("loras")).unwrap();
+
+        let msg = not_ours_to_delete(
+            "ghost.safetensors",
+            "ghost.safetensors",
+            &[root.to_string_lossy().to_string()],
+        );
+        assert_eq!(msg, "ghost.safetensors was not found in the ComfyUI models folders");
+
+        // And with no custom folder set at all.
+        let msg = not_ours_to_delete("ghost.safetensors", "ghost.safetensors", &[]);
+        assert_eq!(msg, "ghost.safetensors was not found in the ComfyUI models folders");
+        let msg = not_ours_to_delete("ghost.safetensors", "ghost.safetensors", &["  ".to_string()]);
+        assert_eq!(msg, "ghost.safetensors was not found in the ComfyUI models folders");
+
+        std::fs::remove_dir_all(&root).ok();
+    }
+}
+
+#[cfg(test)]
+mod civitai_auth_tests {
+    use super::{download_http_error, is_civitai_host};
+
+    #[test]
+    fn the_key_goes_to_civitai_and_its_mirror_and_nowhere_else() {
+        assert!(is_civitai_host("https://civitai.com/api/download/models/12345"));
+        assert!(is_civitai_host("https://CIVITAI.COM/api/download/models/1"));
+        // GH #53: the mirror LU offers where .com is blocked.
+        assert!(is_civitai_host("https://civitai.red/api/download/models/1"));
+        assert!(is_civitai_host("https://api.civitai.com/v1/x"));
+    }
+
+    /// Negative control, and the reason the check is on the HOST: a URL that
+    /// merely mentions civitai must never collect the user's API key.
+    #[test]
+    fn a_url_that_only_mentions_civitai_gets_no_key() {
+        assert!(!is_civitai_host("https://evil.test/?x=civitai.com"));
+        assert!(!is_civitai_host("https://civitai.com.evil.test/file"));
+        assert!(!is_civitai_host("https://notcivitai.com/file"));
+        assert!(!is_civitai_host("https://huggingface.co/repo/resolve/main/m.safetensors"));
+        // A userinfo prefix is not a host either.
+        assert!(!is_civitai_host("https://civitai.com@evil.test/file"));
+        assert!(!is_civitai_host("not a url"));
+    }
+
+    /// The backslash forms the hand written parser got wrong.
+    ///
+    /// In a special scheme the backslash ends the authority. The old check
+    /// split the string by hand and disagreed with the transport in BOTH
+    /// directions: `https://evil.test\.civitai.com/x` goes to `evil.test` and
+    /// was called CivitAI, so the Bearer token would have ridden along, and
+    /// `https://civitai.com\@evil.test/x` goes to `civitai.com` and was called
+    /// something else. The frontend gates on `new URL()` too, so the app could
+    /// not produce the first one, but a second gate that disagrees with the
+    /// transport is not a gate.
+    ///
+    /// The property is the agreement itself: the check answers what the
+    /// request will actually do, because it asks the same parser.
+    #[test]
+    fn the_check_agrees_with_the_host_the_request_will_reach() {
+        for u in [
+            "https://evil.test\\.civitai.com/x",
+            "https://civitai.com\\@evil.test/x",
+            "https://civitai.com\\.evil.test/x",
+            "https://civitai.com/api/download/models/1",
+            "https://evil.test/?x=civitai.com",
+        ] {
+            let host = url::Url::parse(u).unwrap().host_str().unwrap().to_ascii_lowercase();
+            let reaches_civitai = host == "civitai.com"
+                || host == "civitai.red"
+                || host.ends_with(".civitai.com")
+                || host.ends_with(".civitai.red");
+            assert_eq!(
+                is_civitai_host(u),
+                reaches_civitai,
+                "{u} really goes to {host}",
+            );
+        }
+    }
+
+    /// Negative control for the one that matters: the smuggling form must be
+    /// refused, not merely "agree".
+    #[test]
+    fn a_backslash_cannot_send_the_key_to_another_host() {
+        assert!(!is_civitai_host("https://evil.test\\.civitai.com/x"));
+        assert_eq!(
+            url::Url::parse("https://evil.test\\.civitai.com/x")
+                .unwrap()
+                .host_str()
+                .unwrap(),
+            "evil.test",
+            "precondition: this URL really does reach evil.test",
+        );
+    }
+
+    #[test]
+    fn a_refused_civitai_download_names_the_field_instead_of_a_bare_number() {
+        // goonerforporn, 2026-08-28: the download died on a bare HTTP 400 and
+        // the field it was asking for was not in the interface at all.
+        for status in [400u16, 401, 403] {
+            let msg = download_http_error("https://civitai.com/api/download/models/1", status, false);
+            assert!(msg.contains(&format!("HTTP {status}")), "{msg}");
+            assert!(msg.contains("API key"), "{msg}");
+            assert!(msg.contains("Settings > AI Backends > Model Storage"), "{msg}");
+        }
+    }
+
+    #[test]
+    fn a_key_that_was_sent_and_refused_says_so() {
+        let msg = download_http_error("https://civitai.com/api/download/models/1", 401, true);
+        assert!(msg.contains("was sent and rejected"), "{msg}");
+        // and does NOT tell the user to add a key he already has.
+        assert!(!msg.contains("Add one under"), "{msg}");
+    }
+
+    /// Negative control: every other host and every other status keeps the
+    /// short form. A dead HuggingFace link must not send people to the CivitAI
+    /// setting.
+    #[test]
+    fn other_hosts_and_other_statuses_keep_the_short_form() {
+        assert_eq!(
+            download_http_error("https://huggingface.co/repo/resolve/main/m.gguf", 401, false),
+            "HTTP 401",
+        );
+        assert_eq!(
+            download_http_error("https://civitai.com/api/download/models/1", 404, false),
+            "HTTP 404",
+        );
+        assert_eq!(
+            download_http_error("https://civitai.com/api/download/models/1", 500, true),
+            "HTTP 500",
+        );
+    }
+}
+
+#[cfg(test)]
 mod download_security_tests {
     use super::{checked_model_path, safe_subfolder, sanitize_filename};
     use std::path::PathBuf;
@@ -140,13 +314,50 @@ const MODEL_SUBDIRS: &[&str] = &[
     "controlnet", "upscale_models", "embeddings", "style_models",
 ];
 
+/// Why a file ComfyUI listed is not in the ComfyUI models tree.
+///
+/// Two different answers, and the difference is the whole point: a file in the
+/// user's own folder is there because he put it there, and LU deleting out of
+/// a folder it does not own would be worse than the button not working.
+pub(crate) fn not_ours_to_delete(filename: &str, base: &str, extra_dirs: &[String]) -> String {
+    for raw in extra_dirs {
+        let trimmed = raw.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let root = Path::new(trimmed);
+        for (_, folder) in crate::commands::custom_models::comfy_shaped_subdirs(root) {
+            if folder.join(base).is_file() {
+                return format!(
+                    "{} sits in your own model folder ({}). LU does not delete from a folder you keep yourself. Remove the file there and it disappears from this list.",
+                    filename,
+                    folder.display(),
+                );
+            }
+        }
+    }
+    format!("{} was not found in the ComfyUI models folders", filename)
+}
+
 /// Delete one installed model file from the ComfyUI models tree (the Model
 /// Hub's trash action — cpl.sardinas7489, Discord 2026-07-19: a 27 GB video
 /// model his PC couldn't run had no in-app way back out). The name is the
 /// ComfyUI enum entry; we jail-check it and look for the single file match
 /// across the known model subdirs.
+///
+/// `extraDirs` is the folder the user named under Model Storage. LU tells
+/// ComfyUI about the ComfyUI-shaped subfolders in it (GH #122), so ComfyUI now
+/// lists files that are NOT ours to delete. It stays that way on purpose: a
+/// folder the user keeps by hand is his. The button used to end in a flat
+/// "was not found", which reads like a bug; it names the folder now and says
+/// the file has to go from there.
+#[allow(non_snake_case)]
 #[tauri::command]
-pub fn delete_comfy_model(filename: String, state: State<'_, AppState>) -> Result<serde_json::Value, String> {
+pub fn delete_comfy_model(
+    filename: String,
+    extraDirs: Option<Vec<String>>,
+    state: State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
     let comfy_path = state
         .comfy_path
         .lock()
@@ -171,7 +382,11 @@ pub fn delete_comfy_model(filename: String, state: State<'_, AppState>) -> Resul
         }
     }
     match hits.len() {
-        0 => Err(format!("{} was not found in the ComfyUI models folders", filename)),
+        0 => Err(not_ours_to_delete(
+            &filename,
+            &base,
+            &extraDirs.unwrap_or_default(),
+        )),
         1 => {
             let f = &hits[0];
             let bytes = fs::metadata(f).map(|m| m.len()).unwrap_or(0);
@@ -209,9 +424,14 @@ pub async fn download_model(
     subfolder: String,
     filename: String,
     expectedBytes: Option<u64>,
+    // The CivitAI API key, when the caller has one. Sent as a Bearer header
+    // and ONLY to a CivitAI host (see do_download). Absent for every other
+    // catalog, which is every other download in the app.
+    authToken: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
     let expected_bytes = expectedBytes;
+    let auth_token = authToken;
     let comfy_path = {
         let mut p = state.comfy_path.lock().unwrap();
         if p.is_none() {
@@ -288,7 +508,7 @@ pub async fn download_model(
     let filename_clone = filename.clone();
 
     tokio::spawn(async move {
-        match do_download(&url, &dest_file, &downloads_arc, &id_clone, token, resume_offset).await {
+        match do_download(&url, &dest_file, &downloads_arc, &id_clone, token, resume_offset, auth_token.as_deref()).await {
             Ok(_) => {
                 if let Ok(mut dl) = downloads_arc.lock() {
                     if let Some(p) = dl.get_mut(&id_clone) {
@@ -442,6 +662,53 @@ fn gib(bytes: u64) -> String {
     format!("{:.1} GB", bytes as f64 / (1024.0 * 1024.0 * 1024.0))
 }
 
+/// Is this a CivitAI download URL?
+///
+/// `civitai.red` is the mirror LU offers for regions where `.com` is blocked
+/// (GH #53), so both count. Parsed with the same URL parser the request itself
+/// goes through, never picked apart by hand: a hand written host split does not
+/// know that a backslash ends the host in a special scheme, so
+/// `https://evil.test\.civitai.com/x` read as a CivitAI host here while reqwest
+/// sent the Bearer token to `evil.test`. Same rule for
+/// `https://civitai.com\@evil.test`.
+pub(crate) fn is_civitai_host(url: &str) -> bool {
+    let host = match url::Url::parse(url) {
+        Ok(u) => u.host_str().unwrap_or("").to_ascii_lowercase(),
+        Err(_) => return false,
+    };
+    host == "civitai.com"
+        || host == "civitai.red"
+        || host.ends_with(".civitai.com")
+        || host.ends_with(".civitai.red")
+}
+
+/// What the user reads when a download comes back refused.
+///
+/// goonerforporn, Discord #bug-reports 2026-08-28: CivitAI downloads ended in a
+/// bare `HTTP 400` with nothing to act on, because the API key field had gone
+/// missing from the interface and nobody could tell that a key was the point.
+/// A refusal from CivitAI now names the field and the way to it. Every other
+/// host and every other status keeps the short form: inventing a CivitAI hint
+/// for a dead HuggingFace link would send people to the wrong setting.
+pub(crate) fn download_http_error(url: &str, status: u16, sent_token: bool) -> String {
+    let refused = matches!(status, 400 | 401 | 403);
+    if is_civitai_host(url) && refused {
+        return if sent_token {
+            format!(
+                "CivitAI refused this download (HTTP {status}). Your CivitAI API key was sent and rejected. \
+                 Check it under Settings > AI Backends > Model Storage, and check that your CivitAI account \
+                 is allowed to download this model."
+            )
+        } else {
+            format!(
+                "CivitAI refused this download (HTTP {status}). Most CivitAI downloads need an API key. \
+                 Add one under Settings > AI Backends > Model Storage, then start this download again."
+            )
+        };
+    }
+    format!("HTTP {status}")
+}
+
 async fn do_download(
     url: &str,
     dest: &PathBuf,
@@ -449,6 +716,7 @@ async fn do_download(
     id: &str,
     token: CancellationToken,
     resume_offset: u64,
+    auth_token: Option<&str>,
 ) -> Result<(), String> {
     // SSRF guard: model downloads come from public catalogs (HuggingFace,
     // civitai, ollama). Block private/loopback/metadata hosts and re-validate
@@ -475,6 +743,19 @@ async fn do_download(
 
     let mut request = client.get(url);
 
+    // The CivitAI API key, as a Bearer header rather than a `?token=` query
+    // parameter: a key in the URL is written into the download meta the app
+    // persists, printed in the log line above and kept in the browser history
+    // of the web build. Only for a CivitAI host, so an HF or catalog URL never
+    // carries it. reqwest strips Authorization itself when a redirect leaves
+    // the host, which is exactly right: CivitAI hands the file to a signed CDN
+    // URL that must not see the key.
+    let civitai = is_civitai_host(url);
+    let sent_token = auth_token.filter(|t| !t.trim().is_empty() && civitai);
+    if let Some(t) = sent_token {
+        request = request.bearer_auth(t.trim());
+    }
+
     // Resume support: request only remaining bytes
     if resume_offset > 0 {
         request = request.header("Range", format!("bytes={}-", resume_offset));
@@ -488,7 +769,7 @@ async fn do_download(
 
     let status = response.status();
     if !status.is_success() && status.as_u16() != 206 {
-        return Err(format!("HTTP {}", status));
+        return Err(download_http_error(url, status.as_u16(), sent_token.is_some()));
     }
 
     let already_on_disk = resumed_bytes(resume_offset, status.as_u16());
@@ -706,13 +987,16 @@ pub fn cancel_download(id: String, state: State<'_, AppState>) -> Result<serde_j
     Ok(serde_json::json!({"status": "cancelled"}))
 }
 
+#[allow(non_snake_case)]
 #[tauri::command]
 pub async fn resume_download(
     id: String,
     url: String,
     subfolder: String,
+    authToken: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
+    let auth_token = authToken;
     let comfy_path = {
         let p = state.comfy_path.lock().unwrap();
         p.clone()
@@ -758,7 +1042,7 @@ pub async fn resume_download(
     let id_clone = id.clone();
 
     tokio::spawn(async move {
-        match do_download(&url, &dest_file, &downloads_arc, &id_clone, token, resume_offset).await {
+        match do_download(&url, &dest_file, &downloads_arc, &id_clone, token, resume_offset, auth_token.as_deref()).await {
             Ok(_) => {
                 if let Ok(mut dl) = downloads_arc.lock() {
                     if let Some(p) = dl.get_mut(&id_clone) {
@@ -981,7 +1265,9 @@ pub async fn download_model_to_path(
     let filename_clone = filename.clone();
 
     tokio::spawn(async move {
-        match do_download(&url, &dest_file, &downloads_arc, &id_clone, token, resume_offset).await {
+        // No auth token here: download_model_to_path serves the text-model
+        // lane (HuggingFace GGUFs into the app models dir), never CivitAI.
+        match do_download(&url, &dest_file, &downloads_arc, &id_clone, token, resume_offset, None).await {
             Ok(_) => {
                 if let Ok(mut dl) = downloads_arc.lock() {
                     if let Some(p) = dl.get_mut(&id_clone) {

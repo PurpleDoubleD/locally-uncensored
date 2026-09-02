@@ -1468,6 +1468,19 @@ fn start_comfyui_blocking(state: &AppState) -> Result<serde_json::Value, String>
         comfy_args.push("--use-flash-attention");
         println!("[ComfyUI] flash-attn detected in {} — enabling Flash Attention", python);
     }
+    // The folder under Settings -> Model Storage, when it holds ComfyUI-shaped
+    // subfolders (GH #122). ComfyUI lists only what sits under its own models
+    // tree, so its own extra-model-paths mechanism is the way a LoRA on
+    // another drive becomes visible and loadable. Our own file, passed by
+    // flag: a hand written extra_model_paths.yaml in the ComfyUI folder is
+    // never read, written or overwritten by us.
+    let extra_paths_file = crate::commands::custom_models::extra_model_paths_arg()
+        .map(|p| p.to_string_lossy().to_string());
+    if let Some(file) = &extra_paths_file {
+        comfy_args.push("--extra-model-paths-config");
+        comfy_args.push(file);
+        println!("[ComfyUI] Extra model paths: {}", file);
+    }
     let mut cmd = Command::new(&python);
     cmd.args(&comfy_args)
         .current_dir(&comfy_path)

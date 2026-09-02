@@ -753,10 +753,15 @@ export async function oauthWait(port: number, timeoutSecs: number): Promise<stri
 }
 
 /** Fetch an external URL as text — works in both Tauri and dev mode */
-export async function fetchExternal(url: string): Promise<string> {
+export async function fetchExternal(url: string, authToken?: string | null): Promise<string> {
   if (isTauri()) {
     const invoke = await getInvoke();
-    return invoke('fetch_external', { url }) as Promise<string>;
+    // Rust sends this as a Bearer header and only to a CivitAI host. The web
+    // path below deliberately sends NO token: the dev proxy takes the URL as a
+    // query parameter, and a credential in a query parameter is a credential in
+    // every log that quotes it. An anonymous CivitAI search still works, it is
+    // only filtered and rate limited.
+    return invoke('fetch_external', { url, authToken: authToken ?? null }) as Promise<string>;
   }
   const res = await fetch(`/local-api/proxy-download?url=${encodeURIComponent(url)}`);
   if (!res.ok) throw new Error(`HTTP ${res.status}`);

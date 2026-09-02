@@ -63,6 +63,9 @@ import { isMlxImageHost } from '../../api/mlx-image'
 import { ArrowUpCircle, KeyRound, RefreshCw } from 'lucide-react'
 import { CLOUD_BASE } from '../../api/cloud/config'
 import { formatBytes } from '../../lib/formatters'
+import { syncCustomModelDir, type CustomModelDirResult } from '../../lib/custom-model-dir'
+import { listBundledModels, lastCustomScanDir, type ScannedDir } from '../../api/engine'
+import { CivitaiApiKeySetting } from './CivitaiApiKeySetting'
 
 // ── User profile picture (Appearance) ───────────────────────────
 // Self-contained like HfDownloadPathSetting. Stores the picture as a
@@ -252,33 +255,72 @@ function WorkflowSection() {
   )
 }
 
-// ── Model Storage (HF GGUF download path override) ─────────────
+// ── Model Storage (the user's own model folder) ─────────────────
+//
+// GH #122 (zrmdsxa) + Discord "Read me first" (ever.noob): this folder was a
+// download TARGET and nothing else. Models already sitting in it were never
+// looked at, and the copy above the field said nothing about that, so the
+// Models tab stayed empty beside a folder full of models. It is read now
+// (lib/custom-model-dir.ts), and the copy says what it does.
 
 function HfDownloadPathSetting() {
   const override = useSettingsStore(s => s.settings.hfDownloadPathOverride)
   const updateSettings = useSettingsStore(s => s.updateSettings)
   const [draft, setDraft] = useState(override)
+  const [comfy, setComfy] = useState<CustomModelDirResult | null>(null)
+  const [scan, setScan] = useState<ScannedDir | null>(null)
   useEffect(() => { setDraft(override) }, [override])
+
+  // How the GGUF scan itself fared in that folder. A folder too big to finish
+  // within the budget returns a real but partial list, and the only person who
+  // can do anything about that is the one who chose the folder.
+  useEffect(() => {
+    let alive = true
+    if (!override) { setScan(null); return }
+    void listBundledModels()
+      .then(() => { if (alive) setScan(lastCustomScanDir()) })
+      .catch(() => { if (alive) setScan(null) })
+    return () => { alive = false }
+  }, [override])
+
+  // Both directions of the folder: our own GGUF scan reads it on the next
+  // model refresh, and the ComfyUI-shaped subfolders in it are handed to
+  // ComfyUI. Runs on mount too, so a folder set by an older build reaches
+  // ComfyUI without the user having to touch the field again.
+  useEffect(() => {
+    let alive = true
+    void syncCustomModelDir(override).then((res) => { if (alive) setComfy(res) })
+    return () => { alive = false }
+  }, [override])
+
+  function apply(next: string) {
+    setDraft(next)
+    updateSettings({ hfDownloadPathOverride: next })
+    // The Models tab is the surface this setting is about: refresh it now
+    // instead of after the next navigation.
+    window.dispatchEvent(new CustomEvent('lu-models-refresh'))
+  }
 
   async function pickFolder() {
     try {
       const chosen = await backendCall<string | null>('pick_folder')
-      if (chosen) { setDraft(chosen); updateSettings({ hfDownloadPathOverride: chosen }) }
+      if (chosen) apply(chosen)
     } catch {}
   }
 
   return (
     <div className="space-y-2 py-1">
       <div className="text-[0.6rem] text-gray-500 leading-relaxed">
-        Custom location for downloaded GGUFs. Leave empty to auto-detect from your active provider's models folder (e.g. <code className="font-mono">~/.lmstudio/models</code> for LM Studio). Ollama is unaffected, it manages its own blob store; LU pulls Ollama models via <code className="font-mono">ollama pull</code> regardless of this setting.
+        Your own model folder. LU downloads GGUFs here, and it also reads this folder: every <code className="font-mono">.gguf</code> in it, up to four levels down, is listed under Installed and can be loaded straight from there. Leave empty to auto-detect from your active provider's models folder (e.g. <code className="font-mono">~/.lmstudio/models</code> for LM Studio). Ollama is unaffected, it manages its own blob store; LU pulls Ollama models via <code className="font-mono">ollama pull</code> regardless of this setting.
       </div>
       <div className="flex items-center gap-2">
         <input
           type="text"
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
-          onBlur={() => updateSettings({ hfDownloadPathOverride: draft.trim() })}
+          onBlur={() => apply(draft.trim())}
           placeholder="(auto-detect)"
+          aria-label="Your own model folder"
           className="flex-1 px-2 py-1 rounded bg-transparent border border-white/8 text-[0.65rem] text-gray-700 dark:text-gray-300 font-mono focus:outline-none focus:border-white/20"
         />
         <button
@@ -289,13 +331,62 @@ function HfDownloadPathSetting() {
         </button>
         {override && (
           <button
-            onClick={() => { setDraft(''); updateSettings({ hfDownloadPathOverride: '' }) }}
+            onClick={() => apply('')}
             className="px-2.5 py-1 rounded-md text-[0.6rem] text-gray-500 hover:text-red-400 transition-colors"
           >
             Reset
           </button>
         )}
       </div>
+      {override && scan?.status === 'truncated' && (
+        <div className="text-[0.6rem] leading-relaxed text-amber-600 dark:text-amber-400">
+          That folder is too large to read to the end, so the list below it is what LU found before it stopped. Point this at the folder that actually holds the models rather than at a whole drive.
+        </div>
+      )}
+      {override && comfy !== null && <CustomModelDirNote result={comfy} />}
+    </div>
+  )
+}
+
+/**
+ * What became of the folder, in one line.
+ *
+ * A path the OS cannot use, or a drive that is not there, used to be silence:
+ * no models, no file, no word about it. And image and video are a different
+ * question from chat, because that inventory comes out of ComfyUI's own lists,
+ * so LU can only hand ComfyUI the folder. On the Mac it cannot even do that:
+ * local media there is MLX and LU never starts a ComfyUI, so promising one
+ * would be a lie (Rust answers `unsupported` for that host).
+ */
+function CustomModelDirNote({ result }: { result: CustomModelDirResult }) {
+  const cls = "text-[0.6rem] leading-relaxed"
+  if (result.status === 'unusable') {
+    return (
+      <div className={`${cls} text-amber-600 dark:text-amber-400`}>
+        That is not a full path, so nothing can be read from it. Use a complete path such as <code className="font-mono">C:\AI\Models</code> or <code className="font-mono">/mnt/models</code>. A leading <code className="font-mono">~</code> is a shell shorthand the app does not expand.
+      </div>
+    )
+  }
+  if (result.status === 'unreachable') {
+    return (
+      <div className={`${cls} text-amber-600 dark:text-amber-400`}>
+        LU cannot read that folder. Check that the drive is connected and the path is spelled the way the system spells it.
+      </div>
+    )
+  }
+  if (result.status === 'unsupported') {
+    return (
+      <div className={`${cls} text-gray-500`}>
+        Chat models in this folder are read. Image and video on the Mac run on Apple MLX, not ComfyUI, so image models in this folder are not picked up. Install those under Local Media (Apple MLX).
+      </div>
+    )
+  }
+  if (result.status === 'unknown') return null
+  return (
+    <div className={`${cls} text-gray-500`}>
+      {result.folders.length > 0
+        ? <>Image and video: LU passes <code className="font-mono">{result.folders.join(', ')}</code> from this folder to ComfyUI. Takes effect the next time LU starts ComfyUI, and only for a ComfyUI that LU starts.</>
+        : <>Image and video models in this folder stay invisible: ComfyUI lists only its own folders. Name the subfolders like ComfyUI does (<code className="font-mono">checkpoints</code>, <code className="font-mono">loras</code>, <code className="font-mono">vae</code>, …) and LU hands them over.</>}
     </div>
   )
 }
@@ -1498,6 +1589,11 @@ export function SettingsPage() {
           <Section title="Model Storage">
             <HfDownloadPathSetting />
             <ImportLocalModels />
+            {/* goonerforporn (Discord #bug-reports, 2026-08-28): the store knew
+                the key, the changelog named it, and no component ever set it.
+                It sits with the other credential-shaped model settings, which
+                is also the place the refused-download message points at. */}
+            <CivitaiApiKeySetting />
           </Section>
 
           {builtinManaged && (
