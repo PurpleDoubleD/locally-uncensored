@@ -13,6 +13,8 @@ import {
 import { parseNDJSONStream } from '../api/stream'
 import { log } from '../lib/logger'
 import { cloudModelRow } from '../lib/cloud-model-row'
+import { runEngineResume } from '../lib/engine-resume-policy'
+import { engineStartIsWorthRetrying } from '../lib/engine-start-failure'
 import { useModelStore } from '../stores/modelStore'
 import { useProviderStore } from '../stores/providerStore'
 import { useSettingsStore } from '../stores/settingsStore'
@@ -34,19 +36,44 @@ import type { PullProgress, AIModel, ModelCategory, ImageModel, VideoModel, Clou
 // starts a server that reports running:false.
 let builtinResumeAttempted = false
 
+// GH #118: the boot resume used to be a single shot, and a failure was
+// swallowed without a word. The one moment it runs is the worst moment to ask
+// a machine for a GPU: right after login, with the antivirus scanning the
+// fresh install and the graphics driver still settling. A start that loses
+// that race left the user with a dead 127.0.0.1 port and no second attempt
+// until they re-picked the model by hand. Bounded on purpose, because the
+// other failure (a model this box genuinely cannot load) must not turn into an
+// endless restart loop. The policy lives in lib/engine-resume-policy.
+const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
+
 async function resumeBuiltinEngines(bundled: BundledModel[]) {
-  try {
-    const status = await bundledEngineStatus()
-    const { activeModel } = useModelStore.getState()
-    if (
-      !status.running && activeModel &&
-      getProviderIdFromModel(activeModel) === 'openai' &&
-      bundled.some((m) => prefixModelName('openai', m.name) === activeModel)
-    ) {
-      await activateBuiltinModel(activeModel)
-    }
-  } catch { /* engine unavailable — non-critical */ }
-  await resumeEmbedServer(bundled)
+  // The embeddings server is a different process on a different port with a
+  // different model, so it starts NOW and not behind up to three chat-engine
+  // attempts. Waiting its turn is how a slow chat start used to take
+  // Document-Chat down with it (review S3).
+  const embedResumed = resumeEmbedServer(bundled)
+  const outcome = await runEngineResume({
+    status: () => bundledEngineStatus(),
+    eligible: () => {
+      const { activeModel } = useModelStore.getState()
+      return (
+        !!activeModel &&
+        getProviderIdFromModel(activeModel) === 'openai' &&
+        bundled.some((m) => prefixModelName('openai', m.name) === activeModel)
+      )
+    },
+    activate: () => activateBuiltinModel(useModelStore.getState().activeModel as string),
+    // Only a start that DIED is worth repeating. A health-budget timeout means
+    // the engine is still loading, and repeating it spends the whole budget
+    // again (up to ten minutes on a big GGUF) plus another ComfyUI cache drop
+    // and another Ollama eviction (review S3).
+    worthRetrying: engineStartIsWorthRetrying,
+    sleep: wait,
+    onError: (attempt, err) =>
+      log.warn('[useModels] built-in engine resume failed', { attempt, err }),
+  })
+  log.info('[useModels] built-in engine resume', outcome)
+  await embedResumed
 }
 
 /** One arm at a time. fetchModels runs from several mounted components, and a

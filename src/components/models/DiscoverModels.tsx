@@ -23,8 +23,11 @@ import { useModelStore } from '../../stores/modelStore'
 import { useWorkflowStore } from '../../stores/workflowStore'
 import { getProviderIdFromModel } from '../../api/providers'
 import { startBundledEngine } from '../../api/engine'
+import { diagnoseBuiltinEngine } from '../../api/builtin-ensure'
 import { BUILTIN_BACKEND_ID } from '../../lib/onboarding-backend'
-import { matchesLocalGgufInstalled, type InstalledModelLike } from '../../lib/lmstudio-match'
+import type { InstalledModelLike } from '../../lib/lmstudio-match'
+import { findInstalledForDiscoverModel } from '../../lib/discover-installed'
+import { isBuiltinEngineEntry } from '../../lib/lmstudio-match'
 import { resolveTextDownloadTarget } from '../../lib/text-download-target'
 import { hfUrlToOllamaRef, hfUrlToLmStudioSubdir, parseHfUrl, extractGgufQuant, isShardedOrIncompatibleGguf } from '../../lib/hf-to-provider'
 import { GlassCard } from '../ui/GlassCard'
@@ -88,7 +91,7 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
   // backends and a bare name for Ollama.
   const activeChatModel = useModelStore(s => s.activeModel)
   const [hfModelPath, setHfModelPath] = useState<string | null>(null)
-  const { pullModel, models: installedModels, fetchModels } = useModels()
+  const { pullModel, models: installedModels, fetchModels, setActiveModel } = useModels()
 
   // Refresh installed-model list on mount + when category switches to text
   // so the Discover grid reflects what Ollama / LM Studio actually have on
@@ -189,53 +192,67 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
     ? vramFilteredBundles.filter((b) => b.name.toLowerCase().includes(search.toLowerCase()) || b.description.toLowerCase().includes(search.toLowerCase()))
     : vramFilteredBundles
 
+  // Which model the Use button is currently loading. A GGUF start blocks for
+  // seconds to minutes, and without this the button stayed live and a second
+  // click queued a second start behind the first (review S6).
+  const [usingModel, setUsingModel] = useState<string | null>(null)
+
   // Text-model installed check.
   //
-  // Before v2.4.8 this only consulted the in-memory `downloads` store, so the
-  // INSTALLED badge disappeared the moment the user restarted the app — which
-  // is exactly what leonsk29 reported (GH #43). The store has no knowledge of
-  // what Ollama / LM Studio actually have on disk, only of downloads that
-  // happened in the current session.
-  //
-  // Fix: also match against the provider model list (which Ollama/LM Studio
-  // populate from disk). For HF GGUFs the in-app download goes through
-  // `ollama pull hf.co/<repo>:<quant>`, so the same canonical reference is
-  // what we look up in the installed-list. Session downloads remain a valid
-  // signal as the fastest-path (no fetchModels round-trip needed).
-  const isModelFullyInstalled = (model: DiscoverModel) => {
-    if (model.filename && downloads[model.filename]?.status === 'complete') return true
+  // Lives in lib/discover-installed.ts since 2.6.8, unit-tested, because the
+  // rule it encodes is the whole of GH #118: installed is a question about the
+  // DISK. The session download store, the Ollama store and, since the same
+  // ticket, the built-in engine's own directory scan are all filesystem
+  // evidence. Whether the engine answers on its port is a different question
+  // with a different repair, and it must never be able to unsay "this 8 GB
+  // file is on your machine" (Bug #43 was the first version of the same
+  // mistake, nayffy's restart the second).
+  const installedEntryFor = (model: DiscoverModel) =>
+    findInstalledForDiscoverModel(model, downloads, installedModels as unknown as InstalledModelLike[])
 
-    const installedOllamaTags = installedModels
-      .filter(m => m.provider === 'ollama')
-      .map(m => (m.model || m.name || '').toLowerCase())
+  const isModelFullyInstalled = (model: DiscoverModel) => installedEntryFor(model) !== null
 
-    if (model.ollamaModel) {
-      const tag = model.ollamaModel.toLowerCase()
-      if (installedOllamaTags.includes(tag)) return true
-      // Ollama appends `:latest` to bare model names — accept either form
-      if (!tag.includes(':') && installedOllamaTags.includes(`${tag}:latest`)) return true
+  /** Can the Use button do anything for this row: is the local model behind it
+   *  known by its picker id. A download that finished in this session is on the
+   *  disk but carries no id until the next model refresh, so it stays a badge. */
+  const canUseInstalled = (model: DiscoverModel) => !!installedEntryFor(model)?.name
+
+  /**
+   * GH #118: "the Get button doesn't do anything as the files are still
+   * downloaded". With the badge right, the state the user landed in was an
+   * inert Installed pill beside an engine that was not running, and the Models
+   * page offered no way on. This is that way on: pick the model, and start the
+   * engine if it is down.
+   *
+   * The repair runs BEFORE the pick, because diagnoseBuiltinEngine starts the
+   * engine on exactly this model when it is dead, and the pick then swaps only
+   * when something else is loaded. The other order would start twice.
+   *
+   * Review B1: the repair is asked ONLY for a row that really belongs to the
+   * app's own engine. An Ollama or LM Studio row has its own lifecycle, and
+   * sending it through the built-in diagnosis would either boot a stranger's
+   * GGUF that the pick then swaps straight back out, or, on a box with no
+   * built-in GGUF at all, answer a click on a perfectly installed Ollama model
+   * with "no chat model to load yet".
+   */
+  const handleUseInstalled = async (model: DiscoverModel) => {
+    const entry = installedEntryFor(model)
+    const name = entry?.name
+    if (!name || usingModel) return
+    setInstallError(null)
+    setUsingModel(name)
+    try {
+      if (isBuiltinEngineEntry(entry)) {
+        const diagnosis = await diagnoseBuiltinEngine({ repair: true, preferModel: name })
+        if (!diagnosis.ok && diagnosis.reason) setInstallError(diagnosis.reason)
+      }
+      setActiveModel(name)
+    } catch (e) {
+      log.warn('[DiscoverModels] built-in engine repair failed', { err: e })
+      setActiveModel(name)
+    } finally {
+      setUsingModel(null)
     }
-
-    if (model.filename && model.downloadUrl) {
-      const ref = hfUrlToOllamaRef(model.downloadUrl, model.filename)?.toLowerCase()
-      if (ref && installedOllamaTags.includes(ref)) return true
-    }
-
-    // Bug Y/b v2.5.0 — Aldrich Ironhart Discord. Pre-v2.5.0 isModelFullyInstalled
-    // only checked Ollama tags. After a restart, GGUFs that LU itself wrote
-    // to LM Studio's scan dir would never light up the INSTALLED badge,
-    // because LM Studio surfaces them by file basename in the openai-compat
-    // listing rather than by an Ollama-style hf.co tag. Match by filename
-    // (case-insensitive, with/without trailing `.gguf`).
-    // Match against LM Studio's installed models too (not just Ollama tags).
-    // The matcher (lib/lmstudio-match.ts, unit-tested) handles both the older
-    // full-basename id form AND LM Studio's modern quant-less publisher/short
-    // key (e.g. "qwen/qwen2.5-vl-7b" vs "Qwen2.5-VL-7B-Instruct-Q4_K_M.gguf").
-    if (model.filename && matchesLocalGgufInstalled(model.filename, installedModels as unknown as InstalledModelLike[])) {
-      return true
-    }
-
-    return false
   }
 
   const [installingBundle, setInstallingBundle] = useState<string | null>(null)
@@ -600,8 +617,13 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
         } catch (e) {
           setInstallError(`Model downloaded, but the built-in engine failed to start: ${e instanceof Error ? e.message : String(e)}`)
         }
-        window.dispatchEvent(new CustomEvent('lu-models-refresh'))
       }
+      // Outside the built-in branch too: an LM Studio or openai-compat download
+      // lands in a folder the next model refresh reads, and until something
+      // asks for that refresh the tile keeps offering Get for a file that is
+      // already on the disk. That is the badge half of GH #118 wearing another
+      // backend's clothes.
+      window.dispatchEvent(new CustomEvent('lu-models-refresh'))
     } catch (e) {
       log.error('GGUF download failed', { err: e })
       setInstallError(`Download failed: ${e instanceof Error ? e.message : String(e)}`)
@@ -660,6 +682,9 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
         isInstalled={isModelFullyInstalled}
         dlState={getModelDownloadState}
         onDownload={handleTextDownload}
+        onUse={handleUseInstalled}
+        canUse={canUseInstalled}
+        isUsing={(m) => installedEntryFor(m)?.name === usingModel && usingModel !== null}
         onInfo={setInfoModel}
         onOpenUrl={(u) => openExternal(u)}
         highlight={highlight}
@@ -922,6 +947,9 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
                       isInstalled={isModelFullyInstalled}
                       dlState={getModelDownloadState}
                       onDownload={handleTextDownload}
+                      onUse={handleUseInstalled}
+                      canUse={canUseInstalled}
+                      isUsing={(m) => installedEntryFor(m)?.name === usingModel && usingModel !== null}
                       onInfo={setInfoModel}
                       onOpenUrl={(u) => openExternal(u)}
                     />

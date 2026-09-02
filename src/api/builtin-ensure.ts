@@ -20,6 +20,7 @@ import { log } from '../lib/logger'
 import { useProviderStore } from '../stores/providerStore'
 import { useSettingsStore } from '../stores/settingsStore'
 import { builtinSlotStatus, type SlotStatus } from '../lib/builtin-slot-status'
+import { baseUrlNeedingEnginePort } from '../lib/engine-port'
 import { AGENT_CONTEXT_CAP } from '../lib/context-window'
 import { ENGINE_DEFAULT_CTX, preservedSwapCtx } from '../lib/builtin-ctx'
 import {
@@ -42,6 +43,14 @@ interface EngineStatusLite {
 
 interface BundledList {
   models?: Array<{ name: string; path: string; ctx_train?: number | null }>
+}
+
+/** What `start_bundled_engine` / `swap_bundled_model` answer. `port` is the
+ *  port the engine ACTUALLY came up on, which since GH #118 need not be the
+ *  preferred one. */
+interface EngineStartResult {
+  status?: string
+  port?: number
 }
 
 // Coalesce concurrent sends (chat + title generation) into ONE health-check /
@@ -100,6 +109,32 @@ export function explainEngineTransportMessage(message: string, baseUrl: string):
 export function isManagedBuiltinSlot(): boolean {
   const cfg = useProviderStore.getState().providers.openai
   return !!cfg?.enabled && cfg.managed === true
+}
+
+/**
+ * Point the managed slot at the port the engine really came up on.
+ *
+ * GH #118: the Rust side may now take the next free port when 8127 is held, so
+ * the one place that knows the answer is the start/status result. Without this
+ * the slot would keep asking 8127 and the user would get a refused connection
+ * to a healthy engine, which is the ticket's symptom with a different cause.
+ *
+ * Only the app's OWN managed slot on a loopback URL is ever touched, and only
+ * when the port really differs. Never throws: a slot that cannot be updated is
+ * not a reason to fail a start.
+ */
+export function syncBuiltinEnginePort(port: unknown): void {
+  try {
+    const store = useProviderStore.getState()
+    const cfg = store.providers.openai
+    if (!cfg?.enabled || cfg.managed !== true) return
+    const next = baseUrlNeedingEnginePort(cfg.baseUrl, port)
+    if (!next) return
+    log.info('[builtin-engine] the engine moved port, the slot follows', { from: cfg.baseUrl, to: next })
+    store.setProviderConfig('openai', { baseUrl: next })
+  } catch (err) {
+    log.warn('[builtin-engine] could not follow the engine port', { err })
+  }
 }
 
 /**
@@ -231,7 +266,9 @@ async function loadBuiltinModel(modelName: string): Promise<void> {
   // the same model and tuning, so an engine that is merely still warming up is
   // never torn down and restarted for nothing.
   const cmd = status?.running && !rightModel ? 'swap_bundled_model' : 'start_bundled_engine'
-  await trackEngineSwap(backendCall(cmd, { modelPath: hit.path, tuning }))
+  syncBuiltinEnginePort(
+    (await trackEngineSwap(backendCall<EngineStartResult>(cmd, { modelPath: hit.path, tuning })))?.port,
+  )
   // The engine is a different process with a different ctx now. Tell the
   // header and the token counter to re-read it, so the number on screen is the
   // one llama-server actually started with even when the raise above was
@@ -320,16 +357,27 @@ export async function ensureBuiltinAgentCtx(modelName: string): Promise<void> {
 
   const raised = { ...(tuning ?? {}), ctx: want }
   try {
-    await trackEngineSwap(backendCall(status?.running ? 'swap_bundled_model' : 'start_bundled_engine', {
-      modelPath: hit.path,
-      tuning: raised,
-    }))
+    // S2: this restart moves the engine like any other, so the slot has to be
+    // told. Without it an agent run that raised the context could leave the
+    // slot pointing at the port the engine had before a fallback.
+    syncBuiltinEnginePort(
+      (await trackEngineSwap(
+        backendCall<EngineStartResult>(
+          status?.running ? 'swap_bundled_model' : 'start_bundled_engine',
+          { modelPath: hit.path, tuning: raised },
+        ),
+      ))?.port,
+    )
     announceContextReload()
   } catch {
     refusedCtxByPath.set(hit.path, want)
     // Fall back to the previous tuning so the chat engine is not left dead.
     try {
-      await trackEngineSwap(backendCall('start_bundled_engine', { modelPath: hit.path, tuning }))
+      syncBuiltinEnginePort(
+        (await trackEngineSwap(
+          backendCall<EngineStartResult>('start_bundled_engine', { modelPath: hit.path, tuning }),
+        ))?.port,
+      )
       announceContextReload()
     } catch { /* the lazy self-heal on the next send takes over */ }
   }
@@ -426,10 +474,29 @@ export async function diagnoseBuiltinEngine(
       ? opts.preferModel.split('::')[1]
       : opts.preferModel
     : ''
-  const pick = runnable.find((m) => m.name === bare) ?? runnable[0]
+  // A caller that NAMES a model gets that model or an honest no. Falling
+  // through to runnable[0] would load a stranger's GGUF into VRAM and report
+  // success, and the caller's own pick would swap it right back out (review
+  // B1). Only a caller that named nothing accepts whatever is installed.
+  const pick = bare ? runnable.find((m) => m.name === bare) : runnable[0]
+  if (!pick) {
+    return {
+      ok: false,
+      repaired: false,
+      reason: `The built-in engine has no model file named "${bare}". It may have been deleted, moved, or the download did not finish. Open Models and install it again.`,
+    }
+  }
   try {
     const tuning = useSettingsStore.getState().settings.builtinEngine
-    await backendCall('start_bundled_engine', { modelPath: pick.path, tuning })
+    // Through the swap gate (S6): a send that arrives while this start is
+    // still loading has to wait it out instead of hitting the dead port. Every
+    // other start in this file is registered, and this one starts the engine
+    // from a button the user just pressed, so it is the likeliest of all to
+    // overlap with a send.
+    const started = await trackEngineSwap(
+      backendCall<EngineStartResult>('start_bundled_engine', { modelPath: pick.path, tuning }),
+    )
+    syncBuiltinEnginePort(started?.port)
     return { ok: true, reason: '', repaired: true }
   } catch (e) {
     return {
