@@ -1,5 +1,5 @@
 /**
- * Who gets the Docs button, and when it can be pressed.
+ * Who gets the Docs button, how it looks, and what its tooltip may honestly say.
  *
  * A9 (aldrich_ironhart, Discord #general 2026-09-01): "There's no document tab
  * in cloud chat to add documents and audio clips". He was right, and the
@@ -11,55 +11,81 @@
  * system prompt is the one thing every provider takes. So nothing about Cloud
  * mode stops Document Chat; the button was hidden on the wrong question.
  *
- * The rule below asks the right one. Local mode is untouched. Cloud mode shows
- * the button and lets the missing part, if any, say so in a tooltip instead of
- * hiding the feature and leaving the user to guess.
+ * Two things the first cut got wrong, both from the review of 2026-09-02:
+ *
+ * B1. A missing embedding lane disabled the button, and the RAG panel is the
+ *     only place that can INSTALL an embedding lane (its install card drives
+ *     useRAG.installEmbeddingAndDrainQueue). Disabling the only door to the
+ *     repair shop left anyone who onboarded the built-in engine without the
+ *     embeddings step in a cloud-mode dead end, while local mode let them in.
+ *     So the button stays pressable and carries a third state instead:
+ *     `needsSetup`, damped, and a click opens the panel with the install card.
+ *
+ * B2. "Your documents stay on this computer" is not true on every lane.
+ *     Ollama's base URL is user-configurable, and indexing sends EVERY chunk of
+ *     a document to it, not just the passages a question matches. On a LAN or
+ *     remote Ollama the sentence has to name the host instead of promising the
+ *     opposite of what happens.
  */
 import type { AppMode } from '../types/settings'
+import type { EmbedLane, EmbedLaneInfo } from '../api/embed-availability'
 
 export interface DocsAvailability {
   /** Render the button at all. Always true now, which is the fix. */
   visible: boolean
-  /** Clickable. False only in Cloud mode with no embedding backend on the box. */
+  /** Pressable. Also always true: the panel behind it is the repair shop (B1). */
   enabled: boolean
-  /** The button's tooltip. Carries the reason when disabled, and the privacy
-   *  statement when Cloud mode is about to send passages upstream. */
+  /** No embedding lane yet. Damped look, and the click goes to the install card. */
+  needsSetup: boolean
+  /** The measured lane, or null in local mode and while the probe is running. */
+  lane: EmbedLane | null
+  /** The button's tooltip. */
   title: string
 }
 
 /** Local mode, and Cloud mode before the probe answers. */
 export const DOCS_TITLE_PLAIN = 'Document Chat (RAG)'
 
-/**
- * Cloud mode with a working embedding lane. It says where the files stay,
- * because in Cloud mode that is a fair question and the answer is good news:
- * indexing runs on this machine, and only the passages that match the question
- * travel with the prompt.
- */
-export const DOCS_TITLE_CLOUD =
-  'Document Chat (RAG). Your files are indexed on this computer and stay here. ' +
-  'Only the passages that match your question are sent to the cloud model as context.'
+/** Cloud mode, indexing on this machine. Short on purpose (review N2); the
+ *  panel carries the full statement once it is open. */
+export const DOCS_TITLE_CLOUD_LOCAL =
+  'Document Chat (RAG). Files stay on this computer, only matching passages go to the cloud model.'
 
-/** Cloud mode with no embedding backend. The exact wording David asked for. */
-export const DOCS_TITLE_NO_EMBEDDINGS = 'Documents need the local embeddings engine'
+/** Cloud mode, indexing on a remote Ollama. Names the host, because that is
+ *  where whole documents would go (B2). */
+export function docsTitleRemote(endpoint: string | null): string {
+  return `Document Chat (RAG). Indexing runs on ${endpoint ?? 'your configured Ollama host'}, so whole documents are sent there. Matching passages then go to the cloud model.`
+}
+
+/** No embedding lane. The wording David asked for, plus the way out. */
+export const DOCS_TITLE_NO_EMBEDDINGS =
+  'Documents need the local embeddings engine. Click to install it.'
 
 /**
  * @param appMode  the global Local/Cloud switch
- * @param embedReady  result of the embedding-lane probe, or `null` while it is
- *   still running. Unknown counts as available on purpose: a button that starts
- *   dead and comes alive a moment later reads as broken, and the RAG panel
- *   carries its own install card for the case the probe then says no.
+ * @param info  the measured embedding lane, or `null` while the probe is still
+ *   running (and always in local mode, which does not measure). Unknown counts
+ *   as fine on purpose: a button that starts damped and settles a moment later
+ *   reads as flicker, and nothing is lost because the panel behind it is the
+ *   same panel either way.
  */
-export function docsAvailability(appMode: AppMode, embedReady: boolean | null): DocsAvailability {
+export function docsAvailability(
+  appMode: AppMode,
+  info: EmbedLaneInfo | null,
+): DocsAvailability {
   if (appMode !== 'cloud') {
-    return { visible: true, enabled: true, title: DOCS_TITLE_PLAIN }
+    return { visible: true, enabled: true, needsSetup: false, lane: null, title: DOCS_TITLE_PLAIN }
   }
-  if (embedReady === false) {
-    return { visible: true, enabled: false, title: DOCS_TITLE_NO_EMBEDDINGS }
+  if (info === null) {
+    return { visible: true, enabled: true, needsSetup: false, lane: null, title: DOCS_TITLE_PLAIN }
   }
-  return {
-    visible: true,
-    enabled: true,
-    title: embedReady === true ? DOCS_TITLE_CLOUD : DOCS_TITLE_PLAIN,
+  const base = { visible: true as const, enabled: true as const, lane: info.lane }
+  switch (info.lane) {
+    case 'none':
+      return { ...base, needsSetup: true, title: DOCS_TITLE_NO_EMBEDDINGS }
+    case 'ollama-remote':
+      return { ...base, needsSetup: false, title: docsTitleRemote(info.endpoint) }
+    default:
+      return { ...base, needsSetup: false, title: DOCS_TITLE_CLOUD_LOCAL }
   }
 }

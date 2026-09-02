@@ -122,7 +122,15 @@ export function useRAG(conversationId: string | null) {
     // The install has to feed the same lane the embedder reads from. On a
     // built-in-engine box `ollama pull` fills a shop rag.ts never visits, so
     // the card would spin, report success and change nothing.
-    if (isManagedBuiltinActive()) {
+    //
+    // The same is true one step further out (review B1): with no Ollama running
+    // at all, `ollama pull` cannot even start, and the user who onboarded LM
+    // Studio or a plain openai-compat backend and skipped the embeddings step
+    // had no working install path from this card. Ask whether Ollama is
+    // actually reachable, and fall to the bundled GGUF when it is not, which is
+    // the lane rag.ts would take anyway.
+    const ollamaReachable = isManagedBuiltinActive() ? false : await checkConnection()
+    if (isManagedBuiltinActive() || !ollamaReachable) {
       try {
         await installBundledEmbedModel((completed, total) =>
           setEmbeddingPullProgress({ completed, total, status: "downloading" }),

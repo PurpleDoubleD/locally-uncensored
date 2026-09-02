@@ -9,6 +9,7 @@ import { MessageList } from './MessageList'
 import { ChatInput } from './ChatInput'
 import { RAGPanel } from './RAGPanel'
 import { DocsButton } from './DocsButton'
+import { RetrievalErrorBar } from './RetrievalErrorBar'
 import { useDocsAvailability } from '../../hooks/useDocsAvailability'
 import { AgentModeToggle } from './AgentModeToggle'
 import { AgentWorkspaceBadge } from './AgentWorkspaceBadge'
@@ -385,7 +386,7 @@ export function ChatView() {
                 // Commands need the tool catalog to drive, which only Agent
                 // mode has here. Plain chat leaves "/cmd" as ordinary text.
                 slashCommands={isAgentActive}
-                onAttachDocs={docs.enabled ? () => setRagPanelOpen(true) : undefined}
+                onAttachDocs={() => setRagPanelOpen(true)}
                 composerModel={
                   /* What this chat's answers were written by rides on the
                      picker itself now, as a dot plus a tooltip, instead of a
@@ -396,7 +397,7 @@ export function ChatView() {
                 // No plan lives here. The prompt window is the prompt window
                 // (David, 2026-08-22): the plan band sits under the header row
                 // above, next to the other standing status controls.
-                composerAbove={<><LoopBar onStop={stopGeneration} /><GoalBar /><GroupCostHint /></>}
+                composerAbove={<><RetrievalErrorBar /><LoopBar onStop={stopGeneration} /><GoalBar /><GroupCostHint /></>}
                 composerActions={
                   <>
                     {/* Documents (RAG), shown in both modes since A9. In
