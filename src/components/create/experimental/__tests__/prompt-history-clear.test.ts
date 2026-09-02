@@ -98,6 +98,21 @@ describe('Create prompt history: deleting it (A10)', () => {
     expect(screen.getByText(HISTORY[1])).toBeTruthy()
   })
 
+  // N1 from the review: arming is about the whole list. If a single X does not
+  // disarm it, the next click on the head wipes everything after a completely
+  // different action, and the customer never saw a second confirmation.
+  it('removing one entry disarms Clear all, so the next head click asks again', () => {
+    show()
+    openList()
+    fireEvent.click(screen.getByText('Clear all'))
+    fireEvent.click(screen.getByLabelText(`Remove prompt: ${HISTORY[0]}`))
+    expect(screen.getByText('Clear all')).toBeTruthy()
+
+    fireEvent.click(screen.getByText('Clear all'))
+    // Negative control: that click may only arm, never delete the rest.
+    expect(useCreateStore.getState().promptHistory).toEqual([HISTORY[1]])
+  })
+
   it('picking a prompt still works and does not delete it', () => {
     const picked: string[] = []
     show(HISTORY, (p) => picked.push(p))

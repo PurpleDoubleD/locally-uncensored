@@ -96,11 +96,14 @@ export function PromptHistory({ onPick }: { onPick: (p: string) => void }) {
                   >
                     {h}
                   </button>
+                  {/* Removing one row also disarms Clear all: otherwise a
+                      later click on the head would wipe the list after a
+                      completely different action. */}
                   <button
                     type="button"
                     title="Remove this prompt"
                     aria-label={`Remove prompt: ${h}`}
-                    onClick={() => removeFromPromptHistory(h)}
+                    onClick={() => { disarm(); removeFromPromptHistory(h) }}
                     className="shrink-0 mr-1 p-1 rounded text-gray-500 hover:text-red-500 dark:hover:text-red-400 hover:bg-red-500/10 transition-colors"
                   >
                     <X size={12} />
