@@ -178,6 +178,41 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
   })
 }
 
+/**
+ * Die Titel, die eine Konversation TRAEGT, bis sie einen eigenen bekommt.
+ *
+ * Sie stehen hier als Konstanten und nicht als Literale an den beiden
+ * Verwendungsstellen, weil genau ihr Auseinanderlaufen der Fehler war:
+ * `createConversation` vergab fuer den Code-Modus 'Coding Agent',
+ * `addMessage` benannte aber nur um, wenn der Titel exakt 'New Chat' war.
+ * Eine Code-Sitzung startete also mit einem Namen, den die Umbenennung nicht
+ * kannte, und behielt ihn fuer immer — zehn Sitzungen hiessen zehnmal gleich
+ * und waren in der Seitenleiste nur am Datum auseinanderzuhalten.
+ *
+ * David am 02.09.2026: "Code bereich heisst im Chat immer nur Coding Chat. da
+ * brauchen wir das selbe verhalten wie im normalen Chat, das sauber erkennbar
+ * ist, welche Session, welche war."
+ */
+const NEW_CHAT_TITLE = 'New Chat'
+const CODEX_DEFAULT_TITLE = 'Coding Agent'
+
+/**
+ * Traegt diese Konversation noch den Namen ihrer Gattung?
+ *
+ * Nur dann darf die erste Nutzernachricht ihn ersetzen. Wer selbst umbenannt
+ * hat, behaelt seinen Namen — das ist der Fall, an dem eine zu grosszuegige
+ * Bedingung zerbraeche.
+ *
+ * Remote ist ABSICHTLICH nicht dabei: 'Remote Chat 1', '… 2', '… 3' tragen
+ * eine laufende Nummer und sind damit bereits unterscheidbar, was der Grund
+ * fuer die Nummerierung war. Die Auslassung ist eine Entscheidung, kein
+ * vergessener Fall, und code-sessions-heissen-verschieden.test.ts haelt sie
+ * fest, damit sie es bleibt.
+ */
+function isStillDefaultTitle(title: string): boolean {
+  return title === NEW_CHAT_TITLE || title === CODEX_DEFAULT_TITLE
+}
+
 export const useChatStore = create<ChatState>()(
   persist(
     (set, get) => ({
@@ -190,12 +225,12 @@ export const useChatStore = create<ChatState>()(
         let title: string
         // 'codex' is the internal back-compat mode id; the user-facing
         // default title is "Coding Agent".
-        if (mode === 'codex') title = 'Coding Agent'
+        if (mode === 'codex') title = CODEX_DEFAULT_TITLE
         else if (mode === 'remote') {
           const state = get()
           const nextNum = state.conversations.filter((c) => c.mode === 'remote').length + 1
           title = `Remote Chat ${nextNum}`
-        } else title = 'New Chat'
+        } else title = NEW_CHAT_TITLE
         const conversation: Conversation = {
           id,
           title,
@@ -303,7 +338,7 @@ export const useChatStore = create<ChatState>()(
                 messages: [...c.messages, message],
                 updatedAt: Date.now(),
                 title:
-                  c.title === 'New Chat' && message.role === 'user'
+                  isStillDefaultTitle(c.title) && message.role === 'user'
                     ? message.content.slice(0, 50)
                     : c.title,
               }

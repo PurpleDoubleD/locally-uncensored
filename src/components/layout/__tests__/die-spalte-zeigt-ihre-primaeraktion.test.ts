@@ -42,6 +42,7 @@
  * Run: npx vitest run src/components/layout/__tests__/die-spalte-zeigt-ihre-primaeraktion.test.ts
  */
 import { describe, it, expect } from 'vitest'
+import { useChatStore } from '../../../stores/chatStore'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
@@ -222,7 +223,16 @@ describe('KF-8: die Zeile ist eine Auswahl, und sie steht im Weg der Tastatur', 
     // Mit `role="button"` haette jeder `getByRole('button', { name:
     // /New Chat/i })` zwei Treffer — auch der in `e2e/support/ui.ts`.
     expect(ROW).not.toContain('role="button"')
-    expect(read('stores', 'chatStore.ts')).toContain("title = 'New Chat'")
+    // Und der Name ist wirklich der: am 02.09.2026 stand hier eine Textsonde
+    // auf das Literal `title = 'New Chat'` in chatStore.ts. Sie brach, als die
+    // Zeichenkette in eine Konstante wanderte — obwohl der WERT unveraendert
+    // blieb und damit alles, was dieser Test schuetzt. Eine Sonde, die auf die
+    // Schreibweise zeigt statt auf die Wirkung, meldet Umbauten als Fehler und
+    // uebersieht echte. Also fragt sie jetzt den Store selbst.
+    const store = useChatStore.getState()
+    const frisch = store.createConversation('gemma4', '', 'lu')
+    expect(useChatStore.getState().conversations.find((c) => c.id === frisch)!.title)
+      .toBe('New Chat')
   })
 
   it('die Aktionsknoepfe sind GESCHWISTER der Option, nicht ihre Kinder', () => {
