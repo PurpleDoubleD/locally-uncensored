@@ -16,6 +16,9 @@ export type ModelTileAction =
   | 'view'
   /** A download is in flight. Waiting IS the state, and it shows progress. */
   | 'downloading'
+  /** The Use click is in flight: the engine is loading this GGUF. Seconds to
+   *  minutes, so the button has to say so and stop taking clicks (S6). */
+  | 'using'
   /** On the disk, and this surface can load it into the chat. */
   | 'use'
   /** On the disk, and loading it is not this surface's job (image/video). */
@@ -31,6 +34,8 @@ export interface ModelTileActionInput {
   downloading: boolean
   /** Does the caller know WHICH local model this row is, so it can be loaded. */
   loadable: boolean
+  /** A Use click for this row is already running. */
+  using?: boolean
 }
 
 /**
@@ -40,12 +45,13 @@ export interface ModelTileActionInput {
 export function modelTileAction(input: ModelTileActionInput): ModelTileAction {
   if (input.externalOnly) return 'view'
   if (input.downloading) return 'downloading'
+  if (input.using) return 'using'
   if (input.installed) return input.loadable ? 'use' : 'installed'
   return 'get'
 }
 
-/** True when the state offers the user something to click. `downloading` is
- *  the one state that legitimately does not: it is already doing the thing. */
+/** True when the state offers the user something to click. `downloading` and
+ *  `using` legitimately do not: they are already doing the thing. */
 export function tileActionIsClickable(action: ModelTileAction): boolean {
-  return action !== 'downloading' && action !== 'installed'
+  return action !== 'downloading' && action !== 'installed' && action !== 'using'
 }

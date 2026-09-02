@@ -160,10 +160,12 @@ export interface ModelTileProps {
   /** Can `onUse` do anything for THIS row, i.e. is the local model behind it
    *  known by name. */
   canUse?: (m: DiscoverModel) => boolean
+  /** Is a Use click for THIS row already running (S6). */
+  isUsing?: (m: DiscoverModel) => boolean
   highlight?: boolean
 }
 
-export function ModelTile({ variants, vramGb, isInstalled, dlState, onDownload, onInfo, onOpenUrl, onUse, canUse, highlight }: ModelTileProps) {
+export function ModelTile({ variants, vramGb, isInstalled, dlState, onDownload, onInfo, onOpenUrl, onUse, canUse, isUsing, highlight }: ModelTileProps) {
   const [pickerOpen, setPickerOpen] = useState(false)
   const [chosen, setChosen] = useState<string | null>(null)
   const pickerRef = useRef<HTMLDivElement>(null)
@@ -183,6 +185,7 @@ export function ModelTile({ variants, vramGb, isInstalled, dlState, onDownload, 
     installed,
     downloading,
     loadable: !!onUse && (canUse ? canUse(sel) : true),
+    using: !!isUsing?.(sel),
   })
 
   useEffect(() => {
@@ -281,6 +284,10 @@ export function ModelTile({ variants, vramGb, isInstalled, dlState, onDownload, 
             >
               <Check size={11} className="text-emerald-500/80" /> Use
             </button>
+          ) : action === 'using' ? (
+            <span className="flex items-center gap-1.5 px-2 py-1 text-[0.62rem] text-gray-500 dark:text-gray-400">
+              <Loader2 size={11} className="animate-spin" /> Loading…
+            </span>
           ) : action === 'installed' ? (
             <span className="flex items-center gap-1 px-2 py-1 rounded-md bg-gray-100 dark:bg-white/[0.06] text-gray-600 dark:text-gray-300 text-[0.62rem] font-medium">
               <Check size={11} className="text-emerald-500/80" /> Installed

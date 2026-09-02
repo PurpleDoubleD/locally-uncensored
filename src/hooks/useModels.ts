@@ -13,7 +13,8 @@ import {
 import { parseNDJSONStream } from '../api/stream'
 import { log } from '../lib/logger'
 import { cloudModelRow } from '../lib/cloud-model-row'
-import { RESUME_ATTEMPTS, resumeBackoffMs } from '../lib/engine-resume-policy'
+import { runEngineResume } from '../lib/engine-resume-policy'
+import { engineStartIsWorthRetrying } from '../lib/engine-start-failure'
 import { useModelStore } from '../stores/modelStore'
 import { useProviderStore } from '../stores/providerStore'
 import { useSettingsStore } from '../stores/settingsStore'
@@ -46,29 +47,33 @@ let builtinResumeAttempted = false
 const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
 
 async function resumeBuiltinEngines(bundled: BundledModel[]) {
-  for (let attempt = 0; attempt < RESUME_ATTEMPTS; attempt++) {
-    try {
-      const status = await bundledEngineStatus()
-      if (status.running) break
+  // The embeddings server is a different process on a different port with a
+  // different model, so it starts NOW and not behind up to three chat-engine
+  // attempts. Waiting its turn is how a slow chat start used to take
+  // Document-Chat down with it (review S3).
+  const embedResumed = resumeEmbedServer(bundled)
+  const outcome = await runEngineResume({
+    status: () => bundledEngineStatus(),
+    eligible: () => {
       const { activeModel } = useModelStore.getState()
-      if (
-        !activeModel ||
-        getProviderIdFromModel(activeModel) !== 'openai' ||
-        !bundled.some((m) => prefixModelName('openai', m.name) === activeModel)
-      ) {
-        break // nothing to resume, and no number of retries changes that
-      }
-      // False means the GGUF is gone from disk. Retrying cannot conjure it.
-      if (await activateBuiltinModel(activeModel)) break
-      break
-    } catch (err) {
-      log.warn('[useModels] built-in engine resume failed', { attempt: attempt + 1, err })
-      const delay = resumeBackoffMs(attempt)
-      if (delay === null) break
-      await wait(delay)
-    }
-  }
-  await resumeEmbedServer(bundled)
+      return (
+        !!activeModel &&
+        getProviderIdFromModel(activeModel) === 'openai' &&
+        bundled.some((m) => prefixModelName('openai', m.name) === activeModel)
+      )
+    },
+    activate: () => activateBuiltinModel(useModelStore.getState().activeModel as string),
+    // Only a start that DIED is worth repeating. A health-budget timeout means
+    // the engine is still loading, and repeating it spends the whole budget
+    // again (up to ten minutes on a big GGUF) plus another ComfyUI cache drop
+    // and another Ollama eviction (review S3).
+    worthRetrying: engineStartIsWorthRetrying,
+    sleep: wait,
+    onError: (attempt, err) =>
+      log.warn('[useModels] built-in engine resume failed', { attempt, err }),
+  })
+  log.info('[useModels] built-in engine resume', outcome)
+  await embedResumed
 }
 
 /** One arm at a time. fetchModels runs from several mounted components, and a

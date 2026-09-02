@@ -17,7 +17,7 @@ import {
   isDiscoverModelInstalled,
   type DownloadStatuses,
 } from '../discover-installed'
-import type { InstalledModelLike } from '../lmstudio-match'
+import { isBuiltinEngineEntry, type InstalledModelLike } from '../lmstudio-match'
 
 const CYDONIA = {
   filename: 'Cydonia-24B-v4.1-Q4_K_M.gguf',
@@ -103,6 +103,46 @@ describe('the other disk sources keep working', () => {
     // Negative control: a download still running is not an installed model.
     expect(
       isDiscoverModelInstalled(CYDONIA, { [CYDONIA.filename]: { status: 'downloading' } }, []),
+    ).toBe(false)
+  })
+})
+
+describe('who owns an installed row (review B1)', () => {
+  it('marks a built-in entry as ours, so the engine repair may run', () => {
+    expect(isBuiltinEngineEntry(findInstalledForDiscoverModel(CYDONIA, NO_DOWNLOADS, ON_DISK))).toBe(
+      true,
+    )
+  })
+
+  // The finding: an Ollama or LM Studio row went through the built-in
+  // diagnosis, which either booted a stranger's GGUF that the pick swapped
+  // straight back out, or, with no built-in GGUF on the box, answered a click
+  // on a perfectly installed Ollama model with "no chat model to load yet".
+  it('does not claim an Ollama row', () => {
+    const ollama = [{ provider: 'ollama', model: 'llama3.2:latest', name: 'llama3.2:latest' }]
+    const entry = findInstalledForDiscoverModel({ ollamaModel: 'llama3.2' }, NO_DOWNLOADS, ollama)
+    expect(entry?.name).toBe('llama3.2:latest')
+    expect(isBuiltinEngineEntry(entry)).toBe(false)
+  })
+
+  it('does not claim an LM Studio row', () => {
+    const lms = [
+      {
+        provider: 'openai',
+        providerName: 'LM Studio',
+        name: 'openai::Cydonia-24B-v4.1-Q4_K_M.gguf',
+        model: 'Cydonia-24B-v4.1-Q4_K_M.gguf',
+      },
+    ]
+    const entry = findInstalledForDiscoverModel(CYDONIA, NO_DOWNLOADS, lms)
+    expect(entry?.name).toBe('openai::Cydonia-24B-v4.1-Q4_K_M.gguf')
+    expect(isBuiltinEngineEntry(entry)).toBe(false)
+  })
+
+  it('does not claim a session download, which carries no owner yet', () => {
+    const downloads = { [CYDONIA.filename]: { status: 'complete' } }
+    expect(
+      isBuiltinEngineEntry(findInstalledForDiscoverModel(CYDONIA, downloads, [])),
     ).toBe(false)
   })
 })

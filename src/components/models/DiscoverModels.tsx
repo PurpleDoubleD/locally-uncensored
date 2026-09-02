@@ -27,6 +27,7 @@ import { diagnoseBuiltinEngine } from '../../api/builtin-ensure'
 import { BUILTIN_BACKEND_ID } from '../../lib/onboarding-backend'
 import type { InstalledModelLike } from '../../lib/lmstudio-match'
 import { findInstalledForDiscoverModel } from '../../lib/discover-installed'
+import { isBuiltinEngineEntry } from '../../lib/lmstudio-match'
 import { resolveTextDownloadTarget } from '../../lib/text-download-target'
 import { hfUrlToOllamaRef, hfUrlToLmStudioSubdir, parseHfUrl, extractGgufQuant, isShardedOrIncompatibleGguf } from '../../lib/hf-to-provider'
 import { GlassCard } from '../ui/GlassCard'
@@ -191,6 +192,11 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
     ? vramFilteredBundles.filter((b) => b.name.toLowerCase().includes(search.toLowerCase()) || b.description.toLowerCase().includes(search.toLowerCase()))
     : vramFilteredBundles
 
+  // Which model the Use button is currently loading. A GGUF start blocks for
+  // seconds to minutes, and without this the button stayed live and a second
+  // click queued a second start behind the first (review S6).
+  const [usingModel, setUsingModel] = useState<string | null>(null)
+
   // Text-model installed check.
   //
   // Lives in lib/discover-installed.ts since 2.6.8, unit-tested, because the
@@ -221,18 +227,32 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
    * The repair runs BEFORE the pick, because diagnoseBuiltinEngine starts the
    * engine on exactly this model when it is dead, and the pick then swaps only
    * when something else is loaded. The other order would start twice.
+   *
+   * Review B1: the repair is asked ONLY for a row that really belongs to the
+   * app's own engine. An Ollama or LM Studio row has its own lifecycle, and
+   * sending it through the built-in diagnosis would either boot a stranger's
+   * GGUF that the pick then swaps straight back out, or, on a box with no
+   * built-in GGUF at all, answer a click on a perfectly installed Ollama model
+   * with "no chat model to load yet".
    */
   const handleUseInstalled = async (model: DiscoverModel) => {
-    const name = installedEntryFor(model)?.name
-    if (!name) return
+    const entry = installedEntryFor(model)
+    const name = entry?.name
+    if (!name || usingModel) return
     setInstallError(null)
+    setUsingModel(name)
     try {
-      const diagnosis = await diagnoseBuiltinEngine({ repair: true, preferModel: name })
-      if (!diagnosis.ok && diagnosis.reason) setInstallError(diagnosis.reason)
+      if (isBuiltinEngineEntry(entry)) {
+        const diagnosis = await diagnoseBuiltinEngine({ repair: true, preferModel: name })
+        if (!diagnosis.ok && diagnosis.reason) setInstallError(diagnosis.reason)
+      }
+      setActiveModel(name)
     } catch (e) {
       log.warn('[DiscoverModels] built-in engine repair failed', { err: e })
+      setActiveModel(name)
+    } finally {
+      setUsingModel(null)
     }
-    setActiveModel(name)
   }
 
   const [installingBundle, setInstallingBundle] = useState<string | null>(null)
@@ -597,8 +617,13 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
         } catch (e) {
           setInstallError(`Model downloaded, but the built-in engine failed to start: ${e instanceof Error ? e.message : String(e)}`)
         }
-        window.dispatchEvent(new CustomEvent('lu-models-refresh'))
       }
+      // Outside the built-in branch too: an LM Studio or openai-compat download
+      // lands in a folder the next model refresh reads, and until something
+      // asks for that refresh the tile keeps offering Get for a file that is
+      // already on the disk. That is the badge half of GH #118 wearing another
+      // backend's clothes.
+      window.dispatchEvent(new CustomEvent('lu-models-refresh'))
     } catch (e) {
       log.error('GGUF download failed', { err: e })
       setInstallError(`Download failed: ${e instanceof Error ? e.message : String(e)}`)
@@ -659,6 +684,7 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
         onDownload={handleTextDownload}
         onUse={handleUseInstalled}
         canUse={canUseInstalled}
+        isUsing={(m) => installedEntryFor(m)?.name === usingModel && usingModel !== null}
         onInfo={setInfoModel}
         onOpenUrl={(u) => openExternal(u)}
         highlight={highlight}
@@ -923,6 +949,7 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
                       onDownload={handleTextDownload}
                       onUse={handleUseInstalled}
                       canUse={canUseInstalled}
+                      isUsing={(m) => installedEntryFor(m)?.name === usingModel && usingModel !== null}
                       onInfo={setInfoModel}
                       onOpenUrl={(u) => openExternal(u)}
                     />

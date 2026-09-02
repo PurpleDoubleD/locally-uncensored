@@ -357,10 +357,17 @@ export async function ensureBuiltinAgentCtx(modelName: string): Promise<void> {
 
   const raised = { ...(tuning ?? {}), ctx: want }
   try {
-    await trackEngineSwap(backendCall(status?.running ? 'swap_bundled_model' : 'start_bundled_engine', {
-      modelPath: hit.path,
-      tuning: raised,
-    }))
+    // S2: this restart moves the engine like any other, so the slot has to be
+    // told. Without it an agent run that raised the context could leave the
+    // slot pointing at the port the engine had before a fallback.
+    syncBuiltinEnginePort(
+      (await trackEngineSwap(
+        backendCall<EngineStartResult>(
+          status?.running ? 'swap_bundled_model' : 'start_bundled_engine',
+          { modelPath: hit.path, tuning: raised },
+        ),
+      ))?.port,
+    )
     announceContextReload()
   } catch {
     refusedCtxByPath.set(hit.path, want)
@@ -467,10 +474,28 @@ export async function diagnoseBuiltinEngine(
       ? opts.preferModel.split('::')[1]
       : opts.preferModel
     : ''
-  const pick = runnable.find((m) => m.name === bare) ?? runnable[0]
+  // A caller that NAMES a model gets that model or an honest no. Falling
+  // through to runnable[0] would load a stranger's GGUF into VRAM and report
+  // success, and the caller's own pick would swap it right back out (review
+  // B1). Only a caller that named nothing accepts whatever is installed.
+  const pick = bare ? runnable.find((m) => m.name === bare) : runnable[0]
+  if (!pick) {
+    return {
+      ok: false,
+      repaired: false,
+      reason: `The built-in engine has no model file named "${bare}". It may have been deleted, moved, or the download did not finish. Open Models and install it again.`,
+    }
+  }
   try {
     const tuning = useSettingsStore.getState().settings.builtinEngine
-    const started = await backendCall<EngineStartResult>('start_bundled_engine', { modelPath: pick.path, tuning })
+    // Through the swap gate (S6): a send that arrives while this start is
+    // still loading has to wait it out instead of hitting the dead port. Every
+    // other start in this file is registered, and this one starts the engine
+    // from a button the user just pressed, so it is the likeliest of all to
+    // overlap with a send.
+    const started = await trackEngineSwap(
+      backendCall<EngineStartResult>('start_bundled_engine', { modelPath: pick.path, tuning }),
+    )
     syncBuiltinEnginePort(started?.port)
     return { ok: true, reason: '', repaired: true }
   } catch (e) {

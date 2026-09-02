@@ -39,6 +39,14 @@ describe('modelTileAction', () => {
     )
   })
 
+  it('shows the load in flight and stops taking clicks (review S6)', () => {
+    // A GGUF start blocks for seconds to minutes. Without this the button
+    // stayed live and a second click queued a second start behind the first.
+    expect(modelTileAction({ ...base, installed: true, loadable: true, using: true })).toBe('using')
+    // Negative control: without the flag the very same row is clickable again.
+    expect(modelTileAction({ ...base, installed: true, loadable: true })).toBe('use')
+  })
+
   it('an external-only row can only ever be viewed', () => {
     expect(
       modelTileAction({ externalOnly: true, installed: true, downloading: true, loadable: true }),
@@ -53,7 +61,9 @@ describe('a tile is never a dead end', () => {
       for (const installed of [false, true]) {
         for (const downloading of [false, true]) {
           for (const loadable of [false, true]) {
-            states.push({ externalOnly, installed, downloading, loadable })
+            for (const using of [false, true]) {
+              states.push({ externalOnly, installed, downloading, loadable, using })
+            }
           }
         }
       }
@@ -61,9 +71,14 @@ describe('a tile is never a dead end', () => {
     for (const s of states) {
       const action = modelTileAction(s)
       if (tileActionIsClickable(action)) continue
-      // The two states that legitimately offer no click: a download that is
-      // already running, and an installed row nothing here can load.
-      expect(action === 'downloading' || (action === 'installed' && !s.loadable)).toBe(true)
+      // The three states that legitimately offer no click: a download that is
+      // already running, a load that is already running, and an installed row
+      // nothing here can load.
+      expect(
+        action === 'downloading' ||
+          action === 'using' ||
+          (action === 'installed' && !s.loadable),
+      ).toBe(true)
     }
   })
 

@@ -73,6 +73,11 @@ export interface EngineStatus {
 /** Loopback base URL of the managed embeddings server (P5). Mirrors the Rust
  * `DEFAULT_EMBED_PORT` (8128). Document-Chat/RAG POSTs `/v1/embeddings` here
  * when the built-in engine is active, instead of Ollama's `/api/embed`. */
+/** Preferred loopback port of the managed chat engine. Mirrors the Rust
+ *  `DEFAULT_ENGINE_PORT`. Since GH #118 it is a preference, not a promise: the
+ *  engine takes the next free port when this one is held. */
+export const ENGINE_PORT = 8127
+
 export const EMBED_PORT = 8128
 export function embedBaseUrl(): string {
   return `http://127.0.0.1:${EMBED_PORT}/v1`
@@ -131,10 +136,12 @@ export function stopBundledEngine() {
 /** Engine health + which model is loaded on which port. */
 export async function bundledEngineStatus() {
   const status = await backendCall<EngineStatus>('bundled_engine_status')
-  // A RUNNING engine is the only honest source for the port. A stopped one
-  // reports the preferred port as a placeholder, and following that would undo
-  // a fallback the next start is about to reuse.
-  if (status?.running) syncBuiltinEnginePort(status.port)
+  // Running: the port the engine really holds. Stopped: back to the preferred
+  // port, because the next start begins its walk at 8127 and a fallback port
+  // must not outlive the conflict that caused it. The slot is persisted, so
+  // without the reset a one-off collision would keep the app on 8129 for good
+  // and the Settings test would read "failed" on a free 8127 (review S5).
+  syncBuiltinEnginePort(status?.running ? status.port : ENGINE_PORT)
   return status
 }
 

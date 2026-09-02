@@ -75,8 +75,8 @@ function isLmStudioEntry(m: InstalledModelLike): boolean {
  * with `provider: 'openai'` and `providerName: 'Built-in Engine'`, and its
  * `model` is the file stem, so the same filename matcher fits it exactly.
  */
-function isBuiltinEntry(m: InstalledModelLike): boolean {
-  if (m.provider !== 'openai') return false
+export function isBuiltinEngineEntry(m: InstalledModelLike | null | undefined): boolean {
+  if (!m || m.provider !== 'openai') return false
   return (m.providerName || '').toLowerCase().includes('built-in engine')
 }
 
@@ -104,6 +104,10 @@ export function matchesLmStudioInstalled(
  * offered "Get" for a file that was already on disk. `list_bundled_models`
  * reads that disk on every model refresh, so the evidence was there the whole
  * time, just never asked.
+ *
+ * The boolean face of `findLocalGgufInstalled`. The app itself asks the entry
+ * version (lib/discover-installed.ts) because it needs the picker id, and the
+ * regression suite for this matcher's quant precision asks this one.
  */
 export function matchesLocalGgufInstalled(
   filename: string,
@@ -126,7 +130,7 @@ export function findLocalGgufInstalled(
   filename: string,
   installed: InstalledModelLike[],
 ): InstalledModelLike | null {
-  return findInstalled(filename, installed.filter((m) => isLmStudioEntry(m) || isBuiltinEntry(m)))
+  return findInstalled(filename, installed.filter((m) => isLmStudioEntry(m) || isBuiltinEngineEntry(m)))
 }
 
 function findInstalled(filename: string, lms: InstalledModelLike[]): InstalledModelLike | null {
