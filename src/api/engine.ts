@@ -11,7 +11,7 @@
  * `backendCall` maps camelCase args → snake_case Rust params (Tauri).
  */
 
-import { backendCall, isMacOS, isWindows } from './backend'
+import { backendCall, isLinux } from './backend'
 import { syncBuiltinEnginePort } from './builtin-ensure'
 import { trackEngineSwap } from './engine-swap-gate'
 import { prefixModelName } from './providers'
@@ -283,7 +283,9 @@ export function lastScanDirs(): ScannedDir[] {
  *  folders on ext4, and folding them here would let this answer a question
  *  about one folder with the verdict about the other. */
 function samePath(a: string, b: string): boolean {
-  const fold = isWindows() || isMacOS()
+  // The mirror of Rust's `!cfg!(target_os = "linux")` in bundled_scan_dirs,
+  // spelled the same way round so the two cannot drift apart.
+  const fold = !isLinux()
   const key = (p: string) => {
     const normalised = String(p ?? '').replace(/\\/g, '/').replace(/\/+$/, '')
     return fold ? normalised.toLowerCase() : normalised

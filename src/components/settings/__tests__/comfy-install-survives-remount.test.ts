@@ -158,3 +158,31 @@ describe('a failed run stays escapable', () => {
     expect(comfyInstallPolling()).toBe(false)
   })
 })
+
+/**
+ * Review 2026-09-02: the hint under the install button ("Installs to your home
+ * folder by default…") still hung on `idle` after the buttons were opened up
+ * for `error`, so a failed run showed the button without the sentence that
+ * says where it installs to.
+ */
+describe('the install hint keeps the button company', () => {
+  it('stays next to the button after a failed install', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    backendCall.mockImplementation(async (cmd: string) => {
+      if (cmd === 'comfyui_status') return { running: false, found: false, isLocal: true }
+      if (cmd === 'python_check') return { available: true }
+      if (cmd === 'install_comfyui') return {}
+      if (cmd === 'install_comfyui_status') return installStatus
+      return {}
+    })
+    await mountPanel()
+    await act(async () => { fireEvent.click(screen.getByText('Install ComfyUI')) })
+
+    installStatus = { status: 'error', logs: ['ERROR: git clone failed'] }
+    await act(async () => { await vi.advanceTimersByTimeAsync(2000) })
+
+    expect(screen.getByText('Install failed')).toBeTruthy()
+    expect(screen.getByText('Install ComfyUI')).toBeTruthy()
+    expect(screen.getByText(/Installs to your home folder by default/)).toBeTruthy()
+  })
+})

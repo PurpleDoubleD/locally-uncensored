@@ -25,6 +25,7 @@ vi.mock('../backend', () => ({
   isTauri: () => true,
   isMacOS: () => platform === 'macos',
   isWindows: () => platform === 'windows',
+  isLinux: () => platform === 'linux',
 }))
 
 import { customModelDirs, listBundledModels, bundledToAIModels, lastScanDirs, lastCustomScanDir } from '../engine'

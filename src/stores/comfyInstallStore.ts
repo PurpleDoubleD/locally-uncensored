@@ -54,10 +54,22 @@ const MAX_POLL_MISSES = 30
 /** What the panel says when the installer stopped answering. */
 export const LOST_CONTACT = 'Lost contact with the installer. Check the log and try again.'
 
+/** The same for the winget step that runs before it. */
+export const LOST_CONTACT_PYTHON = 'Lost contact with the Python installer. Check the log and try again.'
+
 /** The one poll in flight, module level so it outlives every mount. */
 let timer: ReturnType<typeof setInterval> | null = null
 
+/** Which poll is the current one. A status read that was already in flight
+ *  when the poll was stopped still resolves afterwards, and without this it
+ *  would write its answer into a run that is over: a dismissed failure coming
+ *  back by itself, or a fresh run wearing the old one's log lines. Every tick
+ *  carries the generation it was born in and drops out when that is no longer
+ *  the current one. */
+let generation = 0
+
 function stopTimer() {
+  generation++
   if (timer) {
     clearInterval(timer)
     timer = null
@@ -116,12 +128,15 @@ export const useComfyInstallStore = create<ComfyInstallState>()((set, get) => {
    *  says which one it was. */
   const watch = (kind: ComfyInstallKind) => {
     stopTimer()
+    const mine = generation
     let misses = 0
     timer = setInterval(async () => {
+      if (generation !== mine) return
       let data: InstallStatusPayload
       try {
         data = (await backendCall<InstallStatusPayload>('install_comfyui_status')) ?? {}
       } catch {
+        if (generation !== mine) return
         // Transient, the next tick asks again. Not transient any more once it
         // has been a minute of nothing.
         if (++misses >= MAX_POLL_MISSES) {
@@ -130,6 +145,8 @@ export const useComfyInstallStore = create<ComfyInstallState>()((set, get) => {
         }
         return
       }
+      // The answer took a while; the run it belongs to may be over by now.
+      if (generation !== mine) return
       misses = 0
       set({
         logs: data.logs ?? [],
@@ -194,13 +211,32 @@ export const useComfyInstallStore = create<ComfyInstallState>()((set, get) => {
         }
         pythonOk = await new Promise<boolean>((resolve) => {
           stopTimer()
+          const mine = generation
+          let misses = 0
           timer = setInterval(async () => {
+            // A run that was reset or replaced does not get to answer any
+            // more, but the promise must still settle or runInstall hangs.
+            if (generation !== mine) { resolve(false); return }
             let data: InstallStatusPayload
             try {
               data = (await backendCall<InstallStatusPayload>('install_python_status')) ?? {}
             } catch {
+              if (generation !== mine) { resolve(false); return }
+              // Review 2026-09-02: without this the promise never settled. A
+              // Python status channel that stopped answering left runInstall
+              // waiting for ever in phase `python`, with no Cancel, no Dismiss
+              // and no buttons. It resolves false rather than rejecting, since
+              // the caller is a fire-and-forget click and a rejection here
+              // would only become an unhandled one.
+              if (++misses >= MAX_POLL_MISSES) {
+                stopTimer()
+                set({ error: LOST_CONTACT_PYTHON })
+                resolve(false)
+              }
               return
             }
+            if (generation !== mine) { resolve(false); return }
+            misses = 0
             set({ logs: data.logs ?? [] })
             if (data.status === 'complete' || data.status === 'already_installed') {
               stopTimer()

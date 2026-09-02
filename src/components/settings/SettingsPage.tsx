@@ -819,7 +819,7 @@ export function ComfyUISettings() {
             Update ComfyUI
           </button>
         )}
-        {(!status?.found || status?.complete === false) && installPhase === 'idle' && (
+        {(!status?.found || status?.complete === false) && installIdle && (
           <p className="w-full text-[0.55rem] text-gray-600">
             Installs to your home folder by default. Set Path above (e.g. D:\ComfyUI) to install on another drive.
           </p>
