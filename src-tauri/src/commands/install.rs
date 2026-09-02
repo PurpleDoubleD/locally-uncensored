@@ -333,67 +333,595 @@ fn diagnose_pip_error_for(stderr: &str, python_bin: Option<&str>) -> String {
     }
 }
 
-fn diagnose_pip_error_inner(stderr: &str) -> String {
-    let lower = stderr.to_lowercase();
-    let snippet: String = stderr.chars().take(400).collect();
+/// The Visual C++ runtime files a PyTorch wheel loads and that Windows does
+/// not ship on its own. Named rather than guessed: the whole point of the
+/// diagnosis is to tell the customer which file Windows went looking for.
+/// A3 (falconbob_20415, anglefire, hypocritical_rj, petermanmancusso,
+/// jamiet99uk, Discord 2026-08-26 to 2026-09-02): "VCOMP140.DLL was not
+/// found" and "[WinError 1114] ... c10.dll" were shown to five customers as
+/// a raw crash with no sentence attached.
+pub(crate) const VC_RUNTIME_DLLS: &[&str] = &[
+    "vcomp140.dll",
+    "vcomp140_1.dll",
+    "vcruntime140.dll",
+    "vcruntime140_1.dll",
+    "msvcp140.dll",
+    "msvcp140_1.dll",
+    "concrt140.dll",
+];
 
-    let hint = if lower.contains("externally-managed-environment")
-        || lower.contains("error: externally-managed")
-    {
-        "Your Python is PEP 668 protected (Arch Linux, Debian 12+, Fedora 38+, \
-         Ubuntu 23.04+ block system-wide pip installs by default). LU should have \
-         created a venv inside the ComfyUI folder automatically — if you see this \
-         error, the venv module is missing. Install it and retry:\n\
-         • Arch:   sudo pacman -S python-virtualenv\n\
-         • Debian/Ubuntu: sudo apt install python3-venv\n\
-         • Fedora: sudo dnf install python3-virtualenv"
+/// Where Microsoft publishes the current x64 redistributable. The page is
+/// version free on purpose: linking a numbered installer would pin a version
+/// that goes stale the moment Microsoft ships the next one.
+pub(crate) const VC_REDIST_PAGE: &str = "https://learn.microsoft.com/cpp/windows/latest-supported-vc-redist";
+
+/// The wording Windows and Python use when a library is not there. Without
+/// this a log that merely mentions a DLL by name would be read as a missing
+/// runtime.
+fn reads_as_missing(lower: &str) -> bool {
+    lower.contains("not found")
+        || lower.contains("could not be found")
+        || lower.contains("missing")
+        || lower.contains("error loading")
+        || lower.contains("dll load failed")
+        || lower.contains("cannot open shared object file")
+}
+
+/// The Visual C++ runtime file a failure names, when it names one.
+pub(crate) fn missing_runtime_library(text: &str) -> Option<&'static str> {
+    let lower = text.to_ascii_lowercase();
+    if !reads_as_missing(&lower) {
+        return None;
+    }
+    VC_RUNTIME_DLLS.iter().copied().find(|dll| lower.contains(dll))
+}
+
+/// What went wrong, decided once and reused. The trainer's setup step reads
+/// the same verdict, which is how A2 stage one gets fixed: every failure
+/// there was dressed as "check that you are online", including the ones that
+/// had nothing to do with the network.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PipFailureKind {
+    ExternallyManaged,
+    PythonWithoutSsl,
+    MissingRuntimeLibrary,
+    NativeLoadFailure,
+    TorchWithoutGpuSupport,
+    Ssl,
+    Forbidden,
+    RateLimited,
+    Timeout,
+    Network,
+    DiskFull,
+    Permission,
+    PipBroken,
+    NoMatchingWheel,
+    Unknown,
+}
+
+/// Classify raw pip / interpreter output. Order matters: the native library
+/// failures are checked before the broad `contains("connection")` and
+/// `contains("permission")` arms, because a Windows DLL message carries words
+/// that would otherwise be swallowed by them.
+pub(crate) fn pip_failure_kind(text: &str) -> PipFailureKind {
+    let lower = text.to_lowercase();
+    if lower.contains("externally-managed-environment") || lower.contains("error: externally-managed") {
+        PipFailureKind::ExternallyManaged
     } else if lower.contains("ssl module in python is not available") {
+        PipFailureKind::PythonWithoutSsl
+    } else if missing_runtime_library(&lower).is_some() {
+        PipFailureKind::MissingRuntimeLibrary
+    } else if lower.contains("winerror 1114")
+        || lower.contains("winerror 126")
+        || lower.contains("winerror 127")
+        || lower.contains("dll load failed")
+        || lower.contains("initialization routine failed")
+        || lower.contains("0xc0000005")
+        || lower.contains("exception_access_violation")
+    {
+        PipFailureKind::NativeLoadFailure
+    } else if lower.contains("torch not compiled with cuda enabled")
+        || lower.contains("no kernel image is available")
+    {
+        PipFailureKind::TorchWithoutGpuSupport
+    } else if lower.contains("ssl") {
+        PipFailureKind::Ssl
+    } else if lower.contains("403 ") {
+        PipFailureKind::Forbidden
+    } else if lower.contains("429 ") {
+        PipFailureKind::RateLimited
+    } else if lower.contains("timeout") || lower.contains("timed out") {
+        PipFailureKind::Timeout
+    } else if lower.contains("connection") {
+        PipFailureKind::Network
+    } else if lower.contains("no space") || lower.contains("errno 28") {
+        PipFailureKind::DiskFull
+    } else if lower.contains("permission") || lower.contains("errno 13") {
+        PipFailureKind::Permission
+    } else if lower.contains("no module named") || lower.contains("modulenotfounderror") {
+        PipFailureKind::PipBroken
+    } else if lower.contains("could not find a version") {
+        PipFailureKind::NoMatchingWheel
+    } else {
+        PipFailureKind::Unknown
+    }
+}
+
+/// The sentence that belongs to a verdict. Empty for `Unknown`, where the
+/// caller falls back to quoting the log.
+pub(crate) fn pip_failure_hint(kind: PipFailureKind, text: &str) -> String {
+    match kind {
+        PipFailureKind::ExternallyManaged =>
+            "Your Python is PEP 668 protected (Arch Linux, Debian 12+, Fedora 38+, \
+             Ubuntu 23.04+ block system-wide pip installs by default). LU should have \
+             created a venv inside the ComfyUI folder automatically. If you see this \
+             error, the venv module is missing. Install it and retry:\n\
+             • Arch:   sudo pacman -S python-virtualenv\n\
+             • Debian/Ubuntu: sudo apt install python3-venv\n\
+             • Fedora: sudo dnf install python3-virtualenv".to_string(),
         // numbrain (Discord, 2026-08-02): a pyenv/source-built python without
         // the _ssl extension can't reach pypi AT ALL, and the generic SSL hint
         // below (antivirus/clock) sent him in the wrong direction.
-        "This Python was built without the ssl module, so pip cannot reach \
-         pypi.org at all. Use your distro's regular python3 (it ships with \
-         ssl): check with  python3 -c \"import ssl\"  — if that fails, \
-         reinstall python3 via your package manager (pyenv builds need the \
-         OpenSSL headers installed first, e.g. libssl-dev / openssl-devel), \
-         then retry."
-    } else if lower.contains("ssl") {
-        "SSL error reaching pypi.org. Often caused by an antivirus / firewall \
-         intercepting TLS, or a stale system clock. Disable TLS interception \
-         for python.exe, fix the system clock, then retry."
-    } else if lower.contains("403 ") {
-        "HTTP 403 from pypi.org or pytorch.org. The mirror may be blocked on \
-         your network. Try a different network or VPN, then retry."
-    } else if lower.contains("429 ") {
-        "Rate limited (HTTP 429). Wait a few minutes and retry."
-    } else if lower.contains("timeout") || lower.contains("timed out") {
-        "Network timeout. Slow connection or congested mirror. Retry on a \
-         faster network, or run the install during off-peak hours."
-    } else if lower.contains("connection") {
-        "Connection error. Check internet connectivity, restart the app, \
-         and retry."
-    } else if lower.contains("no space") || lower.contains("errno 28") {
-        "Out of disk space. PyTorch + dependencies need ~5 GB free. Free up \
-         space and retry."
-    } else if lower.contains("permission") || lower.contains("errno 13") {
-        "Permission denied. Make sure no other process is using Python, then \
-         retry. On Windows: close any open Python REPLs / Jupyter / IDE \
-         debuggers."
-    } else if lower.contains("no module named") || lower.contains("modulenotfounderror") {
-        "Python install is missing pip or is broken. Reinstall Python 3.10+ \
-         from python.org with 'Add to PATH' checked."
-    } else if lower.contains("could not find a version") {
-        "No matching wheel for your Python version. ComfyUI needs Python \
-         3.10, 3.11, or 3.12. Reinstall a supported Python version."
-    } else {
-        ""
-    };
+        PipFailureKind::PythonWithoutSsl =>
+            "This Python was built without the ssl module, so pip cannot reach \
+             pypi.org at all. Use your distro's regular python3 (it ships with \
+             ssl): check with  python3 -c \"import ssl\". If that fails, \
+             reinstall python3 via your package manager (pyenv builds need the \
+             OpenSSL headers installed first, e.g. libssl-dev / openssl-devel), \
+             then retry.".to_string(),
+        PipFailureKind::MissingRuntimeLibrary => {
+            let dll = missing_runtime_library(text).unwrap_or("VCOMP140.DLL").to_uppercase();
+            format!(
+                "A Microsoft Visual C++ runtime library is missing on this machine: {dll}. \
+                 PyTorch loads it at import time and Windows does not install it on its own, \
+                 so nothing pip does can fix this. Install the current Visual C++ \
+                 Redistributable for x64 from {VC_REDIST_PAGE}, restart Windows, then press \
+                 Repair environment."
+            )
+        }
+        PipFailureKind::NativeLoadFailure => format!(
+            "PyTorch is on disk but its native libraries will not load on this machine. \
+             Two things cause that, in this order: the Microsoft Visual C++ Redistributable \
+             for x64 is missing or out of date (install the current one from {VC_REDIST_PAGE} \
+             and restart Windows), or the GPU driver is older than the CUDA build that was \
+             installed (update the graphics driver). Do both, then press Repair environment."
+        ),
+        PipFailureKind::TorchWithoutGpuSupport =>
+            "The PyTorch in this environment carries no support for the card in this machine, \
+             so it can only run on the processor. Press Repair environment: the rebuild probes \
+             the card again and picks the matching wheels.".to_string(),
+        PipFailureKind::Ssl =>
+            "SSL error reaching pypi.org. Often caused by an antivirus / firewall \
+             intercepting TLS, or a stale system clock. Disable TLS interception \
+             for python.exe, fix the system clock, then retry.".to_string(),
+        PipFailureKind::Forbidden =>
+            "HTTP 403 from pypi.org or pytorch.org. The mirror may be blocked on \
+             your network. Try a different network or VPN, then retry.".to_string(),
+        PipFailureKind::RateLimited => "Rate limited (HTTP 429). Wait a few minutes and retry.".to_string(),
+        PipFailureKind::Timeout =>
+            "Network timeout. Slow connection or congested mirror. Retry on a \
+             faster network, or run the install during off-peak hours.".to_string(),
+        PipFailureKind::Network =>
+            "Connection error. Check internet connectivity, restart the app, \
+             and retry.".to_string(),
+        PipFailureKind::DiskFull =>
+            "Out of disk space. PyTorch + dependencies need ~5 GB free. Free up \
+             space and retry.".to_string(),
+        PipFailureKind::Permission =>
+            "Permission denied. Make sure no other process is using Python, then \
+             retry. On Windows: close any open Python REPLs / Jupyter / IDE \
+             debuggers.".to_string(),
+        PipFailureKind::PipBroken =>
+            "Python install is missing pip or is broken. Reinstall Python 3.10+ \
+             from python.org with 'Add to PATH' checked.".to_string(),
+        PipFailureKind::NoMatchingWheel =>
+            "No matching wheel for your Python version. ComfyUI needs Python \
+             3.10, 3.11, or 3.12. Reinstall a supported Python version.".to_string(),
+        PipFailureKind::Unknown => String::new(),
+    }
+}
+
+fn diagnose_pip_error_inner(stderr: &str) -> String {
+    let snippet: String = stderr.chars().take(400).collect();
+    let hint = pip_failure_hint(pip_failure_kind(stderr), stderr);
 
     if hint.is_empty() {
         snippet
     } else {
         format!("{}\n\n--- pip output ---\n{}", hint, snippet)
     }
+}
+
+// ── the environment has to prove itself (A3) ────────────────────────────────
+//
+// Five customers in seven days (falconbob_20415, anglefire, jamiet99uk,
+// hypocritical_rj, petermanmancusso) ended up with a ComfyUI environment the
+// installer had called "installed successfully". The mods were repairing it by
+// hand with `pip install sqlalchemy` and `pip install pyyaml`, which is the
+// proof that packages were simply not there: both stand in ComfyUI's own
+// requirements.txt, and this installer does run `pip install -r` against it.
+//
+// What it did NOT do is check the result. A failed requirements run was
+// downgraded to "Some optional dependencies had warnings (non-critical,
+// ComfyUI should still start)" and the install reported complete, so a
+// permission error against an admin-only site-packages, a wheel that would not
+// build, or a mirror that died after three retries all ended in the same
+// place: a green tick over a venv that cannot import ComfyUI.
+//
+// So the environment now has to prove itself: import every package we know the
+// import name for, install what is missing, import again, and only then say
+// the word complete. Repair runs the identical probe, which is the other half
+// of the report, because pressing Repair environment changed nothing for at
+// least two of the five.
+
+/// Import names for the distributions ComfyUI's requirements.txt names.
+///
+/// ONLY distributions listed here are probed. Deriving an import name from a
+/// distribution name is a guess (pyyaml imports as `yaml`, pillow as `PIL`),
+/// and a wrong guess would turn a healthy environment into a false alarm and
+/// send the customer to Repair environment for nothing. Anything the table
+/// does not know is installed but not probed, which is exactly the behaviour
+/// before this change.
+///
+/// The list is names only. It pins no version, and a requirements.txt that
+/// stops naming a package stops it being probed.
+pub(crate) const KNOWN_IMPORT_NAMES: &[(&str, &str)] = &[
+    ("torch", "torch"),
+    ("torchvision", "torchvision"),
+    ("torchaudio", "torchaudio"),
+    ("torchsde", "torchsde"),
+    ("numpy", "numpy"),
+    ("einops", "einops"),
+    ("transformers", "transformers"),
+    ("tokenizers", "tokenizers"),
+    ("sentencepiece", "sentencepiece"),
+    ("safetensors", "safetensors"),
+    ("aiohttp", "aiohttp"),
+    ("yarl", "yarl"),
+    ("pyyaml", "yaml"),
+    ("pillow", "PIL"),
+    ("scipy", "scipy"),
+    ("tqdm", "tqdm"),
+    ("psutil", "psutil"),
+    ("alembic", "alembic"),
+    ("sqlalchemy", "sqlalchemy"),
+    ("av", "av"),
+    ("kornia", "kornia"),
+    ("spandrel", "spandrel"),
+    ("soundfile", "soundfile"),
+    ("pydantic", "pydantic"),
+    ("pydantic-settings", "pydantic_settings"),
+];
+
+/// One package the probe can ask about: what pip calls it, what Python calls
+/// it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ProbeTarget {
+    pub(crate) dist: String,
+    pub(crate) module: &'static str,
+}
+
+/// PEP 503 name normalisation, so `PyYAML`, `pyyaml` and `Py_YAML` are one
+/// package.
+pub(crate) fn normalize_dist(name: &str) -> String {
+    let mut out = String::with_capacity(name.len());
+    let mut last_dash = false;
+    for c in name.trim().to_ascii_lowercase().chars() {
+        let c = if c == '_' || c == '.' { '-' } else { c };
+        if c == '-' {
+            if !last_dash {
+                out.push('-');
+            }
+            last_dash = true;
+        } else {
+            out.push(c);
+            last_dash = false;
+        }
+    }
+    out.trim_matches('-').to_string()
+}
+
+/// Distribution names a requirements.txt asks for. Options (`-r`, `-e`,
+/// `--index-url`), comments, blank lines, URLs and environment markers are
+/// dropped; version specifiers and extras are cut off.
+pub(crate) fn parse_requirement_dists(text: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for raw in text.lines() {
+        let line = raw.split('#').next().unwrap_or("").trim();
+        if line.is_empty() || line.starts_with('-') {
+            continue;
+        }
+        // `name @ url` is still a name; a bare URL is not.
+        let head = line.split('@').next().unwrap_or("").trim();
+        if head.is_empty() || head.contains("://") {
+            continue;
+        }
+        let end = head
+            .find(|c: char| "[<>=!~; \t,(".contains(c))
+            .unwrap_or(head.len());
+        let dist = normalize_dist(&head[..end]);
+        if dist.is_empty() {
+            continue;
+        }
+        if !out.contains(&dist) {
+            out.push(dist);
+        }
+    }
+    out
+}
+
+/// What the probe should import for a given requirements.txt. torch always
+/// comes first and always comes along: it is installed in its own step, it is
+/// the one package whose failure is a native library fault rather than a
+/// missing file, and it is the canary for every DLL report in A3.
+pub(crate) fn probe_targets(requirements: &str) -> Vec<ProbeTarget> {
+    let mut out = vec![ProbeTarget { dist: "torch".to_string(), module: "torch" }];
+    for dist in parse_requirement_dists(requirements) {
+        if dist == "torch" {
+            continue;
+        }
+        if let Some((_, module)) = KNOWN_IMPORT_NAMES.iter().find(|(d, _)| *d == dist) {
+            out.push(ProbeTarget { dist, module });
+        }
+    }
+    out
+}
+
+/// The Python program the probe runs. It announces each module BEFORE trying
+/// it and flushes, so an import that takes the whole interpreter down with it
+/// (0xC0000005, reported by petermanmancusso) still leaves its name in the
+/// output instead of an empty log and an exit code.
+pub(crate) fn import_probe_script(modules: &[&str]) -> String {
+    let list = modules
+        .iter()
+        .map(|m| format!("\"{m}\""))
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!(
+        "import importlib, sys\n\
+         for m in [{list}]:\n\
+         \x20   sys.stdout.write(\"PROBE_TRY \" + m + \"\\n\"); sys.stdout.flush()\n\
+         \x20   try:\n\
+         \x20       importlib.import_module(m)\n\
+         \x20       sys.stdout.write(\"PROBE_OK \" + m + \"\\n\")\n\
+         \x20   except BaseException as e:\n\
+         \x20       sys.stdout.write(\"PROBE_FAIL \" + m + \" :: \" + type(e).__name__ + \": \" + \" \".join(str(e).split()) + \"\\n\")\n\
+         \x20   sys.stdout.flush()\n\
+         sys.stdout.write(\"PROBE_DONE\\n\"); sys.stdout.flush()\n"
+    )
+}
+
+/// What the probe found. `missing` is the healable half (pip can put those
+/// back), `broken` and `crashed` are not: no amount of pip fixes an absent
+/// Visual C++ runtime.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub(crate) struct ImportProbeReport {
+    pub(crate) missing: Vec<String>,
+    pub(crate) broken: Vec<(String, String)>,
+    pub(crate) crashed: Option<String>,
+    pub(crate) finished: bool,
+}
+
+impl ImportProbeReport {
+    pub(crate) fn is_healthy(&self) -> bool {
+        self.finished && self.missing.is_empty() && self.broken.is_empty() && self.crashed.is_none()
+    }
+
+    /// True when pip could plausibly close the gap, so the caller heals first
+    /// and only reports if the second probe still fails.
+    ///
+    /// PyTorch is deliberately not healable here. It is installed from a
+    /// channel the card decides (`plan_pytorch_install`), and a plain
+    /// `pip install torch` would take whatever PyPI serves by default, which
+    /// is how a machine ends up with a build that has no kernels for its own
+    /// card. A torch that is missing after its own step is a failed install,
+    /// and the rebuild is the answer.
+    pub(crate) fn is_healable(&self) -> bool {
+        !self.missing.is_empty()
+            && self.broken.is_empty()
+            && self.crashed.is_none()
+            && !self
+                .missing
+                .iter()
+                .any(|m| torch_wheels::TORCH_TRIO.contains(&m.as_str()))
+    }
+}
+
+/// Read the probe's output. `interpreter_survived` is the process exit status:
+/// an interpreter that died mid import leaves a `PROBE_TRY` with nothing after
+/// it, and that name is the module that killed it.
+pub(crate) fn parse_import_probe(stdout: &str, interpreter_survived: bool) -> ImportProbeReport {
+    let mut report = ImportProbeReport::default();
+    let mut pending: Option<String> = None;
+    for line in stdout.lines() {
+        let line = line.trim();
+        if let Some(m) = line.strip_prefix("PROBE_TRY ") {
+            pending = Some(m.trim().to_string());
+        } else if let Some(m) = line.strip_prefix("PROBE_OK ") {
+            if pending.as_deref() == Some(m.trim()) {
+                pending = None;
+            }
+        } else if let Some(rest) = line.strip_prefix("PROBE_FAIL ") {
+            let (module, reason) = match rest.split_once(" :: ") {
+                Some((m, r)) => (m.trim().to_string(), r.trim().to_string()),
+                None => (rest.trim().to_string(), "no detail from python".to_string()),
+            };
+            if pending.as_deref() == Some(module.as_str()) {
+                pending = None;
+            }
+            // A plain ModuleNotFoundError is a file that is not there, which
+            // is the sqlalchemy / pyyaml case and the only one pip can fix.
+            if reason.to_ascii_lowercase().contains("modulenotfounderror") {
+                report.missing.push(module);
+            } else {
+                report.broken.push((module, reason));
+            }
+        } else if line == "PROBE_DONE" {
+            report.finished = true;
+            pending = None;
+        }
+    }
+    if !report.finished || !interpreter_survived {
+        report.crashed = pending;
+    }
+    report
+}
+
+/// The sentence the customer gets. One shape for all three failure classes:
+/// what is wrong, and what to do about it.
+pub(crate) fn import_probe_message(report: &ImportProbeReport) -> String {
+    if let Some(module) = &report.crashed {
+        return format!(
+            "The Python environment crashed while importing {module}, so it cannot start ComfyUI. \
+             A crash at import time (0xC0000005 on Windows) means a native library the package \
+             loads does not match this machine. {}",
+            pip_failure_hint(PipFailureKind::NativeLoadFailure, "")
+        );
+    }
+    if let Some((module, reason)) = report.broken.first() {
+        let hint = pip_failure_hint(pip_failure_kind(reason), reason);
+        let hint = if hint.is_empty() {
+            "Press Repair environment to rebuild the environment from scratch.".to_string()
+        } else {
+            hint
+        };
+        return format!("The ComfyUI environment cannot import {module}: {reason}\n\n{hint}");
+    }
+    if report
+        .missing
+        .iter()
+        .any(|m| torch_wheels::TORCH_TRIO.contains(&m.as_str()))
+    {
+        return format!(
+            "PyTorch is not in the ComfyUI environment at all ({} could not be imported), so the \
+             install did not finish. Press Repair environment: it rebuilds the environment and \
+             fetches the PyTorch build that matches the card in this machine.",
+            report.missing.join(", ")
+        );
+    }
+    if !report.missing.is_empty() {
+        return format!(
+            "These packages are still missing from the ComfyUI environment after a reinstall: {}. \
+             ComfyUI cannot start without them. Press Repair environment to rebuild the \
+             environment from scratch, and if that fails too, send us the install log.",
+            report.missing.join(", ")
+        );
+    }
+    if !report.finished {
+        return "The check of the ComfyUI environment did not run to the end, so the environment \
+                cannot be called ready. Press Repair environment to rebuild it."
+            .to_string();
+    }
+    String::new()
+}
+
+/// Run the probe against one interpreter. A probe that cannot even be started
+/// is reported as unfinished, never as healthy.
+fn run_import_probe(python_bin: &str, modules: &[&str]) -> ImportProbeReport {
+    let script = import_probe_script(modules);
+    let mut cmd = Command::new(python_bin);
+    cmd.arg("-c").arg(&script);
+    // A piped python child on Windows encodes stdio with the legacy code page,
+    // and an exception text with one non ASCII character would then abort the
+    // probe with a UnicodeEncodeError instead of reporting the import.
+    cmd.env("PYTHONIOENCODING", "utf-8");
+    cmd.env("PYTHONUTF8", "1");
+    cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
+    #[cfg(target_os = "windows")]
+    cmd.creation_flags(CREATE_NO_WINDOW);
+    match cmd.output() {
+        Ok(out) => {
+            let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+            let stderr = String::from_utf8_lossy(&out.stderr).to_string();
+            let mut report = parse_import_probe(&stdout, out.status.success());
+            // A hard crash never reaches our `except`, so whatever it said
+            // went to stderr. Windows puts the missing DLL's name there, which
+            // is the difference between naming VCOMP140.DLL and shrugging.
+            if let Some(module) = report.crashed.clone() {
+                if let Some(last) = stderr.trim().lines().next_back() {
+                    if !last.trim().is_empty() {
+                        report.broken.push((module, last.trim().to_string()));
+                        report.crashed = None;
+                    }
+                }
+            }
+            report
+        }
+        Err(e) => ImportProbeReport {
+            broken: vec![("python".to_string(), os_error::english(&e))],
+            ..Default::default()
+        },
+    }
+}
+
+/// Import every package we can name, install back what is missing, import
+/// again. Ok means the environment really starts; Err carries a finished
+/// sentence for the status line.
+///
+/// This is the step "Repair environment" was missing. It rebuilt the venv and
+/// then trusted pip's exit code, which is the same trust that produced the
+/// broken environment in the first place.
+fn verify_and_heal_environment(
+    python_bin: &str,
+    requirements: &Path,
+    install_status: &Arc<Mutex<InstallState>>,
+    cancel: Option<&Arc<AtomicBool>>,
+) -> Result<(), String> {
+    let text = fs::read_to_string(requirements).unwrap_or_default();
+    let targets = probe_targets(&text);
+    let modules: Vec<&str> = targets.iter().map(|t| t.module).collect();
+    push_install_log(
+        install_status,
+        &format!("Checking the environment: importing {} packages...", modules.len()),
+    );
+
+    let report = run_import_probe(python_bin, &modules);
+    if report.is_healthy() {
+        push_install_log(install_status, "All packages import cleanly.");
+        return Ok(());
+    }
+
+    if !report.is_healable() {
+        return Err(import_probe_message(&report));
+    }
+
+    // Self-heal before the error message: the packages the mods were
+    // installing by hand get installed here instead.
+    let heal: Vec<String> = targets
+        .iter()
+        .filter(|t| report.missing.iter().any(|m| m == t.module))
+        .map(|t| t.dist.clone())
+        .collect();
+    if heal.is_empty() {
+        return Err(import_probe_message(&report));
+    }
+    push_install_log(
+        install_status,
+        &format!(
+            "These packages are missing and are being installed now: {}.",
+            heal.join(", ")
+        ),
+    );
+    let mut args: Vec<&str> = vec!["-m", "pip", "install", "--progress-bar", "off", "--no-input"];
+    args.extend(heal.iter().map(|s| s.as_str()));
+    match pip_install_streaming_with_retry_cancellable(&args, python_bin, 3, install_status, cancel) {
+        Ok(()) => {}
+        Err(d) if d == "cancelled" => return Err("cancelled".to_string()),
+        Err(d) => {
+            return Err(format!(
+                "The ComfyUI environment is missing {} and they could not be installed.\n\n{}",
+                heal.join(", "),
+                d
+            ))
+        }
+    }
+
+    let second = run_import_probe(python_bin, &modules);
+    if second.is_healthy() {
+        push_install_log(install_status, "All packages import cleanly now.");
+        return Ok(());
+    }
+    Err(import_probe_message(&second))
 }
 
 /// Run a `python -m pip install ...` command, streaming its stdout + stderr
@@ -832,7 +1360,7 @@ pub fn install_comfyui(
         // Step 1: Git clone — spawn+poll instead of cmd.output() so the
         // Cancel button can kill an in-flight clone (Bug #1).
         println!("[Install] Cloning ComfyUI to {:?}", target_dir);
-        update("downloading", "Step 1/3: Downloading ComfyUI repository...");
+        update("downloading", "Step 1/4: Downloading ComfyUI repository...");
 
         let mut cmd = Command::new("git");
         cmd.args(["clone", "https://github.com/comfyanonymous/ComfyUI.git"])
@@ -887,7 +1415,27 @@ pub fn install_comfyui(
                     .stdout(Stdio::piped()).stderr(Stdio::piped());
                 #[cfg(target_os = "windows")]
                 pull.creation_flags(CREATE_NO_WINDOW);
-                let _ = pull.output();
+                // A folder that is not a git checkout at all lands here too:
+                // an install copied from another machine on a stick, which is
+                // how falconbob_20415 got a ComfyUI with files missing. Say so
+                // instead of pulling nothing and carrying on quietly.
+                match pull.output() {
+                    Ok(out) if out.status.success() => {}
+                    Ok(out) => {
+                        let text = String::from_utf8_lossy(&out.stderr);
+                        update(
+                            "installing",
+                            &format!(
+                                "The existing folder could not be updated: {}",
+                                text.trim().lines().next_back().unwrap_or("no detail from git")
+                            ),
+                        );
+                    }
+                    Err(e) => update(
+                        "installing",
+                        &format!("git pull could not start: {}", os_error::english(&e)),
+                    ),
+                }
             } else {
                 let err = format!("Git clone failed: {}", stderr);
                 println!("[Install] {}", err);
@@ -941,7 +1489,7 @@ pub fn install_comfyui(
         // with repair_comfyui_env via plan_pytorch_install).
         let (torch_args, gpu_info) = plan_pytorch_install();
         println!("[Install] {}", gpu_info);
-        update("installing", &format!("Step 2/3: {}", gpu_info));
+        update("installing", &format!("Step 2/4: {}", gpu_info));
         update(
             "installing",
             "Downloading PyTorch + Torchvision + Torchaudio (~2 GB total). \
@@ -974,10 +1522,27 @@ pub fn install_comfyui(
 
         // Step 3: Install ComfyUI requirements
         println!("[Install] Installing ComfyUI requirements...");
-        update("installing", "Step 3/3: Installing ComfyUI dependencies (live pip output below)...");
+        update("installing", "Step 3/4: Installing ComfyUI dependencies (live pip output below)...");
 
+        // A3: a folder without requirements.txt is not a ComfyUI checkout, and
+        // skipping the step silently is how falconbob_20415's copied install
+        // reached "installed successfully" with nothing in it. The clone above
+        // treats an existing folder as "pull and carry on", so this is the
+        // place that notices.
         let reqs = target_dir.join("requirements.txt");
-        if reqs.exists() {
+        if !reqs.exists() {
+            update(
+                "error",
+                &format!(
+                    "The folder {} has no requirements.txt, so it is not a complete ComfyUI \
+                     checkout and its dependencies cannot be installed. Rename or delete that \
+                     folder and run the install again.",
+                    target_dir.display()
+                ),
+            );
+            return;
+        }
+        {
             let reqs_str = reqs.to_string_lossy().to_string();
             let req_args = vec![
                 "-m", "pip", "install",
@@ -994,11 +1559,63 @@ pub fn install_comfyui(
                     return;
                 }
                 Err(diagnosis) => {
-                    // Don't fail the whole install — some optional deps may fail
-                    // but ComfyUI can still start and the user can fix them later.
-                    println!("[Install] Requirements install warning: {}", diagnosis);
-                    update("installing", "Some optional dependencies had warnings (non-critical, ComfyUI should still start).");
+                    // A python.org install under Program Files has an
+                    // admin-only site-packages, and without a venv the first
+                    // wheel that is not already there dies on it. The same
+                    // escape the custom node path has used since 2026-07-19,
+                    // and only where no venv was built: a venv rejects --user.
+                    let retried = if effective_python == python_bin
+                        && pip_failure_kind(&diagnosis) == PipFailureKind::Permission
+                    {
+                        update(
+                            "installing",
+                            "The dependencies could not be written to the shared site-packages. \
+                             Retrying into the per user site, which needs no administrator.",
+                        );
+                        let mut user_args = req_args.clone();
+                        user_args.push("--user");
+                        pip_install_streaming_with_retry_cancellable(&user_args, &effective_python, 2, &install_status, Some(&cancel_flag)).is_ok()
+                    } else {
+                        false
+                    };
+                    if retried {
+                        update("installing", "Dependencies installed successfully.");
+                    } else {
+                        // Not fatal on its own: the import check below decides
+                        // whether the environment can actually start. What is
+                        // gone is the old "non-critical" verdict, which called
+                        // a broken environment a finished one.
+                        println!("[Install] Requirements install warning: {}", diagnosis);
+                        update(
+                            "installing",
+                            &format!(
+                                "Not every dependency installed. Checking what is really missing.\n\n{}",
+                                diagnosis
+                            ),
+                        );
+                    }
                 }
+            }
+        }
+
+        if cancelled() {
+            update("cancelled", "Install cancelled before the environment check.");
+            return;
+        }
+
+        // Step 4: the environment has to prove it starts. Everything above
+        // reads pip exit codes; this reads the interpreter.
+        update("installing", "Step 4/4: Checking that the environment really starts...");
+        match verify_and_heal_environment(&effective_python, &reqs, &install_status, Some(&cancel_flag)) {
+            Ok(()) => {}
+            Err(e) if e == "cancelled" => {
+                update("cancelled", "Install cancelled during the environment check.");
+                return;
+            }
+            Err(e) => {
+                error!("comfyui install finished with an environment that does not import");
+                update("error", &format!("ComfyUI was downloaded, but its Python environment is not usable.\n\n{}", e));
+                return;
             }
         }
 
@@ -1140,7 +1757,7 @@ pub fn repair_comfyui_env(state: State<'_, AppState>) -> Result<serde_json::Valu
 
         update(
             "installing",
-            "Step 1/3: Creating a fresh isolated venv inside the ComfyUI folder...",
+            "Step 1/4: Creating a fresh isolated venv inside the ComfyUI folder...",
         );
         let venv_py = match create_comfyui_venv(&comfy_dir, &python_bin) {
             Ok(p) => p.to_string_lossy().to_string(),
@@ -1155,7 +1772,7 @@ pub fn repair_comfyui_env(state: State<'_, AppState>) -> Result<serde_json::Valu
         }
 
         let (torch_args, gpu_info) = plan_pytorch_install();
-        update("installing", &format!("Step 2/3: {}", gpu_info));
+        update("installing", &format!("Step 2/4: {}", gpu_info));
         update(
             "installing",
             "Downloading PyTorch into the fresh venv (~2 GB). Live pip output below.",
@@ -1174,10 +1791,22 @@ pub fn repair_comfyui_env(state: State<'_, AppState>) -> Result<serde_json::Valu
         }
 
         let reqs = comfy_dir.join("requirements.txt");
-        if reqs.exists() {
+        if !reqs.exists() {
+            update(
+                "error",
+                &format!(
+                    "The folder {} has no requirements.txt, so it is not a complete ComfyUI \
+                     checkout and the environment cannot be rebuilt from it. Rename or delete \
+                     that folder and install ComfyUI again.",
+                    comfy_dir.display()
+                ),
+            );
+            return;
+        }
+        {
             update(
                 "installing",
-                "Step 3/3: Installing ComfyUI dependencies into the venv...",
+                "Step 3/4: Installing ComfyUI dependencies into the venv...",
             );
             let reqs_str = reqs.to_string_lossy().to_string();
             let req_args = vec![
@@ -1194,8 +1823,25 @@ pub fn repair_comfyui_env(state: State<'_, AppState>) -> Result<serde_json::Valu
                 }
                 Err(d) => update(
                     "installing",
-                    &format!("Some optional dependencies had warnings (non-critical): {}", d),
+                    &format!("Not every dependency installed. Checking what is really missing.\n\n{}", d),
                 ),
+            }
+        }
+
+        // A3: this is the step the button was missing. Two of the five
+        // reporters pressed Repair environment and nothing changed, because a
+        // rebuild that trusts pip's exit code rebuilds the same hole.
+        update("installing", "Step 4/4: Checking that the environment really starts...");
+        match verify_and_heal_environment(&venv_py, &reqs, &install_status, Some(&cancel_flag)) {
+            Ok(()) => {}
+            Err(e) if e == "cancelled" => {
+                update("cancelled", "Repair cancelled during the environment check.");
+                return;
+            }
+            Err(e) => {
+                error!("comfyui env repair left an environment that does not import");
+                update("error", &format!("The environment was rebuilt, but it still does not start.\n\n{}", e));
+                return;
             }
         }
 
@@ -1295,7 +1941,7 @@ pub fn update_comfyui(state: State<'_, AppState>) -> Result<serde_json::Value, S
             }
         }
 
-        update("installing", "Step 1/2: Pulling the latest ComfyUI...");
+        update("installing", "Step 1/3: Pulling the latest ComfyUI...");
         let mut pull = Command::new("git");
         // --ff-only: a user-modified checkout must not silently merge; surface
         // the divergence honestly instead.
@@ -1334,10 +1980,21 @@ pub fn update_comfyui(state: State<'_, AppState>) -> Result<serde_json::Value, S
 
         update(
             "installing",
-            "Step 2/2: Updating Python dependencies (live pip output below)...",
+            "Step 2/3: Updating Python dependencies (live pip output below)...",
         );
         let reqs = comfy_dir.join("requirements.txt");
-        if reqs.exists() {
+        if !reqs.exists() {
+            update(
+                "error",
+                &format!(
+                    "The folder {} has no requirements.txt after the pull, so its dependencies \
+                     cannot be updated. Reinstall ComfyUI from Settings.",
+                    comfy_dir.display()
+                ),
+            );
+            return;
+        }
+        {
             let reqs_str = reqs.to_string_lossy().to_string();
             let req_args = vec![
                 "-m", "pip", "install",
@@ -1354,15 +2011,23 @@ pub fn update_comfyui(state: State<'_, AppState>) -> Result<serde_json::Value, S
             ) {
                 Ok(()) => update("installing", "Dependencies updated."),
                 Err(diagnosis) => {
-                    // Same stance as the installer's step 3: optional deps may
-                    // fail while ComfyUI still starts — log, don't abort.
                     println!("[Update] Requirements warning: {}", diagnosis);
                     update(
                         "installing",
-                        "Some dependencies had warnings (non-critical, ComfyUI should still start).",
+                        &format!("Not every dependency updated. Checking what is really missing.\n\n{}", diagnosis),
                     );
                 }
             }
+        }
+
+        // A pull that brings new requirements is the third way into A3: the
+        // core moves on, one wheel does not land, and the update reports
+        // finished over an environment that no longer imports.
+        update("installing", "Step 3/3: Checking that the environment really starts...");
+        if let Err(e) = verify_and_heal_environment(&python_bin, &reqs, &install_status, None) {
+            error!("comfyui update left an environment that does not import");
+            update("error", &format!("ComfyUI was updated, but its Python environment is not usable.\n\n{}", e));
+            return;
         }
 
         println!("[Update] ComfyUI update complete");
@@ -4564,6 +5229,279 @@ mod tests {
             hint
         );
         assert!(lower.contains("git-scm.com/download/win"), "got: {}", hint);
+    }
+
+
+    // ── A3: the ComfyUI environment has to prove itself ────────────────────
+    //
+    // Five reporters between 2026-08-26 and 2026-09-02 (falconbob_20415,
+    // anglefire, jamiet99uk, hypocritical_rj, petermanmancusso) got an
+    // environment the installer had called finished. Four symptoms, one root:
+    // nothing ever asked the interpreter whether it could import anything.
+
+    #[test]
+    fn a_missing_visual_cpp_runtime_is_named_and_not_read_as_a_network_fault() {
+        let text = "ImportError: VCOMP140.DLL was not found. Error loading \"C:\\ComfyUI\\venv\\Lib\\site-packages\\torch\\lib\\c10.dll\"";
+        assert_eq!(pip_failure_kind(text), PipFailureKind::MissingRuntimeLibrary);
+        assert_eq!(missing_runtime_library(text), Some("vcomp140.dll"));
+        let hint = pip_failure_hint(PipFailureKind::MissingRuntimeLibrary, text);
+        assert!(hint.contains("VCOMP140.DLL"), "the file is not named: {hint}");
+        assert!(hint.contains(VC_REDIST_PAGE), "no way to get the runtime: {hint}");
+        // The page is deliberately the version free one: a numbered installer
+        // link goes stale the moment Microsoft ships the next build.
+        assert!(!hint.contains("vc_redist"), "pins a numbered installer: {hint}");
+        assert!(!hint.to_lowercase().contains("online"), "still blames the network: {hint}");
+    }
+
+    #[test]
+    fn a_dll_that_is_only_mentioned_is_not_a_missing_runtime() {
+        // Negative control for the arm above: the loader prints the DLL path
+        // on plenty of lines that are not a failure.
+        let text = "Loaded msvcp140.dll from C:\\Windows\\System32 successfully";
+        assert_eq!(missing_runtime_library(text), None);
+        assert_ne!(pip_failure_kind(text), PipFailureKind::MissingRuntimeLibrary);
+    }
+
+    #[test]
+    fn winerror_1114_reads_as_a_native_load_failure_not_a_connection_error() {
+        let text = "OSError: [WinError 1114] A dynamic link library (DLL) initialization routine failed. Error loading \"c10.dll\" or one of its dependencies.";
+        assert_eq!(pip_failure_kind(text), PipFailureKind::NativeLoadFailure);
+        let hint = pip_failure_hint(PipFailureKind::NativeLoadFailure, text);
+        assert!(hint.contains(VC_REDIST_PAGE), "{hint}");
+        assert!(hint.to_lowercase().contains("driver"), "the second cause is unnamed: {hint}");
+    }
+
+    #[test]
+    fn an_access_violation_is_a_native_load_failure() {
+        assert_eq!(
+            pip_failure_kind("Process exited with code 0xC0000005"),
+            PipFailureKind::NativeLoadFailure
+        );
+    }
+
+    #[test]
+    fn a_torch_without_kernels_for_this_card_points_at_repair_not_at_the_network() {
+        let text = "AssertionError: Torch not compiled with CUDA enabled";
+        assert_eq!(pip_failure_kind(text), PipFailureKind::TorchWithoutGpuSupport);
+        let hint = pip_failure_hint(PipFailureKind::TorchWithoutGpuSupport, text);
+        assert!(hint.contains("Repair environment"), "{hint}");
+    }
+
+    #[test]
+    fn the_old_verdicts_still_come_out_of_the_new_classifier() {
+        // The rewrite must not move any existing case: these are the arms the
+        // shipped diagnoses were built on.
+        for (text, kind) in [
+            ("error: externally-managed-environment", PipFailureKind::ExternallyManaged),
+            ("the ssl module in Python is not available", PipFailureKind::PythonWithoutSsl),
+            ("SSLError: certificate verify failed", PipFailureKind::Ssl),
+            ("ERROR: 403 Forbidden ", PipFailureKind::Forbidden),
+            ("ERROR: 429 Too Many Requests ", PipFailureKind::RateLimited),
+            ("ReadTimeoutError: read timed out", PipFailureKind::Timeout),
+            ("ConnectionResetError: connection reset by peer", PipFailureKind::Network),
+            ("OSError: [Errno 28] No space left on device", PipFailureKind::DiskFull),
+            ("PermissionError: [Errno 13] Permission denied", PipFailureKind::Permission),
+            ("No module named pip", PipFailureKind::PipBroken),
+            ("ERROR: Could not find a version that satisfies", PipFailureKind::NoMatchingWheel),
+            ("something nobody has seen before", PipFailureKind::Unknown),
+        ] {
+            assert_eq!(pip_failure_kind(text), kind, "wrong verdict for {text:?}");
+        }
+    }
+
+    // ── the requirements chain ────────────────────────────────────────────
+
+    #[test]
+    fn the_two_packages_the_mods_installed_by_hand_are_in_the_probe() {
+        // Verbatim shape of ComfyUI's own requirements.txt, including the two
+        // names the mods were typing into the ticket by hand.
+        let reqs = "comfyui-frontend-package\ntorch\ntorchsde\ntorchvision\nnumpy>=1.25.0\nPyYAML\nPillow\nSQLAlchemy\nalembic\nav\n";
+        let targets = probe_targets(reqs);
+        let modules: Vec<&str> = targets.iter().map(|t| t.module).collect();
+        assert!(modules.contains(&"yaml"), "pyyaml is not probed: {modules:?}");
+        assert!(modules.contains(&"sqlalchemy"), "sqlalchemy is not probed: {modules:?}");
+        assert!(modules.contains(&"PIL"), "pillow is not probed: {modules:?}");
+        // torch leads, and it comes along even when it is installed in its own
+        // step: it is the canary for every DLL report in A3.
+        assert_eq!(targets[0].module, "torch");
+        assert_eq!(targets.iter().filter(|t| t.module == "torch").count(), 1);
+        // pip has to be handed the DISTRIBUTION name back, not the import name.
+        let yaml = targets.iter().find(|t| t.module == "yaml").expect("pyyaml");
+        assert_eq!(yaml.dist, "pyyaml");
+    }
+
+    #[test]
+    fn a_package_whose_import_name_we_do_not_know_is_never_guessed() {
+        // Negative control: guessing would turn a healthy environment into a
+        // false alarm and send the customer to Repair environment for nothing.
+        let targets = probe_targets("comfyui-workflow-templates\nsome-brand-new-thing\n");
+        let modules: Vec<&str> = targets.iter().map(|t| t.module).collect();
+        assert_eq!(modules, vec!["torch"], "an unknown package was guessed at: {modules:?}");
+    }
+
+    #[test]
+    fn requirements_parsing_drops_the_lines_that_are_not_packages() {
+        let reqs = "# a comment\n\n-r other.txt\n--index-url https://example.invalid/simple\nhttps://example.invalid/wheel.whl\ntorch==2.9.1\nPyYAML\nspandrel ; python_version >= \"3.10\"\nkornia[extra]>=0.7\n";
+        let dists = parse_requirement_dists(reqs);
+        assert_eq!(dists, vec!["torch", "pyyaml", "spandrel", "kornia"], "got {dists:?}");
+    }
+
+    #[test]
+    fn distribution_names_are_normalised_the_way_pip_normalises_them() {
+        for name in ["Py_YAML", "py.yaml", "  py--yaml ", "PY-Yaml"] {
+            assert_eq!(normalize_dist(name), "py-yaml", "{name}");
+        }
+        assert_eq!(normalize_dist("PyYAML"), "pyyaml");
+        assert_eq!(normalize_dist("pydantic_settings"), "pydantic-settings");
+    }
+
+    // ── the import probe ──────────────────────────────────────────────────
+
+    #[test]
+    fn a_probe_where_everything_imports_is_healthy() {
+        let out = "PROBE_TRY torch\nPROBE_OK torch\nPROBE_TRY yaml\nPROBE_OK yaml\nPROBE_DONE\n";
+        let report = parse_import_probe(out, true);
+        assert!(report.is_healthy(), "{report:?}");
+        assert_eq!(import_probe_message(&report), "");
+    }
+
+    #[test]
+    fn a_missing_torch_is_never_reinstalled_from_plain_pypi() {
+        // Negative control for the heal path: torch comes from the channel the
+        // card decides. Letting the heal step run a bare `pip install torch`
+        // would hand a Blackwell box whatever PyPI serves by default, which is
+        // the bug the wheel planner exists to prevent.
+        let out = "PROBE_TRY torch\nPROBE_FAIL torch :: ModuleNotFoundError: No module named 'torch'\nPROBE_DONE\n";
+        let report = parse_import_probe(out, true);
+        assert_eq!(report.missing, vec!["torch"]);
+        assert!(!report.is_healable(), "the heal path would fetch a wheel nobody chose");
+        let msg = import_probe_message(&report);
+        assert!(msg.contains("Repair environment"), "{msg}");
+        assert!(msg.contains("matches the card"), "{msg}");
+    }
+
+    #[test]
+    fn a_module_that_is_simply_not_installed_is_healable() {
+        let out = "PROBE_TRY torch\nPROBE_OK torch\n\
+                   PROBE_TRY sqlalchemy\nPROBE_FAIL sqlalchemy :: ModuleNotFoundError: No module named 'sqlalchemy'\n\
+                   PROBE_TRY yaml\nPROBE_FAIL yaml :: ModuleNotFoundError: No module named 'yaml'\n\
+                   PROBE_DONE\n";
+        let report = parse_import_probe(out, true);
+        assert!(!report.is_healthy());
+        assert!(report.is_healable(), "pip could put these back: {report:?}");
+        assert_eq!(report.missing, vec!["sqlalchemy", "yaml"]);
+        assert!(report.broken.is_empty());
+        assert!(report.crashed.is_none());
+    }
+
+    #[test]
+    fn a_dll_failure_is_never_treated_as_something_pip_can_fix() {
+        // Negative control for the arm above: reinstalling a package cannot
+        // put a Visual C++ runtime on the machine, so the probe must not send
+        // the installer round the pip loop again.
+        let out = "PROBE_TRY torch\nPROBE_FAIL torch :: OSError: [WinError 1114] A dynamic link library (DLL) initialization routine failed. Error loading \"c10.dll\"\nPROBE_DONE\n";
+        let report = parse_import_probe(out, true);
+        assert!(!report.is_healable(), "pip is being asked to fix a DLL: {report:?}");
+        assert_eq!(report.broken.len(), 1);
+        let msg = import_probe_message(&report);
+        assert!(msg.contains("torch"), "{msg}");
+        assert!(msg.contains(VC_REDIST_PAGE), "no way out of the DLL failure: {msg}");
+    }
+
+    #[test]
+    fn an_interpreter_that_dies_mid_import_names_the_module_that_killed_it() {
+        // petermanmancusso: "Process exited with code 0xC0000005". No
+        // traceback, no last line, just a dead process. The PROBE_TRY line
+        // written before the import is the only thing left.
+        let out = "PROBE_TRY torch\n";
+        let report = parse_import_probe(out, false);
+        assert_eq!(report.crashed.as_deref(), Some("torch"));
+        assert!(!report.is_healthy());
+        assert!(!report.is_healable());
+        let msg = import_probe_message(&report);
+        assert!(msg.contains("torch"), "{msg}");
+        assert!(msg.contains("0xC0000005"), "the crash is not named: {msg}");
+        assert!(msg.contains(VC_REDIST_PAGE), "{msg}");
+    }
+
+    #[test]
+    fn a_probe_that_never_reached_the_end_is_not_called_healthy() {
+        // Negative control: exit code 0 with a truncated log used to be
+        // indistinguishable from success, which is the whole class of bug A3
+        // is made of.
+        let report = parse_import_probe("PROBE_TRY torch\nPROBE_OK torch\n", true);
+        assert!(!report.is_healthy(), "an unfinished probe passed as healthy: {report:?}");
+        assert!(!import_probe_message(&report).is_empty());
+    }
+
+    #[test]
+    fn the_probe_script_announces_a_module_before_it_imports_it() {
+        let script = import_probe_script(&["torch", "yaml"]);
+        let try_at = script.find("PROBE_TRY").expect("no try marker");
+        let import_at = script.find("importlib.import_module").expect("no import");
+        assert!(try_at < import_at, "the name is written after the crash could happen");
+        assert!(script.contains("flush()"), "an unflushed line is lost in a crash");
+        assert!(script.contains("\"torch\", \"yaml\""), "modules missing: {script}");
+        assert!(script.contains("BaseException"), "a SystemExit from an import would escape");
+    }
+
+    /// The script is generated as text, so a stray indent or quote would only
+    /// show up on a customer machine. Run it through a real interpreter here.
+    /// Skipped where the test box has no python3, which is honest: this asserts
+    /// nothing about Windows, only that the program we emit is valid Python.
+    #[test]
+    fn the_generated_script_is_valid_python_and_speaks_the_parsers_protocol() {
+        let script = import_probe_script(&["json", "definitely_not_a_real_module_lu"]);
+        let out = std::process::Command::new("python3").arg("-c").arg(&script).output();
+        let Ok(out) = out else {
+            eprintln!("no python3 on this box, skipping the live probe check");
+            return;
+        };
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        assert!(out.status.success(), "the script did not run: {}", String::from_utf8_lossy(&out.stderr));
+        let report = parse_import_probe(&stdout, out.status.success());
+        assert_eq!(report.missing, vec!["definitely_not_a_real_module_lu"], "{stdout}");
+        assert!(report.broken.is_empty(), "{report:?}");
+        assert!(report.finished, "the DONE marker never arrived: {stdout}");
+    }
+
+    // ── the two paths that have to run the probe ──────────────────────────
+
+    #[test]
+    fn install_and_repair_both_end_on_the_environment_check() {
+        // Source pinned, like the trainer's own dead end tests: the probe is
+        // worthless if either path can still reach "complete" without it.
+        let whole = include_str!("install.rs");
+        // Only the shipping half: the assertions below quote the strings they
+        // forbid, and those quotes live in this test.
+        let src = whole.split("#[cfg(test)]").next().expect("the shipping half");
+        for (marker, what) in [
+            ("update(\"complete\", \"ComfyUI installed successfully!\");", "the install"),
+            ("\"Environment repaired.", "the repair"),
+            ("\"ComfyUI updated. Restart ComfyUI", "the update"),
+        ] {
+            let before = src.split(marker).next().expect(what);
+            let last_check = before
+                .rfind("verify_and_heal_environment(")
+                .unwrap_or_else(|| panic!("{what} never checks the environment"));
+            let between = &before[last_check..];
+            assert!(
+                !between.contains("\nfn ") && !between.contains("\npub fn "),
+                "{what} runs the check in a different function than the one that declares success",
+            );
+            assert!(
+                between.contains("update(\"error\""),
+                "{what} does not stop when the check fails",
+            );
+        }
+        assert!(
+            !src.contains("non-critical, ComfyUI should still start"),
+            "a failed requirements install is still waved through as non-critical",
+        );
+        assert!(
+            !src.contains("Some optional dependencies had warnings (non-critical)"),
+            "the repair still waves a failed requirements install through",
+        );
     }
 
     // ── §24.9 — Whisper pip args builder ──────────────────────────────────
