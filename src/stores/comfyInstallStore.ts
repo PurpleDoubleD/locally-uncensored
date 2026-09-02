@@ -16,8 +16,9 @@ import { create } from 'zustand'
 import { backendCall } from '../api/backend'
 import { withInstallerOutput } from '../lib/error-text'
 
-/** Which card the panel draws. `python` is the pre-flight winget step. */
-export type ComfyInstallPhase = 'idle' | 'python' | 'comfyui' | 'repair' | 'error'
+/** Which card the panel draws. `checking` is the Python probe, `python` the
+ *  winget install that only some boxes need. */
+export type ComfyInstallPhase = 'idle' | 'checking' | 'python' | 'comfyui' | 'repair' | 'error'
 
 /** Which long run is in flight. Install and update share the `comfyui` phase,
  *  and they need different sentences when they end. */
@@ -41,6 +42,17 @@ const FAILED: Record<ComfyInstallKind, string> = {
 }
 
 const POLL_MS = 2000
+
+/** How many status reads in a row may fail before the poll gives up.
+ *
+ *  Review 2026-09-02: every failure was swallowed and retried forever, so a
+ *  status channel that stopped answering for good left a spinner turning with
+ *  no end and no word. Thirty ticks is a minute of silence, long enough to sit
+ *  out a busy box and short enough that nobody watches a dead spinner. */
+const MAX_POLL_MISSES = 30
+
+/** What the panel says when the installer stopped answering. */
+export const LOST_CONTACT = 'Lost contact with the installer. Check the log and try again.'
 
 /** The one poll in flight, module level so it outlives every mount. */
 let timer: ReturnType<typeof setInterval> | null = null
@@ -104,13 +116,21 @@ export const useComfyInstallStore = create<ComfyInstallState>()((set, get) => {
    *  says which one it was. */
   const watch = (kind: ComfyInstallKind) => {
     stopTimer()
+    let misses = 0
     timer = setInterval(async () => {
       let data: InstallStatusPayload
       try {
         data = (await backendCall<InstallStatusPayload>('install_comfyui_status')) ?? {}
       } catch {
-        return // transient, the next tick asks again
+        // Transient, the next tick asks again. Not transient any more once it
+        // has been a minute of nothing.
+        if (++misses >= MAX_POLL_MISSES) {
+          stopTimer()
+          set({ phase: 'error', cancelling: false, error: LOST_CONTACT })
+        }
+        return
       }
+      misses = 0
       set({
         logs: data.logs ?? [],
         dl: {
@@ -148,10 +168,15 @@ export const useComfyInstallStore = create<ComfyInstallState>()((set, get) => {
     ...IDLE,
 
     runInstall: async (installPath: string) => {
-      begin('python', 'install', '')
       // Pre-flight: pip needs a Python before ComfyUI can be installed. The
       // carcass case lands here too, the previous run may have died on the
       // Microsoft Store stub.
+      //
+      // Review 2026-09-02: the phase used to jump to `python` before the probe
+      // had answered, so a box that has Python flashed "Installing Python 3.12
+      // (~30 MB)" for an install that never happened. The probe gets its own
+      // neutral phase and `python` now means what it says.
+      begin('checking', 'install', '')
       let pythonOk = false
       try {
         const probe = await backendCall<{ available?: boolean }>('python_check')
@@ -160,7 +185,7 @@ export const useComfyInstallStore = create<ComfyInstallState>()((set, get) => {
         pythonOk = false
       }
       if (!pythonOk) {
-        set({ logs: ['Installing Python 3.12 via winget…'] })
+        set({ phase: 'python', logs: ['Installing Python 3.12 via winget…'] })
         try {
           await backendCall('install_python')
         } catch (err) {

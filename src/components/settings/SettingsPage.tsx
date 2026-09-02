@@ -835,6 +835,7 @@ export function ComfyUISettings() {
                 {cancelling && installPhase !== 'error'
                   ? 'Cancelling…'
                   : <>
+                      {installPhase === 'checking' && 'Checking Python…'}
                       {installPhase === 'python' && 'Installing Python 3.12 (~30 MB)…'}
                       {installPhase === 'comfyui' && `Installing ComfyUI…${downloadSuffix(installDl)}`}
                       {installPhase === 'repair' && `Rebuilding the ComfyUI environment…${downloadSuffix(installDl)}`}
