@@ -200,6 +200,11 @@ export function DownloadBadge() {
                 const bundleProg = totalBytes > 0 ? (doneBytes / totalBytes) * 100 : 0
                 const bundleSpeed = files.reduce((s, f) => s + (f.d.status === 'downloading' ? (f.d.speed || 0) : 0), 0)
                 const isBundle = files.length > 1
+                // The reason a download stopped, in words. A refused transfer
+                // used to show a Retry button and nothing else, so the CivitAI
+                // 400 that only ever needed an API key looked like a dead link
+                // (goonerforporn, Discord #bug-reports 2026-08-28).
+                const failure = files.find(f => f.d.status === 'error')?.d.error
 
                 return (
                   <div key={bundleName} className="px-3 py-2 border-t border-gray-100 dark:border-white/[0.04] first:border-t-0">
@@ -241,6 +246,11 @@ export function DownloadBadge() {
                             </button>
                           )}
                         </div>
+                        {failure && (
+                          <p className="mt-1 text-[0.55rem] text-red-400 leading-relaxed break-words whitespace-pre-line">
+                            {failure}
+                          </p>
+                        )}
                         {/* Individual file rows */}
                         {isBundle && (
                           <div className="mt-1.5 space-y-0.5">

@@ -2,6 +2,7 @@ import { backendCall, fetchExternal } from "./backend"
 import { getCheckpoints, getDiffusionModels, getVAEModels, getCLIPModels, getGgufUnetModels, getAnimateDiffModels, getLoraModels, filterPartialFiles, refreshComfyModels } from "./comfyui"
 import type { ProviderId } from "./providers/types"
 import { log } from "../lib/logger"
+import { useWorkflowStore } from "../stores/workflowStore"
 
 export interface DiscoverModel {
   name: string
@@ -58,8 +59,45 @@ export interface DownloadProgress {
 
 // ─── Download API ───
 
+/**
+ * Is this URL served by CivitAI? Host comparison, never a substring of the
+ * whole URL: `https://evil.test/?x=civitai.com` must not collect the user's
+ * API key. Mirrors `is_civitai_host` in `src-tauri/src/commands/download.rs`,
+ * which gates the same key a second time on its way onto the wire.
+ */
+const CIVITAI_HOSTS = ['civitai.com', 'civitai.red']
+
+export function isCivitaiUrl(url: string): boolean {
+  let host: string
+  try {
+    host = new URL(url).hostname.toLowerCase()
+  } catch {
+    return false
+  }
+  return CIVITAI_HOSTS.some((h) => host === h || host.endsWith(`.${h}`))
+}
+
+/**
+ * The user's CivitAI API key, for a CivitAI URL and no other.
+ *
+ * goonerforporn (Discord #bug-reports, 2026-08-28): downloads from the CivitAI
+ * search died in 400s because they went out anonymous. The key was in the store
+ * and read by the search, and by nothing on the download path.
+ */
+export function civitaiAuthToken(url: string): string | null {
+  if (!isCivitaiUrl(url)) return null
+  const key = useWorkflowStore.getState().civitaiApiKey?.trim()
+  return key ? key : null
+}
+
 export async function startModelDownload(url: string, subfolder: string, filename: string, expectedBytes?: number): Promise<{ status: string; id: string; error?: string }> {
-  return backendCall("download_model", { url, subfolder, filename, expectedBytes: expectedBytes ?? null })
+  return backendCall("download_model", {
+    url,
+    subfolder,
+    filename,
+    expectedBytes: expectedBytes ?? null,
+    authToken: civitaiAuthToken(url),
+  })
 }
 
 export async function getDownloadProgress(): Promise<Record<string, DownloadProgress>> {
@@ -79,7 +117,7 @@ export async function cancelDownload(id: string): Promise<void> {
 }
 
 export async function resumeDownload(id: string, url: string, subfolder: string): Promise<void> {
-  await backendCall("resume_download", { id, url, subfolder })
+  await backendCall("resume_download", { id, url, subfolder, authToken: civitaiAuthToken(url) })
 }
 
 // ─── Custom Node Installation ───

@@ -321,6 +321,10 @@ pub(crate) fn split_shard_stem(stem: &str) -> Option<(&str, u32, u32)> {
 /// "models" that can never load. A set with missing parts is not listed at
 /// all, so a paused or aborted multi-part download never impersonates an
 /// installed model (same rule a9ea114 established for MLX downloads).
+// Only the tests call this since the listing went multi-root, and they are the
+// reason to keep it: every scan rule that predates GH #122 is pinned through
+// this one-root door, so a change to the walk still has to survive them.
+#[allow(dead_code)]
 pub(crate) fn scan_gguf_models(dir: &Path) -> Vec<BundledModel> {
     scan_gguf_roots(&[ScanRoot { dir, max_depth: MAX_SCAN_DEPTH }])
 }

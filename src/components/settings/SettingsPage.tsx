@@ -64,6 +64,7 @@ import { ArrowUpCircle, KeyRound, RefreshCw } from 'lucide-react'
 import { CLOUD_BASE } from '../../api/cloud/config'
 import { formatBytes } from '../../lib/formatters'
 import { syncCustomModelDir } from '../../lib/custom-model-dir'
+import { CivitaiApiKeySetting } from './CivitaiApiKeySetting'
 
 // ── User profile picture (Appearance) ───────────────────────────
 // Self-contained like HfDownloadPathSetting. Stores the picture as a
@@ -1535,6 +1536,11 @@ export function SettingsPage() {
           <Section title="Model Storage">
             <HfDownloadPathSetting />
             <ImportLocalModels />
+            {/* goonerforporn (Discord #bug-reports, 2026-08-28): the store knew
+                the key, the changelog named it, and no component ever set it.
+                It sits with the other credential-shaped model settings, which
+                is also the place the refused-download message points at. */}
+            <CivitaiApiKeySetting />
           </Section>
 
           {builtinManaged && (

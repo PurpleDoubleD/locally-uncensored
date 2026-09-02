@@ -156,7 +156,9 @@ mod tests {
     use super::*;
 
     fn tmp(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join("lu-custom-models-tests").join(name);
+        let dir = std::env::temp_dir()
+            .join("lu-custom-models-tests")
+            .join(format!("{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir
@@ -217,7 +219,9 @@ mod tests {
     /// Negative control: a missing folder is not an error and not a config.
     #[test]
     fn a_folder_that_is_not_there_yields_nothing() {
-        let root = std::env::temp_dir().join("lu-custom-models-tests").join("nope-not-here");
+        let root = std::env::temp_dir()
+            .join("lu-custom-models-tests")
+            .join(format!("nope-not-here-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         assert!(comfy_shaped_subdirs(&root).is_empty());
         assert!(build_extra_model_paths_yaml(&root).is_none());
