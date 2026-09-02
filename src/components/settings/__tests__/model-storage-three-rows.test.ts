@@ -81,7 +81,7 @@ describe('row 1: the folder the user sets belongs to the LU Engine and says so',
     render(createElement(HfDownloadPathSetting))
     await settle()
     const field = screen.getByLabelText('LU Engine folder') as HTMLInputElement
-    expect(field.placeholder).toBe(`Leave empty and LU uses its own folder: ${APP_DIR}`)
+    expect(field.placeholder).toBe(`LU's own folder: ${APP_DIR}`)
   })
 
   // A14 review 4: the two folders are walked to different depths, the app's
@@ -92,7 +92,9 @@ describe('row 1: the folder the user sets belongs to the LU Engine and says so',
     render(createElement(HfDownloadPathSetting))
     await settle()
     expect(screen.getByText(/in a folder you set, up to four levels down/)).toBeTruthy()
-    expect(screen.getByText(/LU uses its own folder instead/)).toBeTruthy()
+    // ...and the app's own folder is walked two, which the paragraph now says
+    // instead of leaving the placeholder to imply a rule of its own.
+    expect(screen.getByText(/its own folder, which it reads two levels down/)).toBeTruthy()
   })
 
   // NEGATIVE CONTROL: with no folder known there is nothing to name, and the
@@ -102,7 +104,7 @@ describe('row 1: the folder the user sets belongs to the LU Engine and says so',
     render(createElement(HfDownloadPathSetting))
     await settle()
     const field = screen.getByLabelText('LU Engine folder') as HTMLInputElement
-    expect(field.placeholder).toBe('Leave empty and LU uses its own folder')
+    expect(field.placeholder).toBe("LU's own folder")
     expect(field.placeholder).not.toContain(':')
   })
 

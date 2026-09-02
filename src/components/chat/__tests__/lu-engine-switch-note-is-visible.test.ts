@@ -90,6 +90,17 @@ describe('the line survives the pick that caused it', () => {
     expect(screen.queryByTestId('lu-engine-switch-note')).toBeNull()
   })
 
+  it('is a polite live region that stays mounted, so it is really announced', async () => {
+    const { container } = render(createElement(LuEngineSwitchBar))
+    const region = container.querySelector('[role="status"]')
+    // Mounted BEFORE there is anything to say: a live region that appears
+    // together with its content is usually read as furniture and skipped.
+    expect(region, 'the live region has to already be there').toBeTruthy()
+    expect(region?.getAttribute('aria-live')).toBe('polite')
+    await act(async () => { pickAnLuEngineModel() })
+    expect(region?.textContent).toContain('Switched your chat provider to the LU Engine')
+  })
+
   it('can be dismissed by hand', async () => {
     render(createElement(LuEngineSwitchBar))
     await act(async () => { pickAnLuEngineModel() })
@@ -107,6 +118,19 @@ describe('the line survives the pick that caused it', () => {
     expect(screen.queryByTestId('lu-engine-switch-note')).toBeNull()
   })
 
+  it('cancels the pending timer when the line is dismissed', () => {
+    vi.useFakeTimers()
+    render(createElement(LuEngineSwitchBar))
+    act(() => { useLuEngineSwitchStore.getState().announce('first') })
+    act(() => { useLuEngineSwitchStore.getState().dismiss() })
+    // A second announcement after the dismiss must live its full span: the
+    // first pick's timer is gone, not merely outvoted.
+    act(() => { useLuEngineSwitchStore.getState().announce('second') })
+    act(() => { vi.advanceTimersByTime(LU_ENGINE_SWITCH_NOTE_MS - 100) })
+    expect(screen.getByTestId('lu-engine-switch-note').textContent).toContain('second')
+    expect(vi.getTimerCount(), 'exactly one timer should be pending').toBe(1)
+  })
+
   // NEGATIVE CONTROL: an older announcement's timer must not clear a newer
   // line. Two picks in a row would otherwise leave the second one blank.
   it('a second pick is not cut short by the first pick timer', () => {
@@ -117,6 +141,8 @@ describe('the line survives the pick that caused it', () => {
     act(() => { useLuEngineSwitchStore.getState().announce('second') })
     act(() => { vi.advanceTimersByTime(200) })
     expect(screen.getByTestId('lu-engine-switch-note').textContent).toContain('second')
+    // And the first one's timer is gone rather than merely outvoted.
+    expect(vi.getTimerCount()).toBe(1)
   })
 })
 

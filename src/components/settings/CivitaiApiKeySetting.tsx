@@ -30,8 +30,17 @@ export function CivitaiApiKeySetting() {
   const [saved, setSaved] = useState(false)
   useEffect(() => { setDraft(apiKey) }, [apiKey])
 
+  const looksWrong = looksLikeAFolderPath(draft)
+
   function save() {
     const next = draft.trim()
+    // A14 second review: a value that is plainly a folder is NOT written.
+    // Saying so under the field and storing it anyway was the worst of both:
+    // the path went into the OS credential store, every CivitAI download kept
+    // failing with a bare 400, and the field then showed a row of dots that
+    // looked exactly like a key that was there. The line below says what is
+    // wrong; refusing the write is what keeps it fixable.
+    if (looksLikeAFolderPath(next)) return
     setApiKey(next)
     setDraft(next)
     setSaved(true)
@@ -78,7 +87,7 @@ export function CivitaiApiKeySetting() {
           </button>
         )}
       </div>
-      {looksLikeAFolderPath(draft) && (
+      {looksWrong && (
         <div data-testid="civitai-key-looks-wrong" className="flex items-start gap-1.5 text-[0.6rem] leading-relaxed text-amber-600 dark:text-amber-400">
           <AlertTriangle size={11} className="shrink-0 mt-0.5" />
           <span>{CIVITAI_KEY_LOOKS_WRONG}</span>

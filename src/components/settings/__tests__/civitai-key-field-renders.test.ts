@@ -145,3 +145,43 @@ describe('the field says what belongs in it', () => {
     expect(screen.queryByTestId('civitai-key-looks-wrong')).toBeNull()
   })
 })
+
+describe('a folder is refused, not stored behind a row of dots', () => {
+  it('a pasted path never reaches the store', () => {
+    show()
+    const field = screen.getByLabelText('CivitAI API key')
+    fireEvent.change(field, { target: { value: 'G:\\AI\\Models' } })
+    fireEvent.blur(field)
+    expect(useWorkflowStore.getState().civitaiApiKey).toBe('')
+    // And the reason stays on screen instead of a Saved tick.
+    expect(screen.getByTestId('civitai-key-looks-wrong')).toBeTruthy()
+    expect(screen.queryByText('Saved')).toBeNull()
+  })
+
+  it('the Save button refuses it too, not just the blur', () => {
+    show()
+    fireEvent.change(screen.getByLabelText('CivitAI API key'), { target: { value: '/Users/dev/lu-e2e-models' } })
+    fireEvent.click(screen.getByText('Save'))
+    expect(useWorkflowStore.getState().civitaiApiKey).toBe('')
+  })
+
+  // NEGATIVE CONTROL: a real key still saves. A field that refuses everything
+  // is a field nobody can use.
+  it('a real key still goes in', () => {
+    show()
+    const field = screen.getByLabelText('CivitAI API key')
+    fireEvent.change(field, { target: { value: '3f9a1c7d5e2b48f06a1d9c3e7b52f8a4' } })
+    fireEvent.blur(field)
+    expect(useWorkflowStore.getState().civitaiApiKey).toBe('3f9a1c7d5e2b48f06a1d9c3e7b52f8a4')
+  })
+
+  // NEGATIVE CONTROL: clearing the field is not a path, so Remove still works.
+  it('and an empty value still clears it', () => {
+    useWorkflowStore.setState({ civitaiApiKey: '3f9a1c7d5e2b48f06a1d9c3e7b52f8a4' })
+    show()
+    const field = screen.getByLabelText('CivitAI API key')
+    fireEvent.change(field, { target: { value: '' } })
+    fireEvent.blur(field)
+    expect(useWorkflowStore.getState().civitaiApiKey).toBe('')
+  })
+})

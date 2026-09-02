@@ -11,20 +11,28 @@ import { useLuEngineSwitchStore } from '../../stores/luEngineSwitchStore'
 
 export function LuEngineSwitchBar() {
   const note = useLuEngineSwitchStore((s) => s.note)
-  if (!note) return null
+  // The live region stays MOUNTED and its text changes, which is the only
+  // shape a screen reader actually announces: a region that appears at the
+  // same moment as its content is usually read as page furniture and skipped.
+  // Polite, not assertive, because nothing went wrong and the user is in the
+  // middle of picking a model.
   return (
-    <div
-      data-testid="lu-engine-switch-note"
-      className="mx-3 mb-1.5 flex items-start gap-2 px-2 py-1 rounded-md bg-white/5 border border-white/10 text-[0.62rem] text-gray-600 dark:text-gray-300"
-    >
-      <span className="flex-1 leading-snug">{note}</span>
-      <button
-        onClick={() => useLuEngineSwitchStore.getState().dismiss()}
-        className="shrink-0 text-gray-500 hover:text-gray-700 dark:hover:text-gray-200"
-        aria-label="Dismiss"
-      >
-        <X size={11} />
-      </button>
+    <div role="status" aria-live="polite">
+      {note && (
+        <div
+          data-testid="lu-engine-switch-note"
+          className="mx-3 mb-1.5 flex items-start gap-2 px-2 py-1 rounded-md bg-white/5 border border-white/10 text-[0.62rem] text-gray-600 dark:text-gray-300"
+        >
+          <span className="flex-1 leading-snug">{note}</span>
+          <button
+            onClick={() => useLuEngineSwitchStore.getState().dismiss()}
+            className="shrink-0 text-gray-500 hover:text-gray-700 dark:hover:text-gray-200"
+            aria-label="Dismiss"
+          >
+            <X size={11} />
+          </button>
+        </div>
+      )}
     </div>
   )
 }

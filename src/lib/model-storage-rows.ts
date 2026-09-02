@@ -31,11 +31,15 @@ export interface LmStudioModelDir {
  * next to a paragraph about four folder levels invited the reading that the
  * four levels apply to this folder, and they do not: the app folder is walked
  * two levels deep (MAX_SCAN_DEPTH), the folder the user names four
- * (MAX_CUSTOM_SCAN_DEPTH).
+ * (MAX_CUSTOM_SCAN_DEPTH). The paragraph carries both depths now, so this one
+ * only has to name the folder.
  */
 export function luEngineFolderPlaceholder(autoDir: string | null | undefined): string {
   const dir = (autoDir ?? '').trim()
-  return dir ? `Leave empty and LU uses its own folder: ${dir}` : 'Leave empty and LU uses its own folder'
+  // Only the folder, not the sentence: the paragraph above already says what
+  // an empty field means, and printing that twice made the placeholder read
+  // like a second, different rule (second review).
+  return dir ? `LU's own folder: ${dir}` : "LU's own folder"
 }
 
 /** The role line under the LM Studio row. */

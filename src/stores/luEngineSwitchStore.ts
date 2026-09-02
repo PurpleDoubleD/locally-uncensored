@@ -30,15 +30,34 @@ interface LuEngineSwitchState {
   dismiss: () => void
 }
 
+// The pending self-clear. The generation counter alone already stopped an old
+// timer from clearing a new line, but the timer itself kept running: a session
+// where the user picks his way through a handful of models left one live timer
+// per pick, each holding the store closure until it fired. Cancelled outright
+// now, and the generation counter stays as the belt to that pair of braces.
+let pending: ReturnType<typeof setTimeout> | null = null
+
+function cancelPending(): void {
+  if (pending !== null) {
+    clearTimeout(pending)
+    pending = null
+  }
+}
+
 export const useLuEngineSwitchStore = create<LuEngineSwitchState>((set, get) => ({
   note: null,
   generation: 0,
   announce: (note) => {
+    cancelPending()
     const generation = get().generation + 1
     set({ note, generation })
-    setTimeout(() => {
+    pending = setTimeout(() => {
+      pending = null
       if (get().generation === generation) set({ note: null })
     }, LU_ENGINE_SWITCH_NOTE_MS)
   },
-  dismiss: () => set({ note: null, generation: get().generation + 1 }),
+  dismiss: () => {
+    cancelPending()
+    set({ note: null, generation: get().generation + 1 })
+  },
 }))
