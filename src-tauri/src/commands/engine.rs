@@ -621,7 +621,7 @@ fn port_is_bindable(port: u16) -> bool {
 /// Said when the whole bounded walk came back empty.
 pub(crate) fn no_free_port_message(first: u16, last: u16) -> String {
     format!(
-        "The built-in engine could not open a local port. Every port from {first} to {last} is taken or blocked on this machine. Close whatever is holding them (a llama-server left over from an earlier session is the usual cause), or check whether a firewall or a reserved Windows port range covers that block, then try again."
+        "The built-in engine could not open a local port. Every port it may use between {first} and {last} is taken or blocked on this machine. Close whatever is holding them (a llama-server left over from an earlier session is the usual cause), or check whether a firewall or a reserved Windows port range covers that block, then try again."
     )
 }
 
@@ -735,27 +735,46 @@ fn stderr_blames_the_gpu(stderr: &str) -> bool {
     MARKERS.iter().any(|m| lower.contains(m))
 }
 
-/// Markers that say the child never got the socket. Lower-cased input.
+/// Markers that say the child never got the socket, whatever else is in the
+/// log. Whole sentences, so they cannot collide with anything.
 ///
-/// The two numbers are Winsock: 10048 is WSAEADDRINUSE, 10013 is WSAEACCES,
-/// which is what a port inside a reserved Windows range answers even though
-/// nothing is listening on it.
+/// The bundled binary's own wording is `couldn't bind HTTP server socket,
+/// hostname: 127.0.0.1, port: 8127`, measured on the Mac sidecar 2026-09-02.
+const PORT_SENTENCES: &[&str] = &[
+    "address already in use",
+    "address in use",
+    "failed to bind",
+    "error while binding",
+    "couldn't bind",
+    "could not bind",
+    "bind: permission denied",
+    "eaddrinuse",
+];
+
+/// Tokens that mean a port ONLY on a line that is about a socket. `10048` is
+/// WSAEADDRINUSE and `10013` is WSAEACCES, which is what a port inside a
+/// reserved Windows range answers while nothing is listening on it. As bare
+/// substrings they are a trap: llama.cpp prints `10048.00 MiB` for a 10 GB
+/// allocation, so a CUDA out-of-memory death used to be read as a busy port,
+/// the user lost the GPU-Layers way out, and the retry hopped to another port
+/// for nothing.
+const PORT_TOKENS: &[&str] = &["10048", "10013", "eacces"];
+
+/// Words that make a line a line about a socket.
+const SOCKET_CONTEXT: &[&str] = &["wsa", "bind", "socket", "listen"];
+
+/// Did the child fail because it never got the socket. Lower-cased internally.
 pub(crate) fn stderr_blames_the_port(stderr: &str) -> bool {
-    const MARKERS: &[&str] = &[
-        "address already in use",
-        "address in use",
-        "failed to bind",
-        "error while binding",
-        "couldn't bind",
-        "could not bind",
-        "bind: permission denied",
-        "eaddrinuse",
-        "eacces",
-        "10048",
-        "10013",
-    ];
     let lower = stderr.to_ascii_lowercase();
-    MARKERS.iter().any(|m| lower.contains(m))
+    if PORT_SENTENCES.iter().any(|m| lower.contains(m)) {
+        return true;
+    }
+    // Per LINE, not per log: a socket word somewhere in a 12 line tail says
+    // nothing about the line that carries the number.
+    lower.lines().any(|line| {
+        PORT_TOKENS.iter().any(|t| line.contains(t))
+            && SOCKET_CONTEXT.iter().any(|c| line.contains(c))
+    })
 }
 
 /// Markers that point at the model file itself.
@@ -787,14 +806,21 @@ pub(crate) fn start_failure_message(failure: &StartFailure, port: u16, budget: D
         format!(
             "Port {port} answers health checks, but the engine this app just started exited immediately. Another llama-server (likely left over from a previous session or crash) is occupying the port. Quit that process or reboot, then try again."
         )
+    } else if failure.died && stderr_blames_the_gpu(&failure.stderr) && !stderr_blames_the_port(&failure.stderr) {
+        // The graphics card is asked BEFORE the port, because the port branch
+        // used to swallow a CUDA out-of-memory whose allocation happened to
+        // contain 10048, and the GPU-Layers way out is the one setting in this
+        // app that gets such a user chatting at all. The port keeps the case
+        // where the log carries a real bind sentence, because "cuda" appears in
+        // the routine backend-init lines of every start on an NVIDIA box and
+        // "set GPU Layers to 0" does not free a busy port.
+        format!("The built-in engine started and exited again before it could serve on port {port}. It was tried twice. This looks like a graphics-card problem. Open Settings, Built-in Engine and set GPU Layers to 0 to run on the CPU, then try again.")
     } else if failure.died && stderr_blames_the_port(&failure.stderr) {
         format!(
             "The built-in engine could not open port {port}. Another program holds it, or the port sits in a range this system has reserved. The app already tried the next free ports and got the same answer. Close that program or reboot, then try again."
         )
     } else if failure.died {
-        let hint = if stderr_blames_the_gpu(&failure.stderr) {
-            " This looks like a graphics-card problem. Open Settings, Built-in Engine and set GPU Layers to 0 to run on the CPU, then try again."
-        } else if stderr_blames_the_model(&failure.stderr) {
+        let hint = if stderr_blames_the_model(&failure.stderr) {
             " The engine refused the model file. Open Models, Discover and install a different quant."
         } else {
             " Reinstall Locally Uncensored if this keeps happening, or pick a different backend in Settings, AI Backends."
@@ -916,21 +942,6 @@ fn start_bundled_engine_blocking(
     // range nobody can quit. So the app takes the next port it can open, and
     // only a completely blocked block of ports is worth a message.
     let preferred_port = port;
-    let candidates = engine_port_candidates(preferred_port);
-    let port = match first_usable_port(&candidates, port_is_bindable) {
-        Some(p) => p,
-        None => {
-            return Err(no_free_port_message(
-                preferred_port,
-                *candidates.last().unwrap_or(&preferred_port),
-            ))
-        }
-    };
-    if port != preferred_port {
-        println!("[Engine] port {preferred_port} is taken, the built-in engine moves to {port}");
-    }
-    let desired_args =
-        build_server_args(&model_path, &tuning, port, slot_dir.as_deref(), mmproj.as_deref());
 
     // Mirror image of the Create-tab handoff: a render leaves ComfyUI's
     // checkpoint cached in VRAM (`includeComfyui:false` keeps it warm between
@@ -974,6 +985,27 @@ fn start_bundled_engine_blocking(
     // self-healing before an error message, so a died-on-start attempt gets
     // one more try after a short settle, and only what survives that becomes a
     // message.
+
+    // The port is chosen HERE, immediately before the spawn, and not further
+    // up. A bind probe is only true for as long as nobody else binds, and the
+    // VRAM calls above take seconds on a busy box (S4): choosing early would
+    // hand llama-server an answer that had gone stale in the meantime.
+    let candidates = engine_port_candidates(preferred_port);
+    let port = match first_usable_port(&candidates, port_is_bindable) {
+        Some(p) => p,
+        None => {
+            return Err(no_free_port_message(
+                preferred_port,
+                *candidates.last().unwrap_or(&preferred_port),
+            ))
+        }
+    };
+    if port != preferred_port {
+        println!("[Engine] port {preferred_port} is taken, the built-in engine moves to {port}");
+    }
+    let desired_args =
+        build_server_args(&model_path, &tuning, port, slot_dir.as_deref(), mmproj.as_deref());
+
     let deadline = health_timeout_for(&model_path);
     let ctx = effective_ctx(&tuning);
     let first = spawn_engine_attempt(state, &binary, &desired_args, &model_path, port, ctx);
@@ -2257,7 +2289,10 @@ mod tests {
         let msg = no_free_port_message(DEFAULT_ENGINE_PORT, *c.last().unwrap());
         assert!(msg.contains("8127"), "{msg}");
         assert!(msg.contains(&c.last().unwrap().to_string()), "{msg}");
-        assert!(!msg.contains('—') && !msg.contains('–'), "no dashes: {msg}");
+        assert!(
+            !msg.contains('\u{2014}') && !msg.contains('\u{2013}'),
+            "no dashes: {msg}"
+        );
     }
 
     #[test]
@@ -2297,6 +2332,108 @@ mod tests {
             stderr: "something went wrong".into(),
         };
         assert!(start_failure_message(&other, 8127, Duration::from_secs(60)).contains("Reinstall"));
+    }
+
+    #[test]
+    fn a_cuda_allocation_that_happens_to_contain_10048_is_not_a_busy_port() {
+        // S1. llama.cpp prints allocation sizes in MiB, so a 10 GB buffer reads
+        // "10048.00 MiB". As a bare substring that number used to make a CUDA
+        // out-of-memory look like a taken port: the user lost the GPU-Layers
+        // way out and the retry hopped to another port for nothing.
+        let oom = "ggml_backend_cuda_buffer_type_alloc_buffer: allocating 10048.00 MiB on device 0 failed\nCUDA error: out of memory";
+        assert!(!stderr_blames_the_port(oom));
+        assert!(stderr_blames_the_gpu(oom));
+        let failure = StartFailure { died: true, port_taken: false, stderr: oom.into() };
+        let msg = start_failure_message(&failure, 8127, Duration::from_secs(60));
+        assert!(msg.contains("GPU Layers to 0"), "the way out has to survive: {msg}");
+        assert!(!msg.contains("could not open port"), "{msg}");
+    }
+
+    #[test]
+    fn a_winsock_number_still_counts_on_a_line_that_is_about_a_socket() {
+        // The same number, in the sentence it actually belongs to.
+        assert!(stderr_blames_the_port(
+            "bind() failed with WSAGetLastError 10048"
+        ));
+        assert!(stderr_blames_the_port(
+            "error creating server socket: 10013"
+        ));
+        // Negative control: the number alone, on a line about nothing else.
+        assert!(!stderr_blames_the_port("model buffer size = 10013.50 MiB"));
+        // Negative control across lines: a socket word elsewhere in the tail
+        // must not lend context to a number on a different line.
+        assert!(!stderr_blames_the_port(
+            "srv start: listening\nkv cache size = 10048.00 MiB"
+        ));
+    }
+
+    #[test]
+    fn a_real_bind_sentence_on_an_nvidia_box_still_reads_as_a_port() {
+        // Every start on an NVIDIA box drags "cuda" through the log, so the
+        // graphics branch must not adopt a failure that names the socket. This
+        // is the bundled binary's own wording, measured 2026-09-02.
+        let stderr = "ggml_cuda_init: found 1 CUDA devices\nsrv start: couldn't bind HTTP server socket, hostname: 127.0.0.1, port: 8127";
+        assert!(stderr_blames_the_gpu(stderr), "the cuda line is really there");
+        let failure = StartFailure { died: true, port_taken: false, stderr: stderr.into() };
+        let msg = start_failure_message(&failure, 8127, Duration::from_secs(60));
+        assert!(msg.contains("could not open port 8127"), "{msg}");
+        assert!(!msg.contains("GPU Layers"), "a busy port is not freed by CPU mode: {msg}");
+    }
+
+    #[test]
+    fn the_retry_moves_to_another_port_only_when_the_port_was_the_cause() {
+        // S7: the decision the retry makes, without spawning anything. This is
+        // the shape of the code in start_bundled_engine_blocking.
+        let hop = |stderr: &str, tried: u16| -> u16 {
+            if stderr_blames_the_port(stderr) {
+                let rest: Vec<u16> = engine_port_candidates(DEFAULT_ENGINE_PORT)
+                    .into_iter()
+                    .filter(|p| *p != tried)
+                    .collect();
+                first_usable_port(&rest, |p| p != tried).unwrap_or(tried)
+            } else {
+                tried
+            }
+        };
+        assert_ne!(
+            hop("srv start: couldn't bind HTTP server socket", DEFAULT_ENGINE_PORT),
+            DEFAULT_ENGINE_PORT,
+            "a port death has to land somewhere else"
+        );
+        // Negative control: a GPU death retries on the SAME port, because the
+        // VRAM this function asked for is released asynchronously and the port
+        // was never the problem.
+        assert_eq!(
+            hop("CUDA error: out of memory", DEFAULT_ENGINE_PORT),
+            DEFAULT_ENGINE_PORT
+        );
+        assert_eq!(hop("10048.00 MiB", DEFAULT_ENGINE_PORT), DEFAULT_ENGINE_PORT);
+    }
+
+    #[test]
+    fn a_slow_load_stays_recognisable_as_a_timeout_for_the_frontend() {
+        // Contract with lib/engine-start-failure.ts: the boot resume may only
+        // repeat a start that DIED. Repeating a start that merely ran out of
+        // its budget spends the same budget again (up to 10 minutes on a big
+        // GGUF) and re-runs the ComfyUI and Ollama evictions each time.
+        let slow = StartFailure { died: false, port_taken: false, stderr: String::new() };
+        let msg = start_failure_message(&slow, 8127, Duration::from_secs(60));
+        assert!(
+            msg.contains("did not become healthy"),
+            "the frontend matches on this phrase: {msg}"
+        );
+        // Negative control: no death message may carry it, or every failure
+        // would be treated as a slow load and never retried.
+        for stderr in [
+            "srv start: couldn't bind HTTP server socket",
+            "CUDA error: out of memory",
+            "failed to load model",
+            "something went wrong",
+        ] {
+            let died = StartFailure { died: true, port_taken: false, stderr: stderr.into() };
+            let m = start_failure_message(&died, 8127, Duration::from_secs(60));
+            assert!(!m.contains("did not become healthy"), "{m}");
+        }
     }
 
     #[test]
