@@ -43,59 +43,87 @@ vi.mock('../CodexConfirmDialog', () => ({ CodexConfirmDialog: () => null }))
 const { CodexView } = await import('../CodexView')
 const { useCodexStore } = await import('../../../stores/codexStore')
 const { useGenerationStore } = await import('../../../stores/generationStore')
+const { useAgentLoopStore } = await import('../../../stores/agentLoopStore')
+const { useAgentModeStore } = await import('../../../stores/agentModeStore')
+const { useSettingsStore } = await import('../../../stores/settingsStore')
 const { useChatStore } = await import('../../../stores/chatStore')
+const { DEFAULT_SETTINGS } = await import('../../../lib/constants')
 
 const WINDOWS_PATH = 'C:\\Users\\dielitakira\\Documents\\huge-tree'
 
-const show = () => render(createElement(CodexView))
+// The git probe on mount resolves after the first paint, so every render is
+// awaited: without it React logs an act() warning for a state update this file
+// does not care about.
+const show = async () => {
+  let out!: ReturnType<typeof render>
+  await act(async () => { out = render(createElement(CodexView)) })
+  return out
+}
 const removeButton = () => screen.queryByTestId('codex-remove-folder')
 
 beforeEach(() => {
-  useCodexStore.setState({ workingDirectory: '', threads: {} })
+  useCodexStore.setState({ workingDirectory: '', threads: {}, sendsInFlight: 0 })
   useGenerationStore.setState({ generating: {} })
+  useAgentLoopStore.setState({ loop: null })
+  useAgentModeStore.setState({ workspaces: {} })
+  useSettingsStore.setState({ settings: { ...DEFAULT_SETTINGS } })
   useChatStore.setState({ conversations: [], activeConversationId: null })
 })
 afterEach(() => cleanup())
 
 describe('the header shows the folder, so it also gives it back', () => {
-  it('carries a Remove control while a folder is set', () => {
+  it('carries a Remove control while a folder is set', async () => {
     act(() => useCodexStore.getState().setWorkingDirectory(WINDOWS_PATH))
-    show()
+    await show()
     expect(removeButton()).not.toBeNull()
   })
 
-  it('carries none while the agent is in its sandbox', () => {
-    show()
+  it('carries none while the agent is in its sandbox', async () => {
+    await show()
     // Negative control: bound to the folder, not always painted.
     expect(removeButton()).toBeNull()
   })
 
-  it('a click empties the store and the header falls back to the sandbox label', () => {
+  it('a click empties the store and the header names the fallback instead', async () => {
     act(() => useCodexStore.getState().setWorkingDirectory(WINDOWS_PATH))
-    const { container } = show()
+    const { container } = await show()
     expect(container.textContent).toContain(WINDOWS_PATH)
 
     fireEvent.click(removeButton()!)
     expect(useCodexStore.getState().workingDirectory).toBe('')
     expect(container.textContent).not.toContain(WINDOWS_PATH)
-    expect(container.textContent).toContain('sandbox')
+    expect(container.textContent).toContain('~/agent-workspace')
   })
 
-  it('the empty transcript then says how to pick a new folder', () => {
+  it('and names the workspace that really wins, not a sandbox it will never use', async () => {
+    // review S4, the header half.
+    useSettingsStore.setState({
+      settings: { ...DEFAULT_SETTINGS, defaultWorkspace: { kind: 'folder', path: '/home/dave/default' } },
+    })
     act(() => useCodexStore.getState().setWorkingDirectory(WINDOWS_PATH))
-    show()
+    const { container } = await show()
+    fireEvent.click(removeButton()!)
+    expect(container.textContent).toContain('/home/dave/default')
+    expect(container.textContent).not.toContain('~/agent-workspace')
+  })
+
+  it('the empty transcript then says how to pick a new folder', async () => {
+    act(() => useCodexStore.getState().setWorkingDirectory(WINDOWS_PATH))
+    await show()
     expect(screen.queryByTestId('codex-no-folder-hint')).toBeNull()
 
     fireEvent.click(removeButton()!)
     const hint = screen.getByTestId('codex-no-folder-hint')
     expect(hint.textContent).toContain('Select folder...')
-    expect(hint.textContent).toContain('agent-workspace')
+    expect(hint.textContent).toContain('~/agent-workspace')
   })
 
-  it('is locked with a reason while a coding turn is in flight', () => {
-    act(() => useCodexStore.getState().setWorkingDirectory(WINDOWS_PATH))
-    useGenerationStore.setState({ generating: { 'conv-1': true } })
-    show()
+  it('is locked with a reason from the first synchronous moment of a send', async () => {
+    act(() => {
+      useCodexStore.getState().setWorkingDirectory(WINDOWS_PATH)
+      useCodexStore.getState().beginSend()
+    })
+    await show()
     const button = removeButton() as HTMLButtonElement
     expect(button.disabled).toBe(true)
     expect(button.getAttribute('title')).toContain('Wait for the current run to finish')
@@ -104,9 +132,25 @@ describe('the header shows the folder, so it also gives it back', () => {
     expect(useCodexStore.getState().workingDirectory).toBe(WINDOWS_PATH)
   })
 
-  it('and unlocked again once nothing is running', () => {
+  it('is locked between two loop passes as well', async () => {
     act(() => useCodexStore.getState().setWorkingDirectory(WINDOWS_PATH))
-    show()
+    useAgentLoopStore.setState({
+      loop: { conversationId: 'conv-1', pass: 2, cap: 0, task: 'go', intervalMs: 30000, nextAt: 0 },
+    })
+    await show()
+    expect((removeButton() as HTMLButtonElement).getAttribute('title')).toContain('loop')
+  })
+
+  it('is NOT locked by a Chat tab streaming somewhere else', async () => {
+    act(() => useCodexStore.getState().setWorkingDirectory(WINDOWS_PATH))
+    useGenerationStore.setState({ generating: { 'some-other-chat': true } })
+    await show()
+    expect((removeButton() as HTMLButtonElement).disabled).toBe(false)
+  })
+
+  it('and unlocked again once nothing is running', async () => {
+    act(() => useCodexStore.getState().setWorkingDirectory(WINDOWS_PATH))
+    await show()
     expect((removeButton() as HTMLButtonElement).disabled).toBe(false)
   })
 })

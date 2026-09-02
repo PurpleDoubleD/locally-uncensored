@@ -16,8 +16,13 @@
  *   - clicking it empties the store, so the picker and the run agree,
  *   - what is left behind says how to pick a new folder instead of going quiet.
  *
- * Plus the one thing a Remove button must not do: fire in the middle of a run.
- * The folder is global, so it would move the ground under every open chat.
+ * Plus the one thing neither folder button may do: fire in the middle of a run.
+ * The folder is global, so it would send the next turn somewhere the user is
+ * not looking. The lock covers a send from its first synchronous moment, a
+ * running thread, and the pause between two /loop passes, and it covers the
+ * PICKER as well as Remove: a picker that stays free while Remove is held is
+ * the same hole (review S1, S2, S8). What it must NOT do is care about a Chat
+ * tab streaming in another conversation (review S3).
  *
  * Run: npx vitest run src/components/chat/__tests__/the-working-directory-can-be-removed.test.ts
  */
@@ -41,17 +46,29 @@ vi.mock('../FilePreview', () => ({ FilePreview: () => null }))
 const { ExplorerPanel } = await import('../ExplorerPanel')
 const { useCodexStore } = await import('../../../stores/codexStore')
 const { useGenerationStore } = await import('../../../stores/generationStore')
+const { useAgentLoopStore } = await import('../../../stores/agentLoopStore')
+const { useAgentModeStore } = await import('../../../stores/agentModeStore')
+const { useSettingsStore } = await import('../../../stores/settingsStore')
 const { useUIStore } = await import('../../../stores/uiStore')
 const { useModelStore } = await import('../../../stores/modelStore')
+const { DEFAULT_SETTINGS } = await import('../../../lib/constants')
 
 const WINDOWS_PATH = 'C:\\Users\\helpslowlydying\\Documents\\My Projects'
 
 const show = () => render(createElement(ExplorerPanel, { onApprovePlan: () => {} }))
 const removeButton = () => screen.queryByTestId('explorer-remove-folder')
+const pickButton = () => screen.queryByTestId('explorer-pick-folder') as HTMLButtonElement
+
+const A_STANDING_LOOP = {
+  conversationId: 'conv-1', pass: 2, cap: 0, task: 'keep going', intervalMs: 30000, nextAt: 0,
+}
 
 beforeEach(() => {
-  useCodexStore.setState({ workingDirectory: '', threads: {} })
+  useCodexStore.setState({ workingDirectory: '', threads: {}, sendsInFlight: 0 })
   useGenerationStore.setState({ generating: {} })
+  useAgentLoopStore.setState({ loop: null })
+  useAgentModeStore.setState({ workspaces: {} })
+  useSettingsStore.setState({ settings: { ...DEFAULT_SETTINGS } })
   useUIStore.setState({ explorerCollapsed: false })
   useModelStore.setState({ activeModel: null })
 })
@@ -93,13 +110,16 @@ describe('clicking it actually lets go', () => {
     expect(useCodexStore.getState().workingDirectory).toBe('')
   })
 
-  it('unpins the open thread, so the run stops walking the old tree', () => {
+  it('unpins the open thread at its next send, so the run stops walking the old tree', () => {
     act(() => {
       useCodexStore.getState().setWorkingDirectory(WINDOWS_PATH)
       useCodexStore.getState().initThread('conv-1', WINDOWS_PATH)
     })
     show()
     fireEvent.click(removeButton()!)
+    // The click owns the store; the thread follows at that chat's next send,
+    // which is the only moment it may move without stepping on another chat.
+    expect(useCodexStore.getState().syncThreadWorkingDirectory('conv-1')).toBe('')
     expect(useCodexStore.getState().getThread('conv-1')!.workingDirectory).toBe('')
   })
 
@@ -112,7 +132,21 @@ describe('clicking it actually lets go', () => {
     fireEvent.click(removeButton()!)
     const empty = screen.getByTestId('explorer-no-folder')
     expect(empty.textContent).toContain('Select folder...')
-    expect(empty.textContent).toContain('agent-workspace')
+    expect(empty.textContent).toContain('~/agent-workspace')
+  })
+
+  it('and names the workspace that really wins, not a sandbox it will never use', () => {
+    // review S4: settings.defaultWorkspace beats an empty picker in the run
+    // resolver, so promising ~/agent-workspace here was simply untrue.
+    useSettingsStore.setState({
+      settings: { ...DEFAULT_SETTINGS, defaultWorkspace: { kind: 'folder', path: '/home/dave/default' } },
+    })
+    act(() => useCodexStore.getState().setWorkingDirectory(WINDOWS_PATH))
+    show()
+    fireEvent.click(removeButton()!)
+    const empty = screen.getByTestId('explorer-no-folder')
+    expect(empty.textContent).toContain('/home/dave/default')
+    expect(empty.textContent).not.toContain('~/agent-workspace')
   })
 
   it('the path itself is gone from the column, not just from the store', () => {
@@ -127,8 +161,10 @@ describe('clicking it actually lets go', () => {
 
 describe('a run in flight holds it', () => {
   it('locks the control and says why, instead of hiding it', () => {
-    act(() => useCodexStore.getState().setWorkingDirectory(WINDOWS_PATH))
-    useGenerationStore.setState({ generating: { 'conv-1': true } })
+    act(() => {
+      useCodexStore.getState().setWorkingDirectory(WINDOWS_PATH)
+      useCodexStore.getState().beginSend()
+    })
     show()
     const button = removeButton()!
     expect(button).not.toBeNull()
@@ -136,9 +172,23 @@ describe('a run in flight holds it', () => {
     expect(button.getAttribute('title')).toContain('Wait for the current run to finish')
   })
 
+  it('holds it from the first synchronous moment of the send, before any await', () => {
+    // review S1: the thread only turns 'running' five awaits into the send.
+    // The counter is taken before the first one, and this is that window.
+    act(() => {
+      useCodexStore.getState().setWorkingDirectory(WINDOWS_PATH)
+      useCodexStore.getState().beginSend()
+    })
+    show()
+    expect(useCodexStore.getState().threads).toEqual({})
+    expect((removeButton() as HTMLButtonElement).disabled).toBe(true)
+  })
+
   it('a locked click changes nothing', () => {
-    act(() => useCodexStore.getState().setWorkingDirectory(WINDOWS_PATH))
-    useGenerationStore.setState({ generating: { 'conv-1': true } })
+    act(() => {
+      useCodexStore.getState().setWorkingDirectory(WINDOWS_PATH)
+      useCodexStore.getState().beginSend()
+    })
     show()
     fireEvent.click(removeButton()!)
     expect(useCodexStore.getState().workingDirectory).toBe(WINDOWS_PATH)
@@ -161,5 +211,67 @@ describe('a run in flight holds it', () => {
     })
     show()
     expect((removeButton() as HTMLButtonElement).disabled).toBe(false)
+  })
+
+  it('the pause between two loop passes holds it too, and says so', () => {
+    // review S2: the thread is idle here and the next pass is on a timer, so
+    // the old lock was wide open and the pass would have walked into a folder
+    // nobody chose.
+    act(() => {
+      useCodexStore.getState().setWorkingDirectory(WINDOWS_PATH)
+      useCodexStore.getState().initThread('conv-1', WINDOWS_PATH)
+    })
+    useAgentLoopStore.setState({ loop: A_STANDING_LOOP })
+    show()
+    const button = removeButton() as HTMLButtonElement
+    expect(button.disabled).toBe(true)
+    expect(button.getAttribute('title')).toContain('loop')
+  })
+
+  it('a Chat tab streaming in another conversation does NOT hold it', () => {
+    // review S3: the first cut read every conversation's generating flag, so
+    // any chat anywhere locked this column for no reason.
+    act(() => useCodexStore.getState().setWorkingDirectory(WINDOWS_PATH))
+    useGenerationStore.setState({ generating: { 'some-other-chat': true } })
+    show()
+    expect((removeButton() as HTMLButtonElement).disabled).toBe(false)
+    fireEvent.click(removeButton()!)
+    expect(useCodexStore.getState().workingDirectory).toBe('')
+  })
+})
+
+describe('the picker is held by exactly the same lock', () => {
+  it('is free while nothing runs', () => {
+    act(() => useCodexStore.getState().setWorkingDirectory(WINDOWS_PATH))
+    show()
+    expect(pickButton().disabled).toBe(false)
+  })
+
+  it('is locked during a send, with the same sentence as Remove', () => {
+    // review S8: leaving the picker open while Remove was held meant the
+    // folder could still be moved under a run, which is the same hole.
+    act(() => {
+      useCodexStore.getState().setWorkingDirectory(WINDOWS_PATH)
+      useCodexStore.getState().beginSend()
+    })
+    show()
+    expect(pickButton().disabled).toBe(true)
+    expect(pickButton().getAttribute('title')).toBe(removeButton()!.getAttribute('title'))
+  })
+})
+
+describe('a collapsed column is not a dead end', () => {
+  it('hides its own Remove, because the whole column is gone', () => {
+    // review S7. The way out then lives in the header, which is always shown
+    // and is tested in the-header-can-let-the-folder-go.test.ts.
+    act(() => useCodexStore.getState().setWorkingDirectory(WINDOWS_PATH))
+    useUIStore.setState({ explorerCollapsed: true })
+    show()
+    expect(removeButton()).toBeNull()
+    // Negative control: expanded, the same state shows it.
+    cleanup()
+    useUIStore.setState({ explorerCollapsed: false })
+    show()
+    expect(removeButton()).not.toBeNull()
   })
 })
