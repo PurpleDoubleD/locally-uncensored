@@ -52,10 +52,37 @@ fn validate_external_url(raw: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// A URL fit to appear in an error message or a log line.
+///
+/// The query string is dropped, and so is any userinfo. A secret in a URL is a
+/// secret in every log that ever quotes the URL, and the log scrubber cannot
+/// see a token that is just another substring of a URL. The CivitAI search used
+/// to put the user's API key there, and this function is the second half of
+/// closing that: the first half is not putting it there at all.
+pub(crate) fn redact_url(raw: &str) -> String {
+    match url::Url::parse(raw) {
+        Ok(mut u) => {
+            u.set_query(None);
+            u.set_fragment(None);
+            let _ = u.set_username("");
+            let _ = u.set_password(None);
+            u.to_string()
+        }
+        // Unparseable: say nothing rather than echo whatever it was.
+        Err(_) => "the requested URL".to_string(),
+    }
+}
+
 /// Generic HTTP proxy — fetch any external URL and return body as string.
 /// Used for CivitAI API calls, workflow JSON downloads, etc.
+///
+/// `authToken` is the user's CivitAI API key and is sent as a Bearer header,
+/// ONLY to a CivitAI host, exactly like the download path. It is not a generic
+/// "send this to whatever host" parameter: a bearer that follows any URL a
+/// catalogue hands us is a credential leak waiting for a redirect.
+#[allow(non_snake_case)]
 #[tauri::command]
-pub async fn fetch_external(url: String) -> Result<String, String> {
+pub async fn fetch_external(url: String, authToken: Option<String>) -> Result<String, String> {
     validate_public_url(&url)?;
 
     let client = reqwest::Client::builder()
@@ -65,13 +92,22 @@ pub async fn fetch_external(url: String) -> Result<String, String> {
         .build()
         .map_err(|e| os_error::english(&e))?;
 
-    let resp = client.get(&url)
+    let mut request = client.get(&url);
+    if let Some(t) = authToken
+        .as_deref()
+        .map(str::trim)
+        .filter(|t| !t.is_empty() && crate::commands::download::is_civitai_host(&url))
+    {
+        request = request.bearer_auth(t);
+    }
+
+    let resp = request
         .send()
         .await
         .map_err(|e| format!("fetch_external: {}", os_error::english(&e)))?;
 
     if !resp.status().is_success() {
-        return Err(format!("HTTP {}: {}", resp.status().as_u16(), url));
+        return Err(format!("HTTP {}: {}", resp.status().as_u16(), redact_url(&url)));
     }
 
     resp.text().await.map_err(|e| os_error::english(&e))
@@ -96,7 +132,7 @@ pub async fn fetch_external_bytes(url: String) -> Result<Vec<u8>, String> {
         .map_err(|e| format!("fetch_external_bytes: {}", os_error::english(&e)))?;
 
     if !resp.status().is_success() {
-        return Err(format!("HTTP {}: {}", resp.status().as_u16(), url));
+        return Err(format!("HTTP {}: {}", resp.status().as_u16(), redact_url(&url)));
     }
 
     resp.bytes().await.map(|b| b.to_vec()).map_err(|e| os_error::english(&e))
@@ -1203,6 +1239,35 @@ mod tests {
         // Real LAN/global addresses are not metadata.
         assert!(!is_blocked_proxy_host("192.168.0.74"));
         assert!(!is_blocked_proxy_host("2606:4700::1111"));
+    }
+
+    /// goonerforporn's key used to ride in the search URL as `&token=`, and
+    /// this function is what quotes that URL back into an error the app then
+    /// logs. The scrubber cannot see a secret that is only a substring of a
+    /// URL, so the query goes.
+    #[test]
+    fn a_url_in_an_error_carries_no_query_and_no_userinfo() {
+        assert_eq!(
+            redact_url("https://civitai.com/api/v1/models?query=x&token=SECRET"),
+            "https://civitai.com/api/v1/models",
+        );
+        assert_eq!(
+            redact_url("https://civitai.com/api/v1/models?token=SECRET#frag"),
+            "https://civitai.com/api/v1/models",
+        );
+        assert!(!redact_url("https://user:pw@civitai.com/x?token=SECRET").contains("pw"));
+        assert!(!redact_url("https://user:pw@civitai.com/x?token=SECRET").contains("SECRET"));
+    }
+
+    /// Negative control: a plain URL is left alone, so the message still says
+    /// which resource failed, and an unparseable one is not echoed at all.
+    #[test]
+    fn a_plain_url_survives_and_a_broken_one_is_not_echoed() {
+        assert_eq!(
+            redact_url("https://huggingface.co/repo/resolve/main/m.gguf"),
+            "https://huggingface.co/repo/resolve/main/m.gguf",
+        );
+        assert_eq!(redact_url("token=SECRET"), "the requested URL");
     }
 
     #[test]

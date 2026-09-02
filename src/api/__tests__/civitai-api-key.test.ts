@@ -18,14 +18,20 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 
 const backendCall = vi.fn()
+const fetchExternal = vi.fn()
 vi.mock('../backend', () => ({
   backendCall: (...args: unknown[]) => backendCall(...args),
-  fetchExternal: vi.fn(),
+  fetchExternal: (...args: unknown[]) => fetchExternal(...args),
   isTauri: () => true,
   isMacOS: () => false,
+  secretGet: vi.fn().mockRejectedValue(new Error('no keychain here')),
+  secretSet: vi.fn(),
+  secretDelete: vi.fn(),
 }))
 
-import { isCivitaiUrl, civitaiAuthToken, startModelDownload, resumeDownload } from '../discover'
+import {
+  isCivitaiUrl, civitaiAuthToken, startModelDownload, resumeDownload, searchCivitaiModels,
+} from '../discover'
 import { useWorkflowStore } from '../../stores/workflowStore'
 
 const KEY = 'civitai-key-abcdef'
@@ -34,7 +40,9 @@ const HUGGINGFACE = 'https://huggingface.co/TheDrummer/Cydonia/resolve/main/mode
 
 beforeEach(() => {
   backendCall.mockReset()
+  fetchExternal.mockReset()
   backendCall.mockResolvedValue({ status: 'started', id: 'x' })
+  fetchExternal.mockResolvedValue(JSON.stringify({ items: [] }))
   useWorkflowStore.setState({ civitaiApiKey: KEY })
 })
 
@@ -104,5 +112,34 @@ describe('the download carries it', () => {
       expectedBytes: 42,
       authToken: null,
     })
+  })
+})
+
+describe('the search does not put the key in the URL', () => {
+  it('sends the key beside the URL, not inside it', async () => {
+    await searchCivitaiModels('pony', 'Checkpoint', KEY)
+    const [url, token] = fetchExternal.mock.calls[0]
+    // The URL is what an error message and a log line quote, and the scrubber
+    // cannot see a secret that is only another substring of a URL.
+    expect(url).not.toContain(KEY)
+    expect(url).not.toContain('token=')
+    expect(url).toContain('https://civitai.com/api/v1/models?')
+    expect(token).toBe(KEY)
+  })
+
+  // Negative control: no key is still a valid, anonymous search, and the query
+  // the user typed still goes out.
+  it('searches without a key just as it did', async () => {
+    await searchCivitaiModels('pony')
+    const [url, token] = fetchExternal.mock.calls[0]
+    expect(url).toContain('query=pony')
+    expect(url).not.toContain('token')
+    expect(token).toBeNull()
+  })
+
+  // Negative control: the mirror is still honoured (GH #53).
+  it('still asks the mirror when one is chosen', async () => {
+    await searchCivitaiModels('pony', 'LORA', KEY, 'civitai.red')
+    expect(fetchExternal.mock.calls[0][0]).toContain('https://civitai.red/api/v1/models?')
   })
 })

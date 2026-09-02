@@ -2451,10 +2451,13 @@ export async function searchCivitaiModels(
       // back near-empty for users who expected to find e.g. unfiltered SDXL forks.
       nsfw: 'true',
     })
-    // Adding the user's API key as a bearer token unlocks the full catalog and
-    // lifts the per-IP rate limit. Falls back to anon access if no key is set.
-    const url = `https://${host}/api/v1/models?${params}${apiKey ? `&token=${encodeURIComponent(apiKey)}` : ''}`
-    const text = await fetchExternal(url)
+    // The user's API key unlocks the full catalog and lifts the per-IP rate
+    // limit. It travels as an Authorization header, NOT as `&token=` in the
+    // URL: the URL is what the error text and the log line quote, and the log
+    // scrubber cannot see a secret that is just another substring of a URL.
+    // No key set is still a valid, anonymous search.
+    const url = `https://${host}/api/v1/models?${params}`
+    const text = await fetchExternal(url, apiKey ?? null)
     const data = JSON.parse(text)
     const items: any[] = data.items ?? []
 
