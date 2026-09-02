@@ -688,6 +688,48 @@ fn stderr_names_a_missing_system_library(stderr: &str) -> Option<String> {
     None
 }
 
+/// The command that installs a soname, for the two libraries the sidecar
+/// actually links against. Anything else returns `None` on purpose: a guessed
+/// package name sends the user to a package that may not exist.
+fn install_commands_for(lib: &str) -> Option<(&'static str, &'static str)> {
+    // (Debian and Ubuntu package, Fedora package). Other RPM distributions
+    // name these differently, which is why the sentence below points them at
+    // the library instead of at a name.
+    match lib {
+        "libvulkan.so.1" => Some(("libvulkan1", "vulkan-loader")),
+        "libgomp.so.1" => Some(("libgomp1", "libgomp")),
+        _ => None,
+    }
+}
+
+/// What to tell a user whose loader is short one library.
+///
+/// `on_linux` is passed in rather than read from `cfg!` inside so both
+/// branches are testable on every platform. On anything but Linux the apt and
+/// dnf lines would be noise: the wording this is triggered by is ld.so's, and
+/// macOS dyld and the Windows loader say something else entirely.
+///
+/// The last sentence only promises the deb and the rpm. The AppImage carries
+/// no dependencies at all, and libvulkan.so.1 is on the AppImage exclude list
+/// by design (the loader has to come from the host so it can see the host's
+/// ICDs), so "reinstall and it comes along" would be a lie there.
+pub(crate) fn missing_library_hint(lib: &str, on_linux: bool) -> String {
+    let head = format!(
+        " A system library the built-in engine needs is missing on this machine: {lib}."
+    );
+    if !on_linux {
+        return format!("{head} Install the package that provides it, then try again.");
+    }
+    match install_commands_for(lib) {
+        Some((deb, rpm)) => format!(
+            "{head} Debian and Ubuntu: sudo apt install {deb}. Fedora: sudo dnf install {rpm}. On other distributions, install the package that provides {lib}. If you installed LU from the .deb or the .rpm, reinstalling also pulls it in."
+        ),
+        None => format!(
+            "{head} Install the package that provides {lib} with your package manager, then try again."
+        ),
+    }
+}
+
 /// Markers in llama-server's stderr that point at the GPU rather than at the
 /// model file or the app. Lower-cased input. Read only after
 /// `stderr_names_a_missing_system_library`: "libvulkan.so.1" contains
@@ -741,9 +783,7 @@ pub(crate) fn start_failure_message(failure: &StartFailure, port: u16, budget: D
         )
     } else if failure.died {
         let hint = if let Some(lib) = stderr_names_a_missing_system_library(&failure.stderr) {
-            format!(
-                " A system library the built-in engine needs is missing on this machine: {lib}. Install it with your package manager (Debian and Ubuntu: sudo apt install libvulkan1 libgomp1; Fedora: sudo dnf install vulkan-loader libgomp), then try again. The current Linux package asks for both, so reinstalling from it also pulls them in."
-            )
+            missing_library_hint(&lib, cfg!(target_os = "linux"))
         } else if stderr_blames_the_gpu(&failure.stderr) {
             " This looks like a graphics-card problem. Open Settings, Built-in Engine and set GPU Layers to 0 to run on the CPU, then try again.".to_string()
         } else if stderr_blames_the_model(&failure.stderr) {
@@ -2231,10 +2271,42 @@ mod tests {
         };
         let msg = start_failure_message(&f, 8127, Duration::from_secs(60));
         assert!(msg.contains("libvulkan.so.1"), "{msg}");
-        assert!(msg.contains("apt install libvulkan1 libgomp1"), "{msg}");
         assert!(!msg.contains("GPU Layers"), "{msg}");
         // The engine's own last words still ride along for a bug report.
         assert!(msg.contains("cannot open shared object file"), "{msg}");
+    }
+
+    #[test]
+    fn the_install_advice_fits_the_library_and_never_guesses_a_package_name() {
+        // Both sonames the shipped sidecar carries get a real command.
+        let vulkan = missing_library_hint("libvulkan.so.1", true);
+        assert!(vulkan.contains("sudo apt install libvulkan1"), "{vulkan}");
+        assert!(vulkan.contains("sudo dnf install vulkan-loader"), "{vulkan}");
+        let gomp = missing_library_hint("libgomp.so.1", true);
+        assert!(gomp.contains("sudo apt install libgomp1"), "{gomp}");
+        assert!(gomp.contains("sudo dnf install libgomp"), "{gomp}");
+        // openSUSE and Mageia call these something else, so nobody is left
+        // without a way out: the library is named as well as the packages.
+        assert!(vulkan.contains("other distributions"), "{vulkan}");
+        // The promise is scoped to the two packages that actually carry
+        // dependencies. The AppImage has none, and it excludes the Vulkan
+        // loader on purpose, so it must not be swept into the sentence.
+        assert!(vulkan.contains("from the .deb or the .rpm"), "{vulkan}");
+        assert!(!vulkan.contains("The current Linux package"), "{vulkan}");
+
+        // Negative control: an unknown soname gets no command at all, because
+        // a guessed package name is worse than none.
+        let unknown = missing_library_hint("libfoobar.so.9", true);
+        assert!(unknown.contains("package that provides libfoobar.so.9"), "{unknown}");
+        assert!(!unknown.contains("apt install"), "{unknown}");
+        assert!(!unknown.contains("dnf install"), "{unknown}");
+
+        // Negative control: off Linux nobody is sent to apt or dnf. The
+        // trigger wording is ld.so's, macOS and Windows word it differently.
+        let elsewhere = missing_library_hint("libvulkan.so.1", false);
+        assert!(elsewhere.contains("libvulkan.so.1"), "{elsewhere}");
+        assert!(!elsewhere.contains("apt"), "{elsewhere}");
+        assert!(!elsewhere.contains("dnf"), "{elsewhere}");
     }
 
     #[test]
