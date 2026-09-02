@@ -47,8 +47,45 @@ interface CodexState {
   /** Plan finished, waiting for approval. Cleared when the run is approved. */
   planApprovalByConversation: Record<string, CodexPlanApproval>
 
+  /**
+   * Sends that have begun and not yet finished. Counted synchronously at the
+   * top of sendInstruction, because the thread status only flips to 'running'
+   * after five awaits and the folder was changeable for that whole gap
+   * (A8 review, S1). Runtime only, never persisted: a crash must not leave a
+   * ghost send holding the working directory hostage.
+   */
+  sendsInFlight: number
+  beginSend: () => void
+  endSend: () => void
+
   setChatMode: (mode: ChatMode) => void
+  /**
+   * Pick the folder the agent works in. The store is the single truth; open
+   * threads are pulled along one at a time by `syncThreadWorkingDirectory` at
+   * the next send of THAT conversation. Writing every thread here would
+   * silently overwrite a deliberate per-chat workspace (A8 review, S5).
+   */
   setWorkingDirectory: (dir: string) => void
+  /**
+   * Give the folder back. The empty string is persisted on purpose: a restart
+   * must not resurrect the folder (A8, 2.6.8).
+   */
+  clearWorkingDirectory: () => void
+  /** Pin ONE conversation's thread to a folder. */
+  setThreadWorkingDirectory: (conversationId: string, dir: string) => void
+  /**
+   * Point one conversation's thread at the folder the picker shows RIGHT NOW,
+   * and return that folder.
+   *
+   * A thread copies the folder once at init and never looked at the store
+   * again, while the run resolver prefers the thread. So a mis-click stayed the
+   * agent's root for the rest of the conversation no matter what the picker
+   * said afterwards, and a Remove pressed during the awaits at the top of a
+   * send was overwritten by the stale snapshot the send had already taken
+   * (A8 review, B1). Reads its own live state, so there is no snapshot to go
+   * stale, and touches nothing but the named conversation.
+   */
+  syncThreadWorkingDirectory: (conversationId: string) => string
   bumpFileTreeVersion: () => void
 
   /**
@@ -81,6 +118,7 @@ export const useCodexStore = create<CodexState>()(
     (set, get) => ({
       chatMode: 'lu',
       threads: {},
+      sendsInFlight: 0,
       workingDirectory: '',
       fileTreeVersion: 0,
       modeByConversation: {},
@@ -88,8 +126,33 @@ export const useCodexStore = create<CodexState>()(
       prePlanModeByConversation: {},
       planApprovalByConversation: {},
 
+      // The counter never goes below zero: a double release (an early return
+      // that also falls through a finally) must not open the lock for a send
+      // that is still running.
+      beginSend: () => set((state) => ({ sendsInFlight: state.sendsInFlight + 1 })),
+      endSend: () => set((state) => ({ sendsInFlight: Math.max(0, state.sendsInFlight - 1) })),
+
       setChatMode: (mode) => set({ chatMode: mode }),
       setWorkingDirectory: (dir) => set({ workingDirectory: dir }),
+      // '' and not `undefined`: partialize writes this key on every change, so
+      // the empty string is what lands in localStorage and what a restart reads
+      // back. Deleting the key would let an older persisted value survive.
+      clearWorkingDirectory: () => set({ workingDirectory: '' }),
+
+      setThreadWorkingDirectory: (conversationId, dir) =>
+        set((state) => {
+          const thread = state.threads[conversationId]
+          if (!thread || thread.workingDirectory === dir) return state
+          return {
+            threads: { ...state.threads, [conversationId]: { ...thread, workingDirectory: dir } },
+          }
+        }),
+
+      syncThreadWorkingDirectory: (conversationId) => {
+        const live = get().workingDirectory
+        get().setThreadWorkingDirectory(conversationId, live)
+        return live
+      },
       bumpFileTreeVersion: () => set((state) => ({ fileTreeVersion: state.fileTreeVersion + 1 })),
 
       chooseCodexMode: (conversationId, mode, runActive) =>

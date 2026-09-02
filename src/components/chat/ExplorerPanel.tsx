@@ -36,9 +36,19 @@ import {
   PanelRightClose,
   PanelRightOpen,
   RefreshCw,
+  FolderX,
 } from 'lucide-react'
 import { useCodexStore } from '../../stores/codexStore'
+import { useAgentLoopStore } from '../../stores/agentLoopStore'
+import { useAgentModeStore } from '../../stores/agentModeStore'
+import { useSettingsStore } from '../../stores/settingsStore'
 import { useUIStore } from '../../stores/uiStore'
+import {
+  CODEX_WORKDIR_LOCK_TITLE,
+  codexBusyReason,
+  codexFallbackLabel,
+} from '../../lib/codex-workdir'
+import { resolveWorkspacePath } from '../../api/agents/workspace-resolve'
 import { backendCall, isTauri, isMacOS } from '../../api/backend'
 import {
   EMPTY_LISTING,
@@ -67,12 +77,43 @@ interface Props {
 export function ExplorerPanel({ onApprovePlan }: Props) {
   const root = useCodexStore((s) => s.workingDirectory)
   const setWorkingDirectory = useCodexStore((s) => s.setWorkingDirectory)
+  const clearWorkingDirectory = useCodexStore((s) => s.clearWorkingDirectory)
   const fileTreeVersion = useCodexStore((s) => s.fileTreeVersion)
+
+  // A8 (2.6.8): the folder is GLOBAL, so moving it mid-run would send the next
+  // turn somewhere the user is not looking. Locked with a reason on the button
+  // while that is the case, not hidden, and the SAME lock on both buttons: a
+  // picker that stays free while Remove is held is the same hole (review S8).
+  //
+  // Only Coding Agent signals count. Reading every conversation's generating
+  // flag locked this column whenever any Chat tab was streaming (review S3).
+  const sendsInFlight = useCodexStore((s) => s.sendsInFlight)
+  const threads = useCodexStore((s) => s.threads)
+  const loop = useAgentLoopStore((s) => s.loop)
+  const lockReason = codexBusyReason({ sendsInFlight, threads, loop })
+  const lockTitle = lockReason ? CODEX_WORKDIR_LOCK_TITLE[lockReason] : null
+
+  // Read up here because the workspace fallback below needs it too. The plan
+  // moved into this column, so a collapsed column would hide it, and with it
+  // the only Approve-and-run button there is. The rail says so instead.
+  const activeConversationId = useChatStore((s) => s.activeConversationId)
 
   const width = useUIStore((s) => s.explorerWidth)
   const collapsed = useUIStore((s) => s.explorerCollapsed)
   const setExplorerWidth = useUIStore((s) => s.setExplorerWidth)
   const setExplorerCollapsed = useUIStore((s) => s.setExplorerCollapsed)
+
+  // Where the agent ACTUALLY goes while the picker is empty. The empty state
+  // used to promise ~/agent-workspace flat out, which is wrong for anybody who
+  // pinned a folder on this chat or set a default workspace: both beat an
+  // empty picker in the run resolver (review S4).
+  const perChatWorkspace = useAgentModeStore((s) =>
+    activeConversationId ? s.workspaces[activeConversationId] : undefined,
+  )
+  const defaultWorkspace = useSettingsStore((s) => s.settings.defaultWorkspace)
+  const fallbackLabel = codexFallbackLabel(
+    resolveWorkspacePath({ perChat: perChatWorkspace, defaultWorkspace }),
+  )
 
   const [listings, setListings] = useState<Record<string, ExplorerListing>>({})
   const [expanded, setExpanded] = useState<string[]>([])
@@ -80,9 +121,6 @@ export function ExplorerPanel({ onApprovePlan }: Props) {
   const [error, setError] = useState<string | null>(null)
   const [selected, setSelected] = useState<ExplorerNode | null>(null)
 
-  // The plan moved into this column, so a collapsed column would hide it, and
-  // with it the only Approve-and-run button there is. The rail says so instead.
-  const activeConversationId = useChatStore((s) => s.activeConversationId)
   const planWaiting = useCodexStore((s) =>
     activeConversationId ? !!s.planApprovalByConversation[activeConversationId] : false,
   )
@@ -158,6 +196,15 @@ export function ExplorerPanel({ onApprovePlan }: Props) {
     if (picked) setWorkingDirectory(picked)
   }
 
+  // Give the folder back (A8). Users reported no way out of a folder they had
+  // opened by mistake, one of them was ready to reinstall the app over it.
+  // Clearing the store also unpins every open thread, so the CURRENT chat falls
+  // back to its own sandbox instead of keeping the tree it was born with.
+  const removeFolder = () => {
+    if (lockReason) return
+    clearWorkingDirectory()
+  }
+
   const startDrag = (e: React.PointerEvent) => {
     e.preventDefault()
     const startX = e.clientX
@@ -221,8 +268,10 @@ export function ExplorerPanel({ onApprovePlan }: Props) {
       <div className="flex items-center gap-1 p-1.5 border-b border-gray-200 dark:border-white/[0.04]">
         <button
           onClick={pickFolder}
-          title={root || 'Pick the folder the agent works in'}
-          className="flex-1 min-w-0 flex items-center gap-1 px-1.5 py-1 rounded bg-gray-100 dark:bg-white/5 border border-gray-200 dark:border-white/[0.06] hover:border-gray-400 dark:hover:border-white/15 transition-colors text-left"
+          disabled={!!lockReason}
+          data-testid="explorer-pick-folder"
+          title={lockTitle || root || 'Pick the folder the agent works in'}
+          className="flex-1 disabled:opacity-40 min-w-0 flex items-center gap-1 px-1.5 py-1 rounded bg-gray-100 dark:bg-white/5 border border-gray-200 dark:border-white/[0.06] hover:border-gray-400 dark:hover:border-white/15 transition-colors text-left"
         >
           <FolderOpen size={10} className="text-gray-500 shrink-0" />
           {root ? (
@@ -231,6 +280,21 @@ export function ExplorerPanel({ onApprovePlan }: Props) {
             <span className="text-[0.5rem] text-gray-400 dark:text-gray-600 flex-1">Select folder...</span>
           )}
         </button>
+        {root && (
+          <button
+            onClick={removeFolder}
+            disabled={!!lockReason}
+            data-testid="explorer-remove-folder"
+            aria-label="Remove the working directory"
+            title={
+              lockTitle ||
+              `Remove this folder. The agent falls back to ${fallbackLabel} until you pick a new one.`
+            }
+            className="p-1 rounded hover:bg-gray-100 dark:hover:bg-white/5 text-gray-400 dark:text-gray-600 hover:text-red-500 dark:hover:text-red-400 disabled:opacity-30 disabled:hover:text-gray-400 transition-colors shrink-0"
+          >
+            <FolderX size={11} />
+          </button>
+        )}
         <button
           onClick={refresh}
           disabled={!root}
@@ -251,7 +315,13 @@ export function ExplorerPanel({ onApprovePlan }: Props) {
 
       <div className={`overflow-y-auto scrollbar-thin p-1 ${selected ? 'max-h-[45%] shrink-0' : 'flex-1 min-h-0'}`}>
         {!root ? (
-          <p className="text-[0.5rem] text-gray-400 dark:text-gray-600 px-1 py-2">Click above to set a folder</p>
+          <p
+            data-testid="explorer-no-folder"
+            className="text-[0.5rem] text-gray-400 dark:text-gray-600 px-1 py-2 leading-relaxed"
+          >
+            No folder picked. The agent works in {fallbackLabel} until you
+            click "Select folder..." above.
+          </p>
         ) : error ? (
           <p className="text-[0.5rem] text-red-500/80 px-1 py-2 break-words">{error}</p>
         ) : !rootListing ? (

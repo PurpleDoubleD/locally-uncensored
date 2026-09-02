@@ -21,9 +21,17 @@ import { GoalBar } from './GoalBar'
 import { LoopBar } from './LoopBar'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { useModelStore } from '../../stores/modelStore'
+import { useAgentLoopStore } from '../../stores/agentLoopStore'
+import { useAgentModeStore } from '../../stores/agentModeStore'
+import {
+  CODEX_WORKDIR_LOCK_TITLE,
+  codexBusyReason,
+  codexFallbackLabel,
+} from '../../lib/codex-workdir'
+import { resolveWorkspacePath } from '../../api/agents/workspace-resolve'
 import { StagedChangesPanel } from './StagedChangesPanel'
 import { SlashStepsBlock } from './SlashStepsBlock'
-import { User, Code, Eye, GitBranch, Download, RefreshCw, RotateCcw, Folder, Check, AlertTriangle } from 'lucide-react'
+import { User, Code, Eye, GitBranch, Download, RefreshCw, RotateCcw, Folder, FolderX, Check, AlertTriangle } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { checkGitInstalled, openExternal, type GitStatus } from '../../api/backend'
 import { CodexConfirmDialog } from './CodexConfirmDialog'
@@ -78,6 +86,28 @@ export function CodexView() {
   const activeModel = useModelStore((s) => s.activeModel)
   const createConversation = useChatStore((s) => s.createConversation)
   const codexWorkingDir = useCodexStore((s) => s.workingDirectory)
+  const clearWorkingDirectory = useCodexStore((s) => s.clearWorkingDirectory)
+  // A8 (2.6.8): the same Remove sits in the explorer column, but that column
+  // can be collapsed, and two users looked for a way out of their folder and
+  // found none. The header always shows the folder, so it also carries the way
+  // to give it back. Locked, not hidden, while a coding turn is in flight, and
+  // the verdict is the shared one so the two buttons cannot drift apart.
+  const sendsInFlight = useCodexStore((s) => s.sendsInFlight)
+  const threads = useCodexStore((s) => s.threads)
+  const loop = useAgentLoopStore((s) => s.loop)
+  const lockReason = codexBusyReason({ sendsInFlight, threads, loop })
+
+  // Where the agent goes while no folder is picked: a per-chat workspace or
+  // settings.defaultWorkspace both beat an empty picker, so the header and the
+  // empty state have to name the winner instead of always saying sandbox
+  // (review S4).
+  const perChatWorkspace = useAgentModeStore((s) =>
+    activeConversationId ? s.workspaces[activeConversationId] : undefined,
+  )
+  const defaultWorkspace = useSettingsStore((s) => s.settings.defaultWorkspace)
+  const fallbackLabel = codexFallbackLabel(
+    resolveWorkspacePath({ perChat: perChatWorkspace, defaultWorkspace }),
+  )
 
   // Git availability for the Codex view (v2.5.0). Codex shells out to git for
   // git_status/diff/commit/log; if git is missing those tools fail. Probe on
@@ -137,11 +167,27 @@ export function CodexView() {
               ~/agent-workspace, which is also where shell output now lands. */}
           <span
             className="flex items-center gap-1 text-[0.5rem] text-gray-500 dark:text-gray-500 font-mono truncate max-w-[200px]"
-            title={codexWorkingDir || 'Sandbox: ~/agent-workspace/<chat>'}
+            title={codexWorkingDir || `No folder picked, the agent works in ${fallbackLabel}`}
           >
             <Folder size={9} className="shrink-0 opacity-70" />
-            <span className="truncate">{codexWorkingDir || 'sandbox · ~/agent-workspace'}</span>
+            <span className="truncate">{codexWorkingDir || fallbackLabel}</span>
           </span>
+          {codexWorkingDir && (
+            <button
+              onClick={() => { if (!lockReason) clearWorkingDirectory() }}
+              disabled={!!lockReason}
+              data-testid="codex-remove-folder"
+              aria-label="Remove the working directory"
+              title={
+                lockReason
+                  ? CODEX_WORKDIR_LOCK_TITLE[lockReason]
+                  : `Remove this folder. The agent falls back to ${fallbackLabel} until you pick a new one.`
+              }
+              className="p-1 rounded text-gray-400 dark:text-gray-600 hover:text-red-500 dark:hover:text-red-400 hover:bg-gray-100 dark:hover:bg-white/5 disabled:opacity-30 disabled:hover:text-gray-400 transition-colors shrink-0"
+            >
+              <FolderX size={11} />
+            </button>
+          )}
           <div className="flex-1" />
           {/* New coding session — aborts any running loop and starts a fresh
               chat/thread (keeps the working directory). David 2026-06-04:
@@ -207,9 +253,10 @@ export function CodexView() {
               <p className="text-[0.55rem] text-gray-400 dark:text-gray-600 mt-0.5 max-w-[300px]">
                 Send a coding instruction. The coding agent will read your codebase, write code, and run commands.
               </p>
-              {!thread?.workingDirectory && (
-                <p className="text-[0.55rem] text-amber-500/70 mt-2">
-                  Set a working directory in the file tree panel →
+              {!codexWorkingDir && (
+                <p className="text-[0.55rem] text-amber-500/70 mt-2" data-testid="codex-no-folder-hint">
+                  No folder picked. The agent works in {fallbackLabel}. Pick a project with
+                  "Select folder..." in the file tree panel on the right.
                 </p>
               )}
             </div>
