@@ -12,6 +12,7 @@
  * Run: npx vitest run src/lib/__tests__/constants-validation.test.ts
  */
 import { describe, it, expect } from 'vitest'
+import { DEFAULT_EFFORT } from '../effort'
 import {
   DEFAULT_SETTINGS,
   BUILT_IN_PERSONAS,
@@ -61,6 +62,16 @@ describe('constants-validation', () => {
 
     it('has thinkingEnabled as boolean', () => {
       expect(typeof DEFAULT_SETTINGS.thinkingEnabled).toBe('boolean')
+    })
+
+    it('has reasoningEffort on the rung the client has always sent', () => {
+      // Not a taste. The default IS the old behaviour: 'high' is what the
+      // provider put on the wire for thinking ON before the control existed,
+      // so a profile that rides the v22 migration sends byte-for-byte the same
+      // request it sent before. Any other default moves an existing customer's
+      // token bill without them touching anything.
+      expect(DEFAULT_SETTINGS.reasoningEffort).toBe('high')
+      expect(DEFAULT_SETTINGS.reasoningEffort).toBe(DEFAULT_EFFORT)
     })
 
     it('has cavemanMode as a valid level', () => {

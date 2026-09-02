@@ -85,7 +85,13 @@ import { DEFAULT_SETTINGS, BUILT_IN_PERSONAS } from '../lib/constants'
 // fills in for everyone, an opt-in the user makes survives every A/B switch,
 // and the stale old key is simply never read again. STRICTLY ADDITIVE and
 // IDEMPOTENT, like v20 and unlike v10 and v19.
-const STORE_VERSION = 21
+// v22 (2.6.8): added settings.reasoningEffort (default 'high'), the rung the
+// composer's effort control cycles through. STRICTLY ADDITIVE and IDEMPOTENT
+// like v20 and v21: the merge below fills the default in, every existing value
+// survives, and there is NO one-shot reset. The default equals what the client
+// already sent for thinking ON, so a profile that rides this migration sends
+// byte-for-byte the same request it sent before.
+const STORE_VERSION = 22
 
 interface SettingsState {
   settings: Settings

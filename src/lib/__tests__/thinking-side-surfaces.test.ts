@@ -154,3 +154,36 @@ describe('what a hidden agent hands back is an answer, not a thought', () => {
     expect(settleThinking('1. read the file', '', false).content).toBe('1. read the file')
   })
 })
+
+// ── 2.6.8: the effort rung, on all three surfaces ──────────────
+describe('the effort rung reaches every surface, not only chat', () => {
+  // The rung is one global setting, like the Think switch, and the composer
+  // shows it on every surface. Three hooks build their own options object, and
+  // a hook that forgets the field silently keeps sending the old fixed 'high'
+  // while the button beside the prompt says something else. The Coding Agent is
+  // where that costs the most, so it is checked by name too.
+  const chat = read('../../hooks/useChat.ts')
+  const agent = read('../../hooks/useAgentChat.ts')
+  const codex = read('../../hooks/useCodex.ts')
+
+  it('chat sends the rung and the ladder', () => {
+    expect(chat).toContain('reasoningEffort: settings.reasoningEffort ?? effortDefault')
+    expect(chat).toMatch(/^\s*effortLevels,$/m)
+  })
+
+  it('agent mode sends them too', () => {
+    expect(agent).toContain('reasoningEffort: settings.reasoningEffort ?? agentEffortDefault')
+    expect(agent).toContain('effortLevels: agentEffortLevels')
+  })
+
+  it('and the coding agent, the surface with the largest token bill', () => {
+    expect(codex).toContain('reasoningEffort: settings.reasoningEffort ?? cxEffort.fallback')
+    expect(codex).toContain('effortLevels: cxEffort.levels')
+  })
+
+  it('all three read the ladder off the model row the server filled in', () => {
+    for (const src of [chat, agent, codex]) {
+      expect(src).toMatch(/'effortLevels' in \w+ \? \w+\.effortLevels : undefined/)
+    }
+  })
+})

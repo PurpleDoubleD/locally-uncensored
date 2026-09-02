@@ -755,6 +755,11 @@ export function useAgentChat() {
         const agentMeta = useModelStore.getState().models.find((m) => m.name === activeModel)
         const agentThinkMode = agentMeta && 'thinkMode' in agentMeta ? agentMeta.thinkMode : undefined
         const canThinkAgent = agentThinkMode ? agentThinkMode === 'toggle' : isThinkingCompatible(activeModel)
+        // Same ladder as the composer shows and as useChat sends. An agent run
+        // that quietly kept the old fixed 'high' would make the control a lie
+        // on the surface where the token bill is largest.
+        const agentEffortLevels = agentMeta && 'effortLevels' in agentMeta ? agentMeta.effortLevels : undefined
+        const agentEffortDefault = agentMeta && 'effortDefault' in agentMeta ? agentMeta.effortDefault : undefined
         const plainPlanAgent = isPlainTextPlanner(activeModel)
         // forceNoThink: set by the dud-turn recovery below — a thinking model
         // (gemma4) dumped its whole answer into the thinking channel and emitted
@@ -787,6 +792,8 @@ export function useAgentChat() {
           maxTokens: settings.maxTokens || undefined,
           contextWindow: agentCtx,
           thinking: thinkOpt as unknown as boolean,
+          reasoningEffort: settings.reasoningEffort ?? agentEffortDefault,
+          effortLevels: agentEffortLevels,
           signal: abort.signal,
         }
 

@@ -1,4 +1,5 @@
 import type { AgentWorkspace } from './agent-workspace'
+import type { EffortLevel } from '../lib/effort'
 
 export type SearchProvider = 'auto' | 'brave' | 'tavily'
 
@@ -56,6 +57,18 @@ export interface Settings {
    *  prompt (raw model). Default true. Ported from the uselu web companion. */
   personasEnabled: boolean
   thinkingEnabled: boolean
+  /**
+   * How hard a reasoning model should think (2.6.8). One global rung, the same
+   * way thinkingEnabled is one global switch, and it reaches Chat, Agent mode
+   * and the Coding Agent alike.
+   *
+   * It only ever leaves the app for a model whose catalogue entry declares its
+   * own rungs (`reasoning_effort_levels`); everything else keeps sending what
+   * it sent before. The value is clamped onto the model's ladder in
+   * lib/effort.ts, so a wish this model has never heard of cannot become a 400
+   * and cannot become "think as hard as you possibly can" either.
+   */
+  reasoningEffort: EffortLevel
   /**
    * Small-Model Mode (v2.5.0). Evidence-backed lean profile that maximises
    * tool-call reliability + context retention on small local models (3B-8B,

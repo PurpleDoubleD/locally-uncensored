@@ -536,6 +536,11 @@ export function useChat() {
     const activeMeta = useModelStore.getState().models.find((m) => m.name === activeModel)
     const thinkMode = activeMeta && 'thinkMode' in activeMeta ? activeMeta.thinkMode : undefined
     const canThink = thinkMode ? thinkMode === 'toggle' : isThinkingCompatible(activeModel)
+    // The reasoning ladder the server declared for THIS model. Absent on every
+    // local backend and on a cloud deployment that predates 2.6.8, and absent
+    // means the provider keeps sending exactly what it sent before.
+    const effortLevels = activeMeta && 'effortLevels' in activeMeta ? activeMeta.effortLevels : undefined
+    const effortDefault = activeMeta && 'effortDefault' in activeMeta ? activeMeta.effortDefault : undefined
     // And not for a LOCAL OpenAI-compatible backend any more (2.6.7
     // Denk-Audit): the built-in engine, LM Studio, llama.cpp and friends
     // render the model's own template, which has a real thinking switch the
@@ -681,6 +686,11 @@ export function useChat() {
         // num_ctx: real model context (capped) for Ollama, else override-or-none.
         contextWindow: effectiveCtx,
         thinking: useThinking,
+        // The rung, and the rungs this model has. Sent on every turn so Chat,
+        // Agent mode and the Coding Agent cannot drift apart; the provider
+        // clamps the wish onto the ladder and ignores both without one.
+        reasoningEffort: settings.reasoningEffort ?? effortDefault,
+        effortLevels,
         signal: abort.signal,
       }
 

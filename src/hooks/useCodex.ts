@@ -231,6 +231,14 @@ function codexCanThink(model: string): boolean {
   const mode = codexThinkMode(model)
   return mode ? mode === 'toggle' : isThinkingCompatible(model)
 }
+/** The reasoning ladder the server declared for this model, if any. */
+function codexEffort(model: string): { levels?: string[]; fallback?: string } {
+  const meta = useModelStore.getState().models.find((m) => m.name === model)
+  return {
+    levels: meta && 'effortLevels' in meta ? meta.effortLevels : undefined,
+    fallback: meta && 'effortDefault' in meta ? meta.effortDefault : undefined,
+  }
+}
 
 /**
  * The pending next /loop pass. MODULE scope, not a hook ref (audit A3): the
@@ -962,10 +970,15 @@ export function useCodex() {
               : settings.thinkingEnabled === true)
           : undefined
 
+        const cxEffort = codexEffort(activeModel)
         const chatOptions = {
           temperature: 0.1, // Low temp for coding precision
           maxTokens: settings.maxTokens || undefined,
           thinking: thinkOptCx as unknown as boolean,
+          // The Coding Agent is the third caller that builds its own options,
+          // and the one where a forgotten field costs the most tokens.
+          reasoningEffort: settings.reasoningEffort ?? cxEffort.fallback,
+          effortLevels: cxEffort.levels,
           signal: abort.signal,
         }
         // Hoisted to the top of the step (2.6.7 Denk-Audit): the prompt

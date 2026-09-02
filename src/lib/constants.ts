@@ -20,6 +20,10 @@ export const DEFAULT_SETTINGS: Settings = {
   cloudTeasersEnabled: true,
   personasEnabled: true,
   thinkingEnabled: true,
+  // Reasoning effort (2.6.8). 'high' is not a taste, it is the rung this
+  // client has always sent for thinking ON. Any other default would move every
+  // existing customer's token bill on update without them touching anything.
+  reasoningEffort: 'high',
   // Small-Model Mode (v2.5.0) — lean profile for 3B-8B local models.
   // Default OFF: big models behave exactly as before until the user flips it.
   smallModelMode: false,
