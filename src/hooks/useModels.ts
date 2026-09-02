@@ -244,7 +244,7 @@ export function useModels() {
       let bundledRaw: BundledModel[] | null = null
       try {
         bundledRaw = await listBundledModels()
-      } catch { /* engine command unavailable — non-critical */ }
+      } catch { /* engine command unavailable, non-critical */ }
       if (bundledRaw) {
         const bundled = bundledToAIModels(bundledRaw).filter(m => !isEmbeddingModel(m.name))
         // One file, one row: with the folder pointed at ~/.lmstudio/models,

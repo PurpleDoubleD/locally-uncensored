@@ -728,7 +728,7 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
       return
     }
 
-    // LU Engine rows (ENG-4): swap the GGUF (await) BEFORE activating —
+    // LU Engine rows (ENG-4): swap the GGUF (await) BEFORE activating, the
     // same contract as the LM Studio path above. A failed llama-server start
     // keeps the dropdown open and shows the real reason (Rust appends the
     // stderr tail) instead of activating a model that can't answer. Idempotent
