@@ -755,6 +755,28 @@ pub(crate) fn first_usable_port(candidates: &[u16], usable: impl Fn(u16) -> bool
     candidates.iter().copied().find(|p| usable(*p))
 }
 
+/// May a healthy engine that already serves the wanted argv simply be kept.
+///
+/// A15, Windows Nachlauf 02.09.: the engine walked from 8127 to 8129 because a
+/// leftover listener held 8127, and it stayed on 8129 for the life of the app.
+/// Two "Apply & Restart Engine" on a long-free 8127 changed nothing, because
+/// the reuse check only asked whether the engine was healthy on the port it
+/// happened to hold, and `swap_bundled_model` handed its own current port back
+/// in as the preferred one. So a user who ends the blocking process is left
+/// staring at the fallback port until the next app start.
+///
+/// The rule: an engine on the preferred port is kept, and an engine that had to
+/// move is kept only while the port that pushed it away is still taken. The
+/// probe is a closure because it costs a bind, and the common case (the engine
+/// is already where it wants to be) never needs to ask.
+pub(crate) fn may_keep_engine_where_it_is(
+    running_port: u16,
+    preferred_port: u16,
+    preferred_is_free: impl FnOnce() -> bool,
+) -> bool {
+    running_port == preferred_port || !preferred_is_free()
+}
+
 /// Can this process open the loopback port right now. Exactly the question
 /// llama-server is about to ask, asked one step earlier so a taken port turns
 /// into another port instead of into a dead engine.
@@ -1159,7 +1181,10 @@ fn start_bundled_engine_blocking(
                 slot_dir.as_deref(),
                 mmproj.as_deref(),
             );
-            if engine.args == args_on_its_port && engine_healthy(engine.port) {
+            if engine.args == args_on_its_port
+                && may_keep_engine_where_it_is(engine.port, port, || port_is_bindable(port))
+                && engine_healthy(engine.port)
+            {
                 return Ok(serde_json::json!({
                     "status": "already_running",
                     "port": engine.port,
@@ -1452,7 +1477,9 @@ pub async fn bundled_engine_status(app: AppHandle) -> Result<serde_json::Value, 
     tauri::async_runtime::spawn_blocking(move || {
         let state = app.state::<AppState>();
         let probe = {
-            let guard = state.bundled_engine.lock().unwrap();
+            let mut guard = state.bundled_engine.lock().unwrap();
+            // A handle whose process died is not a running engine (A15).
+            reap_dead_engine(&mut guard);
             guard.as_ref().map(|e| (e.port, e.model_path.clone(), e.ctx))
         };
         match probe {
@@ -1480,10 +1507,10 @@ pub async fn bundled_engine_status(app: AppHandle) -> Result<serde_json::Value, 
     .map_err(|e| format!("Engine status task failed to run: {e}"))
 }
 
-/// Swap the loaded model: stop the current process and start `model_path` on
-/// the same port. Thin wrapper over `start_bundled_engine` (which already
-/// stops a mismatched model), kept as a distinct command so the intent reads
-/// clearly at the call site and the port is preserved.
+/// Swap the loaded model: stop the current process and start `model_path`.
+/// Thin wrapper over `start_bundled_engine` (which already stops a mismatched
+/// model), kept as a distinct command so the intent reads clearly at the call
+/// site. The port is chosen fresh, starting at the default (A15).
 #[tauri::command]
 pub async fn swap_bundled_model(
     app: AppHandle,
@@ -1492,14 +1519,12 @@ pub async fn swap_bundled_model(
 ) -> Result<serde_json::Value, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let state = app.state::<AppState>();
-        let port = state
-            .bundled_engine
-            .lock()
-            .unwrap()
-            .as_ref()
-            .map(|e| e.port)
-            .unwrap_or(DEFAULT_ENGINE_PORT);
-        start_bundled_engine_blocking(&app, &state, model_path, tuning, Some(port))
+        // No port is passed on purpose. This used to hand back the port the
+        // engine was already on, which turned a one-off collision into a
+        // permanent move: every restart started its walk at the fallback port
+        // and 8127 was never asked about again (A15). The walk starts at the
+        // default and steps aside only for a port that is genuinely taken.
+        start_bundled_engine_blocking(&app, &state, model_path, tuning, None)
     })
     .await
     .map_err(|e| format!("Engine swap task failed to run: {e}"))?
@@ -1886,6 +1911,37 @@ pub async fn import_local_model(path: String, name: String) -> Result<serde_json
 
 /// Kill the managed engine child if present. Returns whether one was running.
 /// Takes the state lock internally; callers must not already hold it.
+/// Drop the engine handle when the process behind it is gone, and say whether
+/// that happened.
+///
+/// A15, Windows Nachlauf 02.09.: an engine killed from outside (Task Manager,
+/// a crash, a driver reset) left the app showing "Engine running / Port: 8127"
+/// for as long as anyone cared to watch. Collapsing the section did not help,
+/// leaving Settings and coming back did not help; only an app restart cleared
+/// it, and an engine that dies mid-session is exactly the moment the display
+/// must not lie. `running` was read off the handle alone, and a handle outlives
+/// its process. Reaping here also leaves the state fit for the next start,
+/// which would otherwise find a stale child in the slot.
+pub(crate) fn reap_dead_engine(slot: &mut Option<BundledEngine>) -> bool {
+    let gone = match slot.as_mut() {
+        // Ok(Some(status)) is an exited child; Ok(None) is a live one. An Err
+        // means the question could not be asked, and a handle we cannot ask
+        // about is not evidence of death, so it is left alone.
+        Some(e) => matches!(e.child.try_wait(), Ok(Some(_))),
+        None => false,
+    };
+    if gone {
+        if let Some(mut e) = slot.take() {
+            let _ = e.child.wait();
+            println!(
+                "[Engine] the built-in engine on port {} is gone, clearing the handle",
+                e.port
+            );
+        }
+    }
+    gone
+}
+
 pub(crate) fn stop_engine_locked(state: &AppState) -> bool {
     let mut guard = state.bundled_engine.lock().unwrap();
     if let Some(mut engine) = guard.take() {
@@ -2876,6 +2932,92 @@ mod tests {
             HealthWait::ChildExited
         );
         assert!(began.elapsed() < Duration::from_secs(5));
+    }
+
+    // ── A15, the two engine findings of the Windows Nachlauf ───────────────
+
+    /// One engine handle around an arbitrary child, for the reaping tests.
+    fn engine_around(child: std::process::Child, port: u16) -> Option<BundledEngine> {
+        Some(BundledEngine {
+            child,
+            model_path: "/tmp/does-not-matter.gguf".into(),
+            port,
+            ctx: Some(8192),
+            args: Vec::new(),
+        })
+    }
+
+    #[test]
+    #[cfg_attr(target_os = "windows", ignore = "uses sh")]
+    fn an_engine_killed_from_outside_stops_counting_as_running() {
+        // The box: `Stop-Process` on lu-llama-server, and the line kept saying
+        // "Engine running / Port: 8127" for as long as anyone watched.
+        let mut child = std::process::Command::new("sh")
+            .args(["-c", "exit 0"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("spawn a child that exits immediately");
+        // Let it actually die before asking, otherwise the test races the OS.
+        let _ = child.wait();
+        let mut slot = engine_around(child, DEFAULT_ENGINE_PORT);
+
+        assert!(reap_dead_engine(&mut slot), "a dead process was not noticed");
+        assert!(slot.is_none(), "the handle survived its process");
+        // And a second look is quiet: nothing left to reap, nothing to log.
+        assert!(!reap_dead_engine(&mut slot));
+    }
+
+    #[test]
+    #[cfg_attr(target_os = "windows", ignore = "uses sh")]
+    fn a_living_engine_is_left_exactly_where_it_is() {
+        // Negative control. Without it the test above would pass on a function
+        // that simply cleared the slot every time.
+        let child = std::process::Command::new("sh")
+            .args(["-c", "sleep 30"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("spawn a long lived child");
+        let mut slot = engine_around(child, DEFAULT_ENGINE_PORT);
+
+        assert!(!reap_dead_engine(&mut slot), "a live engine was declared dead");
+        assert!(slot.is_some());
+        assert_eq!(slot.as_ref().unwrap().port, DEFAULT_ENGINE_PORT);
+
+        let mut engine = slot.take().unwrap();
+        let _ = engine.child.kill();
+        let _ = engine.child.wait();
+    }
+
+    #[test]
+    fn an_empty_slot_has_nothing_to_reap() {
+        let mut slot: Option<BundledEngine> = None;
+        assert!(!reap_dead_engine(&mut slot));
+        assert!(slot.is_none());
+    }
+
+    #[test]
+    fn a_restart_takes_the_default_port_back_as_soon_as_it_is_free() {
+        // The exact walk from the box: 8127 held, engine moves to 8129, the
+        // blocker goes away, "Apply & Restart Engine" is pressed.
+        let moved = DEFAULT_ENGINE_PORT + 2;
+        assert!(
+            !may_keep_engine_where_it_is(moved, DEFAULT_ENGINE_PORT, || true),
+            "the engine stayed on the fallback port with 8127 free, which is the bug"
+        );
+        // While the blocker is still there, the fallback is the right place and
+        // nothing is torn down for nothing.
+        assert!(may_keep_engine_where_it_is(moved, DEFAULT_ENGINE_PORT, || false));
+        // An engine already on the preferred port is kept without asking, which
+        // is what keeps a bind probe off the common path.
+        assert!(may_keep_engine_where_it_is(
+            DEFAULT_ENGINE_PORT,
+            DEFAULT_ENGINE_PORT,
+            || panic!("the free-port probe must not run for an engine already at home"),
+        ));
     }
 
     // ── GH #118, the port half ─────────────────────────────────────────────
