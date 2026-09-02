@@ -407,9 +407,18 @@ export function HardwareChip({ vramGb, ramGb }: { vramGb: number | null; ramGb: 
       title="Detected hardware. Used for the 'runs on your PC' hints. Models are never hidden because of it."
     >
       <HardDrive size={11} className="text-gray-400" />
-      {vramGb ? <span className="tabular-nums">{Math.round(vramGb)} GB GPU</span> : null}
-      {vramGb && ramGb ? <span className="opacity-40">·</span> : null}
-      {ramGb ? <span className="tabular-nums">{Math.round(ramGb)} GB RAM</span> : null}
+      {/* A side we could not measure says so. Zhorts (GH #123) read "62 GB GPU"
+          off this chip on a 16 GB card, because the number behind it was his
+          system RAM; the source of that is fixed in api/comfyui.ts, and this is
+          the other half. Leaving the half out entirely reads as "no GPU", and
+          an unmeasured GPU is not the same thing as an absent one. */}
+      {vramGb
+        ? <span className="tabular-nums">{Math.round(vramGb)} GB GPU</span>
+        : <span>GPU unknown</span>}
+      <span className="opacity-40">·</span>
+      {ramGb
+        ? <span className="tabular-nums">{Math.round(ramGb)} GB RAM</span>
+        : <span>RAM unknown</span>}
     </span>
   )
 }
