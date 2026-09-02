@@ -81,20 +81,6 @@ export function clampEffort(levels: readonly string[] | undefined, wanted: strin
   return below ?? ladder[0]
 }
 
-/**
- * The next rung DOWN, for the retry ladder. A model that refuses 'high' still
- * reasons at 'medium'; dropping the field instead hands the turn to the
- * upstream default, which is the most expensive setting there is.
- */
-export function lowerEffort(
-  levels: readonly string[] | undefined,
-  current: string,
-): string | undefined {
-  const rank = RANK[current]
-  if (rank === undefined) return undefined
-  return known(levels).filter((l) => RANK[l] < rank).pop()
-}
-
 /** The next rung for the cycling button, wrapping at the top of the ladder. */
 export function nextEffort(
   levels: readonly string[] | undefined,

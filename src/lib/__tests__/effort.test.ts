@@ -27,7 +27,6 @@ import {
   effortChoices,
   effortLabel,
   hasEffortLadder,
-  lowerEffort,
   nextEffort,
   isEffortLevel,
   DEFAULT_EFFORT,
@@ -98,27 +97,12 @@ describe("'none' is the off switch and never a rung", () => {
     for (const wish of ['none', 'minimal', 'low', 'medium', 'high', 'max', 'ludicrous']) {
       expect(clampEffort(GLM53, wish)).not.toBe('none')
       expect(nextEffort(GLM53, wish)).not.toBe('none')
-      expect(lowerEffort(GLM53, wish)).not.toBe('none')
     }
   })
 
   it('and minimal is not offered either, the Think button already says off', () => {
     expect(effortChoices(QWEN38_27B)).toEqual(['low', 'medium'])
     expect(EFFORT_STEPS).toEqual(['low', 'medium', 'high', 'max'])
-  })
-})
-
-describe('walking one rung down for the retry ladder', () => {
-  it('finds the next rung below', () => {
-    expect(lowerEffort(GLM53, 'max')).toBe('high')
-    expect(lowerEffort(GLM53, 'high')).toBe('medium')
-    expect(lowerEffort(QWEN38_27B, 'high')).toBe('medium')
-  })
-
-  it('runs out at the cheapest rung instead of inventing one', () => {
-    expect(lowerEffort(GLM53, 'low')).toBeUndefined()
-    expect(lowerEffort(undefined, 'high')).toBeUndefined()
-    expect(lowerEffort(GLM53, 'ludicrous')).toBeUndefined()
   })
 })
 

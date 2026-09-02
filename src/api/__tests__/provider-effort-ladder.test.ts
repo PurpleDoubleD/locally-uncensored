@@ -11,9 +11,12 @@
  * (ops/wissen/deepinfra-modellmatrix-2026-09-02.md):
  *
  *  - Qwen/Qwen3.8-27B answers 400 to 'high' and to 'max', naming 'low' and
- *    'medium'. Dropping the parameter on that 400 hands the turn to the
- *    upstream default, which is the most expensive setting there is. Stepping
- *    one rung down keeps the reasoning AND the price the user asked for.
+ *    'medium'. That is why the ladder is per model and why the wish is clamped
+ *    onto it BEFORE the request leaves. The clamping happens on the server too,
+ *    so a rung off the ladder never reaches the upstream and never comes back
+ *    as a 4xx; the client therefore does not walk the rungs on a 4xx, because
+ *    the everyday 4xx is an overlong context and has nothing to do with the
+ *    knob.
  *  - On GLM 5.3, 'none' does not stop the thinking. It only stops the upstream
  *    from separating it, so the monologue lands in the customer's chat window
  *    and costs more tokens than sending nothing at all. GLM 5.3 is a
@@ -119,129 +122,120 @@ describe('a model that always reasons never gets none', () => {
   })
 })
 
-describe('a refused rung steps down the ladder instead of vanishing', () => {
-  it('THE MEASUREMENT: a 400 on high lands on medium, not on no knob', async () => {
+describe('a 4xx is NEVER blamed on the rung', () => {
+  // The server clamps every rung it knows onto the model's own ladder before
+  // the request leaves the proxy, so a rung off this ladder does not come back
+  // as a 400. What DOES come back as a 400 every day is an overlong context.
+  // A client-side walk down the rungs would spend a post per rung on it, blame
+  // the knob, and then remember a downgrade that nothing ever clears.
+  it('THE RULE: a foreign 400 leaves the chosen rung exactly as it was', async () => {
     const spy = vi.spyOn(globalThis, 'fetch')
       .mockResolvedValueOnce(refuse())
       .mockResolvedValueOnce(ok())
     await new OpenAIProvider(makeConfig()).chatWithTools(
-      'e-step', [{ role: 'user', content: 'hi' }], [],
-      { thinking: true, reasoningEffort: 'high', effortLevels: ['low', 'medium', 'high'] },
-    )
-    expect(spy).toHaveBeenCalledTimes(2)
-    expect(bodyOf(spy, 1).reasoning_effort).toBe('medium')
-  })
-
-  it('walks further down while the upstream keeps refusing', async () => {
-    const spy = vi.spyOn(globalThis, 'fetch')
-      .mockResolvedValueOnce(refuse())
-      .mockResolvedValueOnce(refuse())
-      .mockResolvedValueOnce(ok())
-    await new OpenAIProvider(makeConfig()).chatWithTools(
-      'e-step-twice', [{ role: 'user', content: 'hi' }], [],
+      'e-foreign-400', [{ role: 'user', content: 'war and peace' }], [],
       { thinking: true, reasoningEffort: 'max', effortLevels: GLM53 },
     )
-    expect(spy).toHaveBeenCalledTimes(3)
-    expect(bodyOf(spy, 2).reasoning_effort).toBe('medium')
-  })
-
-  it('an accepted rung is never thrown away for the next one', async () => {
-    const spy = vi.spyOn(globalThis, 'fetch')
-      .mockResolvedValueOnce(refuse())
-      .mockResolvedValueOnce(ok())
-      .mockResolvedValueOnce(ok())
-    await new OpenAIProvider(makeConfig()).chatWithTools(
-      'e-stop-at-yes', [{ role: 'user', content: 'hi' }], [],
-      { thinking: true, reasoningEffort: 'max', effortLevels: GLM53 },
-    )
+    // Two posts: the request, then the one rung that has always existed, which
+    // is dropping the knob. No 'high', no 'medium', no 'low' in between.
     expect(spy).toHaveBeenCalledTimes(2)
-    expect(bodyOf(spy, 1).reasoning_effort).toBe('high')
+    expect(bodyOf(spy, 0).reasoning_effort).toBe('max')
+    expect('reasoning_effort' in bodyOf(spy, 1)).toBe(false)
   })
 
-  it('and the knob is only dropped once the whole ladder is exhausted', async () => {
-    const spy = vi.spyOn(globalThis, 'fetch')
-      .mockResolvedValueOnce(refuse())
-      .mockResolvedValueOnce(refuse())
-      .mockResolvedValueOnce(refuse())
-      .mockResolvedValueOnce(ok())
-    await new OpenAIProvider(makeConfig()).chatWithTools(
-      'e-exhausted', [{ role: 'user', content: 'hi' }], [],
-      { thinking: true, reasoningEffort: 'high', effortLevels: ['low', 'medium', 'high'] },
+  it('and one bad message does not cost the rung for the rest of the session', async () => {
+    const provider = new OpenAIProvider(makeConfig())
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(refuse()).mockResolvedValueOnce(refuse())
+    await expect(
+      provider.chatWithTools(
+        'e-context-blown', [{ role: 'user', content: 'war and peace' }], [],
+        { thinking: true, reasoningEffort: 'high', effortLevels: GLM53 },
+      ),
+    ).rejects.toBeTruthy()
+    vi.restoreAllMocks()
+
+    const spy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(ok())
+    await provider.chatWithTools(
+      'e-context-blown', [{ role: 'user', content: 'short' }], [],
+      { thinking: true, reasoningEffort: 'high', effortLevels: GLM53 },
     )
-    expect(spy).toHaveBeenCalledTimes(4)
-    expect('reasoning_effort' in bodyOf(spy, 3)).toBe(false)
+    expect(bodyOf(spy, 0).reasoning_effort).toBe('high')
   })
 
-  it('the step down NEVER lands on none, not even at the bottom of the ladder', async () => {
+  it('the walk never invents a cheaper rung, it only ever drops the field', async () => {
     const spy = vi.spyOn(globalThis, 'fetch')
-      .mockResolvedValueOnce(refuse())
-      .mockResolvedValueOnce(refuse())
       .mockResolvedValueOnce(refuse())
       .mockResolvedValueOnce(ok())
     await new OpenAIProvider(makeConfig()).chatWithTools(
-      'e-never-none', [{ role: 'user', content: 'hi' }], [],
-      { reasoningEffort: 'max', effortLevels: ['low', 'high', 'max'] },
+      'e-no-invention', [{ role: 'user', content: 'hi' }], [],
+      { reasoningEffort: 'max', effortLevels: GLM53 },
     )
     const sent = spy.mock.calls.map((_c, i) => bodyOf(spy, i).reasoning_effort)
-    expect(sent).toEqual(['max', 'high', 'low', undefined])
+    expect(sent).toEqual(['max', undefined])
+    expect(sent).not.toContain('high')
     expect(sent).not.toContain('none')
     expect(sent).not.toContain('minimal')
+  })
+
+  it('and on the streaming path stream_options keeps its own rung ahead of the knob', async () => {
+    // The rung that has always been there: a 400 that stream_options caused is
+    // never blamed on thinking, so the chosen rung survives that step untouched.
+    const spy = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(refuse())
+      .mockResolvedValueOnce(okStream())
+    await drain(new OpenAIProvider(makeConfig()).chatStream(
+      'e-stream-rung', [{ role: 'user', content: 'hi' }],
+      { reasoningEffort: 'max', effortLevels: GLM53 },
+    ))
+    expect(spy).toHaveBeenCalledTimes(2)
+    expect(bodyOf(spy, 1).reasoning_effort).toBe('max')
+    expect('stream_options' in bodyOf(spy, 1)).toBe(false)
   })
 })
 
 describe('the memory belongs to one rung, not to the whole switch', () => {
-  it('what a refused max taught is not charged to low', async () => {
+  it('a max that had to give the knob up does not take low down with it', async () => {
     const provider = new OpenAIProvider(makeConfig())
-    vi.spyOn(globalThis, 'fetch')
-      .mockResolvedValueOnce(refuse())
-      .mockResolvedValueOnce(refuse())
-      .mockResolvedValueOnce(refuse())
-      .mockResolvedValueOnce(ok())
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(refuse()).mockResolvedValueOnce(ok())
     await provider.chatWithTools(
       'e-rungs', [{ role: 'user', content: 'hi' }], [],
-      { thinking: true, reasoningEffort: 'max', effortLevels: ['low', 'medium', 'max'] },
+      { thinking: true, reasoningEffort: 'max', effortLevels: GLM53 },
     )
     vi.restoreAllMocks()
 
     const spy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(ok())
     await provider.chatWithTools(
       'e-rungs', [{ role: 'user', content: 'hi' }], [],
-      { thinking: true, reasoningEffort: 'low', effortLevels: ['low', 'medium', 'max'] },
+      { thinking: true, reasoningEffort: 'low', effortLevels: GLM53 },
     )
     expect(spy).toHaveBeenCalledTimes(1)
     expect(bodyOf(spy, 0).reasoning_effort).toBe('low')
   })
 
-  it('a rung that had to step down starts at the rung that worked next time', async () => {
+  it('but the same rung remembers, so the detour is paid once', async () => {
     const provider = new OpenAIProvider(makeConfig())
-    vi.spyOn(globalThis, 'fetch')
-      .mockResolvedValueOnce(refuse())
-      .mockResolvedValueOnce(ok())
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(refuse()).mockResolvedValueOnce(ok())
     await provider.chatWithTools(
       'e-learned', [{ role: 'user', content: 'one' }], [],
-      { thinking: true, reasoningEffort: 'high', effortLevels: ['low', 'medium', 'high'] },
+      { thinking: true, reasoningEffort: 'high', effortLevels: GLM53 },
     )
     vi.restoreAllMocks()
 
     const spy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(ok())
     await provider.chatWithTools(
       'e-learned', [{ role: 'user', content: 'two' }], [],
-      { thinking: true, reasoningEffort: 'high', effortLevels: ['low', 'medium', 'high'] },
+      { thinking: true, reasoningEffort: 'high', effortLevels: GLM53 },
     )
     expect(spy).toHaveBeenCalledTimes(1)
-    expect(bodyOf(spy, 0).reasoning_effort).toBe('medium')
+    expect('reasoning_effort' in bodyOf(spy, 0)).toBe(false)
   })
 
   it('and the off switch keeps its own memory, untouched by any of it', async () => {
     const provider = new OpenAIProvider(makeConfig())
-    vi.spyOn(globalThis, 'fetch')
-      .mockResolvedValueOnce(refuse())
-      .mockResolvedValueOnce(refuse())
-      .mockResolvedValueOnce(refuse())
-      .mockResolvedValueOnce(ok())
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(refuse()).mockResolvedValueOnce(ok())
     await provider.chatWithTools(
       'e-lanes', [{ role: 'user', content: 'hi' }], [],
-      { thinking: true, reasoningEffort: 'high', effortLevels: ['low', 'medium', 'high'] },
+      { thinking: true, reasoningEffort: 'high', effortLevels: GLM53 },
     )
     vi.restoreAllMocks()
 

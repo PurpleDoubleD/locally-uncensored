@@ -21,7 +21,7 @@ import { parseRetryAfter } from '../../lib/http-status'
 import { localFetch, localFetchStream, isPrivateOrLanHost, isDirectFetchAllowed, hostnameOf, ensureProxyAllowsHost, backendCall } from '../backend'
 import { ensureBuiltinEngineAlive, explainDeadEngine, explainEngineTransportMessage, isManagedBuiltinSlot } from '../builtin-ensure'
 import { applyTemplateContract } from './normalize-system'
-import { clampEffort, hasEffortLadder, lowerEffort, DEFAULT_EFFORT } from '../../lib/effort'
+import { clampEffort, hasEffortLadder, DEFAULT_EFFORT } from '../../lib/effort'
 
 // Transport routing lives in the `useLocalProxy` getter (below) plus the shared
 // host helpers in backend.ts. A direct webview fetch only works for hosts the
@@ -309,12 +309,18 @@ export class OpenAIProvider implements ProviderClient {
     // ON: the wish, clamped onto the rungs this model really has. Without a
     // ladder that is DEFAULT_EFFORT, which is the 'high' this client has always
     // sent.
+    //
+    // There is no client-side walk down the rungs. The server clamps every rung
+    // it knows onto the model's own ladder before the request leaves the proxy,
+    // so a rung off this ladder does not come back as a 4xx. Walking it here
+    // would only blame the everyday 400 (an overlong context) on the knob, cost
+    // up to seven posts for one message, and leave a downgrade in the memory
+    // that nothing ever clears.
     const wanted = ladder
       ? clampEffort(levels, options?.reasoningEffort ?? DEFAULT_EFFORT)
       : DEFAULT_EFFORT
     const walked = OpenAIProvider.effortMemory.get(this.effortKey(model, 'on', wanted))
-    if (walked?.on === 'omit') return undefined
-    return walked?.on ?? wanted
+    return walked?.on === 'omit' ? undefined : wanted
   }
 
   /**
@@ -323,8 +329,9 @@ export class OpenAIProvider implements ProviderClient {
    * The OFF lane is a single switch position, so one key per model does. The ON
    * lane has as many positions as the model has rungs and they are NOT
    * interchangeable: Qwen/Qwen3.8-27B answers 400 to 'high' and serves
-   * 'medium' without complaint (live measurement 2026-09-02). Keyed by rung,
-   * what a refused 'max' teaches can never be charged to 'low'.
+   * 'medium' without complaint (live measurement 2026-09-02). Keyed by rung, a
+   * 'max' that had to give the knob up cannot take 'low' down with it, the same
+   * way the ON lane has never been allowed to take the OFF lane down with it.
    */
   private effortKey(model: string, lane: 'on' | 'off', rung?: string): string {
     const base = this.catalogKey(model)
@@ -366,11 +373,11 @@ export class OpenAIProvider implements ProviderClient {
   }
 
   /** Remember a walk, for one lane and one rung only. */
-  private rememberEffort(key: string, lane: 'on' | 'off', value: string): void {
+  private rememberEffort(key: string, lane: 'on' | 'off', value: 'minimal' | 'omit'): void {
     const prev = OpenAIProvider.effortMemory.get(key) ?? {}
     const next = { ...prev }
-    if (lane === 'on') next.on = value
-    else next.off = value === 'omit' ? 'omit' : 'minimal'
+    if (lane === 'on') next.on = 'omit'
+    else next.off = value
     OpenAIProvider.effortMemory.set(key, next)
   }
 
@@ -396,7 +403,6 @@ export class OpenAIProvider implements ProviderClient {
     body: Record<string, any>,
     signal: AbortSignal | undefined,
     fetcher: (url: string, init: any) => Promise<Response>,
-    levels?: string[],
   ): Promise<Response> {
     const post = () => fetcher(`${this.baseUrl}/chat/completions`, {
       method: 'POST',
@@ -427,22 +433,6 @@ export class OpenAIProvider implements ProviderClient {
       res = await post()
     }
 
-    // ON lane: step DOWN the model's own ladder before giving the knob up.
-    // Qwen/Qwen3.8-27B refuses 'high' and 'max' with a 400 and reasons happily
-    // at 'medium' (live measurement 2026-09-02); dropping the field instead
-    // hands the turn to the upstream default, which is the most expensive
-    // setting there is. The walk stops at the first rung that is accepted, so
-    // an accepted rung is never thrown away for the sake of the next one.
-    if (lane === 'on' && levels?.length) {
-      for (let step = levels.length; step > 0; step--) {
-        if (stopped() || !refused(res)) break
-        const lower = lowerEffort(levels, body.reasoning_effort as string)
-        if (!lower) break
-        body.reasoning_effort = lower
-        res = await post()
-      }
-    }
-
     // Its own rung, ahead of both the knob and stream_options: a server that
     // refuses the template kwargs must not be remembered as one that cannot
     // think. Dropped for the whole endpoint once it succeeds without it, so
@@ -466,7 +456,7 @@ export class OpenAIProvider implements ProviderClient {
     if (res.ok && lane) {
       const survived = body.reasoning_effort as string | undefined
       if (survived === undefined) this.rememberEffort(memoryKey, lane, 'omit')
-      else if (survived !== asked) this.rememberEffort(memoryKey, lane, survived)
+      else if (survived !== asked) this.rememberEffort(memoryKey, lane, 'minimal')
     }
 
     return res
@@ -572,7 +562,7 @@ export class OpenAIProvider implements ProviderClient {
 
     if (this.useLocalProxy) await ensureProxyAllowsHost(this.baseUrl)
     const fetcher = this.useLocalProxy ? localFetchStream : fetch
-    const res = await this.sendChat(model, body, options?.signal, fetcher as any, options?.effortLevels)
+    const res = await this.sendChat(model, body, options?.signal, fetcher as any)
 
     if (!res.ok) {
       throw await this.parseError(res)
@@ -729,7 +719,7 @@ export class OpenAIProvider implements ProviderClient {
 
     if (this.useLocalProxy) await ensureProxyAllowsHost(this.baseUrl)
     const fetcher = this.useLocalProxy ? localFetch : fetch
-    const res = await this.sendChat(model, body, options?.signal, fetcher as any, options?.effortLevels)
+    const res = await this.sendChat(model, body, options?.signal, fetcher as any)
 
     if (!res.ok) {
       throw await this.parseError(res, tools.length > 0)
@@ -974,9 +964,9 @@ export class OpenAIProvider implements ProviderClient {
    * user's thinking switch for the rest of the session.
    */
   // Keyed by effortKey(): one entry per model for the OFF lane, one per model
-  // AND rung for the ON lane. `on` holds either 'omit' or the rung the upstream
-  // actually accepted after a walk down the ladder.
-  private static effortMemory = new Map<string, { on?: string; off?: 'minimal' | 'omit' }>()
+  // AND rung for the ON lane. The only thing either lane can learn is 'omit',
+  // plus 'minimal' as the OFF lane's one intermediate step.
+  private static effortMemory = new Map<string, { on?: 'omit'; off?: 'minimal' | 'omit' }>()
 
   /**
    * Endpoints that refused `chat_template_kwargs`. Keyed by base URL, not by
