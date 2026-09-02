@@ -19,6 +19,10 @@ import { fileURLToPath } from 'node:url'
 const hier = dirname(fileURLToPath(import.meta.url))
 const kontext = () => readFileSync(resolve(hier, '..', 'CreateContext.tsx'), 'utf8')
 const settings = () => readFileSync(resolve(hier, '..', '..', '..', 'settings', 'SettingsPage.tsx'), 'utf8')
+// A13: der Lauf selbst wohnt seit dem Umbau im Store, damit ein Wechsel des
+// Einstellungsbereichs den Fortschritt nicht mehr wegwirft. Der Knopf sitzt
+// weiter in den Settings, das Kommando steht jetzt daneben.
+const installStore = () => readFileSync(resolve(hier, '..', '..', '..', '..', 'stores', 'comfyInstallStore.ts'), 'utf8')
 
 describe('#98: die ComfyUI-Umgebung heilt sich selbst', () => {
   it('ein Absturz in der Wartschleife wird sofort erkannt, nicht als Timeout verbrannt', () => {
@@ -40,8 +44,9 @@ describe('#98: die ComfyUI-Umgebung heilt sich selbst', () => {
 
   it('die Settings haben einen Repair-Knopf am selben Kommando', () => {
     const src = settings()
-    expect(src).toMatch(/repair_comfyui_env/)
     expect(src).toMatch(/Repair environment/)
+    expect(src).toMatch(/runRepair\(\)/)
+    expect(installStore()).toMatch(/backendCall\('repair_comfyui_env'\)/)
   })
 
   it('der Settings-Start meldet einen spaeten Absturz statt still auf Stopped zu kippen', () => {

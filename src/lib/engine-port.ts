@@ -71,3 +71,30 @@ export function baseUrlNeedingEnginePort(baseUrl: string, port: unknown): string
   const next = withEnginePort(baseUrl, port)
   return next === baseUrl ? null : next
 }
+
+/**
+ * The one line Settings shows about where the engine is listening.
+ *
+ * A13, Windows counter-check 2026-09-02: the engine walked from 8127 to 8129
+ * because a leftover listener held 8127, the log said so, and no surface in
+ * the app did. Providers said "nothing to configure", the expert panel named
+ * the model and the context size, Troubleshoot named neither port. Anyone
+ * pointing another tool at the engine, or reading a refused connection on
+ * 8127, had nothing to go on.
+ *
+ * `preferred` is the port the engine starts its walk at (`ENGINE_PORT`, the
+ * mirror of Rust's `DEFAULT_ENGINE_PORT`). It is passed in rather than
+ * imported so this module stays free of the API layer that imports it.
+ */
+export function enginePortLine(
+  status: { running?: boolean; port?: unknown } | null | undefined,
+  preferred: number,
+): string {
+  if (!status?.running) return 'Engine not running'
+  // Review 2026-09-02: a running engine whose port did not survive the trip is
+  // not a stopped engine. Saying so would send the reader looking for a dead
+  // process while chat keeps answering, so this gets its own answer.
+  if (!isPort(status.port)) return 'Port unknown'
+  if (status.port === preferred) return `Port: ${status.port}`
+  return `Port: ${status.port} (${preferred} was taken)`
+}

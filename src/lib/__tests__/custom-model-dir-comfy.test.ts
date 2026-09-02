@@ -89,9 +89,12 @@ describe('the Model Storage copy tells the truth', () => {
     expect(src).toMatch(/run on Apple MLX, not ComfyUI/)
   })
 
+  // A13: die Zeile haengt jetzt an modelDirScanNote, das alle drei Urteile
+  // des Rust-Scans in einen Satz uebersetzt (Wirkung geprueft in
+  // components/settings/__tests__/model-dir-scan-note.test.ts).
   it('says when the folder was too large to read to the end', () => {
-    expect(src).toMatch(/scan\?\.status === 'truncated'/)
-    expect(src).toMatch(/too large to read to the end/)
+    expect(src).toMatch(/modelDirScanNote\(scan\?\.status\)/)
+    expect(src).toMatch(/too big to scan completely/)
   })
 
   it('says why a folder produced nothing instead of going quiet', () => {

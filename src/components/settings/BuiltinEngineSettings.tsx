@@ -8,7 +8,8 @@
 import { useEffect, useState } from 'react'
 import { Loader2, AlertTriangle, Check, Zap } from 'lucide-react'
 import { useSettingsStore } from '../../stores/settingsStore'
-import { bundledEngineStatus, swapBundledModel, type EngineStatus } from '../../api/engine'
+import { bundledEngineStatus, swapBundledModel, ENGINE_PORT, type EngineStatus } from '../../api/engine'
+import { enginePortLine } from '../../lib/engine-port'
 import { isTauri } from '../../api/backend'
 import type { BuiltinEngineTuning } from '../../types/settings'
 
@@ -95,8 +96,14 @@ export function BuiltinEngineSettings() {
             {typeof status?.ctx === 'number' ? <> · ctx {status.ctx.toLocaleString()}</> : null}
           </>
         ) : (
-          'Engine not running — settings apply automatically on the next start.'
+          'Engine not running, settings apply automatically on the next start.'
         )}
+      </div>
+      {/* A13: which port the engine really holds. It starts its walk at 8127
+          and takes the next free one when that is held, and until now the only
+          place that said so was the log. */}
+      <div className="text-[0.6rem] text-gray-500" data-testid="builtin-engine-port">
+        {enginePortLine(status, ENGINE_PORT)}
       </div>
 
       {/* Context length */}

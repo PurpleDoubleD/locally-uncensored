@@ -53,6 +53,7 @@ import { ProviderSettings } from './ProviderConfig'
 import { BuiltinEngineSettings } from './BuiltinEngineSettings'
 import { MlxMediaSettings } from './MlxMediaSettings'
 import { useProviderStore } from '../../stores/providerStore'
+import { useComfyInstallStore } from '../../stores/comfyInstallStore'
 import { PermissionSettings } from './PermissionSettings'
 import { MCPServerSettings } from './MCPServerSettings'
 import { WorkflowList } from '../agents/WorkflowList'
@@ -263,7 +264,7 @@ function WorkflowSection() {
 // Models tab stayed empty beside a folder full of models. It is read now
 // (lib/custom-model-dir.ts), and the copy says what it does.
 
-function HfDownloadPathSetting() {
+export function HfDownloadPathSetting() {
   const override = useSettingsStore(s => s.settings.hfDownloadPathOverride)
   const updateSettings = useSettingsStore(s => s.updateSettings)
   const [draft, setDraft] = useState(override)
@@ -292,6 +293,15 @@ function HfDownloadPathSetting() {
     void syncCustomModelDir(override).then((res) => { if (alive) setComfy(res) })
     return () => { alive = false }
   }, [override])
+
+  // One line, and only when there is something to say.
+  const scanNote = modelDirScanNote(scan?.status)
+  // A folder that cannot be read at all has one problem, not two, so the
+  // ComfyUI handoff note steps aside for those two verdicts: it would say the
+  // same thing in different words. `truncated` is a different matter. The
+  // folder IS readable, the walk simply ran out of budget, and what LU hands
+  // to ComfyUI is unaffected by that, so both lines belong on screen.
+  const scanHidesHandoff = scan?.status === 'unreachable' || scan?.status === 'unusable'
 
   function apply(next: string) {
     setDraft(next)
@@ -338,14 +348,39 @@ function HfDownloadPathSetting() {
           </button>
         )}
       </div>
-      {override && scan?.status === 'truncated' && (
-        <div className="text-[0.6rem] leading-relaxed text-amber-600 dark:text-amber-400">
-          That folder is too large to read to the end, so the list below it is what LU found before it stopped. Point this at the folder that actually holds the models rather than at a whole drive.
+      {override && scanNote && (
+        <div data-testid="model-dir-scan-note" className="text-[0.6rem] leading-relaxed text-amber-600 dark:text-amber-400">
+          {scanNote}
         </div>
       )}
-      {override && comfy !== null && <CustomModelDirNote result={comfy} />}
+      {override && comfy !== null && !scanHidesHandoff && <CustomModelDirNote result={comfy} />}
     </div>
   )
+}
+
+/**
+ * What the folder scan found, in one sentence, or nothing at all.
+ *
+ * A13, Windows counter-check 2026-09-02: `C:\` as the model folder stayed
+ * fully operable and said nothing. Rust had the answer the whole time (the
+ * walk has a five second deadline and a 20 000 entry budget per folder and
+ * reports `truncated` when it runs out), the panel simply never showed it, and
+ * a partial list that looks complete is the kind of thing people debug for an
+ * hour.
+ *
+ * `ok` is silence on purpose: a folder that scanned clean needs no line.
+ */
+export function modelDirScanNote(status: ScannedDir['status'] | null | undefined): string {
+  if (status === 'truncated') {
+    return 'This folder is too big to scan completely. Only the first files were read; pick a folder that holds just your models.'
+  }
+  if (status === 'unreachable') {
+    return 'This folder cannot be reached right now (drive disconnected or path missing). Models in it are hidden until it is back.'
+  }
+  if (status === 'unusable') {
+    return 'This path is not a folder LU can read.'
+  }
+  return ''
 }
 
 /**
@@ -479,7 +514,7 @@ function ImportLocalModels() {
 
 // ── ComfyUI Settings ────────────────────────────────────────────
 
-function ComfyUISettings() {
+export function ComfyUISettings() {
   const [status, setStatus] = useState<{ running: boolean; found: boolean; complete?: boolean; path?: string; port?: number; host?: string; isLocal?: boolean; starting?: boolean; stalled?: boolean } | null>(null)
   // Why the last start attempt did not stick. The button used to swallow this
   // whole (E16): on a box with no ComfyUI python environment, Start answered
@@ -496,12 +531,23 @@ function ComfyUISettings() {
   const [customHost, setCustomHost] = useState('')
   const [hostError, setHostError] = useState('')
   const [hostSuccess, setHostSuccess] = useState(false)
-  // P14 Python install state for the Settings Install-ComfyUI flow.
-  const [installPhase, setInstallPhase] = useState<'idle' | 'python' | 'comfyui' | 'repair' | 'error'>('idle')
-  const [installLogs, setInstallLogs] = useState<string[]>([])
-  const [installErr, setInstallErr] = useState('')
+  // A13 (Windows counter-check 2026-09-02): install, update and repair used to
+  // keep their phase, their log lines and their byte counters in this
+  // component. Switching to another settings section threw all of it away
+  // while pip kept running, and coming back showed an empty panel. The run now
+  // reports into a store that outlives the mount, and this panel is a reader.
+  const installPhase = useComfyInstallStore((s) => s.phase)
+  const installLogs = useComfyInstallStore((s) => s.logs)
+  const installErr = useComfyInstallStore((s) => s.error)
   // #162: size, rate and remaining time in the bracket next to the spinner.
-  const [installDl, setInstallDl] = useState({ progress: 0, total: 0, speed: 0 })
+  const installDl = useComfyInstallStore((s) => s.dl)
+  const cancelling = useComfyInstallStore((s) => s.cancelling)
+  const installNotice = useComfyInstallStore((s) => s.notice)
+  // A failed run must not be a dead end. The phase stays `error` until
+  // something clears it, and with the state outliving the mount the old escape
+  // hatch (leave the section, lose the useState) is gone. So the start buttons
+  // stay reachable on `error` too, and the card carries a Dismiss.
+  const installIdle = installPhase === 'idle' || installPhase === 'error'
 
   useEffect(() => {
     let cancelled = false
@@ -554,32 +600,15 @@ function ComfyUISettings() {
   // same status contract the installer uses, so the progress card just works.
   const handleRepair = async () => {
     setStartError('')
-    setInstallPhase('repair')
-    setInstallLogs(['Repairing the ComfyUI environment…'])
-    setInstallDl({ progress: 0, total: 0, speed: 0 })
-    try {
-      const { backendCall } = await import('../../api/backend')
-      await backendCall('repair_comfyui_env')
-      const poll = setInterval(async () => {
-        try {
-          const data: any = await backendCall('install_comfyui_status')
-          setInstallLogs(data.logs || [])
-          setInstallDl({ progress: data.download_progress || 0, total: data.download_total || 0, speed: data.download_speed || 0 })
-          if (data.status === 'complete') {
-            clearInterval(poll)
-            setInstallPhase('idle')
-          } else if (data.status === 'error' || data.status === 'cancelled') {
-            clearInterval(poll)
-            const lastLog = (data.logs?.length ? data.logs[data.logs.length - 1] : '') as string
-            setInstallErr(withInstallerOutput('Repairing the environment did not finish.', lastLog))
-            setInstallPhase('error')
-          }
-        } catch { /* keep polling */ }
-      }, 2000)
-    } catch (err) {
-      setInstallPhase('error')
-      setInstallErr(err instanceof Error ? err.message : 'Failed to start the repair')
-    }
+    await useComfyInstallStore.getState().runRepair()
+  }
+
+  // One button for every long run this panel starts. Rust checks the same flag
+  // in every step of the installer and of the repair, so the run stops at the
+  // next step boundary; until it does, the panel says it is cancelling instead
+  // of pretending the click did nothing.
+  const handleCancelInstall = () => {
+    void useComfyInstallStore.getState().cancel()
   }
 
   const handleStop = async () => {
@@ -758,146 +787,80 @@ function ComfyUISettings() {
         {/* GH #98: a from-source install whose Python env broke (shared system
             Python, dead torch) needs a rebuild, not a re-install — pip reports
             broken packages as already satisfied. Rebuilds ComfyUI/venv. */}
-        {status?.found && !status?.running && installPhase === 'idle' && (
+        {status?.found && !status?.running && installIdle && (
           <button onClick={handleRepair} title="Rebuild the Python environment in an isolated venv (~2 GB). Models, outputs and custom nodes are left alone." className="px-2 py-1 rounded text-[0.6rem] bg-amber-500/10 text-amber-400 hover:bg-amber-500/20 transition-colors">
             Repair environment
           </button>
         )}
-        {(!status?.found || status?.complete === false) && installPhase === 'idle' && (
+        {(!status?.found || status?.complete === false) && installIdle && (
           <button
-            onClick={async () => {
-              const { backendCall } = await import('../../api/backend')
-              setInstallErr('')
-              setInstallLogs([])
-
-              // P14 pre-flight: ensure Python is on the box before
-              // pip-installing ComfyUI. The carcass case (status.complete
-              // === false) lands here too — Python may still be missing
-              // and the previous run died on the Microsoft Store stub.
-              let pythonOk = false
-              try {
-                const probe: any = await backendCall('python_check')
-                pythonOk = !!probe?.available
-              } catch { pythonOk = false }
-
-              if (!pythonOk) {
-                setInstallPhase('python')
-                setInstallLogs(['Installing Python 3.12 via winget…'])
-                try {
-                  await backendCall('install_python')
-                } catch (err) {
-                  setInstallPhase('error')
-                  setInstallErr(err instanceof Error ? err.message : 'Could not start Python install')
-                  return
-                }
-                pythonOk = await new Promise<boolean>((resolve) => {
-                  const poll = setInterval(async () => {
-                    try {
-                      const data: any = await backendCall('install_python_status')
-                      setInstallLogs(data.logs || [])
-                      if (data.status === 'complete' || data.status === 'already_installed') {
-                        clearInterval(poll); resolve(true)
-                      } else if (data.status === 'error') {
-                        clearInterval(poll)
-                        const lastLog = (data.logs?.length ? data.logs[data.logs.length - 1] : '') as string
-                        setInstallErr(withInstallerOutput('Installing Python did not finish.', lastLog))
-                        resolve(false)
-                      }
-                    } catch { /* keep polling */ }
-                  }, 2000)
-                })
-                if (!pythonOk) { setInstallPhase('error'); return }
-              }
-
-              setInstallPhase('comfyui')
-              setInstallLogs(['Installing ComfyUI…'])
-              try {
-                // andy_38747 (Discord): let the Path field double as the install
-                // target so the multi-GB install can land on another drive.
-                // Empty field → backend default (~/ComfyUI). On a carcass
-                // re-install with no override, reuse the detected path so the
-                // repair happens where the broken install lives.
-                const installTarget = customPath.trim() || status?.path || ''
-                await backendCall('install_comfyui', installTarget ? { installPath: installTarget } : {})
-                const poll = setInterval(async () => {
-                  try {
-                    const data: any = await backendCall('install_comfyui_status')
-                    setInstallLogs(data.logs || [])
-                    setInstallDl({ progress: data.download_progress || 0, total: data.download_total || 0, speed: data.download_speed || 0 })
-                    if (data.status === 'complete') {
-                      clearInterval(poll)
-                      setInstallPhase('idle')
-                    } else if (data.status === 'error') {
-                      clearInterval(poll)
-                      const lastLog = (data.logs?.length ? data.logs[data.logs.length - 1] : '') as string
-                      setInstallErr(withInstallerOutput('Installing ComfyUI did not finish.', lastLog))
-                      setInstallPhase('error')
-                    }
-                  } catch { /* keep polling */ }
-                }, 2000)
-              } catch (err) {
-                setInstallPhase('error')
-                setInstallErr(err instanceof Error ? err.message : 'Failed to start')
-              }
+            onClick={() => {
+              // andy_38747 (Discord): let the Path field double as the install
+              // target so the multi-GB install can land on another drive.
+              // Empty field means the backend default (~/ComfyUI). On a carcass
+              // re-install with no override, reuse the detected path so the
+              // repair happens where the broken install lives.
+              void useComfyInstallStore.getState().runInstall(customPath.trim() || status?.path || '')
             }}
             className="px-2 py-1 rounded text-[0.6rem] bg-purple-500/10 text-purple-400 hover:bg-purple-500/20 transition-colors"
           >
             {status?.complete === false ? 'Re-install ComfyUI' : 'Install ComfyUI'}
           </button>
         )}
-        {status?.found && status?.complete !== false && installPhase === 'idle' && (
+        {status?.found && status?.complete !== false && installIdle && (
           // 2.5.8: the specialized local lanes (music / talking character /
           // motion) need node families that ship with current cores — this is
           // the one-click git pull + dependency refresh the lane errors point
           // to. Reuses the installer's status channel and log panel.
           <button
-            onClick={async () => {
-              setInstallPhase('comfyui')
-              setInstallErr('')
-              setInstallLogs(['Updating ComfyUI…'])
-              try {
-                await backendCall('update_comfyui')
-                const poll = setInterval(async () => {
-                  try {
-                    const data: any = await backendCall('install_comfyui_status')
-                    setInstallLogs(data.logs || [])
-                    setInstallDl({ progress: data.download_progress || 0, total: data.download_total || 0, speed: data.download_speed || 0 })
-                    if (data.status === 'complete') {
-                      clearInterval(poll)
-                      setInstallPhase('idle')
-                    } else if (data.status === 'error') {
-                      clearInterval(poll)
-                      const lastLog = (data.logs?.length ? data.logs[data.logs.length - 1] : '') as string
-                      setInstallErr(withInstallerOutput('Updating ComfyUI did not finish.', lastLog))
-                      setInstallPhase('error')
-                    }
-                  } catch { /* keep polling */ }
-                }, 2000)
-              } catch (err) {
-                setInstallPhase('error')
-                setInstallErr(err instanceof Error ? err.message : 'Failed to start the update')
-              }
-            }}
+            onClick={() => { void useComfyInstallStore.getState().runUpdate() }}
             className="px-2 py-1 rounded text-[0.6rem] bg-white/5 text-gray-400 hover:text-gray-200 hover:bg-white/10 transition-colors"
           >
             Update ComfyUI
           </button>
         )}
-        {(!status?.found || status?.complete === false) && installPhase === 'idle' && (
+        {(!status?.found || status?.complete === false) && installIdle && (
           <p className="w-full text-[0.55rem] text-gray-600">
             Installs to your home folder by default. Set Path above (e.g. D:\ComfyUI) to install on another drive.
           </p>
+        )}
+        {installNotice && installPhase === 'idle' && (
+          <p className="w-full text-[0.55rem] text-amber-500 dark:text-amber-400 leading-relaxed">{installNotice}</p>
         )}
         {installPhase !== 'idle' && (
           <div className="w-full mt-2 space-y-1">
             <div className="flex items-center gap-1.5 text-[0.6rem] text-gray-400">
               {installPhase !== 'error' && <Loader2 size={10} className="animate-spin" />}
               <span>
-                {installPhase === 'python' && 'Installing Python 3.12 (~30 MB)…'}
-                {installPhase === 'comfyui' && `Installing ComfyUI…${downloadSuffix(installDl)}`}
-                {installPhase === 'repair' && `Rebuilding the ComfyUI environment…${downloadSuffix(installDl)}`}
-                {installPhase === 'error' && 'Install failed'}
+                {cancelling && installPhase !== 'error'
+                  ? 'Cancelling…'
+                  : <>
+                      {installPhase === 'checking' && 'Checking Python…'}
+                      {installPhase === 'python' && 'Installing Python 3.12 (~30 MB)…'}
+                      {installPhase === 'comfyui' && `Installing ComfyUI…${downloadSuffix(installDl)}`}
+                      {installPhase === 'repair' && `Rebuilding the ComfyUI environment…${downloadSuffix(installDl)}`}
+                      {installPhase === 'error' && 'Install failed'}
+                    </>}
               </span>
+              {installPhase === 'error' && (
+                <button
+                  onClick={() => useComfyInstallStore.getState().reset()}
+                  title="Clear this message"
+                  className="ml-auto px-1.5 py-[1px] rounded border border-white/15 text-[0.55rem] text-gray-400 hover:text-gray-200 hover:bg-white/10 transition-colors"
+                >
+                  Dismiss
+                </button>
+              )}
+              {(installPhase === 'comfyui' || installPhase === 'repair') && (
+                <button
+                  onClick={handleCancelInstall}
+                  disabled={cancelling}
+                  title={installPhase === 'repair' ? 'Stop the repair' : 'Stop the ComfyUI install'}
+                  className="ml-auto px-1.5 py-[1px] rounded border border-red-500/40 text-[0.55rem] text-red-500 dark:text-red-300 hover:bg-red-500/10 transition-colors disabled:opacity-50 disabled:cursor-default"
+                >
+                  {cancelling ? 'Cancelling…' : 'Cancel'}
+                </button>
+              )}
             </div>
             {installLogs.length > 0 && (
               <div className="bg-black/50 rounded p-1.5 max-h-24 overflow-y-auto font-mono text-[0.5rem] text-gray-500 space-y-0.5">

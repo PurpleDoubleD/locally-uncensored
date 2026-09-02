@@ -17,10 +17,15 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 
 const backendCall = vi.fn()
+/** Which OS the app is running on. Windows is the platform of the issue this
+ *  file is about, so it is the default; the Linux case has its own test. */
+let platform: 'windows' | 'macos' | 'linux' = 'windows'
 vi.mock('../backend', () => ({
   backendCall: (...args: unknown[]) => backendCall(...args),
   isTauri: () => true,
-  isMacOS: () => false,
+  isMacOS: () => platform === 'macos',
+  isWindows: () => platform === 'windows',
+  isLinux: () => platform === 'linux',
 }))
 
 import { customModelDirs, listBundledModels, bundledToAIModels, lastScanDirs, lastCustomScanDir } from '../engine'
@@ -144,6 +149,93 @@ describe('the panel is told how the scan fared, not only what it found', () => {
     backendCall.mockResolvedValue({ dir: '/app/models', models: [] })
     await listBundledModels()
     expect(lastScanDirs()).toEqual([])
+    expect(lastCustomScanDir()).toBeNull()
+  })
+
+  // A13: the row is found by PATH, not by position. Read off an index, the
+  // panel reports the app folder's verdict about the user's folder the day the
+  // order changes, and Windows writes the same folder in more than one way.
+  it('finds the row for the folder that was asked about, whatever its position', async () => {
+    setFolder(WINDOWS_FOLDER)
+    backendCall.mockResolvedValue({
+      dir: '/app/models',
+      dirs: [
+        { path: 'g:/ai/models\\', status: 'unreachable' },
+        { path: '/app/models', status: 'ok' },
+      ],
+      models: [],
+    })
+    await listBundledModels()
+    expect(lastCustomScanDir()?.status).toBe('unreachable')
+  })
+
+  // Review 2026-09-02: the case fold follows Rust, which folds on Windows and
+  // macOS and not on Linux. `/mnt/Models` and `/mnt/models` are two folders on
+  // ext4, and folding them would answer a question about one with the verdict
+  // about the other.
+  it('does not fold case on Linux, where two spellings are two folders', async () => {
+    platform = 'linux'
+    try {
+      setFolder('/mnt/models')
+      backendCall.mockResolvedValue({
+        dir: '/app/models',
+        dirs: [
+          { path: '/app/models', status: 'ok' },
+          { path: '/mnt/Models', status: 'unreachable' },
+        ],
+        models: [],
+      })
+      await listBundledModels()
+      expect(lastCustomScanDir()).toBeNull()
+
+      // The same spelling still matches, trailing separator and all.
+      backendCall.mockResolvedValue({
+        dir: '/app/models',
+        dirs: [
+          { path: '/app/models', status: 'ok' },
+          { path: '/mnt/models/', status: 'truncated' },
+        ],
+        models: [],
+      })
+      await listBundledModels()
+      expect(lastCustomScanDir()?.status).toBe('truncated')
+    } finally {
+      platform = 'windows'
+    }
+  })
+
+  it('folds case on macOS, where one folder has many spellings', async () => {
+    platform = 'macos'
+    try {
+      setFolder('/Users/me/Models')
+      backendCall.mockResolvedValue({
+        dir: '/app/models',
+        dirs: [
+          { path: '/app/models', status: 'ok' },
+          { path: '/users/me/models', status: 'truncated' },
+        ],
+        models: [],
+      })
+      await listBundledModels()
+      expect(lastCustomScanDir()?.status).toBe('truncated')
+    } finally {
+      platform = 'windows'
+    }
+  })
+
+  // Negative control: a verdict about SOME other folder is not a verdict about
+  // this one, and silence beats a wrong accusation.
+  it('reports nothing when the answer does not mention the folder at all', async () => {
+    setFolder(WINDOWS_FOLDER)
+    backendCall.mockResolvedValue({
+      dir: '/app/models',
+      dirs: [
+        { path: '/app/models', status: 'ok' },
+        { path: 'D:\\somewhere\\else', status: 'truncated' },
+      ],
+      models: [],
+    })
+    await listBundledModels()
     expect(lastCustomScanDir()).toBeNull()
   })
 
