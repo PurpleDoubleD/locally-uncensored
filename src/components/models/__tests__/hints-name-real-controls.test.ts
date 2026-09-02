@@ -41,6 +41,10 @@ const modelManager = read('src/components/models/ModelManager.tsx')
 const settingsPage = read('src/components/settings/SettingsPage.tsx')
 const hardware = read('src/components/settings/HardwareSettings.tsx')
 const modelSelector = read('src/components/models/ModelSelector.tsx')
+const chatInput = read('src/components/chat/ChatInput.tsx')
+/** The effort button's OWN tooltip, pulled out of the shipped markup. */
+const effortTip =
+  chatInput.match(/data-testid="effort-toggle"[\s\S]{0,600}?title=\{`([^`]*)`\}/)?.[1] ?? ''
 const remoteRs = read('src-tauri/src/commands/remote.rs')
 
 describe('THE FIX: the ComfyUI-is-down hint names the control that exists', () => {
@@ -113,6 +117,48 @@ describe('the two the sweep turned up', () => {
     expect(modelSelector).toMatch(/Try the On\/Off button on the model's row/)
     // Proof that On and Off are what that button actually renders.
     expect(modelSelector).toMatch(/loaded \? 'On' : 'Off'/)
+  })
+})
+
+describe('the effort control in the composer says what it is and what it costs', () => {
+  // New in 2.6.8, and it sits right beside the Think button, so it falls under
+  // the same rule as everything above: a control's own text is a promise about
+  // the screen and about the bill.
+
+  it('the control is really there, with a stable handle for a counter-check', () => {
+    expect(chatInput).toMatch(/data-testid="effort-toggle"/)
+    expect(chatInput).toMatch(/<Gauge size=\{11\} \/>/)
+  })
+
+  it('its tooltip names the rung, the gesture and the price', () => {
+    expect(chatInput).toMatch(
+      /Reasoning effort: \$\{effortLabel\(effortNow\)\}\. Click to cycle\. Higher effort spends more output tokens\./,
+    )
+  })
+
+  it('and "click to cycle" is what the button really does', () => {
+    expect(chatInput).toMatch(
+      /onClick=\{\(\) => updateSettings\(\{ reasoningEffort: nextEffort\(effortLevels, effortNow\) \}\)\}/,
+    )
+  })
+
+  it('the label is the rung that actually goes on the wire, the clamped one', () => {
+    // Showing Max while sending high would be a control that lies, on the one
+    // axis where the user is paying attention because it costs money.
+    expect(chatInput).toMatch(/const effortNow = clampEffort\(effortLevels, /)
+    expect(chatInput).toMatch(/<span>\{effortLabel\(effortNow\)\}<\/span>/)
+  })
+
+  it('it is drawn only where it is true: a declared ladder and thinking really on', () => {
+    expect(chatInput).toMatch(/const showEffort = effortSteps\.length > 0 && thinkingIsOn/)
+    expect(chatInput).toMatch(/const thinkingIsOn = thinkLockedOn \|\| \(thinkingEnabled && canThink\)/)
+  })
+
+  it('and it names no control that does not exist', () => {
+    // No slider, no gear, no menu: it is one button that cycles, and the
+    // tooltip says exactly that.
+    expect(effortTip).toMatch(/Click to cycle/)
+    expect(effortTip).not.toMatch(/slider|gear|drop-?down|menu|open settings/i)
   })
 })
 

@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback, type ReactNode } from 'react'
 import { motion } from 'framer-motion'
-import { Send, Square, Paperclip, X, Brain, Terminal } from 'lucide-react'
+import { Send, Square, Paperclip, X, Brain, Gauge, Terminal } from 'lucide-react'
 import { matchAgentCommands, type AgentCommand } from '../../lib/agent-commands'
 import { VoiceButton } from './VoiceButton'
 import { ApprovalDialog } from './ApprovalDialog'
@@ -8,6 +8,7 @@ import { useVoiceStore } from '../../stores/voiceStore'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { useModelStore } from '../../stores/modelStore'
 import { isThinkingCompatible, isVisionCompatible, declaredVision } from '../../lib/model-compatibility'
+import { clampEffort, effortChoices, effortLabel, nextEffort, DEFAULT_EFFORT } from '../../lib/effort'
 import type { AgentToolCall } from '../../types/agent-mode'
 import type { ImageAttachment } from '../../types/chat'
 
@@ -94,6 +95,19 @@ export function ChatInput({ onSend, onStop, isGenerating, pendingApproval, onApp
   // supportsVision, and the built-in engine's projector-on-disk answer). A
   // declared flag counts in both directions; models without one still fall
   // back to the name heuristic.
+  // Reasoning effort. The rungs come from the server catalogue per model, so a
+  // model that declares none gets no control at all and behaves as before. The
+  // displayed rung is the CLAMPED one, because that is what goes on the wire:
+  // showing 'Max' while sending 'high' would be a control that lies.
+  const reasoningEffort = useSettingsStore((s) => s.settings.reasoningEffort)
+  const effortLevels = activeModelMeta && 'effortLevels' in activeModelMeta ? activeModelMeta.effortLevels : undefined
+  const effortDefault = activeModelMeta && 'effortDefault' in activeModelMeta ? activeModelMeta.effortDefault : undefined
+  const effortSteps = effortChoices(effortLevels)
+  const effortNow = clampEffort(effortLevels, reasoningEffort ?? effortDefault ?? DEFAULT_EFFORT)
+  // Only while thinking is really happening. 'always' models keep their Think
+  // button locked on, so the rung is live there without the button being.
+  const thinkingIsOn = thinkLockedOn || (thinkingEnabled && canThink)
+  const showEffort = effortSteps.length > 0 && thinkingIsOn
   const serverVision = declaredVision(activeModelMeta)
   const canSeeImages = serverVision !== undefined ? serverVision : isVisionCompatible(activeModel)
 
@@ -452,6 +466,22 @@ export function ChatInput({ onSend, onStop, isGenerating, pendingApproval, onApp
             <Brain size={11} />
             <span>Think</span>
           </button>
+
+          {/* Reasoning effort. Same shape and size as the Think button beside
+              it, because it is the same kind of statement about the same
+              model; a second visual language here would read as a second
+              subject. */}
+          {showEffort && (
+            <button
+              data-testid="effort-toggle"
+              onClick={() => updateSettings({ reasoningEffort: nextEffort(effortLevels, effortNow) })}
+              className="flex items-center gap-1 px-1.5 py-1.5 rounded-md transition-all shrink-0 text-[0.6rem] font-medium bg-blue-500/15 text-blue-400 border border-blue-500/30"
+              title={`Reasoning effort: ${effortLabel(effortNow)}. Click to cycle. Higher effort spends more output tokens.`}
+            >
+              <Gauge size={11} />
+              <span>{effortLabel(effortNow)}</span>
+            </button>
+          )}
 
           {/* View-specific actions (Docs · Plugins · Tools) */}
           <div className="flex flex-nowrap items-center gap-1 shrink-0">{composerActions}</div>
