@@ -90,7 +90,7 @@ export function matchesLmStudioInstalled(
   filename: string,
   installed: InstalledModelLike[],
 ): boolean {
-  return matchesInstalled(filename, installed.filter(isLmStudioEntry))
+  return !!findInstalled(filename, installed.filter(isLmStudioEntry))
 }
 
 /**
@@ -109,11 +109,28 @@ export function matchesLocalGgufInstalled(
   filename: string,
   installed: InstalledModelLike[],
 ): boolean {
-  return matchesInstalled(filename, installed.filter((m) => isLmStudioEntry(m) || isBuiltinEntry(m)))
+  return !!findLocalGgufInstalled(filename, installed)
 }
 
-function matchesInstalled(filename: string, lms: InstalledModelLike[]): boolean {
-  if (!filename) return false
+/**
+ * The same question, answering WHICH entry matched instead of just whether one
+ * did.
+ *
+ * GH #118, the dead-button half: a tile that knows a model is installed but not
+ * which installed model it is has nothing to offer beyond a badge. The picker
+ * id lives on the entry, so handing the entry back is what lets the tile load
+ * the model into the chat instead of showing an inert "Installed" pill next to
+ * an engine that is not running.
+ */
+export function findLocalGgufInstalled(
+  filename: string,
+  installed: InstalledModelLike[],
+): InstalledModelLike | null {
+  return findInstalled(filename, installed.filter((m) => isLmStudioEntry(m) || isBuiltinEntry(m)))
+}
+
+function findInstalled(filename: string, lms: InstalledModelLike[]): InstalledModelLike | null {
+  if (!filename) return null
   const wantBase = normalBase(filename)
   const wantId = modelIdentity(filename)
   const wantQuant = extractQuant(filename)
@@ -127,18 +144,18 @@ function matchesInstalled(filename: string, lms: InstalledModelLike[]): boolean 
       const cBase = c.replace(/\.gguf$/, '').replace(SHARD_TAIL, '')
       // (1) exact / path-suffix — full basename ids, already carry the quant
       if (cBase === wantBase || cBase.endsWith(`/${wantBase}`) || cBase.endsWith(`\\${wantBase}`)) {
-        return true
+        return m
       }
       // (2) normalised identity + quant agreement
       const cId = modelIdentity(c)
       if (cId && wantId && cId.length >= 5 && cId === wantId) {
-        if (!wantQuant) return true // generic Discover entry (no quant) → match
+        if (!wantQuant) return m // generic Discover entry (no quant) → match
         const cQuant = extractQuant(c)
-        if (cQuant && cQuant === wantQuant) return true // exact quant present
+        if (cQuant && cQuant === wantQuant) return m // exact quant present
         // quant-specific Discover row but candidate quant missing/different →
         // do NOT light (avoids quant-sibling false positives).
       }
     }
   }
-  return false
+  return null
 }

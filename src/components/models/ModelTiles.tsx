@@ -11,6 +11,7 @@ import {
 import type { DiscoverModel, DownloadProgress, ModelBundle } from '../../api/discover'
 import { formatBytes } from '../../lib/formatters'
 import { bundleVramNeedGb } from '../../lib/hardware'
+import { modelTileAction } from '../../lib/model-tile-action'
 
 // ─── Hardware fit ───────────────────────────────────────────────────
 
@@ -152,10 +153,17 @@ export interface ModelTileProps {
   onDownload: (m: DiscoverModel) => void
   onInfo: (m: DiscoverModel) => void
   onOpenUrl: (url: string) => void
+  /** Load an already installed model into the chat. GH #118: without this the
+   *  Installed state is an inert pill, which is the dead end the ticket
+   *  describes. Absent = the old badge, for surfaces that cannot activate. */
+  onUse?: (m: DiscoverModel) => void
+  /** Can `onUse` do anything for THIS row, i.e. is the local model behind it
+   *  known by name. */
+  canUse?: (m: DiscoverModel) => boolean
   highlight?: boolean
 }
 
-export function ModelTile({ variants, vramGb, isInstalled, dlState, onDownload, onInfo, onOpenUrl, highlight }: ModelTileProps) {
+export function ModelTile({ variants, vramGb, isInstalled, dlState, onDownload, onInfo, onOpenUrl, onUse, canUse, highlight }: ModelTileProps) {
   const [pickerOpen, setPickerOpen] = useState(false)
   const [chosen, setChosen] = useState<string | null>(null)
   const pickerRef = useRef<HTMLDivElement>(null)
@@ -168,6 +176,14 @@ export function ModelTile({ variants, vramGb, isInstalled, dlState, onDownload, 
   const installed = isInstalled(sel) || dl?.status === 'complete'
   const externalOnly = sel.canPull === false
   const fit = computeFit(sel.sizeGB, vramGb)
+  // One rule for what the button does, so no state can end up without one
+  // (lib/model-tile-action.ts).
+  const action = modelTileAction({
+    externalOnly,
+    installed,
+    downloading,
+    loadable: !!onUse && (canUse ? canUse(sel) : true),
+  })
 
   useEffect(() => {
     if (!pickerOpen) return
@@ -246,7 +262,7 @@ export function ModelTile({ variants, vramGb, isInstalled, dlState, onDownload, 
         {sel.pulls && <span className="text-[0.55rem] text-gray-400 dark:text-gray-500 ml-auto mr-1">{sel.pulls}</span>}
 
         <div className={`flex items-center gap-1 shrink-0 ${sel.pulls ? '' : 'ml-auto'}`}>
-          {externalOnly ? (
+          {action === 'view' ? (
             sel.url ? (
               <button
                 onClick={() => onOpenUrl(sel.url!)}
@@ -256,11 +272,20 @@ export function ModelTile({ variants, vramGb, isInstalled, dlState, onDownload, 
                 <ExternalLink size={11} /> View
               </button>
             ) : null
-          ) : installed ? (
+          ) : action === 'use' ? (
+            <button
+              onClick={() => onUse!(sel)}
+              className="flex items-center gap-1 px-2 py-1 rounded-md bg-gray-100 dark:bg-white/[0.06] hover:bg-gray-200 dark:hover:bg-white/10 text-gray-700 dark:text-gray-200 text-[0.62rem] font-medium transition-colors"
+              title="Installed. Load it in the chat and start the engine if it is not running."
+              aria-label={`Use ${sel.name}`}
+            >
+              <Check size={11} className="text-emerald-500/80" /> Use
+            </button>
+          ) : action === 'installed' ? (
             <span className="flex items-center gap-1 px-2 py-1 rounded-md bg-gray-100 dark:bg-white/[0.06] text-gray-600 dark:text-gray-300 text-[0.62rem] font-medium">
               <Check size={11} className="text-emerald-500/80" /> Installed
             </span>
-          ) : downloading ? (
+          ) : action === 'downloading' ? (
             <span className="flex items-center gap-1.5 px-2 py-1 text-[0.62rem] text-gray-500 dark:text-gray-400">
               <Loader2 size={11} className="animate-spin" /> Downloading…
             </span>
