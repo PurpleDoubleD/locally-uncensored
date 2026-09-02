@@ -4,8 +4,14 @@
  * This store was NOT persisted before. It carries currentView and
  * cloudGateOpen, so a naive persist would change what the app does on start:
  * it would reopen on whatever tab was left behind, or come up with the cloud
- * gate on screen. partialize therefore has to hold EXACTLY the two explorer
- * fields, and this test is the guard on that word "exactly".
+ * gate on screen. partialize therefore has to hold EXACTLY the fields that
+ * are a stated preference, and this test is the guard on that word "exactly".
+ *
+ * Widened in the web-parity round (2.6.8): sidebarOpen joined the written set.
+ * It is the user saying "rail" or "list", the same class of choice as
+ * explorerCollapsed, and forgetting it on every restart is the bug David
+ * reported. currentView / cloudGateOpen / cloudTeaser stay forbidden, because
+ * those steer where the app STARTS rather than how it looks.
  *
  * Run: npx vitest run src/stores/__tests__/uiStore-explorer.test.ts
  */
@@ -42,37 +48,38 @@ import {
 } from '../uiStore'
 
 describe('what the ui store writes to disk', () => {
-  it('persists exactly explorerWidth and explorerCollapsed', () => {
+  it('persists exactly explorerWidth, explorerCollapsed and sidebarOpen', () => {
     const partialize = useUIStore.persist.getOptions().partialize
     expect(partialize).toBeTypeOf('function')
     const written = partialize!(useUIStore.getState()) as Record<string, unknown>
-    expect(Object.keys(written).sort()).toEqual(['explorerCollapsed', 'explorerWidth'])
+    expect(Object.keys(written).sort()).toEqual(['explorerCollapsed', 'explorerWidth', 'sidebarOpen'])
   })
 
   it('counter-test: nothing that steers the app start comes along', () => {
     const partialize = useUIStore.persist.getOptions().partialize!
     const written = partialize(useUIStore.getState()) as Record<string, unknown>
-    for (const forbidden of ['currentView', 'cloudGateOpen', 'cloudTeaser', 'sidebarOpen']) {
+    // sidebarOpen left this list in the web-parity round, see the file header.
+    for (const forbidden of ['currentView', 'cloudGateOpen', 'cloudTeaser', 'settingsFocus']) {
       expect(written).not.toHaveProperty(forbidden)
     }
     // Actions must not ride along either, they would be dead weight in storage.
     expect(Object.values(written).every((v) => typeof v !== 'function')).toBe(true)
   })
 
-  it('keeps writing only those two after the state moved', () => {
-    useUIStore.setState({ currentView: 'settings', cloudGateOpen: true, explorerCollapsed: true, explorerWidth: 333 })
+  it('keeps writing only those three after the state moved', () => {
+    useUIStore.setState({ currentView: 'settings', cloudGateOpen: true, explorerCollapsed: true, explorerWidth: 333, sidebarOpen: true })
     const written = useUIStore.persist.getOptions().partialize!(useUIStore.getState()) as Record<string, unknown>
-    expect(written).toEqual({ explorerWidth: 333, explorerCollapsed: true })
+    expect(written).toEqual({ explorerWidth: 333, explorerCollapsed: true, sidebarOpen: true })
   })
 
   it('and that is what actually lands in storage', () => {
-    useUIStore.setState({ currentView: 'benchmark', cloudGateOpen: true })
+    useUIStore.setState({ currentView: 'benchmark', cloudGateOpen: true, sidebarOpen: false })
     useUIStore.getState().setExplorerWidth(420, 1600)
     useUIStore.getState().setExplorerCollapsed(true)
     const raw = memory.getItem('locally-uncensored-ui')
     expect(raw).toBeTruthy()
     const parsed = JSON.parse(raw!)
-    expect(parsed.state).toEqual({ explorerWidth: 420, explorerCollapsed: true })
+    expect(parsed.state).toEqual({ explorerWidth: 420, explorerCollapsed: true, sidebarOpen: false })
   })
 })
 

@@ -82,7 +82,12 @@ export const useUIStore = create<UIState>()(
   persist(
     (set) => ({
       currentView: 'chat',
-      sidebarOpen: true,
+      // Collapsed by default, web parity (apps/web/stores/uiStore.ts:13-19):
+      // the left column starts as a slim icon rail and the user expands it to
+      // the full conversation list on demand. Unlike the web build this one is
+      // persisted (see partialize), because a desktop app is not reloaded from
+      // scratch on every visit and the choice should survive a restart.
+      sidebarOpen: false,
       cloudGateOpen: false,
       cloudTeaser: null,
       pendingCloudModel: null,
@@ -90,15 +95,17 @@ export const useUIStore = create<UIState>()(
       explorerCollapsed: false,
       settingsFocus: null,
 
-      // Sidebar visibility follows the view: it's the conversation list, which
-      // only makes sense in Chat. The hamburger toggle still works on other views;
-      // it just resets to the view's default on the next setView() call.
+      // Navigation no longer touches sidebarOpen. The conversation list only
+      // makes sense in Chat, and that rule now lives in the Sidebar itself
+      // (showSidebar), the way the web build does it. Forcing the panel open
+      // here used to undo the user's collapse on every trip through Models or
+      // Settings, which is exactly what the web parity round removes.
       // A plain setView is somebody navigating by hand, so it drops any focus
       // a previous deep link left behind rather than firing it late.
-      setView: (view) => set({ currentView: view, sidebarOpen: view === 'chat', settingsFocus: null }),
+      setView: (view) => set({ currentView: view, settingsFocus: null }),
 
       openSettingsAt: (focus) =>
-        set({ currentView: 'settings', sidebarOpen: false, settingsFocus: focus }),
+        set({ currentView: 'settings', settingsFocus: focus }),
       clearSettingsFocus: () => set({ settingsFocus: null }),
       toggleSidebar: () => set((state) => ({ sidebarOpen: !state.sidebarOpen })),
       setSidebarOpen: (open) => set({ sidebarOpen: open }),
@@ -111,13 +118,17 @@ export const useUIStore = create<UIState>()(
     }),
     {
       name: 'locally-uncensored-ui',
-      // EXACTLY the two explorer fields (plan C3 / R1). This store was not
-      // persisted at all before, and persisting it naively would carry
-      // currentView and cloudGateOpen across restarts: the app would reopen on
-      // whatever tab was left behind, or come up with the cloud gate on screen.
+      // The two explorer fields (plan C3 / R1) plus sidebarOpen. Persisting
+      // this store naively would carry currentView and cloudGateOpen across
+      // restarts: the app would reopen on whatever tab was left behind, or
+      // come up with the cloud gate on screen. Those stay out.
+      // sidebarOpen joined in the web-parity round: it is a stated preference
+      // ("I want the rail" / "I want the list"), not a leftover of one
+      // session, and the app would forget it on every restart otherwise.
       partialize: (state) => ({
         explorerWidth: state.explorerWidth,
         explorerCollapsed: state.explorerCollapsed,
+        sidebarOpen: state.sidebarOpen,
       }),
     },
   ),
