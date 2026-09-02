@@ -20,6 +20,9 @@ import {
 import { useShallow } from 'zustand/react/shallow'
 import { useRAG } from '../../hooks/useRAG'
 import { useRAGStore } from '../../stores/ragStore'
+import { useSettingsStore } from '../../stores/settingsStore'
+import { useEmbedLane } from '../../hooks/useEmbedLane'
+import { laneIsOnThisMachine } from '../../api/embed-availability'
 import { formatBytes } from '../../lib/formatters'
 
 interface Props {
@@ -87,6 +90,10 @@ export function RAGPanel({ conversationId, onClose }: Props) {
 }
 
 function RAGPanelInner({ conversationId, onClose }: { conversationId: string; onClose?: () => void }) {
+  const cloudMode = useSettingsStore((s) => s.settings.appMode) === 'cloud'
+  // Same one measurement the composer's Docs button reads (hooks/useEmbedLane),
+  // so the button's tooltip and this paragraph can never say different things.
+  const lane = useEmbedLane(cloudMode)
   const rag = useRAG(conversationId)
   const documents = rag.documents ?? []
   const isEnabled = rag.isEnabled ?? false
@@ -130,13 +137,14 @@ function RAGPanelInner({ conversationId, onClose }: { conversationId: string; on
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ensureEmbeddingModel])
 
-  const { embeddingModelReactive, lastRetrievedChunksReactive, embeddingPullProgress, embeddingInstallPrompt, embeddingQueuedCount } = useRAGStore(
+  const { embeddingModelReactive, lastRetrievedChunksReactive, embeddingPullProgress, embeddingInstallPrompt, embeddingQueuedCount, retrievalError } = useRAGStore(
     useShallow((s) => ({
       embeddingModelReactive: s.embeddingModel,
       lastRetrievedChunksReactive: s.lastRetrievedChunks,
       embeddingPullProgress: s.embeddingPullProgress,
       embeddingInstallPrompt: s.embeddingInstallPrompt,
       embeddingQueuedCount: s.embeddingQueuedFiles.length,
+      retrievalError: s.retrievalError,
     }))
   )
 
@@ -267,6 +275,48 @@ function RAGPanelInner({ conversationId, onClose }: { conversationId: string; on
           </button>
         )}
       </div>
+
+      {/* Where the text actually goes, said in Cloud mode because in Cloud mode
+          it is a fair question (A9). The sentence follows the measured lane:
+          promising "stays on this computer" while indexing ships every chunk to
+          a LAN Ollama would be a comfortable lie (review B2). */}
+      {cloudMode && lane && lane.lane !== 'none' && (
+        <div className="px-3 pt-2">
+          {laneIsOnThisMachine(lane.lane) ? (
+            <p
+              data-testid="rag-cloud-privacy"
+              className="text-[0.6rem] leading-snug text-gray-500 dark:text-gray-400"
+            >
+              Your documents are indexed on this computer and stay here. Only the passages
+              that match your question are sent to the cloud model as context.
+            </p>
+          ) : (
+            <p
+              data-testid="rag-cloud-privacy-remote"
+              className="flex items-start gap-1.5 text-[0.6rem] leading-snug text-amber-600 dark:text-amber-400"
+            >
+              <AlertTriangle size={11} className="shrink-0 mt-0.5" />
+              <span>
+                Indexing runs on {lane.endpoint ?? 'your configured Ollama host'}, so the full
+                text of every document you add is sent there. The passages that match your
+                question are then sent to the cloud model as context.
+              </span>
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* The last turn went out without the documents (review S4). */}
+      {retrievalError && (
+        <div className="px-3 pt-2">
+          <div className="flex items-start gap-1.5 p-2 rounded-lg bg-amber-500/10 border border-amber-500/20">
+            <AlertTriangle size={12} className="text-amber-500 shrink-0 mt-0.5" />
+            <span data-testid="rag-retrieval-error" className="text-[0.6rem] text-amber-600 dark:text-amber-400 leading-tight">
+              {retrievalError}
+            </span>
+          </div>
+        </div>
+      )}
 
       {/* Context window warning */}
       <AnimatePresence>

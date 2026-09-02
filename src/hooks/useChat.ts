@@ -8,6 +8,7 @@ import { useMemoryStore } from "../stores/memoryStore"
 import { useVoiceStore } from "../stores/voiceStore"
 import { autoSpeak } from "../lib/ttsBridge"
 import { retrieveContext } from "../api/rag"
+import { buildRagSuffix, RETRIEVAL_FAILED_MESSAGE } from "../lib/rag-prompt"
 import { getModelMaxTokens, capMessageCount } from "../lib/context-compaction"
 import { applyChatSendBudget, chatBudgetApplies } from "../lib/chat-send-budget"
 import { isTooManyMessagesError, halveHistory, TOO_MANY_MESSAGES_MAX_HALVINGS } from "../lib/too-many-messages"
@@ -477,20 +478,21 @@ export function useChat() {
           // Store scored chunks for display in RAGPanel
           ragState.setLastRetrievedChunks(scoredChunks)
 
-          if (ragContext.chunks.length > 0) {
-            const contextBlock = ragContext.chunks
-              .map((c, i) => `[Source ${i + 1}]\n${c.content}`)
-              .join("\n\n")
-            // The retrieval block is the most volatile thing in the prompt:
-            // every turn pulls different chunks. It used to sit at byte 0,
-            // ahead of the persona, so an upstream prefix cache, which
-            // matches from the first byte and stops at the first difference,
-            // missed the ENTIRE prompt on every RAG turn. It moves to the very
-            // end, behind persona and memory, and is appended below (plan A5).
-            ragSuffix = `\n\nUse the following document context to help answer the user's question. If the context is not relevant, ignore it and answer normally.\n\n---\n${contextBlock}\n---`
-          }
+          // One builder for plain chat, Agent mode and the tests
+          // (lib/rag-prompt.ts). It is a SUFFIX: the retrieval block is the
+          // most volatile thing in the prompt, and at byte 0 it made the
+          // upstream prefix cache miss everything on every RAG turn (plan A5).
+          // The result is appended to the system prompt below, which is what
+          // makes Document Chat work on a cloud model as well as a local one.
+          ragSuffix = buildRagSuffix(ragContext.chunks)
+          // A clean turn clears any previous complaint.
+          ragState.setRetrievalError(null)
         } catch (err) {
           log.error("RAG retrieval failed, continuing without context", { err })
+          // Silence here was the defect (review S4): the model answered from
+          // nothing while the user watched a green Docs badge and believed the
+          // PDF had been read. The panel and the composer both show this.
+          ragState.setRetrievalError(RETRIEVAL_FAILED_MESSAGE)
         }
       }
     }

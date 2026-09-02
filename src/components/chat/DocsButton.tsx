@@ -1,0 +1,57 @@
+/**
+ * The Docs button in the composer action row.
+ *
+ * Its own file since A9, because it now has three states instead of two and a
+ * state you cannot render in a test is a state nobody has checked.
+ */
+import { FileText } from 'lucide-react'
+import type { DocsAvailability } from '../../lib/docs-availability'
+
+interface Props {
+  availability: DocsAvailability
+  /** The RAG panel is open. */
+  open: boolean
+  /** RAG is switched on for this conversation. */
+  ragEnabled: boolean
+  /** Documents indexed for this conversation. */
+  docCount: number
+  onToggle: () => void
+}
+
+export function DocsButton({ availability, open, ragEnabled, docCount, onToggle }: Props) {
+  if (!availability.visible) return null
+  const active = open || ragEnabled
+  return (
+    <button
+      data-testid="docs-toggle"
+      data-needs-setup={availability.needsSetup ? 'true' : 'false'}
+      onClick={onToggle}
+      disabled={!availability.enabled}
+      title={availability.title}
+      className={
+        'flex items-center gap-1 px-2 py-1.5 rounded-md transition-all shrink-0 text-[0.6rem] font-medium ' +
+        (active
+          ? 'bg-green-500/15 text-green-400 border border-green-500/30'
+          : availability.needsSetup
+            ? // Damped, not dead. The panel behind this button is the only
+              // place that can install the embedding engine, so disabling it
+              // would lock the door to the repair shop (review B1).
+              'text-gray-600 hover:text-gray-400 hover:bg-white/5 opacity-60'
+            : 'text-gray-500 hover:text-gray-300 hover:bg-white/5')
+      }
+    >
+      <FileText size={11} />
+      <span>Docs</span>
+      {docCount > 0 && (
+        <span
+          className={
+            'min-w-[12px] h-[12px] flex items-center justify-center rounded-full text-[0.45rem] font-bold ' +
+            (ragEnabled ? 'bg-green-500 text-white' : 'bg-white/15 text-gray-300')
+          }
+        >
+          {docCount}
+        </span>
+      )}
+    </button>
+  )
+}

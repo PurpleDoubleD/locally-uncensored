@@ -13,6 +13,11 @@ interface RAGState {
   indexingProgress: { current: number; total: number } | null
   lastRetrievedChunks: { chunk: TextChunk; score: number }[]
   contextWarning: string | null
+  /** Retrieval failed on the last send, so the answer was written WITHOUT the
+   *  documents (review S4). The old code only logged it, which meant the model
+   *  answered from nothing while the user watched a green Docs badge and
+   *  believed their PDF had been read. Cleared on the next successful turn. */
+  retrievalError: string | null
   pullingEmbeddingModel: boolean
   /** Bytes-level progress for the embedding-model pull (Bug F45-followup,
    *  upgrade-path UX). Populated by useRAG.pullEmbeddingModel from each
@@ -40,6 +45,7 @@ interface RAGState {
   clearConversationDocs: (conversationId: string) => void
   setLastRetrievedChunks: (chunks: { chunk: TextChunk; score: number }[]) => void
   setContextWarning: (warning: string | null) => void
+  setRetrievalError: (message: string | null) => void
   setPullingEmbeddingModel: (pulling: boolean) => void
   setEmbeddingPullProgress: (p: { completed: number; total: number; status: string } | null) => void
   setEmbeddingInstallPrompt: (prompt: boolean) => void
@@ -58,6 +64,7 @@ export const useRAGStore = create<RAGState>()(
       indexingProgress: null,
       lastRetrievedChunks: [],
       contextWarning: null,
+      retrievalError: null,
       pullingEmbeddingModel: false,
       embeddingPullProgress: null,
       embeddingQueuedFiles: [],
@@ -148,6 +155,10 @@ export const useRAGStore = create<RAGState>()(
       setRagEnabled: (conversationId, enabled) =>
         set((state) => ({
           ragEnabled: { ...state.ragEnabled, [conversationId]: enabled },
+          // Switching Document Chat off answers the complaint. Leaving "your
+          // documents could not be searched" standing over a composer that is
+          // no longer searching documents is just a stale alarm.
+          retrievalError: enabled ? state.retrievalError : null,
         })),
 
       setEmbeddingModel: (model) => set({ embeddingModel: model }),
@@ -176,6 +187,8 @@ export const useRAGStore = create<RAGState>()(
       setLastRetrievedChunks: (chunks) => set({ lastRetrievedChunks: chunks }),
 
       setContextWarning: (warning) => set({ contextWarning: warning }),
+
+      setRetrievalError: (message) => set({ retrievalError: message }),
 
       setPullingEmbeddingModel: (pulling) => set({ pullingEmbeddingModel: pulling }),
 
