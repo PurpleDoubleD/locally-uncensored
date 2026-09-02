@@ -12,6 +12,7 @@
  */
 
 import { backendCall } from './backend'
+import { syncBuiltinEnginePort } from './builtin-ensure'
 import { trackEngineSwap } from './engine-swap-gate'
 import { prefixModelName } from './providers'
 import { useProviderStore } from '../stores/providerStore'
@@ -46,6 +47,17 @@ export interface BundledModel {
    * installed backend predates the field, and the callers then fall back to
    * the model-name heuristic exactly as before. */
   vision?: boolean
+}
+
+/** What a start / swap answers. `port` is the port the engine ACTUALLY came
+ *  up on: since GH #118 the Rust side may take the next free one when the
+ *  preferred port is held, and every caller has to follow it there. */
+export interface EngineStartResult {
+  status: string
+  port: number
+  model_path: string
+  ctx?: number | null
+  retried?: boolean
 }
 
 export interface EngineStatus {
@@ -97,10 +109,18 @@ export function isManagedBuiltinActive(): boolean {
  * Registered with the swap gate so a send that arrives while the engine is
  * still coming up waits for it instead of hitting the dead port (counter-check
  * round 2, 2026-08-29). */
-export function startBundledEngine(modelPath: string, tuning?: BuiltinEngineTuning) {
-  return trackEngineSwap(
-    backendCall('start_bundled_engine', { modelPath, tuning: tuning ?? tuningFromSettings() }),
+export async function startBundledEngine(modelPath: string, tuning?: BuiltinEngineTuning) {
+  const res = await trackEngineSwap(
+    backendCall<EngineStartResult>('start_bundled_engine', {
+      modelPath,
+      tuning: tuning ?? tuningFromSettings(),
+    }),
   )
+  // The engine may have landed on another port (GH #118). The slot that talks
+  // to it has to be told, or the very next request is refused by a port
+  // nobody is listening on, which is the ticket's own symptom.
+  syncBuiltinEnginePort(res?.port)
+  return res
 }
 
 /** Stop the managed engine child if one is running. */
@@ -109,8 +129,13 @@ export function stopBundledEngine() {
 }
 
 /** Engine health + which model is loaded on which port. */
-export function bundledEngineStatus() {
-  return backendCall<EngineStatus>('bundled_engine_status')
+export async function bundledEngineStatus() {
+  const status = await backendCall<EngineStatus>('bundled_engine_status')
+  // A RUNNING engine is the only honest source for the port. A stopped one
+  // reports the preferred port as a placeholder, and following that would undo
+  // a fallback the next start is about to reuse.
+  if (status?.running) syncBuiltinEnginePort(status.port)
+  return status
 }
 
 /** Swap the loaded model (stop → start on the same port).
@@ -118,10 +143,15 @@ export function bundledEngineStatus() {
  * This is the call the model picker makes on every activation, and the one the
  * counter-check raced: two switches in a row, then a send into the restart gap.
  * Registering it here is what lets the send path wait it out. */
-export function swapBundledModel(modelPath: string, tuning?: BuiltinEngineTuning) {
-  return trackEngineSwap(
-    backendCall('swap_bundled_model', { modelPath, tuning: tuning ?? tuningFromSettings() }),
+export async function swapBundledModel(modelPath: string, tuning?: BuiltinEngineTuning) {
+  const res = await trackEngineSwap(
+    backendCall<EngineStartResult>('swap_bundled_model', {
+      modelPath,
+      tuning: tuning ?? tuningFromSettings(),
+    }),
   )
+  syncBuiltinEnginePort(res?.port)
+  return res
 }
 
 /** Start the built-in embeddings server (P5) with a specific embedding GGUF.
