@@ -22,6 +22,7 @@ import { backendCall } from '../../api/backend'
 import { customModelDirs } from '../../api/engine'
 import { counterView } from '../../lib/inventory-counter'
 import { groupInstalledByProvider, needsLuEngineHeading } from '../../lib/lu-engine-rows'
+import { LuEngineSwitchBar } from '../chat/LuEngineSwitchBar'
 import type { InstalledModelLike } from '../../lib/lmstudio-match'
 import type { ModelCategory, AIModel } from '../../types/models'
 
@@ -407,6 +408,10 @@ export function ModelManager() {
                         <div className="flex-1 h-px bg-gray-200 dark:bg-white/[0.06]" />
                       </div>
                       <div className="space-y-1.5">
+                        {/* A14: a click on an LU Engine card can move the chat
+                            backend, so the same line the composer shows stands
+                            here too, from the same store. */}
+                        <LuEngineSwitchBar />
                         {/* A14: grouped by the backend that serves the row, LU
                             Engine first. Its rows are listed here even while
                             Ollama or LM Studio holds the chat, and using one
@@ -419,7 +424,7 @@ export function ModelManager() {
                           // is an LU Engine group while another backend holds
                           // the chat: then the heading is not decoration, it is
                           // the warning that a click here moves the backend.
-                          const showHeadings = needsLuEngineHeading(providerGroups, luEngineHoldsChat)
+                          const showHeadings = needsLuEngineHeading(providerGroups.map((g) => g.label), luEngineHoldsChat)
                           let drawn = 0
                           return providerGroups.map(({ label, models: rows }) => (
                             <div key={label} className="space-y-1.5">

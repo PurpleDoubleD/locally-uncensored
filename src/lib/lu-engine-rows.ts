@@ -20,7 +20,10 @@
  *     of blending into the list.
  */
 
-import { isSameGgufFile, isLmStudioEntry, isBuiltinEngineEntry, type InstalledModelLike } from './lmstudio-match'
+import {
+  isSameGgufFile, isLmStudioEntry, isBuiltinEngineEntry, modelIdentity, extractQuant,
+  type InstalledModelLike,
+} from './lmstudio-match'
 
 /** The heading LU Engine rows sit under, in Installed and in the picker. */
 export const LU_ENGINE_GROUP = 'LU Engine'
@@ -39,12 +42,25 @@ export const LU_ENGINE_GROUP = 'LU Engine'
  * the model and not two views of one file, and collapsing them would hide a
  * real second copy.
  *
- * A14 review: this asks `isSameGgufFile`, not the Discover badge's matcher.
- * That one answers a catalogue question and treats a name without a quant as
- * "any quant will do", so a quant-less GGUF in the LU Engine folder would have
- * been swallowed by whatever quant LM Studio happened to hold. The two files
- * differ; only one of them is on the user's disk twice. No quant on either
- * side means no match here, so the row stays.
+ * A14 review: this does NOT ask the Discover badge's matcher. That one answers
+ * a catalogue question and treats a name without a quant as "any quant will
+ * do", so a quant-less GGUF in the LU Engine folder would have been swallowed
+ * by whatever quant LM Studio happened to hold. Two files, one of them hidden.
+ *
+ * A14 second review: the strict rule alone was too strict for the commonest
+ * case. LM Studio reports a COLLAPSED id with no quant at all
+ * ("qwen/qwen2.5-0.5b-instruct") whenever it holds exactly one quant of a
+ * model, which is most of the time, and that met neither half of the strict
+ * rule. So there are three ways in, in falling order of certainty:
+ *
+ *   1. the same path. Same file, whatever the two sides call it.
+ *   2. our file lies inside LM Studio's own store, which is what happens the
+ *      moment the folder is pointed at ~/.lmstudio/models. Then it IS LM
+ *      Studio's file and the model identity is enough.
+ *   3. LM Studio names no quant and we hold exactly ONE file of that identity.
+ *      One file and one nameless row can only be each other. Two files of the
+ *      same identity and a nameless row cannot be told apart, so nothing is
+ *      dropped and the user keeps both.
  */
 export function dropDuplicateLuEngineRows<T extends InstalledModelLike>(
   bundled: T[],
@@ -53,25 +69,81 @@ export function dropDuplicateLuEngineRows<T extends InstalledModelLike>(
   if (bundled.length === 0) return bundled
   const lmStudio = alreadyListed.filter(isLmStudioEntry)
   if (lmStudio.length === 0) return bundled
-  return bundled.filter((row) => !lmStudio.some((other) => sameFile(row, other)))
+  // How many of OUR files share each identity. Route 3 only applies where the
+  // answer is exactly one.
+  const ownByIdentity = new Map<string, number>()
+  for (const row of bundled) {
+    const id = identityOf(row)
+    if (id) ownByIdentity.set(id, (ownByIdentity.get(id) ?? 0) + 1)
+  }
+  return bundled.filter((row) => !lmStudio.some((other) => sameFile(row, other, ownByIdentity)))
 }
 
 /** Every id a row can be recognised by. LM Studio reports its own key, our own
- *  rows carry the file stem, and both may carry a full path. */
+ *  rows carry the file stem, and ours also carry the path. */
 function idsOf(m: InstalledModelLike): string[] {
   const raw = m as InstalledModelLike & { path?: unknown }
   return [m.model, m.name, m.lmsKey, typeof raw.path === 'string' ? raw.path : undefined]
     .filter((v): v is string => typeof v === 'string' && v.length > 0)
 }
 
+/** The path a row names, or ''. */
+function pathOf(m: InstalledModelLike): string {
+  const raw = m as InstalledModelLike & { path?: unknown }
+  return typeof raw.path === 'string' ? raw.path : ''
+}
+
+/** Trailing separators and the Windows/POSIX split are not a different file. */
+function normalisePath(p: string): string {
+  return p.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase()
+}
+
+/** The model identity a row is about, from whichever id carries one. */
+function identityOf(m: InstalledModelLike): string {
+  for (const id of idsOf(m)) {
+    const identity = modelIdentity(id)
+    if (identity && identity.length >= 5) return identity
+  }
+  return ''
+}
+
+/** Does this row's file lie inside LM Studio's own model store. */
+function livesInLmStudioStore(m: InstalledModelLike): boolean {
+  const p = normalisePath(pathOf(m))
+  if (!p) return false
+  return p.includes('/.lmstudio/models/') || p.includes('/.cache/lm-studio/models/')
+}
+
+/** Does any of this row's ids name a quant. */
+function namesAQuant(m: InstalledModelLike): boolean {
+  return idsOf(m).some((id) => extractQuant(id) !== null)
+}
+
 /** Two rows pointing at one file on disk. */
-function sameFile(a: InstalledModelLike, b: InstalledModelLike): boolean {
-  const idsA = idsOf(a)
-  const idsB = idsOf(b)
-  // The same path is the same file, whatever the two sides call the model.
-  for (const x of idsA) {
-    for (const y of idsB) {
-      if (x === y) return true
+function sameFile(
+  ours: InstalledModelLike,
+  other: InstalledModelLike,
+  ownByIdentity: Map<string, number>,
+): boolean {
+  // Route 1: the same path, spelled either way round.
+  const ourPath = normalisePath(pathOf(ours))
+  const otherPath = normalisePath(pathOf(other))
+  if (ourPath && ourPath === otherPath) return true
+
+  const ourIdentity = identityOf(ours)
+  const otherIdentity = identityOf(other)
+  const sameModel = !!ourIdentity && ourIdentity === otherIdentity
+
+  // Route 2: our file IS in LM Studio's store, so the identity settles it.
+  if (sameModel && livesInLmStudioStore(ours)) return true
+
+  // Route 3: LM Studio names no quant and we hold exactly one such file.
+  if (sameModel && !namesAQuant(other) && ownByIdentity.get(ourIdentity) === 1) return true
+
+  // Otherwise the strict rule: same filename, or the same quant named on both
+  // sides. A missing quant on either side is not evidence.
+  for (const x of idsOf(ours)) {
+    for (const y of idsOf(other)) {
       if (isSameGgufFile(x, y)) return true
     }
   }
@@ -102,18 +174,17 @@ export interface ProviderGroup<T> {
  *
  * A14 review 7: the render dropped every heading at one group, which is right
  * for a plain Ollama box and wrong for the exact machine this whole change is
- * about. A user whose only local models are GGUFs in the LU Engine folder,
+ * about. Takes bare labels rather than groups so the Installed list and the
+ * composer's picker, which group by different things, can ask the one rule
+ * instead of each keeping a copy of it (second review). A user whose only local models are GGUFs in the LU Engine folder,
  * with Ollama or LM Studio in front and nothing of their own installed, saw
  * one unlabelled list and a click that moved his chat backend without a word
  * of warning. The heading is the warning, so it is drawn whenever a foreign
  * backend holds the chat, group count be damned.
  */
-export function needsLuEngineHeading<T extends InstalledModelLike>(
-  groups: ProviderGroup<T>[],
-  luEngineHoldsChat: boolean,
-): boolean {
-  if (groups.length > 1) return true
-  return !luEngineHoldsChat && groups.some((g) => g.label === LU_ENGINE_GROUP)
+export function needsLuEngineHeading(labels: string[], luEngineHoldsChat: boolean): boolean {
+  if (labels.length > 1) return true
+  return !luEngineHoldsChat && labels.includes(LU_ENGINE_GROUP)
 }
 
 /**

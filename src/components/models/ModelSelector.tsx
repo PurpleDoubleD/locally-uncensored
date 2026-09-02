@@ -18,7 +18,7 @@ import { lmStudioSlotUpdate, adoptionReplacesBuiltinEngine } from '../../lib/lms
 import { nextProbeDelayMs } from '../../lib/probe-backoff'
 import { noChatBackendEnabled } from '../../lib/provider-visibility'
 import { cloudTeaserModels } from '../../lib/cloud-teaser-models'
-import { splitLuEngineRows, LU_ENGINE_GROUP } from '../../lib/lu-engine-rows'
+import { splitLuEngineRows, needsLuEngineHeading, LU_ENGINE_GROUP } from '../../lib/lu-engine-rows'
 import { isBuiltinEngineEntry, type InstalledModelLike } from '../../lib/lmstudio-match'
 import { ensureLuEngineIsChatProvider, LU_ENGINE_SWITCH_NOTE } from '../../api/lu-engine-switch'
 import { useLuEngineSwitchStore } from '../../stores/luEngineSwitchStore'
@@ -846,6 +846,10 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
       : []),
     ...groupByFamily(luEngineSplit.rest),
   ]
+  // The one rule, asked rather than copied (second review): one group normally
+  // draws no heading, except an LU Engine group under a foreign chat backend,
+  // where the heading is the warning that picking from it moves the backend.
+  const showHeadings = needsLuEngineHeading(groups.map((g) => g.family), luEngineHoldsChat)
   const hasOllamaModels = textModels.some(m => ('provider' in m && m.provider === 'ollama') || !('provider' in m))
   textModelsEmptyRef.current = textModels.length === 0
 
@@ -975,7 +979,7 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
                       Engine group under a foreign chat backend draws one
                       anyway, because that heading is the warning that picking
                       from it moves the backend (A14 review 7). */}
-                  {(groups.length > 1 || (!luEngineHoldsChat && family === LU_ENGINE_GROUP)) && (
+                  {showHeadings && (
                     <div className="px-2.5 pt-2 pb-0.5">
                       <span className="text-[0.55rem] font-medium uppercase tracking-widest text-gray-600">
                         {family}

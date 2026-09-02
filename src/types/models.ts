@@ -42,6 +42,11 @@ export interface CloudModel {
   /** Friendly picker label when the server provides one (LU Cloud /models
    *  `name`) — pickers fall back to the raw id otherwise. */
   displayName?: string
+  /** Where the file lies, for a row that IS a file: the LU Engine's GGUFs.
+   *  Absent for everything served over a network API. Two rows naming one
+   *  path are one model however differently the two backends spell its name,
+   *  which is what the Installed list uses to stop showing it twice. */
+  path?: string
 }
 
 // Image model (e.g. Stable Diffusion, SDXL, Fooocus, ComfyUI)
