@@ -90,6 +90,17 @@ export function ChatView() {
   const refreshDevices = useRemoteStore((s) => s.refreshDevices)
   const activeConv = conversations.find((c) => c.id === activeConversationId)
   const isRemoteChat = activeConv?.mode === 'remote'
+  // A chat that is open but has nothing in it yet. Counted the way MessageList
+  // counts: the system prompt and hidden bookkeeping are not something the user
+  // has said. Screen check on the bundle (David, 2026-09-02): after New Chat the
+  // main area went blank, because the recent list only stood on the no-chat
+  // screen. While the panel is collapsed and the chat is still empty, the list
+  // belongs above the composer instead.
+  const activeConvIsEmpty =
+    !!activeConv &&
+    (activeConv.mode ?? 'lu') === 'lu' &&
+    activeConv.messages.filter((m) => m.role !== 'system' && !m.hidden).length === 0
+  const showRecentsAboveComposer = !sidebarOpen && activeConvIsEmpty
   const isThisRemoteActive = isRemoteChat && remoteEnabled && dispatchedConversationId === activeConversationId
   const isThisRemoteStopped = isRemoteChat && !isThisRemoteActive
   const mobileConnectedCount = connectedDevices.length
@@ -263,16 +274,25 @@ export function ChatView() {
                   by default so it costs one line above the transcript. */}
               <PlanBar />
 
-              <MessageList
-                isGenerating={isGenerating}
-                isThisChatGenerating={activeGenerating}
-                isLoadingModel={isLoadingModel}
-                onRegenerate={regenerateMessage}
-                onEdit={editAndResend}
-                pendingApprovalId={pendingApproval?.id ?? null}
-                onApprove={approveToolCall}
-                onReject={rejectToolCall}
-              />
+              {showRecentsAboveComposer ? (
+                // Same flex slot the transcript would take, so the composer
+                // stays where it is at the bottom of the view.
+                <div className="flex-1 flex flex-col items-center justify-center overflow-y-auto scrollbar-thin py-4">
+                  <img src="/LU-monogram-bw.png" alt="" width={46} height={46} className="dark:invert-0 invert opacity-20 mb-5" />
+                  <RecentChats />
+                </div>
+              ) : (
+                <MessageList
+                  isGenerating={isGenerating}
+                  isThisChatGenerating={activeGenerating}
+                  isLoadingModel={isLoadingModel}
+                  onRegenerate={regenerateMessage}
+                  onEdit={editAndResend}
+                  pendingApprovalId={pendingApproval?.id ?? null}
+                  onApprove={approveToolCall}
+                  onReject={rejectToolCall}
+                />
+              )}
 
               {/* Remote session banners */}
               {isThisRemoteActive && (

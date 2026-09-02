@@ -19,11 +19,15 @@ const MAX_ROWS = 8
 
 export function RecentChats() {
   const conversations = useChatStore((s) => s.conversations)
+  const activeConversationId = useChatStore((s) => s.activeConversationId)
   const setActiveConversation = useChatStore((s) => s.setActiveConversation)
   const setView = useUIStore((s) => s.setView)
   const setChatMode = useCodexStore((s) => s.setChatMode)
 
   const recents = conversations
+    // The chat you are already looking at is not a place to go back to. On the
+    // no-chat screen nothing is active, so nothing is dropped there.
+    .filter((c) => c.id !== activeConversationId)
     .filter((c) => (c.mode ?? 'lu') === 'lu')
     .sort((a, b) => b.updatedAt - a.updatedAt)
     .slice(0, MAX_ROWS)
