@@ -11,7 +11,7 @@
  * Run: npx vitest run src/lib/__tests__/lu-engine-groups.test.ts
  */
 import { describe, it, expect } from 'vitest'
-import { splitLuEngineRows, groupInstalledByProvider, LU_ENGINE_GROUP } from '../lu-engine-rows'
+import { splitLuEngineRows, groupInstalledByProvider, dropDuplicateLuEngineRows, LU_ENGINE_GROUP } from '../lu-engine-rows'
 
 const lu = (n: string) => ({ name: `openai::${n}`, model: n, provider: 'openai', providerName: 'LU Engine' })
 const luOld = (n: string) => ({ name: `openai::${n}`, model: n, provider: 'openai', providerName: 'Built-in Engine' })
@@ -65,5 +65,60 @@ describe('groupInstalledByProvider', () => {
   it('gives a nameless row a heading instead of losing it', () => {
     const groups = groupInstalledByProvider([{ name: 'x', model: 'x', provider: 'ollama' }])
     expect(groups.map((g) => g.label)).toEqual(['Other'])
+  })
+})
+
+// ── A14 review, point 1: one file, not one model ─────────────────────────────
+
+describe('de-duplication asks about the FILE, never about the model', () => {
+  const luFile = (stem: string) => ({ name: `openai::${stem}`, model: stem, path: `/u/models/${stem}.gguf`, provider: 'openai', providerName: 'LU Engine' })
+  const lmsHas = (id: string) => [{ name: `openai::${id}`, model: id, provider: 'openai', providerName: 'LM Studio' }]
+
+  it('drops the row when LM Studio holds the very same quant', () => {
+    const kept = dropDuplicateLuEngineRows([luFile('Qwen2.5-0.5B-Instruct-Q8_0')], lmsHas('qwen2.5-0.5b-instruct@q8_0'))
+    expect(kept).toEqual([])
+  })
+
+  it('drops the row for an identical filename, whatever the quant is called', () => {
+    const kept = dropDuplicateLuEngineRows([luFile('Qwen2.5-0.5B-Instruct-Q8_0')], lmsHas('Qwen2.5-0.5B-Instruct-Q8_0.gguf'))
+    expect(kept).toEqual([])
+  })
+
+  // THE REVIEW FINDING. The Discover badge's matcher answers a catalogue
+  // question: a name with no quant means "any quant counts as installed". Used
+  // for de-duplication it made a quant-less GGUF in the LU Engine folder
+  // disappear behind whichever quant LM Studio happened to hold, and those are
+  // two different files with two different answer qualities.
+  it('keeps a quant-less GGUF beside any LM Studio quant of the same model', () => {
+    const row = luFile('Qwen2.5-0.5B-Instruct')
+    expect(dropDuplicateLuEngineRows([row], lmsHas('qwen2.5-0.5b-instruct@q4_k_m'))).toEqual([row])
+    expect(dropDuplicateLuEngineRows([row], lmsHas('qwen2.5-0.5b-instruct@q8_0'))).toEqual([row])
+    // And the mirror image: LM Studio holding a quant-less collapsed id does
+    // not swallow a named quant on our side either.
+    const q8 = luFile('Qwen2.5-0.5B-Instruct-Q8_0')
+    expect(dropDuplicateLuEngineRows([q8], lmsHas('qwen/qwen2.5-0.5b-instruct'))).toEqual([q8])
+  })
+
+  // NEGATIVE CONTROL: two quants of one model are two files.
+  it('keeps both when the quants differ', () => {
+    const row = luFile('Qwen2.5-0.5B-Instruct-Q8_0')
+    expect(dropDuplicateLuEngineRows([row], lmsHas('qwen2.5-0.5b-instruct@q4_k_m'))).toEqual([row])
+  })
+
+  // NEGATIVE CONTROL: Ollama is not LM Studio. Its blob store holds a second
+  // copy, so hiding the GGUF there would hide a real download.
+  it('never lets an Ollama row hide a GGUF', () => {
+    const row = luFile('Qwen2.5-0.5B-Instruct-Q8_0')
+    const ollamaRows = [{ name: 'qwen2.5:0.5b-instruct-q8_0', model: 'qwen2.5:0.5b-instruct-q8_0', provider: 'ollama', providerName: 'Ollama' }]
+    expect(dropDuplicateLuEngineRows([row], ollamaRows)).toEqual([row])
+  })
+
+  // NEGATIVE CONTROL: genuinely different models must never collapse, however
+  // similar the names look.
+  it('keeps two different models apart', () => {
+    const row = luFile('Qwen2.5-0.5B-Instruct-Q8_0')
+    expect(dropDuplicateLuEngineRows([row], lmsHas('gemma-3-4b-it@q8_0'))).toEqual([row])
+    // An abliterated finetune is a different model, same quant or not.
+    expect(dropDuplicateLuEngineRows([row], lmsHas('qwen2.5-0.5b-instruct-abliterated@q8_0'))).toEqual([row])
   })
 })

@@ -20,7 +20,7 @@
  *     of blending into the list.
  */
 
-import { matchesLmStudioInstalled, isBuiltinEngineEntry, type InstalledModelLike } from './lmstudio-match'
+import { isSameGgufFile, isLmStudioEntry, isBuiltinEngineEntry, type InstalledModelLike } from './lmstudio-match'
 
 /** The heading LU Engine rows sit under, in Installed and in the picker. */
 export const LU_ENGINE_GROUP = 'LU Engine'
@@ -38,21 +38,44 @@ export const LU_ENGINE_GROUP = 'LU Engine'
  * under its own names, so an Ollama row and a GGUF on disk are two copies of
  * the model and not two views of one file, and collapsing them would hide a
  * real second copy.
+ *
+ * A14 review: this asks `isSameGgufFile`, not the Discover badge's matcher.
+ * That one answers a catalogue question and treats a name without a quant as
+ * "any quant will do", so a quant-less GGUF in the LU Engine folder would have
+ * been swallowed by whatever quant LM Studio happened to hold. The two files
+ * differ; only one of them is on the user's disk twice. No quant on either
+ * side means no match here, so the row stays.
  */
 export function dropDuplicateLuEngineRows<T extends InstalledModelLike>(
   bundled: T[],
   alreadyListed: InstalledModelLike[],
 ): T[] {
-  if (bundled.length === 0 || alreadyListed.length === 0) return bundled
-  return bundled.filter((row) => {
-    const stem = row.model || row.name || ''
-    if (!stem) return true
-    // The matcher speaks GGUF filenames and the bundled row carries the file
-    // stem, so the extension goes back on. It requires the quant to agree
-    // whenever the filename names one, which is what keeps two quants of the
-    // same model from collapsing into each other.
-    return !matchesLmStudioInstalled(`${stem}.gguf`, alreadyListed)
-  })
+  if (bundled.length === 0) return bundled
+  const lmStudio = alreadyListed.filter(isLmStudioEntry)
+  if (lmStudio.length === 0) return bundled
+  return bundled.filter((row) => !lmStudio.some((other) => sameFile(row, other)))
+}
+
+/** Every id a row can be recognised by. LM Studio reports its own key, our own
+ *  rows carry the file stem, and both may carry a full path. */
+function idsOf(m: InstalledModelLike): string[] {
+  const raw = m as InstalledModelLike & { path?: unknown }
+  return [m.model, m.name, m.lmsKey, typeof raw.path === 'string' ? raw.path : undefined]
+    .filter((v): v is string => typeof v === 'string' && v.length > 0)
+}
+
+/** Two rows pointing at one file on disk. */
+function sameFile(a: InstalledModelLike, b: InstalledModelLike): boolean {
+  const idsA = idsOf(a)
+  const idsB = idsOf(b)
+  // The same path is the same file, whatever the two sides call the model.
+  for (const x of idsA) {
+    for (const y of idsB) {
+      if (x === y) return true
+      if (isSameGgufFile(x, y)) return true
+    }
+  }
+  return false
 }
 
 /**

@@ -66,7 +66,7 @@ export function modelIdentity(s: string): string {
 }
 
 /** An LM Studio entry in the installed-model list. */
-function isLmStudioEntry(m: InstalledModelLike): boolean {
+export function isLmStudioEntry(m: InstalledModelLike): boolean {
   if (m.provider !== 'openai') return false
   const pname = (m.providerName || '').toLowerCase()
   return pname.includes('lm studio') || pname.includes('lmstudio')
@@ -81,6 +81,39 @@ function isLmStudioEntry(m: InstalledModelLike): boolean {
 export function isBuiltinEngineEntry(m: InstalledModelLike | null | undefined): boolean {
   if (!m || m.provider !== 'openai') return false
   return isLuEngineName(m.providerName)
+}
+
+/**
+ * Are these two ids the same FILE, not merely the same model.
+ *
+ * A14 review: `matchesLmStudioInstalled` is the wrong question for
+ * de-duplication and the difference is a whole quant. That matcher serves the
+ * Discover badge, where a catalogue row without a quant in its filename means
+ * "any quant of this counts as installed", so rule (2) returns a match for a
+ * quant-less name against ANY quant on disk. Reused for de-duplication it
+ * reads as: `Qwen2.5-0.5B-Instruct.gguf` in the LU Engine folder is the same
+ * thing as `qwen2.5-0.5b-instruct@q4_k_m` in LM Studio. It is not. It is a
+ * different file, a different download and a different answer quality, and
+ * hiding it would hide a model the user has.
+ *
+ * So this one never guesses across a missing quant:
+ *   (a) the same normalised basename, which already carries the quant, or
+ *   (b) the same model identity AND both sides naming the same quant.
+ * A name with no quant matches only under (a).
+ */
+export function isSameGgufFile(a: string, b: string): boolean {
+  const baseA = normalBase(a)
+  const baseB = normalBase(b)
+  if (!baseA || !baseB) return false
+  if (baseA === baseB) return true
+  const idA = modelIdentity(a)
+  const idB = modelIdentity(b)
+  // The length floor is the one `findInstalled` uses: a two-character identity
+  // collides with half the catalogue.
+  if (!idA || idA.length < 5 || idA !== idB) return false
+  const quantA = extractQuant(a)
+  const quantB = extractQuant(b)
+  return !!quantA && !!quantB && quantA === quantB
 }
 
 /**
