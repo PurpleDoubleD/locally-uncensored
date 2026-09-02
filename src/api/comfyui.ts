@@ -550,6 +550,53 @@ export async function refreshComfyModels(maxAttempts = 3): Promise<boolean> {
 
 let cachedVRAM: number | null = null
 
+/**
+ * Is this /system_stats entry ComfyUI's CPU pseudo-device?
+ *
+ * When torch has no usable GPU backend ComfyUI still reports one device, and
+ * for that one `vram_total` is `psutil.virtual_memory().total`. It is system
+ * RAM wearing a VRAM field's name.
+ */
+function isCpuDevice(dev: any): boolean {
+  const type = String(dev?.type ?? '').trim().toLowerCase()
+  const name = String(dev?.name ?? '').trim().toLowerCase()
+  return type === 'cpu' || name === 'cpu' || name.startsWith('cpu:') || name.startsWith('cpu ')
+}
+
+/**
+ * The largest real VRAM figure in a /system_stats payload, in bytes, or null.
+ *
+ * Zhorts, GitHub #123: the Model Manager fit check showed "62 GB GPU · 62 GB
+ * RAM" on a box with a 16 GB RX 9070 XT and 64 GB of RAM, the same number
+ * twice, while the Settings page a tab away had the correct 16 GB. This is
+ * where the 62 came from. ROCm was not detected, so his ComfyUI ran on the
+ * processor, so /system_stats carried exactly one device, the CPU one, whose
+ * `vram_total` is the machine's RAM. The old reader took `devices[0]` whatever
+ * it was, and DiscoverModels then kept the LARGER of that and the honest 16 GB
+ * from detect_gpus.
+ *
+ * Two rules, and the second matters as much as the first:
+ *  - CPU entries are not a GPU and never contribute a size.
+ *  - When nothing else is left the answer is null, which the UI renders as
+ *    "unknown". A fit check that says nothing is a fit check a user can still
+ *    trust; one that says 62 GB sends him to download a model that cannot run.
+ *
+ * Apple's `mps` device is NOT excluded. Unified memory really is the VRAM
+ * there, so the number is right for the machine it comes from.
+ *
+ * Pure and exported so the case above can be a test instead of a screenshot.
+ */
+export function pickDeviceVramBytes(devices: unknown): number | null {
+  if (!Array.isArray(devices)) return null
+  let best = 0
+  for (const dev of devices) {
+    if (isCpuDevice(dev)) continue
+    const bytes = (dev as any)?.vram_total
+    if (typeof bytes === 'number' && Number.isFinite(bytes) && bytes > best) best = bytes
+  }
+  return best > 0 ? best : null
+}
+
 export async function getSystemVRAM(): Promise<number | null> {
   if (cachedVRAM !== null) return cachedVRAM
   try {
@@ -557,9 +604,8 @@ export async function getSystemVRAM(): Promise<number | null> {
     if (!res.ok) return null
     const data = await res.json()
     // ComfyUI returns top-level devices[].vram_total in bytes
-    const devices = data?.devices ?? []
-    if (devices.length > 0) {
-      const vramBytes = devices[0]?.vram_total ?? 0
+    const vramBytes = pickDeviceVramBytes(data?.devices)
+    if (vramBytes !== null) {
       cachedVRAM = Math.round(vramBytes / (1024 * 1024 * 1024)) // bytes → GB
       return cachedVRAM
     }

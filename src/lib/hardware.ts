@@ -19,6 +19,8 @@ interface DetectedGpu {
   name: string;
   memory_mib: number | null;
   source: string;
+  /** `gcnArchName` from the HIP SDK ("gfx1201"), when a tool named it. */
+  arch?: string | null;
 }
 
 /**
@@ -91,4 +93,32 @@ export function bundleVramNeedGb(bundle: { vramRequired?: string; totalSizeGB?: 
   const single = s.match(/(\d+)/)
   if (single) return parseInt(single[1])
   return bundle.totalSizeGB ?? 0
+}
+
+// ─── AMD compute architecture ───────────────────────────────────────
+
+let cachedAmdArch: string | null | undefined = undefined;
+
+/**
+ * The gfx target of the first AMD card, as the HIP SDK's own `hipinfo` named
+ * it, or null when no tool named one.
+ *
+ * Read, never derived: the mapping from a marketing name ("RX 9070 XT") to a
+ * gfx target is AMD's to publish, and a table of it in here would be wrong the
+ * day a new card ships. Used to make the hipErrorInvalidValue message name the
+ * architecture the user has to match (A12, artoriuskurokami, RDNA4).
+ *
+ * Cached because it cannot change while the app runs, and fail-soft because a
+ * message that says a little less is better than an error path that throws.
+ */
+export async function getAmdGpuArch(): Promise<string | null> {
+  if (cachedAmdArch !== undefined) return cachedAmdArch;
+  try {
+    const gpus = await backendCall<DetectedGpu[]>("detect_gpus");
+    const amd = (Array.isArray(gpus) ? gpus : []).find((g) => g.vendor === "amd" && !!g.arch);
+    cachedAmdArch = amd?.arch ?? null;
+  } catch {
+    cachedAmdArch = null;
+  }
+  return cachedAmdArch;
 }

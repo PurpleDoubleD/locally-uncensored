@@ -47,6 +47,7 @@
 import { backendCall, ollamaUrl, localFetch, isOllamaLocal, isWindows } from './backend'
 import { listRunningModels, loadModel, unloadModel } from './ollama'
 import { startBundledEngine } from './engine'
+import { getAmdGpuArch } from '../lib/hardware'
 import { useSettingsStore } from '../stores/settingsStore'
 import {
   getImageModels,
@@ -1488,7 +1489,10 @@ async function pollAndExtract(promptId: string, prompt: string, kindLabel: strin
           || history.status.messages?.map((m: any) => m?.[1]?.message).filter(Boolean).join(' | ')
           || history.status.messages?.[0]?.[1]?.message
           || 'Unknown ComfyUI error'
-        const hint = comfyErrorHint(errEntry?.node_type, errEntry?.exception_type, String(rawMsg))
+        // The architecture only matters for one branch and costs one cached
+        // Tauri call, which is cheaper than the render that just failed.
+        const arch = await getAmdGpuArch().catch(() => null)
+        const hint = comfyErrorHint(errEntry?.node_type, errEntry?.exception_type, String(rawMsg), arch)
         return `${kindLabel} generation failed: ${rawMsg}${hint ? `\n\n${hint}` : ''}`
       }
       const projected = pace.projectedTotalMs()
@@ -1520,7 +1524,12 @@ async function pollAndExtract(promptId: string, prompt: string, kindLabel: strin
  * Returns '' when we have nothing better to add than the verbatim error.
  * Exported + pure for the unit tests.
  */
-export function comfyErrorHint(nodeType: string | undefined, _excType: string | undefined, message: string): string {
+export function comfyErrorHint(
+  nodeType: string | undefined,
+  _excType: string | undefined,
+  message: string,
+  gpuArch?: string | null,
+): string {
   const m = message.toLowerCase()
   // FramePack wrapper version mismatch (David 2026-06-11, RTX 3060): the
   // installed ComfyUI-FramePackWrapper's LoadFramePackModel produces a
@@ -1542,6 +1551,23 @@ export function comfyErrorHint(nodeType: string | undefined, _excType: string | 
       m.includes('hiperrornobinaryforgpu') ||
       m.includes('tensilelibrary')) {
     return 'Your AMD card was found and used, but the ROCm build of PyTorch in this ComfyUI environment carries no compute kernels for this particular chip, so the first step of the render had nothing to run. Rebuilding the environment installs the same wheels and will not change this. Set Settings → Hardware → ComfyUI GPU to Force CPU to render on the processor instead: much slower, but it completes. Running ComfyUI with HSA_OVERRIDE_GFX_VERSION=10.3.0 is the community workaround for RDNA 2 cards; it is not supported by AMD and LU does not set it for you.'
+  }
+  // A12 (artoriuskurokami, Discord 2026-09-02, RX 9070 XT): image generation
+  // dies on `CUDA error: invalid argument / Search for 'hipErrorInvalidValue'`
+  // while the same run on the processor completes. The card is RDNA 4, which is
+  // new enough that a ROCm PyTorch built before it has no kernels for the
+  // target, and HIP rejects the very first launch instead of saying so.
+  //
+  // The architecture is NAMED here when a tool named it (gpuArch comes from the
+  // HIP SDK's hipinfo via detect_gpus) and otherwise the user is pointed at the
+  // two commands that print it. Nothing in this string is a version or a table
+  // of which card is which target: both sides are read off the machine.
+  if (m.includes('hiperrorinvalidvalue')) {
+    const mine = gpuArch ? `Your card reports ${gpuArch}. ` : ''
+    const check = gpuArch
+      ? `${gpuArch} has to appear in the list printed by`
+      : 'Read your card\'s target from the gcnArchName line of hipinfo in the HIP SDK\'s bin folder, then check that it appears in the list printed by'
+    return `Your AMD card was found and the render started, but the first HIP call came back with hipErrorInvalidValue. On a recent Radeon this is almost always an architecture mismatch: the chip reports one gfx target and the ROCm build of PyTorch in this ComfyUI environment carries kernels for other ones. ${mine}${check}: python -c "import torch; print(torch.cuda.get_arch_list())" run inside the ComfyUI environment. If it is missing there, rebuilding this environment installs the same wheels and will not add it; you need a PyTorch ROCm build that names your target. Set Settings, Hardware, ComfyUI GPU to Force CPU to finish the render on the processor in the meantime.`
   }
   if (m.includes('out of memory') || m.includes('outofmemory') || _excType === 'torch.OutOfMemoryError') {
     return 'Ran out of GPU memory. Try a shorter clip / lower resolution, set VRAM hand-off to "always" in Settings so the chat model is evicted first, or pick a lighter model.'
