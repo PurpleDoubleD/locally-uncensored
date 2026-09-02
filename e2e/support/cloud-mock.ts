@@ -143,6 +143,12 @@ export async function routeCloud(page: Page, scenario: CloudScenario): Promise<v
               max_output_length: 8192,
               input_modalities: ['text'],
               think: 'toggle',
+              // The effort ladder, so the composer's effort control has
+              // something to render on the mocked catalogue too. The Llama
+              // entry above deliberately declares none: think 'never' models
+              // get no ladder from the server, and no control from us.
+              reasoning_effort_levels: ['low', 'medium', 'high'],
+              reasoning_effort_default: 'high',
             },
           ],
         }),

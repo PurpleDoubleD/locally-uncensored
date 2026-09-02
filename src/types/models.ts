@@ -34,6 +34,11 @@ export interface CloudModel {
   supportsTools?: boolean
   supportsVision?: boolean
   thinkMode?: 'toggle' | 'always' | 'never'
+  /** The reasoning rungs this model accepts, ascending, and the rung it
+   *  defaults to (LU Cloud /models). Absent = no effort control and the old
+   *  fixed behaviour. See lib/effort.ts. */
+  effortLevels?: string[]
+  effortDefault?: string
   /** Friendly picker label when the server provides one (LU Cloud /models
    *  `name`) — pickers fall back to the raw id otherwise. */
   displayName?: string

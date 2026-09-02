@@ -194,6 +194,12 @@ export function useModels() {
               provider: pm.provider, providerName: pm.providerName,
               contextLength: pm.contextLength, supportsTools: pm.supportsTools, supportsVision: pm.supportsVision,
               thinkMode: pm.thinkMode,
+              // The effort ladder rides along field by field, like thinkMode.
+              // The Ollama branch above is the standing warning: a literal that
+              // rebuilds the model and stops one field short is how a server
+              // answer dies quietly halfway to the composer.
+              effortLevels: pm.effortLevels,
+              effortDefault: pm.effortDefault,
               // Friendly server label (LU Cloud) — pickers prefer it over the id.
               displayName: pm.name !== pm.id ? pm.name : undefined,
             } satisfies CloudModel

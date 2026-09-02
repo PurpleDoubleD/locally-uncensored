@@ -21,6 +21,7 @@ import { parseRetryAfter } from '../../lib/http-status'
 import { localFetch, localFetchStream, isPrivateOrLanHost, isDirectFetchAllowed, hostnameOf, ensureProxyAllowsHost, backendCall } from '../backend'
 import { ensureBuiltinEngineAlive, explainDeadEngine, explainEngineTransportMessage, isManagedBuiltinSlot } from '../builtin-ensure'
 import { applyTemplateContract } from './normalize-system'
+import { clampEffort, hasEffortLadder, lowerEffort, DEFAULT_EFFORT } from '../../lib/effort'
 
 // Transport routing lives in the `useLocalProxy` getter (below) plus the shared
 // host helpers in backend.ts. A direct webview fetch only works for hosts the
@@ -83,6 +84,13 @@ interface OpenAIModelEntry {
   // it → the mapping falls back to `true` (optimistic, corrected at runtime).
   supports_tools?: boolean
   think?: 'toggle' | 'always' | 'never'
+  // The reasoning rungs this model accepts, ascending, and the one it defaults
+  // to. LU Cloud sends both for every model that reasons and neither for a
+  // `think: 'never'` one. Absent everywhere else, and absent on an LU Cloud
+  // deployment that predates 2.6.8, which is why every reader below treats a
+  // missing ladder as "keep doing exactly what you did before".
+  reasoning_effort_levels?: string[]
+  reasoning_effort_default?: string
 }
 
 // ── Known context lengths for popular models ───────────────────
@@ -273,12 +281,54 @@ export class OpenAIProvider implements ProviderClient {
    * answers 400. So sendChat walks the knob down instead of swapping it, and
    * remembers how far it had to walk, per endpoint and model.
    */
-  private thinkingEffort(model: string, thinking: boolean | undefined): string | undefined {
-    if (thinking === undefined) return undefined
-    const walked = OpenAIProvider.effortMemory.get(this.catalogKey(model))
-    if (thinking === true) return walked?.on === 'omit' ? undefined : 'high'
-    if (walked?.off === 'omit') return undefined
-    return walked?.off === 'minimal' ? 'minimal' : 'none'
+  private thinkingEffort(
+    model: string,
+    thinking: boolean | undefined,
+    options?: ChatOptions,
+  ): string | undefined {
+    const levels = options?.effortLevels
+    const ladder = hasEffortLadder(levels)
+    // No wish and no declared ladder: send nothing, exactly as before. A model
+    // that always reasons and a model that never does both arrive here with
+    // `thinking` undefined, and on a server that does not declare rungs they
+    // keep deciding for themselves.
+    if (thinking === undefined && !ladder) return undefined
+
+    // OFF stays OFF, on its own lane and with its own memory. A model whose
+    // catalogue entry says it always reasons never reaches this branch: the
+    // composer keeps its Think button locked on, so 'none' is never asked for
+    // it. That matters in money: on GLM 5.3 'none' does not stop the thinking,
+    // it only stops the upstream from separating it, so the monologue lands in
+    // the customer's chat window and costs MORE than sending nothing.
+    if (thinking === false) {
+      const walkedOff = OpenAIProvider.effortMemory.get(this.effortKey(model, 'off'))
+      if (walkedOff?.off === 'omit') return undefined
+      return walkedOff?.off === 'minimal' ? 'minimal' : 'none'
+    }
+
+    // ON: the wish, clamped onto the rungs this model really has. Without a
+    // ladder that is DEFAULT_EFFORT, which is the 'high' this client has always
+    // sent.
+    const wanted = ladder
+      ? clampEffort(levels, options?.reasoningEffort ?? DEFAULT_EFFORT)
+      : DEFAULT_EFFORT
+    const walked = OpenAIProvider.effortMemory.get(this.effortKey(model, 'on', wanted))
+    if (walked?.on === 'omit') return undefined
+    return walked?.on ?? wanted
+  }
+
+  /**
+   * Memory key for one lane of the walk.
+   *
+   * The OFF lane is a single switch position, so one key per model does. The ON
+   * lane has as many positions as the model has rungs and they are NOT
+   * interchangeable: Qwen/Qwen3.8-27B answers 400 to 'high' and serves
+   * 'medium' without complaint (live measurement 2026-09-02). Keyed by rung,
+   * what a refused 'max' teaches can never be charged to 'low'.
+   */
+  private effortKey(model: string, lane: 'on' | 'off', rung?: string): string {
+    const base = this.catalogKey(model)
+    return lane === 'off' ? base : `${base}#${rung ?? DEFAULT_EFFORT}`
   }
 
   /**
@@ -315,11 +365,13 @@ export class OpenAIProvider implements ProviderClient {
     return { enable_thinking: thinking }
   }
 
-  /** Remember a walk, for one direction of the switch only. */
-  private rememberEffort(model: string, lane: 'on' | 'off', value: 'minimal' | 'omit'): void {
-    const key = this.catalogKey(model)
+  /** Remember a walk, for one lane and one rung only. */
+  private rememberEffort(key: string, lane: 'on' | 'off', value: string): void {
     const prev = OpenAIProvider.effortMemory.get(key) ?? {}
-    OpenAIProvider.effortMemory.set(key, { ...prev, [lane]: value })
+    const next = { ...prev }
+    if (lane === 'on') next.on = value
+    else next.off = value === 'omit' ? 'omit' : 'minimal'
+    OpenAIProvider.effortMemory.set(key, next)
   }
 
   /**
@@ -344,6 +396,7 @@ export class OpenAIProvider implements ProviderClient {
     body: Record<string, any>,
     signal: AbortSignal | undefined,
     fetcher: (url: string, init: any) => Promise<Response>,
+    levels?: string[],
   ): Promise<Response> {
     const post = () => fetcher(`${this.baseUrl}/chat/completions`, {
       method: 'POST',
@@ -354,8 +407,13 @@ export class OpenAIProvider implements ProviderClient {
     const refused = (res: Response) => !res.ok && (res.status === 400 || res.status === 422)
 
     const asked = body.reasoning_effort as string | undefined
+    // 'none' and 'minimal' are the two ways of saying off; every other rung is
+    // the ON lane. Reading it off the value rather than off 'high' is what lets
+    // 'low', 'medium' and 'max' keep their own memory instead of borrowing the
+    // off switch's.
     const lane: 'on' | 'off' | undefined =
-      asked === undefined ? undefined : asked === 'high' ? 'on' : 'off'
+      asked === undefined ? undefined : asked === 'none' || asked === 'minimal' ? 'off' : 'on'
+    const memoryKey = lane === undefined ? '' : this.effortKey(model, lane, asked)
 
     // Stop ends the walk. The real fetch rejects on an aborted signal on its
     // own, but localFetchStream's proxy path used to fire the request anyway,
@@ -367,6 +425,22 @@ export class OpenAIProvider implements ProviderClient {
     if (!stopped() && refused(res) && body.reasoning_effort === 'none') {
       body.reasoning_effort = 'minimal'
       res = await post()
+    }
+
+    // ON lane: step DOWN the model's own ladder before giving the knob up.
+    // Qwen/Qwen3.8-27B refuses 'high' and 'max' with a 400 and reasons happily
+    // at 'medium' (live measurement 2026-09-02); dropping the field instead
+    // hands the turn to the upstream default, which is the most expensive
+    // setting there is. The walk stops at the first rung that is accepted, so
+    // an accepted rung is never thrown away for the sake of the next one.
+    if (lane === 'on' && levels?.length) {
+      for (let step = levels.length; step > 0; step--) {
+        if (stopped() || !refused(res)) break
+        const lower = lowerEffort(levels, body.reasoning_effort as string)
+        if (!lower) break
+        body.reasoning_effort = lower
+        res = await post()
+      }
     }
 
     // Its own rung, ahead of both the knob and stream_options: a server that
@@ -391,8 +465,8 @@ export class OpenAIProvider implements ProviderClient {
 
     if (res.ok && lane) {
       const survived = body.reasoning_effort as string | undefined
-      if (survived === undefined) this.rememberEffort(model, lane, 'omit')
-      else if (survived !== asked) this.rememberEffort(model, lane, 'minimal')
+      if (survived === undefined) this.rememberEffort(memoryKey, lane, 'omit')
+      else if (survived !== asked) this.rememberEffort(memoryKey, lane, survived)
     }
 
     return res
@@ -476,7 +550,7 @@ export class OpenAIProvider implements ProviderClient {
     // Reasoning-model knob (o1, o3, gpt-5-thinking, etc.). Toggle ON → "high",
     // toggle OFF → "none". Non-reasoning models simply ignore the field; an
     // endpoint that rejects it is handled by the ladder in sendChat.
-    const effort = this.thinkingEffort(model, options?.thinking)
+    const effort = this.thinkingEffort(model, options?.thinking, options)
     if (effort) body.reasoning_effort = effort
     // The knob a template-rendering backend actually reads. See
     // templateThinkingKwargs for the counter-check that reasoning_effort
@@ -498,7 +572,7 @@ export class OpenAIProvider implements ProviderClient {
 
     if (this.useLocalProxy) await ensureProxyAllowsHost(this.baseUrl)
     const fetcher = this.useLocalProxy ? localFetchStream : fetch
-    const res = await this.sendChat(model, body, options?.signal, fetcher as any)
+    const res = await this.sendChat(model, body, options?.signal, fetcher as any, options?.effortLevels)
 
     if (!res.ok) {
       throw await this.parseError(res)
@@ -643,7 +717,7 @@ export class OpenAIProvider implements ProviderClient {
     if (options?.topP !== undefined) body.top_p = options.topP
     await this.applyMaxTokens(model, body, options)
     // Same reasoning_effort gate as chatStream.
-    const effort = this.thinkingEffort(model, options?.thinking)
+    const effort = this.thinkingEffort(model, options?.thinking, options)
     if (effort) body.reasoning_effort = effort
     // Same template-kwargs gate as chatStream.
     const tmplKwargs = this.templateThinkingKwargs(options?.thinking)
@@ -655,7 +729,7 @@ export class OpenAIProvider implements ProviderClient {
 
     if (this.useLocalProxy) await ensureProxyAllowsHost(this.baseUrl)
     const fetcher = this.useLocalProxy ? localFetch : fetch
-    const res = await this.sendChat(model, body, options?.signal, fetcher as any)
+    const res = await this.sendChat(model, body, options?.signal, fetcher as any, options?.effortLevels)
 
     if (!res.ok) {
       throw await this.parseError(res, tools.length > 0)
@@ -745,6 +819,11 @@ export class OpenAIProvider implements ProviderClient {
         supportsTools: m.supports_tools ?? true,
         supportsVision: m.input_modalities?.includes('image') || undefined,
         thinkMode: m.think,
+        // Straight through, no invention: a server that does not declare the
+        // ladder leaves both undefined, and undefined is what switches the
+        // whole effort feature off for this model.
+        effortLevels: m.reasoning_effort_levels,
+        effortDefault: m.reasoning_effort_default,
       }
     })
   }
@@ -894,7 +973,10 @@ export class OpenAIProvider implements ProviderClient {
    * the switch ON. One shared entry made a single OFF message silence the
    * user's thinking switch for the rest of the session.
    */
-  private static effortMemory = new Map<string, { on?: 'omit'; off?: 'minimal' | 'omit' }>()
+  // Keyed by effortKey(): one entry per model for the OFF lane, one per model
+  // AND rung for the ON lane. `on` holds either 'omit' or the rung the upstream
+  // actually accepted after a walk down the ladder.
+  private static effortMemory = new Map<string, { on?: string; off?: 'minimal' | 'omit' }>()
 
   /**
    * Endpoints that refused `chat_template_kwargs`. Keyed by base URL, not by
