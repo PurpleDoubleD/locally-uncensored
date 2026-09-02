@@ -33,7 +33,7 @@ import { cloudModelRow } from '../../../lib/cloud-model-row'
 import { useSettingsStore } from '../../../stores/settingsStore'
 import { useModelStore } from '../../../stores/modelStore'
 import { DEFAULT_SETTINGS } from '../../../lib/constants'
-import type { AIModel } from '../../../types/models'
+import type { CloudModel } from '../../../types/models'
 
 vi.mock('../VoiceButton', () => ({ VoiceButton: () => null }))
 
@@ -75,8 +75,10 @@ function serveCatalogue() {
   }) as typeof fetch)
 }
 
-/** The real chain: HTTP, provider, row mapper, store. */
-async function loadCatalogueFrom(baseUrl: string): Promise<AIModel[]> {
+/** The real chain: HTTP, provider, row mapper, store. CloudModel, not the
+ *  AIModel union: the fields under test live on the cloud row, and narrowing
+ *  them away in the test would hide exactly the loss this file exists for. */
+async function loadCatalogueFrom(baseUrl: string): Promise<CloudModel[]> {
   const provider = new OpenAIProvider({
     id: 'lu-cloud', name: 'LU Cloud', enabled: true, baseUrl, apiKey: 'test-token', isLocal: false,
   })
