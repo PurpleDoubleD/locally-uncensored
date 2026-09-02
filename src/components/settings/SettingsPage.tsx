@@ -264,7 +264,7 @@ function WorkflowSection() {
 // Models tab stayed empty beside a folder full of models. It is read now
 // (lib/custom-model-dir.ts), and the copy says what it does.
 
-function HfDownloadPathSetting() {
+export function HfDownloadPathSetting() {
   const override = useSettingsStore(s => s.settings.hfDownloadPathOverride)
   const updateSettings = useSettingsStore(s => s.updateSettings)
   const [draft, setDraft] = useState(override)
@@ -293,6 +293,11 @@ function HfDownloadPathSetting() {
     void syncCustomModelDir(override).then((res) => { if (alive) setComfy(res) })
     return () => { alive = false }
   }, [override])
+
+  // One line, and only when there is something to say. It also swallows the
+  // ComfyUI handoff note below: a folder that cannot be read has one problem,
+  // not two, and two amber lines saying the same thing read as two faults.
+  const scanNote = modelDirScanNote(scan?.status)
 
   function apply(next: string) {
     setDraft(next)
@@ -339,14 +344,39 @@ function HfDownloadPathSetting() {
           </button>
         )}
       </div>
-      {override && scan?.status === 'truncated' && (
-        <div className="text-[0.6rem] leading-relaxed text-amber-600 dark:text-amber-400">
-          That folder is too large to read to the end, so the list below it is what LU found before it stopped. Point this at the folder that actually holds the models rather than at a whole drive.
+      {override && scanNote && (
+        <div data-testid="model-dir-scan-note" className="text-[0.6rem] leading-relaxed text-amber-600 dark:text-amber-400">
+          {scanNote}
         </div>
       )}
-      {override && comfy !== null && <CustomModelDirNote result={comfy} />}
+      {override && comfy !== null && !scanNote && <CustomModelDirNote result={comfy} />}
     </div>
   )
+}
+
+/**
+ * What the folder scan found, in one sentence, or nothing at all.
+ *
+ * A13, Windows counter-check 2026-09-02: `C:\` as the model folder stayed
+ * fully operable and said nothing. Rust had the answer the whole time (the
+ * walk has a five second deadline and a 20 000 entry budget per folder and
+ * reports `truncated` when it runs out), the panel simply never showed it, and
+ * a partial list that looks complete is the kind of thing people debug for an
+ * hour.
+ *
+ * `ok` is silence on purpose: a folder that scanned clean needs no line.
+ */
+export function modelDirScanNote(status: ScannedDir['status'] | null | undefined): string {
+  if (status === 'truncated') {
+    return 'This folder is too big to scan completely. Only the first files were read; pick a folder that holds just your models.'
+  }
+  if (status === 'unreachable') {
+    return 'This folder cannot be reached right now (drive disconnected or path missing). Models in it are hidden until it is back.'
+  }
+  if (status === 'unusable') {
+    return 'This path is not a folder LU can read.'
+  }
+  return ''
 }
 
 /**

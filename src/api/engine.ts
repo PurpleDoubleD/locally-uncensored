@@ -274,10 +274,25 @@ export function lastScanDirs(): ScannedDir[] {
   return lastDirs
 }
 
+/** Same folder, written two ways. Windows arrives with backslashes and any
+ *  case, and `C:\\` and `c:/` are one folder; the trailing separator is noise
+ *  on every platform. Only ever used to find the row for a folder WE asked to
+ *  be scanned, so folding case cannot pull in a stranger's folder. */
+function samePath(a: string, b: string): boolean {
+  const key = (p: string) => String(p ?? '').replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase()
+  return key(a) === key(b)
+}
+
 /** The user's own folder from the last listing, or null when none was set (or
- *  when it was the app folder under another name, which Rust folds away). */
+ *  when it was the app folder under another name, which Rust folds away).
+ *
+ *  Matched by path rather than by position: the app dir is row 0 today, but a
+ *  row read off an index is a row that silently reports the wrong folder the
+ *  moment that stops being true. */
 export function lastCustomScanDir(): ScannedDir | null {
-  return lastDirs[1] ?? null
+  const wanted = customModelDirs()[0]
+  if (!wanted) return null
+  return lastDirs.find((d) => samePath(d.path, wanted)) ?? null
 }
 
 /** List downloaded GGUFs in the app models dir and in the user's own model

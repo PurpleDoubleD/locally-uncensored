@@ -147,6 +147,39 @@ describe('the panel is told how the scan fared, not only what it found', () => {
     expect(lastCustomScanDir()).toBeNull()
   })
 
+  // A13: the row is found by PATH, not by position. Read off an index, the
+  // panel reports the app folder's verdict about the user's folder the day the
+  // order changes, and Windows writes the same folder in more than one way.
+  it('finds the row for the folder that was asked about, whatever its position', async () => {
+    setFolder(WINDOWS_FOLDER)
+    backendCall.mockResolvedValue({
+      dir: '/app/models',
+      dirs: [
+        { path: 'g:/ai/models\\', status: 'unreachable' },
+        { path: '/app/models', status: 'ok' },
+      ],
+      models: [],
+    })
+    await listBundledModels()
+    expect(lastCustomScanDir()?.status).toBe('unreachable')
+  })
+
+  // Negative control: a verdict about SOME other folder is not a verdict about
+  // this one, and silence beats a wrong accusation.
+  it('reports nothing when the answer does not mention the folder at all', async () => {
+    setFolder(WINDOWS_FOLDER)
+    backendCall.mockResolvedValue({
+      dir: '/app/models',
+      dirs: [
+        { path: '/app/models', status: 'ok' },
+        { path: 'D:\\somewhere\\else', status: 'truncated' },
+      ],
+      models: [],
+    })
+    await listBundledModels()
+    expect(lastCustomScanDir()).toBeNull()
+  })
+
   // Negative control: with no folder of his own there is no second row, so the
   // panel has nothing to report either.
   it('has no custom row when no folder is set', async () => {
