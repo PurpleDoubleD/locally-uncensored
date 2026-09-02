@@ -20,6 +20,7 @@ import type { ScannedDir } from '../../../api/engine'
 
 let dirs: ScannedDir[] = []
 let lmstudio: { installed: boolean; path: string | null } = { installed: false, path: null }
+let onMac = false
 
 vi.mock('../../../api/engine', async () => {
   const actual = await vi.importActual<typeof import('../../../api/engine')>('../../../api/engine')
@@ -39,7 +40,7 @@ vi.mock('../../../lib/custom-model-dir', () => ({
 vi.mock('../../../api/backend', () => ({
   backendCall: vi.fn(async () => null),
   isTauri: () => true,
-  isMacOS: () => false,
+  isMacOS: () => onMac,
   openExternal: vi.fn(),
   secretGet: vi.fn().mockRejectedValue(new Error('no keychain here')),
   secretSet: vi.fn(),
@@ -57,6 +58,7 @@ async function settle() {
 
 beforeEach(() => {
   dirs = []
+  onMac = false
   lmstudio = { installed: false, path: null }
   useSettingsStore.getState().updateSettings({ hfDownloadPathOverride: '' })
 })
@@ -160,5 +162,37 @@ describe('row 3: Ollama has no folder, and the row says why', () => {
     const { container } = render(createElement(ImportLocalModels))
     await settle()
     expect(container.querySelectorAll('input').length).toBe(0)
+  })
+})
+
+// ── A14 point 4: the macOS access dialog ─────────────────────────────────────
+
+describe('the panel warns before macOS asks', () => {
+  it('says so under the field for a folder on the Desktop', async () => {
+    onMac = true
+    useSettingsStore.getState().updateSettings({ hfDownloadPathOverride: '/Users/david/Desktop/LU/models' })
+    render(createElement(HfDownloadPathSetting))
+    await settle()
+    expect(screen.getByTestId('macos-folder-access-note').textContent)
+      .toBe('macOS will ask once for access to this folder.')
+  })
+
+  // NEGATIVE CONTROL: an ordinary folder is not gated, so a note there would
+  // be noise that teaches the user to skip the real one.
+  it('stays quiet for an ordinary folder on the same Mac', async () => {
+    onMac = true
+    useSettingsStore.getState().updateSettings({ hfDownloadPathOverride: '/Users/david/AI/models' })
+    render(createElement(HfDownloadPathSetting))
+    await settle()
+    expect(screen.queryByTestId('macos-folder-access-note')).toBeNull()
+  })
+
+  // NEGATIVE CONTROL: the same folder on Windows. Nothing asks there.
+  it('stays quiet off the Mac', async () => {
+    onMac = false
+    useSettingsStore.getState().updateSettings({ hfDownloadPathOverride: '/Users/david/Desktop/LU/models' })
+    render(createElement(HfDownloadPathSetting))
+    await settle()
+    expect(screen.queryByTestId('macos-folder-access-note')).toBeNull()
   })
 })

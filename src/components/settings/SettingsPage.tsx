@@ -59,7 +59,7 @@ import { MCPServerSettings } from './MCPServerSettings'
 import { WorkflowList } from '../agents/WorkflowList'
 import { WorkflowBuilder } from '../agents/WorkflowBuilder'
 import { useUpdateStore, isNewerVersion } from '../../stores/updateStore'
-import { backendCall, isTauri, openExternal } from '../../api/backend'
+import { backendCall, isTauri, isMacOS, openExternal } from '../../api/backend'
 import { isMlxImageHost } from '../../api/mlx-image'
 import { ArrowUpCircle, KeyRound, RefreshCw } from 'lucide-react'
 import { CLOUD_BASE } from '../../api/cloud/config'
@@ -69,6 +69,7 @@ import { listBundledModels, lastCustomScanDir, lastScanDirs, type ScannedDir } f
 import { lmStudioModelDir } from '../../api/model-folders'
 import {
   luEngineFolderPlaceholder, lmStudioFolderNote, lmStudioFolderPath,
+  macOsWillAskForFolder, MACOS_FOLDER_ACCESS_NOTE,
   type LmStudioModelDir,
 } from '../../lib/model-storage-rows'
 import { CivitaiApiKeySetting } from './CivitaiApiKeySetting'
@@ -366,6 +367,17 @@ export function HfDownloadPathSetting() {
           </button>
         )}
       </div>
+      {/* A14: setting a folder under Desktop, Documents or Downloads makes
+          macOS ask for access the first time LU walks it. That is the system
+          asking on the user's behalf and nothing here prevents it; the panel
+          only stops it from arriving as a surprise from an app that just
+          started reading a folder. Shown for the path the user typed as well
+          as for one he picked, and only on the Mac. */}
+      {macOsWillAskForFolder(draft || override, isMacOS()) && (
+        <div data-testid="macos-folder-access-note" className="text-[0.6rem] leading-relaxed text-gray-500">
+          {MACOS_FOLDER_ACCESS_NOTE}
+        </div>
+      )}
       {override && scanNote && (
         <div data-testid="model-dir-scan-note" className="text-[0.6rem] leading-relaxed text-amber-600 dark:text-amber-400">
           {scanNote}
