@@ -29,6 +29,16 @@ function App() {
       import('./stores/workflowStore').then(({ hydrateCivitaiApiKey }) => {
         hydrateCivitaiApiKey().catch(() => {})
       })
+
+      // Hand the user's own model folder to ComfyUI at boot. It used to happen
+      // only while the AI Backends settings tab was mounted, so a user who set
+      // the folder in an older build and never opened that tab again would have
+      // started ComfyUI without it forever.
+      void (async () => {
+        const { syncCustomModelDir } = await import('./lib/custom-model-dir')
+        const { useSettingsStore: store } = await import('./stores/settingsStore')
+        await syncCustomModelDir(store.getState().settings.hfDownloadPathOverride)
+      })()
     }
 
     // Probe local Whisper (STT) once at boot and push the result into the voice

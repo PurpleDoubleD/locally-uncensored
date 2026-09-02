@@ -1242,11 +1242,20 @@ pub(crate) fn bundled_scan_dirs(app_dir: &Path, extra: &[String]) -> Vec<PathBuf
     // Windows paths arrive with a drive letter and backslashes and are
     // compared case-insensitively; `G:\AI\Models` and `g:/ai/models\` are one
     // folder. PathBuf does not know that, so the key is normalised by hand.
+    //
+    // The case fold is NOT applied on Linux. `/mnt/Models` and `/mnt/models`
+    // are two different folders on ext4, and folding them would silently drop
+    // one of the two from the scan. Windows and a default macOS volume are
+    // case-insensitive, so there the fold is what stops one folder from being
+    // walked twice under two spellings.
+    let fold_case = !cfg!(target_os = "linux");
     let key = |p: &Path| {
-        p.to_string_lossy()
+        let normalised = p
+            .to_string_lossy()
             .replace('\\', "/")
             .trim_end_matches('/')
-            .to_lowercase()
+            .to_string();
+        if fold_case { normalised.to_lowercase() } else { normalised }
     };
     let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
     seen.insert(key(app_dir));
@@ -2341,8 +2350,9 @@ mod tests {
             &[
                 "  ".to_string(),
                 "G:\\AI\\Models".to_string(),
-                // The same folder written the other way round: one entry.
-                "g:/ai/models/".to_string(),
+                // The same folder with a trailing slash and the other
+                // separator: one entry, on every platform.
+                "G:/AI/Models/".to_string(),
                 "/data/Locally Uncensored/models".to_string(),
                 "/mnt/second".to_string(),
             ],
@@ -2355,6 +2365,27 @@ mod tests {
                 PathBuf::from("/mnt/second"),
             ],
         );
+    }
+
+    /// Case folding follows the file system, not the developer's machine.
+    ///
+    /// Windows and a default macOS volume are case-insensitive, so `g:/ai` and
+    /// `G:/AI` are one folder and folding them is what stops a double walk. On
+    /// Linux they are two folders, and folding would silently drop one of them.
+    #[test]
+    fn two_spellings_are_one_folder_only_where_the_file_system_says_so() {
+        let app = Path::new("/data/models");
+        let dirs = bundled_scan_dirs(
+            app,
+            &["/mnt/Models".to_string(), "/mnt/models".to_string()],
+        );
+        if cfg!(target_os = "linux") {
+            assert_eq!(dirs.len(), 3, "ext4 keeps both: {dirs:?}");
+        } else {
+            assert_eq!(dirs.len(), 2, "one folder under two spellings: {dirs:?}");
+        }
+        // Either way the first entry given wins, so the app dir stays root 0.
+        assert_eq!(dirs[0], PathBuf::from("/data/models"));
     }
 
     // ── The scan has to come back (S1, S6) ────────────────────────────────

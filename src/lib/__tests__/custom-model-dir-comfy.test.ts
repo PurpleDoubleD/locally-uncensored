@@ -112,6 +112,27 @@ describe('the Model Storage copy tells the truth', () => {
   })
 })
 
+describe('the handover does not depend on a settings tab being open', () => {
+  const app = readFileSync(join(process.cwd(), 'src/App.tsx'), 'utf8')
+
+  it('runs at boot from the persisted setting', () => {
+    // It used to run only inside the AI Backends panel's effect, so a folder
+    // set in an older build and never revisited never reached ComfyUI.
+    expect(app).toMatch(/syncCustomModelDir/)
+    expect(app).toMatch(/settings\.hfDownloadPathOverride/)
+  })
+
+  // Negative control: the settings panel still syncs on change, or a folder the
+  // user picks would only take effect after the next restart.
+  it('and still on every change in the panel', () => {
+    const panel = readFileSync(
+      join(process.cwd(), 'src/components/settings/SettingsPage.tsx'),
+      'utf8',
+    )
+    expect(panel).toMatch(/syncCustomModelDir\(override\)/)
+  })
+})
+
 describe('the folder names Rust looks for are the folders ComfyUI uses', () => {
   it('matches subfolderForSource, so the two lists cannot drift apart', () => {
     const rust = readFileSync(

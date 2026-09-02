@@ -21,11 +21,23 @@
 use std::path::{Path, PathBuf};
 
 /// The `folder_paths` keys ComfyUI accepts in an extra-model-paths file, which
-/// are also the folder names it uses on disk. Kept in step with
-/// `subfolderForSource` in `src/api/comfyui.ts` (a test holds the two lists
-/// against each other).
+/// are also the folder names it uses on disk.
+///
+/// Two directions to keep straight, and a test for each. Every folder LU's own
+/// inventory reads has to be in here, or a file the app can see would be one
+/// LU never hands over (`subfolderForSource` in `src/api/comfyui.ts`). And
+/// every entry here has to be a key ComfyUI really has, or the config file
+/// carries a line ComfyUI ignores at best.
+///
+/// `clip` and `unet` are ComfyUI's older names for `text_encoders` and
+/// `diffusion_models`; both are still live keys and a folder filed under the
+/// old name is common. `audio_encoders` is the newer audio lane. None of the
+/// three appears in `subfolderForSource`, which is why the first test can only
+/// check one direction.
 pub(crate) const COMFY_MODEL_FOLDERS: &[&str] = &[
+    "audio_encoders",
     "checkpoints",
+    "clip",
     "clip_vision",
     "controlnet",
     "diffusion_models",
@@ -33,6 +45,7 @@ pub(crate) const COMFY_MODEL_FOLDERS: &[&str] = &[
     "loras",
     "style_models",
     "text_encoders",
+    "unet",
     "upscale_models",
     "vae",
 ];
@@ -361,6 +374,35 @@ mod tests {
         let block = &parsed["lu_custom_models"];
         assert_eq!(block["loras"].as_str().unwrap(), root.join("loras").to_string_lossy());
         assert_eq!(block["vae"].as_str().unwrap(), root.join("vae").to_string_lossy());
+    }
+
+    /// The other direction of the drift test in
+    /// `src/lib/__tests__/custom-model-dir-comfy.test.ts`, which can only prove
+    /// that everything LU lists is mapped. This one pins the list against
+    /// ComfyUI's own `folder_paths` keys, so a typo or an invented folder name
+    /// cannot ride along into a config file ComfyUI then ignores.
+    #[test]
+    fn every_mapped_folder_is_a_key_comfyui_actually_has() {
+        // ComfyUI folder_paths keys, as its own extra_model_paths.yaml.example
+        // lists them. A copy on purpose: it is the thing being checked.
+        const COMFYUI_KEYS: &[&str] = &[
+            "audio_encoders", "checkpoints", "clip", "clip_vision", "configs",
+            "controlnet", "diffusion_models", "embeddings", "gligen", "hypernetworks",
+            "loras", "photomaker", "style_models", "text_encoders", "unet",
+            "upscale_models", "vae", "vae_approx",
+        ];
+        for key in COMFY_MODEL_FOLDERS {
+            assert!(COMFYUI_KEYS.contains(key), "{key} is not a ComfyUI folder_paths key");
+        }
+        // Negative control: the list is sorted and free of duplicates, so a
+        // second entry for the same folder cannot write two lines for it.
+        let mut sorted = COMFY_MODEL_FOLDERS.to_vec();
+        sorted.sort_unstable();
+        sorted.dedup();
+        assert_eq!(sorted.as_slice(), COMFY_MODEL_FOLDERS);
+        // And a folder that is not a model folder is not in here.
+        assert!(!COMFY_MODEL_FOLDERS.contains(&"custom_nodes"));
+        assert!(!COMFY_MODEL_FOLDERS.contains(&"output"));
     }
 
     // ── The folder the user typed, before any stat ────────────────────────
