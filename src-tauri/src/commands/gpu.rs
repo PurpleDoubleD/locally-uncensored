@@ -47,6 +47,11 @@ pub struct DetectedGpu {
     /// the picker did not list at all, and spent days breaking his install
     /// trying to fix what looked like a driver problem.
     pub note: Option<String>,
+    /// The card's compute architecture as the vendor's own tool names it
+    /// ("gfx1201"), when a tool named it. Nothing derives this from the model
+    /// name: the mapping from marketing name to gfx target is AMD's to publish
+    /// and ours to read, never to guess.
+    pub arch: Option<String>,
 }
 
 fn run_cmd(program: &str, args: &[&str]) -> Option<String> {
@@ -84,6 +89,7 @@ fn detect_nvidia() -> Vec<DetectedGpu> {
                 memory_mib,
                 source: "nvidia-smi".into(),
                 note: None,
+                arch: None,
             })
         })
         .collect()
@@ -129,6 +135,7 @@ fn detect_amd() -> Vec<DetectedGpu> {
                 memory_mib,
                 source: "rocm-smi".into(),
                 note: None,
+                arch: None,
             });
         }
     }
@@ -197,6 +204,7 @@ fn detect_other_via_lspci_from(raw: &str, have_rocm: bool) -> Vec<DetectedGpu> {
             memory_mib: None,
             source: "lspci".into(),
             note: note_for(vendor),
+            arch: None,
         });
         *index += 1;
     }
@@ -256,6 +264,7 @@ fn detect_macos() -> Vec<DetectedGpu> {
         memory_mib: None,
         source: "system".into(),
         note: None,
+        arch: None,
     }]
 }
 
@@ -347,6 +356,7 @@ fn detect_other_via_registry_from(
             memory_mib,
             source: "registry".into(),
             note: note_for(vendor),
+            arch: None,
         });
         *index += 1;
     }
@@ -463,6 +473,7 @@ fn detect_other_via_wmic_from(
             memory_mib,
             source: source.into(),
             note: note_for(vendor),
+            arch: None,
         });
         *index += 1;
     }
@@ -576,6 +587,362 @@ fn parse_reg_hex(value: &str) -> Option<u64> {
 // (bobbyt5667's 24 GB Arc Pro B60 came out of it as 2 GB), which is why the
 // qword is still the number we believe.
 
+// ── ROCm on Windows: the HIP SDK, not rocm-smi ────────────────────────
+//
+// Zhorts, GitHub #123 (2026-09-01, Windows 11, RX 9070 XT, HIP SDK 7.1.1):
+// the SDK was installed correctly, `hipinfo.exe` reported gfx1201, and LU still
+// told him "Found without ROCm tools". `detect_amd()` above is the only thing
+// that ever set that verdict and it runs one command, `rocm-smi`, which the
+// Windows HIP SDK does not ship at all. On Windows the SDK installs
+// `hipinfo.exe` under its own tree and exports HIP_PATH, so that is what has to
+// be asked. Linux keeps rocm-smi, macOS has neither and is untouched.
+//
+// Nothing here writes down a version. Zhorts' own suspicion was a renamed DLL
+// (`amdhip64.dll` became `amdhip64_7.dll` in 7.1.1), which is exactly what a
+// hardcoded name does to a detector a year later, so the install root comes out
+// of the environment or out of a directory listing, and the version is read off
+// whatever directory was found.
+
+/// One device as `hipinfo` reports it.
+#[derive(Debug, Clone, PartialEq)]
+struct HipDevice {
+    index: u32,
+    name: String,
+    /// `gcnArchName`, e.g. "gfx1201". This is the value a ROCm PyTorch build
+    /// has to carry kernels for, which is what A12 (RDNA4 image generation
+    /// dying on hipErrorInvalidValue) turns on.
+    arch: Option<String>,
+    /// `totalGlobalMem`. Read, but barely trusted: see HIPINFO_MIN_TRUSTED_MIB.
+    total_global_mem_mib: Option<u64>,
+}
+
+/// What the HIP SDK probe found, as one bundle.
+#[derive(Debug, Clone, PartialEq)]
+struct RocmFacts {
+    /// Version as the install directory names it ("7.1"), or None when the root
+    /// carried no version-shaped segment. Read, never assumed.
+    version: Option<String>,
+    devices: Vec<HipDevice>,
+}
+
+/// The floor under `hipinfo`'s own VRAM number.
+///
+/// ROCm issue #5105: hipinfo on Windows printed `totalGlobalMem: 0.16 GB` for a
+/// 16 GB RX 6950 XT under HIP SDK 6.2. The field is therefore not a source the
+/// fit check may rest on. It is used only where nothing else answered at all,
+/// and only above a floor no discrete card HIP will run on falls below. Below
+/// it the size stays unknown, because unknown is honest and 0.16 GB is not.
+const HIPINFO_MIN_TRUSTED_MIB: u64 = 1024;
+
+/// Parse `hipinfo` output.
+///
+/// The tool prints one block per device. Every row is a label padded to 34
+/// columns and then the value, and `device#` is the one row printed WITHOUT a
+/// colon (`cout << setw(34) << "device#" << deviceId`), which is what separates
+/// the blocks:
+///
+/// ```text
+/// --------------------------------------------------------------------------
+/// device#                           0
+/// Name:                             AMD Radeon RX 9070 XT
+/// totalGlobalMem:                   15.98 GB
+/// gcnArchName:                      gfx1201
+/// peers:
+/// non-peers:                        device#0
+///
+/// memInfo.total:                    15.98 GB
+/// ```
+///
+/// Only four rows are read and every other one is ignored by name, so a future
+/// SDK adding, dropping or reordering fields cannot break this. Pure over the
+/// text for the reason every other parser in this file is: the machine that
+/// reproduces the bug is not the machine the tests run on.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn parse_hipinfo(raw: &str) -> Vec<HipDevice> {
+    let mut out: Vec<HipDevice> = Vec::new();
+    for line in raw.lines() {
+        let t = line.trim();
+        if t.is_empty() || t.starts_with('-') {
+            continue;
+        }
+        // The block header. `non-peers: device#0` also contains "device#" but
+        // not at the start of the line, so the prefix test is enough.
+        if let Some(rest) = t.strip_prefix("device#") {
+            if let Ok(index) = rest.trim().parse::<u32>() {
+                out.push(HipDevice { index, name: String::new(), arch: None, total_global_mem_mib: None });
+                continue;
+            }
+        }
+        let Some((key, value)) = t.split_once(':') else { continue };
+        let value = value.trim();
+        if value.is_empty() {
+            continue;
+        }
+        // A value row before the first `device#` belongs to nothing.
+        let Some(dev) = out.last_mut() else { continue };
+        match key.trim().to_ascii_lowercase().as_str() {
+            "name" => dev.name = value.to_string(),
+            // The field is a plain string today. Taking the first token keeps a
+            // future ":sramecc+:xnack-" suffix out of a comparison that is only
+            // ever about the target.
+            "gcnarchname" => {
+                dev.arch = value.split_whitespace().next().map(|s| s.trim_end_matches(':').to_string())
+            }
+            "totalglobalmem" => dev.total_global_mem_mib = parse_hip_size_mib(value),
+            _ => {}
+        }
+    }
+    // A block that named neither the card nor its architecture carries nothing
+    // worth reporting.
+    out.retain(|d| !d.name.is_empty() || d.arch.is_some());
+    out
+}
+
+/// "15.98 GB" and friends into MiB. A bare number is bytes, which is what
+/// older builds print.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn parse_hip_size_mib(value: &str) -> Option<u64> {
+    let mut it = value.split_whitespace();
+    let num: f64 = it.next()?.parse().ok()?;
+    if !num.is_finite() || num <= 0.0 {
+        return None;
+    }
+    let unit = it.next().map(|u| u.to_ascii_uppercase());
+    let mib = match unit.as_deref() {
+        Some(u) if u.starts_with("GB") || u.starts_with("GIB") => num * 1024.0,
+        Some(u) if u.starts_with("MB") || u.starts_with("MIB") => num,
+        Some(u) if u.starts_with("KB") || u.starts_with("KIB") => num / 1024.0,
+        Some(u) if u.starts_with('B') => num / 1024.0 / 1024.0,
+        None => num / 1024.0 / 1024.0,
+        // An unit nobody here knows is not a number to guess at.
+        Some(_) => return None,
+    };
+    if mib < 1.0 {
+        return None;
+    }
+    Some(mib.round() as u64)
+}
+
+/// HIP install roots the environment already names.
+///
+/// The Windows SDK exports HIP_PATH, and a side-by-side install adds versioned
+/// twins (HIP_PATH_57 and the like), so any variable whose name starts with
+/// HIP_PATH counts. ROCM_PATH is the Linux spelling and costs nothing to accept.
+/// Order is kept, duplicates are dropped, and no version appears in this file.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn hip_roots_from_env(vars: &[(String, String)]) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for (k, v) in vars {
+        let ku = k.to_ascii_uppercase();
+        if !(ku.starts_with("HIP_PATH") || ku == "ROCM_PATH" || ku.starts_with("ROCM_PATH_")) {
+            continue;
+        }
+        let root = v.trim().trim_end_matches(['\\', '/']).to_string();
+        if root.is_empty() {
+            continue;
+        }
+        if !out.iter().any(|r| r.eq_ignore_ascii_case(&root)) {
+            out.push(root);
+        }
+    }
+    out
+}
+
+/// The version-numbered directory names under an install tree, newest first.
+///
+/// `C:\Program Files\AMD\ROCm\` holds one directory per installed SDK ("6.4",
+/// "7.1"). Which ones exist is the installer's business, so they are listed and
+/// sorted, never named. Anything that is not version-shaped sorts last instead
+/// of being dropped, because a directory this code does not recognise is still a
+/// better guess than nothing.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn rocm_dirs_newest_first(entries: &[String]) -> Vec<String> {
+    let mut v: Vec<&String> = entries.iter().collect();
+    v.sort_by(|a, b| match (version_key(a), version_key(b)) {
+        (Some(x), Some(y)) => y.cmp(&x),
+        (Some(_), None) => std::cmp::Ordering::Less,
+        (None, Some(_)) => std::cmp::Ordering::Greater,
+        (None, None) => a.cmp(b),
+    });
+    v.into_iter().cloned().collect()
+}
+
+/// "7.1.1" into [7, 1, 1], or None when the name is not a version at all.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn version_key(name: &str) -> Option<Vec<u64>> {
+    let n = name.trim();
+    if n.is_empty() {
+        return None;
+    }
+    let parts: Vec<&str> = n.split('.').collect();
+    let mut key = Vec::with_capacity(parts.len());
+    for p in parts {
+        if p.is_empty() || !p.bytes().all(|b| b.is_ascii_digit()) {
+            return None;
+        }
+        key.push(p.parse::<u64>().ok()?);
+    }
+    Some(key)
+}
+
+/// The SDK version an install root spells out in its last path segment, when it
+/// spells one out. `C:\Program Files\AMD\ROCm\7.1` gives "7.1"; a root the user
+/// put somewhere of their own gives None, and the note then simply says less.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn hip_version_from_root(root: &str) -> Option<String> {
+    let seg = root.trim_end_matches(['\\', '/']).rsplit(['\\', '/']).next()?;
+    version_key(seg).map(|_| seg.to_string())
+}
+
+/// The note an AMD card carries once the HIP SDK has answered.
+///
+/// Both halves are read, never assumed: the version comes off the install
+/// directory and the architecture out of `hipinfo`. The second sentence is what
+/// A12 needs (artoriuskurokami, RX 9070 XT, image generation dying with
+/// hipErrorInvalidValue on RDNA4): the card being visible to ROCm and the
+/// PyTorch in the ComfyUI environment having kernels for it are two different
+/// things, and the user has no way to tell them apart from the raw HIP error.
+fn rocm_note(version: Option<&str>, arch: Option<&str>) -> Option<String> {
+    let head = match version {
+        Some(v) => format!("ROCm {v} is installed"),
+        None => "A ROCm HIP SDK is installed".to_string(),
+    };
+    match arch {
+        Some(a) => Some(format!(
+            "{head} and reports this card as {a}. Image and video generation additionally need a PyTorch ROCm build carrying kernels for {a}; without them the first step of a render stops with hipErrorInvalidValue. Read what the installed build covers with: python -c \"import torch; print(torch.cuda.get_arch_list())\""
+        )),
+        None => Some(format!(
+            "{head} and can see this card, but it did not report an architecture. If a render stops with hipErrorInvalidValue, the PyTorch ROCm build in the ComfyUI environment has no kernels for this chip."
+        )),
+    }
+}
+
+/// Fold what `hipinfo` said into the card list.
+///
+/// Two jobs, and deliberately not a third: the AMD cards another probe already
+/// found keep their VRAM number and only gain the architecture and a note that
+/// is true, and a card no other probe saw is appended so the picker is not
+/// empty. What this never does is overwrite a VRAM number, because the registry
+/// qword is measured by the miniport driver and hipinfo's is the field ROCm
+/// issue #5105 caught printing 0.16 GB for a 16 GB card.
+///
+/// Matching is by name first and by position second. On Windows both probes read
+/// the same adapter string, so the name path is the normal one; the positional
+/// fallback exists for the day they disagree, and it can only ever attach a note
+/// to the wrong card of the same vendor, never a wrong size.
+fn apply_rocm_facts(gpus: &mut Vec<DetectedGpu>, facts: Option<&RocmFacts>) {
+    let Some(facts) = facts else { return };
+    if facts.devices.is_empty() {
+        return;
+    }
+    let version = facts.version.as_deref();
+    let mut used = vec![false; facts.devices.len()];
+
+    for gpu in gpus.iter_mut().filter(|g| g.vendor == "amd") {
+        let by_name = facts
+            .devices
+            .iter()
+            .enumerate()
+            .position(|(i, d)| !used[i] && !d.name.is_empty() && names_agree(&gpu.name, &d.name));
+        let pick = by_name.or_else(|| used.iter().position(|u| !u));
+        let Some(i) = pick else { continue };
+        used[i] = true;
+        gpu.arch = facts.devices[i].arch.clone();
+        gpu.note = rocm_note(version, gpu.arch.as_deref());
+    }
+
+    // Anything hipinfo saw and nobody else did. On a box where the display
+    // registry is unreadable this is the only entry the picker gets, so it is
+    // added rather than dropped.
+    let mut next_index = gpus.iter().filter(|g| g.vendor == "amd").count() as u32;
+    for (i, dev) in facts.devices.iter().enumerate() {
+        if used[i] {
+            continue;
+        }
+        let arch = dev.arch.clone();
+        gpus.push(DetectedGpu {
+            index: next_index,
+            vendor: "amd".into(),
+            name: if dev.name.is_empty() { "AMD GPU".to_string() } else { dev.name.clone() },
+            // Only above the floor, and only because nothing else answered.
+            memory_mib: dev.total_global_mem_mib.filter(|m| *m >= HIPINFO_MIN_TRUSTED_MIB),
+            source: "hipinfo".into(),
+            note: rocm_note(version, arch.as_deref()),
+            arch,
+        });
+        next_index += 1;
+    }
+}
+
+/// Whether two adapter strings are the same card. Containment either way,
+/// case-insensitively: the registry writes "AMD Radeon RX 9070 XT" and hipinfo
+/// writes the same string, but one of them gaining a "(TM)" must not split one
+/// card into two.
+fn names_agree(a: &str, b: &str) -> bool {
+    let a = a.to_ascii_lowercase();
+    let b = b.to_ascii_lowercase();
+    a == b || a.contains(&b) || b.contains(&a)
+}
+
+/// `hipinfo` under one install root, if it is there. Both spellings are probed
+/// because the sample is named hipInfo upstream and ships lowercase in the SDK,
+/// and a case-insensitive filesystem is not something to rely on.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn hipinfo_under(root: &str) -> Option<std::path::PathBuf> {
+    let base = std::path::Path::new(root);
+    for rel in ["bin/hipinfo.exe", "bin/hipInfo.exe", "hipinfo.exe", "bin/hipinfo", "bin/hipInfo"] {
+        let p = base.join(rel);
+        if p.is_file() {
+            return Some(p);
+        }
+    }
+    None
+}
+
+/// Ask the Windows HIP SDK. `None` when there is no SDK, which is the answer
+/// the old code gave every Windows user whether or not one was installed.
+#[cfg(target_os = "windows")]
+fn detect_rocm_facts() -> Option<RocmFacts> {
+    let vars: Vec<(String, String)> = std::env::vars().collect();
+    let mut roots = hip_roots_from_env(&vars);
+    // Then the default tree, listed rather than named. `HIP_PATH` is set by the
+    // installer, but a repair or an in-place upgrade has been seen to leave it
+    // behind, and the directory is the ground truth either way.
+    for base_var in ["ProgramFiles", "ProgramW6432", "ProgramFiles(x86)"] {
+        let Some(base) = std::env::var_os(base_var) else { continue };
+        let dir = std::path::Path::new(&base).join("AMD").join("ROCm");
+        let Ok(entries) = std::fs::read_dir(&dir) else { continue };
+        let names: Vec<String> = entries
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_type().map(|t| t.is_dir()).unwrap_or(false))
+            .filter_map(|e| e.file_name().into_string().ok())
+            .collect();
+        for name in rocm_dirs_newest_first(&names) {
+            let root = dir.join(&name).to_string_lossy().into_owned();
+            if !roots.iter().any(|r| r.eq_ignore_ascii_case(&root)) {
+                roots.push(root);
+            }
+        }
+    }
+    for root in roots {
+        let Some(exe) = hipinfo_under(&root) else { continue };
+        let Some(raw) = run_cmd(&exe.to_string_lossy(), &[]) else { continue };
+        let devices = parse_hipinfo(&raw);
+        if devices.is_empty() {
+            continue;
+        }
+        return Some(RocmFacts { version: hip_version_from_root(&root), devices });
+    }
+    None
+}
+
+/// Linux answers through rocm-smi and macOS has no ROCm at all, so neither one
+/// pays for this probe.
+#[cfg(not(target_os = "windows"))]
+fn detect_rocm_facts() -> Option<RocmFacts> {
+    None
+}
+
 #[tauri::command]
 pub fn detect_gpus() -> Result<Vec<DetectedGpu>, String> {
     let mut gpus = Vec::new();
@@ -589,6 +956,12 @@ pub fn detect_gpus() -> Result<Vec<DetectedGpu>, String> {
     gpus.extend(detect_other_via_lspci(have_rocm));
     gpus.extend(detect_other_on_windows(have_rocm));
     gpus.extend(detect_macos());
+    // The HIP SDK answers LAST and never suppresses a probe, which is the whole
+    // difference to `have_rocm` above. rocm-smi is a full replacement for the
+    // fallbacks (it carries VRAM); hipinfo is not (ROCm #5105), so it enriches
+    // the entries the registry already measured instead of replacing them, and
+    // only appends a card nobody else saw.
+    apply_rocm_facts(&mut gpus, detect_rocm_facts().as_ref());
     Ok(gpus)
 }
 
@@ -1103,6 +1476,298 @@ End of search: 1 match(es) found.
             wrong.contains("Reinstall the ComfyUI environment"),
             "if this ever stops holding the negative control has rotted: {wrong}",
         );
+    }
+
+
+    // ── A5: the Windows HIP SDK, GitHub #123 (Zhorts, RX 9070 XT, 7.1.1) ──
+    //
+    // Zhorts had a correct HIP SDK 7.1.1 install and LU said "Found without
+    // ROCm tools" anyway, because the only ROCm probe in this file ran
+    // `rocm-smi`, which the Windows SDK does not ship. The output below is the
+    // shape hipinfo really prints: labels padded to 34 columns, `device#`
+    // without a colon, and a trailing memInfo block. The 0.16 GB in the second
+    // device is not a typo, it is ROCm issue #5105 verbatim (hipinfo on Windows
+    // reporting 0.16 GB for a 16 GB RX 6950 XT under HIP SDK 6.2), kept here so
+    // the "do not trust this field" rule has something to be proven against.
+    const HIPINFO_ONE_CARD: &str = "\
+--------------------------------------------------------------------------------
+device#                           0
+Name:                             AMD Radeon RX 9070 XT
+pciBusID:                         3
+pciDeviceID:                      0
+multiProcessorCount:              32
+clockRate:                        2970 Mhz
+memoryBusWidth:                   256
+totalGlobalMem:                   15.98 GB
+totalConstMem:                    2147483647
+sharedMemPerBlock:                64.00 KB
+warpSize:                         32
+major:                            12
+minor:                            0
+isIntegrated:                     0
+arch.hasGlobalInt32Atomics:       1
+gcnArchName:                      gfx1201
+peers:
+non-peers:                        device#0
+
+memInfo.total:                    15.98 GB
+memInfo.free:                     15.44 GB (97%)
+";
+
+    const HIPINFO_BROKEN_SIZE: &str = "\
+--------------------------------------------------------------------------------
+device#                           0
+Name:                             AMD Radeon RX 6950 XT
+totalGlobalMem:                   0.16 GB
+gcnArchName:                      gfx1030
+peers:
+non-peers:                        device#0
+";
+
+    #[test]
+    fn hipinfo_yields_the_card_its_architecture_and_its_size() {
+        let devs = parse_hipinfo(HIPINFO_ONE_CARD);
+        assert_eq!(devs.len(), 1, "{devs:?}");
+        assert_eq!(devs[0].index, 0);
+        assert_eq!(devs[0].name, "AMD Radeon RX 9070 XT");
+        assert_eq!(devs[0].arch.as_deref(), Some("gfx1201"));
+        assert_eq!(devs[0].total_global_mem_mib, Some(16364));
+
+        // NEGATIVE CONTROL: `non-peers: device#0` is a value row, not a second
+        // device, and the trailing memInfo block is not a third. A parser that
+        // split on "device#" anywhere in the line would grow both.
+        assert!(HIPINFO_ONE_CARD.contains("non-peers:                        device#0"));
+        assert_eq!(devs.len(), 1);
+    }
+
+    #[test]
+    fn hipinfo_blocks_do_not_bleed_into_each_other() {
+        let two = format!("{HIPINFO_ONE_CARD}{HIPINFO_BROKEN_SIZE}");
+        let devs = parse_hipinfo(&two);
+        assert_eq!(devs.len(), 2, "{devs:?}");
+        assert_eq!(devs[0].arch.as_deref(), Some("gfx1201"));
+        assert_eq!(devs[1].name, "AMD Radeon RX 6950 XT");
+        assert_eq!(devs[1].arch.as_deref(), Some("gfx1030"));
+    }
+
+    #[test]
+    fn hipinfo_that_says_nothing_yields_nothing() {
+        // NEGATIVE CONTROLS: a tool that is not there, a tool that errored, and
+        // a block with no fields worth reading must all come back empty rather
+        // than as a phantom card.
+        assert!(parse_hipinfo("").is_empty());
+        assert!(parse_hipinfo("hipinfo.exe is not recognized as an internal or external command").is_empty());
+        assert!(parse_hipinfo("device#                           0\npciBusID:  3\n").is_empty());
+        // A value row before any device# header belongs to no device.
+        assert!(parse_hipinfo("Name:  AMD Radeon RX 9070 XT\n").is_empty());
+    }
+
+    #[test]
+    fn hip_sizes_are_read_in_whatever_unit_the_build_printed() {
+        assert_eq!(parse_hip_size_mib("15.98 GB"), Some(16364));
+        assert_eq!(parse_hip_size_mib("64.00 KB"), None, "under a MiB is not a card size");
+        assert_eq!(parse_hip_size_mib("16384 MB"), Some(16384));
+        // Older builds print the raw byte count with no unit at all.
+        assert_eq!(parse_hip_size_mib("17163091968"), Some(16368));
+        // NEGATIVE CONTROLS: nothing invented out of a shape nobody planned for.
+        assert_eq!(parse_hip_size_mib("unknown"), None);
+        assert_eq!(parse_hip_size_mib("0.00 GB"), None);
+        assert_eq!(parse_hip_size_mib("15.98 furlongs"), None);
+        assert_eq!(parse_hip_size_mib(""), None);
+    }
+
+    #[test]
+    fn the_install_root_comes_out_of_the_environment_with_no_version_written_down() {
+        let vars = vec![
+            ("PATH".to_string(), r"C:\Windows".to_string()),
+            ("HIP_PATH".to_string(), r"C:\Program Files\AMD\ROCm\7.1\".to_string()),
+            ("HIP_PATH_57".to_string(), r"C:\Program Files\AMD\ROCm\5.7".to_string()),
+            ("ROCM_PATH".to_string(), "/opt/rocm".to_string()),
+            ("HIP_PLATFORM".to_string(), "amd".to_string()),
+        ];
+        let roots = hip_roots_from_env(&vars);
+        assert_eq!(
+            roots,
+            vec![
+                r"C:\Program Files\AMD\ROCm\7.1".to_string(),
+                r"C:\Program Files\AMD\ROCm\5.7".to_string(),
+                "/opt/rocm".to_string(),
+            ],
+            "trailing separator dropped, HIP_PLATFORM is not a path",
+        );
+        // NEGATIVE CONTROL: an environment with no HIP in it names no root, so
+        // the probe stays silent instead of guessing at a default path.
+        assert!(hip_roots_from_env(&[("PATH".to_string(), r"C:\Windows".to_string())]).is_empty());
+        assert!(hip_roots_from_env(&[("HIP_PATH".to_string(), "   ".to_string())]).is_empty());
+    }
+
+    #[test]
+    fn the_newest_installed_sdk_is_tried_first() {
+        let dirs = vec!["5.7".to_string(), "7.1".to_string(), "6.4".to_string(), "7.1.1".to_string()];
+        assert_eq!(rocm_dirs_newest_first(&dirs), vec!["7.1.1", "7.1", "6.4", "5.7"]);
+        // A directory that is not a version is kept, just last: an unknown name
+        // is still a better guess than no probe at all.
+        let mixed = vec!["nightly".to_string(), "6.4".to_string()];
+        assert_eq!(rocm_dirs_newest_first(&mixed), vec!["6.4", "nightly"]);
+        // NEGATIVE CONTROL: a plain string sort puts 7.1.1 behind 5.7 the moment
+        // a two-digit component shows up, which is how a version pin creeps in.
+        let ten = vec!["7.1".to_string(), "7.10".to_string()];
+        assert_eq!(rocm_dirs_newest_first(&ten), vec!["7.10", "7.1"]);
+    }
+
+    #[test]
+    fn the_version_is_read_off_the_directory_never_assumed() {
+        assert_eq!(hip_version_from_root(r"C:\Program Files\AMD\ROCm\7.1"), Some("7.1".into()));
+        assert_eq!(hip_version_from_root(r"C:\Program Files\AMD\ROCm\7.1\"), Some("7.1".into()));
+        assert_eq!(hip_version_from_root("/opt/rocm-6.4.1"), None, "not a bare version segment");
+        assert_eq!(hip_version_from_root("/opt/rocm"), None);
+    }
+
+    /// The bug as Zhorts hit it, end to end through the pure halves: a Windows
+    /// box whose registry reports the card and its true 16 GB, and a HIP SDK
+    /// that rocm-smi knows nothing about.
+    #[test]
+    fn a_windows_card_with_the_hip_sdk_stops_claiming_rocm_is_missing() {
+        let names = vec![("0000".to_string(), "AMD Radeon RX 9070 XT".to_string())];
+        let sizes = vec![("0000".to_string(), "0x400000000".to_string())];
+        let mut gpus = windows_fallback_from(&names, &sizes, None, false);
+
+        // NEGATIVE CONTROL: this is the message Zhorts saw, and the state the
+        // fix has to leave behind.
+        assert_eq!(gpus.len(), 1);
+        assert!(gpus[0].note.as_deref().unwrap().contains("Found without ROCm tools"));
+        assert_eq!(gpus[0].arch, None);
+
+        let facts = RocmFacts { version: Some("7.1".into()), devices: parse_hipinfo(HIPINFO_ONE_CARD) };
+        apply_rocm_facts(&mut gpus, Some(&facts));
+
+        assert_eq!(gpus.len(), 1, "one card, not one per probe: {gpus:?}");
+        assert_eq!(gpus[0].arch.as_deref(), Some("gfx1201"));
+        let note = gpus[0].note.as_deref().unwrap();
+        assert!(!note.contains("Found without ROCm tools"), "{note}");
+        assert!(note.contains("ROCm 7.1 is installed"), "{note}");
+        // A12: the note has to say that a visible card and a usable PyTorch are
+        // two different things, and name the architecture the build must carry.
+        assert!(note.contains("gfx1201"), "{note}");
+        assert!(note.contains("hipErrorInvalidValue"), "{note}");
+
+        // The registry's measured 16 GB survives untouched. hipinfo's own
+        // number is never allowed to overwrite it (ROCm #5105).
+        assert_eq!(gpus[0].memory_mib, Some(16384));
+        assert_eq!(gpus[0].source, "registry");
+    }
+
+    #[test]
+    fn hipinfos_own_vram_number_never_overwrites_a_measured_one() {
+        // Same card, and hipinfo is having the #5105 day: 0.16 GB for a 16 GB
+        // board. The registry measured 16 GB, and that is what has to survive.
+        let names = vec![("0000".to_string(), "AMD Radeon RX 6950 XT".to_string())];
+        let sizes = vec![("0000".to_string(), "0x400000000".to_string())];
+        let mut gpus = windows_fallback_from(&names, &sizes, None, false);
+        let facts = RocmFacts { version: Some("6.2".into()), devices: parse_hipinfo(HIPINFO_BROKEN_SIZE) };
+        apply_rocm_facts(&mut gpus, Some(&facts));
+        assert_eq!(gpus.len(), 1);
+        assert_eq!(gpus[0].memory_mib, Some(16384), "the miniport's qword, not hipinfo's 0.16 GB");
+        assert_eq!(gpus[0].arch.as_deref(), Some("gfx1030"));
+
+        // NEGATIVE CONTROL: with no other probe to lean on, the broken number is
+        // still refused. Unknown is honest; 0.16 GB would size models against a
+        // card that does not exist.
+        let mut alone: Vec<DetectedGpu> = vec![];
+        apply_rocm_facts(&mut alone, Some(&facts));
+        assert_eq!(alone.len(), 1, "the card is still listed: {alone:?}");
+        assert_eq!(alone[0].memory_mib, None, "below the trust floor, so unknown");
+        assert_eq!(alone[0].source, "hipinfo");
+        assert_eq!(alone[0].vendor, "amd");
+    }
+
+    #[test]
+    fn a_card_only_the_hip_sdk_can_see_is_still_listed() {
+        // Registry unreadable, no wmic, no rocm-smi. Before this the picker was
+        // empty; now the SDK's own answer is the entry.
+        let mut gpus = windows_fallback_from(&[], &[], None, false);
+        assert!(gpus.is_empty(), "NEGATIVE CONTROL: nothing else answered");
+        let facts = RocmFacts { version: Some("7.1".into()), devices: parse_hipinfo(HIPINFO_ONE_CARD) };
+        apply_rocm_facts(&mut gpus, Some(&facts));
+        assert_eq!(gpus.len(), 1);
+        assert_eq!(gpus[0].vendor, "amd");
+        assert_eq!(gpus[0].index, 0, "the only AMD card is HIP device 0");
+        assert_eq!(gpus[0].name, "AMD Radeon RX 9070 XT");
+        // 15.98 GB is above the floor, so here it IS the best number available.
+        assert_eq!(gpus[0].memory_mib, Some(16364));
+        assert_eq!(gpus[0].source, "hipinfo");
+    }
+
+    #[test]
+    fn no_hip_sdk_changes_nothing_at_all() {
+        // Linux and macOS take this path on every run, and so does every Windows
+        // box without the SDK. The list must come out exactly as it went in.
+        let names = parse_reg_query(DRIVER_DESC_AMD_ONLY, "DriverDesc");
+        let before = windows_fallback_from(&names, &[], None, false);
+        let mut after = before.clone();
+        apply_rocm_facts(&mut after, None);
+        assert_eq!(after.len(), before.len());
+        assert_eq!(after[0].note, before[0].note);
+        assert_eq!(after[0].arch, None);
+        // An SDK that answered with no devices is the same as no SDK.
+        let empty = RocmFacts { version: Some("7.1".into()), devices: vec![] };
+        let mut after2 = before.clone();
+        apply_rocm_facts(&mut after2, Some(&empty));
+        assert_eq!(after2[0].note, before[0].note);
+    }
+
+    #[test]
+    fn only_amd_cards_are_touched_by_the_hip_probe() {
+        // An Intel iGPU next to the Radeon. HIP has nothing to say about it and
+        // must not be given a note that mentions ROCm.
+        let names = vec![
+            ("0000".to_string(), "Intel(R) UHD Graphics 770".to_string()),
+            ("0001".to_string(), "AMD Radeon RX 9070 XT".to_string()),
+        ];
+        let mut gpus = windows_fallback_from(&names, &[], None, false);
+        let facts = RocmFacts { version: Some("7.1".into()), devices: parse_hipinfo(HIPINFO_ONE_CARD) };
+        apply_rocm_facts(&mut gpus, Some(&facts));
+        let intel = gpus.iter().find(|g| g.vendor == "intel").unwrap();
+        let amd = gpus.iter().find(|g| g.vendor == "amd").unwrap();
+        assert_eq!(intel.arch, None);
+        assert!(!intel.note.clone().unwrap_or_default().contains("ROCm 7.1"));
+        assert_eq!(amd.arch.as_deref(), Some("gfx1201"));
+        // And the vendor-scoped index is still the AMD card's own.
+        assert_eq!(amd.index, 0);
+    }
+
+    #[test]
+    fn two_amd_cards_each_get_their_own_architecture() {
+        let names = vec![
+            ("0000".to_string(), "AMD Radeon RX 6950 XT".to_string()),
+            ("0001".to_string(), "AMD Radeon RX 9070 XT".to_string()),
+        ];
+        let mut gpus = windows_fallback_from(&names, &[], None, false);
+        // hipinfo lists them in the other order on purpose: matching is by name
+        // first, so the order the two probes disagree on must not matter.
+        let two = format!("{HIPINFO_ONE_CARD}{HIPINFO_BROKEN_SIZE}");
+        let facts = RocmFacts { version: Some("7.1".into()), devices: parse_hipinfo(&two) };
+        apply_rocm_facts(&mut gpus, Some(&facts));
+        assert_eq!(gpus.len(), 2, "no card invented, none lost: {gpus:?}");
+        let by_name = |n: &str| gpus.iter().find(|g| g.name == n).unwrap().arch.clone();
+        assert_eq!(by_name("AMD Radeon RX 6950 XT").as_deref(), Some("gfx1030"));
+        assert_eq!(by_name("AMD Radeon RX 9070 XT").as_deref(), Some("gfx1201"));
+    }
+
+    #[test]
+    fn the_note_says_less_rather_than_more_when_the_sdk_said_less() {
+        // No version directory to read and no architecture reported. The note
+        // still has to be true, and must not fill either gap with a number.
+        let note = rocm_note(None, None).unwrap();
+        assert!(note.starts_with("A ROCm HIP SDK is installed"), "{note}");
+        assert!(!note.contains("gfx"), "{note}");
+        // NEGATIVE CONTROL: no version string may leak in from this file.
+        for v in ["7.1", "6.4", "5.7"] {
+            assert!(!note.contains(v), "a version was written down in the code: {note}");
+        }
+        let with_arch = rocm_note(None, Some("gfx1200")).unwrap();
+        assert!(with_arch.contains("gfx1200"), "{with_arch}");
+        assert!(with_arch.contains("get_arch_list"), "point at the tool, not at a version: {with_arch}");
     }
 
     #[test]
