@@ -453,7 +453,27 @@ mod drift_guard {
         // microphone (B4 Gegenprobe 29.08.). The guard did not look at write
         // or flush, so nothing complained.
         ".write_all(", ".flush()", ".read_to_end(", ".read_to_string(",
+        // Reaping a child. A15 (Windows Nachlauf 02.09.): the repair and the
+        // git clone both polled their child and rendered the poll's own error
+        // straight into the progress card.
+        ".try_wait()", ".wait()",
     ];
+
+    /// The other half of the same rule: the error is not mapped, it is MATCHED.
+    ///
+    /// A15, Windows Nachlauf 02.09.: the failure the box actually showed was
+    /// `if let Err(e) = std::fs::remove_dir_all(&venv_dir)` followed by a
+    /// `format!` that rendered `e`, and the guard above never looked at that
+    /// shape because there is no `map_err` anywhere in it. Fourteen call sites
+    /// in the installer alone were written that way.
+    fn binds_the_error_in_a_match(line: &str) -> bool {
+        line.contains("Err(e)")
+            && (line.contains("{e}")
+                || line.contains("{e:")
+                || line.contains(", e)")
+                || line.contains("e.to_string()")
+                || line.trim_end().ends_with(", e"))
+    }
 
     /// How many lines a single call may be spread over.
     ///
@@ -484,6 +504,21 @@ mod drift_guard {
             return false;
         }
         OS_CALLS.iter().any(|c| code.contains(c)) && renders_the_error(code)
+    }
+
+    /// How many lines the match shape may be spread over.
+    ///
+    /// Wider than `WINDOW` because a match arm puts the call, the arm, the
+    /// `format!` and its arguments on separate lines. The winget arm in the
+    /// installer runs to seven.
+    const MATCH_WINDOW: usize = 8;
+
+    fn is_suspect_match(text: &str) -> bool {
+        let code = strip_comment(text);
+        if code.contains("os_error::") {
+            return false;
+        }
+        OS_CALLS.iter().any(|c| code.contains(c)) && binds_the_error_in_a_match(code)
     }
 
     /// The other shape: not a map_err at all, but an error FIELD in a payload
@@ -537,6 +572,17 @@ mod drift_guard {
                 let joined: String = lines[i..end].iter().map(|l| strip_comment(l)).collect::<Vec<_>>().join(" ");
                 if is_suspect(&joined) {
                     found.push(format!("{}:{}: {}", file.display(), i + 1, lines[i].trim()));
+                    continue;
+                }
+                // The match shape, over its own wider window.
+                let wide_end = (i + MATCH_WINDOW).min(lines.len());
+                let wide: String = lines[i..wide_end]
+                    .iter()
+                    .map(|l| strip_comment(l))
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                if is_suspect_match(&wide) {
+                    found.push(format!("{}:{}: {}", file.display(), i + 1, lines[i].trim()));
                 }
             }
             for (i, line) in lines.iter().enumerate() {
@@ -584,6 +630,37 @@ mod drift_guard {
         assert!(is_suspect(r#"stdin.write_all(b"\n").map_err(|e| format!("stdin newline: {}", e))?;"#));
         assert!(!is_suspect(
             r#"stdin.flush().map_err(|e| format!("stdin flush: {}", os_error::english(&e)))?;"#
+        ));
+    }
+
+    /// The match shape, from both sides. These are the exact statements the
+    /// A15 round fixed, joined the way the scan joins them.
+    #[test]
+    fn the_guard_catches_an_error_that_is_matched_instead_of_mapped() {
+        // The one the box showed: a German sentence in an English card.
+        assert!(is_suspect_match(
+            r#"if let Err(e) = std::fs::remove_dir_all(&venv_dir) { update( "error", &format!( "Could not remove the old venv at {}: {}. ...", venv_dir.display(), e"#
+        ));
+        assert!(is_suspect_match(
+            r#"let mut child = match cmd.spawn() { Ok(c) => c, Err(e) => return Err(bare(&format!("Could not start pip ({}). Is Python on PATH?", e))), };"#
+        ));
+        assert!(is_suspect_match(
+            r#"match child.try_wait() { Ok(Some(s)) => break s, Err(e) => return Err(format!("{label} wait failed: {e}")), }"#
+        ));
+        // And the shapes that must not fail it.
+        assert!(!is_suspect_match(
+            r#"if let Err(e) = std::fs::remove_dir_all(&venv_dir) { update("error", &venv_removal_error(&venv_dir, &e)); }"#
+        ));
+        assert!(!is_suspect_match(
+            r#"match cmd.spawn() { Err(e) => println!("failed: {}", os_error::english(&e)), }"#
+        ));
+        // No OS call in the window: a parse error words itself.
+        assert!(!is_suspect_match(
+            r#"match s.parse::<u32>() { Ok(n) => n, Err(e) => return Err(format!("bad number: {e}")), }"#
+        ));
+        // An OS call whose error is never rendered.
+        assert!(!is_suspect_match(
+            r#"match cmd.spawn() { Ok(c) => c, Err(_) => return Err("could not start".to_string()), }"#
         ));
     }
 }

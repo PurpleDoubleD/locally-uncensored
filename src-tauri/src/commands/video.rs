@@ -805,7 +805,9 @@ pub(crate) fn run_streamed(slot: &crate::install_state::InstallSlot, cmd: &mut C
             }
         }
     });
-    let status = child.wait().map_err(|e| format!("wait: {e}"))?;
+    let status = child
+        .wait()
+        .map_err(|e| format!("wait: {}", crate::os_error::english(&e)))?;
     let _ = t1.join();
     let _ = t2.join();
     if !status.success() {

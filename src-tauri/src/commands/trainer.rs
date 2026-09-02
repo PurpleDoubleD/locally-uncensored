@@ -761,7 +761,9 @@ fn run_streamed(
         match child.try_wait() {
             Ok(Some(s)) => break s,
             Ok(None) => std::thread::sleep(std::time::Duration::from_millis(300)),
-            Err(e) => return Err(format!("{label} wait failed: {e}")),
+            Err(e) => {
+                return Err(format!("{label} wait failed: {}", os_error::english(&e)))
+            }
         }
     };
     for h in handles {
@@ -1237,7 +1239,11 @@ pub fn start_character_training(
         );
         let toml_path = set_dir.join("dataset.toml");
         if let Err(e) = fs::write(&toml_path, toml) {
-            set_status(&run, "error", &format!("could not write dataset config: {e}"));
+            set_status(
+                &run,
+                "error",
+                &format!("could not write dataset config: {}", os_error::english(&e)),
+            );
             return;
         }
 
@@ -1273,7 +1279,10 @@ pub fn start_character_training(
                     &String::from_utf8_lossy(&out.stderr),
                     gpu_label,
                 ),
-                Err(e) => Preflight::TorchBroken(format!("could not run the trainer python ({label}): {e}")),
+                Err(e) => Preflight::TorchBroken(format!(
+                    "could not run the trainer python ({label}): {}",
+                    os_error::english(&e)
+                )),
             }
         };
 

@@ -133,7 +133,7 @@ pub(crate) fn run_capture_bounded(
                 }
                 std::thread::sleep(std::time::Duration::from_millis(25));
             }
-            Err(e) => return Err(format!("Screenshot failed: {}", e)),
+            Err(e) => return Err(format!("Screenshot failed: {}", os_error::english(&e))),
         }
     }
 }

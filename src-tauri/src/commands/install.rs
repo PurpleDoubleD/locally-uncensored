@@ -199,6 +199,22 @@ pub fn is_pep668_protected(python_bin: &str) -> bool {
 /// boxes that haven't installed the `python-virtualenv` package this can
 /// fail with `No module named venv` — we surface that with an actionable
 /// hint pointing at the right pacman / apt invocation.
+/// The card the user reads when Repair environment cannot delete the old venv.
+///
+/// A15, Windows Nachlauf 02.09.: this exact sentence carried the German
+/// "Der Prozess kann nicht auf die Datei zugreifen, da sie von einem anderen
+/// Prozess verwendet wird. (os error 32)" into an English app, because it
+/// rendered the `io::Error` itself and Windows answers FormatMessageW in the
+/// system language. Split out of the caller so the wording is testable without
+/// a locked folder, and without Windows.
+pub(crate) fn venv_removal_error(venv_dir: &Path, e: &std::io::Error) -> String {
+    format!(
+        "Could not remove the old venv at {}: {}. Close anything using it and retry.",
+        venv_dir.display(),
+        os_error::io_english(e)
+    )
+}
+
 pub fn create_comfyui_venv(comfyui_dir: &Path, python_bin: &str) -> Result<PathBuf, String> {
     let venv_dir = comfyui_dir.join("venv");
     // venv is idempotent: re-running on an existing dir just no-ops, but be
@@ -1449,7 +1465,10 @@ pub(crate) fn pip_install_streaming_with_retry_raw(
 
         let mut child = match cmd.spawn() {
             Ok(c) => c,
-            Err(e) => return Err(PipFailure::bare(&format!("Could not start pip ({}). Is Python on PATH?", e))),
+            Err(e) => return Err(PipFailure::bare(&format!(
+                "Could not start pip ({}). Is Python on PATH?",
+                os_error::english(&e)
+            ))),
         };
 
         let stdout = child.stdout.take();
@@ -1538,7 +1557,12 @@ pub(crate) fn pip_install_streaming_with_retry_raw(
                     }
                     std::thread::sleep(std::time::Duration::from_millis(200));
                 }
-                Err(e) => return Err(PipFailure::bare(&format!("pip wait failed: {}", e))),
+                Err(e) => {
+                    return Err(PipFailure::bare(&format!(
+                        "pip wait failed: {}",
+                        os_error::english(&e)
+                    )))
+                }
             }
         };
         let _ = stdout_handle.join();
@@ -1839,7 +1863,7 @@ pub fn install_comfyui(
         let mut clone_child = match cmd.spawn() {
             Ok(c) => c,
             Err(e) => {
-                let err = format!("Git is not installed or not in PATH: {}", e);
+                let err = format!("Git is not installed or not in PATH: {}", os_error::english(&e));
                 println!("[Install] {}", err);
                 update("error", &err);
                 return;
@@ -1856,7 +1880,7 @@ pub fn install_comfyui(
                 Ok(Some(s)) => break s,
                 Ok(None) => std::thread::sleep(std::time::Duration::from_millis(250)),
                 Err(e) => {
-                    update("error", &format!("git wait failed: {}", e));
+                    update("error", &format!("git wait failed: {}", os_error::english(&e)));
                     return;
                 }
             }
@@ -2230,14 +2254,7 @@ pub fn repair_comfyui_env(state: State<'_, AppState>) -> Result<serde_json::Valu
                 "Removing the old venv (models, outputs and custom nodes stay untouched)...",
             );
             if let Err(e) = std::fs::remove_dir_all(&venv_dir) {
-                update(
-                    "error",
-                    &format!(
-                        "Could not remove the old venv at {}: {}. Close anything using it and retry.",
-                        venv_dir.display(),
-                        e
-                    ),
-                );
+                update("error", &venv_removal_error(&venv_dir, &e));
                 return;
             }
         }
@@ -2466,7 +2483,7 @@ pub fn update_comfyui(state: State<'_, AppState>) -> Result<serde_json::Value, S
                 return;
             }
             Err(e) => {
-                update("error", &format!("Could not run git: {}", e));
+                update("error", &format!("Could not run git: {}", os_error::english(&e)));
                 return;
             }
         }
@@ -2558,7 +2575,7 @@ fn download_file_blocking(
         .connect_timeout(std::time::Duration::from_secs(30))
         .timeout(std::time::Duration::from_secs(7200))
         .build()
-        .map_err(|e| format!("HTTP client error: {}", e))?;
+        .map_err(|e| format!("HTTP client error: {}", os_error::english(&e)))?;
 
     let response = client.get(url).send().map_err(|e| format!("Request failed: {}", os_error::english(&e)))?;
 
@@ -2580,11 +2597,14 @@ fn download_file_blocking(
     let mut buf = [0u8; 65536]; // 64KB chunks
 
     loop {
-        let n = reader.read(&mut buf).map_err(|e| format!("Read error: {}", e))?;
+        let n = reader
+            .read(&mut buf)
+            .map_err(|e| format!("Read error: {}", os_error::english(&e)))?;
         if n == 0 {
             break;
         }
-        std::io::Write::write_all(&mut file, &buf[..n]).map_err(|e| format!("Write: {}", e))?;
+        std::io::Write::write_all(&mut file, &buf[..n])
+            .map_err(|e| format!("Write: {}", os_error::english(&e)))?;
         downloaded += n as u64;
 
         if last_update.elapsed().as_millis() > 500 {
@@ -2929,7 +2949,7 @@ fn install_ollama_windows_impl<F: Fn(&str, &str)>(
             update("starting", &format!("Installer finished (code {}). Starting Ollama...", code));
         }
         Err(e) => {
-            update("error", &format!("Could not run installer: {}", e));
+            update("error", &format!("Could not run installer: {}", os_error::english(&e)));
             return;
         }
     }
@@ -3454,7 +3474,7 @@ pub fn install_lmstudio(state: State<'_, AppState>) -> Result<serde_json::Value,
             match cmd.output() {
                 Ok(_) => println!("[LMStudio] Installer finished"),
                 Err(e) => {
-                    let err = format!("Could not run installer: {}", e);
+                    let err = format!("Could not run installer: {}", os_error::english(&e));
                     println!("[LMStudio] {}", err);
                     update("error", &err);
                     return;
@@ -4003,7 +4023,7 @@ pub fn install_python(state: State<'_, AppState>) -> Result<serde_json::Value, S
                         "Could not run winget: {}. winget ships with Windows 10/11 — \
                          if it's missing, run 'Get App Installer' from the Microsoft \
                          Store (free) and retry.",
-                        e
+                        os_error::english(&e)
                     ),
                 );
                 return;
@@ -4047,7 +4067,7 @@ pub fn install_python(state: State<'_, AppState>) -> Result<serde_json::Value, S
         let exit_status = match child.wait() {
             Ok(s) => s,
             Err(e) => {
-                update("error", &format!("winget wait failed: {}", e));
+                update("error", &format!("winget wait failed: {}", os_error::english(&e)));
                 return;
             }
         };
@@ -4374,7 +4394,7 @@ pub fn install_tts(
     let voices_dir = app
         .path()
         .app_data_dir()
-        .map_err(|e| format!("no app data dir: {}", e))?
+        .map_err(|e| format!("no app data dir: {}", os_error::english(&e)))?
         .join("piper_voices");
 
     let install_state = state.tts_install.clone();
@@ -4454,7 +4474,7 @@ pub fn install_tts(
                         );
                     }
                     Err(e) => {
-                        update("error", &format!("Voice download could not start: {}", e));
+                        update("error", &format!("Voice download could not start: {}", os_error::english(&e)));
                     }
                 }
             }
@@ -4669,7 +4689,8 @@ fn move_aside_broken_node_dir(target_dir: &std::path::Path) -> Result<PathBuf, S
         format!(
             "The folder {} exists but is not a valid git checkout, and it could \
              not be moved aside: {}. Delete it manually and try again.",
-            target_dir.display(), e
+            target_dir.display(),
+            os_error::english(&e)
         )
     })?;
     Ok(backup)
@@ -4778,6 +4799,50 @@ fn is_permission_denied_pip_error(output: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── A15: the repair card speaks English, whatever Windows speaks ────
+
+    /// What code 32 reads as on the machine the test runs on. Windows means
+    /// ERROR_SHARING_VIOLATION, which is the code from the box; every unix
+    /// errno 32 is EPIPE. Both answers are ours, and neither is read off the
+    /// operating system.
+    #[cfg(windows)]
+    const VENV_BUSY: &str = "the file is in use by another process (os error 32)";
+    #[cfg(not(windows))]
+    const VENV_BUSY: &str = "broken pipe (os error 32)";
+
+    #[test]
+    fn a_venv_held_by_another_process_is_reported_in_our_words() {
+        let dir = PathBuf::from("C:\\Users\\ddrob\\ComfyUI\\venv");
+        let e = std::io::Error::from_raw_os_error(32);
+        let msg = venv_removal_error(&dir, &e);
+        assert_eq!(
+            msg,
+            format!(
+                "Could not remove the old venv at {}: {}. Close anything using it and retry.",
+                dir.display(),
+                VENV_BUSY
+            )
+        );
+        // The finding itself: on the German box this sentence carried
+        // "Der Prozess kann nicht auf die Datei zugreifen ...". Whatever this
+        // machine's language calls code 32, that wording is not in here.
+        assert!(!msg.contains(&e.to_string()), "the system wording survived: {msg}");
+        assert!(msg.is_ascii(), "a localised message would not be ascii: {msg}");
+    }
+
+    /// Negative control: an error Rust worded itself is already English, and
+    /// rewriting it would only lose the detail it carries.
+    #[test]
+    fn a_venv_failure_rust_worded_itself_is_passed_through_unchanged() {
+        let e = std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "the venv path is not a directory",
+        );
+        let msg = venv_removal_error(Path::new("/tmp/ComfyUI/venv"), &e);
+        assert!(msg.contains("the venv path is not a directory"), "got: {msg}");
+        assert!(msg.starts_with("Could not remove the old venv at /tmp/ComfyUI/venv: "), "got: {msg}");
+    }
 
     // ── PyTorch-Kanalwahl (W2-Befund 16.08., comfy_kitchen braucht 2.6+) ─
 
