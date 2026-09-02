@@ -514,23 +514,40 @@ pub(crate) fn useful_tail(text: &str) -> String {
 /// (aikabatzu, aldrich_ironhart, Z0mbieK, Discord and GH #121, 2026-08-27 and
 /// 2026-08-29): "Setting up the trainer environment failed. Check that you are
 /// online" while online, with the firewall off, confirmed by a second user.
-const REDIST_NEXT_STEP: &str = "A Microsoft Visual C++ runtime library is missing, and PyTorch cannot load without it. Install the current Visual C++ Redistributable for x64 from https://learn.microsoft.com/cpp/windows/latest-supported-vc-redist, restart Windows, then press Set up trainer in Character Studio.";
-const NATIVE_NEXT_STEP: &str = "PyTorch is on disk but its native libraries will not load. Install the current Visual C++ Redistributable for x64 from https://learn.microsoft.com/cpp/windows/latest-supported-vc-redist, update the graphics driver, restart Windows, then press Set up trainer in Character Studio.";
+///
+/// Windows and the rest get different sentences, because the Visual C++
+/// Redistributable does not exist off Windows and sending a Linux user to
+/// microsoft.com is the same class of mistake as sending an online user to
+/// their router. Both texts compile everywhere and the OS is a parameter, the
+/// way `torch_wheels` does it, so a Mac can test the Windows wording.
+const WINDOWS_REDIST_NEXT_STEP: &str = "A Microsoft Visual C++ runtime library is missing, and PyTorch cannot load without it. Install the current Visual C++ Redistributable for x64 from https://learn.microsoft.com/cpp/windows/latest-supported-vc-redist, restart Windows, then press Set up trainer in Character Studio.";
+const UNIX_LIBRARY_NEXT_STEP: &str = "A system library PyTorch loads is missing on this machine; the log line above names the file. Install it with your package manager, then press Set up trainer in Character Studio.";
+const WINDOWS_NATIVE_NEXT_STEP: &str = "PyTorch is on disk but its native libraries will not load. Install the current Visual C++ Redistributable for x64 from https://learn.microsoft.com/cpp/windows/latest-supported-vc-redist, update the graphics driver, restart Windows, then press Set up trainer in Character Studio.";
+const UNIX_NATIVE_NEXT_STEP: &str = "PyTorch is on disk but its native libraries will not load. Update the graphics driver and the system libraries, restart the machine, then press Set up trainer in Character Studio.";
+/// A wrong wheel, not a broken machine. The setup probes the card again, so it
+/// is the same button and a completely different reason.
+const WHEEL_NEXT_STEP: &str = "The PyTorch that was installed carries no support for the card in this machine, so it can only run on the processor. Press Set up trainer in Character Studio: the setup probes the card again and picks the matching wheel.";
 const PYTHON_VERSION_NEXT_STEP: &str = "No wheel exists for the Python version LU is using here. Install Python 3.10, 3.11 or 3.12 from python.org with 'Add to PATH' checked, then press Set up trainer in Character Studio.";
-const PERMISSION_NEXT_STEP: &str = "Windows refused to write into the Python folder. Close every open Python, Jupyter or IDE debugger, and if the problem stays, install Python for your user instead of for all users, then press Set up trainer in Character Studio.";
+const PERMISSION_NEXT_STEP: &str = "The installer was not allowed to write into the Python folder. Close every open Python, Jupyter or IDE debugger, and if that changes nothing, install Python for your own user instead of for all users, then press Set up trainer in Character Studio.";
 const PEP668_NEXT_STEP: &str = "This Python refuses installs outside a virtual environment and the venv module is missing. Install it from your package manager (python3-venv on Debian and Ubuntu, python-virtualenv on Arch, python3-virtualenv on Fedora), then press Set up trainer in Character Studio.";
 
-/// The way out that fits what actually failed. The old code offered exactly
-/// one, "check that you are online and that the drive has room", for every
-/// failure class there is.
-pub(crate) fn next_step_for_log(log: &str, fallback: &'static str) -> &'static str {
+/// The way out that fits what actually failed, on the platform it failed on.
+/// The old code offered exactly one, "check that you are online and that the
+/// drive has room", for every failure class there is.
+pub(crate) fn next_step_for_log(log: &str, fallback: &'static str, os: &str) -> &'static str {
     use crate::commands::install::PipFailureKind as K;
+    let windows = os == "windows";
     if out_of_disk(log) {
         return DISK_NEXT_STEP;
     }
     match crate::commands::install::pip_failure_kind(log) {
-        K::MissingRuntimeLibrary => REDIST_NEXT_STEP,
-        K::NativeLoadFailure | K::TorchWithoutGpuSupport => NATIVE_NEXT_STEP,
+        K::MissingRuntimeLibrary => {
+            if windows { WINDOWS_REDIST_NEXT_STEP } else { UNIX_LIBRARY_NEXT_STEP }
+        }
+        K::NativeLoadFailure => {
+            if windows { WINDOWS_NATIVE_NEXT_STEP } else { UNIX_NATIVE_NEXT_STEP }
+        }
+        K::TorchWithoutGpuSupport => WHEEL_NEXT_STEP,
         K::NoMatchingWheel => PYTHON_VERSION_NEXT_STEP,
         K::Permission => PERMISSION_NEXT_STEP,
         K::ExternallyManaged => PEP668_NEXT_STEP,
@@ -549,7 +566,7 @@ pub(crate) fn next_step_for_log(log: &str, fallback: &'static str) -> &'static s
 /// status line instead, which on a full disk meant fifteen `Moving to ...`
 /// lines and no next step at all.
 pub(crate) fn env_failure_message(diagnosis: &str, fallback_step: &'static str, log: &str) -> String {
-    let step = next_step_for_log(log, fallback_step);
+    let step = next_step_for_log(log, fallback_step, std::env::consts::OS);
     let head = diagnosis.trim();
     let head = if head.is_empty() { String::new() } else { format!("{head} ") };
     format!("{head}{step} Last steps: {}", useful_tail(log))
@@ -2205,20 +2222,66 @@ mod shutdown_tests {
         use super::install_failed_message;
         let log = "torch install failed (exit Some(1)).\nImportError: VCOMP140.DLL was not found";
         let msg = install_failed_message(log);
-        assert!(msg.contains("Visual C++"), "the real cause is unnamed: {msg}");
-        assert!(msg.contains("latest-supported-vc-redist"), "no way to get it: {msg}");
         assert!(msg.contains("Set up trainer"), "no button: {msg}");
         assert!(!msg.contains("Check that you are online"), "still blames the network: {msg}");
+        if cfg!(target_os = "windows") {
+            assert!(msg.contains("Visual C++"), "the real cause is unnamed: {msg}");
+            assert!(msg.contains("latest-supported-vc-redist"), "no way to get it: {msg}");
+        } else {
+            assert!(msg.contains("package manager"), "{msg}");
+        }
     }
 
     #[test]
-    fn a_dll_that_will_not_load_names_the_runtime_and_the_driver() {
-        use super::install_failed_message;
-        let log = "torch install failed (exit Some(1)).\nOSError: [WinError 1114] A dynamic link library (DLL) initialization routine failed. Error loading \"c10.dll\"";
-        let msg = install_failed_message(log);
-        assert!(msg.contains("Visual C++"), "{msg}");
-        assert!(msg.to_lowercase().contains("driver"), "{msg}");
-        assert!(!msg.contains("Check that you are online"), "{msg}");
+    fn the_visual_cpp_advice_is_only_given_where_it_exists() {
+        // Negative control for the platform split: sending a Linux user to
+        // microsoft.com is the same class of mistake as sending an online user
+        // to their router. Both texts compile everywhere, so a Mac tests both.
+        use super::next_step_for_log;
+        let dll = "ImportError: VCOMP140.DLL was not found";
+        let win = next_step_for_log(dll, "FALLBACK", "windows");
+        let linux = next_step_for_log(dll, "FALLBACK", "linux");
+        assert!(win.contains("Visual C++") && win.contains("vc-redist"), "{win}");
+        assert!(!linux.contains("Visual C++"), "Linux is sent to microsoft.com: {linux}");
+        assert!(!linux.contains("microsoft.com"), "{linux}");
+        assert!(linux.contains("package manager"), "{linux}");
+        assert!(linux.contains("Set up trainer"), "{linux}");
+
+        let native = "OSError: [WinError 1114] initialization routine failed";
+        let win_native = next_step_for_log(native, "FALLBACK", "windows");
+        let linux_native = next_step_for_log(native, "FALLBACK", "linux");
+        assert!(win_native.contains("Visual C++"), "{win_native}");
+        assert!(!linux_native.contains("Visual C++"), "{linux_native}");
+        assert!(linux_native.to_lowercase().contains("driver"), "{linux_native}");
+    }
+
+    #[test]
+    fn a_wrong_wheel_is_not_dressed_up_as_a_broken_machine() {
+        // "Torch not compiled with CUDA enabled" used to get the native
+        // library text, which sends the customer to install a redistributable
+        // and update a driver for a problem that is neither.
+        use super::next_step_for_log;
+        for os in ["windows", "linux"] {
+            let step = next_step_for_log("AssertionError: Torch not compiled with CUDA enabled", "FALLBACK", os);
+            assert!(step.contains("probes the card again"), "{os}: {step}");
+            assert!(!step.contains("Visual C++"), "{os}: {step}");
+            assert!(step.contains("Set up trainer"), "{os}: {step}");
+        }
+    }
+
+    #[test]
+    fn the_refused_write_is_worded_for_every_platform() {
+        // Negative control for wording: the sentence has to be true on a Mac
+        // and on Linux too, where nothing called Windows refuses anything.
+        use super::next_step_for_log;
+        let step = next_step_for_log("ERROR: [WinError 5] Access is denied", "FALLBACK", "linux");
+        assert!(!step.contains("Windows refused"), "names the wrong system: {step}");
+        assert!(step.contains("Set up trainer"), "{step}");
+        // And the Windows wordings for a refused write have to reach this arm
+        // at all, which they did not before: neither contains "permission".
+        for log in ["ERROR: [WinError 5] Access is denied", "ERROR: Access is denied"] {
+            assert_ne!(next_step_for_log(log, "FALLBACK", "windows"), "FALLBACK", "{log}");
+        }
     }
 
     #[test]
@@ -2248,15 +2311,16 @@ mod shutdown_tests {
 
     #[test]
     fn the_full_drive_still_wins_over_every_other_verdict() {
-        // Negative control for the ordering: a disk-full log also carries the
-        // word "permission" often enough, and the disk sentence is the one
-        // with the measured number in it.
+        // Negative control for the ordering: a disk-full rollback names a DLL
+        // under torch\lib on every line it prints, and the disk sentence is
+        // the one with the measured number in it.
         use super::next_step_for_log;
-        let step = next_step_for_log(
-            "OSError: [Errno 28] No space left on device\nPermissionError while rolling back",
-            "FALLBACK",
-        );
-        assert!(step.contains("7 GB"), "{step}");
+        let mut log = String::from("OSError: [Errno 28] No space left on device\n");
+        log.push_str("Moving to c:\\users\\x\\musubi\\venv\\lib\\site-packages\\torch\\lib\\vcomp140.dll\n");
+        for os in ["windows", "linux"] {
+            let step = next_step_for_log(&log, "FALLBACK", os);
+            assert!(step.contains("7 GB"), "{os}: {step}");
+        }
     }
 
     #[test]
@@ -2268,10 +2332,13 @@ mod shutdown_tests {
             "ERROR: Could not find a version that satisfies the requirement torch",
             "PermissionError: [Errno 13] Permission denied",
             "error: externally-managed-environment",
+            "AssertionError: Torch not compiled with CUDA enabled",
         ] {
-            let step = next_step_for_log(log, "FALLBACK");
-            assert_ne!(step, "FALLBACK", "no verdict for {log:?}");
-            assert!(step.contains("Set up trainer"), "{log:?} has no way out: {step}");
+            for os in ["windows", "linux", "macos"] {
+                let step = next_step_for_log(log, "FALLBACK", os);
+                assert_ne!(step, "FALLBACK", "no verdict for {log:?} on {os}");
+                assert!(step.contains("Set up trainer"), "{log:?} on {os} has no way out: {step}");
+            }
         }
     }
 
