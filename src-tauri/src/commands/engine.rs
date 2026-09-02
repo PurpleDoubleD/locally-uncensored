@@ -44,6 +44,11 @@ pub const DEFAULT_EMBED_PORT: u16 = 8128;
 /// binary that never comes up.
 const HEALTH_TIMEOUT: Duration = Duration::from_secs(60);
 
+/// How far past the preferred port the engine may look for one it can open.
+/// Bounded on purpose: twenty ports is far more than any desktop needs, and a
+/// walk that never ends is a hang with extra steps.
+const PORT_SEARCH_SPAN: u16 = 20;
+
 // ── Pure helpers (unit-tested without a real binary) ─────────────────────────
 
 /// Sidecar file name Tauri produces from
@@ -569,6 +574,57 @@ pub async fn kv_slot_action(port: u16, action: String) -> Result<serde_json::Val
     Ok(serde_json::json!({ "ok": ok, "body": body }))
 }
 
+// ── Port selection ───────────────────────────────────────────────────────────
+//
+// GH #118 (nayffy, 2026-08-27): the engine had exactly one port and no way out
+// of it. Whatever held 8127 held the whole chat lane, and the app answered a
+// user with "quit that process or reboot", which is an instruction, not a
+// repair. Windows makes this worse than it sounds: Hyper-V and WSL reserve
+// whole port blocks with nothing listening in them
+// (`netsh interface ipv4 show excludedportrange`), so a port can be refused to
+// a child while looking free from the outside. House rule is self-healing
+// before an error message, so a taken port is now a different port.
+
+/// The ports the managed chat engine may use, in the order it tries them: the
+/// preferred one first, then a bounded walk upwards. The embeddings port is
+/// skipped, because it belongs to the other managed sidecar and taking it
+/// would break Document-Chat instead of fixing chat.
+pub(crate) fn engine_port_candidates(preferred: u16) -> Vec<u16> {
+    let mut out = vec![preferred];
+    let mut port = preferred;
+    while out.len() < PORT_SEARCH_SPAN as usize + 1 {
+        port = match port.checked_add(1) {
+            Some(p) => p,
+            None => break,
+        };
+        if port == DEFAULT_EMBED_PORT {
+            continue;
+        }
+        out.push(port);
+    }
+    out
+}
+
+/// First candidate `usable` accepts. Pure, so the walk is testable without
+/// opening a single socket.
+pub(crate) fn first_usable_port(candidates: &[u16], usable: impl Fn(u16) -> bool) -> Option<u16> {
+    candidates.iter().copied().find(|p| usable(*p))
+}
+
+/// Can this process open the loopback port right now. Exactly the question
+/// llama-server is about to ask, asked one step earlier so a taken port turns
+/// into another port instead of into a dead engine.
+fn port_is_bindable(port: u16) -> bool {
+    std::net::TcpListener::bind(("127.0.0.1", port)).is_ok()
+}
+
+/// Said when the whole bounded walk came back empty.
+pub(crate) fn no_free_port_message(first: u16, last: u16) -> String {
+    format!(
+        "The built-in engine could not open a local port. Every port from {first} to {last} is taken or blocked on this machine. Close whatever is holding them (a llama-server left over from an earlier session is the usual cause), or check whether a firewall or a reserved Windows port range covers that block, then try again."
+    )
+}
+
 fn engine_healthy(port: u16) -> bool {
     reqwest::blocking::Client::builder()
         .timeout(Duration::from_millis(400))
@@ -679,6 +735,29 @@ fn stderr_blames_the_gpu(stderr: &str) -> bool {
     MARKERS.iter().any(|m| lower.contains(m))
 }
 
+/// Markers that say the child never got the socket. Lower-cased input.
+///
+/// The two numbers are Winsock: 10048 is WSAEADDRINUSE, 10013 is WSAEACCES,
+/// which is what a port inside a reserved Windows range answers even though
+/// nothing is listening on it.
+pub(crate) fn stderr_blames_the_port(stderr: &str) -> bool {
+    const MARKERS: &[&str] = &[
+        "address already in use",
+        "address in use",
+        "failed to bind",
+        "error while binding",
+        "couldn't bind",
+        "could not bind",
+        "bind: permission denied",
+        "eaddrinuse",
+        "eacces",
+        "10048",
+        "10013",
+    ];
+    let lower = stderr.to_ascii_lowercase();
+    MARKERS.iter().any(|m| lower.contains(m))
+}
+
 /// Markers that point at the model file itself.
 fn stderr_blames_the_model(stderr: &str) -> bool {
     const MARKERS: &[&str] = &[
@@ -707,6 +786,10 @@ pub(crate) fn start_failure_message(failure: &StartFailure, port: u16, budget: D
     let head = if failure.port_taken {
         format!(
             "Port {port} answers health checks, but the engine this app just started exited immediately. Another llama-server (likely left over from a previous session or crash) is occupying the port. Quit that process or reboot, then try again."
+        )
+    } else if failure.died && stderr_blames_the_port(&failure.stderr) {
+        format!(
+            "The built-in engine could not open port {port}. Another program holds it, or the port sits in a range this system has reserved. The app already tried the next free ports and got the same answer. Close that program or reboot, then try again."
         )
     } else if failure.died {
         let hint = if stderr_blames_the_gpu(&failure.stderr) {
@@ -783,15 +866,26 @@ fn start_bundled_engine_blocking(
     // Vision projector sitting next to the model (written by the Discover
     // download). Present = start multimodal, absent = unchanged text argv.
     let mmproj = existing_mmproj(&model_path);
-    let desired_args = build_server_args(&model_path, &tuning, port, slot_dir.as_deref(), mmproj.as_deref());
 
     // Already serving this exact argv and healthy → no-op. The argv is the
     // idempotence key: a ctx/KV-quant/flash-attn change restarts the server,
     // an identical request reuses the running process.
+    //
+    // Asked on the port the engine ACTUALLY runs on, not on the preferred one.
+    // An engine that had to move to a fallback port carries that port in its
+    // argv, and comparing it against the preferred port would tear down a
+    // perfectly healthy engine on every single call.
     {
         let guard = state.bundled_engine.lock().unwrap();
         if let Some(engine) = guard.as_ref() {
-            if engine.args == desired_args && engine_healthy(engine.port) {
+            let args_on_its_port = build_server_args(
+                &model_path,
+                &tuning,
+                engine.port,
+                slot_dir.as_deref(),
+                mmproj.as_deref(),
+            );
+            if engine.args == args_on_its_port && engine_healthy(engine.port) {
                 return Ok(serde_json::json!({
                     "status": "already_running",
                     "port": engine.port,
@@ -806,20 +900,37 @@ fn start_bundled_engine_blocking(
     stop_engine_locked(state);
 
     // The port must actually be FREE now: our own previous child (if any) was
-    // killed AND reaped above, so anything still answering the health probe is
-    // an orphaned or foreign llama-server — left over from a crashed /
-    // hard-killed session, or user-run. Spawning against it would LOOK green:
-    // the health probe below is answered by the stranger while our child is
-    // still loading its model and only later dies on "address already in use"
-    // — so chats would silently hit an unknown model with unknown ctx, tuning
-    // would never apply, and no shutdown of ours could ever reap it. (Live
-    // repro 2026-07-28: an embed server orphaned by a hard-killed dev session
-    // made every later start look successful.)
-    if engine_healthy(port) {
-        return Err(format!(
-            "Port {port} is already serving another llama-server that this app does not manage (likely left over from a previous session or crash). Quit that process or reboot, then try again."
-        ));
+    // killed AND reaped above, so anything still holding it is an orphaned or
+    // foreign server, left over from a crashed or hard-killed session, or
+    // user-run. Spawning against it would LOOK green: the health probe below is
+    // answered by the stranger while our child is still loading its model and
+    // only later dies on "address already in use", so chats would silently hit
+    // an unknown model with unknown ctx, tuning would never apply, and no
+    // shutdown of ours could ever reap it. (Live repro 2026-07-28: an embed
+    // server orphaned by a hard-killed dev session made every later start look
+    // successful.)
+    //
+    // What used to happen here was an error telling the user to quit that
+    // process or reboot. GH #118: that is an instruction, not a repair, and on
+    // a fresh Windows install the thing holding the port is often a reserved
+    // range nobody can quit. So the app takes the next port it can open, and
+    // only a completely blocked block of ports is worth a message.
+    let preferred_port = port;
+    let candidates = engine_port_candidates(preferred_port);
+    let port = match first_usable_port(&candidates, port_is_bindable) {
+        Some(p) => p,
+        None => {
+            return Err(no_free_port_message(
+                preferred_port,
+                *candidates.last().unwrap_or(&preferred_port),
+            ))
+        }
+    };
+    if port != preferred_port {
+        println!("[Engine] port {preferred_port} is taken, the built-in engine moves to {port}");
     }
+    let desired_args =
+        build_server_args(&model_path, &tuning, port, slot_dir.as_deref(), mmproj.as_deref());
 
     // Mirror image of the Create-tab handoff: a render leaves ComfyUI's
     // checkpoint cached in VRAM (`includeComfyui:false` keeps it warm between
@@ -887,18 +998,44 @@ fn start_bundled_engine_blocking(
 
     println!("[Engine] first start attempt exited immediately, retrying once");
     std::thread::sleep(Duration::from_millis(1500));
-    match spawn_engine_attempt(state, &binary, &desired_args, &model_path, port, ctx) {
+    // A start that died ON THE PORT does not get better by using the same port
+    // a second time, so the retry moves. The bind check above said the port was
+    // free, and on Windows it can still be refused to the child (a reserved
+    // range answers WSAEACCES rather than "in use"), which is exactly the
+    // failure that leaves a user staring at ERR_CONNECTION_REFUSED forever.
+    let retry_port = if stderr_blames_the_port(&failure.stderr) {
+        let rest: Vec<u16> = engine_port_candidates(preferred_port)
+            .into_iter()
+            .filter(|p| *p != port)
+            .collect();
+        first_usable_port(&rest, port_is_bindable).unwrap_or(port)
+    } else {
+        port
+    };
+    let retry_args = if retry_port == port {
+        desired_args.clone()
+    } else {
+        println!("[Engine] the first attempt could not open port {port}, retrying on {retry_port}");
+        build_server_args(
+            &model_path,
+            &tuning,
+            retry_port,
+            slot_dir.as_deref(),
+            mmproj.as_deref(),
+        )
+    };
+    match spawn_engine_attempt(state, &binary, &retry_args, &model_path, retry_port, ctx) {
         Ok(()) => {
-            println!("[Engine] Built-in engine healthy on port {port} (second attempt)");
+            println!("[Engine] Built-in engine healthy on port {retry_port} (second attempt)");
             Ok(serde_json::json!({
                 "status": "started",
-                "port": port,
+                "port": retry_port,
                 "model_path": model_path,
                 "ctx": ctx,
                 "retried": true,
             }))
         }
-        Err(second) => Err(start_failure_message(&second, port, deadline)),
+        Err(second) => Err(start_failure_message(&second, retry_port, deadline)),
     }
 }
 
@@ -2076,6 +2213,106 @@ mod tests {
             HealthWait::ChildExited
         );
         assert!(began.elapsed() < Duration::from_secs(5));
+    }
+
+    // ── GH #118, the port half ─────────────────────────────────────────────
+
+    #[test]
+    fn the_preferred_port_comes_first_and_the_embed_port_is_never_offered() {
+        let c = engine_port_candidates(DEFAULT_ENGINE_PORT);
+        assert_eq!(c[0], DEFAULT_ENGINE_PORT, "the preferred port is tried first");
+        assert!(
+            !c.contains(&DEFAULT_EMBED_PORT),
+            "taking 8128 would break Document-Chat instead of fixing chat: {c:?}"
+        );
+        assert_eq!(c.len(), PORT_SEARCH_SPAN as usize + 1, "the walk stays bounded");
+        // Negative control: without the skip the second candidate WOULD be the
+        // embed port, so the assertion above is really testing the skip.
+        assert_eq!(DEFAULT_ENGINE_PORT + 1, DEFAULT_EMBED_PORT);
+        assert_eq!(c[1], DEFAULT_EMBED_PORT + 1);
+    }
+
+    #[test]
+    fn the_walk_ends_instead_of_wrapping_at_the_top_of_the_range() {
+        let c = engine_port_candidates(u16::MAX - 2);
+        assert_eq!(c, vec![u16::MAX - 2, u16::MAX - 1, u16::MAX]);
+    }
+
+    #[test]
+    fn a_taken_preferred_port_becomes_the_next_free_one() {
+        // The 2.6.6 answer to this situation was an error telling the user to
+        // quit a process or reboot. It is a port, and there are others.
+        let c = engine_port_candidates(DEFAULT_ENGINE_PORT);
+        let taken = [DEFAULT_ENGINE_PORT, DEFAULT_EMBED_PORT + 1];
+        let picked = first_usable_port(&c, |p| !taken.contains(&p));
+        assert_eq!(picked, Some(DEFAULT_EMBED_PORT + 2));
+        // Negative control: nothing free at all is the one case that has to
+        // become a message rather than a silent hop.
+        assert_eq!(first_usable_port(&c, |_| false), None);
+    }
+
+    #[test]
+    fn a_completely_blocked_block_says_which_ports_it_tried() {
+        let c = engine_port_candidates(DEFAULT_ENGINE_PORT);
+        let msg = no_free_port_message(DEFAULT_ENGINE_PORT, *c.last().unwrap());
+        assert!(msg.contains("8127"), "{msg}");
+        assert!(msg.contains(&c.last().unwrap().to_string()), "{msg}");
+        assert!(!msg.contains('—') && !msg.contains('–'), "no dashes: {msg}");
+    }
+
+    #[test]
+    fn a_bind_failure_is_recognised_on_every_platform_wording() {
+        // llama.cpp on Linux/macOS, plus the two Winsock numbers Windows uses.
+        // 10013 is the one that matters most: a port inside a reserved range
+        // answers "permission denied" while nothing is listening on it.
+        assert!(stderr_blames_the_port("error: bind: Address already in use"));
+        assert!(stderr_blames_the_port("failed to bind to 127.0.0.1:8127"));
+        assert!(stderr_blames_the_port("bind error 10048"));
+        assert!(stderr_blames_the_port("WSAEACCES (10013)"));
+        // Negative control: a GPU death must not be mistaken for a port death,
+        // or the retry would move the port and change nothing.
+        assert!(!stderr_blames_the_port(
+            "ggml_backend_alloc: CUDA error: out of memory"
+        ));
+        assert!(!stderr_blames_the_port("failed to load model"));
+    }
+
+    #[test]
+    fn a_port_death_gets_its_own_sentence_instead_of_the_reinstall_advice() {
+        let failure = StartFailure {
+            died: true,
+            port_taken: false,
+            stderr: "bind: Address already in use".into(),
+        };
+        let msg = start_failure_message(&failure, 8127, Duration::from_secs(60));
+        assert!(msg.contains("could not open port 8127"), "{msg}");
+        assert!(
+            !msg.contains("Reinstall"),
+            "a busy port is not a broken installation: {msg}"
+        );
+        // Negative control: an unclassified death keeps the old advice.
+        let other = StartFailure {
+            died: true,
+            port_taken: false,
+            stderr: "something went wrong".into(),
+        };
+        assert!(start_failure_message(&other, 8127, Duration::from_secs(60)).contains("Reinstall"));
+    }
+
+    #[test]
+    fn a_port_this_process_holds_is_not_offered_to_the_engine() {
+        // The one socket-level check: bind a port, then ask for it.
+        let held = std::net::TcpListener::bind(("127.0.0.1", 0)).expect("bind an ephemeral port");
+        let taken = held.local_addr().unwrap().port();
+        assert!(!port_is_bindable(taken), "port {taken} is held by this test");
+        let candidates = engine_port_candidates(taken);
+        let picked = first_usable_port(&candidates, port_is_bindable);
+        assert!(picked.is_some(), "the walk has to find a way out");
+        assert_ne!(picked, Some(taken));
+        // Negative control: the held port is still FIRST in the walk, so it was
+        // the bind check that skipped it and not the order of the candidates.
+        assert_eq!(first_usable_port(&candidates, |_| true), Some(taken));
+        drop(held);
     }
 
     #[test]
