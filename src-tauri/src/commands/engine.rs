@@ -1969,14 +1969,40 @@ mod tests {
             names.contains(&stem),
             "the config bundles {names:?} but the app looks for {stem}",
         );
-        // Negative control: the four binaries Debian's llama.cpp-tools puts
-        // in /usr/bin. None of them may be a name we bundle.
-        for owned in ["llama-server", "llama-cli", "llama-bench", "llama-quantize"] {
+        // The rule is positive, not a list of four forbidden llama names:
+        // everything the bundler drops into /usr/bin carries our prefix, so
+        // the NEXT sidecar cannot walk into #120 either. Same rule as
+        // src/lib/__tests__/linux-package-owns-its-paths.test.ts, which is
+        // the copy CI actually runs.
+        fn is_ours(name: &str) -> bool {
+            let stem = name.strip_suffix(".exe").unwrap_or(name);
+            stem.strip_prefix("lu-").is_some_and(|rest| !rest.is_empty())
+        }
+        for bundled in &names {
             assert!(
-                !names.contains(&owned),
-                "{owned} is owned by llama.cpp-tools in /usr/bin, dpkg would refuse the install",
+                is_ours(bundled),
+                "{bundled} would land in /usr/bin under a name we do not own",
             );
         }
+        // Negative control: binaries a distribution package already puts in
+        // /usr/bin. None of them may be a name we bundle, and none of them
+        // passes the rule above.
+        for owned in [
+            "llama-server",
+            "llama-cli",
+            "llama-bench",
+            "llama-quantize",
+            "llama-embedding",
+            "ffmpeg",
+        ] {
+            assert!(
+                !names.contains(&owned),
+                "{owned} is owned by a distribution package in /usr/bin, dpkg would refuse the install",
+            );
+            assert!(!is_ours(owned), "the rule has to reject {owned}");
+        }
+        assert!(is_ours("lu-llama-server") && is_ours("lu-llama-server.exe"));
+        assert!(!is_ours("lu-"), "a bare prefix is not a name");
     }
 
     #[test]
