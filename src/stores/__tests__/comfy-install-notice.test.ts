@@ -63,7 +63,9 @@ describe('a repair that had to skip the requirements.txt says so at the end', ()
     expect(store().notice).toContain('is not installed')
   })
 
-  it('leaves no line behind when the run used the file it found', async () => {
+  it('carries only what the backend sent, and nothing of its own', async () => {
+    // Negative control on the wiring: the store does not invent a line, it
+    // relays one. A backend that sends an empty notice leaves the panel bare.
     await repairThatEndsWith({
       status: 'complete',
       logs: ['Dependencies installed.', 'All packages import cleanly.'],
@@ -91,13 +93,39 @@ describe('a repair that had to skip the requirements.txt says so at the end', ()
 })
 
 describe('the ComfyUI section opens itself while a run is on screen', () => {
-  it('opens for every phase that is not idle, and stays shut for idle', async () => {
+  it('opens for every phase that is not idle, and stays shut for an empty idle', async () => {
     const { comfySectionShouldOpen } = await import('../comfyInstallStore')
     for (const phase of ['checking', 'python', 'comfyui', 'repair', 'error'] as const) {
-      expect(comfySectionShouldOpen(phase)).toBe(true)
+      expect(comfySectionShouldOpen({ phase, notice: '' })).toBe(true)
     }
-    // Negative control: a settings page with nothing running must not force the
-    // section open, or the accordion would be no accordion at all.
-    expect(comfySectionShouldOpen('idle')).toBe(false)
+    // Negative control: a settings page with nothing running and nothing to
+    // report must not force the section open, or the accordion would be no
+    // accordion at all.
+    expect(comfySectionShouldOpen({ phase: 'idle', notice: '' })).toBe(false)
+  })
+
+  it('opens for the closing line a finished run left behind', async () => {
+    // Review 03.09.: the panel renders the closing line only while the phase is
+    // idle, so asking about the phase alone folded the section shut in exactly
+    // the one state the line exists in. An eight minute repair then reported
+    // its result to nobody.
+    const { comfySectionShouldOpen } = await import('../comfyInstallStore')
+    expect(comfySectionShouldOpen({ phase: 'idle', notice: 'Repair finished. ComfyUI is ready.' }))
+      .toBe(true)
+    expect(comfySectionShouldOpen({ phase: 'idle', notice: SKIPPED })).toBe(true)
+  })
+})
+
+describe('a run that simply worked still says so', () => {
+  it('keeps the closing line of a clean repair', async () => {
+    await repairThatEndsWith({
+      status: 'complete',
+      logs: ['All packages import cleanly.'],
+      notice: 'Repair finished. ComfyUI is ready.',
+    })
+    expect(store().phase).toBe('idle')
+    expect(store().notice).toBe('Repair finished. ComfyUI is ready.')
+    const { comfySectionShouldOpen } = await import('../comfyInstallStore')
+    expect(comfySectionShouldOpen(store())).toBe(true)
   })
 })

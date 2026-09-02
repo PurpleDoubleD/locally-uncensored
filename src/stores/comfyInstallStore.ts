@@ -58,15 +58,24 @@ export const LOST_CONTACT = 'Lost contact with the installer. Check the log and 
 export const LOST_CONTACT_PYTHON = 'Lost contact with the Python installer. Check the log and try again.'
 
 /** True while the ComfyUI section has something the user must not miss: a run
- *  in flight, or a failure nobody has dismissed yet.
+ *  in flight, a failure nobody has dismissed yet, or the closing line a run
+ *  left behind.
  *
  *  A15, Windows Nachlauf 02.09.: the section is an ordinary accordion, so a
  *  trip to General and back folded it up again while a twenty minute repair was
  *  still running. The progress itself survives the remount (that is what this
  *  store is for), but it survives behind a closed lid, and a user who does not
- *  think to open it sees an app that looks idle. */
-export function comfySectionShouldOpen(phase: ComfyInstallPhase): boolean {
-  return phase !== 'idle'
+ *  think to open it sees an app that looks idle.
+ *
+ *  Review 03.09.: the first cut asked about the phase alone, and the panel
+ *  renders the closing line only while the phase is idle. So the one state the
+ *  line exists in was the one state that folded the section shut, and the
+ *  result of a run that had just taken eight minutes was gone on the next
+ *  section switch. Both halves are asked about now. */
+export function comfySectionShouldOpen(
+  run: { phase: ComfyInstallPhase; notice: string },
+): boolean {
+  return run.phase !== 'idle' || run.notice !== ''
 }
 
 /** The one poll in flight, module level so it outlives every mount. */

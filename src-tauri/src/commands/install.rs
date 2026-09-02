@@ -609,6 +609,19 @@ pub(crate) fn requirements_failure_reason(pip_output: &str) -> &'static str {
     }
 }
 
+/// The same question asked of a whole pip failure rather than of its text.
+///
+/// A15 review: an empty `stderr` means pip never wrote any, so the process
+/// could not be started or could not be reaped. Classifying the diagnosis in
+/// that case comes out as "pip exited with an error", which is precisely what
+/// did not happen.
+pub(crate) fn requirements_failure_reason_for(f: &PipFailure) -> &'static str {
+    if f.stderr.is_empty() {
+        return "pip could not be started";
+    }
+    requirements_failure_reason(&f.stderr)
+}
+
 /// The live log line that names the fallback while it happens.
 pub(crate) fn requirements_fallback_log(folder: &str, reason: &str) -> String {
     format!(
@@ -617,9 +630,29 @@ pub(crate) fn requirements_fallback_log(folder: &str, reason: &str) -> String {
     )
 }
 
-/// The line the finished run leaves behind, so the fallback survives the last
-/// poll. Without it the panel goes back to idle and every word about the
-/// skipped file scrolls away with the log.
+/// The line every finished run leaves behind.
+///
+/// David, 03.09.: a run that worked has to say so. The cancel already had a
+/// closing sentence and the success had none, so the abort was better labelled
+/// than the success (A13 Befund 1a), and three full repairs of six to eight
+/// minutes each ended with the card simply vanishing. The requirements hint is
+/// appended rather than substituted: the run did finish, and the user needs
+/// both halves of that.
+pub(crate) fn finished_notice(
+    done: &str,
+    fallback: Option<&(String, &'static str)>,
+) -> String {
+    match fallback {
+        Some((folder, reason)) => {
+            format!("{} {}", done, requirements_fallback_notice(folder, reason))
+        }
+        None => done.to_string(),
+    }
+}
+
+/// The half sentence about a requirements.txt the run had to pass over. Without
+/// it the panel goes back to idle and every word about the skipped file scrolls
+/// away with the log.
 pub(crate) fn requirements_fallback_notice(folder: &str, reason: &str) -> String {
     format!(
         "The requirements.txt in {} could not be used ({}), so LU installed its own package \
@@ -2153,11 +2186,7 @@ pub fn install_comfyui(
                         // gone is the old "non-critical" verdict, which called
                         // a broken environment a finished one.
                         println!("[Install] Requirements install warning: {}", diagnosis);
-                        let reason = requirements_failure_reason(if f.stderr.is_empty() {
-                            &diagnosis
-                        } else {
-                            &f.stderr
-                        });
+                        let reason = requirements_failure_reason_for(&f);
                         let folder = target_dir.display().to_string();
                         requirements_fallback = Some((folder.clone(), reason));
                         update("installing", &requirements_fallback_log(&folder, reason));
@@ -2220,10 +2249,11 @@ pub fn install_comfyui(
             );
         }
 
-        if let Some((folder, reason)) = requirements_fallback.as_ref() {
-            if let Ok(mut s) = install_status.lock() {
-                s.notice = requirements_fallback_notice(folder, reason);
-            }
+        if let Ok(mut s) = install_status.lock() {
+            s.notice = finished_notice(
+                "Install finished. ComfyUI is ready to start.",
+                requirements_fallback.as_ref(),
+            );
         }
         update("complete", "ComfyUI installed successfully!");
     });
@@ -2401,11 +2431,7 @@ pub fn repair_comfyui_env(state: State<'_, AppState>) -> Result<serde_json::Valu
                     return;
                 }
                 Err(f) => {
-                    let reason = requirements_failure_reason(if f.stderr.is_empty() {
-                        &f.diagnosis
-                    } else {
-                        &f.stderr
-                    });
+                    let reason = requirements_failure_reason_for(&f);
                     let folder = comfy_dir.display().to_string();
                     requirements_fallback = Some((folder.clone(), reason));
                     update("installing", &requirements_fallback_log(&folder, reason));
@@ -2437,10 +2463,11 @@ pub fn repair_comfyui_env(state: State<'_, AppState>) -> Result<serde_json::Valu
             }
         }
 
-        if let Some((folder, reason)) = requirements_fallback.as_ref() {
-            if let Ok(mut s) = install_status.lock() {
-                s.notice = requirements_fallback_notice(folder, reason);
-            }
+        if let Ok(mut s) = install_status.lock() {
+            s.notice = finished_notice(
+                "Repair finished. ComfyUI is ready.",
+                requirements_fallback.as_ref(),
+            );
         }
         update(
             "complete",
@@ -2629,11 +2656,7 @@ pub fn update_comfyui(state: State<'_, AppState>) -> Result<serde_json::Value, S
                 }
                 Err(f) => {
                     println!("[Update] Requirements warning: {}", f.diagnosis);
-                    let reason = requirements_failure_reason(if f.stderr.is_empty() {
-                        &f.diagnosis
-                    } else {
-                        &f.stderr
-                    });
+                    let reason = requirements_failure_reason_for(&f);
                     let folder = comfy_dir.display().to_string();
                     requirements_fallback = Some((folder.clone(), reason));
                     update("installing", &requirements_fallback_log(&folder, reason));
@@ -2663,10 +2686,11 @@ pub fn update_comfyui(state: State<'_, AppState>) -> Result<serde_json::Value, S
         }
 
         println!("[Update] ComfyUI update complete");
-        if let Some((folder, reason)) = requirements_fallback.as_ref() {
-            if let Ok(mut s) = install_status.lock() {
-                s.notice = requirements_fallback_notice(folder, reason);
-            }
+        if let Ok(mut s) = install_status.lock() {
+            s.notice = finished_notice(
+                "Update finished. Restart ComfyUI to load the new nodes.",
+                requirements_fallback.as_ref(),
+            );
         }
         update(
             "complete",
@@ -5014,14 +5038,60 @@ mod tests {
         }
     }
 
-    /// Negative control: a run with nothing to add leaves no closing line, so
-    /// the panel is not decorated with a warning after a clean rebuild.
+    /// Negative control on the state itself: nothing is carried over from a
+    /// run that never happened.
     #[test]
-    fn a_run_that_used_the_requirements_file_leaves_no_notice() {
+    fn a_fresh_install_state_carries_no_closing_line() {
         let fresh = crate::state::InstallState::default();
         assert!(fresh.notice.is_empty());
         let json = serde_json::to_value(&fresh).expect("serialises");
         assert_eq!(json["notice"], serde_json::json!(""));
+    }
+
+    /// David, 03.09.: a run that worked says so, every time.
+    #[test]
+    fn a_run_that_worked_leaves_a_closing_line_of_its_own() {
+        for done in [
+            "Install finished. ComfyUI is ready to start.",
+            "Repair finished. ComfyUI is ready.",
+            "Update finished. Restart ComfyUI to load the new nodes.",
+        ] {
+            assert_eq!(finished_notice(done, None), done);
+        }
+    }
+
+    /// And a run that had to skip the requirements.txt says both halves, in
+    /// that order: it finished, and here is what it could not use.
+    #[test]
+    fn a_finished_run_that_skipped_the_file_says_both_halves() {
+        let fallback = (
+            "C:\\Users\\ddrob\\ComfyUI".to_string(),
+            requirements_failure_reason(INVENTED_PACKAGE),
+        );
+        let line = finished_notice("Repair finished. ComfyUI is ready.", Some(&fallback));
+        assert!(line.starts_with("Repair finished. ComfyUI is ready. "), "got: {line}");
+        assert!(line.contains("could not be used"), "got: {line}");
+        assert!(line.contains("C:\\Users\\ddrob\\ComfyUI"), "got: {line}");
+        // Negative control on the substitution: the success half is not
+        // replaced by the warning, which is what a run that finished deserves.
+        assert!(line.contains("Repair finished"), "got: {line}");
+    }
+
+    /// A pip that never started is not a pip that exited with an error.
+    #[test]
+    fn a_pip_that_never_ran_is_not_reported_as_a_pip_that_failed() {
+        let never_ran = PipFailure::bare("Could not start pip (not found). Is Python on PATH?");
+        assert_eq!(requirements_failure_reason_for(&never_ran), "pip could not be started");
+        // Negative control: a real pip failure keeps its own classification and
+        // does not fall into the "could not be started" arm.
+        let really_failed = PipFailure {
+            diagnosis: "whatever the hint says".to_string(),
+            stderr: INVENTED_PACKAGE.to_string(),
+        };
+        assert_eq!(
+            requirements_failure_reason_for(&really_failed),
+            "pip found no installable version for a package it names"
+        );
     }
 
     // ── PyTorch-Kanalwahl (W2-Befund 16.08., comfy_kitchen braucht 2.6+) ─

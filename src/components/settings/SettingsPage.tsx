@@ -1579,7 +1579,7 @@ export function SettingsPage() {
             // subscribing, because the value is only ever wanted at the moment
             // this Section mounts, which is the moment a section switch brings
             // it back.
-            <Section title="ComfyUI (Image & Video)" defaultOpen={entryFocus?.section === 'comfyui' || comfySectionShouldOpen(useComfyInstallStore.getState().phase)}>
+            <Section title="ComfyUI (Image & Video)" defaultOpen={entryFocus?.section === 'comfyui' || comfySectionShouldOpen(useComfyInstallStore.getState())}>
               {settings.appMode === 'cloud' && (
                 <p className="text-[0.55rem] text-gray-500 leading-snug pb-1">
                   Local mode only. Cloud renders run on lu-labs.ai and never use ComfyUI.
