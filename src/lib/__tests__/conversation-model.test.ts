@@ -128,10 +128,26 @@ describe('the conversation displays read the conversation, not the picker', () =
     expect(src('lib/chat-export.ts')).toMatch(/_Model: \$\{conversationModelOf\(conversation\)\}/)
   })
 
-  it('THE FIX: the composer says what the open chat ran on when it differs', () => {
+  it('THE FIX: the composer still knows what the open chat ran on when it differs', () => {
+    // David on 2026-09-02: "mach das woanders hin, versteckter bitte". The
+    // chip in the composer row is gone; the reader behind it is not. It hands
+    // the picker the name, and the picker carries the dot and the sentence
+    // (proved by rendering in
+    // components/chat/__tests__/conversation-model-hint.test.ts).
     const note = src('components/chat/ConversationModelNote.tsx')
     expect(note).toMatch(/conversationModelDiffers\(conv, activeModel\)/)
-    expect(src('components/chat/ChatView.tsx')).toMatch(/<ConversationModelNote \/>/)
+    expect(note).toMatch(/export function useConversationModelHint/)
+    expect(src('components/chat/ChatView.tsx'))
+      .toMatch(/<ModelSelector openUpward answeredBy=\{conversationModelHint\} \/>/)
+    expect(src('components/models/ModelSelector.tsx'))
+      .toMatch(/The answers in this chat were written by \$\{answeredBy\}/)
+  })
+
+  it('NEGATIVE CONTROL: no chip prints the name in the row any more', () => {
+    // The old shape wrote "answers: <name>" beside the picker. Nothing draws
+    // that text now, in either file, or the move would have been cosmetic.
+    expect(src('components/chat/ConversationModelNote.tsx')).not.toMatch(/answers:/)
+    expect(src('components/chat/ChatView.tsx')).not.toMatch(/<ConversationModelNote \/>/)
   })
 
   it('NEGATIVE CONTROL: nothing writes a model into an old message', () => {

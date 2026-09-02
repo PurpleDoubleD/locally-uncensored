@@ -15,7 +15,7 @@ import { useSettingsStore } from '../../stores/settingsStore'
 import { FileText, ChevronDown, Download, Wrench, Radio, RefreshCw, X } from 'lucide-react'
 import { PluginsDropdown } from './PluginsDropdown'
 import { ModelSelector } from '../models/ModelSelector'
-import { ConversationModelNote } from './ConversationModelNote'
+import { useConversationModelHint } from './ConversationModelNote'
 import { GoalBar } from './GoalBar'
 import { PlanBar } from './PlanBar'
 import { LoopBar } from './LoopBar'
@@ -44,6 +44,10 @@ export function ChatView() {
   const conversations = useChatStore((s) => s.conversations)
   const activeModel = useModelStore((s) => s.activeModel)
   const models = useModelStore((s) => s.models)
+  // Meldung 4 (R5 re-measure): the model that wrote the answers on screen,
+  // when it is not the one the picker stands on. Handed to the picker, which
+  // marks itself with a dot and says the whole sentence in its tooltip.
+  const conversationModelHint = useConversationModelHint()
   const [ragPanelOpen, setRagPanelOpen] = useState(false)
   const [exportOpen, setExportOpen] = useState(false)
   const [exportToast, setExportToast] = useState<string>('')
@@ -360,12 +364,11 @@ export function ChatView() {
                 slashCommands={isAgentActive}
                 onAttachDocs={appMode !== 'cloud' ? () => setRagPanelOpen(true) : undefined}
                 composerModel={
-                  <div className="flex items-center gap-1.5">
-                    {/* What this chat's answers were written by, when that is
-                        not what the picker says (Meldung 4, R5 re-measure). */}
-                    <ConversationModelNote />
-                    <ModelSelector openUpward />
-                  </div>
+                  /* What this chat's answers were written by rides on the
+                     picker itself now, as a dot plus a tooltip, instead of a
+                     second chip in the row (Meldung 4, R5 re-measure; David
+                     2026-09-02 wanted it hidden away). */
+                  <ModelSelector openUpward answeredBy={conversationModelHint} />
                 }
                 // No plan lives here. The prompt window is the prompt window
                 // (David, 2026-08-22): the plan band sits under the header row

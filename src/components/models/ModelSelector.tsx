@@ -497,12 +497,21 @@ export interface ModelSelectorProps {
    * not the run says so.
    */
   surface?: 'chat' | 'code'
+  /**
+   * The model that wrote the answers of the open chat, when that is not the
+   * model picked here (Meldung 4 of the R5 re-measure). It used to be a chip
+   * of its own beside the picker; David wanted it out of the row on
+   * 2026-09-02, so the picker carries it: a 4 px dot on the corner and the
+   * full sentence in the tooltip. `null`/undefined is the normal case and
+   * changes nothing about the trigger, not even its width.
+   */
+  answeredBy?: string | null
 }
 
 // `openUpward` flips the dropdown to open above the trigger, right-aligned —
 // used when the picker lives in the composer action bar (bottom of the screen)
 // instead of the header. Header usage keeps the default downward/centered menu.
-export function ModelSelector({ openUpward = false, surface = 'chat' }: ModelSelectorProps = {}) {
+export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy = null }: ModelSelectorProps = {}) {
   const { models, activeModel, setActiveModel, fetchModels } = useModels()
   const isModelLoading = useModelStore((s) => s.isModelLoading)
   // G20: useModels hides every local model while the app is in Cloud mode.
@@ -811,7 +820,11 @@ export function ModelSelector({ openUpward = false, surface = 'chat' }: ModelSel
       {/* ── Trigger Button ── */}
       <button
         onClick={() => setOpen(!open)}
-        title={activeModel ? `Model: ${activeDisplayName}, click to switch` : 'Select a chat model'}
+        title={
+          answeredBy
+            ? `The answers in this chat were written by ${answeredBy}. The next answer runs on the model picked here.`
+            : activeModel ? `Model: ${activeDisplayName}, click to switch` : 'Select a chat model'
+        }
         aria-label="Select chat model"
         className={`
           group flex items-center gap-1.5 h-[26px] px-2 rounded-md
@@ -840,6 +853,17 @@ export function ModelSelector({ openUpward = false, surface = 'chat' }: ModelSel
           <ChevronDown size={10} className={`text-gray-500 transition-transform ml-0.5 ${open ? 'rotate-180' : ''}`} />
         )}
       </button>
+
+      {/* The open chat ran on another model than the one picked here. Absolute
+          so the row keeps its width to the pixel, and quiet enough that it is
+          a mark rather than a message: the sentence lives in the tooltip. */}
+      {answeredBy && (
+        <span
+          data-testid="conversation-model-dot"
+          aria-hidden="true"
+          className="pointer-events-none absolute -top-0.5 -right-0.5 w-1 h-1 rounded-full bg-gray-500 opacity-60"
+        />
+      )}
 
       {/* ── Dropdown ── */}
       <AnimatePresence>
