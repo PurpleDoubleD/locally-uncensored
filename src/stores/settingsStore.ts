@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import type { Settings, Persona } from '../types/settings'
 import { DEFAULT_SETTINGS, BUILT_IN_PERSONAS } from '../lib/constants'
+import { isEffortLevel } from '../lib/effort'
 
 // v5 (Feature EE v2.5.0): added settings.exclusiveVramMode. The migrate below
 // already merges { ...DEFAULT_SETTINGS, ...persisted.settings }, so bumping the
@@ -159,6 +160,24 @@ export const useSettingsStore = create<SettingsState>()(
     {
       name: 'chat-settings',
       version: STORE_VERSION,
+      // The ONE guard for the rung, and it sits here rather than in migrate
+      // above on purpose: migrate does not run for a blob that is already at
+      // STORE_VERSION, where the persisted settings object is swapped in
+      // wholesale. This runs on every rehydration, so it covers both, and a
+      // second copy in migrate would be a guard no test can fail.
+      //
+      // reasoningEffort has a closed set of values. A profile written by a
+      // build that spelled the rung differently, or edited by hand, would
+      // otherwise travel through the whole app as an unknown word and the
+      // composer would draw a rung the provider does not send. isEffortLevel is
+      // the question, 'high' is the answer, and it is the answer a fresh
+      // install gets.
+      onRehydrateStorage: () => (state) => {
+        if (!state?.settings) return
+        if (!isEffortLevel(String(state.settings.reasoningEffort))) {
+          state.settings.reasoningEffort = DEFAULT_SETTINGS.reasoningEffort
+        }
+      },
       migrate: (persisted: any, version: number) => {
         if (version < STORE_VERSION) {
           const customPersonas = (persisted.personas || []).filter((p: Persona) => !p.isBuiltIn)
