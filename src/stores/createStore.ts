@@ -390,6 +390,10 @@ interface CreateState {
   removeFromGallery: (id: string) => void
   clearGallery: () => void
   addToPromptHistory: (prompt: string) => void
+  /** Drop a single remembered prompt (the X next to the entry). */
+  removeFromPromptHistory: (prompt: string) => void
+  /** Drop the whole prompt history (the Clear all button in the dropdown). */
+  clearPromptHistory: () => void
   setImageModelList: (list: ClassifiedModel[]) => void
   setVideoModelList: (list: ClassifiedModel[]) => void
   setComfyRunning: (running: boolean) => void
@@ -749,6 +753,9 @@ export const useCreateStore = create<CreateState>()(
         const filtered = s.promptHistory.filter(p => p !== prompt)
         return { promptHistory: [prompt, ...filtered].slice(0, 50) }
       }),
+      removeFromPromptHistory: (prompt) =>
+        set((s) => ({ promptHistory: s.promptHistory.filter((p) => p !== prompt) })),
+      clearPromptHistory: () => set({ promptHistory: [] }),
       setImageModelList: (list) => set({ imageModelList: list }),
       setVideoModelList: (list) => set({ videoModelList: list }),
       setComfyRunning: (running) => set({ comfyRunning: running }),

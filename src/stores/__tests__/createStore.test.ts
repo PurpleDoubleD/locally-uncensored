@@ -566,6 +566,67 @@ describe('createStore', () => {
     })
   })
 
+  // ── removeFromPromptHistory / clearPromptHistory (A10) ─────
+  //
+  // Bug A10 (pardy22, Discord #general + #help-18): the prompt history could
+  // not be deleted. The store had no action for it at all, so no button could
+  // have worked. These four claims pin the two new actions plus the persisted
+  // copy, which is what made the entries come back after a restart.
+
+  describe('removeFromPromptHistory', () => {
+    it('drops exactly the one entry', () => {
+      useCreateStore.getState().addToPromptHistory('keep me')
+      useCreateStore.getState().addToPromptHistory('delete me')
+      useCreateStore.getState().removeFromPromptHistory('delete me')
+      expect(useCreateStore.getState().promptHistory).toEqual(['keep me'])
+    })
+
+    // Negative control: an unknown prompt must not eat the list.
+    it('leaves the list alone when the prompt is not in it', () => {
+      useCreateStore.getState().addToPromptHistory('a')
+      useCreateStore.getState().addToPromptHistory('b')
+      useCreateStore.getState().removeFromPromptHistory('never added')
+      expect(useCreateStore.getState().promptHistory).toEqual(['b', 'a'])
+    })
+  })
+
+  describe('clearPromptHistory', () => {
+    it('empties the history', () => {
+      useCreateStore.getState().addToPromptHistory('a')
+      useCreateStore.getState().addToPromptHistory('b')
+      useCreateStore.getState().clearPromptHistory()
+      expect(useCreateStore.getState().promptHistory).toEqual([])
+    })
+
+    // Negative control: clearing the prompts must not touch the gallery.
+    it('does not touch the gallery', () => {
+      useCreateStore.getState().addToGallery(makeGalleryItem('a'))
+      useCreateStore.getState().addToPromptHistory('a')
+      useCreateStore.getState().clearPromptHistory()
+      expect(useCreateStore.getState().gallery).toHaveLength(1)
+    })
+  })
+
+  describe('prompt history persistence', () => {
+    const persisted = () => {
+      const raw = localStorage.getItem('create-store')
+      return raw ? (JSON.parse(raw).state as { promptHistory?: string[] }) : null
+    }
+
+    it('writes the surviving entries to localStorage, so nothing returns after a restart', () => {
+      useCreateStore.getState().addToPromptHistory('keep me')
+      useCreateStore.getState().addToPromptHistory('delete me')
+      // Guard: without this the assertions below could pass on an empty store.
+      expect(persisted()?.promptHistory).toEqual(['delete me', 'keep me'])
+
+      useCreateStore.getState().removeFromPromptHistory('delete me')
+      expect(persisted()?.promptHistory).toEqual(['keep me'])
+
+      useCreateStore.getState().clearPromptHistory()
+      expect(persisted()?.promptHistory).toEqual([])
+    })
+  })
+
   // ── setIsGenerating ────────────────────────────────────────
 
   describe('setIsGenerating', () => {
