@@ -1,6 +1,6 @@
-import { useCallback, useRef, useState, useSyncExternalStore } from 'react'
+import { useCallback, useRef, useSyncExternalStore } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Sparkles, X, History, SlidersHorizontal, Square, Workflow } from 'lucide-react'
+import { Sparkles, X, SlidersHorizontal, Square, Workflow } from 'lucide-react'
 import { useCreateStore, MODEL_TYPE_DEFAULTS } from '../../../stores/createStore'
 import { classifyModel } from '../../../api/comfyui'
 import { useCreateExp } from './CreateContext'
@@ -19,6 +19,7 @@ import { subscribeInstallRuns, getInstallRun } from '../../../lib/model-install-
 import { useWorkflowStore, shouldShowManagerNotice } from '../../../stores/workflowStore'
 import { noPromptHint, shouldShowLaneHint } from './laneHint'
 import { ModelChip } from './ModelChip'
+import { PromptHistory } from './PromptHistory'
 import { SpecialControls } from './SpecialIntentControls'
 import { CreditsMeter } from './CreditsMeter'
 import { Button } from '../ui/Button'
@@ -27,7 +28,6 @@ import { Segmented } from '../ui/Segmented'
 import { Slider } from '../ui/Slider'
 import { Tooltip } from '../ui/Tooltip'
 import { cn } from '../ui/cn'
-import { useClickAway } from '../ui/useClickAway'
 
 interface Props {
   onOpenAdvanced: () => void
@@ -443,34 +443,6 @@ function LabeledControl({ label, children }: { label: string; children: React.Re
     <div className="flex items-center gap-1.5">
       <span className="t-label text-gray-600">{label}</span>
       {children}
-    </div>
-  )
-}
-
-function PromptHistory({ onPick }: { onPick: (p: string) => void }) {
-  const history = useCreateStore((s) => s.promptHistory)
-  const [open, setOpen] = useState(false)
-  const ref = useRef<HTMLDivElement>(null)
-  useClickAway(ref, () => setOpen(false), open)
-  if (history.length === 0) return null
-  return (
-    <div ref={ref} className="relative">
-      <Button variant="ghost" size="sm" icon={History} iconOnly title="Prompt history" onClick={() => setOpen((o) => !o)} />
-      <AnimatePresence>
-        {open && (
-          <motion.div
-            initial={{ opacity: 0, y: 4 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: 4 }}
-            transition={{ duration: 0.12 }}
-            className="lu-elevated absolute bottom-full mb-1.5 left-0 z-50 w-72 rounded-lg p-1 max-h-64 overflow-y-auto scrollbar-thin"
-          >
-            {history.map((h, i) => (
-              <button key={i} onClick={() => { onPick(h); setOpen(false) }} className="w-full text-left t-control text-gray-300 px-2.5 py-1.5 rounded-md hover:bg-white/[0.06] truncate">{h}</button>
-            ))}
-          </motion.div>
-        )}
-      </AnimatePresence>
     </div>
   )
 }
