@@ -32,6 +32,47 @@ export interface ReleaseNote {
 
 export const RELEASE_NOTES: ReleaseNote[] = [
   {
+    version: '2.6.8',
+    headline: 'Reasoning models get an effort control, and a downloaded model stays Installed',
+    lines: [
+      'Reasoning models carry an effort control next to the Think button. Low, Medium or High, and Max on GLM 5.3, decides how many tokens a reply may spend on thinking.',
+      'GLM 5.3 (Pro) and GLM 5.3 Flash (Hosted) are in the cloud catalogue, and the cloud model list keeps one fixed order, so a new chat starts on the same model every time instead of a different one on each load.',
+      'The side panel folds away, and while it is closed your latest chats sit on the main screen. The note about which model wrote the chat you are reading is a quiet dot on the model picker now instead of a chip in the composer.',
+      'The built-in engine moves to a free port when 8127 is taken, and a chat model you downloaded stays visible as Installed with a Use button that starts the engine for it.',
+      'AMD on Windows is read from the HIP SDK, the Linux packages name the libraries they need, the ComfyUI installer proves its own environment, your own model folder is read, Document Chat works in Cloud mode, and the prompt history in Create can be cleared.',
+    ],
+    details: [
+      {
+        title: 'Local',
+        items: [
+          'The side panel folds away. While it is closed your latest chats sit on the main screen, and they belong to the panel again the moment you open it.',
+          'What the open chat actually ran on stopped taking a chip of its own in the composer row. It is a small dot on the corner of the model picker now, with the full sentence in the picker\'s tooltip, and it is only there when the chat on screen and the pick beside it disagree.',
+          'The built-in engine moves to a free port when 8127 is taken or reserved by the system, and it retries the start once after a failure instead of giving up until the next restart. Windows port reservations are marked as researched rather than proven, because no such reservation could be staged here.',
+          'A chat model you downloaded stays visible as Installed even while the engine is not running, and its tile carries a Use button that starts the engine and loads that model, instead of showing you a file you cannot reach.',
+          'The ComfyUI installer proves that the environment it just built can really import ComfyUI, installs back what is missing, and names a missing Visual C++ runtime instead of ending in a silent crash.',
+          'Repair environment runs the same check with a time limit and a Cancel that really cancels, and the trainer setup stopped blaming the network for failures that were never about the network.',
+          'The folder you set under Model Storage is read now, not only written to. Every GGUF in it, up to four levels down, appears under Installed and loads from where it lies.',
+          'Subfolders named the way ComfyUI names its own, loras or checkpoints, are handed to ComfyUI through its extra model paths the next time it starts, so models on a second drive stop being invisible.',
+          'The CivitAI API key has a field again, under Settings, AI Backends, Model Storage. Downloads from the CivitAI search carry the key, and a download CivitAI refuses names the missing setting instead of a bare error number.',
+          'AMD on Windows is read from the HIP SDK itself. The only ROCm probe ran rocm-smi, which the Windows SDK does not ship, so an installed ROCm went unseen; LU reads HIP_PATH and hipinfo now and names the card\'s architecture, and an image run that fails names that architecture and get_arch_list instead of a HIP traceback. It is marked as researched rather than proven, because there is no RDNA4 card here.',
+          'The Model Manager stopped putting system RAM in the GPU field. ComfyUI reports system memory on a CPU device in a field called vram_total, so a machine with 64 GB of RAM read as if it had 62 GB of video memory.',
+          'The Linux packages ask for the libraries the built-in engine links against. The deb and the rpm named the desktop libraries but not libvulkan1 and libgomp1, so on a machine without them the install went through, the engine then died in the loader, and the message blamed your graphics card. The missing library is named now, together with the command that installs it, and the AppImage says plainly that it needs the Vulkan loader from your system.',
+          'The Coding Agent\'s working directory can be removed again. There is a Remove button beside the folder picker and one in the header, both are locked while a run is going, and picking a different folder moves the current chat over to it.',
+          'The prompt history in Create can be cleared. Every entry has its own remove button, and Clear all at the top of the list wipes the lot after a second click.',
+        ],
+      },
+      {
+        title: 'Cloud',
+        items: [
+          'Reasoning models carry an effort control next to the Think button. Low, Medium and High, with Max on GLM 5.3, decide how many tokens a reply may spend on thinking. The rungs come from the server per model, so a model that has only two of them is offered two, and a model with none keeps the plain Think button it always had.',
+          'GLM 5.3 (Pro) and GLM 5.3 Flash (Hosted) are in the cloud catalogue.',
+          'The cloud model list keeps one fixed order. The upstream provider shuffles its own list on every call, measured three times with three different orders, so a new chat opened on whatever happened to be first that time. The catalogue order decides now, and a new chat starts on the same model every time.',
+          'Document Chat works in Cloud mode. Your files are indexed on your own machine and only the passages that match your question travel with the prompt, and if indexing runs on an Ollama you pointed at another machine, the panel says so instead of pretending otherwise.',
+        ],
+      },
+    ],
+  },
+  {
     version: '2.6.7',
     headline: 'Create says what a render is really doing, and a dead ComfyUI comes back on its own',
     lines: [

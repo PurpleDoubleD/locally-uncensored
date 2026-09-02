@@ -60,15 +60,17 @@ describe('the notes table', () => {
   it('the shipping entry covers what actually shipped, not the state it was written in', () => {
     // The existence guard above has a blind spot: an entry written early stays
     // green while the branch moves on, so the shipping note is pinned to the
-    // headline features of the release it ships with. For 2.6.7 those are the
-    // honest installed verdict, the built-in engine start on a fresh install,
-    // the update that keeps chats with rotating backups, the system prompt
-    // order for strict templates, the AMD/ROCm and cu130 channels, the Debian
-    // file collision and the hosted history trim, and each anchor below names
-    // one of them, so a note that forgets them fails here.
-    // The late rounds added three more that the early entry could not know:
-    // the honest render phases (sampling), the ComfyUI that restarts itself,
-    // and the AMD detection on Windows after Microsoft removed wmic.
+    // headline features of the release it ships with. For 2.6.8 those are the
+    // effort control on reasoning models, GLM 5.3 in the cloud catalogue, the
+    // engine that steps off a taken 8127, the model that stays Installed, the
+    // ComfyUI installer that repairs its own environment, the model folder
+    // that is finally read, the CivitAI key field, the HIP SDK on Windows with
+    // its vram_total mix-up, the Linux packages that name libvulkan1, the
+    // Coding Agent working directory, Document Chat in Cloud mode, the prompt
+    // history that clears, and the side panel that folds away. Each anchor
+    // below names one of them, so a note that forgets one fails here.
+    // The house formula for hardware nobody here owns is pinned too: a claim
+    // we could not run on real hardware says so in those words.
     const shipping = JSON.parse(
       readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), '../../../package.json'), 'utf8'),
     ).version as string
@@ -81,9 +83,10 @@ describe('the notes table', () => {
       .join('\n')
       .toLowerCase()
     for (const anchor of [
-      'installed', 'built-in engine', 'backups', 'system prompt',
-      'rocm', 'cu130', 'microphone', 'debian', 'trimmed',
-      'sampling', 'restarts itself', 'wmic',
+      'effort', 'glm 5.3', 'installed', 'built-in engine', '8127',
+      'repair environment', 'model storage', 'civitai', 'hip sdk',
+      'vram_total', 'libvulkan1', 'working directory', 'document chat',
+      'prompt history', 'side panel', 'researched rather than proven',
     ]) {
       expect(prose, `${shipping}: nothing about "${anchor}"`).toContain(anchor)
     }
