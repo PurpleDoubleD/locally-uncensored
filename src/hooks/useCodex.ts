@@ -18,6 +18,7 @@ import { buildHermesToolPrompt, buildHermesToolResult, buildHermesToolCall, pars
 import { streamProviderTurn, type StreamedProviderTurn } from '../lib/provider-stream'
 import { createHermesDisplayFilter, createThinkStreamSplitter, createTurnThinkingSink } from '../lib/hermes-stream'
 import { beginAgentRun, endAgentRun, setActiveAgentModel, type AgentRunContext } from '../api/agent-context'
+import { resolveCodexWorkDir } from '../lib/codex-workdir'
 import { resolveChatWorkspaceSlug } from '../api/workspace-slug'
 import { codexModeKnobs, CODEX_MODE_LABELS, type CodexMode } from '../lib/codex-mode'
 import { CODEX_PLAN_SYSTEM_PROMPT } from '../lib/codex-plan-prompt'
@@ -257,7 +258,7 @@ export function useCodex() {
    *  another pass on the run they just killed. Cleared when a new run starts. */
   const userStoppedRef = useRef(false)
 
-  const sendInstruction = useCallback(async (
+  const runInstruction = useCallback(async (
     rawInstruction: string,
     opts?: {
       displayContent?: string
@@ -267,6 +268,7 @@ export function useCodex() {
   ) => {
     const { activeModel } = useModelStore.getState()
     if (!activeModel) return
+
 
     // Coding-Agent slash commands (David 2026-06-12): "/review", "/commit",
     // "/test", … live HERE, in the Code view, its full file_*/shell/git tools
@@ -353,26 +355,29 @@ export function useCodex() {
       defaultWorkspace: settings.defaultWorkspace,
     })
 
-    // Init codex thread if needed
-    if (!codexStore.getThread(convId)) {
-      codexStore.initThread(convId, codexStore.workingDirectory || '.')
+    // Init codex thread if needed. Read LIVE, never from the `codexStore`
+    // snapshot taken at the top of this function: `resolveChatWorkspaceSlug`
+    // above is IPC, and a Remove pressed during it used to be undone here by
+    // a thread born with the old path (A8 review, B1).
+    if (!useCodexStore.getState().getThread(convId)) {
+      useCodexStore.getState().initThread(convId, useCodexStore.getState().workingDirectory)
     }
+    // Pull THIS conversation's thread onto the folder the picker shows now.
+    // Only this one: another chat's thread may carry a deliberate per-chat
+    // workspace, and rewriting all of them took that away (A8 review, S5).
+    const liveWorkingDir = useCodexStore.getState().syncThreadWorkingDirectory(convId)
 
-    const thread = codexStore.getThread(convId)!
-    // Resolve working directory with this precedence:
-    //   1. Explicit codex thread.workingDirectory (file-tree picker)
-    //   2. Resolved agent workspace path (when folder-kind)
-    //   3. Global codexStore.workingDirectory
-    //   4. '.' (bridge's per-chat sandbox)
+    const thread = useCodexStore.getState().getThread(convId)!
     const workspacePath =
       codexWorkspace && codexWorkspace.kind === 'folder' && codexWorkspace.path
         ? codexWorkspace.path
         : null
-    const workDir =
-      (thread.workingDirectory && thread.workingDirectory !== '.' ? thread.workingDirectory : null) ||
-      workspacePath ||
-      codexStore.workingDirectory ||
-      '.'
+    // Precedence lives in src/lib/codex-workdir.ts, with its cases tested.
+    const workDir = resolveCodexWorkDir({
+      threadDir: thread.workingDirectory,
+      workspacePath,
+      storeDir: liveWorkingDir,
+    })
 
     // Pin the tool-containment workspace to the SAME folder the model is told
     // to use (workDir). resolveWorkspace() above only sees the agent-mode
@@ -2546,6 +2551,32 @@ export function useCodex() {
       }
     }
   }, [])
+
+  /**
+   * The public send. Its only job on top of `runInstruction` is to hold the
+   * working directory for the whole turn (A8 review, S1).
+   *
+   * `beginSend` runs SYNCHRONOUSLY, before the first await inside, which is
+   * the point: `setThreadStatus('running')` is five awaits down the page
+   * (workspace slug over IPC, server tool support, token budget, memory
+   * search, .lurules), and both folder buttons used to be free for that whole
+   * stretch. The marker lives out here rather than inside the body because the
+   * body has four early returns and a handful of unguarded awaits: one finally
+   * around the call covers every exit, a thrown error included. A leaked
+   * counter would lock the folder for the rest of the session, which is the
+   * same trap A8 is about.
+   */
+  const sendInstruction = useCallback(async (
+    rawInstruction: string,
+    opts?: Parameters<typeof runInstruction>[1],
+  ) => {
+    useCodexStore.getState().beginSend()
+    try {
+      await runInstruction(rawInstruction, opts)
+    } finally {
+      useCodexStore.getState().endSend()
+    }
+  }, [runInstruction])
 
   // Self-reference so the /loop driver can start the next pass. A plain
   // recursive call is not possible inside the useCallback that defines it.
