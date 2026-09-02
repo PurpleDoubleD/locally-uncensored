@@ -5,9 +5,14 @@
  * Plain chat, a group round (per model) and compare (both sides) all resolve
  * their payload through this module, so the numbers below are the numbers that
  * go over the wire. Every claim has its negative control: the cap is one
- * setting away from off, and a local backend has to come out byte-identical to
- * 2.6.5 or the whole thing is a regression for everyone who does not pay per
- * token.
+ * setting away from off.
+ *
+ * Seit 2.6.8 (Compact-Schritt 2) gilt die Deckelung auch lokal — aber an einem
+ * anderen Mass: ein bezahlter Anbieter wird auf die KOSTEN-Decke gekappt, ein
+ * lokaler nur auf sein eigenes Fenster. Die Zusicherung fuer lokale Modelle ist
+ * damit nicht mehr "nie", sondern "erst beim Ueberlauf": unter 92 Prozent des
+ * Fensters ist die Nutzlast Wort fuer Wort die von 2.6.7, darueber wird gekappt
+ * statt vom Modell stillschweigend vorne abgeschnitten.
  */
 
 import { describe, it, expect } from 'vitest'
@@ -44,6 +49,10 @@ function historyOf(tokens: number): Wire[] {
 const CLOUD_32K = { providerId: 'lu-cloud', modelWindow: 32768, contextDecay: true }
 const CLOUD_262K = { providerId: 'lu-cloud', modelWindow: 262144, contextDecay: true }
 const OLLAMA = { providerId: 'ollama', modelWindow: 262144, contextDecay: true }
+/** Ein lokales Modell mit einem Fenster, das eine lange Unterhaltung sprengt. */
+const OLLAMA_8K = { providerId: 'ollama', modelWindow: 8192, contextDecay: true }
+/** Die Grenze, ab der die A3-Hysterese auf einem lokalen Modell greift. */
+const TRIGGER_8K = Math.floor(Math.floor(8192 * 0.8) * 1.15)
 
 describe('A4: a long chat costs budget level, not history level', () => {
   it('a 50k-token history plus a short question sends at most the budget', () => {
@@ -93,20 +102,52 @@ describe('A4: a long chat costs budget level, not history level', () => {
   })
 })
 
-describe('A4: a local backend is byte-identical to 2.6.5', () => {
-  it('hands the very same array through, unchanged', () => {
-    const history = historyOf(120000)
+describe('2.6.8: ein lokales Modell wird gekappt — aber erst, wo es ueberlaeuft', () => {
+  // Die Zusicherung, die 2.6.7 universell galt und jetzt eine Grenze hat: was
+  // ins Fenster passt, geht unveraendert raus. Der Nutzer soll von diesem
+  // Umbau in einer normalen Unterhaltung nichts merken.
+  it('laesst eine Unterhaltung unter der Grenze Wort fuer Wort durch', () => {
+    const history = historyOf(2000)
     history.push({
       role: 'user',
       content: 'look',
       images: [{ data: 'A'.repeat(40000), mimeType: 'image/png' }],
     })
+    expect(size(history)).toBeLessThan(TRIGGER_8K)
     const before = JSON.stringify(history)
-    const sent = applyChatSendBudget(history, OLLAMA)
-    expect(sent.budget).toBeNull()
-    expect(sent.messages).toBe(history)
+    const sent = applyChatSendBudget(history, OLLAMA_8K)
     expect(JSON.stringify(sent.messages)).toBe(before)
     expect(sent.droppedImages).toBe(0)
+  })
+
+  // Der eigentliche Befund C1: hier hat 2.6.7 das ganze Array rausgeschickt,
+  // und das Modell hat vorne abgeschnitten, ohne es zu sagen.
+  it('kappt eine Unterhaltung, die das Fenster sprengt', () => {
+    const history = historyOf(50000)
+    expect(size(history)).toBeGreaterThan(TRIGGER_8K)
+    const sent = applyChatSendBudget(history, OLLAMA_8K)
+    expect(sent.budget).toBe(Math.floor(8192 * 0.8))
+    expect(sent.promptTokens).toBeLessThanOrEqual(sent.budget!)
+    expect(sent.messages.length).toBeLessThan(history.length)
+  })
+
+  // Negativkontrolle in der Zeit: derselbe Fall war vor diesem Umbau
+  // ungekappt, und der Notaus stellt genau diesen Zustand wieder her.
+  it('der Notaus stellt das Verhalten von 2.6.7 wieder her', () => {
+    const history = historyOf(50000)
+    const sent = applyChatSendBudget(history, { ...OLLAMA_8K, contextDecay: false })
+    expect(sent.budget).toBeNull()
+    expect(sent.messages).toBe(history)
+  })
+
+  // Die Zahl, die der Modulkopf von chat-send-budget.ts behauptet: nicht bei
+  // 0,8 des Fensters, sondern bei 1,15 x 0,8 = 0,92 — der Rest ist der Platz,
+  // den die ANTWORT braucht.
+  it('die Grenze liegt bei 92 Prozent des Fensters, nicht bei 80', () => {
+    expect(TRIGGER_8K / 8192).toBeCloseTo(0.92, 2)
+    const knappDrunter = historyOf(TRIGGER_8K - 800)
+    expect(applyChatSendBudget(knappDrunter, OLLAMA_8K).messages.length)
+      .toBe(knappDrunter.length)
   })
 
   it('negative control: the same history on lu-cloud does shrink', () => {
@@ -118,14 +159,26 @@ describe('A4: a local backend is byte-identical to 2.6.5', () => {
     expect(chatSendBudget({ providerId: 'lu-cloud', modelWindow: 0, contextDecay: true })).toBeNull()
   })
 
-  it('says so before the window is looked up, so no round trip is spent on it', () => {
-    // Resolving a window is an /api/show call. Asking it for a payload that
-    // cannot be capped would put a new request on the local path.
-    expect(chatBudgetApplies('ollama', true)).toBe(false)
-    expect(chatBudgetApplies('lm-studio', true)).toBe(false)
-    expect(chatBudgetApplies('lu-cloud', false)).toBe(false)
-    expect(chatBudgetApplies('lu-cloud', true)).toBe(true)
+  it('nur der Notaus schliesst das Tor — der Anbieter nicht mehr', () => {
+    // Bis 2.6.7 fragte das Tor `isPaidProvider`, also eine KOSTEN-Frage. Die
+    // entscheidet weiter die GROESSE der Decke, aber nicht mehr, ob ueberhaupt
+    // gekappt wird: ein uebergelaufenes Fenster ist kein Abrechnungsproblem.
+    expect(chatBudgetApplies('ollama', true)).toBe(true)
+    expect(chatBudgetApplies('lm-studio', true)).toBe(true)
     expect(chatBudgetApplies('openai', undefined)).toBe(true)
+    expect(chatBudgetApplies('lu-cloud', true)).toBe(true)
+    // Der Notaus gilt fuer alle, lokal wie Cloud.
+    expect(chatBudgetApplies('lu-cloud', false)).toBe(false)
+    expect(chatBudgetApplies('ollama', false)).toBe(false)
+  })
+
+  it('die Kostendecke bleibt den bezahlten Anbietern vorbehalten', () => {
+    // Gleiches Fenster, zwei Anbieter: der bezahlte wird zusaetzlich auf
+    // codexSendWindowTokens gedeckelt, der lokale nur auf sein eigenes
+    // Fenster. Das ist der Unterschied, den `isPaidProvider` weiter macht.
+    expect(chatSendBudget({ providerId: 'ollama', modelWindow: 262144, contextDecay: true }))
+      .toBe(Math.floor(262144 * 0.8))
+    expect(chatSendBudget(CLOUD_262K)).toBe(DEFAULT_SEND_WINDOW_TOKENS)
   })
 })
 
@@ -138,9 +191,23 @@ describe('A4: a group round is budgeted per model per round', () => {
     }
   })
 
-  it('a local member of the line-up keeps its 2.6.5 payload', () => {
+  it('ein lokales Mitglied wird an seinem eigenen Fenster gemessen', () => {
+    // Der gefaehrlichste Platz fuer ein kleines lokales Modell: es traegt
+    // dieselbe geteilte Historie wie das 262k-Modell neben ihm. Bis 2.6.7 ging
+    // sie ungekappt an beide.
     const shared = historyOf(120000)
-    expect(applyChatSendBudget(shared, OLLAMA).messages).toBe(shared)
+    const sent = applyChatSendBudget(shared, OLLAMA_8K)
+    expect(sent.budget).toBe(Math.floor(8192 * 0.8))
+    expect(sent.promptTokens).toBeLessThanOrEqual(sent.budget!)
+    // Und das grosse lokale Modell derselben Runde behaelt ein Vielfaches
+    // davon. Was seine Nutzlast begrenzt, ist nicht die neue Token-Decke
+    // (209715 waere sie), sondern MAX_SEND_MESSAGES — die aeltere Anzahl-Decke,
+    // die diese Historie mit ihren ~480 kurzen Zuegen schon vorher traf.
+    const gross = applyChatSendBudget(shared, OLLAMA)
+    expect(gross.promptTokens).toBeGreaterThan(sent.promptTokens * 10)
+    expect(gross.promptTokens).toBeLessThan(gross.budget!)
+    expect(gross.messages.length).toBeLessThanOrEqual(MAX_SEND_MESSAGES)
+    expect(gross.messages.length).toBeLessThan(shared.length)
   })
 
   it('negative control: uncapped, one round bills the full history N times', () => {
@@ -169,8 +236,14 @@ describe('A4: compare caps the shared base before the fan-out', () => {
     expect(applySendBudget(history, budget).messages.length).toBe(sent.messages.length)
   })
 
-  it('two local models are not capped at all', () => {
-    expect(sharedChatSendBudget([OLLAMA, OLLAMA])).toBeNull()
+  it('zwei lokale Modelle teilen sich das engere ihrer Fenster', () => {
+    // Beide Seiten muessen denselben Prompt sehen, sonst ist der Vergleich
+    // keiner — also gilt auch unter lokalen Modellen das kleinere Fenster.
+    expect(sharedChatSendBudget([OLLAMA, OLLAMA])).toBe(Math.floor(262144 * 0.8))
+    expect(sharedChatSendBudget([OLLAMA, OLLAMA_8K])).toBe(Math.floor(8192 * 0.8))
+    // Mit dem Notaus auf beiden Seiten bleibt es beim ungekappten Array.
+    const aus = [OLLAMA, OLLAMA_8K].map((m) => ({ ...m, contextDecay: false }))
+    expect(sharedChatSendBudget(aus)).toBeNull()
     const history = historyOf(50000)
     expect(applySendBudget(history, null).messages).toBe(history)
   })

@@ -140,3 +140,87 @@ describe('the tool chain a run writes back is not new context', () => {
     )
   })
 })
+
+// ── App-Hinweise kosten nichts ────────────────────────────────────────────
+
+describe('computeContextFill zaehlt keine App-Hinweise', () => {
+  /**
+   * WARUM: `role:'system'` in einem GESPEICHERTEN Gespraech ist immer ein
+   * App-Hinweis — der echte Systemprompt steht nicht im Verlauf. Die Nutzlast
+   * verwirft diese Zeilen. Sie zu zaehlen hiess, dem Nutzer Token anzurechnen,
+   * die nie gesendet werden.
+   *
+   * Bis 2026-09-02 fiel das kaum auf, weil es fast keine solchen Zeilen gab.
+   * Dann bekam `/compact` seine Ein-/Ausgabe als Hinweis, eine fertige
+   * Hintergrundaufgabe meldet ihr GANZES Ergebnis als Hinweis, und die
+   * gescheiterte Auto-Kompaktierung meldet sich ebenfalls. Ein
+   * Rechercheergebnis von 5k Token liess den Balken um 5k springen, ohne dass
+   * je ein Byte davon verschickt wurde.
+   */
+  const lang = 'x'.repeat(20_000)
+
+  it('eine Notiz aendert den geschaetzten Fuellstand nicht', () => {
+    const ohne: FillMessage[] = [
+      { role: 'user', content: 'frage' },
+      { role: 'assistant', content: 'antwort' },
+    ]
+    const mit: FillMessage[] = [
+      ...ohne,
+      { role: 'system', content: `Background agent [task-ab] finished: ${lang}` },
+    ]
+    expect(computeContextFill(mit).used).toBe(computeContextFill(ohne).used)
+  })
+
+  it('auch nicht hinter einem echten Usage-Anker', () => {
+    const basis: FillMessage[] = [
+      { role: 'user', content: 'frage' },
+      {
+        role: 'assistant', content: 'antwort',
+        usage: { promptTokens: 900, completionTokens: 10, totalTokens: 910 },
+      },
+    ]
+    const mit: FillMessage[] = [...basis, { role: 'system', content: lang }]
+    const a = computeContextFill(basis)
+    const b = computeContextFill(mit)
+    expect(b.used).toBe(a.used)
+    // Die Quelle darf dabei nicht umkippen — sonst waere die Zahl zwar
+    // gleich, die Sicherheitsmarge im Auto-Ausloeser aber eine andere.
+    expect(b.source).toBe(a.source)
+    expect(b.real).toBe(a.real)
+  })
+
+  it('auch nicht hinter einem gebauten Anker', () => {
+    const basis: FillMessage[] = [
+      { role: 'user', content: 'a' }, { role: 'assistant', content: 'b' },
+    ]
+    const anker = { tokens: 5000, atMessageCount: 2 }
+    const mit: FillMessage[] = [...basis, { role: 'system', content: lang }]
+    expect(computeContextFill(mit, anker).used).toBe(computeContextFill(basis, anker).used)
+    expect(computeContextFill(mit, anker).source).toBe('built')
+  })
+
+  it('der gebaute Anker ueberlebt Notizen — er wird ungefiltert gezaehlt', () => {
+    // DIE eigentliche Falle. Beide Agentenschleifen zeichnen
+    // `atMessageCount = messages.length` UNGEFILTERT auf. Wer hier eine
+    // gefilterte Liste uebergibt, laesst `atMessageCount <= länge`
+    // fehlschlagen, sobald eine Notiz existiert — der Anker wird verworfen,
+    // die Quelle faellt still auf 'estimate' zurueck, und der Auto-Ausloeser
+    // urteilt ueber eine andere Zahl als die, die im Balken steht.
+    const mitNotiz: FillMessage[] = [
+      { role: 'user', content: 'a' },
+      { role: 'system', content: 'eine Notiz' },
+      { role: 'assistant', content: 'b' },
+    ]
+    expect(computeContextFill(mitNotiz, { tokens: 5000, atMessageCount: 3 }).source).toBe('built')
+    // Gefiltert waeren es nur 2 — und genau dann kippt es:
+    const gefiltert = mitNotiz.filter((m) => m.role !== 'system')
+    expect(computeContextFill(gefiltert, { tokens: 5000, atMessageCount: 3 }).source).not.toBe('built')
+  })
+
+  it('ein leeres Gespraech aus lauter Notizen ist leer, nicht voll', () => {
+    const nurNotizen: FillMessage[] = [
+      { role: 'system', content: lang }, { role: 'system', content: lang },
+    ]
+    expect(computeContextFill(nurNotizen).used).toBe(0)
+  })
+})

@@ -8,7 +8,7 @@
  * - Token estimation via heuristic: text.length / 4
  */
 
-import { getModelContext } from '../api/ollama'
+import { getModelContextCached } from '../api/ollama'
 import { getProviderForModel, getProviderIdFromModel } from '../api/providers'
 import { useModelStore } from '../stores/modelStore'
 import { truncateToolResult } from './truncate-tool-result'
@@ -67,8 +67,17 @@ export async function getModelMaxTokens(modelName: string): Promise<number> {
       return await provider.getContextLength(modelId)
     }
 
-    // Ollama: use existing endpoint
-    return await getModelContext(modelName)
+    // Ollama: use existing endpoint, through the cache.
+    //
+    // Uncached this was one /api/show per call, and 2.6.8 Compact-Schritt 2
+    // gives the group path a reason to ask once per model per ROUND. The
+    // value cached is the model file's trained context length, which does not
+    // change while the app runs; the user's override is a separate lever and
+    // is applied by effectiveContextWindow, downstream of this. Two other
+    // readers of exactly this number — useChat's own num_ctx resolution and
+    // useActiveContextWindow — already go through the same cache, so this
+    // removes an inconsistency rather than adding a risk.
+    return await getModelContextCached(modelName)
   } catch {
     return 4096
   }
@@ -149,6 +158,70 @@ function isToolResultMessage(msg: OllamaChatMessage): boolean {
     return true
   }
   return false
+}
+
+/**
+ * WHERE A CARRIED NOTE IS ALLOWED TO SIT — the one rule, one place.
+ *
+ * Anything a compaction wants to tell the model afterwards (the mechanical
+ * trim notice, and since 2.6.8 the written summary) has the same problem: it
+ * is instruction-shaped, so `role: 'system'` is the obvious home, and
+ * `role: 'system'` is exactly what it may not be. A system message anywhere
+ * but index 0 is refused outright by strict Jinja chat templates — "System
+ * message must be at the beginning" (platorius, Discord #bug-reports
+ * 2026-08-21, and the reason it only showed up in LU was that compaction only
+ * fires once a history is long).
+ *
+ * So the note rides on USER material, in this order of preference:
+ *   1. appended to the pinned task, when the pin is being re-added anyway —
+ *      the note and the task belong together and cost one message instead of
+ *      two;
+ *   2. else prefixed to the first kept user turn;
+ *   3. else as its own user turn.
+ *
+ * Extracted in 2.6.8 because the written summary needs the identical rule.
+ * Two copies of a placement rule whose whole purpose is "there is exactly one
+ * legal position" is how the second copy ends up in the illegal one.
+ */
+export interface CarriedNoteInput<T> {
+  /** The system prompt, if any. Always ends up at index 0 and nowhere else. */
+  system: T | null
+  /** The pinned first user turn, when it has to be re-added ahead of the window. */
+  pinned: T | null
+  /** The kept suffix, newest material, in order. */
+  kept: T[]
+  /** The note to carry, or null when there is nothing to say. */
+  note: string | null
+  /** Removes an earlier note of the same kind from a body, so notes never stack. */
+  strip?: (text: string) => string
+}
+
+export function attachNoteToUserMaterial<T extends { role: string; content?: unknown }>(
+  input: CarriedNoteInput<T>,
+): T[] {
+  const strip = input.strip ?? ((t: string) => t)
+  const out: T[] = []
+  if (input.system) out.push(input.system)
+  const kept = [...input.kept]
+  let note = input.note
+
+  if (input.pinned) {
+    out.push(
+      note
+        ? ({ ...input.pinned, content: `${String(input.pinned.content ?? '')}\n\n${note}` } as T)
+        : input.pinned,
+    )
+    note = null
+  }
+  if (note) {
+    if (kept[0]?.role === 'user' && typeof kept[0].content === 'string') {
+      kept[0] = { ...kept[0], content: `${note}\n\n${strip(kept[0].content)}` } as T
+    } else {
+      out.push({ role: 'user', content: note } as unknown as T)
+    }
+  }
+  out.push(...kept)
+  return out
 }
 
 /**
@@ -312,8 +385,6 @@ export function compactMessages(
   const pinNeeded = pinnedTask !== null && !kept.includes(capped[firstUserIdx])
 
   const droppedCount = capped.length - kept.length - (pinNeeded ? 1 : 0)
-  const compacted: OllamaChatMessage[] = []
-  if (systemMsg) compacted.push(systemMsg)
   let notice: string | null = null
   if (droppedCount > 0) {
     // What was dropped is exactly the record of the work already done, while
@@ -344,26 +415,14 @@ export function compactMessages(
   }
 
   // The notice used to be its own role:'system' message pushed right here,
-  // between the pin and the window — a system message mid conversation, which
-  // strict Jinja chat templates refuse with "System message must be at the
-  // beginning" (platorius, Discord #bug-reports 2026-08-21: "the problem is
-  // only in LU", same prompts fine elsewhere because compaction only fires
-  // once the history is long). It now rides inside user material: appended to
-  // the pinned task, else prefixed to the first kept user turn, else as its
-  // own user turn. After compaction, system only ever sits at index 0.
-  if (pinNeeded && pinnedTask) {
-    compacted.push(
-      notice ? { ...pinnedTask, content: `${pinnedTask.content}\n\n${notice}` } : pinnedTask,
-    )
-    notice = null
-  }
-  if (notice) {
-    if (kept[0]?.role === 'user' && typeof kept[0].content === 'string') {
-      kept[0] = { ...kept[0], content: `${notice}\n\n${stripTrimNotice(kept[0].content)}` }
-    } else {
-      compacted.push({ role: 'user', content: notice })
-    }
-  }
-  compacted.push(...kept)
-  return compacted
+  // between the pin and the window. Why that is forbidden, and where it goes
+  // instead, is now documented once at attachNoteToUserMaterial above — the
+  // written summary of 2.6.8 obeys the identical rule through the same call.
+  return attachNoteToUserMaterial<OllamaChatMessage>({
+    system: systemMsg,
+    pinned: pinNeeded ? pinnedTask : null,
+    kept,
+    note: notice,
+    strip: stripTrimNotice,
+  })
 }

@@ -8,11 +8,19 @@
  * never a statement about what a step is worth paying for.
  *
  * So paid providers get a second, tighter ceiling: min(0.8 × model window,
- * codexSendWindowTokens), default 64k. Local backends keep exactly the
- * behaviour they had, because there is no bill on the other end and their
- * windows are small to begin with. num_ctx is untouched either way, so no
- * model is ever asked to run in a smaller allocation than before (that would
- * only trade money for a trim loop).
+ * codexSendWindowTokens), default 64k. A local backend has no bill on the
+ * other end, so it never gets that second ceiling — `effectiveSendWindow`
+ * returns the plain 0.8 × window base for it, and always has.
+ *
+ * What changed in 2.6.8 (Compact-Schritt 2) is not this function, it is who
+ * asks it. The chat surfaces used to skip it entirely on a local model; now
+ * they apply that base there too, because an overflowing window is a
+ * correctness problem and not a billing one. The reasoning sits at the one
+ * place that made the call: `chatBudgetApplies` in chat-send-budget.ts.
+ *
+ * num_ctx is untouched either way, so no model is ever asked to run in a
+ * smaller allocation than before (that would only trade money for a trim
+ * loop).
  */
 
 /** Providers where a token sent is a token billed. */
