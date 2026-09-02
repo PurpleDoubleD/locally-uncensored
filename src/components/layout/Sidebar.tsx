@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Plus, Search, Trash2, Edit3, Check, X, MessageSquare, Code, Radio, Copy, RefreshCw, Square, Wifi, Globe, QrCode } from 'lucide-react'
+import { Plus, Search, Trash2, Edit3, Check, X, MessageSquare, Code, Radio, Copy, RefreshCw, Square, Wifi, Globe, QrCode, PanelLeftOpen, PanelLeftClose } from 'lucide-react'
 import { useChatStore } from '../../stores/chatStore'
 import { useUIStore } from '../../stores/uiStore'
+import { useCompareStore } from '../../stores/compareStore'
 import { useModelStore } from '../../stores/modelStore'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { useCodexStore } from '../../stores/codexStore'
@@ -12,7 +13,11 @@ import { formatDate, truncate } from '../../lib/formatters'
 
 export function Sidebar() {
   const { conversations, activeConversationId, createConversation, deleteConversation, renameConversation, setActiveConversation } = useChatStore()
-  const { sidebarOpen, setView } = useUIStore()
+  const { sidebarOpen, setView, setSidebarOpen, currentView } = useUIStore()
+  // A/B Compare takes the whole chat area, so neither rail nor panel belongs
+  // on screen while it runs. AppShell already unmounts us there; this keeps
+  // the rule readable in one place, the way apps/web does it.
+  const isComparing = useCompareStore((s) => s.isComparing)
   const { activeModel } = useModelStore()
   const { getActivePersona } = useSettingsStore()
   const personasEnabled = useSettingsStore((s) => s.settings.personasEnabled)
@@ -228,10 +233,89 @@ export function Sidebar() {
     return () => clearInterval(timer)
   }, [passcodeExpiresAt, remoteEnabled])
 
+  // Web parity (apps/web/components/layout/Sidebar.tsx:217): the conversation
+  // list belongs to Chat and nowhere else. This used to be a side effect of
+  // setView, which also tore the user's collapse open on every trip through
+  // Models or Settings.
+  const showSidebar = !isComparing && currentView === 'chat'
+
+  /** One rail button, active or not. Same shape as the web rail. */
+  const railBtn = (active: boolean) =>
+    `flex items-center justify-center w-9 h-9 rounded-md transition-all ${
+      active
+        ? 'bg-gray-200 dark:bg-white/10 text-gray-900 dark:text-white'
+        : 'text-gray-500 hover:text-gray-800 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/5'
+    }`
+
   return (
-    <AnimatePresence>
-      {sidebarOpen && (
+    <>
+    <AnimatePresence mode="wait" initial={false}>
+      {/* Collapsed: the slim icon rail. Chat/Code/Remote stay visible and
+          clickable, the top button expands to the full conversation list.
+          56 px and w-9 buttons are the web numbers, unchanged. */}
+      {showSidebar && !sidebarOpen && (
         <motion.aside
+          key="rail"
+          data-testid="sidebar-rail"
+          className="h-full rounded-xl bg-gray-50 dark:bg-[#1e1e1e] ring-1 ring-black/[0.04] dark:ring-white/[0.05] flex flex-col items-center z-20 overflow-hidden shrink-0 py-2 gap-1"
+          initial={{ width: 0, opacity: 0 }}
+          animate={{ width: 56, opacity: 1 }}
+          exit={{ width: 0, opacity: 0 }}
+          transition={{ duration: 0.15 }}
+          style={{ width: 56 }}
+        >
+          <button
+            onClick={() => setSidebarOpen(true)}
+            title="Expand sidebar"
+            aria-label="Expand sidebar"
+            data-testid="sidebar-toggle"
+            className="flex items-center justify-center w-9 h-9 rounded-md text-gray-500 hover:text-gray-800 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/5 transition-all"
+          >
+            <PanelLeftOpen size={16} />
+          </button>
+          <div className="w-6 h-px bg-gray-200 dark:bg-white/10 my-1" />
+          <button
+            onClick={() => { setChatMode('lu'); setActiveConversation(null); setView('chat'); setDispatchPicker(false) }}
+            title="Chat"
+            aria-label="Chat"
+            className={railBtn(!isCodingMode && !isRemoteMode)}
+          >
+            <MessageSquare size={15} />
+          </button>
+          <button
+            onClick={() => { setChatMode('codex'); setActiveConversation(null); setView('chat'); setDispatchPicker(false) }}
+            title="Code"
+            aria-label="Code"
+            className={railBtn(isCodingMode)}
+          >
+            <Code size={15} />
+          </button>
+          <button
+            onClick={() => { setChatMode('remote'); setActiveConversation(dispatchedConversationId); setView('chat') }}
+            title="Remote"
+            aria-label="Remote"
+            className={railBtn(isRemoteMode)}
+          >
+            <Radio size={15} />
+          </button>
+          <div className="flex-1" />
+          <button
+            onClick={handleNewChat}
+            title={activeModel ? 'New Chat' : 'Pick or install a model first'}
+            aria-label="New Chat"
+            className="flex items-center justify-center w-9 h-9 rounded-md text-gray-500 hover:text-gray-800 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/5 transition-all"
+          >
+            <Plus size={17} />
+          </button>
+        </motion.aside>
+      )}
+      {/* Expanded: the full conversation list. Width and zoom stay as they
+          were on the desktop (200 px at zoom 1.25 renders as 250, the web
+          panel is 258): this round ports the collapse, not a resize. */}
+      {showSidebar && sidebarOpen && (
+        <motion.aside
+          key="full"
+          data-testid="sidebar-panel"
           className="w-[200px] h-full rounded-xl bg-white dark:bg-[#1e1e1e] ring-1 ring-black/[0.04] dark:ring-white/[0.05] flex flex-col z-20 overflow-hidden"
           style={{ zoom: 1.25 }}
           initial={{ width: 0, opacity: 0 }}
@@ -242,6 +326,16 @@ export function Sidebar() {
           {/* Mode Tabs (Chat | Code | Remote) — icon-only, like uselu.
               Labels live in title/aria-label for accessibility. */}
           <div className="flex items-center gap-0.5 px-2 pt-2 pb-1">
+            {/* Collapse back to the slim rail */}
+            <button
+              onClick={() => setSidebarOpen(false)}
+              title="Collapse sidebar"
+              aria-label="Collapse sidebar"
+              data-testid="sidebar-toggle"
+              className="flex items-center justify-center w-6 h-6 rounded text-gray-500 hover:text-gray-800 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/5 transition-all shrink-0"
+            >
+              <PanelLeftClose size={13} />
+            </button>
             {/* Chat tab */}
             <button
               onClick={() => { setChatMode('lu'); setActiveConversation(null); setView('chat'); setDispatchPicker(false) }}
@@ -582,7 +676,9 @@ export function Sidebar() {
           </div>
         </motion.aside>
       )}
+    </AnimatePresence>
 
+    <AnimatePresence>
       {/* Right-click menu for a conversation row. The hover buttons stay, this
           is the gesture people reach for first. */}
       {rowMenu && (
@@ -710,5 +806,6 @@ export function Sidebar() {
         </motion.div>
       )}
     </AnimatePresence>
+    </>
   )
 }
