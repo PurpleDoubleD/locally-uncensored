@@ -8,7 +8,7 @@ import { useMemoryStore } from "../stores/memoryStore"
 import { useVoiceStore } from "../stores/voiceStore"
 import { autoSpeak } from "../lib/ttsBridge"
 import { retrieveContext } from "../api/rag"
-import { buildRagSuffix } from "../lib/rag-prompt"
+import { buildRagSuffix, RETRIEVAL_FAILED_MESSAGE } from "../lib/rag-prompt"
 import { getModelMaxTokens, capMessageCount } from "../lib/context-compaction"
 import { applyChatSendBudget, chatBudgetApplies } from "../lib/chat-send-budget"
 import { isTooManyMessagesError, halveHistory, TOO_MANY_MESSAGES_MAX_HALVINGS } from "../lib/too-many-messages"
@@ -485,8 +485,14 @@ export function useChat() {
           // The result is appended to the system prompt below, which is what
           // makes Document Chat work on a cloud model as well as a local one.
           ragSuffix = buildRagSuffix(ragContext.chunks)
+          // A clean turn clears any previous complaint.
+          ragState.setRetrievalError(null)
         } catch (err) {
           log.error("RAG retrieval failed, continuing without context", { err })
+          // Silence here was the defect (review S4): the model answered from
+          // nothing while the user watched a green Docs badge and believed the
+          // PDF had been read. The panel and the composer both show this.
+          ragState.setRetrievalError(RETRIEVAL_FAILED_MESSAGE)
         }
       }
     }

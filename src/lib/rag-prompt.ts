@@ -36,3 +36,11 @@ export function buildRagSuffix(chunks: { content: string }[]): string {
     .join('\n\n')
   return `\n\n${RAG_INSTRUCTION}\n\n---\n${contextBlock}\n---`
 }
+
+/**
+ * Shown when retrieval threw and the turn went out without the documents
+ * (review S4). English, like every other error surface in the app.
+ */
+export const RETRIEVAL_FAILED_MESSAGE =
+  'Your documents could not be searched for this message, so the answer was written without them. ' +
+  'Check that the embedding engine is running, then send again.'

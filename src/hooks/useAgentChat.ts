@@ -24,7 +24,7 @@ import { useModelStore } from '../stores/modelStore'
 import { useSettingsStore } from '../stores/settingsStore'
 import { useRAGStore } from '../stores/ragStore'
 import { retrieveContext } from '../api/rag'
-import { buildRagSuffix } from '../lib/rag-prompt'
+import { buildRagSuffix, RETRIEVAL_FAILED_MESSAGE } from '../lib/rag-prompt'
 import { toolRegistry } from '../api/mcp'
 import { usePermissionStore } from '../stores/permissionStore'
 import { CODEX_CONFIRM_TOOLS, codexConfirmEnabled } from './codexShellGate'
@@ -439,8 +439,13 @@ export function useAgentChat() {
           // at offset 0 it cost the upstream prefix cache the whole prompt
           // (plan A5).
           ragSuffix = buildRagSuffix(ragContext.chunks)
+          ragState.setRetrievalError(null)
         } catch (err) {
           log.error('RAG retrieval failed', { err })
+          // Same statement plain chat makes (review S4). An agent run that
+          // quietly lost its documents is worse, not better: it goes on to act
+          // on what it did not read.
+          ragState.setRetrievalError(RETRIEVAL_FAILED_MESSAGE)
         }
       }
     }
