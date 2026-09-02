@@ -83,7 +83,7 @@ fn cancel_comfyui_install_blocking(state: &AppState) -> Result<serde_json::Value
         // "Cancelling…" indicator even before the spawn loop notices.
         if s.status == "installing" || s.status == "downloading" {
             s.status = "cancelling".to_string();
-            s.logs.push("Cancellation requested — waiting for active subprocess to exit…".to_string());
+            s.logs.push("Cancellation requested, waiting for the active subprocess to exit...".to_string());
         }
     }
     Ok(serde_json::json!({"status": "cancelling"}))
@@ -355,25 +355,37 @@ pub(crate) const VC_RUNTIME_DLLS: &[&str] = &[
 /// that goes stale the moment Microsoft ships the next one.
 pub(crate) const VC_REDIST_PAGE: &str = "https://learn.microsoft.com/cpp/windows/latest-supported-vc-redist";
 
-/// The wording Windows and Python use when a library is not there. Without
-/// this a log that merely mentions a DLL by name would be read as a missing
-/// runtime.
+/// The wording Windows and Python use when a library is not there.
+///
+/// `winerror` carries the weight on a non English Windows: the bracketed code
+/// is not localised, while the sentence after it is. Everything else here is
+/// an English phrase and is only ever a second chance.
 fn reads_as_missing(lower: &str) -> bool {
-    lower.contains("not found")
+    lower.contains("winerror")
+        || lower.contains("not found")
         || lower.contains("could not be found")
-        || lower.contains("missing")
         || lower.contains("error loading")
         || lower.contains("dll load failed")
         || lower.contains("cannot open shared object file")
 }
 
 /// The Visual C++ runtime file a failure names, when it names one.
+///
+/// Asked PER LINE, not over the whole log. `torch\lib` ships msvcp140.dll and
+/// vcomp140.dll itself, so any log that lists that directory mentions both
+/// names; a whole log that also contains the word "missing" somewhere else
+/// would otherwise be read as a missing runtime.
 pub(crate) fn missing_runtime_library(text: &str) -> Option<&'static str> {
-    let lower = text.to_ascii_lowercase();
-    if !reads_as_missing(&lower) {
-        return None;
+    for raw in text.lines() {
+        let line = raw.to_ascii_lowercase();
+        let Some(dll) = VC_RUNTIME_DLLS.iter().copied().find(|d| line.contains(d)) else {
+            continue;
+        };
+        if reads_as_missing(&line) {
+            return Some(dll);
+        }
     }
-    VC_RUNTIME_DLLS.iter().copied().find(|dll| lower.contains(dll))
+    None
 }
 
 /// What went wrong, decided once and reused. The trainer's setup step reads
@@ -399,17 +411,24 @@ pub(crate) enum PipFailureKind {
     Unknown,
 }
 
-/// Classify raw pip / interpreter output. Order matters: the native library
-/// failures are checked before the broad `contains("connection")` and
-/// `contains("permission")` arms, because a Windows DLL message carries words
-/// that would otherwise be swallowed by them.
+/// Classify raw pip / interpreter output.
+///
+/// Order matters twice. The native library arms sit before the broad
+/// `contains("connection")` and permission arms, because a Windows DLL message
+/// carries words those would otherwise swallow. And the disk and PEP 668 arms
+/// sit before the native ones, because a rollback on a full drive prints a
+/// `Moving to ...torch\lib\....dll` line for every file it moves.
 pub(crate) fn pip_failure_kind(text: &str) -> PipFailureKind {
     let lower = text.to_lowercase();
     if lower.contains("externally-managed-environment") || lower.contains("error: externally-managed") {
         PipFailureKind::ExternallyManaged
     } else if lower.contains("ssl module in python is not available") {
         PipFailureKind::PythonWithoutSsl
-    } else if missing_runtime_library(&lower).is_some() {
+    // Before the native arms: a full disk rolls torch back file by file, and
+    // every one of those lines names a DLL under torch\lib.
+    } else if lower.contains("no space") || lower.contains("errno 28") {
+        PipFailureKind::DiskFull
+    } else if missing_runtime_library(text).is_some() {
         PipFailureKind::MissingRuntimeLibrary
     } else if lower.contains("winerror 1114")
         || lower.contains("winerror 126")
@@ -434,9 +453,10 @@ pub(crate) fn pip_failure_kind(text: &str) -> PipFailureKind {
         PipFailureKind::Timeout
     } else if lower.contains("connection") {
         PipFailureKind::Network
-    } else if lower.contains("no space") || lower.contains("errno 28") {
-        PipFailureKind::DiskFull
-    } else if lower.contains("permission") || lower.contains("errno 13") {
+    // The predicate the custom node path has used since 2026-07-19: an
+    // admin only site-packages under Program Files answers with "Access is
+    // denied" and WinError 5, neither of which contains the word permission.
+    } else if is_permission_denied_pip_error(text) {
         PipFailureKind::Permission
     } else if lower.contains("no module named") || lower.contains("modulenotfounderror") {
         PipFailureKind::PipBroken
@@ -591,14 +611,33 @@ pub(crate) const KNOWN_IMPORT_NAMES: &[(&str, &str)] = &[
     ("soundfile", "soundfile"),
     ("pydantic", "pydantic"),
     ("pydantic-settings", "pydantic_settings"),
+    ("requests", "requests"),
+    ("filelock", "filelock"),
+    ("blake3", "blake3"),
+    ("simpleeval", "simpleeval"),
 ];
 
+/// The comment ComfyUI's own requirements.txt uses to separate the packages a
+/// core needs from the ones it can start without. Everything below it is
+/// reported and logged when it will not import, but it never fails an install:
+/// kornia, spandrel, pydantic and friends live down there, and refusing to
+/// finish over one of them would trade A3 for a worse bug.
+///
+/// Matched on the words, not on the exact line, so a reflow of that comment
+/// does not silently turn six optional packages back into mandatory ones.
+pub(crate) fn is_optional_section_marker(comment: &str) -> bool {
+    let c = comment.to_ascii_lowercase();
+    (c.contains("non essential") || c.contains("non-essential") || c.contains("optional"))
+        && c.contains("dependencies")
+}
+
 /// One package the probe can ask about: what pip calls it, what Python calls
-/// it.
+/// it, and whether a core can start without it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ProbeTarget {
     pub(crate) dist: String,
     pub(crate) module: &'static str,
+    pub(crate) essential: bool,
 }
 
 /// PEP 503 name normalisation, so `PyYAML`, `pyyaml` and `Py_YAML` are one
@@ -621,47 +660,79 @@ pub(crate) fn normalize_dist(name: &str) -> String {
     out.trim_matches('-').to_string()
 }
 
+/// One line of a requirements.txt, as far as the probe cares.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct RequirementLine {
+    pub(crate) dist: String,
+    /// False below the optional-dependencies comment: reported, never fatal.
+    pub(crate) essential: bool,
+}
+
 /// Distribution names a requirements.txt asks for. Options (`-r`, `-e`,
-/// `--index-url`), comments, blank lines, URLs and environment markers are
-/// dropped; version specifiers and extras are cut off.
-pub(crate) fn parse_requirement_dists(text: &str) -> Vec<String> {
-    let mut out: Vec<String> = Vec::new();
+/// `--index-url`), comments, blank lines and URLs are dropped; version
+/// specifiers and extras are cut off.
+///
+/// A line carrying an environment marker (`foo ; sys_platform == "win32"`) is
+/// dropped entirely rather than stripped down to its name. pip decides whether
+/// that line applies to this machine, and the probe has no business asking for
+/// a Windows only package on Linux and then calling the environment broken.
+pub(crate) fn parse_requirement_lines(text: &str) -> Vec<RequirementLine> {
+    let mut out: Vec<RequirementLine> = Vec::new();
+    let mut essential = true;
     for raw in text.lines() {
-        let line = raw.split('#').next().unwrap_or("").trim();
-        if line.is_empty() || line.starts_with('-') {
+        let (code, comment) = match raw.split_once('#') {
+            Some((c, rest)) => (c.trim(), rest),
+            None => (raw.trim(), ""),
+        };
+        if is_optional_section_marker(comment) {
+            essential = false;
+        }
+        if code.is_empty() || code.starts_with('-') {
+            continue;
+        }
+        // pip owns the marker, so a line that has one is installed but not
+        // probed.
+        if code.contains(';') {
             continue;
         }
         // `name @ url` is still a name; a bare URL is not.
-        let head = line.split('@').next().unwrap_or("").trim();
+        let head = code.split('@').next().unwrap_or("").trim();
         if head.is_empty() || head.contains("://") {
             continue;
         }
         let end = head
-            .find(|c: char| "[<>=!~; \t,(".contains(c))
+            .find(|c: char| "[<>=!~ \t,(".contains(c))
             .unwrap_or(head.len());
         let dist = normalize_dist(&head[..end]);
-        if dist.is_empty() {
+        if dist.is_empty() || out.iter().any(|l| l.dist == dist) {
             continue;
         }
-        if !out.contains(&dist) {
-            out.push(dist);
-        }
+        out.push(RequirementLine { dist, essential });
     }
     out
 }
+
 
 /// What the probe should import for a given requirements.txt. torch always
 /// comes first and always comes along: it is installed in its own step, it is
 /// the one package whose failure is a native library fault rather than a
 /// missing file, and it is the canary for every DLL report in A3.
 pub(crate) fn probe_targets(requirements: &str) -> Vec<ProbeTarget> {
-    let mut out = vec![ProbeTarget { dist: "torch".to_string(), module: "torch" }];
-    for dist in parse_requirement_dists(requirements) {
-        if dist == "torch" {
+    let mut out = vec![ProbeTarget {
+        dist: "torch".to_string(),
+        module: "torch",
+        essential: true,
+    }];
+    for line in parse_requirement_lines(requirements) {
+        if line.dist == "torch" {
             continue;
         }
-        if let Some((_, module)) = KNOWN_IMPORT_NAMES.iter().find(|(d, _)| *d == dist) {
-            out.push(ProbeTarget { dist, module });
+        if let Some((_, module)) = KNOWN_IMPORT_NAMES.iter().find(|(d, _)| *d == line.dist) {
+            out.push(ProbeTarget {
+                dist: line.dist,
+                module,
+                essential: line.essential,
+            });
         }
     }
     out
@@ -679,6 +750,7 @@ pub(crate) fn import_probe_script(modules: &[&str]) -> String {
         .join(", ");
     format!(
         "import importlib, sys\n\
+         sys.stdout.write(\"PROBE_VENV \" + (\"1\" if sys.prefix != sys.base_prefix else \"0\") + \"\\n\"); sys.stdout.flush()\n\
          for m in [{list}]:\n\
          \x20   sys.stdout.write(\"PROBE_TRY \" + m + \"\\n\"); sys.stdout.flush()\n\
          \x20   try:\n\
@@ -691,40 +763,61 @@ pub(crate) fn import_probe_script(modules: &[&str]) -> String {
     )
 }
 
+/// How long the probe may take before it counts as hung. Twenty four imports
+/// on a cold Windows drive is minutes of disk, and torch alone can take most
+/// of one; a Windows loader dialog behind the app takes forever. Generous
+/// enough for a slow spinning disk, short enough that 4/4 is not a dead end.
+const IMPORT_PROBE_DEADLINE: std::time::Duration = std::time::Duration::from_secs(300);
+
 /// What the probe found. `missing` is the healable half (pip can put those
-/// back), `broken` and `crashed` are not: no amount of pip fixes an absent
-/// Visual C++ runtime.
+/// back), everything else is not: no amount of pip fixes an absent Visual C++
+/// runtime, a hung loader or an interpreter that dies on exit.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub(crate) struct ImportProbeReport {
     pub(crate) missing: Vec<String>,
     pub(crate) broken: Vec<(String, String)>,
+    /// Every failure's own words, keyed by the module we asked for. `missing`
+    /// and `broken` say what to do; this says what Python said.
+    pub(crate) reasons: Vec<(String, String)>,
     pub(crate) crashed: Option<String>,
     pub(crate) finished: bool,
+    /// The probe hit its deadline and was killed.
+    pub(crate) timed_out: bool,
+    /// The interpreter walked the whole list and still exited non zero, which
+    /// is a native library dying on shutdown. Every field above can be clean
+    /// and the environment still be broken, so this one has to count.
+    pub(crate) exited_badly: bool,
+    /// The interpreter runs inside a virtual environment, so a `--user`
+    /// install would be refused. Read from the probe itself rather than
+    /// guessed from the path.
+    pub(crate) in_venv: bool,
 }
 
 impl ImportProbeReport {
     pub(crate) fn is_healthy(&self) -> bool {
-        self.finished && self.missing.is_empty() && self.broken.is_empty() && self.crashed.is_none()
-    }
-
-    /// True when pip could plausibly close the gap, so the caller heals first
-    /// and only reports if the second probe still fails.
-    ///
-    /// PyTorch is deliberately not healable here. It is installed from a
-    /// channel the card decides (`plan_pytorch_install`), and a plain
-    /// `pip install torch` would take whatever PyPI serves by default, which
-    /// is how a machine ends up with a build that has no kernels for its own
-    /// card. A torch that is missing after its own step is a failed install,
-    /// and the rebuild is the answer.
-    pub(crate) fn is_healable(&self) -> bool {
-        !self.missing.is_empty()
+        self.finished
+            && self.missing.is_empty()
             && self.broken.is_empty()
             && self.crashed.is_none()
-            && !self
-                .missing
-                .iter()
-                .any(|m| torch_wheels::TORCH_TRIO.contains(&m.as_str()))
+            && !self.timed_out
+            && !self.exited_badly
     }
+}
+
+/// The module name a `No module named 'X'` blames, which is not always the
+/// module we asked for: a package whose own dependency chain is broken names
+/// the dependency, and quoting only our side turns that into a riddle.
+pub(crate) fn module_named_in_error(reason: &str) -> Option<String> {
+    let at = reason.find("No module named")? + "No module named".len();
+    let rest = reason[at..].trim_start();
+    let quote = rest.chars().next()?;
+    if quote != '\'' && quote != '"' {
+        return None;
+    }
+    let inner = &rest[quote.len_utf8()..];
+    let end = inner.find(quote)?;
+    let name = inner[..end].trim();
+    (!name.is_empty()).then(|| name.to_string())
 }
 
 /// Read the probe's output. `interpreter_survived` is the process exit status:
@@ -735,7 +828,9 @@ pub(crate) fn parse_import_probe(stdout: &str, interpreter_survived: bool) -> Im
     let mut pending: Option<String> = None;
     for line in stdout.lines() {
         let line = line.trim();
-        if let Some(m) = line.strip_prefix("PROBE_TRY ") {
+        if let Some(v) = line.strip_prefix("PROBE_VENV ") {
+            report.in_venv = v.trim() == "1";
+        } else if let Some(m) = line.strip_prefix("PROBE_TRY ") {
             pending = Some(m.trim().to_string());
         } else if let Some(m) = line.strip_prefix("PROBE_OK ") {
             if pending.as_deref() == Some(m.trim()) {
@@ -749,6 +844,7 @@ pub(crate) fn parse_import_probe(stdout: &str, interpreter_survived: bool) -> Im
             if pending.as_deref() == Some(module.as_str()) {
                 pending = None;
             }
+            report.reasons.push((module.clone(), reason.clone()));
             // A plain ModuleNotFoundError is a file that is not there, which
             // is the sqlalchemy / pyyaml case and the only one pip can fix.
             if reason.to_ascii_lowercase().contains("modulenotfounderror") {
@@ -764,60 +860,268 @@ pub(crate) fn parse_import_probe(stdout: &str, interpreter_survived: bool) -> Im
     if !report.finished || !interpreter_survived {
         report.crashed = pending;
     }
+    report.exited_badly = !interpreter_survived;
     report
 }
 
-/// The sentence the customer gets. One shape for all three failure classes:
-/// what is wrong, and what to do about it.
-pub(crate) fn import_probe_message(report: &ImportProbeReport) -> String {
+/// Move a crash into `broken` only when the interpreter's dying words say
+/// something we can name.
+///
+/// Torch and transformers write warnings to stderr on almost every start, so
+/// the LAST stderr line of a crashed run is usually a deprecation notice.
+/// Promoting on that turned an access violation into "Press Repair
+/// environment" with no cause named, which is the message the crash case
+/// exists to avoid.
+pub(crate) fn promote_crash_from_stderr(report: &mut ImportProbeReport, stderr: &str) {
+    let Some(module) = report.crashed.clone() else {
+        return;
+    };
+    let named = stderr
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .rev()
+        .find(|l| pip_failure_kind(l) != PipFailureKind::Unknown);
+    if let Some(line) = named {
+        report.broken.push((module, line.to_string()));
+        report.crashed = None;
+    }
+}
+
+/// What to do about a probe result. Pure, so every branch is testable without
+/// an interpreter, a network or a card.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum ProbeVerdict {
+    /// Nothing to do.
+    Healthy,
+    /// Install these distributions, then probe once more.
+    Heal(Vec<String>),
+    /// Say it in the log, finish anyway. Only optional packages are affected.
+    Warn(String),
+    /// Stop, with a finished sentence for the status line.
+    Fail(String),
+}
+
+/// The distributions a heal step should install: every missing module we can
+/// name a package for.
+///
+/// PyTorch is never in the list. It comes from a channel the card decides
+/// (`plan_pytorch_install`), and a bare `pip install torch` would take whatever
+/// PyPI serves by default, which is how a machine ends up with a build that has
+/// no kernels for its own card. A torch that is missing after its own step is a
+/// failed install, and the rebuild is the answer.
+pub(crate) fn dists_to_heal(targets: &[ProbeTarget], report: &ImportProbeReport) -> Vec<String> {
+    if report
+        .missing
+        .iter()
+        .any(|m| torch_wheels::TORCH_TRIO.contains(&m.as_str()))
+    {
+        return Vec::new();
+    }
+    let mut out: Vec<String> = Vec::new();
+    for module in &report.missing {
+        if let Some(t) = targets.iter().find(|t| t.module == module.as_str()) {
+            if !out.contains(&t.dist) {
+                out.push(t.dist.clone());
+            }
+        }
+    }
+    out
+}
+
+/// Whether a failed pip run should be tried again into the per user site.
+///
+/// Two conditions, and both matter. A venv REFUSES `--user` ("Can not perform
+/// a '--user' install"), so retrying there swaps one failure for another. And
+/// only a refused write is worth retrying at all: a network failure would just
+/// fail again, twice as slowly.
+pub(crate) fn should_retry_in_user_site(in_venv: bool, stderr: &str) -> bool {
+    !in_venv && pip_failure_kind(stderr) == PipFailureKind::Permission
+}
+
+/// True for a module the core cannot start without.
+fn is_essential(targets: &[ProbeTarget], module: &str) -> bool {
+    targets
+        .iter()
+        .find(|t| t.module == module)
+        .map(|t| t.essential)
+        .unwrap_or(true)
+}
+
+/// The whole decision, in one place. `already_healed` says whether the heal
+/// step has already run, so a second look never sends the caller round the pip
+/// loop again.
+pub(crate) fn probe_verdict(
+    targets: &[ProbeTarget],
+    report: &ImportProbeReport,
+    already_healed: bool,
+) -> ProbeVerdict {
+    if report.is_healthy() {
+        return ProbeVerdict::Healthy;
+    }
+    if report.timed_out {
+        let what = report
+            .crashed
+            .clone()
+            .map(|m| format!(" It was importing {m}."))
+            .unwrap_or_default();
+        return ProbeVerdict::Fail(format!(
+            "The check of the ComfyUI environment did not finish within {} minutes and was \
+             stopped.{what} A Windows dialog from the library loader sitting behind the app will \
+             do that. Bring any hidden dialog to the front and close it, then press Repair \
+             environment.",
+            IMPORT_PROBE_DEADLINE.as_secs() / 60
+        ));
+    }
     if let Some(module) = &report.crashed {
-        return format!(
+        return ProbeVerdict::Fail(format!(
             "The Python environment crashed while importing {module}, so it cannot start ComfyUI. \
              A crash at import time (0xC0000005 on Windows) means a native library the package \
              loads does not match this machine. {}",
             pip_failure_hint(PipFailureKind::NativeLoadFailure, "")
-        );
+        ));
     }
-    if let Some((module, reason)) = report.broken.first() {
+    // A hard failure that is about a package the core needs beats everything
+    // below, so it is asked for first.
+    if let Some((module, reason)) = report
+        .broken
+        .iter()
+        .find(|(m, _)| is_essential(targets, m))
+    {
         let hint = pip_failure_hint(pip_failure_kind(reason), reason);
         let hint = if hint.is_empty() {
             "Press Repair environment to rebuild the environment from scratch.".to_string()
         } else {
             hint
         };
-        return format!("The ComfyUI environment cannot import {module}: {reason}\n\n{hint}");
+        return ProbeVerdict::Fail(format!(
+            "The ComfyUI environment cannot import {module}: {reason}\n\n{hint}"
+        ));
     }
     if report
         .missing
         .iter()
         .any(|m| torch_wheels::TORCH_TRIO.contains(&m.as_str()))
     {
-        return format!(
+        return ProbeVerdict::Fail(format!(
             "PyTorch is not in the ComfyUI environment at all ({} could not be imported), so the \
              install did not finish. Press Repair environment: it rebuilds the environment and \
              fetches the PyTorch build that matches the card in this machine.",
             report.missing.join(", ")
-        );
+        ));
     }
-    if !report.missing.is_empty() {
-        return format!(
+    if !already_healed {
+        let heal = dists_to_heal(targets, report);
+        if !heal.is_empty() {
+            return ProbeVerdict::Heal(heal);
+        }
+    }
+    let hard: Vec<String> = report
+        .missing
+        .iter()
+        .filter(|m| is_essential(targets, m))
+        .map(|m| describe_missing(report, m))
+        .collect();
+    if !hard.is_empty() {
+        return ProbeVerdict::Fail(format!(
             "These packages are still missing from the ComfyUI environment after a reinstall: {}. \
              ComfyUI cannot start without them. Press Repair environment to rebuild the \
              environment from scratch, and if that fails too, send us the install log.",
-            report.missing.join(", ")
-        );
+            hard.join(", ")
+        ));
     }
     if !report.finished {
-        return "The check of the ComfyUI environment did not run to the end, so the environment \
-                cannot be called ready. Press Repair environment to rebuild it."
-            .to_string();
+        return ProbeVerdict::Fail(
+            "The check of the ComfyUI environment did not run to the end, so the environment \
+             cannot be called ready. Press Repair environment to rebuild it."
+                .to_string(),
+        );
     }
-    String::new()
+    if report.exited_badly {
+        return ProbeVerdict::Fail(format!(
+            "Every package imported, but the interpreter itself then ended with an error, which \
+             is a native library failing as it unloads. {}",
+            pip_failure_hint(PipFailureKind::NativeLoadFailure, "")
+        ));
+    }
+    // Only the packages below the optional-dependencies line are left. Say so
+    // and finish: refusing to complete over one of those would trade A3 for a
+    // worse bug.
+    let soft: Vec<String> = report
+        .missing
+        .iter()
+        .map(|m| describe_missing(report, m))
+        .chain(report.broken.iter().map(|(m, r)| format!("{m} ({r})")))
+        .collect();
+    if !soft.is_empty() {
+        return ProbeVerdict::Warn(format!(
+            "These optional packages do not import: {}. ComfyUI starts without them, but the \
+             nodes that use them will not appear.",
+            soft.join(", ")
+        ));
+    }
+    ProbeVerdict::Healthy
 }
 
-/// Run the probe against one interpreter. A probe that cannot even be started
-/// is reported as unfinished, never as healthy.
-fn run_import_probe(python_bin: &str, modules: &[&str]) -> ImportProbeReport {
+/// `spandrel` when spandrel itself is gone, `spandrel (needs timm)` when the
+/// import died on somebody else's package.
+fn describe_missing(report: &ImportProbeReport, module: &str) -> String {
+    let named = report
+        .reasons
+        .iter()
+        .find(|(m, _)| m == module)
+        .and_then(|(_, r)| module_named_in_error(r));
+    match named {
+        Some(dep) if dep != module => format!("{module} (needs {dep})"),
+        _ => module.to_string(),
+    }
+}
+
+/// The line the install panel shows for a probe line, if any. Twenty four
+/// silent imports on a cold drive look exactly like a hung installer, so 4/4
+/// says what it is doing.
+pub(crate) fn probe_progress_line(line: &str) -> Option<String> {
+    if let Some(m) = line.strip_prefix("PROBE_TRY ") {
+        return Some(format!("Importing {}...", m.trim()));
+    }
+    if let Some(rest) = line.strip_prefix("PROBE_FAIL ") {
+        let module = rest.split(" :: ").next().unwrap_or(rest).trim();
+        return Some(format!("{module} does not import."));
+    }
+    None
+}
+
+/// Run the probe against one interpreter, with a hard deadline and the same
+/// cancel flag every other step honours.
+///
+/// `Command::output()` waits forever. Twenty four imports on a cold Windows
+/// drive is a minute of disk with no output at all, and a library loader that
+/// puts up a modal dialog behind the app waits for a click that will never
+/// come. Both leave the installer sitting on 4/4 with no way out, which is a
+/// worse failure than the one this probe exists to catch. Modelled on
+/// `shell::output_bounded`, extended to carry stderr, the exit status and the
+/// cancel flag.
+///
+/// Err is only ever "cancelled". Everything else is a report: a probe that
+/// could not start, timed out or died is reported, never called healthy.
+fn run_import_probe(
+    python_bin: &str,
+    modules: &[&str],
+    install_status: Option<&Arc<Mutex<InstallState>>>,
+    cancel: Option<&Arc<AtomicBool>>,
+) -> Result<ImportProbeReport, String> {
+    run_import_probe_bounded(python_bin, modules, install_status, cancel, IMPORT_PROBE_DEADLINE)
+}
+
+/// Same, with the deadline as a parameter so a test can drive the timeout and
+/// the cancel paths in a second instead of in five minutes.
+fn run_import_probe_bounded(
+    python_bin: &str,
+    modules: &[&str],
+    install_status: Option<&Arc<Mutex<InstallState>>>,
+    cancel: Option<&Arc<AtomicBool>>,
+    max: std::time::Duration,
+) -> Result<ImportProbeReport, String> {
     let script = import_probe_script(modules);
     let mut cmd = Command::new(python_bin);
     cmd.arg("-c").arg(&script);
@@ -826,32 +1130,112 @@ fn run_import_probe(python_bin: &str, modules: &[&str]) -> ImportProbeReport {
     // probe with a UnicodeEncodeError instead of reporting the import.
     cmd.env("PYTHONIOENCODING", "utf-8");
     cmd.env("PYTHONUTF8", "1");
-    cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
+    cmd.stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
     #[cfg(target_os = "windows")]
     cmd.creation_flags(CREATE_NO_WINDOW);
-    match cmd.output() {
-        Ok(out) => {
-            let stdout = String::from_utf8_lossy(&out.stdout).to_string();
-            let stderr = String::from_utf8_lossy(&out.stderr).to_string();
-            let mut report = parse_import_probe(&stdout, out.status.success());
-            // A hard crash never reaches our `except`, so whatever it said
-            // went to stderr. Windows puts the missing DLL's name there, which
-            // is the difference between naming VCOMP140.DLL and shrugging.
-            if let Some(module) = report.crashed.clone() {
-                if let Some(last) = stderr.trim().lines().next_back() {
-                    if !last.trim().is_empty() {
-                        report.broken.push((module, last.trim().to_string()));
-                        report.crashed = None;
+    let mut child = match cmd.spawn() {
+        Ok(c) => c,
+        Err(e) => {
+            return Ok(ImportProbeReport {
+                broken: vec![("python".to_string(), os_error::english(&e))],
+                ..Default::default()
+            })
+        }
+    };
+
+    let out_lines: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+    let err_lines: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+    let readers_done = Arc::new(AtomicU64::new(0));
+    if let Some(stdout) = child.stdout.take() {
+        let sink = out_lines.clone();
+        let done = readers_done.clone();
+        let status = install_status.cloned();
+        std::thread::spawn(move || {
+            for line in BufReader::new(stdout).lines().map_while(Result::ok) {
+                let line = line.trim().to_string();
+                if line.is_empty() {
+                    continue;
+                }
+                if let (Some(state), Some(msg)) = (status.as_ref(), probe_progress_line(&line)) {
+                    push_install_log(state, &msg);
+                }
+                if let Ok(mut v) = sink.lock() {
+                    v.push(line);
+                }
+            }
+            done.fetch_add(1, Ordering::Release);
+        });
+    } else {
+        readers_done.fetch_add(1, Ordering::Release);
+    }
+    if let Some(stderr) = child.stderr.take() {
+        let sink = err_lines.clone();
+        let done = readers_done.clone();
+        std::thread::spawn(move || {
+            for line in BufReader::new(stderr).lines().map_while(Result::ok) {
+                let line = line.trim().to_string();
+                if !line.is_empty() {
+                    if let Ok(mut v) = sink.lock() {
+                        v.push(line);
                     }
                 }
             }
-            report
-        }
-        Err(e) => ImportProbeReport {
-            broken: vec![("python".to_string(), os_error::english(&e))],
-            ..Default::default()
-        },
+            done.fetch_add(1, Ordering::Release);
+        });
+    } else {
+        readers_done.fetch_add(1, Ordering::Release);
     }
+
+    let deadline = Instant::now() + max;
+    let mut timed_out = false;
+    let exit = loop {
+        if cancel.map(|c| c.load(Ordering::SeqCst)).unwrap_or(false) {
+            crate::commands::shell::kill_tree(child.id());
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err("cancelled".to_string());
+        }
+        match child.try_wait() {
+            Ok(Some(status)) => break Some(status),
+            Ok(None) => {
+                if Instant::now() >= deadline {
+                    // The tree, not just the child: a loader dialog belongs to
+                    // this process, but a probe that spawned anything would
+                    // otherwise keep the pipe open.
+                    crate::commands::shell::kill_tree(child.id());
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    timed_out = true;
+                    break None;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(200));
+            }
+            Err(_) => break None,
+        }
+    };
+    // The reader threads are deliberately not joined: the same reason
+    // `run_streamed` gives, a surviving grandchild can hold the pipe open and
+    // the join would hang instead of returning what we already have.
+    let settle = Instant::now() + std::time::Duration::from_millis(500);
+    while readers_done.load(Ordering::Acquire) < 2 && Instant::now() < settle {
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+
+    let stdout_text = out_lines.lock().map(|v| v.join("\n")).unwrap_or_default();
+    let stderr_text = err_lines.lock().map(|v| v.join("\n")).unwrap_or_default();
+    // A localised Windows wording in the interpreter's own words would
+    // otherwise be quoted straight into an English message.
+    let stderr_text = os_error::sanitize_os_wording(&stderr_text).into_owned();
+    let survived = exit.map(|s| s.success()).unwrap_or(false);
+    let mut report = parse_import_probe(&stdout_text, survived);
+    report.timed_out = timed_out;
+    if timed_out {
+        report.finished = false;
+    }
+    promote_crash_from_stderr(&mut report, &stderr_text);
+    Ok(report)
 }
 
 /// Import every package we can name, install back what is missing, import
@@ -875,26 +1259,22 @@ fn verify_and_heal_environment(
         &format!("Checking the environment: importing {} packages...", modules.len()),
     );
 
-    let report = run_import_probe(python_bin, &modules);
-    if report.is_healthy() {
-        push_install_log(install_status, "All packages import cleanly.");
-        return Ok(());
-    }
-
-    if !report.is_healable() {
-        return Err(import_probe_message(&report));
-    }
+    let report = run_import_probe(python_bin, &modules, Some(install_status), cancel)?;
+    let heal = match probe_verdict(&targets, &report, false) {
+        ProbeVerdict::Healthy => {
+            push_install_log(install_status, "All packages import cleanly.");
+            return Ok(());
+        }
+        ProbeVerdict::Warn(msg) => {
+            push_install_log(install_status, &msg);
+            return Ok(());
+        }
+        ProbeVerdict::Fail(msg) => return Err(msg),
+        ProbeVerdict::Heal(dists) => dists,
+    };
 
     // Self-heal before the error message: the packages the mods were
     // installing by hand get installed here instead.
-    let heal: Vec<String> = targets
-        .iter()
-        .filter(|t| report.missing.iter().any(|m| m == t.module))
-        .map(|t| t.dist.clone())
-        .collect();
-    if heal.is_empty() {
-        return Err(import_probe_message(&report));
-    }
     push_install_log(
         install_status,
         &format!(
@@ -904,24 +1284,54 @@ fn verify_and_heal_environment(
     );
     let mut args: Vec<&str> = vec!["-m", "pip", "install", "--progress-bar", "off", "--no-input"];
     args.extend(heal.iter().map(|s| s.as_str()));
-    match pip_install_streaming_with_retry_cancellable(&args, python_bin, 3, install_status, cancel) {
+    match pip_install_streaming_with_retry_raw(&args, python_bin, 3, install_status, cancel) {
         Ok(()) => {}
-        Err(d) if d == "cancelled" => return Err("cancelled".to_string()),
-        Err(d) => {
-            return Err(format!(
-                "The ComfyUI environment is missing {} and they could not be installed.\n\n{}",
-                heal.join(", "),
-                d
-            ))
+        Err(f) if f.diagnosis == "cancelled" => return Err("cancelled".to_string()),
+        Err(f) => {
+            // The same admin-only site-packages escape the requirements step
+            // takes. Without it the heal dies on exactly the machine the heal
+            // exists for: a python.org install under Program Files, where the
+            // first wheel that is not already there cannot be written.
+            let escaped = should_retry_in_user_site(report.in_venv, &f.stderr)
+                && {
+                    push_install_log(
+                        install_status,
+                        "The missing packages could not be written to the shared site-packages. \
+                         Retrying into the per user site, which needs no administrator.",
+                    );
+                    let mut user_args = args.clone();
+                    user_args.push("--user");
+                    pip_install_streaming_with_retry_raw(&user_args, python_bin, 2, install_status, cancel)
+                        .is_ok()
+                };
+            if !escaped {
+                return Err(format!(
+                    "The ComfyUI environment is missing {} and they could not be installed.\n\n{}",
+                    heal.join(", "),
+                    f.diagnosis
+                ));
+            }
         }
     }
 
-    let second = run_import_probe(python_bin, &modules);
-    if second.is_healthy() {
-        push_install_log(install_status, "All packages import cleanly now.");
-        return Ok(());
+    let second = run_import_probe(python_bin, &modules, Some(install_status), cancel)?;
+    match probe_verdict(&targets, &second, true) {
+        ProbeVerdict::Healthy => {
+            push_install_log(install_status, "All packages import cleanly now.");
+            Ok(())
+        }
+        ProbeVerdict::Warn(msg) => {
+            push_install_log(install_status, &msg);
+            Ok(())
+        }
+        ProbeVerdict::Heal(_) | ProbeVerdict::Fail(_) => {
+            Err(match probe_verdict(&targets, &second, true) {
+                ProbeVerdict::Fail(msg) => msg,
+                _ => "The ComfyUI environment still does not import. Press Repair environment."
+                    .to_string(),
+            })
+        }
     }
-    Err(import_probe_message(&second))
 }
 
 /// Run a `python -m pip install ...` command, streaming its stdout + stderr
@@ -938,6 +1348,25 @@ fn verify_and_heal_environment(
 /// of waiting for pip to finish naturally. When `cancel` is `None`, the
 /// install runs to completion as before — used by `install_python` and
 /// callers that haven't been wired up to the new cancel flow.
+/// A pip run that failed: the sentence for the customer, and the raw stderr
+/// behind it.
+///
+/// The two are not interchangeable. `diagnosis` carries a hint plus the FIRST
+/// 400 characters of the log, so a decision taken on it (retry into the user
+/// site, say) is taken on a string that may have cut the deciding line off.
+pub(crate) struct PipFailure {
+    pub(crate) diagnosis: String,
+    pub(crate) stderr: String,
+}
+
+impl PipFailure {
+    /// A failure with no pip log behind it: cancelled, or pip never started.
+    fn bare(diagnosis: &str) -> Self {
+        PipFailure { diagnosis: diagnosis.to_string(), stderr: String::new() }
+    }
+}
+
+/// The plain form every existing caller uses: the diagnosis only.
 pub fn pip_install_streaming_with_retry_cancellable(
     args: &[&str],
     python_bin: &str,
@@ -945,25 +1374,36 @@ pub fn pip_install_streaming_with_retry_cancellable(
     install_state: &Arc<Mutex<InstallState>>,
     cancel: Option<&Arc<AtomicBool>>,
 ) -> Result<(), String> {
+    pip_install_streaming_with_retry_raw(args, python_bin, max_attempts, install_state, cancel)
+        .map_err(|f| f.diagnosis)
+}
+
+pub(crate) fn pip_install_streaming_with_retry_raw(
+    args: &[&str],
+    python_bin: &str,
+    max_attempts: u32,
+    install_state: &Arc<Mutex<InstallState>>,
+    cancel: Option<&Arc<AtomicBool>>,
+) -> Result<(), PipFailure> {
     let mut delay_seconds = 10u64;
     let mut last_stderr = String::new();
 
     for attempt in 1..=max_attempts {
         if cancel.as_ref().map(|c| c.load(Ordering::SeqCst)).unwrap_or(false) {
-            return Err("cancelled".to_string());
+            return Err(PipFailure::bare("cancelled"));
         }
         if attempt > 1 {
             push_install_log(
                 install_state,
                 &format!(
-                    "Transient network error — retry {}/{} after {}s wait...",
+                    "Transient network error, retry {}/{} after {}s wait...",
                     attempt, max_attempts, delay_seconds
                 ),
             );
             // Sleep in 1-second chunks so cancel reacts within ~1s.
             for _ in 0..delay_seconds {
                 if cancel.as_ref().map(|c| c.load(Ordering::SeqCst)).unwrap_or(false) {
-                    return Err("cancelled".to_string());
+                    return Err(PipFailure::bare("cancelled"));
                 }
                 std::thread::sleep(std::time::Duration::from_secs(1));
             }
@@ -988,7 +1428,7 @@ pub fn pip_install_streaming_with_retry_cancellable(
 
         let mut child = match cmd.spawn() {
             Ok(c) => c,
-            Err(e) => return Err(format!("Could not start pip ({}). Is Python on PATH?", e)),
+            Err(e) => return Err(PipFailure::bare(&format!("Could not start pip ({}). Is Python on PATH?", e))),
         };
 
         let stdout = child.stdout.take();
@@ -1051,7 +1491,7 @@ pub fn pip_install_streaming_with_retry_cancellable(
                 let _ = child.wait();
                 let _ = stdout_handle.join();
                 let _ = stderr_handle.join();
-                return Err("cancelled".to_string());
+                return Err(PipFailure::bare("cancelled"));
             }
             match child.try_wait() {
                 Ok(Some(s)) => break s,
@@ -1077,7 +1517,7 @@ pub fn pip_install_streaming_with_retry_cancellable(
                     }
                     std::thread::sleep(std::time::Duration::from_millis(200));
                 }
-                Err(e) => return Err(format!("pip wait failed: {}", e)),
+                Err(e) => return Err(PipFailure::bare(&format!("pip wait failed: {}", e))),
             }
         };
         let _ = stdout_handle.join();
@@ -1102,15 +1542,21 @@ pub fn pip_install_streaming_with_retry_cancellable(
             .unwrap_or_default();
 
         if !is_transient_pip_error(&last_stderr) {
-            return Err(diagnose_pip_error_for(&last_stderr, Some(python_bin)));
+            return Err(PipFailure {
+                diagnosis: diagnose_pip_error_for(&last_stderr, Some(python_bin)),
+                stderr: last_stderr,
+            });
         }
     }
 
-    Err(format!(
-        "Exhausted {} retry attempts for transient network errors.\n\n{}",
-        max_attempts,
-        diagnose_pip_error_for(&last_stderr, Some(python_bin))
-    ))
+    Err(PipFailure {
+        diagnosis: format!(
+            "Exhausted {} retry attempts for transient network errors.\n\n{}",
+            max_attempts,
+            diagnose_pip_error_for(&last_stderr, Some(python_bin))
+        ),
+        stderr: last_stderr,
+    })
 }
 
 /// Pure: the pip argument set for the PyTorch install, for a given wheel
@@ -1459,7 +1905,22 @@ pub fn install_comfyui(
         // pip step. The launcher in `process.rs` mirrors this check and
         // prefers the venv when starting ComfyUI, so the user gets a
         // consistent isolated environment without ever touching pacman.
-        let effective_python = if is_pep668_protected(&python_bin) {
+        // A venv that is already there wins over everything below. The
+        // launcher starts ComfyUI out of it (process.rs) and update_comfyui
+        // installs into it, so an installer that reached past it would put the
+        // packages in one interpreter and start another: press Install after a
+        // Repair and the requirements land in the system Python while ComfyUI
+        // keeps running out of the venv that still has the hole.
+        let existing_venv = crate::python::resolve_comfyui_venv_python(&target_dir);
+        let effective_python = if let Some(venv_py) = existing_venv {
+            update(
+                "installing",
+                &format!(
+                    "This ComfyUI already has its own environment. Installing into {venv_py}."
+                ),
+            );
+            venv_py
+        } else if is_pep668_protected(&python_bin) {
             update(
                 "installing",
                 "Python is PEP 668 protected (Arch / Debian 12+ / Fedora 38+ / \
@@ -1472,7 +1933,7 @@ pub fn install_comfyui(
                     let p = venv_py.to_string_lossy().to_string();
                     update(
                         "installing",
-                        &format!("venv ready — using {} for the install.", p),
+                        &format!("venv ready, using {} for the install.", p),
                     );
                     p
                 }
@@ -1550,23 +2011,28 @@ pub fn install_comfyui(
                 "--no-input",
                 "-r", reqs_str.as_str(),
             ];
-            match pip_install_streaming_with_retry_cancellable(&req_args, &effective_python, 3, &install_status, Some(&cancel_flag)) {
+            match pip_install_streaming_with_retry_raw(&req_args, &effective_python, 3, &install_status, Some(&cancel_flag)) {
                 Ok(()) => {
                     update("installing", "Dependencies installed successfully.");
                 }
-                Err(diagnosis) if diagnosis == "cancelled" => {
+                Err(f) if f.diagnosis == "cancelled" => {
                     update("cancelled", "Install cancelled during requirements install.");
                     return;
                 }
-                Err(diagnosis) => {
+                Err(f) => {
+                    let diagnosis = f.diagnosis;
                     // A python.org install under Program Files has an
                     // admin-only site-packages, and without a venv the first
                     // wheel that is not already there dies on it. The same
                     // escape the custom node path has used since 2026-07-19,
                     // and only where no venv was built: a venv rejects --user.
-                    let retried = if effective_python == python_bin
-                        && pip_failure_kind(&diagnosis) == PipFailureKind::Permission
-                    {
+                    // Decided on the RAW stderr: the diagnosis keeps only the
+                    // first 400 characters of the log, and pip prints the
+                    // permission line at the end of a long one.
+                    let retried = if should_retry_in_user_site(
+                        effective_python != python_bin,
+                        &f.stderr,
+                    ) {
                         update(
                             "installing",
                             "The dependencies could not be written to the shared site-packages. \
@@ -5255,11 +5721,30 @@ mod tests {
 
     #[test]
     fn a_dll_that_is_only_mentioned_is_not_a_missing_runtime() {
-        // Negative control for the arm above: the loader prints the DLL path
-        // on plenty of lines that are not a failure.
-        let text = "Loaded msvcp140.dll from C:\\Windows\\System32 successfully";
-        assert_eq!(missing_runtime_library(text), None);
+        // Negative control: torch\lib SHIPS msvcp140.dll and vcomp140.dll, so
+        // any log that lists that directory names them. Asking the whole log
+        // whether it also contains the word "missing" somewhere turned every
+        // such log into a redistributable problem.
+        let text = "Collecting torch\n\
+                    Installing collected packages: torch\n\
+                    Copying torch\\lib\\msvcp140.dll\n\
+                    ERROR: some other package is missing a build backend";
+        assert_eq!(missing_runtime_library(text), None, "read the wrong line");
         assert_ne!(pip_failure_kind(text), PipFailureKind::MissingRuntimeLibrary);
+    }
+
+    #[test]
+    fn a_rollback_on_a_full_drive_is_a_disk_failure_not_a_dll_failure() {
+        // The exact shape measured on the box on 2026-08-15: pip moves every
+        // file aside before it replaces it, and each of those lines names a
+        // DLL under torch\lib. The disk arm has to be asked first.
+        let mut log = String::from(
+            "ERROR: Could not install packages due to an OSError: [Errno 28] No space left on device\n",
+        );
+        for name in ["msvcp140.dll", "vcomp140.dll", "c10.dll"] {
+            log.push_str(&format!("Moving to c:\\comfyui\\venv\\lib\\site-packages\\torch\\lib\\{name}\n"));
+        }
+        assert_eq!(pip_failure_kind(&log), PipFailureKind::DiskFull, "{log}");
     }
 
     #[test]
@@ -5269,6 +5754,17 @@ mod tests {
         let hint = pip_failure_hint(PipFailureKind::NativeLoadFailure, text);
         assert!(hint.contains(VC_REDIST_PAGE), "{hint}");
         assert!(hint.to_lowercase().contains("driver"), "the second cause is unnamed: {hint}");
+    }
+
+    #[test]
+    fn a_dll_line_in_another_language_is_still_recognised() {
+        // The bracketed WinError code is not localised; the sentence after it
+        // is. A German Windows says "Eine DLL-Initialisierungsroutine ist
+        // fehlgeschlagen", which contains not one English word we matched on.
+        let text = "OSError: [WinError 126] Das angegebene Modul wurde nicht gefunden. VCOMP140.DLL";
+        assert_eq!(missing_runtime_library(text), Some("vcomp140.dll"), "{text}");
+        let text2 = "OSError: [WinError 1114] Eine DLL-Initialisierungsroutine ist fehlgeschlagen.";
+        assert_eq!(pip_failure_kind(text2), PipFailureKind::NativeLoadFailure);
     }
 
     #[test]
@@ -5285,6 +5781,27 @@ mod tests {
         assert_eq!(pip_failure_kind(text), PipFailureKind::TorchWithoutGpuSupport);
         let hint = pip_failure_hint(PipFailureKind::TorchWithoutGpuSupport, text);
         assert!(hint.contains("Repair environment"), "{hint}");
+    }
+
+    #[test]
+    fn the_windows_wordings_for_a_refused_write_count_as_permission() {
+        // python.org under Program Files answers with these, and neither one
+        // contains the word permission. The custom node path has known them
+        // since 2026-07-19; the classifier did not, so the ComfyUI
+        // requirements step never took the --user escape.
+        for text in [
+            "ERROR: Could not install packages due to an OSError: [WinError 5] Access is denied: 'C:\\Program Files\\Python312\\Lib\\site-packages\\yaml'",
+            "ERROR: Access is denied",
+            "PermissionError: [Errno 13] Permission denied",
+        ] {
+            assert_eq!(pip_failure_kind(text), PipFailureKind::Permission, "{text}");
+        }
+        // Negative control: a plain HTTP failure must not become a permission
+        // problem just because pip mentions access somewhere.
+        assert_eq!(
+            pip_failure_kind("ERROR: 403 Forbidden from pypi.org "),
+            PipFailureKind::Forbidden
+        );
     }
 
     #[test]
@@ -5311,12 +5828,27 @@ mod tests {
 
     // ── the requirements chain ────────────────────────────────────────────
 
+    /// The shape of ComfyUI's own requirements.txt, including the comment that
+    /// splits it and the two names the mods were typing into the ticket.
+    const COMFY_REQUIREMENTS: &str = "comfyui-frontend-package\n\
+                                      torch\n\
+                                      torchsde\n\
+                                      torchvision\n\
+                                      numpy>=1.25.0\n\
+                                      PyYAML\n\
+                                      Pillow\n\
+                                      SQLAlchemy\n\
+                                      alembic\n\
+                                      av\n\
+                                      #non essential dependencies:\n\
+                                      kornia>=0.7.1\n\
+                                      spandrel\n\
+                                      pydantic~=2.0\n\
+                                      pydantic-settings~=2.0\n";
+
     #[test]
     fn the_two_packages_the_mods_installed_by_hand_are_in_the_probe() {
-        // Verbatim shape of ComfyUI's own requirements.txt, including the two
-        // names the mods were typing into the ticket by hand.
-        let reqs = "comfyui-frontend-package\ntorch\ntorchsde\ntorchvision\nnumpy>=1.25.0\nPyYAML\nPillow\nSQLAlchemy\nalembic\nav\n";
-        let targets = probe_targets(reqs);
+        let targets = probe_targets(COMFY_REQUIREMENTS);
         let modules: Vec<&str> = targets.iter().map(|t| t.module).collect();
         assert!(modules.contains(&"yaml"), "pyyaml is not probed: {modules:?}");
         assert!(modules.contains(&"sqlalchemy"), "sqlalchemy is not probed: {modules:?}");
@@ -5331,6 +5863,44 @@ mod tests {
     }
 
     #[test]
+    fn the_packages_below_the_non_essential_comment_never_fail_an_install() {
+        // requirements.txt splits itself, and kornia, spandrel and pydantic
+        // live on the far side of that line. Treating them as mandatory would
+        // trade A3 for a worse bug: an install that refuses to finish over a
+        // package ComfyUI starts without.
+        let targets = probe_targets(COMFY_REQUIREMENTS);
+        let essential = |m: &str| targets.iter().find(|t| t.module == m).map(|t| t.essential);
+        assert_eq!(essential("sqlalchemy"), Some(true), "above the line, so mandatory");
+        assert_eq!(essential("yaml"), Some(true));
+        assert_eq!(essential("torch"), Some(true));
+        for soft in ["kornia", "spandrel", "pydantic", "pydantic_settings"] {
+            assert_eq!(essential(soft), Some(false), "{soft} would fail an install");
+        }
+        // Negative control: without that comment the very same lines are
+        // mandatory, so the split really comes from the file and not from a
+        // hard-coded package list.
+        let flat = COMFY_REQUIREMENTS.replace("#non essential dependencies:\n", "");
+        let flat_targets = probe_targets(&flat);
+        assert_eq!(
+            flat_targets.iter().find(|t| t.module == "kornia").map(|t| t.essential),
+            Some(true),
+        );
+    }
+
+    #[test]
+    fn a_line_with_an_environment_marker_is_installed_but_never_probed() {
+        // pip owns the marker. Probing a Windows only package on Linux and
+        // then calling the environment broken is a bug we would have shipped.
+        let with_marker = "torch\nsoundfile ; sys_platform == \"win32\"\n";
+        let modules: Vec<&str> = probe_targets(with_marker).iter().map(|t| t.module).collect();
+        assert_eq!(modules, vec!["torch"], "a marked line was probed: {modules:?}");
+        // Negative control: the same package without a marker IS probed, so
+        // the rule is about the marker and not about soundfile.
+        let plain: Vec<&str> = probe_targets("torch\nsoundfile\n").iter().map(|t| t.module).collect();
+        assert!(plain.contains(&"soundfile"), "{plain:?}");
+    }
+
+    #[test]
     fn a_package_whose_import_name_we_do_not_know_is_never_guessed() {
         // Negative control: guessing would turn a healthy environment into a
         // false alarm and send the customer to Repair environment for nothing.
@@ -5342,8 +5912,8 @@ mod tests {
     #[test]
     fn requirements_parsing_drops_the_lines_that_are_not_packages() {
         let reqs = "# a comment\n\n-r other.txt\n--index-url https://example.invalid/simple\nhttps://example.invalid/wheel.whl\ntorch==2.9.1\nPyYAML\nspandrel ; python_version >= \"3.10\"\nkornia[extra]>=0.7\n";
-        let dists = parse_requirement_dists(reqs);
-        assert_eq!(dists, vec!["torch", "pyyaml", "spandrel", "kornia"], "got {dists:?}");
+        let dists: Vec<String> = parse_requirement_lines(reqs).into_iter().map(|l| l.dist).collect();
+        assert_eq!(dists, vec!["torch", "pyyaml", "kornia"], "got {dists:?}");
     }
 
     #[test]
@@ -5355,55 +5925,126 @@ mod tests {
         assert_eq!(normalize_dist("pydantic_settings"), "pydantic-settings");
     }
 
+    #[test]
+    fn the_optional_marker_is_read_from_the_words_not_from_one_exact_line() {
+        assert!(is_optional_section_marker("non essential dependencies:"));
+        assert!(is_optional_section_marker(" Non-Essential Dependencies "));
+        assert!(is_optional_section_marker("optional dependencies below"));
+        // Negative control: an ordinary comment must not silently turn the
+        // rest of the file optional.
+        assert!(!is_optional_section_marker(" pinned for the frontend package"));
+        assert!(!is_optional_section_marker(" dependencies"));
+    }
+
     // ── the import probe ──────────────────────────────────────────────────
 
     #[test]
     fn a_probe_where_everything_imports_is_healthy() {
-        let out = "PROBE_TRY torch\nPROBE_OK torch\nPROBE_TRY yaml\nPROBE_OK yaml\nPROBE_DONE\n";
+        let out = "PROBE_VENV 1\nPROBE_TRY torch\nPROBE_OK torch\nPROBE_TRY yaml\nPROBE_OK yaml\nPROBE_DONE\n";
         let report = parse_import_probe(out, true);
         assert!(report.is_healthy(), "{report:?}");
-        assert_eq!(import_probe_message(&report), "");
+        assert!(report.in_venv, "the venv flag was not read");
+        assert_eq!(probe_verdict(&probe_targets("torch\nPyYAML\n"), &report, false), ProbeVerdict::Healthy);
     }
 
     #[test]
-    fn a_missing_torch_is_never_reinstalled_from_plain_pypi() {
-        // Negative control for the heal path: torch comes from the channel the
-        // card decides. Letting the heal step run a bare `pip install torch`
-        // would hand a Blackwell box whatever PyPI serves by default, which is
-        // the bug the wheel planner exists to prevent.
-        let out = "PROBE_TRY torch\nPROBE_FAIL torch :: ModuleNotFoundError: No module named 'torch'\nPROBE_DONE\n";
-        let report = parse_import_probe(out, true);
-        assert_eq!(report.missing, vec!["torch"]);
-        assert!(!report.is_healable(), "the heal path would fetch a wheel nobody chose");
-        let msg = import_probe_message(&report);
-        assert!(msg.contains("Repair environment"), "{msg}");
-        assert!(msg.contains("matches the card"), "{msg}");
+    fn a_probe_that_finished_but_exited_non_zero_is_not_healthy() {
+        // A native library that dies as it unloads walks the whole list first
+        // and only then takes the process down. Every field was clean and the
+        // exit status was the one thing nobody looked at.
+        let out = "PROBE_VENV 0\nPROBE_TRY torch\nPROBE_OK torch\nPROBE_DONE\n";
+        let bad = parse_import_probe(out, false);
+        assert!(!bad.is_healthy(), "a non zero exit passed as healthy: {bad:?}");
+        assert!(bad.exited_badly);
+        let msg = match probe_verdict(&probe_targets("torch\n"), &bad, true) {
+            ProbeVerdict::Fail(m) => m,
+            other => panic!("{other:?}"),
+        };
+        assert!(msg.contains("unloads"), "{msg}");
+        // Negative control: the identical output with exit 0 is healthy, so
+        // the verdict really turns on the status and not on the log.
+        assert!(parse_import_probe(out, true).is_healthy());
     }
 
     #[test]
-    fn a_module_that_is_simply_not_installed_is_healable() {
-        let out = "PROBE_TRY torch\nPROBE_OK torch\n\
+    fn a_module_that_is_simply_not_installed_is_healed_before_it_is_reported() {
+        let out = "PROBE_VENV 1\nPROBE_TRY torch\nPROBE_OK torch\n\
                    PROBE_TRY sqlalchemy\nPROBE_FAIL sqlalchemy :: ModuleNotFoundError: No module named 'sqlalchemy'\n\
                    PROBE_TRY yaml\nPROBE_FAIL yaml :: ModuleNotFoundError: No module named 'yaml'\n\
                    PROBE_DONE\n";
         let report = parse_import_probe(out, true);
         assert!(!report.is_healthy());
-        assert!(report.is_healable(), "pip could put these back: {report:?}");
         assert_eq!(report.missing, vec!["sqlalchemy", "yaml"]);
         assert!(report.broken.is_empty());
         assert!(report.crashed.is_none());
+        let targets = probe_targets(COMFY_REQUIREMENTS);
+        // The heal list is what pip is handed: distribution names, so yaml has
+        // to come back out as pyyaml.
+        assert_eq!(dists_to_heal(&targets, &report), vec!["sqlalchemy", "pyyaml"]);
+        assert_eq!(
+            probe_verdict(&targets, &report, false),
+            ProbeVerdict::Heal(vec!["sqlalchemy".to_string(), "pyyaml".to_string()]),
+        );
+        // Negative control: after the heal has run, the same result is a
+        // failure and not another trip round the pip loop.
+        assert!(matches!(probe_verdict(&targets, &report, true), ProbeVerdict::Fail(_)));
+    }
+
+    #[test]
+    fn a_missing_torch_is_never_reinstalled_from_plain_pypi() {
+        // Negative control for the heal path: torch comes from the channel the
+        // card decides. A bare `pip install torch` would hand a Blackwell box
+        // whatever PyPI serves by default, which is the bug the wheel planner
+        // exists to prevent.
+        let out = "PROBE_VENV 1\nPROBE_TRY torch\nPROBE_FAIL torch :: ModuleNotFoundError: No module named 'torch'\nPROBE_DONE\n";
+        let report = parse_import_probe(out, true);
+        let targets = probe_targets(COMFY_REQUIREMENTS);
+        assert_eq!(report.missing, vec!["torch"]);
+        assert!(dists_to_heal(&targets, &report).is_empty(), "the heal would fetch a wheel nobody chose");
+        let msg = match probe_verdict(&targets, &report, false) {
+            ProbeVerdict::Fail(m) => m,
+            other => panic!("{other:?}"),
+        };
+        assert!(msg.contains("Repair environment"), "{msg}");
+        assert!(msg.contains("matches the card"), "{msg}");
+    }
+
+    #[test]
+    fn only_the_optional_half_missing_still_finishes_the_install() {
+        // kornia below the non essential line: say it, log it, complete.
+        let out = "PROBE_VENV 1\nPROBE_TRY torch\nPROBE_OK torch\n\
+                   PROBE_TRY kornia\nPROBE_FAIL kornia :: ModuleNotFoundError: No module named 'kornia'\n\
+                   PROBE_DONE\n";
+        let report = parse_import_probe(out, true);
+        let targets = probe_targets(COMFY_REQUIREMENTS);
+        let verdict = probe_verdict(&targets, &report, true);
+        let msg = match &verdict {
+            ProbeVerdict::Warn(m) => m.clone(),
+            other => panic!("an optional package stopped the install: {other:?}"),
+        };
+        assert!(msg.contains("kornia"), "{msg}");
+        assert!(msg.contains("optional"), "{msg}");
+        // Negative control: the same failure for a package ABOVE the line
+        // stops the install.
+        let hard = parse_import_probe(
+            "PROBE_VENV 1\nPROBE_TRY sqlalchemy\nPROBE_FAIL sqlalchemy :: ModuleNotFoundError: No module named 'sqlalchemy'\nPROBE_DONE\n",
+            true,
+        );
+        assert!(matches!(probe_verdict(&targets, &hard, true), ProbeVerdict::Fail(_)));
     }
 
     #[test]
     fn a_dll_failure_is_never_treated_as_something_pip_can_fix() {
-        // Negative control for the arm above: reinstalling a package cannot
-        // put a Visual C++ runtime on the machine, so the probe must not send
-        // the installer round the pip loop again.
-        let out = "PROBE_TRY torch\nPROBE_FAIL torch :: OSError: [WinError 1114] A dynamic link library (DLL) initialization routine failed. Error loading \"c10.dll\"\nPROBE_DONE\n";
+        // Reinstalling a package cannot put a Visual C++ runtime on the
+        // machine, so the probe must not send the installer round the pip loop.
+        let out = "PROBE_VENV 1\nPROBE_TRY torch\nPROBE_FAIL torch :: OSError: [WinError 1114] A dynamic link library (DLL) initialization routine failed. Error loading \"c10.dll\"\nPROBE_DONE\n";
         let report = parse_import_probe(out, true);
-        assert!(!report.is_healable(), "pip is being asked to fix a DLL: {report:?}");
-        assert_eq!(report.broken.len(), 1);
-        let msg = import_probe_message(&report);
+        let targets = probe_targets(COMFY_REQUIREMENTS);
+        assert!(dists_to_heal(&targets, &report).is_empty());
+        let msg = match probe_verdict(&targets, &report, false) {
+            ProbeVerdict::Fail(m) => m,
+            other => panic!("pip is being asked to fix a DLL: {other:?}"),
+        };
         assert!(msg.contains("torch"), "{msg}");
         assert!(msg.contains(VC_REDIST_PAGE), "no way out of the DLL failure: {msg}");
     }
@@ -5413,15 +6054,43 @@ mod tests {
         // petermanmancusso: "Process exited with code 0xC0000005". No
         // traceback, no last line, just a dead process. The PROBE_TRY line
         // written before the import is the only thing left.
-        let out = "PROBE_TRY torch\n";
-        let report = parse_import_probe(out, false);
+        let report = parse_import_probe("PROBE_VENV 1\nPROBE_TRY torch\n", false);
         assert_eq!(report.crashed.as_deref(), Some("torch"));
         assert!(!report.is_healthy());
-        assert!(!report.is_healable());
-        let msg = import_probe_message(&report);
+        let msg = match probe_verdict(&probe_targets("torch\n"), &report, false) {
+            ProbeVerdict::Fail(m) => m,
+            other => panic!("{other:?}"),
+        };
         assert!(msg.contains("torch"), "{msg}");
         assert!(msg.contains("0xC0000005"), "the crash is not named: {msg}");
         assert!(msg.contains(VC_REDIST_PAGE), "{msg}");
+    }
+
+    #[test]
+    fn a_crash_is_only_explained_by_a_stderr_line_that_says_something() {
+        // torch and transformers write warnings on nearly every start, so the
+        // LAST stderr line of a crashed run is usually a deprecation notice.
+        // Promoting on that turned an access violation into a shrug.
+        let mut noisy = parse_import_probe("PROBE_TRY torch\n", false);
+        promote_crash_from_stderr(
+            &mut noisy,
+            "UserWarning: torchvision is out of date\n  warnings.warn(msg)\n",
+        );
+        assert_eq!(noisy.crashed.as_deref(), Some("torch"), "a warning stole the crash");
+        assert!(noisy.broken.is_empty());
+        // And a line that DOES say something is taken, with the file named.
+        let mut named = parse_import_probe("PROBE_TRY torch\n", false);
+        promote_crash_from_stderr(
+            &mut named,
+            "UserWarning: something noisy\nImportError: VCOMP140.DLL was not found\n",
+        );
+        assert!(named.crashed.is_none(), "{named:?}");
+        assert_eq!(named.broken.len(), 1);
+        let msg = match probe_verdict(&probe_targets("torch\n"), &named, false) {
+            ProbeVerdict::Fail(m) => m,
+            other => panic!("{other:?}"),
+        };
+        assert!(msg.contains("VCOMP140.DLL"), "{msg}");
     }
 
     #[test]
@@ -5429,9 +6098,44 @@ mod tests {
         // Negative control: exit code 0 with a truncated log used to be
         // indistinguishable from success, which is the whole class of bug A3
         // is made of.
-        let report = parse_import_probe("PROBE_TRY torch\nPROBE_OK torch\n", true);
+        let report = parse_import_probe("PROBE_VENV 1\nPROBE_TRY torch\nPROBE_OK torch\n", true);
         assert!(!report.is_healthy(), "an unfinished probe passed as healthy: {report:?}");
-        assert!(!import_probe_message(&report).is_empty());
+        assert!(matches!(probe_verdict(&probe_targets("torch\n"), &report, true), ProbeVerdict::Fail(_)));
+    }
+
+    #[test]
+    fn a_timed_out_probe_names_the_hidden_dialog_and_never_passes() {
+        let mut report = parse_import_probe("PROBE_VENV 0\nPROBE_TRY torch\n", false);
+        report.timed_out = true;
+        assert!(!report.is_healthy());
+        let msg = match probe_verdict(&probe_targets("torch\n"), &report, false) {
+            ProbeVerdict::Fail(m) => m,
+            other => panic!("a hung probe did not stop the install: {other:?}"),
+        };
+        assert!(msg.contains("did not finish"), "{msg}");
+        assert!(msg.contains("torch"), "the module it hung on is unnamed: {msg}");
+        assert!(msg.contains("dialog"), "the usual cause is unnamed: {msg}");
+    }
+
+    #[test]
+    fn a_broken_dependency_chain_names_the_package_that_is_really_gone() {
+        // spandrel imports and dies on timm. Quoting only our own side turns
+        // that into a riddle.
+        assert_eq!(
+            module_named_in_error("ModuleNotFoundError: No module named 'timm'").as_deref(),
+            Some("timm"),
+        );
+        assert_eq!(module_named_in_error("OSError: something else"), None);
+        let report = parse_import_probe(
+            "PROBE_VENV 1\nPROBE_TRY spandrel\nPROBE_FAIL spandrel :: ModuleNotFoundError: No module named 'timm'\nPROBE_DONE\n",
+            true,
+        );
+        let targets = probe_targets("torch\nspandrel\n");
+        let msg = match probe_verdict(&targets, &report, true) {
+            ProbeVerdict::Fail(m) => m,
+            other => panic!("{other:?}"),
+        };
+        assert!(msg.contains("spandrel (needs timm)"), "{msg}");
     }
 
     #[test]
@@ -5443,6 +6147,61 @@ mod tests {
         assert!(script.contains("flush()"), "an unflushed line is lost in a crash");
         assert!(script.contains("\"torch\", \"yaml\""), "modules missing: {script}");
         assert!(script.contains("BaseException"), "a SystemExit from an import would escape");
+        assert!(script.contains("PROBE_VENV"), "nothing says whether --user would be refused");
+    }
+
+    #[test]
+    fn the_user_site_escape_is_taken_exactly_where_it_can_work() {
+        // The heal step used to lack this entirely, so it died on precisely
+        // the machine it exists for: a python.org install under Program Files,
+        // where the first wheel that is not already there cannot be written.
+        let denied = "ERROR: Could not install packages due to an OSError: [WinError 5] Access is denied: 'C:\\Program Files\\Python312\\Lib\\site-packages'";
+        assert!(should_retry_in_user_site(false, denied), "the escape is never taken");
+        // Negative control one: a venv REFUSES --user, so retrying there swaps
+        // one failure for another.
+        assert!(!should_retry_in_user_site(true, denied), "a venv would reject --user");
+        // Negative control two: a network failure would just fail again.
+        assert!(!should_retry_in_user_site(false, "ConnectionResetError: connection reset by peer"));
+    }
+
+    #[test]
+    fn the_install_panel_says_which_package_it_is_importing() {
+        // Twenty four silent imports on a cold drive look exactly like a hung
+        // installer, which is the state 4/4 must never be mistaken for.
+        assert_eq!(probe_progress_line("PROBE_TRY torch").as_deref(), Some("Importing torch..."));
+        assert_eq!(
+            probe_progress_line("PROBE_FAIL yaml :: ModuleNotFoundError: x").as_deref(),
+            Some("yaml does not import."),
+        );
+        // Negative control: the protocol's own bookkeeping is not shown.
+        assert_eq!(probe_progress_line("PROBE_OK torch"), None);
+        assert_eq!(probe_progress_line("PROBE_VENV 1"), None);
+        assert_eq!(probe_progress_line("PROBE_DONE"), None);
+    }
+
+    // ── the probe against a real interpreter ──────────────────────────────
+
+    /// PYTHONPATH is process wide and the test runner is threaded, so the live
+    /// probe tests take turns. Without this they steal each other's module
+    /// folder and fail for a reason that has nothing to do with the probe.
+    static PROBE_ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    /// Write a throwaway python module and put its folder on PYTHONPATH, so
+    /// the probe can be driven against a real interpreter with a module that
+    /// behaves exactly like the customer reports. Returns the module name.
+    fn stage_probe_module(dir: &std::path::Path, name: &str, body: &str) -> String {
+        std::fs::create_dir_all(dir).expect("probe dir");
+        std::fs::write(dir.join(format!("{name}.py")), body).expect("probe module");
+        std::env::set_var("PYTHONPATH", dir);
+        name.to_string()
+    }
+
+    fn have_python3() -> bool {
+        std::process::Command::new("python3")
+            .arg("--version")
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
     }
 
     /// The script is generated as text, so a stray indent or quote would only
@@ -5451,18 +6210,124 @@ mod tests {
     /// nothing about Windows, only that the program we emit is valid Python.
     #[test]
     fn the_generated_script_is_valid_python_and_speaks_the_parsers_protocol() {
-        let script = import_probe_script(&["json", "definitely_not_a_real_module_lu"]);
-        let out = std::process::Command::new("python3").arg("-c").arg(&script).output();
-        let Ok(out) = out else {
+        let _turn = PROBE_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        if !have_python3() {
             eprintln!("no python3 on this box, skipping the live probe check");
             return;
-        };
-        let stdout = String::from_utf8_lossy(&out.stdout);
-        assert!(out.status.success(), "the script did not run: {}", String::from_utf8_lossy(&out.stderr));
-        let report = parse_import_probe(&stdout, out.status.success());
-        assert_eq!(report.missing, vec!["definitely_not_a_real_module_lu"], "{stdout}");
+        }
+        let report = run_import_probe("python3", &["json", "definitely_not_a_real_module_lu"], None, None)
+            .expect("not cancelled");
+        assert_eq!(report.missing, vec!["definitely_not_a_real_module_lu"], "{report:?}");
         assert!(report.broken.is_empty(), "{report:?}");
-        assert!(report.finished, "the DONE marker never arrived: {stdout}");
+        assert!(report.finished, "the DONE marker never arrived: {report:?}");
+        assert!(!report.exited_badly, "{report:?}");
+    }
+
+    /// The whole reason `promote_crash_from_stderr` is careful: a real child
+    /// that warns and then dies without a traceback.
+    #[test]
+    fn a_real_child_that_warns_then_dies_keeps_its_crash_unexplained() {
+        let _turn = PROBE_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        if !have_python3() {
+            return;
+        }
+        let dir = std::env::temp_dir().join("lu-probe-crash-noisy");
+        let name = stage_probe_module(
+            &dir,
+            "lu_probe_boom_noisy",
+            "import sys, os\n\
+             sys.stderr.write('UserWarning: a library being noisy\\n')\n\
+             sys.stderr.flush()\n\
+             os._exit(3)\n",
+        );
+        let report = run_import_probe("python3", &[&name], None, None).expect("not cancelled");
+        std::env::remove_var("PYTHONPATH");
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(report.crashed.as_deref(), Some(name.as_str()), "{report:?}");
+        assert!(report.broken.is_empty(), "a warning was sold as the cause: {report:?}");
+        assert!(!report.finished, "{report:?}");
+    }
+
+    /// And the same child whose last words DO name a cause.
+    #[test]
+    fn a_real_child_that_names_a_dll_before_it_dies_gets_that_cause() {
+        let _turn = PROBE_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        if !have_python3() {
+            return;
+        }
+        let dir = std::env::temp_dir().join("lu-probe-crash-named");
+        let name = stage_probe_module(
+            &dir,
+            "lu_probe_boom_named",
+            "import sys, os\n\
+             sys.stderr.write('UserWarning: a library being noisy\\n')\n\
+             sys.stderr.write('ImportError: VCOMP140.DLL was not found\\n')\n\
+             sys.stderr.flush()\n\
+             os._exit(3)\n",
+        );
+        let report = run_import_probe("python3", &[&name], None, None).expect("not cancelled");
+        std::env::remove_var("PYTHONPATH");
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(report.crashed.is_none(), "{report:?}");
+        assert_eq!(report.broken.len(), 1, "{report:?}");
+        assert!(report.broken[0].1.contains("VCOMP140.DLL"), "{report:?}");
+    }
+
+    /// An import that never returns is the failure mode a modal loader dialog
+    /// produces on Windows, and `Command::output()` would have waited for a
+    /// click that never comes.
+    #[test]
+    fn a_probe_that_hangs_is_killed_at_the_deadline_and_never_passes() {
+        let _turn = PROBE_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        if !have_python3() {
+            return;
+        }
+        let dir = std::env::temp_dir().join("lu-probe-hang");
+        let name = stage_probe_module(&dir, "lu_probe_hang", "import time\ntime.sleep(120)\n");
+        let started = std::time::Instant::now();
+        let report = run_import_probe_bounded(
+            "python3",
+            &[&name],
+            None,
+            None,
+            std::time::Duration::from_millis(1200),
+        )
+        .expect("not cancelled");
+        std::env::remove_var("PYTHONPATH");
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(started.elapsed() < std::time::Duration::from_secs(20), "the deadline did not bite");
+        assert!(report.timed_out, "{report:?}");
+        assert!(!report.is_healthy(), "a hung probe passed as healthy: {report:?}");
+    }
+
+    /// Cancel has to reach the probe too, or the button stops working exactly
+    /// at 4/4.
+    #[test]
+    fn cancel_stops_the_probe_instead_of_waiting_it_out() {
+        let _turn = PROBE_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        if !have_python3() {
+            return;
+        }
+        let dir = std::env::temp_dir().join("lu-probe-cancel");
+        let name = stage_probe_module(&dir, "lu_probe_cancel", "import time\ntime.sleep(120)\n");
+        let flag = Arc::new(AtomicBool::new(false));
+        let trip = flag.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(400));
+            trip.store(true, Ordering::SeqCst);
+        });
+        let started = std::time::Instant::now();
+        let out = run_import_probe_bounded(
+            "python3",
+            &[&name],
+            None,
+            Some(&flag),
+            std::time::Duration::from_secs(60),
+        );
+        std::env::remove_var("PYTHONPATH");
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(out.err().as_deref(), Some("cancelled"));
+        assert!(started.elapsed() < std::time::Duration::from_secs(20), "cancel waited the probe out");
     }
 
     // ── the two paths that have to run the probe ──────────────────────────
@@ -5502,6 +6367,18 @@ mod tests {
             !src.contains("Some optional dependencies had warnings (non-critical)"),
             "the repair still waves a failed requirements install through",
         );
+        // The install must reach for an existing venv before it reaches for
+        // the system Python: the launcher and the updater both use that venv,
+        // so installing past it puts the packages in the wrong interpreter.
+        let install_body = src
+            .split("pub fn install_comfyui(")
+            .nth(1)
+            .expect("install_comfyui");
+        let venv_at = install_body
+            .find("resolve_comfyui_venv_python")
+            .expect("install_comfyui ignores an existing venv");
+        let pep_at = install_body.find("is_pep668_protected").expect("the PEP 668 branch");
+        assert!(venv_at < pep_at, "the venv is only considered after the PEP 668 branch");
     }
 
     // ── §24.9 — Whisper pip args builder ──────────────────────────────────
