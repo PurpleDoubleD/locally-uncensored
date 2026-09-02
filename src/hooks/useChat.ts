@@ -17,6 +17,8 @@ import { requestGenerationCancel } from "../api/vram-handoff"
 import { effectiveContextWindow } from "../lib/context-window"
 import { useAgentChat } from "./useAgentChat"
 import { parseAgentCommand, parseLoopSpec } from '../lib/agent-commands'
+import { runCompactForConversation, compactOutcomeMessage, newestCompaction, maybeAutoCompact } from '../lib/run-compact-command'
+import { applyStoredCompaction } from '../lib/compact-summary'
 import { planResend } from '../lib/resend-plan'
 import { isOrphanRun } from '../lib/orphan-run'
 import { applyGoalCommand } from '../lib/goal-command'
@@ -40,6 +42,7 @@ import { log } from "../lib/logger"
 import { CREDITS_EXHAUSTED_MESSAGE } from '../lib/credits-exhausted'
 import { shouldDowngradeThinking } from './codex/thinking-downgrade'
 import { ProviderError } from '../api/providers/types'
+import { useBackgroundAgentWake } from './useBackgroundAgentWake'
 
 /**
  * Pull the most recent media generation (image/video) out of an assistant
@@ -89,8 +92,12 @@ async function runGroupTurn(convId: string, model: string, allModels: string[], 
   // the most multiplied surface in the app: one round sends the whole shared
   // history to two to four models, so an uncapped group chat bills history
   // level times N every time the user says anything. The budget is resolved per
-  // model because the line-up can mix a 262k cloud model with a local one, and
-  // a local one is not billed and stays exactly as it was.
+  // model because the line-up can mix a 262k cloud model with a local one: the
+  // paid member is held to the cost ceiling, the local one to 0.8 of its own
+  // window (2.6.8, Compact-Schritt 2). Neither is skipped any more — a local
+  // member with a small window was the one most likely to be silently
+  // truncated in a group round, because it carries the same shared history as
+  // the 262k model beside it.
   const messages = applyChatSendBudget(
     capMessageCount([
       { role: 'system' as const, content: groupSystemPrompt(model, allModels, personaPrompt) },
@@ -98,9 +105,10 @@ async function runGroupTurn(convId: string, model: string, allModels: string[], 
     ]),
     {
       providerId,
-      // Only asked where the answer can change something: resolving the window
-      // is an /api/show round trip, and a local member of the line-up is not
-      // capped at all.
+      // Only asked where the answer can change something — which, since the
+      // notaus is now the only thing that closes the gate, means: unless the
+      // user switched capping off. The lookup is cached per model, so a group
+      // round does not pay an /api/show per member per turn.
       modelWindow: chatBudgetApplies(providerId, settings.contextDecay)
         ? await getModelMaxTokens(model)
         : 0,
@@ -278,11 +286,24 @@ export function useChat() {
   const { sendAgentMessage } = agentChat
   const { extractAndSave } = useMemory()
 
+
   // G29: a run outlives this hook instance when the chat view unmounts on a
   // view switch, so the conversation's own flag is the only honest source for
   // "is something still in flight here". Without it the composer showed Send
   // next to a running clock and the user had no way to end the run.
   const activeConversationId = useChatStore((s) => s.activeConversationId)
+
+  // Ein fertiger Hintergrundagent holt den Hauptagenten zurueck. Hier montiert
+  // und nicht in useAgentChat: `sendAgentMessage` entsteht dort, aber der Hook
+  // bekommt den Sendeweg von aussen, damit derselbe Hook auch den Codex-Weg
+  // bedienen kann. Er kostet nichts, solange es keine Hintergrundaufgaben
+  // gibt — `shouldWakeParent` faellt auf der ersten Bedingung heraus.
+  //
+  // NACH `activeConversationId`, weil der Hook die REAKTIVE Kennung braucht:
+  // ein `getState()` im Render liefert eine Momentaufnahme, und nach einem
+  // Gespraechswechsel weckte der Hook still das falsche Gespraech.
+  useBackgroundAgentWake(activeConversationId, sendAgentMessage)
+
   const storeGenerating = useGenerationStore((s) => !!s.generating[activeConversationId ?? ''])
   const orphanRun = isOrphanRun(storeGenerating, isGenerating, agentChat.isAgentRunning)
 
@@ -345,6 +366,59 @@ export function useChat() {
     if (modelOutOfMode(activeModel, settings.appMode)) {
       useModelStore.getState().setActiveModel(null)
       return
+    }
+
+    // /compact — BEFORE the agent delegation, because this one command is not
+    // an agent task. It belongs to the conversation, and both surfaces this
+    // hook serves (plain chat and agent mode) have one. Putting it after the
+    // delegation would have meant a second, identical branch inside
+    // useAgentChat for no reason; putting it before means the scope decides.
+    //
+    // The scope also does the refusing: in plain chat parseAgentCommand only
+    // recognises commands marked for it, so "/fix the login" stays literal
+    // text there instead of quietly becoming an agent instruction on a
+    // surface with no tools to carry it out.
+    {
+      const convId = store.activeConversationId
+      const agentOn = convId ? useAgentModeStore.getState().isActive(convId) : false
+      const cmd = parseAgentCommand(content, agentOn ? 'agent' : 'chat')
+      if (cmd?.command.name === 'compact') {
+        if (!convId) return
+        // BEIDE Zeilen sind App-Hinweise, keine Modell-Turns.
+        //
+        // Bis 2.6.8 standen sie als `role:'user'` und `role:'assistant'` im
+        // Verlauf — und die Nutzlast filtert nur `role:'system'`. Also fuhr
+        // ein erfundener Assistentenzug („Summarised 12 earlier messages …")
+        // in JEDE spaetere Anfrage mit, sass im geschuetzten Schwanz der
+        // letzten sechs Nachrichten und wurde bei der naechsten Verdichtung
+        // als Protokoll mitzusammengefasst. Das Modell las sich selbst dabei
+        // zu, wie es angeblich zusammengefasst hatte.
+        //
+        // In der Claude-Code-Desktop-App sind Schraegstrich-Befehle und ihre
+        // Ausgabe rein oertlich und erreichen das Modell nie. Der Mechanismus
+        // dafuer gibt es hier schon: `notice` auf einer System-Nachricht, von
+        // der Nutzlast verworfen, von der Ansicht als schlichte Zeile
+        // gezeigt. Er wurde nur nie benutzt.
+        store.addMessage(convId, {
+          id: uuid(), role: 'system', notice: 'info', content, timestamp: Date.now(),
+        })
+        // A placeholder first: writing the summary is a real round trip, and a
+        // composer that just goes quiet for ten seconds reads as a hang. The
+        // same reason the send path shows a streaming placeholder.
+        const noticeId = uuid()
+        store.addMessage(convId, {
+          id: noticeId, role: 'system', notice: 'info',
+          content: 'Summarising the earlier turns…', timestamp: Date.now(),
+        })
+        const outcome = await runCompactForConversation({
+          conversationId: convId,
+          activeModel,
+          trigger: 'manual',
+          focus: cmd.args || undefined,
+        })
+        useChatStore.getState().updateMessageContent(convId, noticeId, compactOutcomeMessage(outcome))
+        return
+      }
     }
 
     // Agent mode delegation: if active for this conversation, use agent chat.
@@ -585,12 +659,46 @@ export function useChat() {
     // token budget while the count climbs past the LU Cloud proxy's
     // 400-message gate — after which EVERY send 400s and the chat is a
     // permanent dead end (yaserrieh, 2026-08-21).
-    // Token budget (plan A4), on top of the count cap and only where a token
-    // sent is a token billed. Plain chat rebuilt the ENTIRE history on every
-    // send, so turn 60 of a long chat paid for turns 1 to 59 again just to ask
-    // "and shorter please", and every attachment ever made rode along with it,
-    // invisible to the token estimator the whole way. Local backends and the
-    // contextDecay notaus get the untouched array, byte for byte.
+    // Token budget (plan A4), on top of the count cap. Plain chat rebuilt the
+    // ENTIRE history on every send, so turn 60 of a long chat paid for turns 1
+    // to 59 again just to ask "and shorter please", and every attachment ever
+    // made rode along with it, invisible to the token estimator the whole way.
+    //
+    // Since 2.6.8 this holds on a local backend too, at 0.8 of its own window
+    // instead of a cost ceiling — a local chat that outgrew its window used to
+    // be truncated by the model itself, from the front, without a word. Below
+    // 92% of the window (the A3 hysteresis on top of that 0.8) the payload is
+    // byte-identical to 2.6.7. The contextDecay notaus still returns every
+    // surface to the untouched array.
+    //
+    // The window is already resolved above for the memory budget, so this
+    // costs nothing extra on this path.
+    // 2.6.8 auto-compact, immediately before the payload is assembled.
+    //
+    // HERE and not earlier: the fill number this reads is "what the NEXT
+    // request will carry", and the user's message plus the assistant
+    // placeholder are already in the store by now, so it is measuring the
+    // request that is actually about to go out. Earlier would measure the
+    // previous turn; later would be after the budget already trimmed.
+    //
+    // Costs nothing when the opt-in was never taken — maybeAutoCompact reads
+    // the threshold first and returns on the cheap path.
+    if (settings.autoCompactThreshold) {
+      await maybeAutoCompact({
+        conversationId: convId,
+        activeModel,
+        window: modelWindowTokens,
+        // Plain chat resolves the window through getModelMaxTokens, which is
+        // the model's real trained context on Ollama and the catalogue value
+        // on cloud — not a fallback guess. Zero means the lookup failed, and
+        // shouldAutoCompact refuses a zero window outright.
+        windowIsTrue: modelWindowTokens > 0,
+      })
+    }
+    // Re-read: a compaction just wrote a record, and the payload below has to
+    // see it. The binding above was taken before the turn started.
+    const convNow = useChatStore.getState().conversations.find((c) => c.id === convId) ?? conv
+
     const messages = applyChatSendBudget(
       capMessageCount([
         ...(systemPrompt ? [{ role: "system" as const, content: systemPrompt }] : []),
@@ -602,8 +710,17 @@ export function useChat() {
         // whatever index it happened to sit at, and a strict Jinja template
         // answers a mid-conversation system message with "System message must
         // be at the beginning" instead of a reply.
-        ...conv.messages
-          .filter((m) => m.role !== 'system' && m.content.trim() !== '')
+        // 2.6.8: a recorded compaction stands in for everything up to its
+        // anchor. Applied HERE — on the stored messages, before the wire map —
+        // for two reasons: the record's anchor is a message id and the wire
+        // shape does not carry one, and the filter above has to have run first
+        // so the anchor is looked up in the same array the payload is built
+        // from. A record whose anchor is gone applies nothing and the full
+        // history goes out, which is the honest answer to a stale record.
+        ...applyStoredCompaction(
+          convNow.messages.filter((m) => m.role !== 'system' && m.content.trim() !== ''),
+          newestCompaction(convNow.compactions),
+        ).messages
           .map((m) => ({
             role: m.role as 'user' | 'assistant' | 'tool',
             content: m.role === 'user' && cavemanReminder

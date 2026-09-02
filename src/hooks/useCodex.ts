@@ -2,6 +2,8 @@ import { useRef, useState, useCallback } from 'react'
 import { v4 as uuid } from 'uuid'
 import { useCodexStore } from '../stores/codexStore'
 import { useModelStore } from '../stores/modelStore'
+import { runCompactForConversation, compactOutcomeMessage, newestCompaction, maybeAutoCompact } from '../lib/run-compact-command'
+import { applyStoredCompaction } from '../lib/compact-summary'
 import { useSettingsStore } from '../stores/settingsStore'
 import { useChatStore, flushChatPersist } from '../stores/chatStore'
 import { endTurnDurably } from '../stores/durability'
@@ -12,6 +14,15 @@ import { usePermissionStore } from '../stores/permissionStore'
 import { toolStrategyFor } from '../lib/tool-support'
 import { allowedInReadOnlyTurn } from '../lib/mutating-tools'
 import { applyGoalCommand } from '../lib/goal-command'
+import {
+  parseFanoutRequest,
+  resolveRequestedModel,
+  fanoutDirective,
+  unresolvedModelNote,
+} from '../lib/agent-fanout'
+import { setExplicitFanout } from '../api/agents/sub-agent'
+import { appendTaskReport } from '../lib/agent-task-report'
+import { useAgentTaskStore } from '../stores/agentTaskStore'
 import { useAgentGoalStore, renderGoalSection } from '../stores/agentGoalStore'
 import { useAgentLoopStore } from '../stores/agentLoopStore'
 import { beginRun, isRunStopped, stopRun } from '../lib/run-stop'
@@ -249,6 +260,13 @@ export function useCodex() {
       displayContent?: string
       /** Set by the /loop driver when this run is pass 2 or later. */
       loop?: { pass: number; intervalMs: number; task: string; startedAt: number }
+      /**
+       * Die Nutzernachricht dieses Zuges reist versteckt — siehe die
+       * gleichnamige Option in useAgentChat. Fuer den Weckzug eines fertigen
+       * Hintergrundagenten: der Zug braucht eine Nutzernachricht, aber im
+       * Verlauf stuende sonst ein Satz, den der Mensch nie geschrieben hat.
+       */
+      hiddenUser?: boolean
     },
   ) => {
     const { activeModel } = useModelStore.getState()
@@ -357,6 +375,35 @@ export function useCodex() {
 
     // `/goal` is bookkeeping, not a prompt. Handle it here and show the result;
     // every LATER turn picks the goal up from the system prompt below.
+    // /compact — a round trip, unlike /goal, but the same kind of branch: the
+    // hook does the work and nothing is sent to the model as an instruction.
+    // See lib/run-compact-command.ts for why it is a record and not an edit.
+    if (slash?.command.handledLocally && slash.command.name === 'compact') {
+      // BEIDE Zeilen sind App-Hinweise, keine Modell-Turns. Bis 2.6.8 standen
+      // sie als user/assistant im Verlauf, und die Nutzlast filtert nur
+      // `role:'system'` — also fuhr ein erfundener Assistentenzug
+      // („Summarised 12 earlier messages …") in jede spaetere Anfrage mit und
+      // wurde bei der naechsten Verdichtung als Protokoll mitzusammengefasst.
+      // In der Claude-Code-Desktop-App erreichen Schraegstrich-Befehle das
+      // Modell nie. Der Mechanismus dafuer gab es hier schon: `notice`.
+      useChatStore.getState().addMessage(convId, {
+        id: uuid(), role: 'system', notice: 'info', content: rawInstruction, timestamp: Date.now(),
+      })
+      const noticeId = uuid()
+      useChatStore.getState().addMessage(convId, {
+        id: noticeId, role: 'system', notice: 'info',
+        content: 'Summarising the earlier turns…', timestamp: Date.now(),
+      })
+      const outcome = await runCompactForConversation({
+        conversationId: convId,
+        activeModel: activeModel || '',
+        trigger: 'manual',
+        focus: slash.args || undefined,
+      })
+      useChatStore.getState().updateMessageContent(convId, noticeId, compactOutcomeMessage(outcome))
+      return
+    }
+
     if (slash?.command.handledLocally && slash.command.name === 'goal') {
       const res = applyGoalCommand(convId, slash.args)
       useChatStore.getState().addMessage(convId, {
@@ -415,6 +462,7 @@ export function useCodex() {
     useChatStore.getState().addMessage(convId, {
       id: uuid(), role: 'user', content: instruction, timestamp: Date.now(),
       ...(displayInstruction ? { displayContent: displayInstruction } : {}),
+      ...(opts?.hiddenUser ? { hidden: true } : {}),
     })
 
     // Add empty assistant message. For a slash command, tag it so CodexView
@@ -640,11 +688,26 @@ export function useCodex() {
     // comes back at exactly those bytes (decayRestoredToolResult is a pure
     // function of the stored text), so a restore never re-cuts with a second
     // budget and never moves the prefix.
+    // 2.6.8 auto-compact, once per user turn — outside the iteration loop for
+    // the same reason as in useAgentChat.
+    if (settings.autoCompactThreshold) {
+      await maybeAutoCompact({ conversationId: convId, activeModel })
+    }
+    const convForPayload =
+      useChatStore.getState().conversations.find(c => c.id === convId) ?? conv
+
     const decayRestored = settings.contextDecay !== false
     let messages: ChatMessage[] = [
       { role: 'system', content: systemPrompt },
-      ...conv.messages
-        .filter(m => m.role !== 'system' && (m.content.trim() || m.hidden))
+      // 2.6.8: a recorded compaction stands in for everything up to its
+      // anchor. Note the filter here keeps `hidden` turns (the agent's own
+      // tool chain) that the other two paths drop, so the anchor is looked up
+      // in exactly the array this payload is built from — which is the reason
+      // this call sits inside each builder rather than in a shared wrapper.
+      ...applyStoredCompaction(
+        convForPayload.messages.filter(m => m.role !== 'system' && (m.content.trim() || m.hidden)),
+        newestCompaction(convForPayload.compactions),
+      ).messages
         .map(m => {
           const msg: ChatMessage = {
             role: m.role as 'user' | 'assistant' | 'tool',
@@ -685,6 +748,40 @@ export function useCodex() {
         messages.push({ role: 'user', content: resume.text })
       }
     }
+    // ── „nutze 5 glm 5.2 agenten" ────────────────────────────────────────
+    //
+    // Ausdrueckliche Anweisung des Nutzers, deterministisch aus dem Text
+    // gelesen statt dem Modell ueberlassen. Der Grund steht in
+    // lib/agent-fanout.ts und ist gemessen: ein 4B-Modell antwortete auf
+    // „call delegate_task with background true" mit PROSA („Task ID: t12345")
+    // und rief nie ein Werkzeug. Eine genannte Zahl darf daran nicht
+    // scheitern.
+    //
+    // Als NUTZER-Material, wie jede andere Notiz in diesem Verlauf: eine
+    // System-Nachricht an anderer Stelle als Index 0 weisen strenge
+    // Jinja-Vorlagen ab, eine Werkzeugantwort braeuchte eine echte
+    // tool_call_id.
+    {
+      const wunsch = parseFanoutRequest(instruction)
+      if (wunsch) {
+        const modelle = useModelStore.getState().models
+        const treffer = wunsch.modelPhrase
+          ? resolveRequestedModel(wunsch.modelPhrase, modelle)
+          : null
+        const note = wunsch.modelPhrase && !treffer
+          ? unresolvedModelNote(wunsch.modelPhrase, modelle.map((m) => m.name))
+          : undefined
+        // Die Schranke folgt der Ansage. SUB_AGENT_MAX_PARALLEL (4) bremst
+        // eine Fan-out-Schleife des MODELLS; sagt der NUTZER „nutze 5", ist
+        // sie keine Sicherheitsgrenze mehr, sondern Bevormundung.
+        setExplicitFanout(convId, wunsch.count)
+        messages.push({
+          role: 'user',
+          content: fanoutDirective(wunsch, treffer ? treffer.name : null, note),
+        })
+      }
+    }
+
     const messagesStartLen = messages.length
 
     // Setup
@@ -900,6 +997,16 @@ export function useCodex() {
       // backstop. Floor of 1 so a stray 0 setting can't zero the loop.
       const MAX_CODEX_ITERATIONS = Math.max(settings.agentMaxIterations ?? 200, 1)
       for (let i = 0; i < MAX_CODEX_ITERATIONS && runningRef.current && !abort.signal.aborted; i++) {
+        // Fertige Hintergrundagenten melden sich hier, oben in der Iteration:
+        // vor dem Modellaufruf und nach den Werkzeugantworten der vorigen
+        // Runde. Als NUTZER-Material — die Begruendung steht in
+        // lib/agent-task-report.ts und ist dieselbe Regel, an der schon die
+        // Verdichtungsnotiz haengt.
+        appendTaskReport(
+          messages,
+          () => useAgentTaskStore.getState().takeUnreported(convId!),
+          Date.now(),
+        )
         budget.addIteration()
         const bx = budget.exceeded()
         if (bx.kind !== 'none') {

@@ -65,9 +65,15 @@ describe('a plain coding turn does not carry the generators', () => {
     // A6 widened the gate from the three generators to five: pr_resume and
     // delegate_task shipped a schema on every step of every run that never
     // mentions a PR or a fan-out.
+    //
+    // 2.6.8 macht sieben daraus: check_tasks und message_agent sprechen UEBER
+    // eine Delegation und gehoeren deshalb hinter dasselbe Tor wie sie. Ohne
+    // das kostete ein gewoehnlicher Refactor-Zug 844 Zeichen Katalogtext fuer
+    // zwei Werkzeuge, die auf ihm nichts zu tun haben — gefunden vom Deckel in
+    // tool-catalog-tokens.test.ts, nicht von einem Menschen.
     const before = names(codingCatalog())
     const after = names(gateCreateTools(codingCatalog(), 'fix the failing test in parser.ts'))
-    expect(before.length - after.length).toBe(5)
+    expect(before.length - after.length).toBe(7)
     expect(before.filter((n) => !after.includes(n)).sort()).toEqual([...GATE_OPENING_TOOLS].sort())
   })
 
@@ -80,6 +86,17 @@ describe('a plain coding turn does not carry the generators', () => {
     expect(out).toContain('delegate_task')
     expect(out).not.toContain('run_workflow')
     expect(out).not.toContain('image_generate')
+  })
+
+  it('ein Fan-out bringt die zwei Begleiter MIT, sonst waeren sie unerreichbar', () => {
+    // Die Kehrseite der Torentscheidung, und sie muss festgenagelt sein:
+    // haengt man check_tasks hinter ein Tor und vergisst, es zusammen mit
+    // delegate_task zu oeffnen, kann ein Agent zwar delegieren, aber nie
+    // nachsehen. Das waere schlimmer als der Katalogtext, den das Tor spart.
+    const out = names(gateCreateTools(codingCatalog(), 'delegate this and fan out'))
+    expect(out).toContain('delegate_task')
+    expect(out).toContain('check_tasks')
+    expect(out).toContain('message_agent')
   })
 
   it('a PR ask brings pr_resume back and nothing else', () => {
@@ -230,12 +247,17 @@ describe('a run that discovers halfway through that it needs a picture', () => {
     )
   })
 
-  it('isGatedTool names exactly the gated five, and nothing that always ships', () => {
-    for (const n of [...CREATE_TOOLS, 'pr_resume', 'delegate_task']) expect(isGatedTool(n), n).toBe(true)
+  it('isGatedTool nennt genau die sieben Torwerkzeuge und nichts, was immer faehrt', () => {
+    // Seit 2.6.8 sieben: die drei Erzeuger, pr_resume, delegate_task und
+    // dessen zwei Begleiter. Die Liste steht hier ausgeschrieben und wird
+    // NICHT aus GATE_KEYWORDS abgeleitet — sonst pruefte sie eine Karte gegen
+    // sich selbst und waere fuer jeden kuenftigen Eintrag automatisch gruen.
+    const TOR = [...CREATE_TOOLS, 'pr_resume', 'delegate_task', 'check_tasks', 'message_agent']
+    for (const n of TOR) expect(isGatedTool(n), n).toBe(true)
     for (const n of ['file_read', 'file_edit', 'shell_execute', 'todo_write', 'web_search']) {
       expect(isGatedTool(n), n).toBe(false)
     }
-    expect([...GATE_OPENING_TOOLS].sort()).toEqual([...CREATE_TOOLS, 'pr_resume', 'delegate_task'].sort())
+    expect([...GATE_OPENING_TOOLS].sort()).toEqual([...TOR].sort())
   })
 
   it('a closed gate still tells the model the hatch is there', () => {

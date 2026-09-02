@@ -53,13 +53,24 @@ import { extractMemoriesFromPair } from './useMemory'
 import { useAgentWorkflowStore } from '../stores/agentWorkflowStore'
 import { WorkflowEngine } from '../lib/workflow-engine'
 import type { AgentBlock, AgentToolCall } from '../types/agent-mode'
-import { selectRelevantToolsAsync, ALWAYS_INCLUDE, SMALL_MODEL_MAX_TOOLS } from '../lib/tool-selection'
+import { selectRelevantToolsAsync, toolSelectionOpts, ALWAYS_INCLUDE } from '../lib/tool-selection'
 import { renderToolRoster, renderToolNames } from '../lib/tool-roster'
 import { MUTATING_TOOLS, allowedInReadOnlyTurn } from '../lib/mutating-tools'
+import {
+  parseFanoutRequest,
+  resolveRequestedModel,
+  fanoutDirective,
+  unresolvedModelNote,
+} from '../lib/agent-fanout'
+import { setExplicitFanout } from '../api/agents/sub-agent'
+import { appendTaskReport } from '../lib/agent-task-report'
+import { useAgentTaskStore } from '../stores/agentTaskStore'
 import { useAgentGoalStore, renderGoalSection } from '../stores/agentGoalStore'
 import { useAgentLoopStore } from '../stores/agentLoopStore'
 import { beginRun, isRunStopped, stopRun } from '../lib/run-stop'
 import { buildLoopRecheck, loopPassSaysDone } from '../lib/agent-commands'
+import { applyStoredCompaction } from '../lib/compact-summary'
+import { newestCompaction, maybeAutoCompact } from '../lib/run-compact-command'
 import { generateEmbeddings } from '../api/rag'
 import { truncateToolResult } from '../lib/truncate-tool-result'
 import { toolCallCapMs, raceWithToolTimeout, SHELL_EXECUTE_DEFAULT_TIMEOUT_MS } from '../lib/tool-timeout'
@@ -217,6 +228,17 @@ export function useAgentChat() {
       // router passes the task kind + the prior generation's exact args so a weak
       // model that can't emit the call still gets the SAME media synthesized.
       mediaHint?: { kind: 'image' | 'video'; args?: Record<string, unknown> }
+      /**
+       * Die Nutzernachricht dieses Zuges reist versteckt.
+       *
+       * Fuer den Weckzug eines fertigen Hintergrundagenten: ein Zug braucht
+       * eine Nutzernachricht, aber im Verlauf stuende sonst ein Satz, den der
+       * Mensch nie geschrieben hat. Der Nutzlastbau filtert `role:'system'`
+       * und NICHT `hidden` — die Zeile erreicht also das Modell und nicht das
+       * Auge. Denselben Weg nimmt schon die Werkzeugkette, die useCodex nach
+       * einem Lauf zurueckschreibt.
+       */
+      hiddenUser?: boolean
     },
   ) => {
     const { activeModel } = useModelStore.getState()
@@ -402,6 +424,7 @@ export function useAgentChat() {
       content: userContent,
       // Slash command: show "/commit" to the user, keep the expansion in content.
       ...(opts?.displayContent ? { displayContent: opts.displayContent } : {}),
+      ...(opts?.hiddenUser ? { hidden: true } : {}),
       images: userImages,
       timestamp: Date.now(),
     }
@@ -491,12 +514,48 @@ export function useAgentChat() {
     const toolMatchesCurated = (name: string) =>
       (!curated || curated.includes(name)) && !(opts?.readOnly && !allowedInReadOnlyTurn(name))
 
-    // Build agent system prompt FIRST, then append caveman style as a modifier
-    const hermesToolDefs = toolRegistry.toHermesToolDefs(permissions)
-      .filter((t) => toolMatchesCurated(t.name))
+    // ── Die Werkzeugliste fuer den Rueckfallweg ─────────────────────────────
+    //
+    // Hier stand `toolRegistry.toHermesToolDefs(permissions)` — also der ganze
+    // Katalog, nur nach Berechtigungen gefiltert. Der native Zweig weiter
+    // unten laesst dieselbe Menge durch `selectRelevantToolsAsync` laufen und
+    // deckelt unter Small-Model-Mode auf SMALL_MODEL_MAX_TOOLS; dieser Zweig
+    // tat beides nicht.
+    //
+    // Das war genau herum falsch. `hermes_xml` ist kein Weg, den man waehlt,
+    // sondern der RUECKFALL fuer Modelle, deren Template kein natives
+    // Werkzeug-Feld kann (agent-strategy.ts, applyLiveCapabilities). Die
+    // schwaechsten Modelle bekamen also die LAENGSTE Liste — und weil Hermes
+    // die Schemata nicht als `tools`-Feld auf die Leitung legen kann, sondern
+    // als Text in den Systemprompt schreibt, bezahlt jeder Zug sie voll.
+    //
+    // Gemessen am 02.09.2026: 17 Werkzeuge = 19.459 Zeichen ≈ 4.866 Token.
+    // smollm2:135m/360m melden Ollama kein `tools`, landen also hier, haben
+    // 8k Fenster und damit unter Small-Model-Mode ein Sendefenster von 4.096
+    // Token. Die Werkzeugliste ALLEIN war 119 % davon — die Anfrage konnte
+    // gar nicht passen, bevor eine Frage darin stand.
+    //
+    // Nur im hermes_xml-Fall berechnet: sonst zahlte jeder native Zug eine
+    // Einbettungsabfrage fuer eine Liste, die er nie benutzt.
+    const hermesToolDefs = strategy === 'hermes_xml'
+      ? await selectRelevantToolsAsync(
+          userContent,
+          toolRegistry.getAll().filter((t) => toolMatchesCurated(t.name)),
+          permissions,
+          toolSelectionOpts(!!settings.smallModelMode, (texts) => generateEmbeddings(texts)),
+        )
+      : []
     // Small-Model Mode (Knob 2): swap the ~3000-char agent prompt for a lean
-    // ~750-char one on the native path. The Hermes-XML branch already uses a
-    // tight tool prompt (buildHermesToolPrompt), so it stays as-is.
+    // ~750-char one on the native path. Der Hermes-Zweig behaelt seine eigene
+    // Anweisung — nicht weil sie kuerzer waere (sie ist es nicht: 1.112
+    // Zeichen wie ausgeliefert gegen ~750), sondern weil sie der PROTOKOLL-
+    // VERTRAG ist. In ihr steht, dass ein Aufruf als <tool_call>-Block kommt,
+    // und genau danach sucht parseHermesToolCalls. Tauscht man sie gegen die
+    // schlanke, ruft das Modell weiter Werkzeuge — nur erkennt sie niemand.
+    //
+    // Was diesen Zweig frueher gesprengt hat, war ohnehin nie die Huelle,
+    // sondern die LISTE darin: 18.347 der 19.459 Zeichen, also 94 %. Die zieht
+    // jetzt oben durch dieselbe Vorauswahl wie der native Zweig.
     // Chat-Tools mode uses a conversational prompt (NOT the autonomous-agent
     // one) so plain chat keeps its normal voice and only reaches for a tool
     // when the user actually needs it.
@@ -559,11 +618,28 @@ export function useAgentChat() {
     agentSystemPrompt += ragSuffix
     agentSystemPrompt += `\n\n${hostClockLine()}`
 
+    // 2.6.8 auto-compact, once per user turn — deliberately outside the
+    // iteration loop below. Inside it, every step would re-ask and a long run
+    // would summarise itself again and again; the cooldown in
+    // shouldAutoCompact would catch it, but relying on a guard to undo a
+    // wrong call site is not the same as calling it in the right place.
+    if (useSettingsStore.getState().settings.autoCompactThreshold) {
+      await maybeAutoCompact({ conversationId: convId, activeModel })
+    }
+    const convForPayload =
+      useChatStore.getState().conversations.find((c) => c.id === convId) ?? conv
+
     // Build messages array
     let agentMessages: ChatMessage[] = [
       ...(agentSystemPrompt ? [{ role: 'system' as const, content: agentSystemPrompt }] : []),
-      ...conv.messages
-        .filter((m) => m.role !== 'system' && m.content.trim() !== '')
+      // 2.6.8: a recorded compaction stands in for everything up to its
+      // anchor. On the stored messages, before the wire map — the record's
+      // anchor is a message id, and the wire shape has none. See
+      // lib/run-compact-command.ts.
+      ...applyStoredCompaction(
+        convForPayload.messages.filter((m) => m.role !== 'system' && m.content.trim() !== ''),
+        newestCompaction(convForPayload.compactions),
+      ).messages
         .map((m) => ({
           role: m.role as 'user' | 'assistant' | 'tool',
           content: m.role === 'user' && cavemanReminder
@@ -665,6 +741,40 @@ export function useAgentChat() {
         agentMessages.push({ role: 'user', content: resume.text })
       }
     }
+    // ── „nutze 5 glm 5.2 agenten" ────────────────────────────────────────
+    //
+    // Ausdrueckliche Anweisung des Nutzers, deterministisch aus dem Text
+    // gelesen statt dem Modell ueberlassen. Der Grund steht in
+    // lib/agent-fanout.ts und ist gemessen: ein 4B-Modell antwortete auf
+    // „call delegate_task with background true" mit PROSA („Task ID: t12345")
+    // und rief nie ein Werkzeug. Eine genannte Zahl darf daran nicht
+    // scheitern.
+    //
+    // Als NUTZER-Material, wie jede andere Notiz in diesem Verlauf: eine
+    // System-Nachricht an anderer Stelle als Index 0 weisen strenge
+    // Jinja-Vorlagen ab, eine Werkzeugantwort braeuchte eine echte
+    // tool_call_id.
+    {
+      const wunsch = parseFanoutRequest(userContent)
+      if (wunsch) {
+        const modelle = useModelStore.getState().models
+        const treffer = wunsch.modelPhrase
+          ? resolveRequestedModel(wunsch.modelPhrase, modelle)
+          : null
+        const note = wunsch.modelPhrase && !treffer
+          ? unresolvedModelNote(wunsch.modelPhrase, modelle.map((m) => m.name))
+          : undefined
+        // Die Schranke folgt der Ansage. SUB_AGENT_MAX_PARALLEL (4) bremst
+        // eine Fan-out-Schleife des MODELLS; sagt der NUTZER „nutze 5", ist
+        // sie keine Sicherheitsgrenze mehr, sondern Bevormundung.
+        setExplicitFanout(convId, wunsch.count)
+        agentMessages.push({
+          role: 'user',
+          content: fanoutDirective(wunsch, treffer ? treffer.name : null, note),
+        })
+      }
+    }
+
     // Seed the media intent from the router's continuation hint too (David
     // 2026-06-20): "ok generiere jetzt" carries no noun, so detecting wants from
     // the last message alone left wantsVideo=false and the synth fallback never
@@ -749,6 +859,16 @@ export function useAgentChat() {
       // ── Agent Loop ──────────────────────────────────────────
       while (runningRef.current && !abort.signal.aborted) {
         stepNo++
+        // Fertige Hintergrundagenten melden sich hier, oben in der Iteration:
+        // vor dem Modellaufruf und nach den Werkzeugantworten der vorigen
+        // Runde. Als NUTZER-Material — die Begruendung steht in
+        // lib/agent-task-report.ts und ist dieselbe Regel, an der schon die
+        // Verdichtungsnotiz haengt.
+        appendTaskReport(
+          agentMessages,
+          () => useAgentTaskStore.getState().takeUnreported(convId),
+          Date.now(),
+        )
         budget.addIteration()
         const exceed = budget.exceeded()
         if (exceed.kind !== 'none') {
@@ -925,13 +1045,15 @@ export function useAgentChat() {
           // embedding router even on a modest catalog (threshold 6) so a 3B-8B
           // model sees ≤6 semantically-ranked tools. Default mode keeps the
           // permissive selection unchanged for big models.
+          // Die Zahlen dahinter stehen in `toolSelectionOpts`, nicht hier.
+          // Als sie hier standen, gab es sie nur an DIESER Stelle — der
+          // hermes_xml-Zweig oben nahm stattdessen den ganzen Katalog, und
+          // niemandem fiel es auf, weil nichts brach.
           const relevantDefs = await selectRelevantToolsAsync(
             lastUserMsg,
             toolRegistry.getAll().filter((t) => toolMatchesCurated(t.name)),
             permissions,
-            settings.smallModelMode
-              ? { embed: (texts) => generateEmbeddings(texts), topN: 5, embeddingThreshold: 6, maxTools: SMALL_MODEL_MAX_TOOLS }
-              : { embed: (texts) => generateEmbeddings(texts) }
+            toolSelectionOpts(!!settings.smallModelMode, (texts) => generateEmbeddings(texts)),
           )
           const tools: ToolDefinition[] = relevantDefs.map(t => ({
             type: 'function' as const,
