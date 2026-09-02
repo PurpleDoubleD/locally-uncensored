@@ -20,6 +20,7 @@ import {
 import { useShallow } from 'zustand/react/shallow'
 import { useRAG } from '../../hooks/useRAG'
 import { useRAGStore } from '../../stores/ragStore'
+import { useSettingsStore } from '../../stores/settingsStore'
 import { formatBytes } from '../../lib/formatters'
 
 interface Props {
@@ -87,6 +88,7 @@ export function RAGPanel({ conversationId, onClose }: Props) {
 }
 
 function RAGPanelInner({ conversationId, onClose }: { conversationId: string; onClose?: () => void }) {
+  const cloudMode = useSettingsStore((s) => s.settings.appMode) === 'cloud'
   const rag = useRAG(conversationId)
   const documents = rag.documents ?? []
   const isEnabled = rag.isEnabled ?? false
@@ -267,6 +269,21 @@ function RAGPanelInner({ conversationId, onClose }: { conversationId: string; on
           </button>
         )}
       </div>
+
+      {/* Where the files stay, said in Cloud mode because in Cloud mode it is a
+          fair question (A9). Indexing runs on this machine on 127.0.0.1:8128;
+          only the passages that match the question travel with the prompt. */}
+      {cloudMode && (
+        <div className="px-3 pt-2">
+          <p
+            data-testid="rag-cloud-privacy"
+            className="text-[0.6rem] leading-snug text-gray-500 dark:text-gray-400"
+          >
+            Your documents are indexed on this computer and stay here. Only the passages
+            that match your question are sent to the cloud model as context.
+          </p>
+        </div>
+      )}
 
       {/* Context window warning */}
       <AnimatePresence>

@@ -8,11 +8,12 @@ import { useAgentModeStore } from '../../stores/agentModeStore'
 import { MessageList } from './MessageList'
 import { ChatInput } from './ChatInput'
 import { RAGPanel } from './RAGPanel'
+import { DocsButton } from './DocsButton'
+import { useDocsAvailability } from '../../hooks/useDocsAvailability'
 import { AgentModeToggle } from './AgentModeToggle'
 import { AgentWorkspaceBadge } from './AgentWorkspaceBadge'
 import { ErrorBoundary } from '../ui/ErrorBoundary'
-import { useSettingsStore } from '../../stores/settingsStore'
-import { FileText, ChevronDown, Download, Wrench, Radio, RefreshCw, X } from 'lucide-react'
+import { ChevronDown, Download, Wrench, Radio, RefreshCw, X } from 'lucide-react'
 import { PluginsDropdown } from './PluginsDropdown'
 import { ModelSelector } from '../models/ModelSelector'
 import { useConversationModelHint } from './ConversationModelNote'
@@ -68,11 +69,13 @@ export function ChatView() {
   const ragEnabled = useRAGStore((s) =>
     activeConversationId ? s.ragEnabled[activeConversationId] ?? false : false
   )
-  // Docs (RAG) needs a LOCAL embeddings backend (built-in llama-server or
-  // Ollama). In global Cloud mode there is none, so mirror the web app and
-  // hide the Docs button rather than offer an upload that fails with
-  // "Ollama is not running". Local mode keeps it (built-in engine embeds).
-  const appMode = useSettingsStore((s) => s.settings.appMode)
+  // Docs (RAG) needs a LOCAL EMBEDDINGS backend, which is not the same thing as
+  // a local CHAT backend. That mix-up is what hid the button in Cloud mode until
+  // A9 (aldrich_ironhart, 2026-09-01). The embeddings sidecar on 127.0.0.1:8128
+  // runs in Cloud mode too, and retrieval reaches the model through the system
+  // prompt, which every provider takes. So the question is whether this machine
+  // can embed, and that is what useDocsAvailability asks.
+  const docs = useDocsAvailability()
   const isAgentActive = useAgentModeStore((s) =>
     activeConversationId ? s.agentModeActive[activeConversationId] ?? false : false
   )
@@ -382,7 +385,7 @@ export function ChatView() {
                 // Commands need the tool catalog to drive, which only Agent
                 // mode has here. Plain chat leaves "/cmd" as ordinary text.
                 slashCommands={isAgentActive}
-                onAttachDocs={appMode !== 'cloud' ? () => setRagPanelOpen(true) : undefined}
+                onAttachDocs={docs.enabled ? () => setRagPanelOpen(true) : undefined}
                 composerModel={
                   /* What this chat's answers were written by rides on the
                      picker itself now, as a dot plus a tooltip, instead of a
@@ -396,31 +399,16 @@ export function ChatView() {
                 composerAbove={<><LoopBar onStop={stopGeneration} /><GoalBar /><GroupCostHint /></>}
                 composerActions={
                   <>
-                    {/* Documents (RAG) — local-embeddings only, so hide in
-                        Cloud mode (web parity). */}
-                    {appMode !== 'cloud' && (
-                    <button
-                      onClick={() => setRagPanelOpen(!ragPanelOpen)}
-                      className={
-                        'flex items-center gap-1 px-2 py-1.5 rounded-md transition-all shrink-0 text-[0.6rem] font-medium ' +
-                        (ragPanelOpen || ragEnabled
-                          ? 'bg-green-500/15 text-green-400 border border-green-500/30'
-                          : 'text-gray-500 hover:text-gray-300 hover:bg-white/5')
-                      }
-                      title="Document Chat (RAG)"
-                    >
-                      <FileText size={11} />
-                      <span>Docs</span>
-                      {docCount > 0 && (
-                        <span className={
-                          'min-w-[12px] h-[12px] flex items-center justify-center rounded-full text-[0.45rem] font-bold ' +
-                          (ragEnabled ? 'bg-green-500 text-white' : 'bg-white/15 text-gray-300')
-                        }>
-                          {docCount}
-                        </span>
-                      )}
-                    </button>
-                    )}
+                    {/* Documents (RAG), shown in both modes since A9. In
+                        Cloud mode without an embedding lane it stays visible
+                        and says what is missing. */}
+                    <DocsButton
+                      availability={docs}
+                      open={ragPanelOpen}
+                      ragEnabled={ragEnabled}
+                      docCount={docCount}
+                      onToggle={() => setRagPanelOpen(!ragPanelOpen)}
+                    />
 
                     {/* Plugins (Chat Tools + Caveman + Personas) */}
                     <PluginsDropdown openUpward />
