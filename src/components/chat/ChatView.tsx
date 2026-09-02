@@ -5,6 +5,7 @@ import { useChatStore } from '../../stores/chatStore'
 import { useModelStore } from '../../stores/modelStore'
 import { useRAGStore } from '../../stores/ragStore'
 import { useAgentModeStore } from '../../stores/agentModeStore'
+import { AgentPanel } from './AgentPanel'
 import { MessageList } from './MessageList'
 import { ChatInput } from './ChatInput'
 import { RAGPanel } from './RAGPanel'
@@ -512,7 +513,7 @@ export function ChatView() {
               onReject={rejectToolCall}
               // Commands need the tool catalog to drive, which only Agent
               // mode has here. Plain chat leaves "/cmd" as ordinary text.
-              slashCommands={isAgentActive}
+              slashCommands={isAgentActive ? 'agent' : 'chat'}
               onAttachDocs={appMode !== 'cloud' ? () => setRagPanelOpen(true) : undefined}
               composerModel={
                 <div className="flex items-center gap-1.5">
@@ -593,6 +594,18 @@ export function ChatView() {
             </ErrorBoundary>
           )}
         </AnimatePresence>
+
+        {/* Hintergrundagenten, ganz aussen rechts.
+            HIER und nicht in CodexView, obwohl der Code-Modus eigene Spalten
+            hat: diese eine Montage deckt BEIDE Bereiche ab, weil CodexView
+            innerhalb dieser Zeile gerendert wird. Im Code-Modus steht das
+            Panel damit rechts NEBEN dem Explorer statt in ihm — zwei
+            Spalten mit zwei Aufgaben, und keine musste die andere aufnehmen.
+            Es rendert `null`, solange diese Konversation keine
+            Hintergrundaufgabe hat, also auch im normalen Chat immer: dort
+            kommt `delegate_task` gar nicht erst in die Werkzeugliste
+            (CHAT_TOOLS), festgehalten in multiagent-nicht-im-chat.test.ts. */}
+        <AgentPanel />
       </div>
 
       {/* Export toast */}

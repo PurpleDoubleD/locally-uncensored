@@ -2,6 +2,7 @@ import { useCodex } from '../../hooks/useCodex'
 import { useAutoScroll } from '../../hooks/useAutoScroll'
 import { useCodexStore } from '../../stores/codexStore'
 import { useChatStore } from '../../stores/chatStore'
+import { useBackgroundAgentWake } from '../../hooks/useBackgroundAgentWake'
 import { useGenerationStore } from '../../stores/generationStore'
 import { ChatInput } from './ChatInput'
 import { ToolCallBlock } from './ToolCallBlock'
@@ -25,8 +26,10 @@ import { useSettingsStore } from '../../stores/settingsStore'
 import { useModelStore } from '../../stores/modelStore'
 import { StagedChangesPanel } from './StagedChangesPanel'
 import { SlashStepsBlock } from './SlashStepsBlock'
+import { CompactBlock } from './CompactBlock'
+import { compactionAnchors } from '../../lib/compact-summary'
 import { User, Code, Eye, GitBranch, Download, RefreshCw, RotateCcw, Folder, Check, AlertTriangle } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { Fragment, useEffect, useState } from 'react'
 import { checkGitInstalled, openExternal, type GitStatus } from '../../api/backend'
 import { CodexConfirmDialog } from './CodexConfirmDialog'
 import { stripModelNoise } from '../../lib/strip-model-noise'
@@ -42,12 +45,25 @@ const stripChannelTags = (text: string) => stripModelNoise(text, { aggressive: t
 
 export function CodexView() {
   const { sendInstruction, stopCodex, isRunning } = useCodex()
+  // Derselbe Weckhaken wie im Agentenweg: eine Hintergrundaufgabe endet fast
+  // immer NACH dem Zug, der sie startete, und ohne diesen Haken erfuehre das
+  // Modell davon erst bei der naechsten Eingabe des Menschen.
+  useBackgroundAgentWake(useChatStore((s) => s.activeConversationId), sendInstruction)
   const activeConversationId = useChatStore((s) => s.activeConversationId)
   const conversations = useChatStore((s) => s.conversations)
   const thread = useCodexStore((s) => activeConversationId ? s.threads[activeConversationId] : undefined)
 
   const conversation = conversations.find(c => c.id === activeConversationId)
   const messages = conversation?.messages || []
+
+  // Verdichtungslinien fuer den Code-Verlauf. Codex blendet nur `hidden` aus
+  // (Systemhinweise bleiben stehen), aber die Rechnung laeuft trotzdem ueber
+  // die volle Liste — der Schnittpunkt darf auf eine ausgeblendete zeigen.
+  const compactAt = compactionAnchors(
+    messages,
+    messages.filter((m) => !m.hidden).map((m) => m.id),
+    conversation?.compactions,
+  )
 
   // Per-conversation generating flag (David 2026-06-12): the typing indicator
   // + realtime counter + a message's live-stream state must follow the coding
@@ -221,6 +237,14 @@ export function CodexView() {
           ) : (
             <div ref={contentRef} className="py-1">
               {messages.filter(msg => !msg.hidden).map((msg) => {
+                // Der Rumpf hat mehrere Ausgaenge (Hinweiszeile, Werkzeugblock,
+                // normale Blase). Statt jeden einzeln anzufassen, wandert er
+                // unveraendert in eine IIFE — seine `return`s werden ihre. Die
+                // Verdichtungslinie haengt danach EINMAL an, fuer alle Ausgaenge
+                // gleich. Der Alternativentwurf, jeden Ausgang zu umhuellen,
+                // waere dieselbe Zeile an fuenf Stellen gewesen, und die
+                // sechste, die jemand spaeter dazuschreibt, haette gefehlt.
+                const gerendert = (() => {
                 // App notices (a staged change that landed on disk) are not
                 // model turns. They used to be written hidden, so the one line
                 // that says "the file on disk is not the diff you approved"
@@ -487,6 +511,17 @@ export function CodexView() {
                     </div>
                   </div>
                 )
+                })()
+                const linien = compactAt.get(msg.id)
+                if (!linien?.length) return gerendert
+                return (
+                  <Fragment key={msg.id}>
+                    {gerendert}
+                    {linien.map((record) => (
+                      <CompactBlock key={record.id} record={record} />
+                    ))}
+                  </Fragment>
+                )
               })}
               {/* 3-dot indicator while THIS coding chat is mid-loop. Bound to
                   the per-conversation flag so switching to another (idle) chat
@@ -520,7 +555,7 @@ export function CodexView() {
           // parallel send and no Stop button. The generating flag follows the
           // conversation, not the hook instance.
           isGenerating={isRunning || codexGenerating}
-          slashCommands
+          slashCommands="agent"
           composerModel={<ModelSelector openUpward surface="code" />}
           // No plan lives here. The prompt window is the prompt window
           // (David, 2026-08-22): the plan and its Approve-and-run card sit

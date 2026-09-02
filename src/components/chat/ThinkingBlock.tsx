@@ -47,7 +47,7 @@ export function ThinkingBlock({ thinking, streaming }: Props) {
                 aria-label="Toggle thinking details"
             >
                 <Brain size={10} className="text-blue-400/70 shrink-0" />
-                <span className={`t-micro text-blue-400/70 ${streaming ? 'lu-tool-shimmer' : ''}`}>Thinking</span>
+                <span className={`t-micro text-blue-400 ${streaming ? 'lu-tool-shimmer' : ''}`}>Thinking</span>
                 <ChevronDown
                     size={9}
                     className={`text-blue-400/50 transition-transform duration-[var(--motion-base)] ${open ? 'rotate-180' : ''}`}
@@ -62,7 +62,7 @@ export function ThinkingBlock({ thinking, streaming }: Props) {
                     ref={previewRef}
                     className={`pl-4 pb-1 pt-0.5 ${PREVIEW_MAX_H} overflow-hidden pointer-events-none [mask-image:linear-gradient(to_bottom,transparent,#000_20px)]`}
                 >
-                    <div className="t-micro leading-relaxed italic text-blue-200/40">
+                    <div className="t-micro leading-relaxed italic text-blue-200/60">
                         <MarkdownRenderer content={cleaned} />
                     </div>
                 </div>
@@ -78,7 +78,7 @@ export function ThinkingBlock({ thinking, streaming }: Props) {
                         className="overflow-hidden"
                     >
                         <div className="pl-4 pb-1 pt-0.5">
-                            <div className="t-micro leading-relaxed italic text-blue-200/40">
+                            <div className="t-micro leading-relaxed italic text-blue-200/60">
                                 <MarkdownRenderer content={cleaned} />
                             </div>
                         </div>

@@ -83,6 +83,7 @@ const FUNDSTELLEN = [...WERTE.values()].reduce((a, b) => a + b, 0)
 //   Welle 1 (Klasse gebaut)    30 Werte / 1026 Fundstellen
 //                              25 Werte / 1009 Fundstellen
 //   Welle 2 (Klasse gezogen)   23 Werte /  826 Fundstellen
+//   2.6.8 (Auto-Compact)       23 Werte /  820 Fundstellen
 //
 // Welle 1 hat `#7c3aed`/`#a78bfa` (jetzt Tokens), `8px` (identisch zu
 // 0.5rem), `0.75rem` (identisch zu 12px) und `0.63rem` abgebaut.
@@ -98,8 +99,18 @@ const FUNDSTELLEN = [...WERTE.values()].reduce((a, b) => a + b, 0)
 // index.css. Der groesste Rest ist `0.55rem` (8,8px) und `0.5rem` (8px):
 // dorthin zu ziehen waere +14 bzw. +25 %, also ein Entwurf und keine
 // Zusammenfuehrung.
+//
+// 2.6.8 hat diese Klinke ausgeloest, und das ist der Beweis, dass sie
+// arbeitet: die neue Auto-Compact-Zeile in den Einstellungen entstand
+// durch Abschreiben der Nachbarzeile und brachte drei frische
+// Umgehungen mit (829). Der Ausweg war nicht, die Schranke zu heben,
+// sondern die ganze Zahlensektion — Max Tokens, Context window und die
+// neue Zeile — auf die Leiter zu stellen: `.t-micro` fuer Beschriftung
+// und Hilfstext, `.t-mono` fuer die drei Zahlenfelder. Das ist genau
+// der Zug, den diese Klinke erzwingen soll, und er hat die Sektion
+// nebenbei einheitlich gemacht statt einheitlich falsch.
 const SCHRANKE_WERTE = 23
-const SCHRANKE_FUNDSTELLEN = 826
+const SCHRANKE_FUNDSTELLEN = 820
 
 describe('die Umgehung ist gedeckelt und darf nur schrumpfen', () => {
   it(`hoechstens ${SCHRANKE_WERTE} verschiedene arbitraere Schriftgroessen`, () => {

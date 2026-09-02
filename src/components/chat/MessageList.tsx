@@ -4,6 +4,8 @@ import { useChatStore } from '../../stores/chatStore'
 import { useAutoScroll } from '../../hooks/useAutoScroll'
 import { MessageBubble } from './MessageBubble'
 import { WorkingAnchor } from './WorkingAnchor'
+import { CompactBlock } from './CompactBlock'
+import { compactionAnchors } from '../../lib/compact-summary'
 
 /**
  * Above this many visible messages the transcript stops paying full layout +
@@ -111,7 +113,14 @@ export function MessageList({ isGenerating, isThisChatGenerating, isLoadingModel
 
   if (!conversation) return null
 
-  const visibleMessages = conversation.messages.filter((m) => m.role !== 'system' && !m.hidden)
+  // App-Hinweise sind Systemnachrichten mit `notice` — sie erreichen das
+  // Modell nie (die Nutzlast wirft `role:'system'` weg) und gehoeren trotzdem
+  // in den Verlauf. Bis 2.6.8 filterte diese Zeile jede Systemnachricht weg,
+  // und der Code-Verlauf zeigte sie schon; damit war `/compact` im Chat
+  // stumm, sobald die beiden Zeilen ehrlich als Hinweise abgelegt wurden.
+  const visibleMessages = conversation.messages.filter(
+    (m) => (m.role !== 'system' || !!m.notice) && !m.hidden,
+  )
   const lastVisibleId = visibleMessages[visibleMessages.length - 1]?.id
 
   if (skipGate.id !== conversation.id) {
@@ -122,6 +131,15 @@ export function MessageList({ isGenerating, isThisChatGenerating, isLoadingModel
   }
   const skipOffscreen = skipGate.id === conversation.id && skipGate.on
   const tailStart = visibleMessages.length - ALWAYS_RENDERED_TAIL
+
+  // Die Verdichtungslinien. Berechnet aus der VOLLEN Nachrichtenliste, weil
+  // der Schnittpunkt auf eine gefilterte Nachricht zeigen kann, aber
+  // angezeigt an sichtbaren Zeilen — siehe compactionAnchors.
+  const compactAt = compactionAnchors(
+    conversation.messages,
+    visibleMessages.map((m) => m.id),
+    conversation.compactions,
+  )
 
   return (
     <div
@@ -145,6 +163,20 @@ export function MessageList({ isGenerating, isThisChatGenerating, isLoadingModel
               key={message.id}
               style={skipOffscreen && index < tailStart ? SKIPPABLE : undefined}
             >
+              {message.role === 'system' && message.notice ? (
+                // Schlichte Zeile, keine Blase: eine Blase wuerde behaupten,
+                // das Modell habe es gesagt. Dieselbe Form wie im
+                // Code-Verlauf (CodexView, data-testid="codex-notice").
+                <div className="px-3 py-1" data-testid="chat-notice">
+                  <div className={`flex items-start gap-1.5 px-2 py-1 rounded border t-micro leading-snug ${
+                    message.notice === 'warn'
+                      ? 'border-amber-300/70 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/10 text-amber-900 dark:text-amber-200'
+                      : 'border-gray-200 dark:border-white/10 bg-gray-50/60 dark:bg-white/[0.02] text-gray-500 dark:text-gray-400'
+                  }`}>
+                    <span className="break-words">{message.content}</span>
+                  </div>
+                </div>
+              ) : (
               <MessageBubble
                 message={message}
                 isLast={message.id === lastVisibleId}
@@ -161,6 +193,10 @@ export function MessageList({ isGenerating, isThisChatGenerating, isLoadingModel
                 onApprove={onApprove}
                 onReject={onReject}
               />
+              )}
+              {compactAt.get(message.id)?.map((record) => (
+                <CompactBlock key={record.id} record={record} />
+              ))}
             </div>
           ))}
         {/* The run anchor stays visible the entire time the agent is still

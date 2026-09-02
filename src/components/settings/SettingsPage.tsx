@@ -1413,15 +1413,22 @@ export function SettingsPage() {
             <SliderControl label="Temperature" value={settings.temperature} min={0} max={2} step={0.1} onChange={(v) => updateSettings({ temperature: v })} />
             <SliderControl label="Top P" value={settings.topP} min={0} max={1} step={0.05} onChange={(v) => updateSettings({ topP: v })} />
             <SliderControl label="Top K" value={settings.topK} min={1} max={100} step={1} onChange={(v) => updateSettings({ topK: v })} />
+            {/* Die drei Zahlenzeilen dieser Sektion stehen auf der Leiter statt
+                in eckigen Klammern (D-T04). Sie taten es nicht, und als 2.6.8
+                eine vierte dazukam, hat die Sperrklinke das gefangen — der
+                Ausweg war nicht, den Deckel zu heben, sondern die Zeilen zu
+                stellen. `.t-micro` ist der schlichte Kleintext der Leiter,
+                `.t-mono` ihr Rezept fuer eine Zahl (Ziffernbreite fest, damit
+                die Werte untereinander nicht wandern). */}
             <div className="flex items-center justify-between">
-              <span className="text-[0.7rem] text-gray-700 dark:text-gray-400">Max Tokens</span>
+              <span className="t-micro text-gray-700 dark:text-gray-400">Max Tokens</span>
               <input
                 type="number"
                 value={settings.maxTokens}
                 onChange={(e) => updateSettings({ maxTokens: Math.max(0, parseInt(e.target.value) || 0) })}
                 min={0}
                 placeholder="0"
-                className="w-20 px-1.5 py-0.5 rounded bg-transparent border border-white/8 text-[0.65rem] text-right text-gray-300 font-mono focus:outline-none focus:border-white/20"
+                className="w-20 px-1.5 py-0.5 rounded bg-transparent border border-white/8 t-mono text-right text-gray-300 focus:outline-none focus:border-white/20"
               />
             </div>
             {/* Bug AA v2.5.0 — Ollama num_ctx override. 0 = use the provider
@@ -1429,18 +1436,91 @@ export function SettingsPage() {
                 clips RAG / long chats). Bump up to use the model's full
                 context window. Ignored by Anthropic / OpenAI providers. */}
             <div className="flex items-center justify-between">
-              <span className="text-[0.7rem] text-gray-700 dark:text-gray-400" title="Forwarded as Ollama num_ctx. 0 = provider default (Ollama defaults to 2048, which clips RAG and long chats). Bump up to use the model's full context. Ignored by cloud providers.">Context window (Ollama)</span>
+              <span className="t-micro text-gray-700 dark:text-gray-400" title="Forwarded as Ollama num_ctx. 0 = provider default (Ollama defaults to 2048, which clips RAG and long chats). Bump up to use the model's full context. Ignored by cloud providers.">Context window (Ollama)</span>
               <input
                 type="number"
                 value={settings.contextWindowOverride ?? 0}
                 onChange={(e) => updateSettings({ contextWindowOverride: Math.max(0, parseInt(e.target.value) || 0) })}
                 min={0}
                 placeholder="0"
-                className="w-20 px-1.5 py-0.5 rounded bg-transparent border border-white/8 text-[0.65rem] text-right text-gray-300 font-mono focus:outline-none focus:border-white/20"
+                className="w-20 px-1.5 py-0.5 rounded bg-transparent border border-white/8 t-mono text-right text-gray-300 focus:outline-none focus:border-white/20"
               />
             </div>
-            <div className="text-[0.6rem] text-gray-500 dark:text-gray-500 leading-relaxed pt-0.5">
+            <div className="t-micro text-gray-500 dark:text-gray-500 leading-relaxed pt-0.5">
               0 = let Ollama decide (defaults to 2048). Set to e.g. 8192 or 16384 if RAG / long chats get clipped. Cloud providers ignore this.
+            </div>
+            {/* 2.6.8 auto-compact. Shown as a percentage and stored as a
+                fraction, because the threshold is compared against a ratio
+                (compact-trigger.ts). Same shape as the row above — a number
+                input whose 0 is the off state — rather than a slider, because
+                a slider has no way to express "off" at all. */}
+            <div className="flex items-center justify-between">
+              <span
+                className="t-micro text-gray-700 dark:text-gray-400"
+                title="When the conversation fills this much of the window, the model writes a summary of the older turns and those turns stop being sent. 0 = off. The full history stays in the chat either way; only what is sent changes."
+              >Auto-compact at</span>
+              <div className="flex items-center gap-1">
+                <input
+                  type="number"
+                  value={Math.round((settings.autoCompactThreshold || 0) * 100)}
+                  onChange={(e) => {
+                    const pct = Math.max(0, Math.min(100, parseInt(e.target.value) || 0))
+                    updateSettings({ autoCompactThreshold: pct === 0 ? 0 : pct / 100 })
+                  }}
+                  min={0}
+                  max={100}
+                  step={5}
+                  placeholder="0"
+                  className="w-20 px-1.5 py-0.5 rounded bg-transparent border border-white/8 t-mono text-right text-gray-300 focus:outline-none focus:border-white/20"
+                />
+                <span className="t-mono text-gray-500 w-3">%</span>
+              </div>
+            </div>
+            <div className="t-micro text-gray-500 dark:text-gray-500 leading-relaxed pt-0.5">
+              0 = off. Set 80 to have older turns summarised once the context is 80% full, instead of being dropped without a word. Values under 30 or over 95 count as off. Costs one extra model call each time it fires. You can always run it yourself with <span className="font-mono">/compact</span>.
+            </div>
+
+            {/* Die Kappen fuer einen delegierten Agenten. Getrennt von den
+                beiden des Hauptlaufs darueber, weil der Grund ein anderer ist:
+                beim Hauptlauf sitzt der Nutzer davor und kann Stop druecken,
+                ein Sub-Agent laeuft ohne Zuschauer. Darum sind diese Zahlen
+                klein und darum heisst 0 hier "Vorgabe" und nicht
+                "unbegrenzt" — Unbegrenztheit soll man an einer
+                unbeaufsichtigten Schleife nicht aus Versehen einstellen. */}
+            <div className="flex items-center justify-between pt-1">
+              <span
+                className="t-micro text-gray-700 dark:text-gray-400"
+                title="How many tool calls one delegated sub-agent may make."
+              >
+                Sub-agent tool calls
+              </span>
+              <input
+                type="number"
+                value={settings.subAgentMaxToolCalls ?? 0}
+                onChange={(e) => updateSettings({ subAgentMaxToolCalls: Math.max(0, parseInt(e.target.value) || 0) })}
+                min={0}
+                placeholder="10"
+                className="w-20 px-1.5 py-0.5 rounded bg-transparent border border-white/8 t-mono text-right text-gray-300 focus:outline-none focus:border-white/20"
+              />
+            </div>
+            <div className="flex items-center justify-between">
+              <span
+                className="t-micro text-gray-700 dark:text-gray-400"
+                title="How many think-act rounds one delegated sub-agent may run."
+              >
+                Sub-agent steps
+              </span>
+              <input
+                type="number"
+                value={settings.subAgentMaxIterations ?? 0}
+                onChange={(e) => updateSettings({ subAgentMaxIterations: Math.max(0, parseInt(e.target.value) || 0) })}
+                min={0}
+                placeholder="5"
+                className="w-20 px-1.5 py-0.5 rounded bg-transparent border border-white/8 t-mono text-right text-gray-300 focus:outline-none focus:border-white/20"
+              />
+            </div>
+            <div className="t-micro text-gray-500 dark:text-gray-500 leading-relaxed pt-0.5">
+              0 = use the defaults (10 calls, 5 steps). A sub-agent runs unattended, so these stay deliberately tight — raise them only for a task you know is long.
             </div>
           </Section>
 

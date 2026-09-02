@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback, type ReactNode } from 'react'
 import { Send, Square, Paperclip, X, Brain, Terminal } from 'lucide-react'
-import { matchAgentCommands, type AgentCommand } from '../../lib/agent-commands'
+import { matchAgentCommands, type AgentCommand, type CommandScope } from '../../lib/agent-commands'
 import { VoiceButton } from './VoiceButton'
 import { ApprovalDialog } from './ApprovalDialog'
 import { useVoiceStore } from '../../stores/voiceStore'
@@ -23,7 +23,13 @@ interface Props {
    * Enable the "/command" typeahead. Only the Coding Agent (Code view) sets this
    * — slash commands belong there, not in the normal chat (David 2026-06-12).
    */
-  slashCommands?: boolean
+  /**
+   * Which commands this composer offers. Was a boolean meaning
+   * "Coding-Agent-only"; since 2.6.8 it is the SCOPE, because the answer
+   * stopped being all-or-nothing: plain chat offers /compact and nothing else,
+   * while Agent and Coding offer the whole set. Undefined = no menu at all.
+   */
+  slashCommands?: CommandScope
   /**
    * Open the Documents (RAG) panel. The clip button is images-only; this lets the
    * composer point a user who tried to attach a PDF/doc to the right place
@@ -182,12 +188,14 @@ export function ChatInput({ onSend, onStop, isGenerating, pendingApproval, onApp
     if (textareaRef.current) textareaRef.current.style.height = 'auto'
   }
 
-  // Update the input + the slash-command typeahead together. The typeahead is
-  // Coding-Agent-only — in the normal chat (slashCommands unset) "/foo" is just
-  // text and no menu appears.
+  // Update the input + the slash-command typeahead together. The menu shows
+  // what the SURFACE can actually carry out: everything in Agent and Coding,
+  // and in plain chat only the commands marked for it (today: /compact).
+  // Offering an agent command where there is no tool catalogue would be
+  // offering work the surface cannot do.
   const updateInput = (value: string) => {
     setInput(value)
-    const matches = slashCommands ? matchAgentCommands(value) : []
+    const matches = slashCommands ? matchAgentCommands(value, slashCommands) : []
     setCmdMenu(matches)
     setCmdIndex(0)
   }
