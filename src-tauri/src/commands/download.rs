@@ -1217,8 +1217,23 @@ pub fn detect_model_path(provider: String) -> Result<serde_json::Value, String> 
 /// platform, and only then from `os_paths::lmstudio_installed()`, which knows
 /// the `lms` CLI and the app bundle. A user who has LM Studio but has not
 /// downloaded a model yet is therefore still recognised.
+///
+/// ASYNC + spawn_blocking, the same shape as `list_bundled_models`: a
+/// SYNCHRONOUS Tauri command runs on the MAIN thread, and neither half of this
+/// one is cheap enough for that. `lmstudio_dir_in` touches the disk, and
+/// `lmstudio_installed()` reaches `spotlight_app()`, which spawns `mdfind` and
+/// waits for it. Settings opens this on mount, so on a Mac with a busy
+/// Spotlight index that was the window freezing while a panel drew one line
+/// of grey text. That is the same mistake the Mac ComfyUI search made in
+/// 2.6.8, one door further along.
 #[tauri::command]
-pub fn lmstudio_model_dir() -> Result<serde_json::Value, String> {
+pub async fn lmstudio_model_dir() -> Result<serde_json::Value, String> {
+    tokio::task::spawn_blocking(lmstudio_model_dir_blocking)
+        .await
+        .map_err(|e| format!("lmstudio_model_dir task: {e}"))?
+}
+
+fn lmstudio_model_dir_blocking() -> Result<serde_json::Value, String> {
     let home = dirs::home_dir().ok_or("Cannot find home directory")?;
     let found = lmstudio_dir_in(&home);
     let installed = found.is_some() || crate::os_paths::lmstudio_installed();
@@ -1464,6 +1479,32 @@ pub async fn check_model_sizes(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn the_lm_studio_row_never_runs_on_the_main_thread() {
+        // A14 review 3. A SYNCHRONOUS Tauri command runs on the MAIN thread,
+        // and this one reaches os_paths::lmstudio_installed() ->
+        // find_lmstudio_app() -> spotlight_app(), which spawns mdfind and
+        // waits for it. Settings asks on mount, so the shipped shape would
+        // have frozen the window on a Mac with a busy Spotlight index for as
+        // long as mdfind took. Same mistake the Mac ComfyUI search made in
+        // 2.6.8, one door further along.
+        //
+        // The guard is the TYPE, not the source text. A source-text check
+        // would have been self-referential here: the assertion's own string
+        // literal lives in this file, so the file contains it whatever the
+        // signature says (tried, and it passed happily against a synchronous
+        // version). Awaiting the call only compiles while the command really
+        // returns a future, so a return to `pub fn` breaks the build.
+        let value = lmstudio_model_dir().await.expect("the command answers");
+        assert!(value.get("installed").is_some(), "{value}");
+        assert!(value.get("path").is_some(), "{value}");
+
+        // The blocking half answers the same question on its own, and it is
+        // the half whose behaviour the test below pins.
+        let direct = lmstudio_model_dir_blocking().expect("the blocking half answers");
+        assert_eq!(direct.get("installed"), value.get("installed"));
+    }
 
     #[test]
     fn the_lm_studio_row_looks_and_never_creates() {
