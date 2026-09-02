@@ -47,6 +47,11 @@ pub struct DetectedGpu {
     /// the picker did not list at all, and spent days breaking his install
     /// trying to fix what looked like a driver problem.
     pub note: Option<String>,
+    /// How the note should read to a user: "warn" for something LU could not
+    /// verify and the user may have to act on, "info" for a healthy state we
+    /// are only naming. A correctly installed ROCm painted in the warning
+    /// colour is a support ticket waiting to happen.
+    pub note_severity: Option<String>,
     /// The card's compute architecture as the vendor's own tool names it
     /// ("gfx1201"), when a tool named it. Nothing derives this from the model
     /// name: the mapping from marketing name to gfx target is AMD's to publish
@@ -89,6 +94,7 @@ fn detect_nvidia() -> Vec<DetectedGpu> {
                 memory_mib,
                 source: "nvidia-smi".into(),
                 note: None,
+                note_severity: None,
                 arch: None,
             })
         })
@@ -135,6 +141,7 @@ fn detect_amd() -> Vec<DetectedGpu> {
                 memory_mib,
                 source: "rocm-smi".into(),
                 note: None,
+                note_severity: None,
                 arch: None,
             });
         }
@@ -204,6 +211,7 @@ fn detect_other_via_lspci_from(raw: &str, have_rocm: bool) -> Vec<DetectedGpu> {
             memory_mib: None,
             source: "lspci".into(),
             note: note_for(vendor),
+            note_severity: note_for(vendor).map(|_| "warn".to_string()),
             arch: None,
         });
         *index += 1;
@@ -264,6 +272,7 @@ fn detect_macos() -> Vec<DetectedGpu> {
         memory_mib: None,
         source: "system".into(),
         note: None,
+        note_severity: None,
         arch: None,
     }]
 }
@@ -356,6 +365,7 @@ fn detect_other_via_registry_from(
             memory_mib,
             source: "registry".into(),
             note: note_for(vendor),
+            note_severity: note_for(vendor).map(|_| "warn".to_string()),
             arch: None,
         });
         *index += 1;
@@ -473,6 +483,7 @@ fn detect_other_via_wmic_from(
             memory_mib,
             source: source.into(),
             note: note_for(vendor),
+            note_severity: note_for(vendor).map(|_| "warn".to_string()),
             arch: None,
         });
         *index += 1;
@@ -682,11 +693,18 @@ fn parse_hipinfo(raw: &str) -> Vec<HipDevice> {
         let Some(dev) = out.last_mut() else { continue };
         match key.trim().to_ascii_lowercase().as_str() {
             "name" => dev.name = value.to_string(),
-            // The field is a plain string today. Taking the first token keeps a
-            // future ":sramecc+:xnack-" suffix out of a comparison that is only
-            // ever about the target.
+            // ROCm appends its feature flags to this field with no space in
+            // between: "gfx942:sramecc+:xnack-". `torch.cuda.get_arch_list()`
+            // prints the bare target, and the whole point of reading this value
+            // is that a user can hold the two side by side, so the suffix has
+            // to go. Split on the colon, not on whitespace: there is none.
             "gcnarchname" => {
-                dev.arch = value.split_whitespace().next().map(|s| s.trim_end_matches(':').to_string())
+                dev.arch = value
+                    .split_whitespace()
+                    .next()
+                    .and_then(|s| s.split(':').next())
+                    .filter(|s| !s.is_empty())
+                    .map(|s| s.to_string())
             }
             "totalglobalmem" => dev.total_global_mem_mib = parse_hip_size_mib(value),
             _ => {}
@@ -737,7 +755,10 @@ fn hip_roots_from_env(vars: &[(String, String)]) -> Vec<String> {
         if !(ku.starts_with("HIP_PATH") || ku == "ROCM_PATH" || ku.starts_with("ROCM_PATH_")) {
             continue;
         }
-        let root = v.trim().trim_end_matches(['\\', '/']).to_string();
+        // A path pasted into the environment by hand keeps its quotes, and
+        // `C:\Program Files\...` with a quote on the front is a directory that
+        // does not exist.
+        let root = v.trim().trim_matches('"').trim().trim_end_matches(['\\', '/']).to_string();
         if root.is_empty() {
             continue;
         }
@@ -797,23 +818,22 @@ fn hip_version_from_root(root: &str) -> Option<String> {
 /// The note an AMD card carries once the HIP SDK has answered.
 ///
 /// Both halves are read, never assumed: the version comes off the install
-/// directory and the architecture out of `hipinfo`. The second sentence is what
-/// A12 needs (artoriuskurokami, RX 9070 XT, image generation dying with
-/// hipErrorInvalidValue on RDNA4): the card being visible to ROCm and the
-/// PyTorch in the ComfyUI environment having kernels for it are two different
-/// things, and the user has no way to tell them apart from the raw HIP error.
+/// directory and the architecture out of `hipinfo`.
+///
+/// One sentence, and it ships as "info" rather than "warn". This line sits in
+/// the settings list where the old "Found without ROCm tools" warning sat, and
+/// a correct install painted amber with a python command in it reads like
+/// something is wrong. What a user has to DO with the architecture belongs in
+/// the message he sees when a render actually fails, which is
+/// `comfyErrorHint`'s hipErrorInvalidValue branch, and it is there.
 fn rocm_note(version: Option<&str>, arch: Option<&str>) -> Option<String> {
     let head = match version {
         Some(v) => format!("ROCm {v} is installed"),
         None => "A ROCm HIP SDK is installed".to_string(),
     };
     match arch {
-        Some(a) => Some(format!(
-            "{head} and reports this card as {a}. Image and video generation additionally need a PyTorch ROCm build carrying kernels for {a}; without them the first step of a render stops with hipErrorInvalidValue. Read what the installed build covers with: python -c \"import torch; print(torch.cuda.get_arch_list())\""
-        )),
-        None => Some(format!(
-            "{head} and can see this card, but it did not report an architecture. If a render stops with hipErrorInvalidValue, the PyTorch ROCm build in the ComfyUI environment has no kernels for this chip."
-        )),
+        Some(a) => Some(format!("{head} and reports this card as {a}.")),
+        None => Some(format!("{head} and can see this card.")),
     }
 }
 
@@ -826,10 +846,21 @@ fn rocm_note(version: Option<&str>, arch: Option<&str>) -> Option<String> {
 /// qword is measured by the miniport driver and hipinfo's is the field ROCm
 /// issue #5105 caught printing 0.16 GB for a 16 GB card.
 ///
-/// Matching is by name first and by position second. On Windows both probes read
-/// the same adapter string, so the name path is the normal one; the positional
-/// fallback exists for the day they disagree, and it can only ever attach a note
-/// to the wrong card of the same vendor, never a wrong size.
+/// Matching runs in two passes, and the second one is deliberately timid.
+///
+/// Pass one pairs cards by name, which on Windows is the normal case because
+/// both probes read the same adapter string. Pass two is positional and only
+/// fires when exactly one AMD card and exactly one HIP device are left over,
+/// so there is nothing to get wrong.
+///
+/// The timidity is the fix for a real machine, not a style choice. A Ryzen with
+/// an integrated "AMD Radeon(TM) Graphics" plus a discrete card lists two AMD
+/// entries, HIP enumerates only the discrete one, and a first-unused fallback
+/// handed the iGPU the discrete card's gfx target. The picker would then show
+/// the wrong card as the ROCm one, the real card would keep saying "Found
+/// without ROCm tools", and `getAmdGpuArch` would put the iGPU's architecture
+/// into the render-failure message, which is the one place the number has to be
+/// right. Leaving a card unannotated says less; it does not say something false.
 fn apply_rocm_facts(gpus: &mut Vec<DetectedGpu>, facts: Option<&RocmFacts>) {
     let Some(facts) = facts else { return };
     if facts.devices.is_empty() {
@@ -838,50 +869,85 @@ fn apply_rocm_facts(gpus: &mut Vec<DetectedGpu>, facts: Option<&RocmFacts>) {
     let version = facts.version.as_deref();
     let mut used = vec![false; facts.devices.len()];
 
-    for gpu in gpus.iter_mut().filter(|g| g.vendor == "amd") {
+    // Pass one: names.
+    let mut unmatched: Vec<usize> = Vec::new();
+    for (slot, gpu) in gpus.iter_mut().enumerate().filter(|(_, g)| g.vendor == "amd") {
         let by_name = facts
             .devices
             .iter()
             .enumerate()
             .position(|(i, d)| !used[i] && !d.name.is_empty() && names_agree(&gpu.name, &d.name));
-        let pick = by_name.or_else(|| used.iter().position(|u| !u));
-        let Some(i) = pick else { continue };
+        match by_name {
+            Some(i) => {
+                used[i] = true;
+                gpu.arch = facts.devices[i].arch.clone();
+                gpu.note = rocm_note(version, gpu.arch.as_deref());
+                gpu.note_severity = Some("info".to_string());
+            }
+            None => unmatched.push(slot),
+        }
+    }
+
+    // Pass two: position, but only where there is exactly one candidate on each
+    // side. Two of either is a guess, and a guess here is worse than silence.
+    let spare: Vec<usize> = used.iter().enumerate().filter(|(_, u)| !**u).map(|(i, _)| i).collect();
+    if unmatched.len() == 1 && spare.len() == 1 {
+        let (slot, i) = (unmatched[0], spare[0]);
         used[i] = true;
-        gpu.arch = facts.devices[i].arch.clone();
-        gpu.note = rocm_note(version, gpu.arch.as_deref());
+        gpus[slot].arch = facts.devices[i].arch.clone();
+        gpus[slot].note = rocm_note(version, gpus[slot].arch.as_deref());
+        gpus[slot].note_severity = Some("info".to_string());
     }
 
     // Anything hipinfo saw and nobody else did. On a box where the display
     // registry is unreadable this is the only entry the picker gets, so it is
     // added rather than dropped.
-    let mut next_index = gpus.iter().filter(|g| g.vendor == "amd").count() as u32;
     for (i, dev) in facts.devices.iter().enumerate() {
         if used[i] {
             continue;
         }
         let arch = dev.arch.clone();
         gpus.push(DetectedGpu {
-            index: next_index,
+            // HIP's own number, straight off the `device#` header, because that
+            // is exactly what HIP_VISIBLE_DEVICES names. A counter of our own
+            // would be a second numbering to keep in step with HIP's, and this
+            // entry exists precisely because HIP is the only probe that saw the
+            // card.
+            index: dev.index,
             vendor: "amd".into(),
             name: if dev.name.is_empty() { "AMD GPU".to_string() } else { dev.name.clone() },
             // Only above the floor, and only because nothing else answered.
             memory_mib: dev.total_global_mem_mib.filter(|m| *m >= HIPINFO_MIN_TRUSTED_MIB),
             source: "hipinfo".into(),
             note: rocm_note(version, arch.as_deref()),
+            note_severity: Some("info".to_string()),
             arch,
         });
-        next_index += 1;
     }
 }
 
-/// Whether two adapter strings are the same card. Containment either way,
-/// case-insensitively: the registry writes "AMD Radeon RX 9070 XT" and hipinfo
-/// writes the same string, but one of them gaining a "(TM)" must not split one
-/// card into two.
+/// Whether two adapter strings are the same card.
+///
+/// Equality after normalising, NOT containment. The registry writes
+/// "AMD Radeon RX 9070 XT" and hipinfo writes the same string, sometimes with a
+/// "(TM)" in it, so case, punctuation and spacing all have to go. Containment
+/// looked like the tolerant choice and was the dangerous one: "AMD Radeon RX
+/// 7900 XT" is contained in "AMD Radeon RX 7900 XTX", and a box holding both
+/// would have paired them.
 fn names_agree(a: &str, b: &str) -> bool {
-    let a = a.to_ascii_lowercase();
-    let b = b.to_ascii_lowercase();
-    a == b || a.contains(&b) || b.contains(&a)
+    normalised_adapter_name(a) == normalised_adapter_name(b)
+}
+
+/// Lowercase, letters and digits only, with the trademark markers taken out
+/// first. Their letters would otherwise survive the filter and "(TM)" would
+/// turn into "tm" in the middle of the name. "AMD Radeon(TM) RX 9070 XT" and
+/// "AMD Radeon RX 9070 XT" both come out as "amdradeonrx9070xt".
+fn normalised_adapter_name(name: &str) -> String {
+    let mut lower = name.to_ascii_lowercase();
+    for marker in ["(tm)", "(r)", "(c)", "\u{2122}", "\u{00ae}"] {
+        lower = lower.replace(marker, " ");
+    }
+    lower.chars().filter(|c| c.is_ascii_alphanumeric()).collect()
 }
 
 /// `hipinfo` under one install root, if it is there. Both spellings are probed
@@ -903,7 +969,14 @@ fn hipinfo_under(root: &str) -> Option<std::path::PathBuf> {
 /// the old code gave every Windows user whether or not one was installed.
 #[cfg(target_os = "windows")]
 fn detect_rocm_facts() -> Option<RocmFacts> {
-    let vars: Vec<(String, String)> = std::env::vars().collect();
+    // vars_os, never vars. `std::env::vars` PANICS on a variable that is not
+    // valid Unicode, and a Windows environment is UTF-16 that can carry an
+    // unpaired surrogate. detect_gpus is a plain command, so that panic would
+    // land in the settings page and the model manager with nothing to catch it.
+    // A name we cannot read is a name we skip, which is what lossy gives us.
+    let vars: Vec<(String, String)> = std::env::vars_os()
+        .map(|(k, v)| (k.to_string_lossy().into_owned(), v.to_string_lossy().into_owned()))
+        .collect();
     let mut roots = hip_roots_from_env(&vars);
     // Then the default tree, listed rather than named. `HIP_PATH` is set by the
     // installer, but a repair or an in-place upgrade has been seen to leave it
@@ -943,7 +1016,11 @@ fn detect_rocm_facts() -> Option<RocmFacts> {
     None
 }
 
-#[tauri::command]
+/// Off the main thread. Every branch below shells out, each call is bounded at
+/// five seconds, and Windows can hold several HIP install roots to walk before
+/// one of them answers. A synchronous command runs on the main thread and would
+/// freeze the window for the whole of it.
+#[tauri::command(async)]
 pub fn detect_gpus() -> Result<Vec<DetectedGpu>, String> {
     let mut gpus = Vec::new();
     gpus.extend(detect_nvidia());
@@ -1533,11 +1610,10 @@ non-peers:                        device#0
         assert_eq!(devs[0].arch.as_deref(), Some("gfx1201"));
         assert_eq!(devs[0].total_global_mem_mib, Some(16364));
 
-        // NEGATIVE CONTROL: `non-peers: device#0` is a value row, not a second
-        // device, and the trailing memInfo block is not a third. A parser that
-        // split on "device#" anywhere in the line would grow both.
-        assert!(HIPINFO_ONE_CARD.contains("non-peers:                        device#0"));
-        assert_eq!(devs.len(), 1);
+        // NEGATIVE CONTROL: "device#" also appears mid-line in the `non-peers`
+        // row, and a parser that looked for it anywhere would open a block
+        // there. Feed it that row and nothing else: no device may come back.
+        assert!(parse_hipinfo("non-peers:                        device#0\n").is_empty());
     }
 
     #[test]
@@ -1646,10 +1722,10 @@ non-peers:                        device#0
         let note = gpus[0].note.as_deref().unwrap();
         assert!(!note.contains("Found without ROCm tools"), "{note}");
         assert!(note.contains("ROCm 7.1 is installed"), "{note}");
-        // A12: the note has to say that a visible card and a usable PyTorch are
-        // two different things, and name the architecture the build must carry.
         assert!(note.contains("gfx1201"), "{note}");
-        assert!(note.contains("hipErrorInvalidValue"), "{note}");
+        // A healthy install is stated, not warned about. The amber colour in
+        // the settings list hangs off this.
+        assert_eq!(gpus[0].note_severity.as_deref(), Some("info"));
 
         // The registry's measured 16 GB survives untouched. hipinfo's own
         // number is never allowed to overwrite it (ROCm #5105).
@@ -1767,7 +1843,139 @@ non-peers:                        device#0
         }
         let with_arch = rocm_note(None, Some("gfx1200")).unwrap();
         assert!(with_arch.contains("gfx1200"), "{with_arch}");
-        assert!(with_arch.contains("get_arch_list"), "point at the tool, not at a version: {with_arch}");
+        assert!(!with_arch.contains("7."), "no version leaked in: {with_arch}");
+    }
+
+
+    // ── Review round: the cases the first pass got wrong ──────────────────
+
+    /// gfx942 as ROCm really prints it once the feature flags are on. The
+    /// suffix hangs off the target with no space, and `get_arch_list()` prints
+    /// the bare target, so the two would never compare equal.
+    const HIPINFO_WITH_FEATURE_FLAGS: &str = "\
+device#                           0
+Name:                             AMD Instinct MI300X
+totalGlobalMem:                   192.00 GB
+gcnArchName:                      gfx942:sramecc+:xnack-
+";
+
+    #[test]
+    fn the_architecture_drops_the_feature_flags_rocm_hangs_off_it() {
+        let devs = parse_hipinfo(HIPINFO_WITH_FEATURE_FLAGS);
+        assert_eq!(devs.len(), 1, "{devs:?}");
+        assert_eq!(devs[0].arch.as_deref(), Some("gfx942"));
+
+        // NEGATIVE CONTROL: the raw field is what a user would be told to
+        // compare against `torch.cuda.get_arch_list()`, which prints "gfx942".
+        // Carrying the suffix through makes the comparison fail on a machine
+        // that is fine.
+        assert!(HIPINFO_WITH_FEATURE_FLAGS.contains("gfx942:sramecc+:xnack-"));
+        assert_ne!(devs[0].arch.as_deref(), Some("gfx942:sramecc+:xnack-"));
+        // A plain target is untouched.
+        assert_eq!(parse_hipinfo(HIPINFO_ONE_CARD)[0].arch.as_deref(), Some("gfx1201"));
+    }
+
+    /// The machine the first version of this got wrong: a Ryzen APU next to a
+    /// discrete card. Two AMD entries in the registry, one HIP device, and the
+    /// integrated part is listed first because that is how the subkeys fell.
+    #[test]
+    fn an_apu_next_to_a_discrete_card_never_borrows_its_architecture() {
+        let names = vec![
+            ("0000".to_string(), "AMD Radeon(TM) Graphics".to_string()),
+            ("0001".to_string(), "AMD Radeon RX 9070 XT".to_string()),
+        ];
+        let mut gpus = windows_fallback_from(&names, &[], None, false);
+        let facts = RocmFacts { version: Some("7.1".into()), devices: parse_hipinfo(HIPINFO_ONE_CARD) };
+        apply_rocm_facts(&mut gpus, Some(&facts));
+
+        let igpu = gpus.iter().find(|g| g.name == "AMD Radeon(TM) Graphics").unwrap();
+        let dgpu = gpus.iter().find(|g| g.name == "AMD Radeon RX 9070 XT").unwrap();
+        // The card HIP actually reported gets the architecture.
+        assert_eq!(dgpu.arch.as_deref(), Some("gfx1201"));
+        // NEGATIVE CONTROL: the integrated part must keep saying nothing. A
+        // first-unused fallback gave it gfx1201, and getAmdGpuArch reads the
+        // FIRST amd entry with an arch, so the render-failure message would
+        // then have named the wrong chip.
+        assert_eq!(igpu.arch, None, "the iGPU borrowed an architecture it does not have");
+        assert!(igpu.note.as_deref().unwrap().contains("Found without ROCm tools"));
+        assert_eq!(igpu.note_severity.as_deref(), Some("warn"));
+        assert_eq!(dgpu.note_severity.as_deref(), Some("info"));
+        // Nothing invented and nothing dropped.
+        assert_eq!(gpus.iter().filter(|g| g.vendor == "amd").count(), 2, "{gpus:?}");
+    }
+
+    #[test]
+    fn the_positional_fallback_only_fires_when_there_is_nothing_to_get_wrong() {
+        // One card, one device, names that do not match at all: this is what
+        // the fallback is for, and it still runs.
+        let names = vec![("0000".to_string(), "Radeon Graphics Adapter".to_string())];
+        let mut one = windows_fallback_from(&names, &[], None, false);
+        let facts = RocmFacts { version: Some("7.1".into()), devices: parse_hipinfo(HIPINFO_ONE_CARD) };
+        apply_rocm_facts(&mut one, Some(&facts));
+        assert_eq!(one[0].arch.as_deref(), Some("gfx1201"), "{one:?}");
+        assert_eq!(one.len(), 1, "no second card appended: {one:?}");
+
+        // Two cards and two devices, none of the names matching. Both sides are
+        // ambiguous, so nobody is annotated and nobody is paired by luck.
+        let two_names = vec![
+            ("0000".to_string(), "Radeon Adapter A".to_string()),
+            ("0001".to_string(), "Radeon Adapter B".to_string()),
+        ];
+        let mut two = windows_fallback_from(&two_names, &[], None, false);
+        let two_devices = format!("{HIPINFO_ONE_CARD}{HIPINFO_BROKEN_SIZE}");
+        let facts2 = RocmFacts { version: Some("7.1".into()), devices: parse_hipinfo(&two_devices) };
+        apply_rocm_facts(&mut two, Some(&facts2));
+        assert!(two[0].arch.is_none() && two[1].arch.is_none(), "guessed a pairing: {two:?}");
+        // The devices nobody claimed are still listed, so no card disappears.
+        assert_eq!(two.iter().filter(|g| g.vendor == "amd").count(), 4, "{two:?}");
+    }
+
+    #[test]
+    fn a_card_the_hip_sdk_appended_keeps_hips_own_device_number() {
+        // HIP_VISIBLE_DEVICES names HIP's numbering, and this entry exists
+        // because HIP is the only probe that saw the card, so its number is the
+        // only one that means anything.
+        let mut gpus: Vec<DetectedGpu> = vec![];
+        let second = HIPINFO_ONE_CARD.replace("device#                           0", "device#                           1");
+        let facts = RocmFacts { version: None, devices: parse_hipinfo(&second) };
+        apply_rocm_facts(&mut gpus, Some(&facts));
+        assert_eq!(gpus.len(), 1);
+        assert_eq!(gpus[0].index, 1, "HIP said device 1, so HIP_VISIBLE_DEVICES=1");
+    }
+
+    #[test]
+    fn two_cards_of_the_same_family_are_not_the_same_card() {
+        // NEGATIVE CONTROL for the matching rule itself: "RX 7900 XT" is a
+        // substring of "RX 7900 XTX", and containment paired them.
+        assert!("amd radeon rx 7900 xtx".contains("amd radeon rx 7900 xt"));
+        assert!(!names_agree("AMD Radeon RX 7900 XT", "AMD Radeon RX 7900 XTX"));
+        // What the rule is actually there to absorb.
+        assert!(names_agree("AMD Radeon(TM) RX 9070 XT", "AMD Radeon RX 9070 XT"));
+        assert!(names_agree("amd  radeon rx 9070 xt", "AMD Radeon RX 9070 XT"));
+        assert!(!names_agree("AMD Radeon RX 9070 XT", "AMD Radeon(TM) Graphics"));
+    }
+
+    #[test]
+    fn a_healthy_rocm_install_is_not_painted_as_a_warning() {
+        let note = rocm_note(Some("7.1"), Some("gfx1201")).unwrap();
+        // One sentence. The old text ran past 300 characters and carried a
+        // python command, in the amber colour the "cannot confirm" warning uses.
+        assert!(note.len() < 80, "{} chars: {note}", note.len());
+        assert_eq!(note, "ROCm 7.1 is installed and reports this card as gfx1201.");
+        // NEGATIVE CONTROL: what a user has to DO belongs in the message he
+        // gets when a render fails, not in a settings line about a healthy
+        // install. Neither the command nor the error name may be here.
+        assert!(!note.contains("get_arch_list"), "{note}");
+        assert!(!note.contains("hipErrorInvalidValue"), "{note}");
+    }
+
+    #[test]
+    fn a_hip_path_that_was_pasted_in_with_quotes_still_resolves() {
+        let vars = vec![("HIP_PATH".to_string(), "\"C:\\Program Files\\AMD\\ROCm\\7.1\\\"".to_string())];
+        assert_eq!(hip_roots_from_env(&vars), vec!["C:\\Program Files\\AMD\\ROCm\\7.1".to_string()]);
+        // NEGATIVE CONTROL: the quote used to survive, and no such directory
+        // exists, so the probe walked past a correctly installed SDK.
+        assert!(!hip_roots_from_env(&vars)[0].starts_with('"'));
     }
 
     #[test]
