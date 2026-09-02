@@ -361,12 +361,33 @@ pub(crate) const VC_REDIST_PAGE: &str = "https://learn.microsoft.com/cpp/windows
 /// is not localised, while the sentence after it is. Everything else here is
 /// an English phrase and is only ever a second chance.
 fn reads_as_missing(lower: &str) -> bool {
+    // R1: a file that is THERE and refused, or THERE and locked, is not a file
+    // that is absent. `winerror` alone would read both as missing, and pip
+    // names the blocked path in the same line: "[WinError 5] Access is denied:
+    // '...\\torch\\lib\\msvcp140.dll'". That sent the customer after a
+    // redistributable they already have, and it cost them the --user escape,
+    // because the permission arm never saw the failure.
+    if reads_as_refused(lower) {
+        return false;
+    }
     lower.contains("winerror")
         || lower.contains("not found")
         || lower.contains("could not be found")
         || lower.contains("error loading")
         || lower.contains("dll load failed")
         || lower.contains("cannot open shared object file")
+}
+
+/// A file the process may not write, or may not touch because something else
+/// holds it. Both are answered by installing somewhere else, which is what the
+/// per user site is for.
+fn reads_as_refused(lower: &str) -> bool {
+    lower.contains("access is denied")
+        || lower.contains("permission denied")
+        || lower.contains("winerror 5]")
+        || lower.contains("winerror 32]")
+        || lower.contains("errno 13")
+        || lower.contains("used by another process")
 }
 
 /// The Visual C++ runtime file a failure names, when it names one.
@@ -428,6 +449,11 @@ pub(crate) fn pip_failure_kind(text: &str) -> PipFailureKind {
     // every one of those lines names a DLL under torch\lib.
     } else if lower.contains("no space") || lower.contains("errno 28") {
         PipFailureKind::DiskFull
+    // R1, and for the same reason as the disk arm above it: pip names the
+    // blocked file in the message, and under Program Files that file is
+    // regularly one of the runtime DLLs torch ships.
+    } else if is_permission_denied_pip_error(text) {
+        PipFailureKind::Permission
     } else if missing_runtime_library(text).is_some() {
         PipFailureKind::MissingRuntimeLibrary
     } else if lower.contains("winerror 1114")
@@ -453,11 +479,6 @@ pub(crate) fn pip_failure_kind(text: &str) -> PipFailureKind {
         PipFailureKind::Timeout
     } else if lower.contains("connection") {
         PipFailureKind::Network
-    // The predicate the custom node path has used since 2026-07-19: an
-    // admin only site-packages under Program Files answers with "Access is
-    // denied" and WinError 5, neither of which contains the word permission.
-    } else if is_permission_denied_pip_error(text) {
-        PipFailureKind::Permission
     } else if lower.contains("no module named") || lower.contains("modulenotfounderror") {
         PipFailureKind::PipBroken
     } else if lower.contains("could not find a version") {
@@ -2390,6 +2411,12 @@ pub fn update_comfyui(state: State<'_, AppState>) -> Result<serde_json::Value, S
     }
 
     let install_status = state.install_status.clone();
+    // The update runs through the same status slot, the same panel and the
+    // same Cancel button as the install, so it gets the same flag. Reset
+    // first, for the reason install_comfyui resets it (Bug #1): a previously
+    // cancelled run would otherwise abort this one on the first poll.
+    state.comfyui_install_cancel.store(false, Ordering::SeqCst);
+    let cancel_flag = state.comfyui_install_cancel.clone();
     std::thread::spawn(move || {
         let update = |status: &str, msg: &str| {
             if let Ok(mut s) = install_status.lock() {
@@ -2473,9 +2500,13 @@ pub fn update_comfyui(state: State<'_, AppState>) -> Result<serde_json::Value, S
                 &python_bin,
                 3,
                 &install_status,
-                None,
+                Some(&cancel_flag),
             ) {
                 Ok(()) => update("installing", "Dependencies updated."),
+                Err(diagnosis) if diagnosis == "cancelled" => {
+                    update("cancelled", "Update cancelled during the requirements install.");
+                    return;
+                }
                 Err(diagnosis) => {
                     println!("[Update] Requirements warning: {}", diagnosis);
                     update(
@@ -2490,7 +2521,11 @@ pub fn update_comfyui(state: State<'_, AppState>) -> Result<serde_json::Value, S
         // core moves on, one wheel does not land, and the update reports
         // finished over an environment that no longer imports.
         update("installing", "Step 3/3: Checking that the environment really starts...");
-        if let Err(e) = verify_and_heal_environment(&python_bin, &reqs, &install_status, None) {
+        if let Err(e) = verify_and_heal_environment(&python_bin, &reqs, &install_status, Some(&cancel_flag)) {
+            if e == "cancelled" {
+                update("cancelled", "Update cancelled during the environment check.");
+                return;
+            }
             error!("comfyui update left an environment that does not import");
             update("error", &format!("ComfyUI was updated, but its Python environment is not usable.\n\n{}", e));
             return;
@@ -4731,6 +4766,11 @@ fn is_permission_denied_pip_error(output: &str) -> bool {
         || lower.contains("errno 13")
         || lower.contains("access is denied")
         || lower.contains("winerror 5")
+        // A DLL another process still holds open is the same dead end with a
+        // different code, and it has the same way out: install into the per
+        // user site instead of into the one that is locked.
+        || lower.contains("winerror 32]")
+        || lower.contains("used by another process")
 }
 
 // ── tests (issue #32: PyTorch / ComfyUI install reliability) ────────────────
@@ -5805,6 +5845,36 @@ mod tests {
     }
 
     #[test]
+    fn a_runtime_dll_that_is_blocked_is_a_permission_failure_not_a_missing_file() {
+        // R1. pip names the file it could not write, and under Program Files
+        // that file is regularly one of the DLLs torch ships. Reading those
+        // two lines as a missing runtime sent the customer after a
+        // redistributable they already have AND cost them the --user escape,
+        // because should_retry_in_user_site never saw a permission failure.
+        for line in [
+            "ERROR: Could not install packages due to an OSError: [WinError 5] Access is denied: 'C:\\Program Files\\Python312\\Lib\\site-packages\\torch\\lib\\msvcp140.dll'",
+            "ERROR: Could not install packages due to an OSError: [WinError 32] The process cannot access the file because it is being used by another process: 'C:\\Program Files\\Python312\\Lib\\site-packages\\torch\\lib\\vcomp140.dll'",
+        ] {
+            assert_eq!(pip_failure_kind(line), PipFailureKind::Permission, "{line}");
+            assert_eq!(missing_runtime_library(line), None, "read a blocked file as an absent one: {line}");
+            assert!(should_retry_in_user_site(false, line), "the escape is lost: {line}");
+            let hint = pip_failure_hint(pip_failure_kind(line), line);
+            assert!(!hint.contains(VC_REDIST_PAGE), "still sends them to microsoft.com: {hint}");
+        }
+    }
+
+    #[test]
+    fn a_runtime_dll_that_is_really_absent_is_still_a_missing_file() {
+        // Negative control for the arm above: the genuine case must not be
+        // swept into the permission arm along with it.
+        let line = "OSError: [WinError 126] The specified module could not be found. Error loading \"vcomp140.dll\"";
+        assert_eq!(pip_failure_kind(line), PipFailureKind::MissingRuntimeLibrary, "{line}");
+        assert_eq!(missing_runtime_library(line), Some("vcomp140.dll"));
+        assert!(!should_retry_in_user_site(false, line), "a --user retry cannot install a runtime");
+        assert!(pip_failure_hint(pip_failure_kind(line), line).contains(VC_REDIST_PAGE));
+    }
+
+    #[test]
     fn the_old_verdicts_still_come_out_of_the_new_classifier() {
         // The rewrite must not move any existing case: these are the arms the
         // shipped diagnoses were built on.
@@ -6196,13 +6266,27 @@ mod tests {
         name.to_string()
     }
 
-    fn have_python3() -> bool {
-        std::process::Command::new("python3")
-            .arg("--version")
-            .output()
-            .map(|o| o.status.success())
-            .unwrap_or(false)
+    /// The interpreter the live probe tests run against, found the way the
+    /// product finds it.
+    ///
+    /// Not the literal "python3": the CI matrix runs this suite on
+    /// windows-latest too, where the interpreter is `python`, lives under
+    /// Program Files, or answers only through the `py` launcher. Borrowing the
+    /// product's own resolver means these tests cover Windows instead of being
+    /// skipped there, and it returns the empty string when the box has no
+    /// usable Python, which is the clean skip.
+    fn probe_python() -> Option<String> {
+        let bin = crate::python::get_python_bin();
+        (!bin.is_empty() && crate::python::is_real_python(&bin)).then_some(bin)
     }
+
+    /// The deadline the live tests use. The product waits five minutes for a
+    /// cold drive; a test that waited that long would be a CI outage, and a
+    /// test that never reaches its deadline proves nothing.
+    const TEST_PROBE_DEADLINE: std::time::Duration = std::time::Duration::from_millis(1200);
+    /// Long enough that only a broken cancel reaches it, short enough that a
+    /// broken cancel fails the job in seconds instead of a minute.
+    const TEST_CANCEL_DEADLINE: std::time::Duration = std::time::Duration::from_secs(8);
 
     /// The script is generated as text, so a stray indent or quote would only
     /// show up on a customer machine. Run it through a real interpreter here.
@@ -6211,11 +6295,11 @@ mod tests {
     #[test]
     fn the_generated_script_is_valid_python_and_speaks_the_parsers_protocol() {
         let _turn = PROBE_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        if !have_python3() {
-            eprintln!("no python3 on this box, skipping the live probe check");
+        let Some(python) = probe_python() else {
+            eprintln!("no usable Python on this box, skipping the live probe check");
             return;
-        }
-        let report = run_import_probe("python3", &["json", "definitely_not_a_real_module_lu"], None, None)
+        };
+        let report = run_import_probe(&python, &["json", "definitely_not_a_real_module_lu"], None, None)
             .expect("not cancelled");
         assert_eq!(report.missing, vec!["definitely_not_a_real_module_lu"], "{report:?}");
         assert!(report.broken.is_empty(), "{report:?}");
@@ -6228,9 +6312,10 @@ mod tests {
     #[test]
     fn a_real_child_that_warns_then_dies_keeps_its_crash_unexplained() {
         let _turn = PROBE_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        if !have_python3() {
+        let Some(python) = probe_python() else {
+            eprintln!("no usable Python on this box, skipping the live probe check");
             return;
-        }
+        };
         let dir = std::env::temp_dir().join("lu-probe-crash-noisy");
         let name = stage_probe_module(
             &dir,
@@ -6240,7 +6325,7 @@ mod tests {
              sys.stderr.flush()\n\
              os._exit(3)\n",
         );
-        let report = run_import_probe("python3", &[&name], None, None).expect("not cancelled");
+        let report = run_import_probe(&python, &[&name], None, None).expect("not cancelled");
         std::env::remove_var("PYTHONPATH");
         let _ = std::fs::remove_dir_all(&dir);
         assert_eq!(report.crashed.as_deref(), Some(name.as_str()), "{report:?}");
@@ -6252,9 +6337,10 @@ mod tests {
     #[test]
     fn a_real_child_that_names_a_dll_before_it_dies_gets_that_cause() {
         let _turn = PROBE_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        if !have_python3() {
+        let Some(python) = probe_python() else {
+            eprintln!("no usable Python on this box, skipping the live probe check");
             return;
-        }
+        };
         let dir = std::env::temp_dir().join("lu-probe-crash-named");
         let name = stage_probe_module(
             &dir,
@@ -6265,7 +6351,7 @@ mod tests {
              sys.stderr.flush()\n\
              os._exit(3)\n",
         );
-        let report = run_import_probe("python3", &[&name], None, None).expect("not cancelled");
+        let report = run_import_probe(&python, &[&name], None, None).expect("not cancelled");
         std::env::remove_var("PYTHONPATH");
         let _ = std::fs::remove_dir_all(&dir);
         assert!(report.crashed.is_none(), "{report:?}");
@@ -6279,23 +6365,18 @@ mod tests {
     #[test]
     fn a_probe_that_hangs_is_killed_at_the_deadline_and_never_passes() {
         let _turn = PROBE_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        if !have_python3() {
+        let Some(python) = probe_python() else {
+            eprintln!("no usable Python on this box, skipping the live probe check");
             return;
-        }
+        };
         let dir = std::env::temp_dir().join("lu-probe-hang");
         let name = stage_probe_module(&dir, "lu_probe_hang", "import time\ntime.sleep(120)\n");
         let started = std::time::Instant::now();
-        let report = run_import_probe_bounded(
-            "python3",
-            &[&name],
-            None,
-            None,
-            std::time::Duration::from_millis(1200),
-        )
-        .expect("not cancelled");
+        let report = run_import_probe_bounded(&python, &[&name], None, None, TEST_PROBE_DEADLINE)
+            .expect("not cancelled");
         std::env::remove_var("PYTHONPATH");
         let _ = std::fs::remove_dir_all(&dir);
-        assert!(started.elapsed() < std::time::Duration::from_secs(20), "the deadline did not bite");
+        assert!(started.elapsed() < std::time::Duration::from_secs(30), "the deadline did not bite");
         assert!(report.timed_out, "{report:?}");
         assert!(!report.is_healthy(), "a hung probe passed as healthy: {report:?}");
     }
@@ -6305,9 +6386,10 @@ mod tests {
     #[test]
     fn cancel_stops_the_probe_instead_of_waiting_it_out() {
         let _turn = PROBE_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        if !have_python3() {
+        let Some(python) = probe_python() else {
+            eprintln!("no usable Python on this box, skipping the live probe check");
             return;
-        }
+        };
         let dir = std::env::temp_dir().join("lu-probe-cancel");
         let name = stage_probe_module(&dir, "lu_probe_cancel", "import time\ntime.sleep(120)\n");
         let flag = Arc::new(AtomicBool::new(false));
@@ -6317,17 +6399,11 @@ mod tests {
             trip.store(true, Ordering::SeqCst);
         });
         let started = std::time::Instant::now();
-        let out = run_import_probe_bounded(
-            "python3",
-            &[&name],
-            None,
-            Some(&flag),
-            std::time::Duration::from_secs(60),
-        );
+        let out = run_import_probe_bounded(&python, &[&name], None, Some(&flag), TEST_CANCEL_DEADLINE);
         std::env::remove_var("PYTHONPATH");
         let _ = std::fs::remove_dir_all(&dir);
         assert_eq!(out.err().as_deref(), Some("cancelled"));
-        assert!(started.elapsed() < std::time::Duration::from_secs(20), "cancel waited the probe out");
+        assert!(started.elapsed() < TEST_CANCEL_DEADLINE, "cancel waited the probe out");
     }
 
     // ── the two paths that have to run the probe ──────────────────────────
@@ -6366,6 +6442,12 @@ mod tests {
         assert!(
             !src.contains("Some optional dependencies had warnings (non-critical)"),
             "the repair still waves a failed requirements install through",
+        );
+        // Every path hands the probe the cancel flag. A probe with a deadline
+        // but no Cancel is still five minutes the user cannot get out of.
+        assert!(
+            !src.contains("verify_and_heal_environment(&python_bin, &reqs, &install_status, None)"),
+            "a path runs the environment check with no way to cancel it",
         );
         // The install must reach for an existing venv before it reaches for
         // the system Python: the launcher and the updater both use that venv,
