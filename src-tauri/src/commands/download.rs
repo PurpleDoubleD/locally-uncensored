@@ -123,6 +123,57 @@ mod civitai_auth_tests {
         assert!(!is_civitai_host("https://huggingface.co/repo/resolve/main/m.safetensors"));
         // A userinfo prefix is not a host either.
         assert!(!is_civitai_host("https://civitai.com@evil.test/file"));
+        assert!(!is_civitai_host("not a url"));
+    }
+
+    /// The backslash forms the hand written parser got wrong.
+    ///
+    /// In a special scheme the backslash ends the authority. The old check
+    /// split the string by hand and disagreed with the transport in BOTH
+    /// directions: `https://evil.test\.civitai.com/x` goes to `evil.test` and
+    /// was called CivitAI, so the Bearer token would have ridden along, and
+    /// `https://civitai.com\@evil.test/x` goes to `civitai.com` and was called
+    /// something else. The frontend gates on `new URL()` too, so the app could
+    /// not produce the first one, but a second gate that disagrees with the
+    /// transport is not a gate.
+    ///
+    /// The property is the agreement itself: the check answers what the
+    /// request will actually do, because it asks the same parser.
+    #[test]
+    fn the_check_agrees_with_the_host_the_request_will_reach() {
+        for u in [
+            "https://evil.test\\.civitai.com/x",
+            "https://civitai.com\\@evil.test/x",
+            "https://civitai.com\\.evil.test/x",
+            "https://civitai.com/api/download/models/1",
+            "https://evil.test/?x=civitai.com",
+        ] {
+            let host = url::Url::parse(u).unwrap().host_str().unwrap().to_ascii_lowercase();
+            let reaches_civitai = host == "civitai.com"
+                || host == "civitai.red"
+                || host.ends_with(".civitai.com")
+                || host.ends_with(".civitai.red");
+            assert_eq!(
+                is_civitai_host(u),
+                reaches_civitai,
+                "{u} really goes to {host}",
+            );
+        }
+    }
+
+    /// Negative control for the one that matters: the smuggling form must be
+    /// refused, not merely "agree".
+    #[test]
+    fn a_backslash_cannot_send_the_key_to_another_host() {
+        assert!(!is_civitai_host("https://evil.test\\.civitai.com/x"));
+        assert_eq!(
+            url::Url::parse("https://evil.test\\.civitai.com/x")
+                .unwrap()
+                .host_str()
+                .unwrap(),
+            "evil.test",
+            "precondition: this URL really does reach evil.test",
+        );
     }
 
     #[test]
@@ -611,23 +662,20 @@ fn gib(bytes: u64) -> String {
     format!("{:.1} GB", bytes as f64 / (1024.0 * 1024.0 * 1024.0))
 }
 
-/// Is this a CivitAI download URL? `civitai.red` is the mirror LU offers for
-/// regions where `.com` is blocked (GH #53), so both count. Matched on the
-/// host, never on a substring of the whole URL: `https://evil.test/?x=civitai.com`
-/// must not collect the user's API key.
+/// Is this a CivitAI download URL?
+///
+/// `civitai.red` is the mirror LU offers for regions where `.com` is blocked
+/// (GH #53), so both count. Parsed with the same URL parser the request itself
+/// goes through, never picked apart by hand: a hand written host split does not
+/// know that a backslash ends the host in a special scheme, so
+/// `https://evil.test\.civitai.com/x` read as a CivitAI host here while reqwest
+/// sent the Bearer token to `evil.test`. Same rule for
+/// `https://civitai.com\@evil.test`.
 pub(crate) fn is_civitai_host(url: &str) -> bool {
-    let rest = match url.split_once("://") {
-        Some((_, r)) => r,
-        None => url,
+    let host = match url::Url::parse(url) {
+        Ok(u) => u.host_str().unwrap_or("").to_ascii_lowercase(),
+        Err(_) => return false,
     };
-    let host = rest
-        .split(['/', '?', '#'])
-        .next()
-        .unwrap_or("")
-        .rsplit('@')
-        .next()
-        .unwrap_or("");
-    let host = host.split(':').next().unwrap_or("").to_ascii_lowercase();
     host == "civitai.com"
         || host == "civitai.red"
         || host.ends_with(".civitai.com")

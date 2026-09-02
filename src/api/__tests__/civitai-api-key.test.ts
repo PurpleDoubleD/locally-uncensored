@@ -53,6 +53,13 @@ describe('who gets the key', () => {
     expect(isCivitaiUrl('https://evil.test/?x=civitai.com')).toBe(false)
     expect(isCivitaiUrl('https://civitai.com.evil.test/file')).toBe(false)
     expect(isCivitaiUrl('not a url')).toBe(false)
+    // The backslash forms: in a special scheme a backslash ends the authority,
+    // so this one really reaches evil.test. `new URL()` knows that, and so does
+    // the Rust gate behind it (url::Url::parse), which is the point: both sides
+    // have to agree with the host the request will actually reach.
+    expect(new URL('https://evil.test\\.civitai.com/x').hostname).toBe('evil.test')
+    expect(isCivitaiUrl('https://evil.test\\.civitai.com/x')).toBe(false)
+    expect(civitaiAuthToken('https://evil.test\\.civitai.com/x')).toBeNull()
     expect(civitaiAuthToken(HUGGINGFACE)).toBeNull()
     expect(civitaiAuthToken('https://evil.test/?x=civitai.com')).toBeNull()
   })
