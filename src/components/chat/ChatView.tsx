@@ -25,6 +25,8 @@ import { TokenCounter } from './TokenCounter'
 import { ContextDropdown } from './ContextDropdown'
 import { SmallModelModeToggle } from './SmallModelModeToggle'
 import { ABCompare } from './ABCompare'
+import { RecentChats } from './RecentChats'
+import { useUIStore } from '../../stores/uiStore'
 import { useCompareStore } from '../../stores/compareStore'
 import { exportConversation } from '../../lib/chat-export'
 import { PermissionOverrideBar } from './PermissionOverrideBar'
@@ -36,6 +38,9 @@ import { useRemoteStore } from '../../stores/remoteStore'
 export function ChatView() {
   const { sendMessage, stopGeneration, isGenerating, isLoadingModel, regenerateMessage, editAndResend, pendingApproval, approveToolCall, rejectToolCall } = useChat()
   const activeConversationId = useChatStore((s) => s.activeConversationId)
+  // Drives the recent-chats list on the empty screen: collapsed panel means
+  // the list stands in the main area, expanded means it stands in the panel.
+  const sidebarOpen = useUIStore((s) => s.sidebarOpen)
   const conversations = useChatStore((s) => s.conversations)
   const activeModel = useModelStore((s) => s.activeModel)
   const models = useModelStore((s) => s.models)
@@ -158,7 +163,12 @@ export function ChatView() {
             exit={{ opacity: 0, y: -20 }}
             transition={{ duration: 0.2 }}
           >
-            <img src="/LU-monogram-bw.png" alt="" width={46} height={46} className="dark:invert-0 invert opacity-20" />
+            <img src="/LU-monogram-bw.png" alt="" width={46} height={46} className="dark:invert-0 invert opacity-20 mb-5" />
+
+            {/* The latest chats stand here only while the side panel is
+                collapsed (David, web parity). Expanded, the list lives in the
+                panel and would be on screen twice. */}
+            {!sidebarOpen && <RecentChats />}
 
             {models.length > 0 && !activeModel && (
               <p className="text-[0.6rem] text-amber-500/60 mt-3">Select a model above.</p>
