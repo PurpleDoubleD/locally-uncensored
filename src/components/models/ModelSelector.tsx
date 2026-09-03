@@ -451,6 +451,34 @@ export function toolBadgeTitle(model: AIModel, support: ToolSupport = 'native'):
   return how
 }
 
+/**
+ * Which wait a click on a switched-off picker row ran into, or null.
+ *
+ * A17 (Windows counter-check 03.09.): while a pick is in flight every row in
+ * the list carries `aria-disabled`, and the row's onClick read
+ * `if (!rowDisabled) void handleSelectModel(model)`. Both busy sentences live
+ * inside `handleSelectModel`, so the door that would have said them was the
+ * door that never opened: two clicks 150 ms apart, fourteen and eighteen
+ * seconds of watching, and not a word on screen. The card path (Models >
+ * Installed) says its line because its buttons are not switched off.
+ *
+ * So the disabled row answers too, and it answers with the SAME split
+ * `handleSelectModel` makes: the bolt is the only thing that knows whether the
+ * engine is swapping, and the picker's own in-flight state without the bolt is
+ * LM Studio warming a model of its own.
+ *
+ * `pickInFlight` is exactly the reason this picker switches rows off. A row
+ * that is dead for any other reason (nothing running, some future rule) is not
+ * a wait, and gets silence rather than a sentence about a wait nobody is in.
+ */
+export function blockedPickWait(
+  pickInFlight: boolean,
+  luEngineSwapRunning: boolean,
+): 'lu-engine' | 'lm-studio' | null {
+  if (!pickInFlight) return null
+  return luEngineSwapRunning ? 'lu-engine' : 'lm-studio'
+}
+
 export function lmsAutoLoadContext(model: AIModel): number {
   const max =
     'contextLength' in model && typeof model.contextLength === 'number' && model.contextLength > 0
@@ -823,6 +851,25 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
     setOpen(false)
   }
 
+  /**
+   * The answer a click on a switched-off row gets (A17).
+   *
+   * Not a queued pick: the click is still refused, it just stops being silent.
+   * `blockedPickWait` decides whether there is anything to say at all, so a row
+   * switched off for some other reason keeps its silence.
+   */
+  const announceBlockedPick = (pickInFlight: boolean) => {
+    const wait = blockedPickWait(pickInFlight, luEngineSwapInFlight())
+    if (wait === null) return
+    if (wait === 'lm-studio') {
+      announceLmStudioLoadBusy()
+      setSelectError(LM_STUDIO_LOAD_BUSY_NOTE)
+      return
+    }
+    announceLuEngineSwapBusy()
+    setSelectError(LU_ENGINE_SWAP_BUSY_NOTE)
+  }
+
   useEffect(() => { fetchModels() }, [fetchModels])
 
   // GH #118: an empty picker used to say "No models available" no matter what
@@ -1056,7 +1103,12 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
                     // a <button>. A <button> can't nest a <button> (invalid HTML →
                     // React hydration error + flaky clicks), so the row is a
                     // role="button" <div> with explicit keyboard activation.
-                    const rowDisabled = selectingLms !== null || togglingLms !== null
+                    // The one reason this picker switches rows off: a pick is
+                    // already running. Kept as its own name because the click
+                    // below hands exactly this to `blockedPickWait`, which is
+                    // what keeps any future second reason silent (A17).
+                    const pickInFlight = selectingLms !== null || togglingLms !== null
+                    const rowDisabled = pickInFlight
 
                     return (
                       <div
@@ -1064,9 +1116,23 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
                         role="button"
                         tabIndex={rowDisabled ? -1 : 0}
                         aria-disabled={rowDisabled}
-                        onClick={() => { if (!rowDisabled) void handleSelectModel(model) }}
+                        onClick={() => {
+                          // A17: the switched-off row used to swallow the
+                          // click whole, and both busy sentences sit behind
+                          // this door in `handleSelectModel`, so nothing was
+                          // ever said. It says the wait now and still does not
+                          // pick.
+                          if (rowDisabled) { announceBlockedPick(pickInFlight); return }
+                          void handleSelectModel(model)
+                        }}
                         onKeyDown={(e) => {
-                          if (rowDisabled) return
+                          if (rowDisabled) {
+                            if (e.key === 'Enter' || e.key === ' ') {
+                              e.preventDefault()
+                              announceBlockedPick(pickInFlight)
+                            }
+                            return
+                          }
                           if (e.key === 'Enter' || e.key === ' ') {
                             e.preventDefault()
                             void handleSelectModel(model)
