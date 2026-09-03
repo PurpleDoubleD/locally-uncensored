@@ -960,6 +960,19 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
 
   useEffect(() => { fetchModels() }, [fetchModels])
 
+  // Und bei jedem Aufklappen noch einmal. Der Modellordner ist eine Sache der
+  // Platte, nicht der Anwendung: eine Datei kann dazugekommen oder
+  // verschwunden sein, seit die Liste zuletzt gelesen wurde, und es gibt
+  // keinen Waechter darauf.
+  //
+  // Persona P5, 03./04.09.2026, am echten Build: eine gerade angelegte GGUF
+  // fehlte im Waehler, und eine laengst geloeschte stand noch darin. Erst der
+  // Refresh-Knopf auf Models, Installed hat die Liste in Ordnung gebracht.
+  // Der Moment des Aufklappens ist genau der, in dem die Liste zaehlt, und
+  // ein Ordnerlauf je Klick ist billiger als eine falsche Liste. Beim
+  // Zuklappen nicht, das waere Arbeit fuer niemanden.
+  useEffect(() => { if (open) void fetchModels() }, [open, fetchModels])
+
   // GH #118: an empty picker used to say "No models available" no matter what
   // was wrong, so a built-in engine that never started read like a machine
   // with nothing installed. Asked only while the dropdown is open and the list
