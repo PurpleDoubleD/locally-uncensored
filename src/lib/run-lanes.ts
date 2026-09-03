@@ -217,6 +217,28 @@ export function admit(lane: RunLane, convId: string, start: StartThunk): Admissi
 }
 
 /**
+ * Wuerde dieser Lauf sich JETZT anstellen muessen? Ohne ihn anzustellen.
+ *
+ * Fuer den Senden-Knopf, der "Einreihen" statt "Senden" anbieten soll, und
+ * fuer das Warteplaettchen, das erklaeren soll, warum. Die naheliegende
+ * Fassung in der Oberflaeche waere `lane === 'local' && localLaneHolder()`,
+ * und die ist zweimal dieselbe Regel: einmal hier, einmal dort, eine davon
+ * gepflegt. Beim ersten Sonderfall, den `admit` dazubekommt (der Halter, der
+ * noch einmal fragt, ist schon einer), stuende an der Eingabe "Einreihen",
+ * waehrend der Lauf sofort losliefe.
+ *
+ * Deshalb steht die Vorschau hier, unmittelbar neben der Entscheidung, und
+ * ein Waechter vergleicht die beiden Fall fuer Fall.
+ */
+export function wouldQueue(lane: RunLane, conversationId: string | null | undefined): boolean {
+  if (lane === 'cloud') return false
+  if (!conversationId) return false
+  if (halter === conversationId) return false
+  if (warteschlange.some((w) => w.convId === conversationId)) return true
+  return halter !== null
+}
+
+/**
  * Der Lauf ist vorbei (oder der Wartende will doch nicht mehr).
  *
  * Rueckgabe ist der `start` des Naechsten, oder nichts. DER AUFRUFER MUSS IHN

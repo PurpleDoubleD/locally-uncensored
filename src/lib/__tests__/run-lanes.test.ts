@@ -34,7 +34,9 @@ import {
   subscribeRunLanes,
   localLaneSnapshot,
   runQueuePosition,
+  wouldQueue,
   __resetRunLanesForTests,
+  type RunLane,
 } from '../run-lanes'
 import { quelldateien, quelltext } from '../../components/__tests__/quelldateien'
 
@@ -365,5 +367,72 @@ describe('die Warteposition, die das Plaettchen anzeigt', () => {
     expect(runQueuePosition('fremd')).toBeNull()
     expect(runQueuePosition(null)).toBeNull()
     expect(runQueuePosition(undefined)).toBeNull()
+  })
+})
+
+// ── Der Knopf muss die Antwort kennen, BEVOR er gedrueckt wird ──────────────
+//
+// Die Eingabe soll "Einreihen" statt "Senden" anbieten koennen. Dafuer
+// braucht sie dieselbe Entscheidung, die `admit` gleich treffen wird, nur
+// ohne sie zu treffen. Die naheliegende Fassung in der Oberflaeche waere
+// `laneOf(...) === 'local' && localLaneHolder() !== null`, und das ist genau
+// das Muster, das dieses Haus am haeufigsten Geld gekostet hat: dieselbe
+// Regel zweimal geschrieben, eine davon gepflegt. Also steht sie hier, neben
+// der echten, und ein Waechter vergleicht die beiden Fall fuer Fall.
+describe('die Vorschau auf die Entscheidung', () => {
+  interface Lage {
+    name: string
+    aufbau: () => void
+    lane: RunLane
+    wer: string | null | undefined
+  }
+
+  const LAGEN: Lage[] = [
+    { name: 'freie Spur, lokal', aufbau: () => {}, lane: 'local', wer: 'x' },
+    { name: 'freie Spur, cloud', aufbau: () => {}, lane: 'cloud', wer: 'x' },
+    {
+      name: 'ein Fremder haelt die Spur, lokal',
+      aufbau: () => { admit('local', 'halter', () => {}) },
+      lane: 'local',
+      wer: 'x',
+    },
+    {
+      name: 'ein Fremder haelt die Spur, cloud faehrt trotzdem',
+      aufbau: () => { admit('local', 'halter', () => {}) },
+      lane: 'cloud',
+      wer: 'x',
+    },
+    {
+      name: 'man haelt die Spur selbst',
+      aufbau: () => { admit('local', 'x', () => {}) },
+      lane: 'local',
+      wer: 'x',
+    },
+    {
+      name: 'man steht schon in der Schlange',
+      aufbau: () => { admit('local', 'halter', () => {}); admit('local', 'x', () => {}) },
+      lane: 'local',
+      wer: 'x',
+    },
+    { name: 'ohne Kennung', aufbau: () => { admit('local', 'halter', () => {}) }, lane: 'local', wer: '' },
+    { name: 'ohne Gespraech', aufbau: () => {}, lane: 'local', wer: null },
+  ]
+
+  for (const lage of LAGEN) {
+    it(`stimmt mit admit ueberein: ${lage.name}`, () => {
+      __resetRunLanesForTests()
+      lage.aufbau()
+      const vorschau = wouldQueue(lage.lane, lage.wer)
+      const echt = admit(lage.lane, lage.wer ?? '', () => {}) === 'queued'
+      expect(vorschau).toBe(echt)
+    })
+  }
+
+  it('und sie aendert nichts an der Spur, sonst waere sie keine Vorschau', () => {
+    admit('local', 'halter', () => {})
+    wouldQueue('local', 'x')
+    wouldQueue('local', 'x')
+    expect(localLaneHolder()).toBe('halter')
+    expect(queuedRunIds()).toEqual([])
   })
 })
