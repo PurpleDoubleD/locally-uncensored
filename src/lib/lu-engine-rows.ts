@@ -100,6 +100,45 @@ export function dropDuplicateLuEngineRows<T extends InstalledModelLike>(
   return bundled.filter((row) => !lmStudio.some((other) => sameFile(row, other, ownByIdentity)))
 }
 
+/**
+ * The other direction: standby rows the LU Engine is already serving, removed.
+ *
+ * A16 counter-check 02.09.: the standby listing (`listStandbyBackendModels`)
+ * pushed LM Studio's rows into the same array that is then handed to
+ * `dropDuplicateLuEngineRows` as "already listed". So the row that IS serving
+ * the chat was measured against a row that is merely waiting beside the slot,
+ * and lost: bundled `Qwen2.5-0.5B-Instruct-Q4_K_M` against standby
+ * `qwen2.5-0.5b-instruct@q4_k_m` left zero rows. What stayed on screen was the
+ * standby row, whose click hands the slot away and stops the engine that was
+ * answering a second ago.
+ *
+ * The rule at the top of this file is unchanged and this is it, applied the
+ * right way round: precedence goes to the provider that holds the slot. While
+ * the LU Engine holds it, its row is the one that works right now, so the
+ * standby twin is the one that goes. Same identity logic, same three routes,
+ * only the roles swapped, which is why it reads the same `sameFile` and not a
+ * second copy of it.
+ *
+ * `alreadyListed` is the whole list; the LU Engine rows are picked out of it
+ * here, exactly as `dropDuplicateLuEngineRows` picks out the LM Studio ones.
+ */
+export function dropStandbyRowsServedByLuEngine<T extends InstalledModelLike>(
+  standby: T[],
+  alreadyListed: InstalledModelLike[],
+): T[] {
+  if (standby.length === 0) return standby
+  const luEngine = alreadyListed.filter(isBuiltinEngineEntry)
+  if (luEngine.length === 0) return standby
+  // How many of OUR files share each identity, counted over the LU Engine rows
+  // because those are "ours" in this direction. Route 3 only applies at one.
+  const ownByIdentity = new Map<string, number>()
+  for (const row of luEngine) {
+    const id = identityOf(row)
+    if (id) ownByIdentity.set(id, (ownByIdentity.get(id) ?? 0) + 1)
+  }
+  return standby.filter((row) => !luEngine.some((ours) => sameFile(ours, row, ownByIdentity)))
+}
+
 /** Every id a row can be recognised by. LM Studio reports its own key, our own
  *  rows carry the file stem, and ours also carry the path. */
 function idsOf(m: InstalledModelLike): string[] {

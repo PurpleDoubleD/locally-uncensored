@@ -16,7 +16,7 @@ import { cloudModelRow } from '../lib/cloud-model-row'
 import { runEngineResume } from '../lib/engine-resume-policy'
 import { engineStartIsWorthRetrying } from '../lib/engine-start-failure'
 import { commandIsUnavailable } from '../lib/engine-command-availability'
-import { dropDuplicateLuEngineRows } from '../lib/lu-engine-rows'
+import { dropDuplicateLuEngineRows, dropStandbyRowsServedByLuEngine } from '../lib/lu-engine-rows'
 import { isBuiltinEngineEntry, type InstalledModelLike } from '../lib/lmstudio-match'
 import {
   ensureLuEngineIsChatProvider, LU_ENGINE_SWITCH_NOTE, LU_ENGINE_FILE_GONE,
@@ -254,13 +254,23 @@ export function useModels() {
       //
       // Only reached when a local backend really was displaced, so on the
       // ordinary machine with nothing on standby this costs no request at all.
+      //
+      // Fetched here and appended further down, AFTER the LU Engine rows.
+      // A16 counter-check 02.09.: pushed straight into `allModels`, these rows
+      // counted as "already listed" when the LU Engine rows were de-duplicated
+      // against them, so the row that is serving the chat was dropped in
+      // favour of the row that is only waiting beside the slot. Precedence
+      // belongs to whoever holds the slot (lib/lu-engine-rows), and while our
+      // engine holds it that is us, so the standby list is the side that gives
+      // way (`dropStandbyRowsServedByLuEngine`).
+      let standbyRows: CloudModel[] = []
       const standby = managedBuiltin ? standbyChatBackend() : null
       if (standby) {
         try {
           const waiting = await listStandbyBackendModels(standby)
-          allModels.push(...waiting
+          standbyRows = waiting
             .map((pm) => cloudModelRow(pm) satisfies CloudModel)
-            .filter((m) => !isEmbeddingModel(m.name)))
+            .filter((m) => !isEmbeddingModel(m.name))
         } catch {
           // Its server went away in the meantime. No rows, exactly as before.
         }
@@ -335,6 +345,12 @@ export function useModels() {
           if (managedBuiltin) void resumeBuiltinEngines(bundledRaw)
           else void resumeEmbedServer(bundledRaw)
         }
+      }
+      // The standby backend's rows, minus the ones our engine is already
+      // serving from the same file. Appended after the LU Engine rows on
+      // purpose: see the note where `standbyRows` is filled.
+      if (standbyRows.length > 0) {
+        allModels.push(...dropStandbyRowsServedByLuEngine(standbyRows, allModels))
       }
       const ollamaEnabled = useProviderStore.getState().providers.ollama.enabled
       const hasOllamaModels = allModels.some(m => m.provider === 'ollama')
