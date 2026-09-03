@@ -6,6 +6,7 @@ import { ApprovalDialog } from './ApprovalDialog'
 import { useVoiceStore } from '../../stores/voiceStore'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { useModelStore } from '../../stores/modelStore'
+import { useChatStore } from '../../stores/chatStore'
 import { isThinkingCompatible, isVisionCompatible, declaredVision } from '../../lib/model-compatibility'
 import type { AgentToolCall } from '../../types/agent-mode'
 import type { ImageAttachment } from '../../types/chat'
@@ -98,6 +99,36 @@ export function ChatInput({ onSend, onStop, isGenerating, pendingApproval, onApp
   // the matching agent commands; ↑/↓ to move, Enter/Tab to pick, Esc to dismiss.
   const [cmdMenu, setCmdMenu] = useState<AgentCommand[]>([])
   const [cmdIndex, setCmdIndex] = useState(0)
+  /**
+   * Ein Entwurf gehoert dem Gespraech, in dem er getippt wurde.
+   *
+   * Der Composer wird beim Wechsel nicht neu gebaut, also stand der halbe Satz
+   * aus dem alten Chat im neuen wieder im Feld — einmal beobachtet am
+   * 03.09.2026, mit dem naheliegenden Ausgang: der Satz geht an den falschen
+   * Empfaenger. Ihn beim Wechsel einfach zu leeren waere die andere Haelfte
+   * desselben Fehlers, nur teurer (Arbeit weg), darum wird er beiseitegelegt
+   * und beim Zurueckkommen wieder hingelegt. Bilder reisen mit dem Text, sonst
+   * hinge die Anlage am falschen Satz.
+   */
+  const conversationId = useChatStore((s) => s.activeConversationId)
+  const entwuerfe = useRef(new Map<string, { text: string; bilder: ImageAttachment[] }>())
+  const letztesGespraech = useRef(conversationId)
+  const standRef = useRef({ input: '', images: [] as ImageAttachment[] })
+  standRef.current = { input, images }
+  useEffect(() => {
+    const vorher = letztesGespraech.current
+    if (vorher === conversationId) return
+    letztesGespraech.current = conversationId
+    if (vorher) {
+      const { input: t, images: b } = standRef.current
+      if (t || b.length) entwuerfe.current.set(vorher, { text: t, bilder: b })
+      else entwuerfe.current.delete(vorher)
+    }
+    const zurueck = conversationId ? entwuerfe.current.get(conversationId) : undefined
+    setInput(zurueck?.text ?? '')
+    setImages(zurueck?.bilder ?? [])
+    setCmdMenu([])
+  }, [conversationId])
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   // Text already in the box when dictation started. Interim + final transcripts
