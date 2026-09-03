@@ -6,12 +6,12 @@
  * `src-tauri/src/app_identity.rs` getestet wird
  * (`src/lib/__tests__/app-identity.test.ts`).
  *
- * Hintergrund: dieser Branch (`experiment/audits-komplett`) hat bewusst eigene
- * Datenverzeichnisse, weil der Experiment-Build am 2026-08-31 in das
- * Verzeichnis der ECHTEN App geschrieben hat. Die Zusicherungen in den
- * Smoke-Skripten ("der Pfad liegt NICHT im Standard-Sandkasten") wären mit
- * einem fest verdrahteten `agent-workspace` still immer erfüllt und würden
- * nichts mehr fangen.
+ * Hintergrund: der Experiment-Build hat am 2026-08-31 in das Verzeichnis der
+ * ECHTEN App geschrieben und bekam daraufhin eigene Datenverzeichnisse. Die
+ * Zusicherungen in den Smoke-Skripten ("der Pfad liegt NICHT im
+ * Standard-Sandkasten") wären mit einem fest verdrahteten `agent-workspace`
+ * still immer erfüllt und würden nichts mehr fangen, egal welche Namen der
+ * Build gerade trägt. Deshalb gelesen und nicht geschrieben.
  */
 
 import { readFileSync } from 'node:fs'

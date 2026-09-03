@@ -23,8 +23,8 @@ export const LOCAL_API_DEFAULT_PORT = 8129
  */
 export const BELEGTE_PORTS: Record<number, string> = {
   1234: 'LM Studio',
-  5173: 'the Vite dev server',
-  5273: 'the Vite server of this experiment build',
+  5173: 'a Vite dev server',
+  5273: 'the Vite dev server LU runs in development',
   8127: 'the LU Engine (llama-server)',
   8188: 'ComfyUI',
   11434: 'Ollama',
