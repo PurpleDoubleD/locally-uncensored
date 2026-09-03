@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import {
   applyTaskRing,
   isTerminal,
+  taskAnswerDelivered,
   type AgentTask,
   type AgentTaskStatus,
 } from '../lib/agent-tasks'
@@ -148,7 +149,13 @@ export const useAgentTaskStore = create<AgentTaskState>((set, get) => ({
   },
 
   takeUnreported: (convId) => {
-    const fertig = get().forConv(convId).filter((t) => isTerminal(t.status) && !t.reported)
+    // `taskAnswerDelivered` und nicht `!t.reported`: eine VORDERGRUNDzeile hat
+    // ihre Antwort als Rueckgabewert des Werkzeugaufrufs abgeliefert, lange
+    // bevor jemand hier nachsieht, und traegt `reported` trotzdem ewig auf
+    // `false`. Am rohen Merker gemessen ginge dieselbe Antwort ein zweites Mal
+    // an das Modell, diesmal als `[background-task]`. Die volle Begruendung
+    // steht bei der Funktion in lib/agent-tasks.ts.
+    const fertig = get().forConv(convId).filter((t) => isTerminal(t.status) && !taskAnswerDelivered(t))
     if (!fertig.length) return []
     set((s) => ({
       byConv: {
