@@ -71,6 +71,21 @@ export interface TauriMockOptions {
   }>
   /** Canned file contents served to fs_read, keyed by path suffix. */
   files?: Record<string, string>
+  /**
+   * What Ollama's `/api/tags` reports as already installed. Omit for the
+   * historical EMPTY answer, which is what makes a box look brand new.
+   *
+   * This is the difference between a first-time user and a returning one, and
+   * the whole app reads it from this one endpoint: the onboarding model step
+   * counts it, the model manager lists it, and the chat picker is filled from
+   * it. A spec about "the user already has models" therefore cannot fake that
+   * state anywhere else without testing a fiction.
+   *
+   * Order matters to a spec: nothing preselects for the user, so the model
+   * store's own fallback takes the FIRST chat-capable entry. A spec that wants
+   * to prove a pick really arrived has to pick a different one than that.
+   */
+  ollamaModels?: string[]
 }
 
 export const DEFAULT_ASSISTANT_REPLY = 'PONG_BUILTIN_OK the built-in engine answered.'
@@ -500,11 +515,12 @@ export function tauriMockInit(opts: TauriMockOptions) {
         return Promise.resolve(null)
 
       // ── generic localhost proxy ───────────────────────────────────
-      // Ollama's model list (`/api/tags`) must resolve to an EMPTY list so a
-      // fresh box looks fresh (existingModelCount === 0 keeps the model picker
-      // visible instead of auto-skipping). Resolving here also stops localFetch
-      // from falling through to a direct fetch that could hit a REAL Ollama on
-      // the dev machine. Every other probe rejects, so no external backend is
+      // Ollama's model list (`/api/tags`) resolves to `opts.ollamaModels`,
+      // empty by default, so a fresh box looks fresh (no installed models →
+      // the starter recommendation is the one thing on the model step).
+      // Resolving here rather than rejecting also stops localFetch from
+      // falling through to a direct fetch that could hit a REAL Ollama on the
+      // dev machine. Every other probe rejects, so no external backend is
       // ever detected as live.
       case 'proxy_localhost': {
         const url: string = args?.url || ''
@@ -529,7 +545,23 @@ export function tauriMockInit(opts: TauriMockOptions) {
         }
 
         if (url.includes('11434') || /\/tags(\?|$)/.test(url)) {
-          return Promise.resolve(JSON.stringify({ models: [] }))
+          // Shaped like a real /api/tags entry, not just a name: listModels()
+          // spreads the entry through and the pickers read `details` and
+          // `capabilities` off it. `tools` is declared so a chosen model is
+          // not additionally judged by the family-name fallback.
+          const models = (opts.ollamaModels || []).map((name: string) => ({
+            name,
+            model: name,
+            size: 4 * 1024 * 1024 * 1024,
+            digest: `e2e-${name}`,
+            modified_at: '2026-09-01T00:00:00Z',
+            details: {
+              parent_model: '', format: 'gguf', family: name.split(':')[0],
+              families: [name.split(':')[0]], parameter_size: '4B', quantization_level: 'Q4_K_M',
+            },
+            capabilities: ['completion', 'tools'],
+          }))
+          return Promise.resolve(JSON.stringify({ models }))
         }
         return Promise.reject('error sending request: connection refused (e2e)')
       }

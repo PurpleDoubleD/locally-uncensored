@@ -1,6 +1,13 @@
 /**
- * Schritt „Model": ein Startermodell aussuchen und es dorthin schreiben, wo
- * die gewaehlte Maschine es auch findet.
+ * Schritt „Model": ein Modell aussuchen. Entweder eins herunterladen und
+ * dorthin schreiben, wo die gewaehlte Maschine es auch findet, oder eins der
+ * schon installierten zum aktiven Chatmodell machen.
+ *
+ * Dieser Bildschirm wird NIE uebersprungen. Er hat es bis zum 04.09.2026
+ * getan, sobald `/api/tags` ein chatfaehiges Modell meldete, und genau das
+ * war der Fehler: die Wahl fiel dann nicht mehr im Assistenten, sondern in
+ * `modelStore.setModels`, das ohne Wahl den ERSTEN Eintrag der Liste nimmt.
+ * Der Nutzer stand im Chat vor einem Modell, das er nie angefasst hatte.
  *
  * Warum es dieses Modul gibt: die Auswahl, der laufende Pull, der HF-Pfad,
  * der Fehlertext, die Unterreiter und die VRAM-Schranke sind Zustand, den
@@ -16,9 +23,10 @@
  * Studio). Welche Maschine das ist, weiss der Scan (`useBackendScan`) — nicht
  * dieser Schritt.
  *
- * `step` faehrt als Prop mit: die beiden Effekte, die die installierten
- * Modelle zaehlen und den Schritt gegebenenfalls ueberspringen, haengen daran
- * und stehen hier unveraendert.
+ * `step` faehrt als Prop mit: der Effekt, der die installierten Modelle holt,
+ * haengt daran. Die WAHL dagegen liegt nicht hier und nicht in der Schale,
+ * sondern in `modelStore.activeModel`, also an der Stelle, die der Chat
+ * liest.
  */
 import { useState, useEffect } from 'react'
 import { Check, Download, ChevronRight } from 'lucide-react'
@@ -26,6 +34,7 @@ import { ONBOARDING_MODELS } from '../../lib/constants'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { useProviderStore } from '../../stores/providerStore'
 import { useDownloadStore } from '../../stores/downloadStore'
+import { useModelStore } from '../../stores/modelStore'
 import { detectProviderModelPath, startModelDownloadToPath } from '../../api/discover'
 import { hfUrlToOllamaRef, hfUrlToLmStudioSubdir } from '../../lib/hf-to-provider'
 import { pullModelTauri, checkConnection as checkOllama } from '../../api/ollama'
@@ -246,16 +255,20 @@ export function ModelsStep({ skin, scan, fleet, step, setStep, pulledModels, set
   // is no action to offer, and nothing was lost.
   useEffect(() => { getSystemVRAM().then(v => setSystemVRAM(v)).catch(() => {}) }, [])
 
-  // Count CHAT-CAPABLE models the user already has installed. Used to skip
-  // the model-picker step when they're not a fresh install — a reinstaller /
-  // upgrader doesn't need a starter rec.
+  // Die CHATFAEHIGEN Modelle, die der Nutzer schon hat, mit Namen und nicht
+  // nur als Zahl.
   //
   // Embedding-only models (LM Studio's default `nomic-embed-text-v1.5`,
   // `bge-*`, anything with `embed` in the name) are excluded because they
   // can't drive a chat. Without this filter, a fresh LM Studio install
-  // looked like "user already has 1 model" and auto-skipped the starter
-  // card — which is exactly the noob trap we're trying to remove.
-  const [existingModelCount, setExistingModelCount] = useState<number | null>(null)
+  // looked like "user already has 1 model", which is exactly the noob trap
+  // we're trying to remove.
+  //
+  // Hier stand vorher eine ZAHL, und daneben ein zweiter Effekt, der bei
+  // `> 0` sofort auf den Einbettungsschritt sprang. Die Namen sind der
+  // Unterschied zwischen „wir wissen, dass er welche hat" und „er kann eins
+  // davon waehlen": ohne sie liesse sich der Schritt gar nicht zeigen.
+  const [installedModels, setInstalledModels] = useState<string[] | null>(null)
   useEffect(() => {
     if (step !== 'models') return
     let cancelled = false
@@ -266,27 +279,74 @@ export function ModelsStep({ skin, scan, fleet, step, setStep, pulledModels, set
             const lower = (m.name || '').toLowerCase()
             return !lower.includes('embed') && !lower.includes('bge-') && !lower.includes('nomic')
           })
-          if (!cancelled) setExistingModelCount(chatCapable.length)
+          if (!cancelled) setInstalledModels(chatCapable.map(m => m.name))
         })
-        .catch(() => { if (!cancelled) setExistingModelCount(0) })
+        .catch(() => { if (!cancelled) setInstalledModels([]) })
     )
     return () => { cancelled = true }
   }, [step])
 
-  // Auto-skip the model step when the user already has installed models
-  // (P4 LU-Aufgaben: "Nur wenn der User noch gar kein Modell installiert hat.
-  // Sonst nirgendwo mehr 'Recommended'-Empfehlungen"). null = still loading,
-  // 0 = fresh, >0 = experienced — only the first two should see the picker.
-  // Experienced users still progress to the embedding step (separate skip).
-  useEffect(() => {
-    if (step === 'models' && existingModelCount !== null && existingModelCount > 0) {
-      setStep('embeddings')
-    }
-    // `setStep` ist der Setter eines `useState` aus der Schale, also stabil;
-    // er steht hier fuer die Regel und triggert den Effekt nicht nach.
-  }, [step, existingModelCount, setStep])
+  // EINE Quelle, zwei Leser: die Zahl ist die Laenge der Liste. Vorher waren
+  // es zwei Groessen aus derselben Abfrage, und genau so faengt „zwei Pfade,
+  // einer gepflegt" an. null = noch nicht geladen, 0 = frisch, >0 = erfahren.
+  const existingModelCount = installedModels === null ? null : installedModels.length
+  const hatEigeneModelle = existingModelCount !== null && existingModelCount > 0
 
+  // Der Schritt wurde bei `existingModelCount > 0` uebersprungen, und das war
+  // der eigentliche Befund: `modelStore.setModels` setzt, wenn keine Wahl
+  // vorliegt, den ERSTEN chatfaehigen Eintrag der Liste. Wer uebersprungen
+  // wurde, hat also nie gewaehlt und landete trotzdem auf einem Modell: eine
+  // Persona auf einem Qwen3-4B, das sie nie angefasst hatte. David
+  // 04.09.2026: „modellauswahl muss noch da sein oder nicht? ich denke ja."
+  //
+  // Was BLEIBT, ist P4 („Nur wenn der User noch gar kein Modell installiert
+  // hat. Sonst nirgendwo mehr Empfehlungen"): das Abzeichen unten haengt
+  // unveraendert an `=== 0`. Die Empfehlung verschwindet fuer erfahrene
+  // Nutzer, die Auswahl nicht. Das ist kein Widerspruch, sondern die
+  // Trennlinie zwischen „welches ist gut?" und „welches willst du?".
   const showRecommendedBadge = existingModelCount === 0
+
+  // Die Wahl steht NICHT hier. Sie steht dort, wo der Chat sie liest, in
+  // `modelStore.activeModel`, derselben Stelle, die der Modellknopf des
+  // Composers zeigt und aus der der naechste Sendeweg sein Modell nimmt.
+  // Ein eigener `useState` daneben waere ein zweiter Wahrheitsort gewesen,
+  // der beim Verlassen des Schritts abgeglichen werden muesste; ein
+  // Ollama-Name ist ausserdem praefixlos (`prefixModelName`), passt also
+  // ohne Umbau in den Store und ueberlebt als Teil von `partialize` den
+  // Fensterwechsel vom Assistenten ins Hauptfenster.
+  const activeModel = useModelStore(s => s.activeModel)
+  const setActiveModel = useModelStore(s => s.setActiveModel)
+  const setProviderConfig = useProviderStore(s => s.setProviderConfig)
+  const eigenesGewaehlt = !!activeModel && (installedModels ?? []).includes(activeModel)
+
+  /**
+   * Ein installiertes Modell waehlen, und zwar so, dass die Wahl im Chat
+   * auch ankommt.
+   *
+   * Die erste Zeile ist der Grund, warum diese Funktion ueberhaupt eine ist
+   * und kein blosses `setActiveModel` am Knopf. Der
+   * Ollama-Slot steht seit 2.5.7 per Vorgabe auf `enabled: false`
+   * (`providerStore.DEFAULT_PROVIDERS`), weil die eingebaute Maschine die
+   * Vorgabe ist. Diese Liste kommt aber aus Ollamas `/api/tags`. Ein Modell
+   * aus einem dunklen Slot taucht in `fetchModels` nie auf; `setModels`
+   * findet die Wahl dann nicht in der Inventarliste, verwirft sie und setzt
+   * den ersten Eintrag, den es hat.
+   *
+   * Genau das ist im ersten gruenen Lauf des Waechters passiert, und es ist
+   * derselbe Befund eine Station spaeter: gewaehlt war `llama3.1:8b`, im
+   * Modellknopf des Composers stand
+   * `Model: qwen2.5-0.5b-instruct-q4_k_m`, also die mitgelieferte GGUF.
+   *
+   * Die eingebaute Maschine wird dabei NICHT abgeschaltet. Sie ist der Weg
+   * zurueck, wenn Ollama gerade nicht laeuft, und zwei helle Slots
+   * nebeneinander sind in diesem Assistenten der Normalfall (der
+   * Backend-Schritt macht es bei einer bewussten Ollama-Wahl anders, weil
+   * dort die PRIMAERE Maschine bestimmt wird, hier ein einzelnes Modell).
+   */
+  const waehleInstalliertes = (name: string) => {
+    setProviderConfig('ollama', { enabled: true })
+    setActiveModel(name)
+  }
 
   // GGUF download progress from downloadStore
   const currentModel = pullingModel ? ONBOARDING_MODELS.find(m => m.name === pullingModel) : null
@@ -299,12 +359,56 @@ export function ModelsStep({ skin, scan, fleet, step, setStep, pulledModels, set
 
   return (
     <>
+      {/* Zwei Ueberschriften fuer zwei Lagen, und der Unterschied ist die
+          ganze Aussage dieses Schritts: wer noch nichts hat, sucht einen
+          ANFANG; wer schon etwas hat, waehlt aus dem, was da ist. „Starter"
+          ueber einer Liste eigener Modelle waere schlicht gelogen. */}
       <div className="text-center mb-3">
-        <h2 className="text-base font-semibold mb-1">Pick a starter model</h2>
+        <h2 className="text-base font-semibold mb-1">
+          {hatEigeneModelle ? 'Pick your chat model' : 'Pick a starter model'}
+        </h2>
         <p className={`text-[0.7rem] ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
-          One small model to get you running. You can browse and install more from the Models tab once you're in.
+          {hatEigeneModelle
+            ? 'Choose the model LU should open with. You can switch anytime from the picker next to the message box.'
+            : 'One small model to get you running. You can browse and install more from the Models tab once you\'re in.'}
         </p>
       </div>
+
+      {/* Die eigenen Modelle. Sie stehen VOR der Downloadliste, weil dieser
+          Nutzer nichts herunterladen muss, und ohne jede Wertung
+          untereinander: kein „Recommended", keine Sortierung nach unserer
+          Meinung, die Reihenfolge ist die des Backends. Angezeigt wird der
+          rohe Modellname, denn genau der steht spaeter auch im Knopf des
+          Composers; ein geschoenter Name waere ein zweiter Name fuer
+          dieselbe Sache. */}
+      {hatEigeneModelle && (
+        <div className="space-y-1.5">
+          <p className={`t-micro ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>Models you already have</p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-[30vh] overflow-y-auto scrollbar-thin pr-1">
+            {(installedModels ?? []).map((name) => {
+              const gewaehlt = activeModel === name
+              return (
+                <button
+                  key={name}
+                  onClick={() => waehleInstalliertes(name)}
+                  className={`flex items-center justify-between gap-2 text-left p-2.5 rounded-lg border transition-colors ${
+                    gewaehlt
+                      ? isDark ? 'bg-white/10 border-white/30' : 'bg-gray-100 border-gray-900'
+                      : isDark ? 'border-white/10 hover:border-white/20' : 'border-gray-200 hover:border-gray-400'
+                  }`}
+                >
+                  <span className="t-mono truncate">{name}</span>
+                  {gewaehlt ? (
+                    <Check size={14} className="text-green-400 shrink-0" />
+                  ) : (
+                    <div className={`w-4 h-4 rounded-full border shrink-0 ${isDark ? 'border-white/20' : 'border-gray-300'}`} />
+                  )}
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      )}
 
       {/* Unfiltered / Mainstream tabs, only meaningful when both
           categories have entries. With the curated single-starter list
@@ -343,6 +447,12 @@ export function ModelsStep({ skin, scan, fleet, step, setStep, pulledModels, set
       )}
       {downloadError && (
         <p className={`text-[0.65rem] text-red-400 text-center`}>{downloadError}</p>
+      )}
+
+      {/* Nur wenn darueber schon eine Liste steht: sonst haette der
+          Bildschirm eine Zwischenueberschrift ueber seinem einzigen Inhalt. */}
+      {hatEigeneModelle && (
+        <p className={`t-micro ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>Or install another one</p>
       )}
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-[50vh] overflow-y-auto scrollbar-thin pr-1">
@@ -412,7 +522,10 @@ export function ModelsStep({ skin, scan, fleet, step, setStep, pulledModels, set
             onClick={() => setStep('embeddings')}
             className={`flex-1 flex items-center justify-center gap-1.5 ${secondaryBtn}`}
           >
-            Skip for now <ChevronRight size={14} />
+            {/* „Skip for now" waere nach einer getroffenen Wahl falsch: es
+                gibt nichts mehr zu ueberspringen, der Knopf traegt sie
+                weiter. Derselbe Unterschied wie im Einbettungsschritt. */}
+            {eigenesGewaehlt ? <>Continue <ChevronRight size={14} /></> : <>Skip for now <ChevronRight size={14} /></>}
           </button>
         ) : null}
       </div>
