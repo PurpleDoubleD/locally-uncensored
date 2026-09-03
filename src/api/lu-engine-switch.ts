@@ -63,6 +63,28 @@ export function announceLuEngineSwapBusy(): void {
 }
 
 /**
+ * The other wait behind the same blocked pick.
+ *
+ * A16 counter-check follow-up: the picker answers "something is already going
+ * on" with one sentence, and one of the three conditions it asks about is not
+ * about our engine at all. `selectingLms` / `togglingLms` with no LU Engine
+ * swap running is LM Studio warming a model of its own, and telling the user
+ * that "The LU Engine is still switching" then describes something that is not
+ * happening. Someone who reads it goes looking for an engine swap he never
+ * started.
+ *
+ * No `holdWhile` here: the condition it describes lives in the picker's own
+ * component state, which this module cannot see, and an LM Studio load is a
+ * request over a socket rather than a cold GGUF off disk, so the ordinary
+ * twelve second clock is the right length for it.
+ */
+export const LM_STUDIO_LOAD_BUSY_NOTE = 'LM Studio is still loading a model, one moment.'
+
+export function announceLmStudioLoadBusy(): void {
+  useLuEngineSwitchStore.getState().announce(LM_STUDIO_LOAD_BUSY_NOTE, 'info')
+}
+
+/**
  * The reason behind an `activateBuiltinModel` that answered false.
  *
  * It resolves the GGUF path from the last `list_bundled_models`, refreshes

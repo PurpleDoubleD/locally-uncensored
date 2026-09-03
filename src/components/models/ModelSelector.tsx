@@ -23,9 +23,10 @@ import { isBuiltinEngineEntry, type InstalledModelLike } from '../../lib/lmstudi
 import {
   ensureLuEngineIsChatProvider, LU_ENGINE_SWITCH_NOTE, LU_ENGINE_SWAP_BUSY_NOTE,
   announceLuEngineSwapBusy, luEngineStartFailureNote,
+  LM_STUDIO_LOAD_BUSY_NOTE, announceLmStudioLoadBusy,
   handBackChatProviderForRow, chatProviderSwitchNote,
 } from '../../api/lu-engine-switch'
-import { tryAcquireLuEngineSwap, releaseLuEngineSwap } from '../../api/lu-engine-swap-lock'
+import { tryAcquireLuEngineSwap, releaseLuEngineSwap, luEngineSwapInFlight } from '../../api/lu-engine-swap-lock'
 import { useLuEngineSwitchStore } from '../../stores/luEngineSwitchStore'
 import type { AIModel } from '../../types/models'
 
@@ -769,9 +770,20 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
       // bolt is only asked for, and therefore only taken, when the first two
       // are clear.
       if (selectingLms || togglingLms || !tryAcquireLuEngineSwap()) {
-        // Both places, because they outlive different things: the dropdown
-        // line dies when the dropdown closes, the standing row above the
-        // composer survives that and is where the card writes too.
+        // A16 counter-check follow-up: one condition, but not one wait. The
+        // first two flags are this component's own state and are also set
+        // while LM STUDIO loads a model, which has nothing to do with our
+        // engine. The bolt is what says a swap of ours is running, so it
+        // decides which of the two sentences is true.
+        //
+        // Both places in either case, because they outlive different things:
+        // the dropdown line dies when the dropdown closes, the standing row
+        // above the composer survives that and is where the card writes too.
+        if ((selectingLms || togglingLms) && !luEngineSwapInFlight()) {
+          announceLmStudioLoadBusy()
+          setSelectError(LM_STUDIO_LOAD_BUSY_NOTE)
+          return
+        }
         announceLuEngineSwapBusy()
         setSelectError(LU_ENGINE_SWAP_BUSY_NOTE)
         return
