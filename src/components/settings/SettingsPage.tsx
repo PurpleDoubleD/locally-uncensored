@@ -129,6 +129,12 @@ function Section({ title, children, defaultOpen = false }: { title: string; chil
     <div id={sectionAnchorId(title)} className="scroll-mt-16 border-b border-gray-100 dark:border-white/[0.04]">
       <button
         onClick={() => { setOpen(!open); setAnimating(true) }}
+        // Ein Aufklapp-Knopf, der seinen Zustand nicht meldet, ist fuer eine
+        // Vorlesehilfe ein Knopf ohne Wirkung: sie sagt „Local API, Schalter"
+        // und nie, ob der Abschnitt offen ist. Das Kind traegt die Kennung,
+        // die der Knopf hier steuert.
+        aria-expanded={open}
+        aria-controls={`${sectionAnchorId(title)}-body`}
         className="w-full flex items-center justify-between py-2.5 group"
       >
         {/* D-S28: zwoelfmal 11,96px/600 uppercase gray-500 war kein Rang,
@@ -145,6 +151,7 @@ function Section({ title, children, defaultOpen = false }: { title: string; chil
       <AnimatePresence>
         {open && (
           <motion.div
+            id={`${sectionAnchorId(title)}-body`}
             initial={{ height: 0, opacity: 0 }}
             animate={{ height: 'auto', opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
