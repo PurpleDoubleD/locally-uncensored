@@ -1023,6 +1023,16 @@ pub(crate) fn stderr_blames_the_port(stderr: &str) -> bool {
 }
 
 /// Markers that point at the model file itself.
+///
+/// `gguf_init_from_` and not `gguf_init_from_file`: llama.cpp parses a GGUF in
+/// `gguf_init_from_reader`, and the file entry point only wraps it. Every error
+/// line of a header it cannot read carries the READER name, so the longer
+/// marker matched nothing that a broken file actually prints.
+///
+/// `tensor .* not found` stood here until 03.09.2026 and could never match:
+/// this is a substring test on a log, not a regular expression, and no line
+/// ever carries the two characters `.*`. That case arrives through
+/// `failed to load model` like every other load error.
 fn stderr_blames_the_model(stderr: &str) -> bool {
     const MARKERS: &[&str] = &[
         "unknown model architecture",
@@ -1030,8 +1040,7 @@ fn stderr_blames_the_model(stderr: &str) -> bool {
         "invalid magic",
         "unsupported model",
         "wrong number of tensors",
-        "tensor .* not found",
-        "gguf_init_from_file",
+        "gguf_init_from_",
     ];
     let lower = stderr.to_ascii_lowercase();
     MARKERS.iter().any(|m| lower.contains(m))
@@ -1054,13 +1063,19 @@ fn stderr_blames_the_model(stderr: &str) -> bool {
 /// deliberately NOT in here: a CUDA out-of-memory prints that line too, and on
 /// that failure GPU Layers 0 is exactly the right advice. Only markers that a
 /// working card can never produce belong here.
+///
+/// Measured again 03.09.2026, same build, a DIFFERENT broken file: a GGUF
+/// whose version field reads 684680038. llama.cpp answers that one through
+/// `gguf_init_from_reader`, not `gguf_init_from_file`, so the marker list
+/// missed it and the app blamed the graphics card a second time. The markers
+/// name the reading routine now, not the wrapper around it.
 fn stderr_blames_the_model_file(stderr: &str) -> bool {
     const MARKERS: &[&str] = &[
         "unknown model architecture",
         "invalid magic",
         "unsupported model",
         "wrong number of tensors",
-        "gguf_init_from_file",
+        "gguf_init_from_",
         "failed to open gguf",
     ];
     let lower = stderr.to_ascii_lowercase();
@@ -3779,6 +3794,33 @@ srv    llama_server: exiting due to model loading error";
         assert!(!msg.contains("graphics-card"), "{msg}");
         // The engine's own last words still travel, for a bug report.
         assert!(msg.contains("unknown model architecture"), "{msg}");
+    }
+
+    /// Wort fuer Wort, was llama-server am 03.09.2026 im echten Windows-Build
+    /// zu einer GGUF mit unbrauchbarer Versionsnummer gesagt hat. Persona P5
+    /// hat es ueber CDP aus dem Fenster gelesen, und die App antwortete darauf
+    /// wieder mit der Grafikkarte. Der Grund steht in der Zeile
+    /// `gguf_init_from_reader`: sie traegt den Namen der lesenden Routine, die
+    /// alte Marke suchte nach der Huelle `gguf_init_from_file` darum herum.
+    const KAPUTTE_VERSION_STDERR: &str = r#"0.00.262.272 E gguf_init_from_reader: failed to read header
+0.00.262.420 E llama_model_load: error loading model: llama_model_loader: failed to load model from C:\Users\ddrob\AppData\Roaming\Locally Uncensored\models\P5-Kaputt-Test-Q4_K_M.gguf
+0.00.262.483 E llama_model_load_from_file_impl: failed to load model
+0.00.262.556 E common_fit_params: encountered an error while trying to fit params to free device memory: failed to load model
+0.00.262.723 E gguf_init_from_reader: this GGUF file is version 684680038 but this software only supports up to version 3
+0.00.262.887 E cmn  common_init_: failed to load model
+0.00.264.147 E srv  llama_server: exiting due to model loading error"#;
+
+    #[test]
+    fn eine_unlesbare_versionsnummer_ist_auch_kein_grafikkartenproblem() {
+        let f = StartFailure {
+            died: true,
+            port_taken: false,
+            stderr: KAPUTTE_VERSION_STDERR.into(),
+        };
+        let msg = start_failure_message(&f, 8127, Duration::from_secs(60));
+        assert!(msg.contains("refused the model file"), "{msg}");
+        assert!(!msg.contains("GPU Layers"), "{msg}");
+        assert!(!msg.contains("graphics-card"), "{msg}");
     }
 
     #[test]
