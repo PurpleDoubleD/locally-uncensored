@@ -400,8 +400,16 @@ describe('Der Weckhaken haengt an beiden Sendewegen', () => {
     // entweder unsichtbar fuer das Modell (dann antwortet es auf nichts) oder
     // sichtbar fuer den Menschen (dann liest er eine erfundene eigene
     // Nachricht).
-    expect(lies('hooks/useAgentChat.ts')).toContain("m.role !== 'system' && m.content.trim() !== ''")
-    expect(lies('hooks/useCodex.ts')).toContain("m.role !== 'system' && (m.content.trim() || m.hidden)")
+    // 03.09.2026: `useAgentChat` stand hier mit `m.content.trim() !== ''` —
+    // was versteckte Nachrichten MIT Text durchliess und die ohne Text
+    // wegwarf. Fuer den Weckzug reichte das (er traegt einen Satz), fuer die
+    // abgelegte Werkzeugkette nicht: eine Assistentennachricht, die nur
+    // tool_calls traegt, hat leeren Text, und ohne sie steht das Ergebnis
+    // ohne seinen Aufruf da. Beide Wege sagen jetzt denselben Satz, und der
+    // ist der staerkere. Die Absicht dieser Zeile ist unveraendert.
+    for (const datei of ['hooks/useAgentChat.ts', 'hooks/useCodex.ts']) {
+      expect(lies(datei), datei).toMatch(/m\.role !== 'system' && \(m\.content\.trim\(\)(?: !== '')? \|\| m\.hidden\)/)
+    }
     expect(lies('components/chat/MessageList.tsx')).toContain('!m.hidden')
   })
 })

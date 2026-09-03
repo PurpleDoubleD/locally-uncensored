@@ -95,6 +95,7 @@ import { platformPromptLine, hostClockLine } from '../lib/host-platform'
 import { explainSendRefusal } from '../lib/template-refusal'
 import { httpStatusOf, isTerminalModelError, retryDelayMs } from '../lib/http-status'
 import { shouldDowngradeThinking, engineDeniedThinking } from './codex/thinking-downgrade'
+import { capHiddenToolHistory } from './codex/hidden-history'
 import { asString, errorText, prop } from '../types/json-guards'
 import type { ToolArgs } from '../api/mcp/types'
 import { CREDITS_EXHAUSTED_MESSAGE } from '../lib/credits-exhausted'
@@ -632,6 +633,20 @@ export function useAgentChat() {
       useChatStore.getState().conversations.find((c) => c.id === convId) ?? conv
 
     // Build messages array
+    // Die Werkzeugkette dieses Laufs, mitgeschrieben waehrend sie entsteht.
+    //
+    // Persona-Befund 6 (03.09.2026): nach Runde 1 stand im naechsten Payload
+    // nur noch der Text der Assistentenantwort — das Aufruf/Ergebnis-Paar mit
+    // dem echten Seiteninhalt fehlte, und die Nachfrage holte die Seite ein
+    // zweites Mal. `useCodex` legt diese Kette laengst als versteckte
+    // Nachrichten ab; dieser Lauf tat es nicht, seine Aufrufe lebten nur in
+    // den Anzeige-Bloecken. Was der Nutzer als Karte SIEHT, sah das Modell in
+    // der naechsten Runde nicht mehr.
+    //
+    // Eigener Sammler statt eines Index in `agentMessages`: das Arbeitsfenster
+    // wird waehrend des Laufs beschnitten und neu zugewiesen
+    // (trimWorkingHistory), ein gemerkter Startindex waere danach falsch.
+    const werkzeugKette: ChatMessage[] = []
     let agentMessages: ChatMessage[] = [
       ...(agentSystemPrompt ? [{ role: 'system' as const, content: agentSystemPrompt }] : []),
       // 2.6.8: a recorded compaction stands in for everything up to its
@@ -639,7 +654,11 @@ export function useAgentChat() {
       // anchor is a message id, and the wire shape has none. See
       // lib/run-compact-command.ts.
       ...applyStoredCompaction(
-        convForPayload.messages.filter((m) => m.role !== 'system' && m.content.trim() !== ''),
+        // `|| m.hidden`: eine Assistentennachricht, die NUR tool_calls traegt,
+        // hat leeren Text. Ohne diese Ausnahme fiele sie hier heraus und das
+        // Ergebnis stuende ohne seinen Aufruf da — genau der 422-Fall, den der
+        // Waisenschnitt beim Ablegen schon vermeidet. useCodex filtert seit je so.
+        convForPayload.messages.filter((m) => m.role !== 'system' && (m.content.trim() !== '' || m.hidden)),
         newestCompaction(convForPayload.compactions),
       ).messages
         .map((m) => ({
@@ -2062,6 +2081,11 @@ export function useAgentChat() {
         // [system, user, assistant, tool] and the strict template raised on
         // the next round. The transport decides the shape; the provider only
         // decides whether the native shape needs ids.
+        // Was dieser Durchgang an die Historie haengt, wird gleich auch fuer
+        // die naechste RUNDE aufbewahrt (siehe `werkzeugKette` oben). Der
+        // Index ist blockoertlich und damit unempfindlich gegen das
+        // Beschneiden, das erst zu Beginn des naechsten Durchgangs laeuft.
+        const kettenStart = agentMessages.length
         if (strategy === 'hermes_xml') {
           for (const { tc } of batch) {
             const result = results.find((r) => r.id === batch.find((b) => b.tc === tc)?.ac.id)!
@@ -2119,6 +2143,7 @@ export function useAgentChat() {
             }, tc))
           }
         }
+        werkzeugKette.push(...agentMessages.slice(kettenStart))
 
         // Loop-detector, result side: a round where every call failed changed
         // nothing, so a run of them is a stall the call-shape detectors above
@@ -2214,6 +2239,30 @@ export function useAgentChat() {
         // last thing the user reads. It may not say "completed" while the
         // PlanBar next to it says otherwise. closingSummary carries that rule.
         contentRef.current = closingSummary()
+      }
+
+      // Die Werkzeugkette als versteckte Nachrichten ablegen, VOR der
+      // Assistentenantwort — genau wie useCodex es tut (dieselbe Deckelung,
+      // derselbe Waisenschnitt aus hooks/codex/hidden-history.ts: ein Fenster,
+      // das mit einem Ergebnis ohne seinen Aufruf beginnt, laesst strenge
+      // Anbieter mit 422 antworten). Ohne das hier sah die naechste Runde nur
+      // noch den Antworttext und holte dieselbe Seite ein zweites Mal.
+      if (werkzeugKette.length > 0 && convId) {
+        const kette = capHiddenToolHistory(werkzeugKette)
+        const store = useChatStore.getState()
+        const convNow = store.conversations.find((c) => c.id === convId)
+        const idx = convNow?.messages.findIndex((m) => m.id === assistantMessage.id) ?? -1
+        if (kette.length > 0 && idx > 0) {
+          store.insertMessagesBefore(convId, assistantMessage.id, kette.map((tm) => ({
+            id: uuid(),
+            role: tm.role as import('../types/chat').Message['role'],
+            content: tm.content || '',
+            timestamp: Date.now(),
+            hidden: true,
+            ...(tm.tool_calls ? { tool_calls: tm.tool_calls as import('../types/chat').Message['tool_calls'] } : {}),
+            ...(tm.tool_call_id ? { tool_call_id: tm.tool_call_id } : {}),
+          })))
+        }
       }
 
       // Final store update

@@ -39,6 +39,17 @@ const GESPRAECH = [
   { role: 'assistant' as const, content: 'Je nach Ausgangslage liegen die Herstellungskosten meist zwischen 3.000 und 12.000 Euro je Hektar, ohne Flaechenerwerb.' },
 ]
 
+/**
+ * Bewusst STROEMEND, obwohl das Ergebnis erst am Ende gebraucht wird.
+ *
+ * Mit `stream: false` schickt Ollama den Kopf der Antwort erst, wenn das ganze
+ * Modell fertig gedacht hat. Ein 9B-Modell mit Denkschritt braucht dafuer auf
+ * dieser Maschine mehr als fuenf Minuten — und `undici`, der fetch von Node,
+ * bricht bei 300 s ohne Kopfzeile mit `UND_ERR_HEADERS_TIMEOUT` ab. Das sah
+ * zweimal wie ein Fehlschlag der Verdichtung aus und war ein Fehler meines
+ * Pruefstands. Im Strom kommt die Kopfzeile sofort, und die Wartezeit steht
+ * dort, wo sie hingehoert: im Zeitlimit des Tests.
+ */
 async function zusammenfassen(prompt: string): Promise<string> {
   const res = await fetch('http://127.0.0.1:11434/api/chat', {
     method: 'POST',
@@ -46,13 +57,29 @@ async function zusammenfassen(prompt: string): Promise<string> {
     body: JSON.stringify({
       model: MODELL,
       messages: [{ role: 'user', content: prompt }],
-      stream: false,
+      stream: true,
       options: { temperature: 0 },
     }),
   })
-  const data = (await res.json()) as { message?: { content?: string }; error?: string }
-  if (data.error) throw new Error(data.error)
-  return data.message?.content ?? ''
+  if (!res.body) throw new Error('Ollama antwortete ohne Koerper')
+  const leser = res.body.getReader()
+  const dec = new TextDecoder()
+  let rest = ''
+  let text = ''
+  for (;;) {
+    const { done, value } = await leser.read()
+    if (done) break
+    rest += dec.decode(value, { stream: true })
+    const zeilen = rest.split('\n')
+    rest = zeilen.pop() ?? ''
+    for (const z of zeilen) {
+      if (!z.trim()) continue
+      const teil = JSON.parse(z) as { message?: { content?: string }; error?: string }
+      if (teil.error) throw new Error(teil.error)
+      text += teil.message?.content ?? ''
+    }
+  }
+  return text
 }
 
 describe.runIf(LIVE)('Verdichtung gegen ein echtes Modell', () => {
