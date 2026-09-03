@@ -39,7 +39,7 @@ export const RELEASE_NOTES: ReleaseNote[] = [
       'The cloud catalogue adds GLM 5.3 (Pro) and GLM 5.3 Flash (Hosted), and the cloud model list holds one fixed order, so a new chat starts on the same model every time instead of whichever one the provider listed first.',
       'The side panel folds away, and while it is closed your latest chats sit on the main screen. Which model wrote the chat you are reading shows as a small dot on the model picker instead of a chip in the composer.',
       'The built-in engine is called LU Engine from now on. It moves to a free port when 8127 is taken, and a chat model you downloaded stays visible as Installed, with a Use button that starts the engine for it.',
-      'AMD on Windows is read from the HIP SDK, the Linux packages name the libraries they need, the ComfyUI installer checks the environment it built, LU reads the model folder you set, Document Chat works in Cloud mode, and the prompt history in Create can be cleared.',
+      'AMD on Windows is read from the HIP SDK, AMD on Linux reports its memory without ROCm, the Linux packages name the libraries they need, the ComfyUI installer checks the environment it built, LU reads the model folder you set, Document Chat works in Cloud mode, and the prompt history in Create can be cleared.',
     ],
     details: [
       {
@@ -66,6 +66,10 @@ export const RELEASE_NOTES: ReleaseNote[] = [
           'Settings shows the port the LU Engine actually runs on, and the Model Storage folder says when it could not be read or was too big to scan. A ComfyUI install or repair can be cancelled from Settings, and it keeps showing its progress while you look at other settings.',
           'On the Mac, LU stopped searching your whole home folder for a ComfyUI it never runs there. That search touched the Desktop and Music folders, so macOS asked for access to Apple Music and to the Desktop at first launch, and the window sat on LOADING while the search ran. On Windows and Linux the same search moved off the main thread, so a slow disk no longer freezes the window.',
           'Error messages from Windows arrive in English, and a ComfyUI requirements.txt that cannot be used is named instead of silently skipped.',
+      'A ComfyUI that will not start names the cause. A missing Visual C++ runtime, or a graphics driver older than the PyTorch that was installed, used to arrive as "the Python environment looks broken" next to a Repair button, and neither of those lives in the folder Repair rebuilds. The message now says which of the two it is, and LU no longer starts a repair that cannot fix it.',
+      'Every Python step LU starts now runs with UTF-8 output. One step out of eight did before, so on a Windows account whose name falls outside the English alphabet, a single character in a path could end an install or a probe partway through.',
+      'AMD cards on Linux report their memory size without ROCm installed. LU read AMD memory only through rocm-smi, which comes with the ROCm developer packages rather than with the driver, so the card was found and its size was not. The size comes from the kernel now. An integrated AMD chip is deliberately left out, because the number it reports there is the fixed carve-out rather than what it can actually use. This reading is covered by tests but has not been run on an AMD card here.',
+      'German phrasing reaches the chat tools. Plain chat offers its tools only when it recognises what you asked for, and its German half misread two common cases. The filler word "mal", which turns up in most casual German sentences, was read as the command to paint, so ordinary questions were sent to image generation. And no German word for the internet was on any list, so a request like "schau im Netz nach" matched nothing and the model answered from memory instead of looking anything up. Both are fixed, along with two smaller gaps in the German verb lists.',
         ],
       },
       {

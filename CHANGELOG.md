@@ -67,6 +67,32 @@ engine has a name of its own, the LU Engine.
 
 ### Fixed
 
+- **A ComfyUI that will not start names the cause.** A missing Visual C++
+  runtime, or a graphics driver older than the PyTorch that was installed,
+  used to arrive as "the Python environment looks broken" next to a Repair
+  button, and neither of those lives in the folder Repair rebuilds. The
+  message now says which of the two it is, and LU no longer starts a repair
+  that cannot fix it. Reported on Discord as ticket 0007.
+- **Every Python step LU starts now runs with UTF-8 output.** One step out of
+  eight did before, so on a Windows account whose name falls outside the
+  English alphabet, a single character in a path was enough to end an install
+  or a probe partway through. Reported on Discord as ticket 0003.
+- **AMD cards on Linux report their memory size without ROCm installed.** LU
+  read AMD memory only through rocm-smi, which comes with the ROCm developer
+  packages rather than with the driver, so the card was found and its size was
+  not. The size comes from the kernel now. An integrated AMD chip is
+  deliberately left out, because the number it reports there is the fixed
+  carve-out rather than what it can actually use. This reading is covered by
+  tests but has not been run on an AMD card here.
+- **German phrasing reaches the chat tools.** Plain chat offers its tools only
+  when it recognises what you asked for, and its German half misread two
+  common cases. The filler word "mal", which turns up in most casual German
+  sentences, was read as the command to paint, so ordinary questions were sent
+  to image generation. And no German word for the internet was on any list, so
+  a request like "schau im Netz nach" matched nothing and the model answered
+  from memory instead of looking anything up. Both are fixed, along with two
+  smaller gaps in the German verb lists.
+
 - **The LU Engine moves to a free port when 8127 is taken** or reserved by the
   system, and after a start that fails it retries once instead of giving up
   until the next restart. The next start begins at 8127 again rather than

@@ -101,6 +101,25 @@ describe('the notes table', () => {
       // slot of its own and never leaves the picker, so the way back is a
       // click, and sending a reader to Settings for it is a wrong instruction.
       'never leave the picker',
+      // Discord-Ticket 007 (falcon bob, 01.09.): der Startfehler schickte ihn
+      // in eine Reparatur, die den Fehler gar nicht beheben kann. Beide
+      // Haelften gehoeren in die Notiz, die Ursache UND dass die Reparatur
+      // hier nicht mehr von selbst anlaeuft.
+      'the folder repair rebuilds',
+      'a repair that cannot fix it',
+      // Discord-Ticket 003 (anglefire, 03.09.): sein Windows-Benutzername
+      // steht ausserhalb des englischen Alphabets. Die Zahl bleibt mit
+      // Bezugspunkt, eine von acht, sonst sagt sie nichts.
+      'one step out of eight',
+      // Reddit (zenmasterdredd, 02.09.): AMD-Karte gefunden, Groesse nicht.
+      // Der Grund gehoert dazu, sonst liest es sich wie eine Marotte.
+      'without rocm installed',
+      'fixed carve-out',
+      // Und die Hausformel fuer fremde Hardware auch hier, wortgleich.
+      'has not been run on an amd card here',
+      // Persona-Lauf 03.09.: deutsche Alltagssaetze erreichten die Werkzeuge
+      // nicht. Beide Faelle sind benannt, weil ein Kunde nur den Effekt sieht.
+      'schau im netz nach',
     ]) {
       expect(prose, `${shipping}: nothing about "${anchor}"`).toContain(anchor)
     }
