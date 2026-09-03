@@ -95,7 +95,7 @@ describe('the notes table', () => {
       'begins at 8127 again',
       // A16 (A14-3a): the trip back to LM Studio is new visible behaviour, so
       // it is in the note and pinned here.
-      'the way back costs the same one click',
+      'the way back is one click',
       // A16 counter-check follow-up: the Ollama half of the same paragraph
       // said the way back was "the provider card it always was". Ollama has a
       // slot of its own and never leaves the picker, so the way back is a
