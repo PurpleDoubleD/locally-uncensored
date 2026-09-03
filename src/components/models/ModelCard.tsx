@@ -75,7 +75,7 @@ export function ModelCard({ model, isActive, onSelect, onDelete, onInfo, canDele
       {/* Type icon */}
       <TypeIcon size={13} className={`${typeInfo.color} shrink-0`} />
 
-      {/* Name — grows to fill the row (single-line, LM-Studio style).
+      {/* Name, grows to fill the row (single-line, LM-Studio style).
           Ohne das `openai::` davor: das ist unser Steckplatzname, kein Name,
           den ein Kunde je gewaehlt hat. Persona P5, 03./04.09.2026: "Fuer
           einen Kunden, der LU Engine benutzt und mit OpenAI nichts zu tun
