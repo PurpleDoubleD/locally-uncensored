@@ -72,6 +72,26 @@ export interface AgentRunContext {
    * null off the Code tab. Carried so a gate can name the reason it refused.
    */
   mode: string | null
+  /**
+   * Die Freigabe-Entscheidung dieses Laufs, EINMAL beim Start aufgeloest
+   * (Auftrag 2.3, David 04.09.2026).
+   *
+   * `confirmExec` ist codexModeKnobs().confirmExec, also die Antwort auf "fragt
+   * dieser Lauf vor Werkzeugen mit beliebiger Ausfuehrung nach". Alles, was der
+   * Lauf delegiert, liest DIESEN Wert, statt die Rechnung mit eigenen Eingaben
+   * noch einmal aufzumachen. Zwei Rechnungen fuer dieselbe Frage waren hier
+   * schon zweimal die Fehlerursache.
+   *
+   * `cloudReason` ist die Begruendung, die auf der Freigabekarte steht, und sie
+   * entscheidet mit, welche Einstellung ein "stop asking" ausschaltet. Sie
+   * gehoert deshalb zum LAUF und nicht zum Unteragenten, der ein anderes
+   * Modell fahren kann als der Hauptlauf.
+   *
+   * Wird wie `abortSignal` nach `beginAgentRun` gesetzt: die Knoepfe stehen
+   * erst fest, wenn Provider und Einstellungen gelesen sind. Fehlt das Feld,
+   * gilt "nicht fragen", was genau der Vorgabe von useCodex entspricht.
+   */
+  execApproval?: { confirmExec: boolean; cloudReason: boolean }
   artifacts: CapturedArtifact[]
   /**
    * Stop button of the run that owns this context (audit AGT-1).

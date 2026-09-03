@@ -549,6 +549,18 @@ export function useCodex() {
       providerId,
       readOnlyTurn,
     })
+    // Die Entscheidung EINMAL, VORNE, auf den Lauf gelegt (Auftrag 2.3, David
+    // 04.09.2026). Alles, was dieser Lauf delegiert, liest von hier, statt die
+    // Rechnung mit eigenen Eingaben zu wiederholen. Nicht in beginAgentRun,
+    // weil die Knoepfe erst feststehen, wenn Provider und Einstellungen
+    // gelesen sind, genau wie beim abortSignal weiter unten.
+    run.execApproval = {
+      confirmExec: knobs.confirmExec,
+      // Wortgleich mit der Karte, die die Hauptschleife zeigt: die
+      // Begruendung entscheidet mit, welche Einstellung ein "stop asking"
+      // ausschaltet, und sie gehoert dem Lauf, nicht dem Unteragenten.
+      cloudReason: !settings.codexConfirmShell && codexMode !== 'ask' && providerId === 'lu-cloud',
+    }
     // The merged shell_execute stays offered on read-only turns (it carries
     // git status/log/diff now); the executor refuses everything else while the
     // run's flag is up. The flag lives on the run object (set at

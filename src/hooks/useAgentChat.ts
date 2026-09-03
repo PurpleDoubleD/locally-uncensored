@@ -57,6 +57,7 @@ import type { AgentBlock, AgentToolCall } from '../types/agent-mode'
 import { selectRelevantToolsAsync, toolSelectionOpts, ALWAYS_INCLUDE } from '../lib/tool-selection'
 import { renderToolRoster, renderToolNames } from '../lib/tool-roster'
 import { MUTATING_TOOLS, allowedInReadOnlyTurn } from '../lib/mutating-tools'
+import { resolveApprovalLevel } from '../lib/agent-approval-policy'
 import {
   parseFanoutRequest,
   resolveRequestedModel,
@@ -1819,11 +1820,25 @@ export function useAgentChat() {
         for (const tc of toolCalls) {
           const toolCallId = uuid()
           const blockId = uuid()
-          const permLevel = toolRegistry.getPermissionLevelWithOverrides(
-            tc.function.name,
-            permissions,
-            perToolOverrides
-          )
+          // Die Stufe kommt aus der gemeinsamen Tabelle (Auftrag 2.3), nicht
+          // mehr direkt aus der Registry: sonst haette der Hauptlauf hier eine
+          // andere Rechnung als der Unterauftrag in sub-agent.ts, und genau
+          // dieses Paar ist in diesem Baum schon mehrfach auseinandergelaufen.
+          // Was sich sichtbar aendert: delegate_task oeffnet keinen Dialog
+          // mehr. Drei Unteragenten waren vorher drei Unterbrechungen, weil
+          // die Kategorie 'workflow' auf 'confirm' steht.
+          const permLevel = resolveApprovalLevel(tc.function.name, {
+            categoryLevel: toolRegistry.getPermissionLevelWithOverrides(
+              tc.function.name,
+              permissions,
+              {},
+            ),
+            override: perToolOverrides[tc.function.name],
+            // Die Presets sind ein Begriff des Code-Tabs. Hier gilt der
+            // Berechtigungs-Store, das ist die BINDUNG aus Plan C1.
+            codexMode: null,
+            readOnlyRun: run.readOnlyShellTurn,
+          })
           // One cloud shell rule for BOTH surfaces (G15a, 2026-08-07): the
           // Code tab and Agent mode read the same helper and the same setting,
           // so the same cloud model cannot be stricter in one tab than the

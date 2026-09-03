@@ -45,6 +45,8 @@ import { platformPromptLine, hostClockLine } from '../../lib/host-platform'
 import { clampTaskResult, describeToolCalls, makeTaskId } from '../../lib/agent-tasks'
 import { istNurAnkuendigung, ANKUENDIGUNG_STEER } from './ankuendigung'
 import { MAX_EXPLICIT_FANOUT } from '../../lib/agent-fanout'
+import { resolveApprovalLevel } from '../../lib/agent-approval-policy'
+import { allowedInReadOnlyTurn } from '../../lib/mutating-tools'
 
 // NOTE: the toolRegistry import is done LAZILY inside defaultSubAgentRunner
 // to avoid a circular dependency with src/api/mcp/builtin-tools.ts, which
@@ -317,6 +319,15 @@ export interface SubAgentGates {
  *
  * Fail closed: with no conversation to ask in, a 'confirm' tool is refused
  * rather than run.
+ *
+ * Auftrag 2.3 (David, 04.09.2026): WELCHE Stufe gilt, sagt jetzt
+ * resolveApprovalLevel, und zwar fuer beide Agentenwege dieselbe Tabelle. Zwei
+ * Dinge aendern sich dadurch hier. Erstens fragt der Hintergrundbetrieb selbst
+ * nicht mehr nach. Zweitens folgt ein Unterauftrag aus dem Code-Tab dem Preset
+ * dieses Laufs statt den Kategorien des Agent-Chats: vorher las er immer den
+ * Chat-Store und stellte seine Frage immer in die Chat-Warteschlange, was auf
+ * der Code-Oberflaeche beide Fehler auf einmal war, eine unsichtbare Frage in
+ * Bypass und ein unbeaufsichtigtes shell_execute in Ask.
  */
 export async function buildSubAgentGates(run?: AgentRunContext): Promise<SubAgentGates> {
   const convId = run?.conversationId ?? null
@@ -334,17 +345,49 @@ export async function buildSubAgentGates(run?: AgentRunContext): Promise<SubAgen
       return false
     }
     const perm = usePermissionStore.getState()
-    const level = toolRegistry.getPermissionLevelWithOverrides(
+    // Die Kategorie-Stufe OHNE die Einzelregeln holen und die Einzelregel
+    // daneben legen: die Politik unterscheidet die beiden, weil eine
+    // ausdrueckliche Einzelregel des Nutzers die genaueste Ansage ist und
+    // deshalb auch gegen die Hintergrund-Ausnahme gewinnen muss.
+    const categoryLevel = toolRegistry.getPermissionLevelWithOverrides(
       req.toolName,
       perm.getEffectivePermissions(convId ?? undefined),
-      perm.perToolOverrides,
+      {},
     )
+    const level = resolveApprovalLevel(req.toolName, {
+      categoryLevel,
+      override: perm.perToolOverrides[req.toolName],
+      codexMode: run?.mode ?? null,
+      execConfirm: run?.execApproval?.confirmExec === true,
+      readOnlyRun: run?.readOnlyShellTurn === true,
+    })
     if (level === 'blocked') {
-      refusals.set(req.id, `Blocked: ${req.toolName} is not permitted in this conversation.`)
+      // Ein lesend gestellter Lauf sagt, WARUM er ablehnt. "not permitted in
+      // this conversation" waere hier gelogen: das Werkzeug ist erlaubt, der
+      // Zug ist es nicht, und ein Modell, das das liest, hoert auf zu raten.
+      refusals.set(
+        req.id,
+        run?.readOnlyShellTurn === true && !allowedInReadOnlyTurn(req.toolName)
+          ? `Blocked: this run is read-only, so ${req.toolName} was not run. Report what you found instead.`
+          : `Blocked: ${req.toolName} is not permitted in this conversation.`,
+      )
       return false
     }
     if (level === 'auto') return true
-    // 'confirm' — the user decides, in the conversation that owns this run.
+    // Stufe 'confirm': der Nutzer entscheidet, und zwar auf der Oberflaeche, die
+    // den Lauf gestartet hat. Im Code-Tab ist das der Codex-Dialog: die
+    // Chat-Warteschlange haengt am Chat-Fenster, eine Frage von dort sieht im
+    // Code-Tab niemand, und der Unterauftrag stand bis zum Stop still.
+    if (run?.mode) {
+      const { useCodexConfirmStore } = await import('../../stores/codexConfirmStore')
+      const { renderApprovalPreview } = await import('../../hooks/codexShellGate')
+      return useCodexConfirmStore.getState().ask({
+        toolName: req.toolName,
+        command: renderApprovalPreview(req.toolName, req.args),
+        args: req.args,
+        cloudReason: run.execApproval?.cloudReason === true,
+      }, abortSignal)
+    }
     if (!convId) {
       refusals.set(
         req.id,
