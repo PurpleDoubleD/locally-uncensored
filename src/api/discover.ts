@@ -1033,6 +1033,46 @@ export function getUncensoredTextModels(): DiscoverModel[] {
     { name: 'GLM 4.7 Flash Heretic Q4', group: 'GLM 4.7 Flash Heretic', description: 'GLM 4.7 Flash HERETIC · 30B unfiltered, best quality/size balance.', pulls: '5K+', tags: ['30B', 'Q4_K_M', '19 GB'], updated: 'Hot', agent: true, released: '2026-04', downloadUrl: HF('DavidAU/GLM-4.7-Flash-Uncensored-Heretic-NEO-CODE-Imatrix-MAX-GGUF', 'GLM-4.7-Flash-Uncen-Hrt-NEO-CODE-MAX-imat-D_AU-Q4_K_M.gguf'), filename: 'GLM-4.7-Flash-Uncen-Hrt-NEO-CODE-MAX-imat-D_AU-Q4_K_M.gguf', sizeGB: 19 },
     { name: 'GLM 4.7 Flash Heretic Q6', group: 'GLM 4.7 Flash Heretic', description: 'GLM 4.7 Flash HERETIC · 30B unfiltered, high quality quant.', pulls: '5K+', tags: ['30B', 'Q6_K', '25 GB'], updated: 'New', agent: true, released: '2026-04', downloadUrl: HF('DavidAU/GLM-4.7-Flash-Uncensored-Heretic-NEO-CODE-Imatrix-MAX-GGUF', 'GLM-4.7-Flash-Uncen-Hrt-NEO-CODE-MAX-imat-D_AU-Q6_K.gguf'), filename: 'GLM-4.7-Flash-Uncen-Hrt-NEO-CODE-MAX-imat-D_AU-Q6_K.gguf', sizeGB: 25 },
     { name: 'GLM 4.7 Flash Heretic Q8', group: 'GLM 4.7 Flash Heretic', description: 'GLM 4.7 Flash HERETIC · 30B unfiltered, near-lossless quality.', pulls: '5K+', tags: ['30B', 'Q8_0', '32 GB'], updated: 'New', agent: true, released: '2026-04', downloadUrl: HF('DavidAU/GLM-4.7-Flash-Uncensored-Heretic-NEO-CODE-Imatrix-MAX-GGUF', 'GLM-4.7-Flash-Uncen-Hrt-NEO-CODE-MAX-imat-D_AU-Q8_0.gguf'), filename: 'GLM-4.7-Flash-Uncen-Hrt-NEO-CODE-MAX-imat-D_AU-Q8_0.gguf', sizeGB: 32 },
+    // ── Qwen 3.8 27B Heretic RVN ──────────────────────────────────────
+    //
+    // Nachgetragen am 02.09.2026, nachdem David gesagt hatte „such mehr nach
+    // uncensored, irgendwas muss es geben". Es gab etwas: dieses Repo stand
+    // mit 1,2 Mio Downloads auf Platz zwei aller unzensierten GGUF-Modelle
+    // und fehlte hier.
+    //
+    // WICHTIG zur Dateiwahl, sonst laedt jemand das Falsche: die Modellkarte
+    // sagt ausdruecklich, dass das sauber benannte
+    // `Qwen3.8-27B-Heretic-Q4_K_M.gguf` die AELTERE Abliteration ist und nur
+    // „for download-count continuity" liegen bleibt. Empfohlen sind die
+    // `RVN-*-multilingual`-Dateien: zwei zusaetzliche ARA-Durchgaenge, KL
+    // 0,0085, Verweigerungen von 3/100 auf 0–1/100. Genau die stehen hier.
+    // `-mtp`- und `-vision`-Varianten sind absichtlich draussen, solange sie
+    // niemand am Pin gefahren hat.
+    //
+    // Architektur am 02.09.2026 aus dem echten Dateikopf gelesen: `qwen35` —
+    // dieselbe wie beim Nachbareintrag oben, also von b9949 getragen.
+    { name: 'Qwen 3.8 27B Heretic', group: 'Qwen 3.8 27B Heretic', description: 'Qwen 3.8 27B RVN Heretic · doppelt nachgeschaerfte Abliteration, 0–1 Verweigerungen auf 100 Aufforderungen. Vision, mehrsprachig. Empfohlene Groesse.', pulls: '1.2M+', tags: ['27B', 'Vision', 'Q4_K_M', '17 GB'], updated: 'Hot', agent: true, released: '2026-08', downloadUrl: HF('0bserverx/Qwen3.8-27B-Heretic-Abliterated-Uncensored-GGUF', 'RVN-Q4_K_M-multilingual.gguf'), filename: 'RVN-Q4_K_M-multilingual.gguf', sizeGB: 16.6, mmprojUrl: HF('0bserverx/Qwen3.8-27B-Heretic-Abliterated-Uncensored-GGUF', 'mmproj-Qwen3.8-27B-Q8_0.gguf'), mmprojSizeGB: 0.63 },
+    { name: 'Qwen 3.8 27B Heretic IQ2_M', group: 'Qwen 3.8 27B Heretic', description: 'Qwen 3.8 27B RVN Heretic · kleinster brauchbarer Quant, passt auf eine 12-GB-Karte.', pulls: '1.2M+', tags: ['27B', 'Vision', 'IQ2_M', '10 GB'], updated: 'New', agent: true, released: '2026-08', downloadUrl: HF('0bserverx/Qwen3.8-27B-Heretic-Abliterated-Uncensored-GGUF', 'RVN-IQ2_M-multilingual.gguf'), filename: 'RVN-IQ2_M-multilingual.gguf', sizeGB: 10, mmprojUrl: HF('0bserverx/Qwen3.8-27B-Heretic-Abliterated-Uncensored-GGUF', 'mmproj-Qwen3.8-27B-Q8_0.gguf'), mmprojSizeGB: 0.63 },
+    { name: 'Qwen 3.8 27B Heretic Q5_K_M', group: 'Qwen 3.8 27B Heretic', description: 'Qwen 3.8 27B RVN Heretic · Q5, hoehere Qualitaet. Fuer 24-GB-Karten.', pulls: '1.2M+', tags: ['27B', 'Vision', 'Q5_K_M', '19 GB'], updated: 'New', agent: true, released: '2026-08', downloadUrl: HF('0bserverx/Qwen3.8-27B-Heretic-Abliterated-Uncensored-GGUF', 'RVN-Q5_K_M-multilingual.gguf'), filename: 'RVN-Q5_K_M-multilingual.gguf', sizeGB: 19.2, mmprojUrl: HF('0bserverx/Qwen3.8-27B-Heretic-Abliterated-Uncensored-GGUF', 'mmproj-Qwen3.8-27B-Q8_0.gguf'), mmprojSizeGB: 0.63 },
+    { name: 'Qwen 3.8 27B Heretic Q6_K', group: 'Qwen 3.8 27B Heretic', description: 'Qwen 3.8 27B RVN Heretic · Q6, nahezu verlustfrei. Fuer viel VRAM.', pulls: '1.2M+', tags: ['27B', 'Vision', 'Q6_K', '22 GB'], updated: 'New', agent: true, released: '2026-08', downloadUrl: HF('0bserverx/Qwen3.8-27B-Heretic-Abliterated-Uncensored-GGUF', 'RVN-Q6_K-multilingual.gguf'), filename: 'RVN-Q6_K-multilingual.gguf', sizeGB: 22.1, mmprojUrl: HF('0bserverx/Qwen3.8-27B-Heretic-Abliterated-Uncensored-GGUF', 'mmproj-Qwen3.8-27B-Q8_0.gguf'), mmprojSizeGB: 0.63 },
+    // ── Gemma 4 12B Heretic ───────────────────────────────────────────
+    //
+    // Die Luecke, die dem Katalog am meisten gefehlt hat: alles Unzensierte
+    // hier ist Qwen oder GLM. Wer mit Gemma anders zurechtkommt — und viele
+    // tun das —, hatte keine Wahl. 302K Downloads, Architektur `gemma4` am
+    // 02.09.2026 aus dem Dateikopf gelesen, von b9949 getragen.
+    { name: 'Gemma 4 12B Heretic', group: 'Gemma 4 12B Heretic', description: 'Gemma 4 12B heretic-abliterated · unzensiertes Gegenstueck zu Qwen und GLM, mit anderem Ton. Vision. Empfohlene Groesse.', pulls: '300K+', tags: ['12B', 'Vision', 'Q4_K_M', '7 GB'], updated: 'Hot', agent: true, released: '2026-06', downloadUrl: HF('culturerevolt/gemma-4-12b-heretic-abliterated-GGUF', 'gemma-4-12b-heretic-Q4_K_M.gguf'), filename: 'gemma-4-12b-heretic-Q4_K_M.gguf', sizeGB: 7.4, mmprojUrl: HF('culturerevolt/gemma-4-12b-heretic-abliterated-GGUF', 'gemma-4-12b-heretic-mmproj-f16.gguf'), mmprojSizeGB: 0.18 },
+    { name: 'Gemma 4 12B Heretic IQ4_XS', group: 'Gemma 4 12B Heretic', description: 'Gemma 4 12B heretic · IQ4_XS, das guenstigste 4 Bit. Fuer 8-GB-Karten.', pulls: '300K+', tags: ['12B', 'Vision', 'IQ4_XS', '7 GB'], updated: 'New', agent: true, released: '2026-06', downloadUrl: HF('culturerevolt/gemma-4-12b-heretic-abliterated-GGUF', 'gemma-4-12b-heretic-IQ4_XS.gguf'), filename: 'gemma-4-12b-heretic-IQ4_XS.gguf', sizeGB: 6.6, mmprojUrl: HF('culturerevolt/gemma-4-12b-heretic-abliterated-GGUF', 'gemma-4-12b-heretic-mmproj-f16.gguf'), mmprojSizeGB: 0.18 },
+    { name: 'Gemma 4 12B Heretic Q6_K', group: 'Gemma 4 12B Heretic', description: 'Gemma 4 12B heretic · Q6, nahezu verlustfrei.', pulls: '300K+', tags: ['12B', 'Vision', 'Q6_K', '10 GB'], updated: 'New', agent: true, released: '2026-06', downloadUrl: HF('culturerevolt/gemma-4-12b-heretic-abliterated-GGUF', 'gemma-4-12b-heretic-Q6_K.gguf'), filename: 'gemma-4-12b-heretic-Q6_K.gguf', sizeGB: 9.8, mmprojUrl: HF('culturerevolt/gemma-4-12b-heretic-abliterated-GGUF', 'gemma-4-12b-heretic-mmproj-f16.gguf'), mmprojSizeGB: 0.18 },
+    // ── Qwen3-VL 8B Abliterated ───────────────────────────────────────
+    //
+    // Die zweite echte Luecke: alles Unzensierte mit Bildverstehen ist hier
+    // 27B aufwaerts. Wer eine 8-GB-Karte hat, konnte Bilder nur zensiert
+    // ansehen lassen. Das hier laeuft in 5 GB. Architektur `qwen3vl`, am
+    // 02.09.2026 aus dem Dateikopf gelesen, von b9949 getragen.
+    { name: 'Qwen3-VL 8B Abliterated', group: 'Qwen3-VL 8B Abliterated', description: 'Qwen3-VL 8B abliterated · unzensiertes Bildverstehen auf einer 8-GB-Karte. Empfohlene Groesse.', pulls: '650K+', tags: ['8B', 'Vision', 'Q4_K_M', '5 GB'], updated: 'Hot', agent: true, released: '2025-11', downloadUrl: HF('mradermacher/Qwen3-VL-8B-Instruct-abliterated-GGUF', 'Qwen3-VL-8B-Instruct-abliterated.Q4_K_M.gguf'), filename: 'Qwen3-VL-8B-Instruct-abliterated.Q4_K_M.gguf', sizeGB: 5, mmprojUrl: HF('mradermacher/Qwen3-VL-8B-Instruct-abliterated-GGUF', 'Qwen3-VL-8B-Instruct-abliterated.mmproj-f16.gguf'), mmprojSizeGB: 1.16 },
+    { name: 'Qwen3-VL 8B Abliterated Q5_K_M', group: 'Qwen3-VL 8B Abliterated', description: 'Qwen3-VL 8B abliterated · Q5, hoehere Qualitaet.', pulls: '650K+', tags: ['8B', 'Vision', 'Q5_K_M', '6 GB'], updated: 'New', agent: true, released: '2025-11', downloadUrl: HF('mradermacher/Qwen3-VL-8B-Instruct-abliterated-GGUF', 'Qwen3-VL-8B-Instruct-abliterated.Q5_K_M.gguf'), filename: 'Qwen3-VL-8B-Instruct-abliterated.Q5_K_M.gguf', sizeGB: 5.9, mmprojUrl: HF('mradermacher/Qwen3-VL-8B-Instruct-abliterated-GGUF', 'Qwen3-VL-8B-Instruct-abliterated.mmproj-f16.gguf'), mmprojSizeGB: 1.16 },
+    { name: 'Qwen3-VL 8B Abliterated Q6_K', group: 'Qwen3-VL 8B Abliterated', description: 'Qwen3-VL 8B abliterated · Q6, nahezu verlustfrei.', pulls: '650K+', tags: ['8B', 'Vision', 'Q6_K', '7 GB'], updated: 'New', agent: true, released: '2025-11', downloadUrl: HF('mradermacher/Qwen3-VL-8B-Instruct-abliterated-GGUF', 'Qwen3-VL-8B-Instruct-abliterated.Q6_K.gguf'), filename: 'Qwen3-VL-8B-Instruct-abliterated.Q6_K.gguf', sizeGB: 6.7, mmprojUrl: HF('mradermacher/Qwen3-VL-8B-Instruct-abliterated-GGUF', 'Qwen3-VL-8B-Instruct-abliterated.mmproj-f16.gguf'), mmprojSizeGB: 1.16 },
     // ── Popular: GLM 4.6 Abliterated ──
     { name: 'GLM 4 9B Abliterated', description: 'GLM 4 9B abliterated · strong coding and reasoning.', pulls: '5K+', tags: ['9B', 'Q4_K_M', '5 GB'], updated: 'New', agent: true, released: '2026-03', downloadUrl: HF('bartowski/glm-4-9b-chat-abliterated-GGUF', 'glm-4-9b-chat-abliterated-Q4_K_M.gguf'), filename: 'glm-4-9b-chat-abliterated-Q4_K_M.gguf', sizeGB: 5 },
     // ── Popular: Gemma 3 Abliterated ──
@@ -1246,6 +1286,26 @@ export function getMainstreamTextModels(): DiscoverModel[] {
     // Der Waechter __tests__/katalog-architektur.live.test.ts prueft das ab
     // jetzt selbst; seine Gegenprobe wird GRUEN-nach-ROT, sobald llama.cpp
     // glm5next kennt. Dann gehoert Flash hier hinein.
+    //
+    // NACHGEPRUEFT am 02.09.2026, weil David gesagt hatte „such mehr nach
+    // uncensored, irgendwas muss es geben". Das war berechtigt — nur nicht
+    // hier: an GLM 5.3 hat sich nichts geaendert. Neu erhoben statt erinnert:
+    //
+    //   - HuggingFace fuehrt 52 GGUF-Repos zu GLM-5.3, davon 40 Flash.
+    //   - AliceThirty/GLM-5.3-Flash-UNCENSORED-GGUF hat inzwischen 4.572
+    //     Downloads, ist also kein Einzelfall mehr. Kopfbytes am 02.09.2026
+    //     gelesen: `glm5next`. Unveraendert.
+    //   - src/llama-arch.cpp auf MASTER am 02.09.2026 geholt und durchsucht:
+    //     glm4, glm4moe, glm-dsa — kein glm5next, kein glm5-next.
+    //   - Von den 12 Nicht-Flash-GGUF-Repos ist kein einziges unzensiert. Der
+    //     einzige Treffer (msuiche/GLM-5.3-abliterated-cyber-GLP-77) ist eine
+    //     gesperrte LoRA unter 10 MB, kein Modell.
+    //
+    // Was die Suche dafuer WOHL gebracht hat, steht weiter oben im
+    // Uncensored-Block: Qwen 3.8 27B Heretic RVN, Gemma 4 12B Heretic und
+    // Qwen3-VL 8B Abliterated fehlten hier, zusammen ueber zwei Millionen
+    // Downloads. Die Antwort auf „irgendwas muss es geben" war ja — nur unter
+    // einem anderen Namen.
     // ── Hunyuan 3 295B: entfernt am 03.09.2026, und warum ───────────────
     //
     // Hier standen zwei Eintraege, 170 GB und 83,3 GB. Ihre GGUFs tragen

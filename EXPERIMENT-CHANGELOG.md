@@ -332,6 +332,59 @@ der Typecheck monatelang gar nichts geprüft hat.
 
   Welle 3 unberührt.
 
+## feat(Katalog) — „such mehr nach uncensored, irgendwas muss es geben"
+
+Das war die Antwort auf meine Absage zu GLM 5.3 unzensiert. Sie war
+berechtigt, nur nicht dort, wo ich gesucht hatte.
+
+**Zu GLM 5.3 selbst hat sich nichts geändert** — aber das ist jetzt gemessen
+statt erinnert. Neu erhoben am 02.09.2026: HuggingFace führt 52 GGUF-Repos zu
+GLM-5.3, davon 40 Flash. `AliceThirty/GLM-5.3-Flash-UNCENSORED-GGUF` hat
+inzwischen 4.572 Downloads, ist also kein Einzelfall mehr — die Kopfbytes der
+echten Datei sagen weiterhin `general.architecture = glm5next`. Und
+`src/llama-arch.cpp` **auf master an diesem Tag geholt**: glm4, glm4moe,
+glm-dsa — kein glm5next. Von den zwölf Nicht-Flash-GGUF-Repos ist keines
+unzensiert; der einzige Treffer ist eine gesperrte LoRA unter 10 MB.
+
+**Was die Suche wirklich gebracht hat**, war etwas anderes: ein Abgleich der
+meistgeladenen unzensierten GGUF-Modelle gegen unseren Katalog. Neun fehlten.
+Drei davon sind jetzt drin, zusammen über zwei Millionen Downloads:
+
+| Modell | Downloads | Architektur | Warum es gefehlt hat |
+|---|---|---|---|
+| Qwen 3.8 27B Heretic RVN | 1,2 Mio | `qwen35` | Platz 2 aller unzensierten GGUFs, schlicht übersehen |
+| Gemma 4 12B Heretic | 302 K | `gemma4` | Alles Unzensierte hier war Qwen oder GLM |
+| Qwen3-VL 8B Abliterated | 650 K | `qwen3vl` | Unzensiertes Bildverstehen gab es erst ab 27B |
+
+Jede Architektur am 02.09.2026 **aus dem echten Dateikopf gelesen**, nicht aus
+dem Repo-Namen geschlossen, und gegen die Architekturliste des gepinnten
+b9949 geprüft. Alle dreizehn URLs mit HEAD abgefragt: 200, und die Größen
+stimmen bis auf die Nachkommastelle.
+
+### Die Datei, die man leicht falsch erwischt
+
+Bei Qwen 3.8 27B Heretic wäre die naheliegende Wahl die falsche gewesen. Das
+Repo enthält ein sauber benanntes `Qwen3.8-27B-Heretic-Q4_K_M.gguf` — und die
+Modellkarte sagt ausdrücklich, dass genau diese Datei die **ältere**
+Abliteration ist und nur „for download-count continuity" liegen bleibt.
+Empfohlen sind die `RVN-*-multilingual`-Dateien: zwei zusätzliche
+ARA-Durchgänge, KL 0,0085, Verweigerungen von 3/100 auf 0–1/100. Genau die
+stehen im Katalog, und ein Test hält die Dateiform fest — wer die Altdatei
+zurückschreibt, bekommt Rot. `-mtp`- und `-vision`-Sonderbauten sind bewusst
+draußen, solange sie niemand am Pin gefahren hat.
+
+### Der Kachelzähler hat es gefangen
+
+53 → 56 in der Uncensored-Liste, dritte Bewegung dieser Schranke. Sie zählt
+Gruppen, nicht Dateien: die zehn neuen Einträge sind vier, drei und drei
+Quants derselben drei Modelle. Die Leistungsmessung dahinter trägt weiter —
+die Kurve ist an zwei Punkten belegt (53 → 0,2 ms · 303 → 1,1 ms), und 56
+liegt am unteren Ende.
+
+**Tore:** typecheck sauber · eslint sauber · 8.671 Frontend-Tests (vorher
+8.669) · der Live-Architekturwächter hat **147 von 147** GGUF-Köpfen echt
+gelesen, 63 Sekunden, alle Architekturen von b9949 getragen.
+
 ## feat(API) — was ein Kunde fand, der den Code nicht kennt
 
 Die lokale Modell-API war gebaut, geprüft und grün. Dann hat ein Agent mit

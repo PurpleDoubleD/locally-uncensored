@@ -82,3 +82,50 @@ describe('GLM 5.3 Flash steht NICHT im Katalog', () => {
     expect(ollama).toEqual([])
   })
 })
+
+// ── Die Nachsuche vom 02.09.2026 ────────────────────────────────────────────
+//
+// „such mehr nach uncensored, irgendwas muss es geben" — es gab etwas, aber
+// nicht bei GLM. Diese drei Modelle standen unter den zehn meistgeladenen
+// unzensierten GGUF-Modellen und fehlten im Katalog. Der Test haelt fest,
+// WELCHE Datei jeweils gemeint ist, denn bei zweien ist die naheliegende die
+// falsche.
+
+describe('was die Nachsuche gebracht hat, bleibt drin', () => {
+  const alle = getUncensoredTextModels()
+
+  it('Qwen 3.8 27B Heretic zeigt auf RVN, nicht auf die Altdatei', () => {
+    const gruppe = alle.filter((m) => m.group === 'Qwen 3.8 27B Heretic')
+    expect(gruppe.length).toBe(4)
+    for (const m of gruppe) {
+      // Die Modellkarte sagt ausdruecklich, dass
+      // `Qwen3.8-27B-Heretic-Q4_K_M.gguf` die AELTERE Abliteration ist und nur
+      // "for download-count continuity" liegen bleibt. Wer sie versehentlich
+      // eintraegt, liefert dem Nutzer das schwaechere Modell aus, und niemand
+      // sieht es an der Datei.
+      expect(m.filename).toMatch(/^RVN-.*-multilingual\.gguf$/)
+      // MTP- und Vision-Sonderbauten sind bewusst draussen, solange sie
+      // niemand am Pin gefahren hat.
+      expect(m.filename).not.toContain('mtp')
+      expect(m.filename).not.toContain('-vision')
+      // Vision kommt ueber den Projektor, nicht ueber eine Sondervariante.
+      expect(m.mmprojUrl).toBeTruthy()
+    }
+  })
+
+  it('Gemma 4 und Qwen3-VL fuellen die zwei echten Luecken', () => {
+    // Gemma: alles Unzensierte hier war Qwen oder GLM.
+    const gemma = alle.filter((m) => m.group === 'Gemma 4 12B Heretic')
+    expect(gemma.length).toBe(3)
+    expect(gemma.every((m) => m.mmprojUrl)).toBe(true)
+
+    // Qwen3-VL: unzensiertes Bildverstehen gab es erst ab 27B, also nicht auf
+    // einer 8-GB-Karte. Genau das ist der Zweck dieses Eintrags — faellt die
+    // Groesse, faellt der Grund.
+    const vl = alle.filter((m) => m.group === 'Qwen3-VL 8B Abliterated')
+    expect(vl.length).toBe(3)
+    expect(vl.every((m) => m.mmprojUrl)).toBe(true)
+    const klein = vl.find((m) => m.filename?.includes('Q4_K_M'))
+    expect(klein?.sizeGB).toBeLessThanOrEqual(6)
+  })
+})

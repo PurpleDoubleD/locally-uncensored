@@ -109,8 +109,24 @@ describe('D-S26 · was das Raster wirklich kostet', () => {
     // waren, war Zufall: es sind zwei getrennte Listen (Mainstream und
     // Uncensored), und GLM 5.3 gibt es uncensored nur als Flash, das lokal
     // nicht laeuft (siehe api/__tests__/glm53-nur-was-laeuft.test.ts).
+    //
+    // 53 -> 56 am 02.09.2026, dritte Bewegung dieser Schranke. Drei neue
+    // Gruppen in der Uncensored-Liste, nachdem David gesagt hatte „such mehr
+    // nach uncensored, irgendwas muss es geben": Qwen 3.8 27B Heretic RVN
+    // (1,2 Mio Downloads), Gemma 4 12B Heretic (302K) und Qwen3-VL 8B
+    // Abliterated (650K). Alle drei standen unter den zehn meistgeladenen
+    // unzensierten GGUF-Modellen und fehlten hier.
+    //
+    // Warum GRUPPEN und nicht 10 Kacheln fuer 10 Eintraege: das Raster zaehlt
+    // Gruppen, nicht Dateien. Die zehn neuen Eintraege sind vier, drei und
+    // drei Quants derselben drei Modelle.
+    //
+    // Traegt die Messung oben noch? Ja, aus demselben Grund wie bei 54: die
+    // Kurve ist an zwei Punkten belegt (53 -> 0,2 ms · 303 -> 1,1 ms), und 56
+    // liegt weiterhin am unteren Ende. Neu zu messen waere bei einem Sprung
+    // in die Hunderter noetig.
     expect(messeReiter(getMainstreamTextModels()).kacheln).toBe(53)
-    expect(messeReiter(getUncensoredTextModels()).kacheln).toBe(53)
+    expect(messeReiter(getUncensoredTextModels()).kacheln).toBe(56)
   })
 
   it('eine Kachel ist rund 28 Elementknoten gross, nicht 300', () => {
