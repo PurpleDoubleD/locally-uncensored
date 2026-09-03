@@ -67,6 +67,24 @@ describe('der Prompt', () => {
     for (const sec of SECTIONS) expect(p).toContain(sec.heading)
   })
 
+  it('verlangt die Sprache des Gespraechs und woertliche Werte', () => {
+    // Ein Persona-Lauf am 03.09.2026 fuehrte ein durchgehend deutsches
+    // Gespraech und bekam eine englische Zusammenfassung zurueck, in der
+    // „47,3 Millionen Euro" zu „47.3 million euros" geworden war und eine
+    // Uhrzeit ganz fehlte. Beides ist derselbe Fehler: ein Protokoll, das
+    // uebersetzt, ist kein Protokoll mehr, sondern eine Nacherzaehlung — und
+    // Werte, die nacherzaehlt werden, sind die einzigen, die nach der
+    // Verdichtung nicht mehr nachgeschlagen werden koennen.
+    //
+    // Eine Zusicherung auf den Wortlaut eines Prompts ist eine schwache
+    // Sperrklinke, das ist mir bewusst. Sie haelt aber das eine fest, was
+    // ohne sie lautlos verschwindet: dass die Anweisung ueberhaupt dasteht.
+    const p = buildCompactPrompt([{ role: 'user', content: 'x' }])
+    expect(p).toContain('in the language the conversation is in')
+    expect(p).toMatch(/Never translate, convert or reformat a value/)
+    expect(p).toMatch(/Count nothing you have not written down/)
+  })
+
   it('nimmt einen Fokus auf, ohne die Abschnitte fallen zu lassen', () => {
     const p = buildCompactPrompt([{ role: 'user', content: 'x' }], { focus: 'die Datenbank' })
     expect(p).toContain('die Datenbank')

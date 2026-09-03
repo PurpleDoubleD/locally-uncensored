@@ -205,6 +205,10 @@ export function buildCompactPrompt(
 
 Write for the assistant that has to carry on, not for a human reader. Facts over prose. Keep names, paths, numbers and identifiers exactly as they appear — they cannot be looked up again once the original is gone. Do not add anything that is not in the transcript, and do not offer to help; this is a record, not a reply.
 
+Write the whole summary in the language the conversation is in. A record that changes language has been re-said, not recorded: on 2026-09-03 a German conversation came back as an English summary in which "47,3 Millionen Euro" had become "47.3 million euros" and a time of day had disappeared entirely. Never translate, convert or reformat a value — not currency, not dates, not times, not units, not decimal marks. Copy them character for character.
+
+Count nothing you have not written down. If the person marked five things to remember and you can only find four, record the four and say the fifth is missing. A list that promises five and delivers four makes the next assistant shift the values into the wrong slots — which is worse than a gap, because a gap gets asked about.
+
 Use exactly these six headings, each on its own line:
 
 TASK
