@@ -14,6 +14,7 @@ import {
   parseWikipediaResults,
   type WebSearchResult,
 } from '../src/dev/web-search-parse'
+import { wikiVersuche, wikiSuchUrl } from '../src/dev/wikipedia-language'
 
 /**
  * Websuche und die SearXNG-Instanz darunter.
@@ -343,15 +344,30 @@ export function registerWebSearchRoutes(routes: RouteMount): void {
           })
         }
 
-        // Tier 3: Wikipedia API (always works)
-        const tryWikipedia = (): Promise<WebSearchResult[]> => {
-          const wikiUrl = 'https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=' + encodeURIComponent(query) + '&format=json&srlimit=' + maxResults + '&utf8=1'
-          return fetchJSON(wikiUrl).then((data) => {
-            const results = parseWikipediaResults(data, maxResults)
-            if (results.length === 0) throw tierEmpty('Wikipedia')
-            console.log('[WebSearch] Wikipedia returned ' + results.length + ' results')
-            return results
-          })
+        // Letzte Stufe: Wikipedia. Ueber dieser Zeile stand „always works" —
+        // sie fragte fest en.wikipedia.org. Gemessen am 04.09.2026:
+        // „Transparenzgesetz Hamburg Antragsfristen" ergibt dort 0 Treffer und
+        // auf de.wikipedia 31. Zusammen mit DuckDuckGos Bot-Sperre (HTTP 202)
+        // hatte eine deutsche Recherche damit KEINE funktionierende Stufe.
+        // Jetzt entscheidet die Frage selbst, welche Sprachwiki zuerst
+        // drankommt — und die andere wird trotzdem noch versucht.
+        const tryWikipedia = async (): Promise<WebSearchResult[]> => {
+          let letzter: Error = tierEmpty('Wikipedia')
+          for (const versuch of wikiVersuche(query)) {
+            try {
+              const data = await fetchJSON(wikiSuchUrl(versuch.sprache, versuch.query, maxResults))
+              const results = parseWikipediaResults(data, maxResults, versuch.sprache)
+              if (results.length === 0) {
+                letzter = tierEmpty('Wikipedia (' + versuch.sprache + ', "' + versuch.query + '")')
+                continue
+              }
+              console.log('[WebSearch] Wikipedia (' + versuch.sprache + ') returned ' + results.length + ' results for "' + versuch.query + '"')
+              return results
+            } catch (e) {
+              letzter = e instanceof Error ? e : new Error(String(e))
+            }
+          }
+          throw letzter
         }
 
         // Execute tiers based on provider setting
@@ -371,9 +387,19 @@ export function registerWebSearchRoutes(routes: RouteMount): void {
             res.end(JSON.stringify({ results }))
           })
           .catch((err) => {
+            // Was die Meldung zu sagen hat, ist nicht „es ging nicht",
+            // sondern was der Nutzer dagegen tun kann. Eine Persona las am
+            // 03.09.2026 nur „All search tiers failed" und konnte daraus
+            // nicht schliessen, dass ein API-Schluessel die Kette wieder
+            // ganz macht — das Modell konnte es auch nicht und erfand
+            // stattdessen eine Tabelle.
+            const rat = braveApiKey || tavilyApiKey
+              ? ''
+              : ' The free tiers are unreliable (DuckDuckGo answers automated requests with a bot check).'
+                + ' Configure Brave or Tavily under Settings → Agent → Search Provider for dependable search.'
             console.error('[WebSearch] All tiers failed:', (err as Error).message)
             res.writeHead(200, { 'Content-Type': 'application/json' })
-            res.end(JSON.stringify({ results: [], error: 'All search tiers failed: ' + (err as Error).message }))
+            res.end(JSON.stringify({ results: [], error: 'All search tiers failed: ' + (err as Error).message + rat }))
           })
       } catch (err) {
         res.writeHead(400, { 'Content-Type': 'application/json' })

@@ -76,7 +76,14 @@ export function parseTavilyResults(data: unknown, max: number): WebSearchResult[
  * TypeError mitten in der letzten Ebene der Suchkette und machte aus „keine
  * Treffer" ein „alle Ebenen fehlgeschlagen". Hier fällt er einfach heraus.
  */
-export function parseWikipediaResults(data: unknown, max: number): WebSearchResult[] {
+/**
+ * @param sprache Die Sprachwiki, DIE GEFRAGT WURDE. Stand hier fest auf 'en',
+ *   was solange stimmte, wie nur en.wikipedia gefragt wurde — seit die Stufe
+ *   auch de.wikipedia fragt (siehe dev/wikipedia-language.ts), zeigte jeder
+ *   Treffer auf eine Adresse in der falschen Wiki. Ein falscher Link ist fuer
+ *   eine Recherche schlimmer als keiner: er sieht aus wie ein Beleg.
+ */
+export function parseWikipediaResults(data: unknown, max: number, sprache = 'en'): WebSearchResult[] {
   return listAt(data, 'query', 'search')
     .slice(0, max)
     .map((r) => {
@@ -85,7 +92,7 @@ export function parseWikipediaResults(data: unknown, max: number): WebSearchResu
         title,
         url: title === ''
           ? ''
-          : `https://en.wikipedia.org/wiki/${encodeURIComponent(title.replace(/ /g, '_'))}`,
+          : `https://${sprache}.wikipedia.org/wiki/${encodeURIComponent(title.replace(/ /g, '_'))}`,
         snippet: text(r, 'snippet').replace(/<[^>]*>/g, ''),
       }
     })
