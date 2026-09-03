@@ -93,6 +93,9 @@ describe('the notes table', () => {
       // its own as if the engine then lives there. It does not, and the note
       // has to say which one of the two it is.
       'begins at 8127 again',
+      // A16 (A14-3a): the trip back to LM Studio is new visible behaviour, so
+      // it is in the note and pinned here.
+      'the way back costs the same one click',
     ]) {
       expect(prose, `${shipping}: nothing about "${anchor}"`).toContain(anchor)
     }

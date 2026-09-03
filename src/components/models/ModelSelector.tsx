@@ -23,6 +23,7 @@ import { isBuiltinEngineEntry, type InstalledModelLike } from '../../lib/lmstudi
 import {
   ensureLuEngineIsChatProvider, LU_ENGINE_SWITCH_NOTE, LU_ENGINE_SWAP_BUSY_NOTE,
   announceLuEngineSwapBusy, luEngineStartFailureNote,
+  handBackChatProviderForRow, chatProviderSwitchNote,
 } from '../../api/lu-engine-switch'
 import { tryAcquireLuEngineSwap, releaseLuEngineSwap } from '../../api/lu-engine-swap-lock'
 import { useLuEngineSwitchStore } from '../../stores/luEngineSwitchStore'
@@ -704,6 +705,16 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
    */
   const handleSelectModel = async (model: AIModel) => {
     const id = lmsIdOf(model)
+
+    // A16 (A14-3a): a row belonging to the backend our engine displaced hands
+    // the slot back to it. First thing in the function, because everything
+    // below asks who holds the slot: the auto-load branch would warm a model
+    // in LM Studio and then route the chat at 8127, and the LU Engine branch
+    // would try to load an LM Studio id as a GGUF.
+    const handedBackTo = handBackChatProviderForRow(model as unknown as InstalledModelLike)
+    if (handedBackTo) {
+      useLuEngineSwitchStore.getState().announce(chatProviderSwitchNote(handedBackTo))
+    }
 
     if (shouldAutoLoadForSelect(model, lmsLoaded)) {
       if (selectingLms || togglingLms) return // a load is already in flight

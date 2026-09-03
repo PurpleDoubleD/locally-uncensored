@@ -21,6 +21,8 @@ import { isBuiltinEngineEntry, type InstalledModelLike } from '../lib/lmstudio-m
 import {
   ensureLuEngineIsChatProvider, LU_ENGINE_SWITCH_NOTE, LU_ENGINE_FILE_GONE,
   announceLuEngineSwapBusy, luEngineStartFailureNote,
+  standbyChatBackend, listStandbyBackendModels, handBackChatProviderForRow,
+  chatProviderSwitchNote,
 } from '../api/lu-engine-switch'
 import { tryAcquireLuEngineSwap, releaseLuEngineSwap } from '../api/lu-engine-swap-lock'
 import { useLuEngineSwitchStore } from '../stores/luEngineSwitchStore'
@@ -239,6 +241,31 @@ export function useModels() {
           allModels.push(...result.value.filter(m => !isEmbeddingModel(m.name)))
         }
       }
+      // A16 (A14-3a): the backend our engine displaced keeps its models on
+      // screen while it is on standby.
+      //
+      // The openai slot holds one backend at a time, so while the LU Engine
+      // has it, `/v1/models` is asked of the engine and LM Studio drops out of
+      // the list even though its server is still running on 1234. The trip out
+      // was one click on a tile; the trip back was Settings, AI Backends,
+      // Providers, Enable, and nothing on the picker said so. Its rows are
+      // listed here under their own name, and picking one hands the slot back
+      // (see `handBackChatProviderForRow`).
+      //
+      // Only reached when a local backend really was displaced, so on the
+      // ordinary machine with nothing on standby this costs no request at all.
+      const standby = managedBuiltin ? standbyChatBackend() : null
+      if (standby) {
+        try {
+          const waiting = await listStandbyBackendModels(standby)
+          allModels.push(...waiting
+            .map((pm) => cloudModelRow(pm) satisfies CloudModel)
+            .filter((m) => !isEmbeddingModel(m.name)))
+        } catch {
+          // Its server went away in the meantime. No rows, exactly as before.
+        }
+      }
+
       // LU Engine model list (the downloaded GGUFs and the user's own folder).
       //
       // A14 (2.6.8): asked whether or not the LU Engine is the active chat
@@ -518,6 +545,15 @@ export function useModels() {
     // saying so: the slot has already changed hands and the model the user was
     // talking to has already been unloaded to make room.
     let switched = false
+    // A16 (A14-3a): the other direction. A row belonging to the backend on
+    // standby gives the slot back to it, with the same sentence in the same
+    // row the outward switch uses. Done BEFORE the openai config is read below,
+    // so the engine branch sees a slot that is no longer ours and keeps its
+    // hands off a model it does not serve.
+    const handedBackTo = handBackChatProviderForRow(row as unknown as InstalledModelLike | undefined)
+    if (handedBackTo) {
+      useLuEngineSwitchStore.getState().announce(chatProviderSwitchNote(handedBackTo))
+    }
     if (isLuRow) {
       // The bolt against two swap_bundled_model calls at one engine, where the
       // second lands on a process the first is still restarting. It is taken

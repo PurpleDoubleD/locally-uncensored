@@ -19,6 +19,13 @@
 import { useLuEngineSwitchStore } from '../stores/luEngineSwitchStore'
 import { luEngineSwapInFlight } from './lu-engine-swap-lock'
 import { useProviderStore } from '../stores/providerStore'
+import {
+  slotHandbackUpdate, standbyOccupant,
+  type HandoverSlot, type SlotOccupant,
+} from '../lib/openai-slot-handover'
+import { isBuiltinEngineEntry, type InstalledModelLike } from '../lib/lmstudio-match'
+import { OpenAIProvider } from './providers/openai-provider'
+import type { ProviderModel } from './providers/types'
 import { PROVIDER_PRESETS } from './providers/types'
 import { slotTakeoverUpdate } from '../lib/openai-slot-handover'
 import { LU_ENGINE_NAME } from '../lib/engine-name'
@@ -104,4 +111,92 @@ export function ensureLuEngineIsChatProvider(): boolean {
     managed: true,
   }))
   return true
+}
+
+// ── The way back (A16, A14-3a) ──────────────────────────────────────────────
+//
+// Windows counter-check 02.09.: start the LM Studio server from the picker,
+// chat with an LM Studio model, then click an LU Engine tile. From that moment
+// the picker shows LU Engine models and nothing else, although LM Studio's
+// server is still up on 1234. The card that offers to start it is gone too,
+// correctly, because the server is running. The only way back is Settings, AI
+// Backends, Providers, Enable on the standby card, and no line anywhere says
+// so. The trip out took one click.
+//
+// So the trip back takes one click as well. While our engine holds the slot,
+// the backend it displaced is asked for its models, they keep their own
+// heading in the list, and picking one hands the slot back the way the
+// standby card's Enable does, with the same sentence in the same status row
+// the outward trip uses.
+
+/** What the pick says when it moved the chat backend to `name`. */
+export function chatProviderSwitchNote(name: string): string {
+  return `Switched your chat provider to ${name} for this model.`
+}
+
+/**
+ * The local backend waiting beside the slot while the LU Engine holds it, or
+ * null when there is none to go back to.
+ *
+ * Local only, and never a managed one: a cloud backend on standby has nothing
+ * to list from a machine that may be offline, and "managed" is us.
+ */
+export function standbyChatBackend(): SlotOccupant | null {
+  const slot = useProviderStore.getState().providers.openai as HandoverSlot
+  if (!(slot.enabled && slot.managed === true)) return null
+  const waiting = standbyOccupant(slot)
+  if (!waiting || !waiting.isLocal || waiting.managed) return null
+  return waiting
+}
+
+/**
+ * Is this row served by the backend on standby rather than by our engine.
+ *
+ * Both wear `provider: 'openai'`, because that is the one slot every
+ * OpenAI-protocol backend shares. The display name is what tells them apart,
+ * and it is the same name the standby card carries.
+ */
+export function isStandbyBackendRow(row: InstalledModelLike | null | undefined): boolean {
+  if (!row || row.provider !== 'openai') return false
+  if (isBuiltinEngineEntry(row)) return false
+  const waiting = standbyChatBackend()
+  if (!waiting) return false
+  return (row.providerName || '').toLowerCase() === waiting.name.toLowerCase()
+}
+
+/**
+ * Hand the slot back when the picked row belongs to the backend on standby.
+ *
+ * Returns the name it went back to, so the caller can say it, or null when
+ * this row had nothing to do with the standby backend and everything stays
+ * where it is.
+ */
+export function handBackChatProviderForRow(row: InstalledModelLike | null | undefined): string | null {
+  if (!isStandbyBackendRow(row)) return null
+  const { providers, setProviderConfig } = useProviderStore.getState()
+  const slot = providers.openai as HandoverSlot
+  const update = slotHandbackUpdate(slot)
+  if (!update) return null
+  setProviderConfig('openai', update)
+  return update.name ?? null
+}
+
+/**
+ * The standby backend's own model list, read straight from its server.
+ *
+ * A one-off client rather than the registry's cached one: the registry is
+ * keyed on the slot, and the slot is currently the LU Engine. Nothing is
+ * cached, so a server that has gone away since simply throws and the caller
+ * adds no rows, which is exactly the old behaviour.
+ */
+export async function listStandbyBackendModels(occupant: SlotOccupant): Promise<ProviderModel[]> {
+  const client = new OpenAIProvider({
+    id: 'openai',
+    name: occupant.name,
+    enabled: true,
+    baseUrl: occupant.baseUrl,
+    apiKey: '',
+    isLocal: occupant.isLocal,
+  })
+  return client.listModels()
 }
