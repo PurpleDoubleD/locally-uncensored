@@ -766,12 +766,24 @@ async function executeShellExecute(
   const task = argString(args, 'task')
   if (task === 'list') return executeShellTaskList()
   if (task === 'status' || task === 'kill') {
-    if (task === 'kill' && isReadOnlyShellTurn(run)) {
-      return 'Refused: this turn is read-only (/review, Code-Review Mode or Plan mode); killing a task changes state.'
-    }
     const id = argString(args, 'task_id', 'id')
-    if (!id) return `shell_execute: task "${task}" needs a task_id.`
-    return task === 'status' ? executeShellTaskStatus({ id }) : executeShellTaskKill({ id })
+    // Die Falle, die eine Persona am 03.09.2026 dreimal von drei Malen
+    // ausgeloest hat: `llama3.2:3b` fuellte `task: "status"` wie jedes andere
+    // Schema-Feld mit, waehrend daneben ein vollstaendiger Befehl stand —
+    // `{"task":"status","command":"sw_vers -productVersion"}`. Ohne `task_id`
+    // ist das ein garantierter Fehlschlag, und danach erfand das Modell die
+    // Ausgabe. Diese Kombination hat genau eine sinnvolle Lesart: der Befehl
+    // soll laufen. Mit `task_id` bleibt es die Abfrage am Hintergrundlauf, und
+    // ohne Befehl bleibt der Fehlschlag stehen.
+    if (!id && argString(args, 'command').trim()) {
+      // faellt durch zur normalen Ausfuehrung unten
+    } else {
+      if (task === 'kill' && isReadOnlyShellTurn(run)) {
+        return 'Refused: this turn is read-only (/review, Code-Review Mode or Plan mode); killing a task changes state.'
+      }
+      if (!id) return `shell_execute: task "${task}" needs a task_id (it comes from a background start). To run a command instead, drop \`task\` and pass \`command\`.`
+      return task === 'status' ? executeShellTaskStatus({ id }) : executeShellTaskKill({ id })
+    }
   }
 
   const command = argString(args, 'command').trim()

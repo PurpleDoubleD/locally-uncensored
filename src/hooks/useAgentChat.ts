@@ -74,6 +74,7 @@ import { applyStoredCompaction } from '../lib/compact-summary'
 import { newestCompaction, maybeAutoCompact } from '../lib/run-compact-command'
 import { generateEmbeddings } from '../api/rag'
 import { truncateToolResult } from '../lib/truncate-tool-result'
+import { toolFailureNote } from '../lib/tool-failure-note'
 import { toolCallCapMs, raceWithToolTimeout, SHELL_EXECUTE_DEFAULT_TIMEOUT_MS } from '../lib/tool-timeout'
 import { AgentLoopGuard } from '../lib/agent-loop-guard'
 import { budgetFromSettings } from '../api/agents/budget'
@@ -2014,7 +2015,12 @@ export function useAgentChat() {
           // chars, big models get 60k (~15k tokens) so one giant tool result
           // can never ride along verbatim in every following request via
           // compaction's KEEP_RECENT window (225k-token prompts, 2026-07-26).
-          return truncateToolResult(text, settings.smallModelMode ? 1500 : 60000)
+          // Die Notiz haengt NACH dem Kuerzen dran, sonst schneidet ein
+          // langes Fehlerprotokoll sie gerade dann weg, wenn sie gebraucht wird.
+          return (
+            truncateToolResult(text, settings.smallModelMode ? 1500 : 60000) +
+            toolFailureNote(r.status)
+          )
         }
         // After a successful image/video gen, nudge a NATURAL closing comment so
         // the model doesn't silently loop another generation (David 2026-06-04).
