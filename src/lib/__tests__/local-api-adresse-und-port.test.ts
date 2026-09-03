@@ -10,7 +10,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   localApiBaseUrl, pruefePort, curlBeispiel, clientFelder, reichweiteText,
-  kannStarten, LOCAL_API_DEFAULT_PORT, BELEGTE_PORTS,
+  kannStarten, LOCAL_API_DEFAULT_PORT, BELEGTE_PORTS, parseCorsOrigins, corsText,
 } from '../local-api'
 import { readFileSync } from 'node:fs'
 import { resolve, dirname } from 'node:path'
@@ -117,5 +117,50 @@ describe('Was der Nutzer angezeigt bekommt', () => {
     // und in einem WLAN mit Gaesten sind das fremde.
     expect(reichweiteText(true)).toContain('Gaeste')
     expect(reichweiteText(false)).toContain('Nur Programme auf diesem Rechner')
+  })
+})
+
+// ── CORS-Erlaubnisliste ─────────────────────────────────────────────────────
+//
+// Aus dem Kunden-Testbericht vom 02.09.2026, Fund 3. Die Liste ist eine
+// Sicherheitsentscheidung; sie gehoert deshalb hierher und nicht in ein `.tsx`,
+// das kein Test dieses Hauses je rendert.
+
+describe('die CORS-Liste laesst nur herein, was benannt wurde', () => {
+  it('nimmt Herkuenfte, entdoppelt und normalisiert', () => {
+    expect(parseCorsOrigins('http://localhost:3000')).toEqual(['http://localhost:3000'])
+    // Komma, Leerzeichen und Zeilenumbruch trennen alle gleich.
+    expect(parseCorsOrigins('http://localhost:3000, https://app.example\nhttp://127.0.0.1:8080'))
+      .toEqual(['http://localhost:3000', 'https://app.example', 'http://127.0.0.1:8080'])
+    // Gross/klein ist bei Hostnamen bedeutungslos, doppelt ist doppelt.
+    expect(parseCorsOrigins('http://LOCALHOST:3000 http://localhost:3000'))
+      .toEqual(['http://localhost:3000'])
+  })
+
+  it('der Platzhalter faellt weg, statt alles zu oeffnen', () => {
+    // Dieselbe Entscheidung wie in cors_erlaubt() in local_api.rs. Hier faellt
+    // er schon beim Tippen weg, damit niemand einen Eintrag stehen sieht, der
+    // nichts bewirkt.
+    expect(parseCorsOrigins('*')).toEqual([])
+    expect(parseCorsOrigins('* http://localhost:3000')).toEqual(['http://localhost:3000'])
+  })
+
+  it('was keine Herkunft ist, kommt nicht in die Liste', () => {
+    // Ein Eintrag mit Pfad trifft NIE zu — der Browser sendet nur Schema, Host
+    // und Port. Ihn anzunehmen hiesse, dem Nutzer eine Freigabe vorzuspielen.
+    expect(parseCorsOrigins('http://localhost:3000/app')).toEqual([])
+    expect(parseCorsOrigins('http://localhost:3000?x=1')).toEqual([])
+    expect(parseCorsOrigins('http://user:pw@localhost:3000')).toEqual([])
+    expect(parseCorsOrigins('localhost:3000')).toEqual([])
+    expect(parseCorsOrigins('file:///etc/passwd')).toEqual([])
+    expect(parseCorsOrigins('javascript:alert(1)')).toEqual([])
+    expect(parseCorsOrigins('')).toEqual([])
+  })
+
+  it('der Satz unter dem Feld sagt den Zustand, nicht die Zahl allein', () => {
+    expect(corsText([])).toContain('Closed')
+    expect(corsText([])).toContain('unaffected')
+    expect(corsText(['http://localhost:3000'])).toBe('Open to http://localhost:3000 only.')
+    expect(corsText(['a', 'b'])).toContain('2 origins')
   })
 })

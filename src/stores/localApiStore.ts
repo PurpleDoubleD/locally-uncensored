@@ -24,12 +24,19 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { safeJSONStorage } from '../lib/storage-quota'
 import { backendCall } from '../api/backend'
-import { LOCAL_API_DEFAULT_PORT, kannStarten } from '../lib/local-api'
+import { LOCAL_API_DEFAULT_PORT, kannStarten, parseCorsOrigins } from '../lib/local-api'
 
 interface LocalApiState {
   port: number
   lan: boolean
   token: string
+  /**
+   * Herkuenfte, die im Browser mitlesen duerfen. Leer heisst zu — siehe
+   * `cors_erlaubt` in local_api.rs. Der Rohtext des Feldes wird NICHT
+   * gespeichert, nur das gepruefte Ergebnis: was hier steht, ist genau das,
+   * was der Server bekommt.
+   */
+  corsOrigins: string[]
   /** Nur zur Laufzeit. Kommt aus `local_api_status`, nie aus dem Speicher. */
   laeuft: boolean
   adresse: string | null
@@ -37,6 +44,7 @@ interface LocalApiState {
 
   setPort: (p: number) => void
   setLan: (v: boolean) => void
+  setCors: (text: string) => void
   neuesToken: () => Promise<void>
   starten: () => Promise<void>
   stoppen: () => Promise<void>
@@ -49,12 +57,14 @@ export const useLocalApiStore = create<LocalApiState>()(
       port: LOCAL_API_DEFAULT_PORT,
       lan: false,
       token: '',
+      corsOrigins: [],
       laeuft: false,
       adresse: null,
       fehler: null,
 
       setPort: (p) => set({ port: p }),
       setLan: (v) => set({ lan: v }),
+      setCors: (text) => set({ corsOrigins: parseCorsOrigins(text) }),
 
       neuesToken: async () => {
         try {
@@ -66,11 +76,13 @@ export const useLocalApiStore = create<LocalApiState>()(
       },
 
       starten: async () => {
-        const { token, port, lan } = get()
+        const { token, port, lan, corsOrigins } = get()
         const urteil = kannStarten(token, port)
         if (!urteil.ok) { set({ fehler: urteil.grund }); return }
         try {
-          const r = await backendCall<{ address?: string }>('start_local_api', { port, lan, token })
+          const r = await backendCall<{ address?: string }>('start_local_api', {
+            port, lan, token, corsOrigins,
+          })
           set({ laeuft: true, adresse: r?.address ?? null, fehler: null })
         } catch (e) {
           set({ laeuft: false, fehler: String(e) })
@@ -96,14 +108,14 @@ export const useLocalApiStore = create<LocalApiState>()(
     {
       name: 'lu-local-api',
       // Quotensicher wie jeder andere localStorage-Store dieses Hauses. Es
-      // sind drei kleine Felder, aber die Quote ist geteilt: laeuft sie durch
+      // sind vier kleine Felder, aber die Quote ist geteilt: laeuft sie durch
       // die Chatverlaeufe voll, wuerfe ein nacktes `persist` hier eine
       // QuotaExceededError bis in den Aufrufer — und die Einstellung sperrte
       // sich zu, ohne zu sagen warum.
       storage: safeJSONStorage(),
-      // Genau die drei Einstellungen. `laeuft`, `adresse` und `fehler` sind
+      // Genau die vier Einstellungen. `laeuft`, `adresse` und `fehler` sind
       // Laufzeit und gehoeren nicht in die Datei — siehe Kopfkommentar.
-      partialize: (s) => ({ port: s.port, lan: s.lan, token: s.token }),
+      partialize: (s) => ({ port: s.port, lan: s.lan, token: s.token, corsOrigins: s.corsOrigins }),
     },
   ),
 )

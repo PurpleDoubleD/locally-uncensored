@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react'
-import { Copy, Check, KeyRound, Eye, EyeOff } from 'lucide-react'
+import { Copy, Check, KeyRound, Eye, EyeOff, Globe } from 'lucide-react'
 import { useLocalApiStore } from '../../stores/localApiStore'
 import {
   localApiBaseUrl, curlBeispiel, clientFelder, reichweiteText, kannStarten, pruefePort,
+  corsText,
 } from '../../lib/local-api'
 import { InlineToggle } from './InlineToggle'
 
@@ -14,9 +15,12 @@ import { InlineToggle } from './InlineToggle'
  * qualifizierter Name: wer ihn kopiert, lernt die Namensform gleich mit.
  */
 export function LocalApiSettings() {
-  const { port, lan, token, laeuft, fehler, setPort, setLan, neuesToken, starten, stoppen, auffrischen } = useLocalApiStore()
+  const { port, lan, token, corsOrigins, laeuft, fehler, setPort, setLan, setCors, neuesToken, starten, stoppen, auffrischen } = useLocalApiStore()
   const [zeigeToken, setZeigeToken] = useState(false)
   const [kopiert, setKopiert] = useState<string | null>(null)
+  // Der Rohtext bleibt lokal: gespeichert wird nur, was die Pruefung
+  // uebersteht. Sonst stuende in der Datei eine Freigabe, die nie greift.
+  const [corsRoh, setCorsRoh] = useState(corsOrigins.join(', '))
 
   useEffect(() => { auffrischen() }, [auffrischen])
 
@@ -88,6 +92,24 @@ export function LocalApiSettings() {
             />
           </div>
         </div>
+      </div>
+
+      <div className="space-y-1">
+        <div className="flex items-center gap-2">
+          <Globe className="w-3 h-3 text-gray-500" />
+          <span className="t-micro text-gray-500">
+            Browser-Freigabe — leer lassen, wenn keine Webseite die API benutzen soll.
+          </span>
+        </div>
+        <input
+          value={corsRoh}
+          onChange={(e) => { setCorsRoh(e.target.value); setCors(e.target.value) }}
+          onBlur={() => setCorsRoh(corsOrigins.join(', '))}
+          disabled={laeuft}
+          placeholder="http://localhost:3000"
+          className="w-full bg-black/30 border border-white/10 rounded px-2 py-1 t-mono text-xs disabled:opacity-50"
+        />
+        <div className="t-micro text-gray-600">{corsText(corsOrigins)}</div>
       </div>
 
       <div className="space-y-1">

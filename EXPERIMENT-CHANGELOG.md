@@ -303,8 +303,190 @@ der Typecheck monatelang gar nichts geprüft hat.
   identischer Meldung um (in einem separaten Arbeitsbaum gegengeprüft). Der
   Lauf endet mit Exit 0, weil Playwright Retries zulässt; ohne `--retries=0`
   sieht man es nicht.
-- **Design-Welle 2**: 2 von 7 Posten erledigt (Modal-Bedienbarkeit,
-  Motion/reduced-motion). Welle 3 unberührt.
+- **Design-Welle 2**: 7 von 7 Posten erledigt. Diese Zeile stand lange auf
+  „2 von 7"; das war eine stehengebliebene Notiz, keine Messung. Nachgemessen am
+  2026-09-02, Posten für Posten:
+  1. Root 16px + `--ui-scale` — `index.css:489`, Skala 1.15 in Benutzung
+  2. Composer-Grammatik 7→2 — `composer-grammar.test.ts`, 46 Tests grün
+  3. Modal-Escape/Fokus — `ui/Modal.tsx` und 14 weitere Stellen mit `Escape`
+  4. Fehlerkanal — **0** stumme `catch {}` in `src/**/*.ts*` (Regex-Scan)
+  5. Hellmodus — 0 Hex-Literale mit Kontrastproblem, siehe unten
+  6. Motion-Tokens — `--motion-fast/base/slow` + `prefers-reduced-motion`
+  7. Primary-Rezept — `.lu-primary` in allen 3 vom Audit benannten Knöpfen
+     (und 7 weiteren Dateien)
+
+  Zu Posten 5, weil „Hex-Literal" allein noch kein Befund ist: der Scan findet
+  10 Hex-Literale in den vom Audit genannten Dateien. Vier davon stehen in
+  Kommentaren, die frühere Fixes belegen. Zwei stehen in
+  `onboarding-skin.ts` in einem `isDark ? … : …` — das *ist* der Hell/Dunkel-
+  Zweig, nur in JavaScript statt in Tailwinds `dark:`. Eines ist
+  `OnboardingSkeleton`s `bg-[#161616]`, das absichtlich exakt die
+  Splash-Farbe aus `index.html` trifft, damit der Übergang vom HTML-Splash
+  zum ersten React-Frame nicht blitzt. Bleiben `ReleaseNotesModal` und
+  `CloudTeaserModal`: zwei bewusst dunkle Karten, deren Text durchgehend hell
+  ist (`text-gray-200/300/400`, `text-white/90`, kein einziges `dark:`). Sie
+  sind im Hellmodus stilistisch Fremdkörper, aber kein Kontrastbefund — der
+  Audit-Befund war dunkler Text auf dunkler Fläche, und den gibt es nirgends
+  mehr. Als Stilfrage bleibt er offen und ist hier notiert statt still
+  mitgezählt.
+
+  Welle 3 unberührt.
+
+## feat(API) — was ein Kunde fand, der den Code nicht kennt
+
+Die lokale Modell-API war gebaut, geprüft und grün. Dann hat ein Agent mit
+einer Persona sie benutzt: er bekam eine Basis-URL, einen Schlüssel und den
+Auftrag, das Vorhaben als Endkunde zu rekonstruieren. Er wusste nichts vom
+Code, nichts von den Entscheidungen, nichts von den Tests. Sein Bericht ist
+der Grund für alles, was hier steht — **neun Befunde, die keiner meiner 26
+Tests gefunden hatte**, weil sie alle prüften, was der Code tut, und keiner,
+was ein Fremder erwartet.
+
+Was er bestätigt hat, gehört mit dazu: er hat mit dem offiziellen
+OpenAI-Python-SDK ohne einen einzigen Behelf gearbeitet — Streaming,
+Mehrturn-Kontext, Function-Calling (`finish_reason: tool_calls`), JSON-Modus,
+`/v1/completions`, `/v1/embeddings`, drei gleichzeitige Anfragen ohne
+Serialisierung. Sein Urteil zum Kompatibilitätsteil: eingelöst.
+
+Sein Urteil zum Rest: „Aus Kundensicht habe ich einen sehr ordentlichen
+Ollama-Proxy getestet, kein Drei-Wege-Gateway." Das saß, und es stimmte.
+
+### Fund 2 — der Round-Trip war gebrochen (sein härtester)
+
+Rein ging `ollama/llama3.2:3b`, zurück kam `"model":"llama3.2:3b"`. Die ID aus
+der Antwort stand damit **nicht** in `/v1/models`. Jeder Client, der sie
+weiterverwendet — Protokoll, Kostenzuordnung, Modellumschalter,
+Cache-Schlüssel — greift ins Leere; und führen zwei Lanes ein gleichnamiges
+Modell, ist hinterher nicht feststellbar, wer geantwortet hat.
+
+Der Haken: der Antwortkörper läuft absichtlich **ungepuffert** durch, und das
+ist die Eigenschaft, wegen der jemand `stream: true` schreibt. Ein Namensfix
+darf sie nicht kosten. Also `SseModellUmschreiber`, der zeilenweise arbeitet:
+was an ganzen Zeilen da ist, geht sofort weiter, ein angebrochener Rest wartet
+auf den nächsten Schub. Ein `"model":"…"` **darf** über eine Chunk-Grenze
+fallen — genau daran scheitert jede Fassung, die im Bytestrom sucht, und genau
+das ist einer der beiden Tests, die vor dem Fix rot waren:
+
+```
+kam an: data: {"model":"qwen3-8b","object":"chat.completion.chunk"}
+```
+
+Nicht-Streaming wird gepuffert, weil es dort nichts zu streamen gibt. Zeilen
+ohne `model` und Zeilen, die nicht als JSON lesbar sind, gehen unverändert
+durch — wir zerstören nie, was wir nicht verstehen.
+
+**Im Lauf bewiesen** gegen echtes Ollama: rein und zurück `ollama/hf.co/
+DevQuasar/huihui-ai.Qwen3-4B-abliterated-GGUF:Q4_K_M`, identisch, und in der
+Modellliste auffindbar. Ollama selbst antwortet ohne das `ollama/` — die Lücke
+ist also echt und im Lauf geschlossen.
+
+### Fund 1 — zwei von drei Lanes waren still, und niemand sagte es
+
+`/lu/v1/health` zeigte `lu: 0`, `lmstudio: 0`, `ollama: 10`. Wer `lu/…`
+anfragte, bekam „Unknown model". Das ist wahr und trotzdem irreführend: das
+Modell ist nicht unbekannt, die Lane ist aus. Der Kunde schloss daraus, das
+Drei-Wege-Versprechen sei unbelegt — und er konnte es nicht besser wissen, die
+Schnittstelle hat es ihm nicht gesagt.
+
+Neu `ResolveError::LaneLeer`: nennt ein Name eine Lane, die es gibt, die aber
+gerade nichts führt, heißt die Antwort *„… asks for the LU Engine lane, but LU
+Engine currently reports no models — it is most likely not running."* Mit
+Gegenprobe: führt die Lane etwas, ist ein Fehlgriff wieder schlicht
+`model_not_found`. Ohne diese zweite Hälfte wäre der Fix eine Umbenennung.
+
+### Fund 3 — CORS: „gar nicht" war die falsche Antwort auf einen echten Bedarf
+
+Der Preflight scheiterte an der Auth (`OPTIONS → 401`), es gab keinen einzigen
+`Access-Control-*`-Kopf. Damit war „jedes Programm, das mit OpenAI spricht"
+für Weboberflächen schlicht falsch.
+
+Das war **kein Versehen**: Regel 1 im Kopf von `local_api.rs` nennt genau die
+neugierige Webseite als Grund, und ohne CORS-Köpfe lässt der Browser das
+Mitlesen nicht zu. Aber ein echter Bedarf verlangt eine Antwort, und die
+richtige hat dieselbe Form wie der LAN-Schalter: **eine Erlaubnisliste, ab
+Werk leer**, die der Nutzer selbst füllt.
+
+**Kein `*`.** Ein Platzhalter macht die Liste wieder zu „jede Webseite", und
+ihr ganzer Wert ist, dass jemand die Herkunft *benennt*, der er seinen lokalen
+Modellverkehr zeigt. Wer `*` einträgt, bekommt deshalb nichts — lieber ein
+Eintrag, der sichtbar nicht wirkt, als eine Tür, die man versehentlich ganz
+aufmacht. Ebenso fallen Einträge mit Pfad weg: der Browser sendet nur Schema,
+Host und Port, ein Eintrag mit `/app` träfe nie zu, und ein Eintrag, der nie
+trifft, ist eine Falle.
+
+Die Schichtreihenfolge ist dabei Sicherheit, nicht Geschmack: `cors` sitzt
+ganz außen, `auth` darunter — nur so fällt der Preflight nicht in die
+Token-Schranke. Der Test prüft **beide** Richtungen, inklusive der, auf die es
+ankommt: mit Freigabe kommt eine Anfrage **ohne** Token weiterhin mit 401
+zurück. CORS hebt die Token-Schranke nicht auf.
+
+### Fund 4 — `param` und `code` waren ausnahmslos `null`
+
+`null` ist in OpenAIs Form erlaubt und heißt „trifft hier nicht zu"; wir hatten
+es als „haben wir nicht ausgefüllt" benutzt, und das ist ein anderer Satz. Ein
+Client, der auf `error.code == "model_not_found"` verzweigt, bekam nichts.
+
+Dazu die Pflichtfelder: ohne `messages` kam beim Kunden `"[] is too short -
+'messages'"` an — eine durchgereichte Ollama-Schemameldung, kryptisch, ohne
+unser Feldwort, und sie wechselt mit dem Upstream. `koerper_pruefen` steht
+jetzt **vor** der Weiterleitung. Sechs Codes sind vergeben:
+`invalid_api_key`, `invalid_body`, `missing_required_parameter`,
+`model_not_found`, `model_ambiguous`, `lane_unavailable`.
+
+### Fund 5, 6, 7, 8 — die kleineren, die im Support wehtun
+
+- **Keine Doku.** `/docs` und `/openapi.json` waren beide 404; dass das Präfix
+  optional ist, wie die Lanes heißen, was durchgereicht wird — alles nur durch
+  Ausprobieren. Neu `/lu/v1/docs`, und der 404 nennt sie. Ein Test hält die
+  Selbstauskunft an den echten Routen fest: kommt eine Route dazu und die Doku
+  verschweigt sie, fällt er.
+- **`/lu/v1/tools` verwies auf den Quelltext.** Wörtlich in einer
+  Kundenantwort: *„see the comment on `lu_werkzeuge()` in local_api.rs"*. Der
+  Kunde hat kein `local_api.rs`. Ersetzt durch `callable_here: false` und einen
+  Satz, wo die Werkzeuge wirklich laufen. Der Test verbietet jedes `.rs` in
+  der Antwort.
+- **Keine Request-ID.** Bei einem Fehlerbericht gab es nichts zu korrelieren.
+  Neu `x-request-id` auf **jeder** Antwort, auch auf dem 401 — gerade dort,
+  denn darüber wird berichtet. Eine mitgeschickte eigene Kennung wird
+  *übernommen* statt überschrieben; genau das macht Korrelation über mehrere
+  Schichten möglich. Fremde Werte werden begrenzt (≤ 200 Zeichen, druckbares
+  ASCII): ein Antwortkopf, dessen Länge der Aufrufer bestimmt, ist ein Hebel.
+- **401 ohne `WWW-Authenticate`.** Nach RFC 9110 protokollwidrig; manche
+  HTTP-Bibliotheken warten darauf, bevor sie überhaupt an Zugangsdaten denken.
+
+### Was ich NICHT geändert habe, und warum
+
+Fund 9 (nur 127.0.0.1, LAN-Schalter nicht gefunden) ist kein Fehler: das ist
+Regel 2, und der Kunde hat sie korrekt beobachtet — inklusive `"reach":
+"localhost"` in `/lu/v1/health`. Sein eigentlicher Punkt ist, dass der
+Schalter in der App sitzt und die API nicht auf ihn zeigt. Das steht jetzt in
+`/lu/v1/docs`.
+
+Fund 7s zweite Hälfte — 13 Werkzeuge auflisten ohne Aufrufweg — bleibt offen.
+Der Aufrufweg ist ein ~400-zeiliges `match` in `remote.rs`, an dem die
+Parallel-Sitzung gerade arbeitet; ihn im Vorbeigehen herauszulösen hieße, in
+fremder Arbeit zu wühlen. Der Katalog bleibt trotzdem: er beantwortet „was
+kann dieses Gerät", und das ist eine eigene Frage. Er sagt jetzt nur
+unmissverständlich, dass es hier keinen Aufrufweg gibt, und wo einer ist.
+
+### Ein Test hing an einer Nutzlast, die nie gültig war
+
+`ein_unbekanntes_modell_sagt_wo_man_nachsieht` schickte `"messages": []` und
+erwartete 404. Er bekam ihn nur, weil niemand die leere Liste prüfte. Seit
+`koerper_pruefen` fängt die sie vorher ab — der Test hätte eine 400 für einen
+Modellbefund gehalten. Nutzlast auf eine gültige geändert, Aussage unberührt,
+und `code == "model_not_found"` als zusätzliche Klammer dazu. **Kategorie:
+hing an altem Wert, keine Regression.**
+
+### Tore
+
+Typecheck sauber · eslint sauber · clippy sauber · **8.669** Frontend-Tests
+(vorher 8.665) · **862** Rust-Tests (vorher 839) · 16 Live-Tests gegen echtes
+Ollama grün, darunter alle neun Befunde als Gegenprobe.
+
+**Verifikationsgrad: im Lauf bewiesen.** Nicht durch mich — durch einen
+Fremden, der nichts wusste, und danach durch Tests, die seine Sätze
+festhalten.
 
 ## tech(M1) — die Hintergrund-Shell ignorierte den Shell-Namen
 

@@ -106,6 +106,103 @@ pub fn qualified_id(lane: Lane, upstream_id: &str) -> String {
     format!("{}/{}", lane.prefix(), upstream_id)
 }
 
+/// Schreibt `model` in einem ANTWORT-Koerper auf die qualifizierte ID zurueck.
+///
+/// Der Kunden-Testbericht vom 02.09.2026 nennt das seinen haertesten Fund: man
+/// schickt `ollama/llama3.2:3b`, zurueck kommt `"model":"llama3.2:3b"` — die ID
+/// aus der Antwort steht damit NICHT in `/v1/models`. Wer sie weiterverwendet
+/// (Protokoll, Kostenzuordnung, Modellumschalter, Cache-Schluessel), greift ins
+/// Leere; und fuehren zwei Lanes ein gleichnamiges Modell, ist hinterher nicht
+/// mehr feststellbar, wer geantwortet hat. Hin qualifiziert, zurueck nackt, ist
+/// kein Round-Trip.
+///
+/// Gibt `true` zurueck, wenn wirklich etwas geaendert wurde.
+pub fn modell_zurueckschreiben(json: &mut serde_json::Value, qualifiziert: &str) -> bool {
+    match json.get_mut("model") {
+        Some(m) if m.is_string() => {
+            *m = serde_json::Value::String(qualifiziert.to_string());
+            true
+        }
+        _ => false,
+    }
+}
+
+/// Dasselbe fuer den Streaming-Fall, ohne das Streaming zu zerstoeren.
+///
+/// Der Antwortkoerper laeuft ungepuffert durch — das ist die Eigenschaft, wegen
+/// der jemand `stream: true` schreibt, und sie darf ein Namensfix nicht kosten.
+/// Also wird zeilenweise umgeschrieben statt am Stueck: was an ganzen Zeilen da
+/// ist, geht sofort weiter; ein angebrochener Rest wartet auf den naechsten
+/// Schub. Ein `"model":"…"` DARF ueber eine Chunk-Grenze fallen, und genau
+/// daran scheitert jede Fassung, die einfach im Bytestrom sucht.
+///
+/// Zwei Folgen, die ich nicht verschweige: umgeschriebene Zeilen werden neu
+/// serialisiert, deshalb stehen ihre Schluessel danach alphabetisch statt in
+/// Upstream-Reihenfolge, und Gleitkommazahlen bekommen ihre kuerzeste Form.
+/// Beides ist wertgleich (serde_json serialisiert f64 ueber ryu, also exakt
+/// round-trip-fest); die Reihenfolge von JSON-Schluesseln bedeutet nichts.
+/// Zeilen ohne `model` und Zeilen, die nicht als JSON lesbar sind, werden
+/// unveraendert durchgereicht — wir zerstoeren nie, was wir nicht verstehen.
+pub struct SseModellUmschreiber {
+    qualifiziert: String,
+    rest: Vec<u8>,
+}
+
+impl SseModellUmschreiber {
+    pub fn neu(qualifiziert: &str) -> Self {
+        Self { qualifiziert: qualifiziert.to_string(), rest: Vec::new() }
+    }
+
+    /// Ein Schub roher Upstream-Bytes rein, die fertigen Zeilen raus.
+    pub fn schub(&mut self, chunk: &[u8]) -> Vec<u8> {
+        self.rest.extend_from_slice(chunk);
+        let mut aus = Vec::new();
+        while let Some(nl) = self.rest.iter().position(|b| *b == b'\n') {
+            let zeile: Vec<u8> = self.rest.drain(..=nl).collect();
+            aus.extend_from_slice(&self.zeile_umschreiben(&zeile));
+        }
+        aus
+    }
+
+    /// Was am Ende noch im Puffer liegt. Nie verschlucken.
+    pub fn schluss(&mut self) -> Vec<u8> {
+        if self.rest.is_empty() {
+            return Vec::new();
+        }
+        let zeile: Vec<u8> = self.rest.drain(..).collect();
+        self.zeile_umschreiben(&zeile)
+    }
+
+    fn zeile_umschreiben(&self, zeile: &[u8]) -> Vec<u8> {
+        let Ok(text) = std::str::from_utf8(zeile) else {
+            return zeile.to_vec(); // kein UTF-8 — nicht unser Protokoll
+        };
+        // Zeilenende abtrennen und WOERTLICH aufheben: \n und \r\n sind beide
+        // gueltig, und wer hier normalisiert, verschiebt fremde Byteanzahlen.
+        let (rumpf, ende) = match text.strip_suffix('\n') {
+            Some(r) => match r.strip_suffix('\r') {
+                Some(r2) => (r2, "\r\n"),
+                None => (r, "\n"),
+            },
+            None => (text, ""),
+        };
+        let Some(nutz) = rumpf.strip_prefix("data:") else {
+            return zeile.to_vec(); // `:`-Kommentar, `event:`, Leerzeile
+        };
+        let nutz_trim = nutz.trim_start();
+        if nutz_trim == "[DONE]" {
+            return zeile.to_vec();
+        }
+        let Ok(mut json) = serde_json::from_str::<serde_json::Value>(nutz_trim) else {
+            return zeile.to_vec(); // nicht lesbar — durchreichen, nicht raten
+        };
+        if !modell_zurueckschreiben(&mut json, &self.qualifiziert) {
+            return zeile.to_vec(); // nichts zu tun, also nichts anfassen
+        }
+        format!("data: {}{}", json, ende).into_bytes()
+    }
+}
+
 /// Ein aufgeloestes Modell.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ModelRef {
@@ -120,6 +217,15 @@ pub enum ResolveError {
     Unknown(String),
     /// Blosser Name, den mehrere Lanes fuehren. Wir raten NICHT.
     Ambiguous { requested: String, candidates: Vec<String> },
+    /// Der Name nennt eine Lane, die es gibt — die aber gerade nichts fuehrt.
+    ///
+    /// Aus dem Kundenbericht vom 02.09.2026, Fund 1: von drei beworbenen Lanes
+    /// lief eine, und wer `lu/…` anfragte, bekam „Unknown model". Das ist
+    /// wahr und trotzdem irrefuehrend — das Modell ist nicht unbekannt, die
+    /// Lane ist aus. Der Kunde hielt das Drei-Wege-Versprechen deshalb fuer
+    /// unbelegt, und er konnte es nicht besser wissen: die Schnittstelle hat
+    /// es ihm nicht gesagt.
+    LaneLeer { lane: Lane, requested: String },
 }
 
 impl ResolveError {
@@ -135,7 +241,61 @@ impl ResolveError {
                 requested,
                 candidates.join(", ")
             ),
+            ResolveError::LaneLeer { lane, requested } => format!(
+                "Model '{}' asks for the {} lane, but {} currently reports no models — it is most likely not running. Start it, then call GET /v1/models. GET /lu/v1/health shows every lane and what it holds.",
+                requested,
+                lane.label(),
+                lane.label()
+            ),
         }
+    }
+
+    /// Der `code`-Wert im Fehlerobjekt. Clients pruefen darauf, statt
+    /// englische Saetze zu vergleichen.
+    pub fn code(&self) -> &'static str {
+        match self {
+            ResolveError::Unknown(_) => "model_not_found",
+            ResolveError::Ambiguous { .. } => "model_ambiguous",
+            ResolveError::LaneLeer { .. } => "lane_unavailable",
+        }
+    }
+}
+
+/// Was an einem Anfragekoerper fehlt, bevor er ueberhaupt weitergereicht wird.
+///
+/// Aus dem Kundenbericht, Fund 4: ohne `messages` kam eine durchgereichte
+/// Ollama-Schemameldung („[] is too short - 'messages'") beim Kunden an. Sie
+/// ist kryptisch, sie nennt unser Feld nicht, und sie wechselt mit dem
+/// Upstream. Eine Pflichtfeldpruefung gehoert vor die Weiterleitung, nicht
+/// dahinter.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FeldFehler {
+    pub param: String,
+    pub nachricht: String,
+}
+
+/// Prueft die Felder, ohne die eine Anfrage keinen Sinn hat.
+///
+/// `pflichtfeld` ist das, was der jeweilige Endpunkt braucht: `messages` beim
+/// Chat, `prompt` bei Completions, `input` bei Embeddings.
+pub fn koerper_pruefen(json: &serde_json::Value, pflichtfeld: &str) -> Result<(), FeldFehler> {
+    let modell = json.get("model").and_then(|m| m.as_str()).unwrap_or("").trim();
+    if modell.is_empty() {
+        return Err(FeldFehler {
+            param: "model".into(),
+            nachricht: "Missing required parameter: 'model'. Call GET /v1/models for the ids this server accepts.".into(),
+        });
+    }
+    match json.get(pflichtfeld) {
+        None | Some(serde_json::Value::Null) => Err(FeldFehler {
+            param: pflichtfeld.into(),
+            nachricht: format!("Missing required parameter: '{}'.", pflichtfeld),
+        }),
+        Some(serde_json::Value::Array(a)) if a.is_empty() => Err(FeldFehler {
+            param: pflichtfeld.into(),
+            nachricht: format!("'{}' is empty. Send at least one entry.", pflichtfeld),
+        }),
+        _ => Ok(()),
     }
 }
 
@@ -176,13 +336,51 @@ pub fn resolve_model(requested: &str, katalog: &[(Lane, String)]) -> Result<Mode
 
     let treffer: Vec<&(Lane, String)> = katalog.iter().filter(|(_, id)| id == req).collect();
     match treffer.len() {
-        0 => Err(ResolveError::Unknown(req.to_string())),
+        0 => {
+            // Bevor „unbekannt" gesagt wird: nannte der Name eine Lane, die
+            // gerade ueberhaupt nichts fuehrt? Dann ist nicht das Modell das
+            // Problem, sondern dass das Programm dahinter nicht laeuft — und
+            // das ist die Auskunft, mit der jemand etwas anfangen kann.
+            if let Some((pre, _)) = req.split_once('/') {
+                if let Some(lane) = Lane::from_prefix(pre) {
+                    if !katalog.iter().any(|(l, _)| *l == lane) {
+                        return Err(ResolveError::LaneLeer { lane, requested: req.to_string() });
+                    }
+                }
+            }
+            Err(ResolveError::Unknown(req.to_string()))
+        }
         1 => Ok(ModelRef { lane: treffer[0].0, upstream_id: treffer[0].1.clone() }),
         _ => Err(ResolveError::Ambiguous {
             requested: req.to_string(),
             candidates: treffer.iter().map(|(l, id)| qualified_id(*l, id)).collect(),
         }),
     }
+}
+
+/// Darf diese Herkunft im Browser mitlesen?
+///
+/// Aus dem Kundenbericht vom 02.09.2026, Fund 3: der Preflight scheiterte an
+/// der Auth, es gab keinen einzigen `Access-Control-*`-Kopf, und damit war
+/// „jedes Programm, das mit OpenAI spricht" fuer Weboberflaechen schlicht
+/// falsch. Das war kein Versehen — Regel 1 im Kopf dieser Datei nennt genau
+/// die neugierige Webseite als Grund. Aber „gar nicht" ist die falsche Antwort
+/// auf einen echten Bedarf. Die richtige hat dieselbe Form wie der LAN-
+/// Schalter: eine Liste, ab Werk LEER, die der Nutzer selbst fuellt.
+///
+/// **Kein `*`.** Ein Platzhalter macht aus der Liste wieder „jede Webseite",
+/// und der ganze Wert dieser Liste ist, dass jemand die Herkunft BENENNT, der
+/// er seinen lokalen Modellverkehr zeigen will. Wer `*` eintraegt, bekommt
+/// deshalb keine Freigabe, sondern nichts — lieber ein Eintrag, der sichtbar
+/// nicht wirkt, als eine Tuer, die man versehentlich ganz aufmacht.
+pub fn cors_erlaubt(origin: &str, liste: &[String]) -> bool {
+    let o = origin.trim();
+    if o.is_empty() || o == "null" || o == "*" {
+        return false;
+    }
+    liste
+        .iter()
+        .any(|e| !e.trim().is_empty() && e.trim() != "*" && e.trim().eq_ignore_ascii_case(o))
 }
 
 /// Auf welcher Adresse gelauscht wird.
@@ -336,6 +534,10 @@ pub struct LocalApiConfig {
     pub lan: bool,
     pub token: String,
     pub upstreams: Vec<Upstream>,
+    /// Herkuenfte, die im Browser mitlesen duerfen. Ab Werk leer — siehe
+    /// `cors_erlaubt`.
+    #[serde(default)]
+    pub cors_origins: Vec<String>,
 }
 
 impl Default for LocalApiConfig {
@@ -345,6 +547,7 @@ impl Default for LocalApiConfig {
             lan: false,
             token: String::new(),
             upstreams: default_upstreams(),
+            cors_origins: Vec::new(),
         }
     }
 }
@@ -382,11 +585,35 @@ fn header_map_to_btree(h: &HeaderMap) -> BTreeMap<String, String> {
 }
 
 fn fehler(code: StatusCode, typ: &str, msg: &str) -> Response {
-    // Die Fehlerform von OpenAI, damit fremde Clients sie anzeigen koennen
-    // statt "unexpected response".
-    (code, Json(serde_json::json!({
-        "error": { "message": msg, "type": typ, "param": serde_json::Value::Null, "code": serde_json::Value::Null }
-    }))).into_response()
+    fehler_mit(code, typ, msg, None, None)
+}
+
+/// Die Fehlerform von OpenAI — vollstaendig, samt `param` und `code`.
+///
+/// Aus dem Kundenbericht, Fund 4: beide Felder waren ausnahmslos `null`. Ein
+/// Client, der auf `error.code == "model_not_found"` verzweigt oder dem Nutzer
+/// das falsche Feld markieren will, bekam nichts. `null` ist in OpenAIs Form
+/// erlaubt und heisst „trifft hier nicht zu" — wir hatten es als „haben wir
+/// nicht ausgefuellt" benutzt, und das ist ein anderer Satz.
+fn fehler_mit(code: StatusCode, typ: &str, msg: &str, param: Option<&str>, fehlercode: Option<&str>) -> Response {
+    let mut antwort = (code, Json(serde_json::json!({
+        "error": {
+            "message": msg,
+            "type": typ,
+            "param": param.map(serde_json::Value::from).unwrap_or(serde_json::Value::Null),
+            "code": fehlercode.map(serde_json::Value::from).unwrap_or(serde_json::Value::Null),
+        }
+    }))).into_response();
+    if code == StatusCode::UNAUTHORIZED {
+        // RFC 9110: eine 401 OHNE WWW-Authenticate ist protokollwidrig. Manche
+        // HTTP-Bibliotheken warten darauf, bevor sie ueberhaupt an Zugangsdaten
+        // denken.
+        antwort.headers_mut().insert(
+            header::WWW_AUTHENTICATE,
+            HeaderValue::from_static("Bearer realm=\"LU local API\""),
+        );
+    }
+    antwort
 }
 
 /// Token-Schranke. Kein Pfad hinter dem Router ist oeffentlich — auch
@@ -401,14 +628,16 @@ async fn auth(
     let erwartet = state.cfg.read().await.token.clone();
     let gezeigt = presented_token(&header_map_to_btree(req.headers()));
     if !token_matches(&erwartet, &gezeigt) {
-        return fehler(
+        return fehler_mit(
             StatusCode::UNAUTHORIZED,
-            "invalid_api_key",
+            "invalid_request_error",
             if erwartet.is_empty() {
                 "The local API has no token yet. Open Settings and generate one — until then it answers nobody."
             } else {
                 "Missing or wrong API key. Send it as `Authorization: Bearer <token>` or `x-api-key`."
             },
+            None,
+            Some("invalid_api_key"),
         );
     }
     next.run(req).await
@@ -474,11 +703,31 @@ async fn handle_models(AxumState(state): AxumState<LocalApiState>) -> Response {
 /// Streaming laeuft als Durchreiche: der Koerper der Upstream-Antwort wird
 /// ohne Zwischenspeicher weitergegeben. Alles andere waere ein Puffer, der
 /// genau die Eigenschaft zerstoert, wegen der jemand `stream: true` schreibt.
-async fn weiterleiten(state: LocalApiState, pfad: &str, headers: HeaderMap, body: axum::body::Bytes) -> Response {
+async fn weiterleiten(state: LocalApiState, pfad: &str, pflichtfeld: &str, headers: HeaderMap, body: axum::body::Bytes) -> Response {
     let mut json: serde_json::Value = match serde_json::from_slice(&body) {
         Ok(v) => v,
-        Err(e) => return fehler(StatusCode::BAD_REQUEST, "invalid_request_error", &format!("Body is not JSON: {}", e)),
+        Err(e) => {
+            return fehler_mit(
+                StatusCode::BAD_REQUEST,
+                "invalid_request_error",
+                &format!("Body is not JSON: {}", e),
+                None,
+                Some("invalid_body"),
+            )
+        }
     };
+
+    // Erst die eigenen Pflichtfelder, dann erst nach oben. Was hier durchfaellt,
+    // faellt sonst beim Upstream durch — in dessen Worten, ueber dessen Felder.
+    if let Err(f) = koerper_pruefen(&json, pflichtfeld) {
+        return fehler_mit(
+            StatusCode::BAD_REQUEST,
+            "invalid_request_error",
+            &f.nachricht,
+            Some(&f.param),
+            Some("missing_required_parameter"),
+        );
+    }
 
     let gewuenscht = json.get("model").and_then(|m| m.as_str()).unwrap_or("").to_string();
     let k = katalog(&state).await;
@@ -487,9 +736,9 @@ async fn weiterleiten(state: LocalApiState, pfad: &str, headers: HeaderMap, body
         Err(e) => {
             let code = match e {
                 ResolveError::Ambiguous { .. } => StatusCode::BAD_REQUEST,
-                ResolveError::Unknown(_) => StatusCode::NOT_FOUND,
+                ResolveError::Unknown(_) | ResolveError::LaneLeer { .. } => StatusCode::NOT_FOUND,
             };
-            return fehler(code, "invalid_request_error", &e.message());
+            return fehler_mit(code, "invalid_request_error", &e.message(), Some("model"), Some(e.code()));
         }
     };
 
@@ -497,6 +746,8 @@ async fn weiterleiten(state: LocalApiState, pfad: &str, headers: HeaderMap, body
     if let Some(m) = json.get_mut("model") {
         *m = serde_json::Value::String(ziel.upstream_id.clone());
     }
+
+    let stream_gewuenscht = json.get("stream").and_then(|v| v.as_bool()).unwrap_or(false);
 
     let base = {
         let cfg = state.cfg.read().await;
@@ -535,20 +786,81 @@ async fn weiterleiten(state: LocalApiState, pfad: &str, headers: HeaderMap, body
     if let Ok(v) = HeaderValue::from_str(&ctype) {
         out = out.header(header::CONTENT_TYPE, v);
     }
-    out.body(Body::from_stream(antwort.bytes_stream()))
+
+    // Auf dem Rueckweg traegt `model` wieder die qualifizierte ID. Ohne das
+    // steht in der Antwort ein Name, den `/v1/models` nicht kennt.
+    let qualifiziert = qualified_id(ziel.lane, &ziel.upstream_id);
+
+    if !stream_gewuenscht {
+        // Eine einzelne JSON-Antwort. Sie zu puffern kostet nichts: es gibt
+        // hier nichts zu streamen, was ein Client frueher sehen koennte.
+        let bytes = match antwort.bytes().await {
+            Ok(b) => b,
+            Err(e) => {
+                return fehler(
+                    StatusCode::BAD_GATEWAY,
+                    "api_error",
+                    &format!("{} broke off mid-answer: {}", ziel.lane.label(), e),
+                )
+            }
+        };
+        let raus = match serde_json::from_slice::<serde_json::Value>(&bytes) {
+            Ok(mut v) => {
+                modell_zurueckschreiben(&mut v, &qualifiziert);
+                Body::from(v.to_string())
+            }
+            // Kein JSON (etwa ein HTML-Fehler eines Proxys davor): unveraendert
+            // weitergeben. Der Client soll sehen, was wirklich kam.
+            Err(_) => Body::from(bytes),
+        };
+        return out
+            .body(raus)
+            .unwrap_or_else(|_| fehler(StatusCode::INTERNAL_SERVER_ERROR, "api_error", "Could not build the response."));
+    }
+
+    // Streaming: zeilenweise umschreiben, ohne zu puffern. `unfold` traegt den
+    // Umschreiber ueber die Chunk-Grenzen und gibt am Schluss noch heraus, was
+    // im Rest liegt — ein abgerissener Upstream soll Bytes verlieren duerfen,
+    // wir nicht.
+    let quelle = antwort.bytes_stream();
+    let strom = futures_util::stream::unfold(
+        (quelle, SseModellUmschreiber::neu(&qualifiziert), false),
+        |(mut quelle, mut um, fertig)| async move {
+            use futures_util::StreamExt;
+            if fertig {
+                return None;
+            }
+            match quelle.next().await {
+                Some(Ok(chunk)) => {
+                    let raus = um.schub(&chunk);
+                    Some((Ok::<_, std::io::Error>(axum::body::Bytes::from(raus)), (quelle, um, false)))
+                }
+                Some(Err(e)) => Some((
+                    Err(std::io::Error::other(e.to_string())),
+                    (quelle, um, true),
+                )),
+                None => {
+                    let rest = um.schluss();
+                    Some((Ok(axum::body::Bytes::from(rest)), (quelle, um, true)))
+                }
+            }
+        },
+    );
+
+    out.body(Body::from_stream(strom))
         .unwrap_or_else(|_| fehler(StatusCode::INTERNAL_SERVER_ERROR, "api_error", "Could not build the response."))
 }
 
 async fn handle_chat(AxumState(state): AxumState<LocalApiState>, headers: HeaderMap, body: axum::body::Bytes) -> Response {
-    weiterleiten(state, "/chat/completions", headers, body).await
+    weiterleiten(state, "/chat/completions", "messages", headers, body).await
 }
 
 async fn handle_completions(AxumState(state): AxumState<LocalApiState>, headers: HeaderMap, body: axum::body::Bytes) -> Response {
-    weiterleiten(state, "/completions", headers, body).await
+    weiterleiten(state, "/completions", "prompt", headers, body).await
 }
 
 async fn handle_embeddings(AxumState(state): AxumState<LocalApiState>, headers: HeaderMap, body: axum::body::Bytes) -> Response {
-    weiterleiten(state, "/embeddings", headers, body).await
+    weiterleiten(state, "/embeddings", "input", headers, body).await
 }
 
 /// Was gerade laeuft und wohin geleitet wird. Auch das steht hinter dem Token.
@@ -632,7 +944,14 @@ fn lu_werkzeuge() -> serde_json::Value {
         // bewusst nicht gespiegelt — eine gespiegelte Erlaubnis, die hinter der
         // echten herhinkt, ist gefaehrlicher als gar keine Angabe.
         "note": "Availability depends on the permissions the user granted in Settings → Remote Access. This list is the catalogue, not the current grant.",
-        "agent_runs": "not exposed yet — see the comment on lu_werkzeuge() in local_api.rs",
+        // Fund 7 des Kundenberichts: 13 Werkzeuge auflisten und keinen Weg
+        // anbieten, eines aufzurufen, ist schlechter als sie wegzulassen. Der
+        // Katalog bleibt trotzdem — er beantwortet „was kann dieses Geraet",
+        // und das ist eine eigene Frage. Er sagt jetzt nur unmissverstaendlich,
+        // dass es hier keinen Aufrufweg gibt, und wo einer ist. (Die vorige
+        // Fassung verwies auf eine Quelldatei, die kein Kunde hat.)
+        "callable_here": false,
+        "how_to_call": "This endpoint is a catalogue, not a call surface: there is no POST here. These tools run inside LU itself — from a chat, or over Remote Access after pairing in Settings → Remote Access. An HTTP endpoint for agent runs is planned and not built yet.",
     })
 }
 
@@ -640,11 +959,147 @@ async fn handle_tools() -> Response {
     Json(lu_werkzeuge()).into_response()
 }
 
+/// Die Selbstauskunft.
+///
+/// Aus dem Kundenbericht, Fund 5: `/docs` und `/openapi.json` waren beide 404,
+/// und dass das Lane-Praefix optional ist, wie die Lanes heissen und welche
+/// Parameter durchgereicht werden, hat der Kunde ausschliesslich durch
+/// Ausprobieren herausgefunden. Genau das steht jetzt hier — an einer Adresse,
+/// die der 404 auch nennt.
+fn lu_doku() -> serde_json::Value {
+    serde_json::json!({
+        "object": "documentation",
+        "name": "LU local model API",
+        "summary": "One OpenAI-compatible address in front of every model backend on this machine.",
+        "auth": {
+            "required": "always, also on 127.0.0.1",
+            "headers": ["Authorization: Bearer <token>", "x-api-key: <token>"],
+            "where_from": "Settings → Local API in the LU app generates it.",
+        },
+        "model_names": {
+            "form": "<lane>/<id as the backend knows it>",
+            "lanes": Lane::ALL.iter().map(|l| serde_json::json!({
+                "prefix": l.prefix(),
+                "name": l.label(),
+            })).collect::<Vec<_>>(),
+            "prefix_optional": "A bare id works when exactly one lane holds it. When two lanes hold the same name the request is refused rather than guessed — send the qualified id.",
+            "round_trip": "Responses echo the qualified id, so what comes back is always findable in GET /v1/models.",
+        },
+        "routes": [
+            { "method": "GET",  "path": "/v1/models",           "note": "Every model across every running lane." },
+            { "method": "POST", "path": "/v1/chat/completions",  "note": "Requires `model` and `messages`. `stream: true` streams." },
+            { "method": "POST", "path": "/v1/completions",       "note": "Requires `model` and `prompt`." },
+            { "method": "POST", "path": "/v1/embeddings",        "note": "Requires `model` and `input`." },
+            { "method": "GET",  "path": "/lu/v1/health",         "note": "Per-lane state: address, reachable, model count." },
+            { "method": "GET",  "path": "/lu/v1/tools",          "note": "Catalogue of LU agent tools. Not callable over HTTP yet." },
+            { "method": "GET",  "path": "/lu/v1/docs",           "note": "This page." },
+        ],
+        "passthrough": "Everything other than `model` goes to the backend untouched — temperature, tools, response_format, and whatever else that backend supports. What a lane cannot do, this API cannot add.",
+        "errors": {
+            "shape": "OpenAI's: { error: { message, type, param, code } }",
+            "codes": ["invalid_api_key", "invalid_body", "missing_required_parameter", "model_not_found", "model_ambiguous", "lane_unavailable"],
+            "lane_unavailable": "The name asked for a real lane that currently holds no models — that backend is most likely not running.",
+        },
+        "cors": "Off until you list an origin under Settings → Local API. No wildcard: name the origin you want to let read your local model traffic.",
+        "request_id": "Every response carries `x-request-id`. Send your own and it is kept, so a report can be correlated.",
+    })
+}
+
+async fn handle_docs() -> Response {
+    Json(lu_doku()).into_response()
+}
+
+/// Eine Kennung pro Anfrage, damit ein Fehlerbericht etwas hat, worauf er
+/// zeigen kann.
+///
+/// Aus dem Kundenbericht, Fund 8: die Antworten trugen `content-type`, `date`
+/// und `transfer-encoding` — sonst nichts. Wer einen Fehler meldet, kann ihn
+/// mit nichts abgleichen. Eine mitgeschickte eigene Kennung wird UEBERNOMMEN
+/// statt ueberschrieben; genau das macht Korrelation ueber mehrere Schichten
+/// hinweg erst moeglich.
+fn naechste_request_id(eigen: Option<&str>) -> String {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static ZAEHLER: AtomicU64 = AtomicU64::new(0);
+    static START: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    if let Some(e) = eigen {
+        let e = e.trim();
+        // Fremde Kennungen begrenzen: sie landen in einem Antwortkopf, und ein
+        // Kopf, dessen Laenge der Aufrufer bestimmt, ist ein Hebel.
+        if !e.is_empty() && e.len() <= 200 && e.chars().all(|c| c.is_ascii_graphic()) {
+            return e.to_string();
+        }
+    }
+    let start = START.get_or_init(|| generate_token()[..8].to_string());
+    format!("req_{}_{:x}", start, ZAEHLER.fetch_add(1, Ordering::Relaxed))
+}
+
+/// Setzt `x-request-id` auf jede Antwort, auch auf Fehler.
+async fn request_id(req: axum::extract::Request, next: axum::middleware::Next) -> Response {
+    let id = naechste_request_id(req.headers().get("x-request-id").and_then(|v| v.to_str().ok()));
+    let mut res = next.run(req).await;
+    if let Ok(v) = HeaderValue::from_str(&id) {
+        res.headers_mut().insert(HeaderName::from_static("x-request-id"), v);
+    }
+    res
+}
+
+/// Die CORS-Schranke. Sitzt VOR der Token-Schranke, weil ein Browser dem
+/// Preflight nie Zugangsdaten mitgibt — eine 401 auf OPTIONS ist der Grund,
+/// warum beim Kunden jede Weboberflaeche scheiterte.
+async fn cors(
+    AxumState(state): AxumState<LocalApiState>,
+    req: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> Response {
+    let herkunft = req
+        .headers()
+        .get(header::ORIGIN)
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.to_string());
+    let erlaubt = match &herkunft {
+        Some(o) => {
+            let liste = state.cfg.read().await.cors_origins.clone();
+            cors_erlaubt(o, &liste).then(|| o.clone())
+        }
+        None => None,
+    };
+
+    let ist_preflight = req.method() == Method::OPTIONS;
+    let mut res = if ist_preflight {
+        // Nie an die Token-Schranke weitergeben: der Preflight KANN sie nicht
+        // bestehen. Ist die Herkunft nicht freigegeben, kommt eine leere 204
+        // ohne CORS-Koepfe zurueck — der Browser blockt dann von selbst, und
+        // wir haben nichts verraten.
+        StatusCode::NO_CONTENT.into_response()
+    } else {
+        next.run(req).await
+    };
+
+    if let Some(o) = erlaubt {
+        let k = res.headers_mut();
+        if let Ok(v) = HeaderValue::from_str(&o) {
+            k.insert(header::ACCESS_CONTROL_ALLOW_ORIGIN, v);
+        }
+        k.insert(header::ACCESS_CONTROL_ALLOW_METHODS, HeaderValue::from_static("GET, POST, OPTIONS"));
+        k.insert(
+            header::ACCESS_CONTROL_ALLOW_HEADERS,
+            HeaderValue::from_static("authorization, x-api-key, content-type, x-request-id"),
+        );
+        k.insert(header::ACCESS_CONTROL_EXPOSE_HEADERS, HeaderValue::from_static("x-request-id"));
+        k.insert(header::ACCESS_CONTROL_MAX_AGE, HeaderValue::from_static("600"));
+    }
+    // Die Antwort haengt von der Herkunft ab — ohne `Vary` liefert jeder Cache
+    // davor irgendwann die Freigabe an den Falschen aus.
+    res.headers_mut().insert(header::VARY, HeaderValue::from_static("Origin"));
+    res
+}
+
 pub fn build_local_api_router(state: LocalApiState) -> Router {
-    // Keine CORS-Schicht: diese API ist fuer Programme, nicht fuer Webseiten.
-    // Eine erlaubende CORS-Antwort hiesse, dass jede geoeffnete Seite im
-    // Browser des Nutzers hier mitlesen darf, sobald sie das Token errät oder
-    // es irgendwo abgreift. Ohne CORS-Kopfzeilen laesst der Browser das nicht zu.
+    // Die Schichtreihenfolge ist Sicherheit, nicht Geschmack: axum wickelt von
+    // unten nach oben, `cors` steht also GANZ AUSSEN und `auth` darunter. Nur
+    // so faellt der Preflight nicht in die Token-Schranke. Umgekehrt darf CORS
+    // nie eine Anfrage durchlassen, die auth abgelehnt haette — tut es auch
+    // nicht: ausser OPTIONS geht alles durch `next`, also durch auth.
     Router::new()
         .route("/v1/models", get(handle_models))
         .route("/v1/chat/completions", post(handle_chat))
@@ -652,14 +1107,17 @@ pub fn build_local_api_router(state: LocalApiState) -> Router {
         .route("/v1/embeddings", post(handle_embeddings))
         .route("/lu/v1/health", get(handle_health))
         .route("/lu/v1/tools", get(handle_tools))
+        .route("/lu/v1/docs", get(handle_docs))
         .fallback(|method: Method, uri: axum::http::Uri| async move {
             fehler(
                 StatusCode::NOT_FOUND,
                 "invalid_request_error",
-                &format!("No route {} {}. This server speaks /v1/models, /v1/chat/completions, /v1/completions, /v1/embeddings, /lu/v1/health and /lu/v1/tools.", method, uri.path()),
+                &format!("No route {} {}. This server speaks /v1/models, /v1/chat/completions, /v1/completions, /v1/embeddings, /lu/v1/health, /lu/v1/tools and /lu/v1/docs — the last one describes all of them.", method, uri.path()),
             )
         })
         .layer(axum::middleware::from_fn_with_state(state.clone(), auth))
+        .layer(axum::middleware::from_fn_with_state(state.clone(), cors))
+        .layer(axum::middleware::from_fn(request_id))
         .with_state(state)
 }
 
@@ -682,6 +1140,7 @@ pub async fn start_local_api(
     lan: Option<bool>,
     token: String,
     upstreams: Option<Vec<Upstream>>,
+    cors_origins: Option<Vec<String>>,
 ) -> Result<serde_json::Value, String> {
     if token.trim().is_empty() {
         return Err("The local API needs a token before it can start. Generate one in Settings.".into());
@@ -694,6 +1153,14 @@ pub async fn start_local_api(
         lan: lan.unwrap_or(false),
         token: token.trim().to_string(),
         upstreams: upstreams.unwrap_or_else(default_upstreams),
+        // Ab Werk leer, und `None` heisst leer — nicht „wie zuletzt". Eine
+        // Freigabe, die ein Aufrufer versehentlich weglaesst, soll erloeschen.
+        cors_origins: cors_origins
+            .unwrap_or_default()
+            .into_iter()
+            .map(|o| o.trim().to_string())
+            .filter(|o| !o.is_empty())
+            .collect(),
     };
     let addr = bind_addr(cfg.lan, cfg.port);
 
@@ -864,6 +1331,7 @@ mod werkzeugliste {
 #[cfg(test)]
 mod local_api_echt {
     use super::*;
+    use std::future::IntoFuture;
 
     const TOKEN: &str = "pruefzeichen-0123456789abcdef";
 
@@ -873,6 +1341,11 @@ mod local_api_echt {
 
     /// Startet den echten Router auf einem freien Port. Gibt die Basis-URL zurueck.
     async fn starte() -> Option<(String, tokio::task::JoinHandle<()>)> {
+        starte_mit(Vec::new()).await
+    }
+
+    /// Dasselbe, aber mit einer CORS-Erlaubnisliste.
+    async fn starte_mit(cors: Vec<String>) -> Option<(String, tokio::task::JoinHandle<()>)> {
         let http = reqwest::Client::builder()
             .connect_timeout(std::time::Duration::from_secs(5))
             .build()
@@ -897,6 +1370,7 @@ mod local_api_echt {
             lan: false,
             token: TOKEN.to_string(),
             upstreams: default_upstreams(),
+            cors_origins: cors,
         };
         let state = LocalApiState { cfg: Arc::new(RwLock::new(cfg)), http };
         let l = tokio::net::TcpListener::bind(bind_addr(false, 0)).await.ok()?;
@@ -1019,12 +1493,20 @@ mod local_api_echt {
         let r = reqwest::Client::new()
             .post(format!("{}/v1/chat/completions", base))
             .bearer_auth(TOKEN)
-            .json(&serde_json::json!({"model": "gibtsnicht-42", "messages": []}))
+            // Die Nutzlast ist ansonsten GUELTIG. Vorher stand hier
+            // `"messages": []`, und der 404 kam nur, weil niemand die leere
+            // Liste prueste — seit `koerper_pruefen` faengt die sie vorher ab,
+            // und der Test haette eine 400 fuer einen Modellbefund gehalten.
+            .json(&serde_json::json!({
+                "model": "gibtsnicht-42",
+                "messages": [{"role": "user", "content": "hi"}],
+            }))
             .send().await.unwrap();
         assert_eq!(r.status(), 404);
         let v: serde_json::Value = r.json().await.unwrap();
         let m = v["error"]["message"].as_str().unwrap_or("");
         assert!(m.contains("/v1/models"), "Fehlertext hilft nicht weiter: {}", m);
+        assert_eq!(v["error"]["code"], "model_not_found");
         h.abort();
     }
 
@@ -1039,6 +1521,49 @@ mod local_api_echt {
         assert_eq!(v["reach"], "localhost");
         assert!(v["lanes"]["ollama"]["models"].as_u64().unwrap_or(0) > 0);
         h.abort();
+    }
+
+    /// Haelt den ECHTEN Server auf einem festen Port offen, damit ihn jemand
+    /// benutzen kann, der nichts von diesem Code weiss.
+    ///
+    /// Das ist kein Test im ueblichen Sinn — er prueft nichts. Er ist das
+    /// Labor fuer den Persona-Durchlauf: derselbe Router, dieselbe
+    /// Token-Schranke, dieselbe Weiterleitung wie im Betrieb, nur ohne das
+    /// App-Fenster, das die Einstellungen sonst bedient.
+    ///
+    ///   LIVE_LOCAL_API_HOLD=1 LU_API_PORT=8129 LU_API_TOKEN=... \
+    ///     cargo test halte_die_api_offen -- --nocapture --test-threads=1
+    #[tokio::test]
+    async fn halte_die_api_offen() {
+        if std::env::var("LIVE_LOCAL_API_HOLD").ok().as_deref() != Some("1") { return }
+        let port: u16 = std::env::var("LU_API_PORT").ok().and_then(|s| s.parse().ok())
+            .unwrap_or(DEFAULT_LOCAL_API_PORT);
+        let token = std::env::var("LU_API_TOKEN").unwrap_or_else(|_| generate_token());
+        let minuten: u64 = std::env::var("LU_API_MINUTES").ok().and_then(|s| s.parse().ok()).unwrap_or(20);
+
+        let state = LocalApiState {
+            cfg: Arc::new(RwLock::new(LocalApiConfig {
+                port, lan: false, token: token.clone(), upstreams: default_upstreams(),
+                // Damit auch eine Weboberflaeche gegen diesen Halter geprueft
+                // werden kann: LU_API_CORS="http://localhost:3000".
+                cors_origins: std::env::var("LU_API_CORS")
+                    .unwrap_or_default()
+                    .split(',')
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect(),
+            })),
+            http: reqwest::Client::builder()
+                .connect_timeout(std::time::Duration::from_secs(5)).build().unwrap(),
+        };
+        let l = tokio::net::TcpListener::bind(bind_addr(false, port)).await
+            .unwrap_or_else(|e| panic!("Port {} nicht frei: {}", port, e));
+        eprintln!("[halte_die_api_offen] http://127.0.0.1:{}/v1  ·  Token {}", port, token);
+        eprintln!("[halte_die_api_offen] {} Minuten offen", minuten);
+        let _ = tokio::time::timeout(
+            std::time::Duration::from_secs(minuten * 60),
+            axum::serve(l, build_local_api_router(state)).into_future(),
+        ).await;
     }
 
     #[tokio::test]
@@ -1079,6 +1604,226 @@ mod local_api_echt {
         }
         ids.into_iter().next()
     }
+
+    // ── Der Kundenbericht vom 02.09.2026, gegen den echten Server ────────
+    //
+    // Diese neun Tests sind die Gegenprobe zu einem Bericht, den ein Agent
+    // ohne jede Kenntnis des Codes geschrieben hat. Sie pruefen NICHT, was der
+    // Code tut, sondern was der Kunde vermisst hat.
+
+    #[tokio::test]
+    async fn was_zurueckkommt_steht_auch_in_der_liste() {
+        // Fund 2, der haerteste: `ollama/llama3.2:3b` rein, `llama3.2:3b` raus.
+        if !an() { return }
+        let Some((base, h)) = starte().await else { return };
+        let c = reqwest::Client::new();
+
+        let liste: serde_json::Value = c.get(format!("{}/v1/models", base)).bearer_auth(TOKEN)
+            .send().await.unwrap().json().await.unwrap();
+        let ids: Vec<String> = liste["data"].as_array().unwrap().iter()
+            .map(|m| m["id"].as_str().unwrap().to_string()).collect();
+        let Some(erstes) = ids.first().cloned() else {
+            eprintln!("[local_api_echt] keine Modelle geladen — uebersprungen");
+            h.abort();
+            return;
+        };
+
+        let r: serde_json::Value = c.post(format!("{}/v1/chat/completions", base)).bearer_auth(TOKEN)
+            .json(&serde_json::json!({
+                "model": erstes, "max_tokens": 1,
+                "messages": [{"role": "user", "content": "hi"}],
+            }))
+            .send().await.unwrap().json().await.unwrap();
+        let zurueck = r["model"].as_str().unwrap_or("");
+        assert_eq!(zurueck, erstes, "Round-Trip gebrochen: rein {}, raus {}", erstes, zurueck);
+        assert!(ids.contains(&zurueck.to_string()), "{} steht nicht in /v1/models", zurueck);
+        h.abort();
+    }
+
+    #[tokio::test]
+    async fn auch_jeder_streaming_chunk_traegt_ihn() {
+        if !an() { return }
+        let Some((base, h)) = starte().await else { return };
+        let c = reqwest::Client::new();
+        let liste: serde_json::Value = c.get(format!("{}/v1/models", base)).bearer_auth(TOKEN)
+            .send().await.unwrap().json().await.unwrap();
+        let Some(erstes) = liste["data"].as_array().unwrap().first()
+            .map(|m| m["id"].as_str().unwrap().to_string()) else { h.abort(); return };
+
+        let text = c.post(format!("{}/v1/chat/completions", base)).bearer_auth(TOKEN)
+            .json(&serde_json::json!({
+                "model": erstes, "stream": true, "max_tokens": 3,
+                "messages": [{"role": "user", "content": "zaehl bis drei"}],
+            }))
+            .send().await.unwrap().text().await.unwrap();
+
+        let mut gesehen = 0usize;
+        for zeile in text.lines().filter(|l| l.starts_with("data: ") && !l.contains("[DONE]")) {
+            let v: serde_json::Value = match serde_json::from_str(&zeile[6..]) { Ok(v) => v, Err(_) => continue };
+            if let Some(m) = v["model"].as_str() {
+                assert_eq!(m, erstes, "Chunk traegt {} statt {}", m, erstes);
+                gesehen += 1;
+            }
+        }
+        assert!(gesehen > 0, "kein einziger Chunk mit model-Feld:\n{}", text);
+        // Und das Protokoll ist heil geblieben.
+        assert!(text.contains("data: [DONE]"), "kein [DONE]:\n{}", text);
+        h.abort();
+    }
+
+    #[tokio::test]
+    async fn eine_stille_lane_wird_als_solche_gemeldet() {
+        // Fund 1. LM Studio laeuft auf dieser Maschine nicht — genau der Fall.
+        if !an() { return }
+        let Some((base, h)) = starte().await else { return };
+        let c = reqwest::Client::new();
+        let r = c.post(format!("{}/v1/chat/completions", base)).bearer_auth(TOKEN)
+            .json(&serde_json::json!({
+                "model": "lmstudio/gibt-es-hier-nicht",
+                "messages": [{"role": "user", "content": "hi"}],
+            }))
+            .send().await.unwrap();
+        assert_eq!(r.status(), 404);
+        let v: serde_json::Value = r.json().await.unwrap();
+        let code = v["error"]["code"].as_str().unwrap_or("");
+        let msg = v["error"]["message"].as_str().unwrap_or("");
+        // Laeuft LM Studio doch, ist „unbekannt" die richtige Antwort — dann
+        // prueft dieser Test die andere Haelfte derselben Regel.
+        assert!(
+            code == "lane_unavailable" || code == "model_not_found",
+            "unerwarteter code {}: {}", code, msg
+        );
+        if code == "lane_unavailable" {
+            assert!(msg.contains("LM Studio") && msg.contains("not running"), "{}", msg);
+        }
+        assert_eq!(v["error"]["param"], "model");
+        h.abort();
+    }
+
+    #[tokio::test]
+    async fn fehlende_pflichtfelder_heissen_beim_namen() {
+        // Fund 4: „[] is too short - 'messages'" kam vom Upstream durch.
+        if !an() { return }
+        let Some((base, h)) = starte().await else { return };
+        let c = reqwest::Client::new();
+
+        let r = c.post(format!("{}/v1/chat/completions", base)).bearer_auth(TOKEN)
+            .json(&serde_json::json!({ "model": "ollama/irgendwas" }))
+            .send().await.unwrap();
+        assert_eq!(r.status(), 400);
+        let v: serde_json::Value = r.json().await.unwrap();
+        assert_eq!(v["error"]["param"], "messages");
+        assert_eq!(v["error"]["code"], "missing_required_parameter");
+        assert!(!v["error"]["message"].as_str().unwrap().contains("too short"),
+                "Upstream-Meldung durchgereicht: {}", v["error"]["message"]);
+
+        let r = c.post(format!("{}/v1/chat/completions", base)).bearer_auth(TOKEN)
+            .json(&serde_json::json!({ "messages": [{"role": "user", "content": "hi"}] }))
+            .send().await.unwrap();
+        let v: serde_json::Value = r.json().await.unwrap();
+        assert_eq!(v["error"]["param"], "model");
+        h.abort();
+    }
+
+    #[tokio::test]
+    async fn ohne_freigabe_bleibt_der_browser_draussen_mit_freigabe_nicht() {
+        // Fund 3. Beide Haelften, sonst prueft der Test nur eine Meinung.
+        if !an() { return }
+        let c = reqwest::Client::new();
+
+        // Zu: kein einziger CORS-Kopf, auch nicht fuer eine freundliche Seite.
+        let Some((base, h)) = starte().await else { return };
+        let r = c.request(reqwest::Method::OPTIONS, format!("{}/v1/chat/completions", base))
+            .header("Origin", "http://localhost:3000")
+            .header("Access-Control-Request-Method", "POST")
+            .send().await.unwrap();
+        assert!(r.headers().get("access-control-allow-origin").is_none(),
+                "Freigabe ohne Eintrag erteilt");
+        h.abort();
+
+        // Offen: der Preflight geht durch, OHNE Token — der Browser sendet nie
+        // eines mit, und genau daran scheiterte der Kunde.
+        let Some((base, h)) = starte_mit(vec!["http://localhost:3000".into()]).await else { return };
+        let r = c.request(reqwest::Method::OPTIONS, format!("{}/v1/chat/completions", base))
+            .header("Origin", "http://localhost:3000")
+            .header("Access-Control-Request-Method", "POST")
+            .send().await.unwrap();
+        assert!(r.status().is_success(), "Preflight kam mit {} zurueck", r.status());
+        assert_eq!(r.headers()["access-control-allow-origin"], "http://localhost:3000");
+        assert!(r.headers()["access-control-allow-headers"].to_str().unwrap().contains("authorization"));
+
+        // Eine andere Herkunft bekommt trotzdem nichts.
+        let r = c.request(reqwest::Method::OPTIONS, format!("{}/v1/chat/completions", base))
+            .header("Origin", "https://boese.example")
+            .header("Access-Control-Request-Method", "POST")
+            .send().await.unwrap();
+        assert!(r.headers().get("access-control-allow-origin").is_none(), "fremde Herkunft freigegeben");
+
+        // Und die Freigabe ersetzt das Token NICHT.
+        let r = c.get(format!("{}/v1/models", base)).header("Origin", "http://localhost:3000")
+            .send().await.unwrap();
+        assert_eq!(r.status(), 401, "CORS hat die Token-Schranke uebersprungen");
+        h.abort();
+    }
+
+    #[tokio::test]
+    async fn die_selbstauskunft_ist_erreichbar_und_der_404_nennt_sie() {
+        // Fund 5: /docs und /openapi.json waren beide 404, und alles musste
+        // erraten werden.
+        if !an() { return }
+        let Some((base, h)) = starte().await else { return };
+        let c = reqwest::Client::new();
+
+        let v: serde_json::Value = c.get(format!("{}/lu/v1/docs", base)).bearer_auth(TOKEN)
+            .send().await.unwrap().json().await.unwrap();
+        assert!(v["routes"].as_array().unwrap().len() >= 7);
+        assert!(v["model_names"]["prefix_optional"].is_string());
+
+        // Der Weg dorthin steht im 404 — so hat der Kunde die Routen gefunden.
+        let v: serde_json::Value = c.get(format!("{}/docs", base)).bearer_auth(TOKEN)
+            .send().await.unwrap().json().await.unwrap();
+        assert!(v["error"]["message"].as_str().unwrap().contains("/lu/v1/docs"),
+                "der 404 nennt die Doku nicht: {}", v["error"]["message"]);
+        h.abort();
+    }
+
+    #[tokio::test]
+    async fn jede_antwort_traegt_eine_kennung() {
+        // Fund 8: es gab nichts zu korrelieren.
+        if !an() { return }
+        let Some((base, h)) = starte().await else { return };
+        let c = reqwest::Client::new();
+
+        // Auch auf dem 401 — gerade dort, denn darueber wird berichtet.
+        let r = c.get(format!("{}/v1/models", base)).send().await.unwrap();
+        assert_eq!(r.status(), 401);
+        assert!(r.headers().contains_key("x-request-id"));
+        assert!(r.headers().contains_key("www-authenticate"), "401 ohne WWW-Authenticate");
+
+        let a = c.get(format!("{}/v1/models", base)).bearer_auth(TOKEN).send().await.unwrap();
+        let b = c.get(format!("{}/v1/models", base)).bearer_auth(TOKEN).send().await.unwrap();
+        assert_ne!(a.headers()["x-request-id"], b.headers()["x-request-id"]);
+
+        // Eine mitgebrachte Kennung bleibt erhalten.
+        let r = c.get(format!("{}/v1/models", base)).bearer_auth(TOKEN)
+            .header("x-request-id", "kunde-4711").send().await.unwrap();
+        assert_eq!(r.headers()["x-request-id"], "kunde-4711");
+        h.abort();
+    }
+
+    #[tokio::test]
+    async fn die_werkzeugantwort_nennt_keine_quelldatei() {
+        // Fund 6/7.
+        if !an() { return }
+        let Some((base, h)) = starte().await else { return };
+        let c = reqwest::Client::new();
+        let t = c.get(format!("{}/lu/v1/tools", base)).bearer_auth(TOKEN)
+            .send().await.unwrap().text().await.unwrap();
+        assert!(!t.contains("local_api.rs"), "Quelldateiverweis beim Kunden: {}", t);
+        assert!(t.contains("\"callable_here\":false"), "sagt nicht, dass hier nichts aufrufbar ist");
+        h.abort();
+    }
+
 }
 
 #[cfg(test)]
@@ -1286,5 +2031,196 @@ mod tests {
         assert_eq!(qualified_id(Lane::Engine, "qwen3-8b"), "lu/qwen3-8b");
         assert_eq!(qualified_id(Lane::Ollama, "llama3.2:3b"), "ollama/llama3.2:3b");
         assert_eq!(qualified_id(Lane::LmStudio, "m"), "lmstudio/m");
+    }
+
+    // ── Round-Trip: was rausgeht, muss in /v1/models stehen ───────────────
+    //
+    // Aus dem Kundenbericht vom 02.09.2026, Fund 2. Diese Tests beschreiben
+    // NICHT den Code, sondern was der Kunde erwartet hat und nicht bekam.
+
+    #[test]
+    fn die_antwort_nennt_das_modell_so_wie_die_liste_es_fuehrt() {
+        let mut v: serde_json::Value =
+            serde_json::from_str(r#"{"id":"chatcmpl-1","model":"llama3.2:3b","object":"chat.completion"}"#).unwrap();
+        assert!(modell_zurueckschreiben(&mut v, "ollama/llama3.2:3b"));
+        assert_eq!(v["model"], "ollama/llama3.2:3b");
+        // Der Rest bleibt unangetastet.
+        assert_eq!(v["id"], "chatcmpl-1");
+        assert_eq!(v["object"], "chat.completion");
+    }
+
+    #[test]
+    fn ohne_modellfeld_wird_nichts_erfunden() {
+        // Fehlerantworten des Upstreams haben kein `model`. Eines einzusetzen
+        // hiesse, eine Auskunft zu erfinden, die niemand gegeben hat.
+        let mut v: serde_json::Value = serde_json::from_str(r#"{"error":{"message":"nope"}}"#).unwrap();
+        assert!(!modell_zurueckschreiben(&mut v, "ollama/llama3.2:3b"));
+        assert!(v.get("model").is_none());
+    }
+
+    #[test]
+    fn jeder_streaming_chunk_traegt_die_qualifizierte_id() {
+        let mut u = SseModellUmschreiber::neu("ollama/llama3.2:3b");
+        let ein = b"data: {\"model\":\"llama3.2:3b\",\"choices\":[]}\n\ndata: [DONE]\n\n";
+        let aus = String::from_utf8(u.schub(ein)).unwrap();
+        assert!(aus.contains(r#""model":"ollama/llama3.2:3b""#), "kam an: {}", aus);
+        assert!(!aus.contains(r#""model":"llama3.2:3b""#), "nackte ID uebrig: {}", aus);
+        // Das Abschlusszeichen des Protokolls bleibt, sonst haengt jeder Client.
+        assert!(aus.contains("data: [DONE]"), "kam an: {}", aus);
+        assert!(u.schluss().is_empty());
+    }
+
+    #[test]
+    fn ein_modellname_ueber_der_chunk_grenze_ueberlebt() {
+        // Der Fall, an dem jede Fassung scheitert, die im Bytestrom sucht:
+        // TCP zerlegt, wo es will, auch mitten im Namen.
+        let mut u = SseModellUmschreiber::neu("lu/qwen3-8b");
+        let mut aus = u.schub(b"data: {\"model\":\"qwen3");
+        aus.extend(u.schub(b"-8b\",\"object\":\"chat.completion.chunk\"}\n"));
+        aus.extend(u.schluss());
+        let s = String::from_utf8(aus).unwrap();
+        assert!(s.contains(r#""model":"lu/qwen3-8b""#), "kam an: {}", s);
+    }
+
+    #[test]
+    fn unlesbare_zeilen_gehen_unveraendert_durch() {
+        // Kommentarzeilen (`: ping`) und alles, was wir nicht als JSON lesen,
+        // sind fremdes Protokoll. Durchreichen, nicht raten.
+        let mut u = SseModellUmschreiber::neu("ollama/x");
+        let aus = String::from_utf8(u.schub(b": ping\ndata: kein-json\n")).unwrap();
+        assert_eq!(aus, ": ping\ndata: kein-json\n");
+    }
+
+    // ── Was der Kunde gemeldet hat, Punkt fuer Punkt ──────────────────────
+
+    #[test]
+    fn eine_stille_lane_sagt_dass_sie_still_ist() {
+        // Fund 1: nur Ollama lief. `lu/…` beantwortete das mit „Unknown model",
+        // und der Kunde schloss daraus, das Drei-Wege-Versprechen sei unbelegt.
+        let nur_ollama = vec![(Lane::Ollama, "llama3.2:3b".to_string())];
+        let e = resolve_model("lu/qwen3-8b", &nur_ollama).unwrap_err();
+        assert_eq!(e, ResolveError::LaneLeer { lane: Lane::Engine, requested: "lu/qwen3-8b".into() });
+        assert_eq!(e.code(), "lane_unavailable");
+        let m = e.message();
+        assert!(m.contains("LU Engine"), "{}", m);
+        assert!(m.contains("not running"), "{}", m);
+        assert!(m.contains("/lu/v1/health"), "{}", m);
+    }
+
+    #[test]
+    fn eine_laufende_lane_sagt_weiter_unbekannt() {
+        // Die Gegenprobe, ohne die der Fix nur eine Umbenennung waere: fuehrt
+        // die Lane etwas, ist ein Fehlgriff wieder schlicht ein Fehlgriff.
+        let e = resolve_model("ollama/gibt-es-nicht", &katalog()).unwrap_err();
+        assert_eq!(e.code(), "model_not_found");
+    }
+
+    #[test]
+    fn pflichtfelder_werden_hier_geprueft_und_nicht_oben() {
+        // Fund 4: ohne `messages` kam eine Ollama-Schemameldung beim Kunden an.
+        let ohne_messages: serde_json::Value = serde_json::from_str(r#"{"model":"ollama/llama3.2:3b"}"#).unwrap();
+        let f = koerper_pruefen(&ohne_messages, "messages").unwrap_err();
+        assert_eq!(f.param, "messages");
+        assert!(f.nachricht.contains("Missing required parameter"), "{}", f.nachricht);
+
+        let ohne_modell: serde_json::Value = serde_json::from_str(r#"{"messages":[]}"#).unwrap();
+        let f = koerper_pruefen(&ohne_modell, "messages").unwrap_err();
+        assert_eq!(f.param, "model", "fehlendes model muss model heissen, nicht „Unknown model ''\u{22}");
+
+        // Leere Liste ist kein gueltiges Gespraech.
+        let leer: serde_json::Value = serde_json::from_str(r#"{"model":"x","messages":[]}"#).unwrap();
+        assert_eq!(koerper_pruefen(&leer, "messages").unwrap_err().param, "messages");
+
+        // Und der Normalfall geht durch — sonst waere die Pruefung eine Mauer.
+        let gut: serde_json::Value =
+            serde_json::from_str(r#"{"model":"x","messages":[{"role":"user","content":"hi"}]}"#).unwrap();
+        assert!(koerper_pruefen(&gut, "messages").is_ok());
+        // Jeder Endpunkt hat sein eigenes Pflichtfeld.
+        let emb: serde_json::Value = serde_json::from_str(r#"{"model":"x","input":"hi"}"#).unwrap();
+        assert!(koerper_pruefen(&emb, "input").is_ok());
+        assert_eq!(koerper_pruefen(&emb, "prompt").unwrap_err().param, "prompt");
+    }
+
+    #[test]
+    fn cors_ist_zu_bis_jemand_eine_herkunft_benennt() {
+        // Fund 3, und Regel 1 im Dateikopf gleichzeitig.
+        assert!(!cors_erlaubt("http://localhost:3000", &[]));
+        assert!(cors_erlaubt("http://localhost:3000", &["http://localhost:3000".into()]));
+        // Gross/klein ist bei Hostnamen bedeutungslos.
+        assert!(cors_erlaubt("http://LocalHost:3000", &["http://localhost:3000".into()]));
+        // Eine andere Herkunft bleibt draussen, auch wenn eine freigegeben ist.
+        assert!(!cors_erlaubt("https://boese.example", &["http://localhost:3000".into()]));
+    }
+
+    #[test]
+    fn der_platzhalter_oeffnet_nichts() {
+        // Absicht, nicht Versehen: `*` in der Liste ist wieder „jede Webseite",
+        // und damit waere die Liste sinnlos. Sie wirkt sichtbar nicht, statt
+        // still alles aufzumachen.
+        assert!(!cors_erlaubt("https://irgendwas.example", &["*".into()]));
+        assert!(!cors_erlaubt("*", &["*".into()]));
+        assert!(!cors_erlaubt("null", &["null".into()]));
+        assert!(!cors_erlaubt("", &["".into()]));
+    }
+
+    #[test]
+    fn jede_antwort_ist_zuordenbar_und_eigene_kennungen_bleiben() {
+        // Fund 8. Eine eigene Kennung UEBERNEHMEN ist der ganze Punkt —
+        // sonst korreliert man nur mit sich selbst.
+        assert_eq!(naechste_request_id(Some("kunde-42")), "kunde-42");
+        let a = naechste_request_id(None);
+        let b = naechste_request_id(None);
+        assert_ne!(a, b, "zwei Anfragen duerfen nicht dieselbe Kennung tragen");
+        assert!(a.starts_with("req_"), "{}", a);
+        // Muell wird nicht uebernommen: der Wert landet in einem Antwortkopf.
+        assert!(naechste_request_id(Some("")).starts_with("req_"));
+        assert!(naechste_request_id(Some(&"x".repeat(500))).starts_with("req_"));
+        assert!(naechste_request_id(Some("zeile\numbruch")).starts_with("req_"));
+    }
+
+    #[test]
+    fn die_doku_beschreibt_die_routen_die_es_wirklich_gibt() {
+        // Fund 5 — und eine Doku, die von den Routen abweicht, ist schlimmer
+        // als keine. Dieser Test faellt, sobald eine Route dazukommt und die
+        // Selbstauskunft sie verschweigt.
+        let d = lu_doku();
+        let beschrieben: Vec<String> = d["routes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|r| r["path"].as_str().unwrap().to_string())
+            .collect();
+        for pfad in [
+            "/v1/models",
+            "/v1/chat/completions",
+            "/v1/completions",
+            "/v1/embeddings",
+            "/lu/v1/health",
+            "/lu/v1/tools",
+            "/lu/v1/docs",
+        ] {
+            assert!(beschrieben.contains(&pfad.to_string()), "{} fehlt in der Doku", pfad);
+        }
+        // Alle Fehlercodes, die der Code wirklich sendet, stehen drin.
+        let codes = d["errors"]["codes"].to_string();
+        for c in ["invalid_api_key", "missing_required_parameter", "model_not_found", "model_ambiguous", "lane_unavailable"] {
+            assert!(codes.contains(c), "{} fehlt in der Doku", c);
+        }
+        // Und jede Lane nennt sich so, wie das Praefix wirklich heisst.
+        let lanes = d["model_names"]["lanes"].to_string();
+        for l in Lane::ALL {
+            assert!(lanes.contains(l.prefix()), "{} fehlt", l.prefix());
+        }
+    }
+
+    #[test]
+    fn die_werkzeugliste_verweist_nicht_auf_den_quelltext() {
+        // Fund 6: „see the comment on lu_werkzeuge() in local_api.rs" stand
+        // woertlich in einer Kundenantwort. Der Kunde hat kein local_api.rs.
+        let w = lu_werkzeuge().to_string();
+        assert!(!w.contains(".rs"), "interner Dateiverweis in der Antwort: {}", w);
+        assert!(!w.contains("lu_werkzeuge"), "interner Funktionsname in der Antwort");
+        // Stattdessen wird gesagt, dass es hier keinen Aufrufweg gibt.
+        assert_eq!(lu_werkzeuge()["callable_here"], false);
     }
 }

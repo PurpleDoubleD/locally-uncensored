@@ -113,3 +113,57 @@ export function kannStarten(token: string, port: number): PortUrteil {
   if (!token.trim()) return { ok: false, grund: 'Ohne Token startet die API nicht. Erzeuge zuerst eines.' }
   return pruefePort(port)
 }
+
+/**
+ * Die CORS-Erlaubnisliste aus dem, was der Nutzer ins Feld tippt.
+ *
+ * Warum das hier steht und nicht in der Komponente: es ist eine
+ * Sicherheitsentscheidung, und die Tests dieses Hauses rendern kein `.tsx`.
+ *
+ * Der Kunden-Testbericht vom 02.09.2026 nennt das fehlende CORS als Fund 3 —
+ * ohne Freigabe kann keine Weboberflaeche die lokale API benutzen. Die Antwort
+ * darauf ist eine Liste, kein Schalter: der Nutzer BENENNT, wer seinen
+ * Modellverkehr im Browser lesen darf.
+ *
+ * Was hier wegfaellt und warum:
+ * - `*` — der Platzhalter macht die Liste bedeutungslos. Rust weist ihn
+ *   ohnehin ab (`cors_erlaubt`); hier faellt er schon beim Tippen weg, damit
+ *   niemand einen Eintrag sieht, der nichts tut.
+ * - alles mit Pfad, Abfrage oder Fragment — eine Herkunft ist Schema, Host und
+ *   Port, sonst nichts. `http://localhost:3000/app` als Herkunft trifft nie zu,
+ *   und ein Eintrag, der nie trifft, ist eine Falle.
+ * - Doppelte, in Eingabereihenfolge entdoppelt.
+ */
+export function parseCorsOrigins(text: string): string[] {
+  const roh = text.split(/[\s,]+/).map((s) => s.trim()).filter(Boolean)
+  const raus: string[] = []
+  for (const eintrag of roh) {
+    if (eintrag === '*') continue
+    let u: URL
+    try {
+      u = new URL(eintrag)
+    } catch {
+      continue
+    }
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') continue
+    if (!u.hostname) continue
+    if (u.pathname !== '/' && u.pathname !== '') continue
+    if (u.search || u.hash || u.username || u.password) continue
+    const norm = u.origin.toLowerCase()
+    if (!raus.includes(norm)) raus.push(norm)
+  }
+  return raus
+}
+
+/**
+ * Was unter dem Feld steht, wenn die Liste leer ist bzw. Eintraege hat.
+ * Ein Satz, der den Zustand benennt, statt ihn den Nutzer raten zu lassen.
+ */
+export function corsText(origins: string[]): string {
+  if (origins.length === 0) {
+    return 'Closed. No web page may read this API — command-line tools and apps are unaffected.'
+  }
+  return origins.length === 1
+    ? `Open to ${origins[0]} only.`
+    : `Open to ${origins.length} origins: ${origins.join(', ')}.`
+}
