@@ -878,6 +878,8 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
       // also steht die Antwort ausserhalb des try. Die Uebergabe selbst bleibt
       // drin, damit sie weiter mitgefangen wird.
       let switched = false
+      // Was vorher gewaehlt war, fuer den Rueckweg. Genau wie auf der Kachel.
+      const vorherAktiv = useModelStore.getState().activeModel
       try {
         // Announced BEFORE the start is attempted and NOT into this dropdown,
         // which the pick closes a few lines further down. It goes to the
@@ -887,16 +889,34 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
         if (switched) {
           useLuEngineSwitchStore.getState().announce(LU_ENGINE_SWITCH_NOTE)
         }
+        // Die Wahl steht SOFORT, nicht erst wenn die Engine bedient. Die
+        // Kachel macht das laengst so, der Waehler schrieb sie erst hinter
+        // dem `await`, und ein Ladevorgang dauert Sekunden bis Minuten.
+        //
+        // Persona P5, 03./04.09.2026, am echten Build: nach einem Klick auf
+        // Phi-4-mini nannte das Eingabefeld 11 s lang
+        // "Hermes-3-Llama-3.2-3B", ein Modell, das an dem Wechsel gar nicht
+        // beteiligt war. Waehrend des Wartens wechselt naemlich der
+        // Steckplatz, die Modelliste wird neu gebaut, und die Regel in
+        // lib/active-model-mode findet die ALTE Wahl darin nicht mehr wieder
+        // und faellt auf den Kopf der Liste zurueck. Steht die neue Wahl
+        // schon da, findet sie sich und nichts faellt zurueck.
+        //
+        // Rohes set: der Wrapper aus useModels wuerde ein zweites, sinnloses
+        // activate ausloesen.
+        useModelStore.getState().setActiveModel(model.name)
         const swapped = await activateBuiltinModel(model.name)
-        if (swapped) {
-          // Raw store set — the useModels wrapper would fire a second
-          // (idempotent but pointless) activate.
-          useModelStore.getState().setActiveModel(model.name)
-        } else {
-          setActiveModel(model.name) // not a bundled GGUF — plain activate
-        }
+        // Keine unserer GGUFs: die gewoehnliche Aktivierung ueber den Wrapper
+        // holt nach, was dieser Weg nicht kann.
+        if (!swapped) setActiveModel(model.name)
         setOpen(false)
       } catch (e) {
+        // Und zurueck, wenn nichts daraus wurde. Ohne das stuende die Wahl
+        // auf einem Modell, das nirgends laeuft (derselbe Befund, den die
+        // Kachel am 03.09.2026 hatte).
+        if (useModelStore.getState().activeModel === model.name) {
+          useModelStore.getState().setActiveModel(vorherAktiv)
+        }
         // Shared with the Installed card, which used to swallow this failure
         // whole. One sentence, one place it is written (A14 third review).
         //
