@@ -5360,15 +5360,40 @@ mod tests {
         // inside a Tauri command and cannot be driven from here, so the ORDER
         // is pinned by reading this file. It catches the check drifting back
         // down the function, which is exactly what the counter-check found.
+        //
+        // Every needle is assembled from two halves, and that is not cosmetic.
+        // Written whole, each one would stand in THIS file as well, `find`
+        // would return the position of the copy in this test body whenever the
+        // real line was gone, and the `.expect` beside it could never fire. A
+        // guard that cannot fail is not a guard. Split, the halves never form
+        // a contiguous match in the source, so a missing line is a `None` and
+        // the message next to it is the one the reader gets.
         let src = include_str!("install.rs");
-        let call = src.find("if let Err(msg) = repair_precheck(&comfy_dir) {")
+        let needle = |head: &str, tail: &str| format!("{head}{tail}");
+        let call = src.find(&needle("if let Err(msg) = repair_prech", "eck(&comfy_dir) {"))
             .expect("Repair no longer prechecks at all");
-        let venv = src.find("\"Removing the old venv (models, outputs and custom nodes stay untouched)...\",")
+        let venv = src.find(&needle("\"Removing the old venv (models, outputs", " and custom nodes stay untouched)...\","))
             .expect("the venv removal step is gone");
-        let torch = src.find("\"Downloading PyTorch into the fresh venv (~2 GB). Live pip output below.\",")
+        let torch = src.find(&needle("\"Downloading PyTorch into the fresh venv", " (~2 GB). Live pip output below.\","))
             .expect("the PyTorch step is gone");
         assert!(call < venv, "the precheck runs after the venv is deleted");
         assert!(call < torch, "the precheck runs after the PyTorch download");
+
+        // And the guard on the guard: each needle occurs EXACTLY once in the
+        // file. Two occurrences would mean this test body carries a copy of
+        // the line it is looking for, which is how the three `.expect`s above
+        // became unreachable in the first place.
+        for (what, n) in [
+            ("the precheck call", needle("if let Err(msg) = repair_prech", "eck(&comfy_dir) {")),
+            ("the venv step", needle("\"Removing the old venv (models, outputs", " and custom nodes stay untouched)...\",")),
+            ("the PyTorch step", needle("\"Downloading PyTorch into the fresh venv", " (~2 GB). Live pip output below.\",")),
+        ] {
+            assert_eq!(
+                src.matches(&n).count(),
+                1,
+                "{what}: the search string finds itself in this test, so its .expect can never fire",
+            );
+        }
     }
 
     // ── install_custom_node helpers (#72 bob: VHS install loop) ─────────
