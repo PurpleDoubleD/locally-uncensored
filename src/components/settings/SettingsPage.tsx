@@ -1489,48 +1489,6 @@ export function SettingsPage() {
               0 = off. Set 80 to have older turns summarised once the context is 80% full, instead of being dropped without a word. Values under 30 or over 95 count as off. Costs one extra model call each time it fires. You can always run it yourself with <span className="font-mono">/compact</span>.
             </div>
 
-            {/* Die Kappen fuer einen delegierten Agenten. Getrennt von den
-                beiden des Hauptlaufs darueber, weil der Grund ein anderer ist:
-                beim Hauptlauf sitzt der Nutzer davor und kann Stop druecken,
-                ein Sub-Agent laeuft ohne Zuschauer. Darum sind diese Zahlen
-                klein und darum heisst 0 hier "Vorgabe" und nicht
-                "unbegrenzt" — Unbegrenztheit soll man an einer
-                unbeaufsichtigten Schleife nicht aus Versehen einstellen. */}
-            <div className="flex items-center justify-between pt-1">
-              <span
-                className="t-micro text-gray-700 dark:text-gray-400"
-                title="How many tool calls one delegated sub-agent may make."
-              >
-                Sub-agent tool calls
-              </span>
-              <input
-                type="number"
-                value={settings.subAgentMaxToolCalls ?? 0}
-                onChange={(e) => updateSettings({ subAgentMaxToolCalls: Math.max(0, parseInt(e.target.value) || 0) })}
-                min={0}
-                placeholder="10"
-                className="w-20 px-1.5 py-0.5 rounded bg-transparent border border-white/8 t-mono text-right text-gray-300 focus:outline-none focus:border-white/20"
-              />
-            </div>
-            <div className="flex items-center justify-between">
-              <span
-                className="t-micro text-gray-700 dark:text-gray-400"
-                title="How many think-act rounds one delegated sub-agent may run."
-              >
-                Sub-agent steps
-              </span>
-              <input
-                type="number"
-                value={settings.subAgentMaxIterations ?? 0}
-                onChange={(e) => updateSettings({ subAgentMaxIterations: Math.max(0, parseInt(e.target.value) || 0) })}
-                min={0}
-                placeholder="5"
-                className="w-20 px-1.5 py-0.5 rounded bg-transparent border border-white/8 t-mono text-right text-gray-300 focus:outline-none focus:border-white/20"
-              />
-            </div>
-            <div className="t-micro text-gray-500 dark:text-gray-500 leading-relaxed pt-0.5">
-              0 = use the defaults (10 calls, 5 steps). A sub-agent runs unattended, so these stay deliberately tight — raise them only for a task you know is long.
-            </div>
           </Section>
 
           {/* Bug BB v2.5.0 — BobbyT GPU picker. Lazy-loads the GPU list when
@@ -1737,6 +1695,56 @@ export function SettingsPage() {
               >
                 Reset tutorial
               </button>
+            </Section>
+          )}
+
+
+          {FEATURE_FLAGS.AGENT_MODE && (
+            <Section title="Sub-agents">
+            {/* Die Kappen fuer einen delegierten Agenten. Sie standen bis zum
+                03.09.2026 unter General → Generation, neben Temperatur und
+                Auto-Compact; eine Persona suchte sie beim Agenten und fand sie
+                dort nicht. Der Gegenstand ist auch ein anderer: beim Hauptlauf
+                sitzt der Nutzer davor und kann Stop druecken, ein Sub-Agent
+                laeuft ohne Zuschauer. Darum sind diese Zahlen klein und darum
+                heisst 0 hier "Vorgabe" und nicht "unbegrenzt" —
+                Unbegrenztheit soll man an einer unbeaufsichtigten Schleife
+                nicht aus Versehen einstellen. */}
+            <div className="flex items-center justify-between">
+              <span
+                className="t-micro text-gray-700 dark:text-gray-400"
+                title="How many tool calls one delegated sub-agent may make."
+              >
+                Sub-agent tool calls
+              </span>
+              <input
+                type="number"
+                value={settings.subAgentMaxToolCalls ?? 0}
+                onChange={(e) => updateSettings({ subAgentMaxToolCalls: Math.max(0, parseInt(e.target.value) || 0) })}
+                min={0}
+                placeholder="10"
+                className="w-20 px-1.5 py-0.5 rounded bg-transparent border border-white/8 t-mono text-right text-gray-300 focus:outline-none focus:border-white/20"
+              />
+            </div>
+            <div className="flex items-center justify-between">
+              <span
+                className="t-micro text-gray-700 dark:text-gray-400"
+                title="How many think-act rounds one delegated sub-agent may run."
+              >
+                Sub-agent steps
+              </span>
+              <input
+                type="number"
+                value={settings.subAgentMaxIterations ?? 0}
+                onChange={(e) => updateSettings({ subAgentMaxIterations: Math.max(0, parseInt(e.target.value) || 0) })}
+                min={0}
+                placeholder="5"
+                className="w-20 px-1.5 py-0.5 rounded bg-transparent border border-white/8 t-mono text-right text-gray-300 focus:outline-none focus:border-white/20"
+              />
+            </div>
+            <div className="t-micro text-gray-500 dark:text-gray-500 leading-relaxed pt-0.5">
+              0 = use the defaults (10 calls, 5 steps). A sub-agent runs unattended, so these stay deliberately tight — raise them only for a task you know is long.
+            </div>
             </Section>
           )}
 

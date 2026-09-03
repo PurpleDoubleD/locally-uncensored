@@ -99,6 +99,12 @@ export function sectionsFor(tab: SettingsTab, flags: SettingsSectionFlags): stri
         'Personas',
         'Memory',
         ...(flags.agentMode ? ['Agent Permissions'] : []),
+        // Die Kappen fuer delegierte Agenten. Sie standen bis zum
+        // 03.09.2026 unter General → Generation, zwischen Temperatur und
+        // Auto-Compact; eine Persona suchte sie beim Agenten und fand sie
+        // dort nicht. Ein delegierter Lauf hat keinen Zuschauer — das ist
+        // ein anderer Gegenstand als die Werte des Zugs, vor dem man sitzt.
+        ...(flags.agentMode ? ['Sub-agents'] : []),
         ...(flags.agentWorkflows ? ['Agent Workflows'] : []),
         ...(flags.agentMode ? ['MCP Servers', 'Coding Agent', 'Search Provider'] : []),
       ]
