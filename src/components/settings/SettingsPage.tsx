@@ -720,13 +720,14 @@ export function ComfyUISettings() {
       // does nothing". Look once, a few seconds in, and say what happened.
       setTimeout(async () => {
         try {
-          const out: any = await backendCall('comfyui_last_output')
+          const out = await backendCall<{ exited?: boolean; lines?: string[]; envBroken?: boolean; hint?: string }>('comfyui_last_output')
           if (out?.exited && Array.isArray(out?.lines) && out.lines.length > 1) {
-            const { comfyStartupError } = await import('../create/experimental/comfyError')
-            setStartError(
-              comfyStartupError(out.lines) +
-              (out.envBroken ? '\n\nThe Python environment looks broken. Repair environment below rebuilds it in place; models, outputs and custom nodes are left alone.' : ''),
-            )
+            // Ticket 007: welcher Satz unter die Ausgabe gehoert, entscheidet
+            // comfyCrashAdvice fuer beide Oberflaechen. Vorher stand der
+            // allgemeine Satz hier fest verdrahtet, und der konkrete Hinweis
+            // aus dem Einordner des Installers erreichte den Kunden nie.
+            const { comfyStartupError, comfyCrashAdvice } = await import('../create/experimental/comfyError')
+            setStartError(comfyStartupError(out.lines, comfyCrashAdvice(out)))
           }
         } catch { /* status polling keeps the panel honest */ }
       }, 6000)

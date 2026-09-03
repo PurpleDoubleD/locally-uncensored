@@ -526,14 +526,21 @@ pub(crate) fn pip_failure_hint(kind: PipFailureKind, text: &str) -> String {
              reinstall python3 via your package manager (pyenv builds need the \
              OpenSSL headers installed first, e.g. libssl-dev / openssl-devel), \
              then retry.".to_string(),
+        // Ticket 007: beide Saetze endeten auf "then press Repair environment"
+        // und widersprachen sich damit selbst, der erste sogar im selben Absatz
+        // ("nothing pip does can fix this"). Ein Neubau des venv holt dieselben
+        // Wheels an dieselbe Stelle; was fehlt, wohnt in Windows. falcon bob hat
+        // die Reparatur gedrueckt, den Neubau abgewartet und stand vor derselben
+        // Meldung. Der Satz sagt jetzt, was wirklich hilft.
         PipFailureKind::MissingRuntimeLibrary => {
             let dll = missing_runtime_library(text).unwrap_or("VCOMP140.DLL").to_uppercase();
             format!(
                 "A Microsoft Visual C++ runtime library is missing on this machine: {dll}. \
                  PyTorch loads it at import time and Windows does not install it on its own, \
                  so nothing pip does can fix this. Install the current Visual C++ \
-                 Redistributable for x64 from {VC_REDIST_PAGE}, restart Windows, then press \
-                 Repair environment."
+                 Redistributable for x64 from {VC_REDIST_PAGE}, restart Windows, then start \
+                 ComfyUI again. Repair environment does not help here: the missing library \
+                 belongs to Windows, not to the ComfyUI folder."
             )
         }
         PipFailureKind::NativeLoadFailure => format!(
@@ -541,7 +548,9 @@ pub(crate) fn pip_failure_hint(kind: PipFailureKind, text: &str) -> String {
              Two things cause that, in this order: the Microsoft Visual C++ Redistributable \
              for x64 is missing or out of date (install the current one from {VC_REDIST_PAGE} \
              and restart Windows), or the GPU driver is older than the CUDA build that was \
-             installed (update the graphics driver). Do both, then press Repair environment."
+             installed (update the graphics driver). Do both, then start ComfyUI again. \
+             Repair environment does not help here: it rebuilds the folder, and both of \
+             these live outside it."
         ),
         PipFailureKind::TorchWithoutGpuSupport =>
             "The PyTorch in this environment carries no support for the card in this machine, \

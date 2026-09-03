@@ -55,3 +55,32 @@ describe('#98: die ComfyUI-Umgebung heilt sich selbst', () => {
     expect(src).toMatch(/envBroken/)
   })
 })
+
+/**
+ * Ticket 007 (falcon bob, 01.09. bis 02.09.): der Einordner des Installers
+ * kannte WinError 1114 seit 2.6.7, der Startfehler-Pfad hat ihn nie gefragt.
+ * Der Kunde bekam den allgemeinen Satz, drueckte Repair, wartete den Neubau ab
+ * und stand vor derselben Meldung. Beide Oberflaechen holen den Rat jetzt aus
+ * derselben Stelle, damit der gepflegte Pfad nicht wieder der einzige bleibt.
+ */
+describe('Ticket 007: der Rat unter der Ausgabe kommt aus einer Stelle', () => {
+  it('die Settings entscheiden nicht mehr selbst, welcher Satz drunter steht', () => {
+    const src = settings()
+    expect(src).toMatch(/comfyCrashAdvice\(out\)/)
+    // Der allgemeine Satz wohnt jetzt in comfyError.ts. Stuende er hier noch
+    // einmal, waere die naechste Aenderung wieder eine von zwei Kopien.
+    expect(src).not.toMatch(/The Python environment looks broken/)
+  })
+
+  it('der Create-Pfad reicht den konkreten Hinweis an den Kunden durch', () => {
+    const src = kontext()
+    expect(src).toMatch(/comfyStartupError\(out\?\.lines, out\?\.hint\)/)
+    expect(src).toMatch(/hint\?: string/)
+  })
+
+  it('der Rat selbst steht in comfyError.ts, samt Vorrang des konkreten Hinweises', () => {
+    const fehler = readFileSync(resolve(hier, '..', 'comfyError.ts'), 'utf8')
+    expect(fehler).toMatch(/export const REPAIR_ADVICE/)
+    expect(fehler).toMatch(/export function comfyCrashAdvice/)
+  })
+})

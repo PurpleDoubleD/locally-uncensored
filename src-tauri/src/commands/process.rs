@@ -291,6 +291,62 @@ pub fn comfy_env_failure(tail: &[String]) -> bool {
         || (joined.contains("Traceback (most recent call last)") && joined.contains("site-packages"))
 }
 
+/// Was die letzte Ausgabe eines Startversuchs bedeutet: darf die Selbstheilung
+/// laufen, und welcher Satz gehoert unter die Ausgabe.
+pub(crate) struct ComfyCrashVerdict {
+    /// Ein Absturz, den ein Neubau des venv beheben kann (GH #98).
+    pub env_broken: bool,
+    /// Der konkrete Rat aus dem Einordner des Installers, sonst leer.
+    pub hint: String,
+}
+
+/// Die Einordnung eines Startabsturzes, mit genau dem Einordner, den der
+/// Installer schon hat. Kein zweiter Einordner und kein zweiter Hinweistext:
+/// `pip_failure_kind` und `pip_failure_hint` wissen seit 2.6.7, was WinError
+/// 1114 bedeutet, sie wurden auf diesem Weg nur nie gefragt.
+///
+/// falcon bob (Ticket 007, 01.09. bis 02.09.): sein torch starb an einem
+/// c10.dll im venv, LU nannte das eine kaputte Umgebung und baute das venv
+/// automatisch neu. Ein nativer Ladefehler hat seine Ursache AUSSERHALB des
+/// venv, in der Visual-C++-Laufzeit oder im Grafiktreiber, also endet der
+/// Neubau nach Minuten auf derselben Meldung. Genau diese Schleife hat er
+/// berichtet. Alle uebrigen Faelle heilen sich weiter selbst.
+pub(crate) fn comfy_crash_verdict(lines: &[String], exited: bool) -> ComfyCrashVerdict {
+    use crate::commands::install::{pip_failure_hint, pip_failure_kind, PipFailureKind};
+    let joined = lines.join("\n");
+    let kind = pip_failure_kind(&joined);
+    // Eine Auswahl ueber den vorhandenen Einordner, kein zweiter Einordner:
+    // diese vier Saetze beschreiben die Maschine selbst und stimmen deshalb
+    // auch, wenn nicht pip sie gedruckt hat, sondern ComfyUI beim Start. Die
+    // uebrigen Saetze reden von pip und vom Paketindex, die hier gar nicht
+    // gelaufen sind. Der schlimmste davon ist PipBroken: anglefires fehlendes
+    // sqlalchemy wuerde damit ein "Reinstall Python 3.10+ from python.org"
+    // bekommen, obwohl sein Python heil ist und die Reparatur der Weg ist.
+    let hint = match kind {
+        PipFailureKind::MissingRuntimeLibrary
+        | PipFailureKind::NativeLoadFailure
+        | PipFailureKind::TorchWithoutGpuSupport
+        | PipFailureKind::DiskFull => pip_failure_hint(kind, &joined),
+        _ => String::new(),
+    };
+    ComfyCrashVerdict {
+        env_broken: exited && comfy_env_failure(lines) && venv_rebuild_can_fix(kind),
+        hint,
+    }
+}
+
+/// Kann ein Neubau des venv dieses Fehlerbild ueberhaupt beheben?
+///
+/// Nein, sobald das fehlende Stueck ausserhalb des venv liegt: die
+/// Visual-C++-Laufzeit und der Grafiktreiber wohnen in Windows, und ein
+/// frisches venv laedt dieselben Wheels an dieselbe Stelle. Alles andere
+/// bleibt bei Ja, damit die Selbstheilung aus GH #98 nur enger wird und nicht
+/// verschwindet.
+pub(crate) fn venv_rebuild_can_fix(kind: crate::commands::install::PipFailureKind) -> bool {
+    use crate::commands::install::PipFailureKind as K;
+    !matches!(kind, K::NativeLoadFailure | K::MissingRuntimeLibrary)
+}
+
 /// Pure decision (all probes done by the caller): pass `--cpu` to ComfyUI?
 ///
 /// - `baseline_needs_cpu`: `needs_cpu_fallback()` — false when NVIDIA present or macOS.
@@ -1695,10 +1751,16 @@ pub fn comfyui_last_output(state: State<'_, AppState>) -> Result<serde_json::Val
         }
     };
     // envBroken drives the self-repair (GH #98): only a crash that looks like
-    // a dead Python environment may trigger the venv rebuild, everything else
-    // keeps its own message.
-    let env_broken = exited && comfy_env_failure(&lines);
-    Ok(serde_json::json!({ "lines": lines, "exited": exited, "envBroken": env_broken }))
+    // a dead Python environment AND can be fixed by a fresh venv may trigger
+    // the rebuild, everything else keeps its own message. hint carries the
+    // installer's own verdict about this crash, empty when it has none.
+    let verdict = comfy_crash_verdict(&lines, exited);
+    Ok(serde_json::json!({
+        "lines": lines,
+        "exited": exited,
+        "envBroken": verdict.env_broken,
+        "hint": verdict.hint,
+    }))
 }
 
 #[tauri::command]
@@ -2486,6 +2548,123 @@ mod tests {
         assert!(!comfy_env_failure(&voll));
         let sauber = zeilen(&["[start] python main.py --port 8188", "Total VRAM 12288 MB"]);
         assert!(!comfy_env_failure(&sauber));
+    }
+
+    // ── Ticket 007 (falcon bob, 01.09. bis 02.09.) ─────────────────────────
+    //
+    // Windows 10 Home 20H2, Radeon R9 200 mit 3 GB. Er bekam den allgemeinen
+    // Satz ueber die kaputte Umgebung, drueckte Repair, wartete den Neubau ab
+    // und stand vor derselben Meldung: "I tried running the comfy repair
+    // directive from the settings area and that did not work either."
+
+    /// Der Puffer, den comfyui_last_output bei ihm gehalten hat. Die letzten
+    /// sechs Zeilen sind die aus seinem Bildschirmabzug; die Traceback-Zeile
+    /// davor steht hier, weil der Puffer mehr haelt als die Meldung zeigt und
+    /// die alte Regel genau an ihr angeschlagen hat.
+    fn falcon_bobs_tail() -> Vec<String> {
+        zeilen(&[
+            "Traceback (most recent call last):",
+            r#"  File "C:\Users\xavie\ComfyUI\main.py", line 89, in <module>"#,
+            "import torch",
+            r#"  File "C:\Users\xavie\ComfyUI\venv\Lib\site-packages\torch\__init__.py", line 309, in <module>"#,
+            "    _load_dll_libraries()",
+            r#"  File "C:\Users\xavie\ComfyUI\venv\Lib\site-packages\torch\__init__.py", line 292, in _load_dll_libraries"#,
+            "    raise err",
+            r#"OSError: [WinError 1114] A dynamic link library (DLL) initialization routine failed. Error loading "C:\Users\xavie\ComfyUI\venv\Lib\site-packages\torch\lib\c10.dll" or one of its dependencies."#,
+        ])
+    }
+
+    #[test]
+    fn falcon_bobs_dll_crash_does_not_start_a_rebuild_that_cannot_help() {
+        let tail = falcon_bobs_tail();
+        // Die alte Regel allein haette genau hier neu gebaut, deshalb steht
+        // sie als Ausgangslage im Test.
+        assert!(comfy_env_failure(&tail), "der Ausgangsbefund stimmt nicht mehr");
+        let verdict = comfy_crash_verdict(&tail, true);
+        assert!(
+            !verdict.env_broken,
+            "ein nativer Ladefehler loest weiter die Reparatur aus, die ihn nicht beheben kann",
+        );
+    }
+
+    #[test]
+    fn falcon_bobs_dll_crash_carries_the_hint_the_installer_already_had() {
+        let verdict = comfy_crash_verdict(&falcon_bobs_tail(), true);
+        assert!(
+            verdict.hint.contains("Visual C++"),
+            "die erste Ursache wird nicht genannt: {}",
+            verdict.hint,
+        );
+        assert!(
+            verdict.hint.to_lowercase().contains("driver"),
+            "die zweite Ursache wird nicht genannt: {}",
+            verdict.hint,
+        );
+        assert!(
+            !verdict.hint.contains("press Repair environment"),
+            "der Hinweis schickt weiter in die Reparatur: {}",
+            verdict.hint,
+        );
+        assert!(
+            verdict.hint.contains("Repair environment does not help here"),
+            "der Hinweis sagt nicht, dass die Reparatur hier nichts aendert: {}",
+            verdict.hint,
+        );
+    }
+
+    #[test]
+    fn a_missing_visual_cpp_library_at_startup_also_stops_the_rebuild() {
+        let tail = zeilen(&[
+            "Traceback (most recent call last):",
+            r#"  File "C:\Users\xavie\ComfyUI\venv\Lib\site-packages\torch\__init__.py", line 309, in <module>"#,
+            r#"ImportError: VCOMP140.DLL was not found. Error loading "C:\Users\xavie\ComfyUI\venv\Lib\site-packages\torch\lib\c10.dll""#,
+        ]);
+        let verdict = comfy_crash_verdict(&tail, true);
+        assert!(!verdict.env_broken, "eine fehlende Systembibliothek loest die Reparatur aus");
+        assert!(
+            verdict.hint.contains("VCOMP140.DLL"),
+            "die fehlende Datei wird nicht beim Namen genannt: {}",
+            verdict.hint,
+        );
+    }
+
+    #[test]
+    fn the_self_healing_from_gh_98_still_fires_for_everything_else() {
+        // Die Faehigkeit darf nicht versehentlich verschwinden: beide Faelle,
+        // die sie ueberhaupt erst gebaut haben, muessen weiter heilen, und
+        // anglefires fehlendes sqlalchemy (Ticket 003) auch.
+        for (was, tail) in [
+            ("joels torch-import", zeilen(&[
+                "Traceback (most recent call last):",
+                r#"  File "C:\Users\joeln\AppData\Local\Python\pythoncore-3.12-64\Lib\site-packages\torch\_library\infer_schema.py", line 106, in infer_schema"#,
+                "RuntimeError: infer_schema(func): Parameter dtype has unsupported type",
+            ])),
+            ("kryptoxides comfy-paket", zeilen(&[
+                "Traceback (most recent call last):",
+                r#"  File "I:\comfyui\main.py", line 1, in <module>"#,
+                "ModuleNotFoundError: No module named 'comfy.options'",
+            ])),
+            ("anglefires sqlalchemy", zeilen(&[
+                "Traceback (most recent call last):",
+                r#"  File "C:\Users\1 בוגר\ComfyUI\app\database\db.py", line 3, in <module>"#,
+                "ModuleNotFoundError: No module named 'sqlalchemy'",
+            ])),
+        ] {
+            let verdict = comfy_crash_verdict(&tail, true);
+            assert!(verdict.env_broken, "{was}: die Selbstheilung ist weg");
+            assert!(
+                verdict.hint.is_empty(),
+                "{was}: ein Hinweistext ueber pip verdraengt den richtigen Satz ueber die Reparatur: {}",
+                verdict.hint,
+            );
+        }
+    }
+
+    #[test]
+    fn a_process_that_still_runs_is_never_called_broken() {
+        // Negativprobe: der Befund haengt weiter am beendeten Kind, sonst
+        // repariert die Oberflaeche einen laufenden Start weg.
+        assert!(!comfy_crash_verdict(&falcon_bobs_tail(), false).env_broken);
     }
 
     // ── AMD/ROCm ComfyUI GPU decision (rhodium92, 2026-07-01) ────────────
