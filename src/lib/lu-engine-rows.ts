@@ -69,8 +69,19 @@ export const LU_ENGINE_GROUP = 'LU Engine'
  * hit the exact machine this change is about: ~/lu-e2e-models holding
  * Qwen2.5-0.5B-Instruct-Q8_0.gguf. Our own quant is knowledge, and a route
  * that throws knowledge away to reach a guess is not a route. The case where
- * the collapsed row really is our file is already covered by route 2, which
- * proves it from the path instead of guessing it from the name.
+ * the collapsed row really is our file is covered by route 2, which proves it
+ * from the path instead of guessing it from the name.
+ *
+ * A14 fourth review, how far route 2 reaches: it recognises LM Studio's store
+ * by the two folders LM Studio itself ships with, ~/.lmstudio/models and
+ * ~/.cache/lm-studio/models (see livesInLmStudioStore below). A user who moved
+ * his LM Studio library somewhere else and then pointed the LU Engine folder
+ * at that same place gets neither route 1 (LM Studio's API reports its own key
+ * and no path) nor route 2, so the file stands twice in the list. That is the
+ * accepted outcome and not an oversight: a visible duplicate costs the user
+ * one confused look, while widening the rule to catch it would mean guessing
+ * from names again, and a wrong guess hides a file he owns. Visible duplicate
+ * beats hidden file.
  */
 export function dropDuplicateLuEngineRows<T extends InstalledModelLike>(
   bundled: T[],
@@ -117,7 +128,11 @@ function identityOf(m: InstalledModelLike): string {
   return ''
 }
 
-/** Does this row's file lie inside LM Studio's own model store. */
+/** Does this row's file lie inside LM Studio's own model store.
+ *
+ *  The two default locations only. A relocated library is not recognised here
+ *  and is not meant to be: see the fourth-review paragraph on the function
+ *  above for why a duplicate row is the better half of that trade. */
 function livesInLmStudioStore(m: InstalledModelLike): boolean {
   const p = normalisePath(pathOf(m))
   if (!p) return false
