@@ -28,11 +28,51 @@ export const CHAT_TOOLS = [
 
 export type ChatToolCapability = 'image' | 'video' | 'web' | 'file'
 
-const lower = (s: string) => (s || '').toLowerCase()
+/**
+ * Umlaute und Eszett auf ihre Ersatzschreibung bringen, BEVOR irgendein Muster
+ * greift (Persona-Lauf 03.09.2026).
+ *
+ * Zwei Gruende. Erstens tippen viele Leute deutsch ohne Umlaute, aus Gewohnheit
+ * oder auf fremder Tastatur; ein Muster, das auf "oeffne" in Umlautschreibung
+ * besteht, verfehlt die dann jedes Mal. Zweitens, und schlimmer: eine
+ * Wortgrenze vor einem Umlaut greift in JavaScript nie, weil Umlaute keine
+ * Wortzeichen sind. Das alte Muster fuer "oeffne" stand mit Wortgrenze davor
+ * und war damit toter Buchstabe, auch bei korrekter Schreibung. Deshalb wird
+ * EINMAL zentral normalisiert und jedes Muster unten in der Ersatzschreibung
+ * gefuehrt.
+ */
+export function entumlauten(s: string): string {
+  return s
+    .replace(/\u00e4/g, 'ae')
+    .replace(/\u00f6/g, 'oe')
+    .replace(/\u00fc/g, 'ue')
+    .replace(/\u00df/g, 'ss')
+}
+
+const lower = (s: string) => entumlauten((s || '').toLowerCase())
 
 // A bare URL or an explicit "open/read this page" → web_fetch territory.
 const URL_RE = /\bhttps?:\/\/\S+|\bwww\.\S+|\b[a-z0-9-]+\.(com|org|net|io|dev|ai|de|co|gov|edu|app|news)\b(\/\S*)?/i
-const FETCH_VERB_RE = /\b(open|read|fetch|scrape|summari[sz]e|summari[sz]e|get|öffne|lies|lese|fasse|zusammenfass\w*|ruf\w*\s+auf)\b[^.?!]*\b(page|site|website|link|url|article|seite|webseite|link|url|artikel)\b/i
+//
+// Die deutsche Verbliste kannte lange nur oeffne/lies/fasse/ruf...auf, und die
+// URL-Regel darunter fuehrte eine zweite, kuerzere Kopie davon. Eine Persona
+// tippte am 03.09.2026 zweimal "Hol bitte die Seite ..." und bekam beide Male
+// gar kein tools-Feld im Payload, waehrend derselbe Satz auf Englisch sauber
+// lief. Das Verb, das man am ehesten tippt, fehlte schlicht in beiden Listen.
+// Der Wortstamm steht deshalb jetzt an genau einer Stelle.
+const WEB_ZUGRIFF_VERBEN =
+  'open|read|fetch|scrape|summari[sz]e|get|visit|check|' +
+  // Trennbare Verben: im Deutschen steht die Vorsilbe am Satzende ("Ruf die
+  // Webseite example.com AUF"), das alte Muster verlangte sie direkt hinter
+  // dem Verb und traf damit nur unnatuerliche Saetze.
+  'oeffne|lies|lese|fasse|zusammenfass\\w*|ruf(e|st|t)?|auf-?ruf\\w*|hol(e|st|t)?|abruf\\w*|' +
+  'besuch(e|st|t)?|lad(e|est)?|zeig(e|st)?|schau|guck|sieh|ansehen|anschauen'
+const FETCH_VERB_RE = new RegExp(
+  `\\b(${WEB_ZUGRIFF_VERBEN})\\b[^.?!]*\\b(page|site|website|link|url|article|seite|webseite|artikel)\\b`,
+  'i',
+)
+/** Derselbe Verbstamm, aber neben einer echten URL. Da braucht es kein Substantiv. */
+const URL_VERB_RE = new RegExp(`\\b(${WEB_ZUGRIFF_VERBEN})\\b`, 'i')
 
 // Search intent: explicit search verbs, or a freshness/lookup signal that a
 // model cannot answer reliably from training memory.
@@ -41,11 +81,33 @@ const SEARCH_VERB_RE = /\b(search|google|look\s*up|web\s*search|search\s+the\s+w
 // "today"/"now" in conversational phrasing ("how are you today") must not.
 const FRESHNESS_RE = /\b(latest|newest|current(ly)?|today'?s?|tonight|right\s+now|recent(ly)?|breaking|in\s+20\d\d|as\s+of\s+(today|now)|aktuell\w*|neueste\w*|heutige\w*)\b/i
 const FRESH_TOPIC_RE = /\b(version|release|update|news|results?|winner|champion|election|launch|price|prices|stock|standings|score|scores|ranking|patch|driver(s)?|model(s)?|treiber)\b/i
+// Die Substantivliste oben kennt Seite, Webseite und Artikel, also das
+// EINZELNE Dokument. Sie kannte kein einziges Wort fuer das Internet selbst.
+// Genau so tippen Kunden aber, wenn sie keine bestimmte Adresse im Kopf haben:
+// "schau im Netz nach", "hol mir das aus dem Internet", "schau online nach".
+// Alle drei liefen ins Leere, das Modell bekam kein tools-Feld und erfand die
+// Antwort, statt zu suchen. Belegt am 03.09.2026 an fuenf von fuenf Versuchen.
+//
+// Die Praeposition ist Absicht: sie trennt das Ziel vom Thema. "Schau im Netz
+// nach" meint das Internet, "erklaer mir den Unterschied zwischen Netz und
+// Graph" meint es nicht.
+const NETZ_ZIEL_RE = /\b(im|ins|aus\s+dem|beim|uebers|ueber\s+das)\s+(netz|internet|web)\b|\bonline\b/i
+// Nachschlagende Verben. Zusammengeschriebene Formen brauchen einen eigenen
+// Eintrag, weil die Wortgrenze "schau" in "nachschauen" nicht findet.
+const NETZ_VERB_RE = /\b(nach-?schau\w*|nach-?seh\w*|nach-?guck\w*|nach-?les\w*|schau(e|st)?|guck(e|st)?|sieh|such(e|en|st)?|hol(e|st|t)?|find(e|en|est)?|recherchier\w*|pruef(e|en|st)?|check(e|en)?|look|search|find)\b/i
 const LOOKUP_TOPIC_RE = /\b(weather|temperature|forecast|price\s+of|stock\s+price|exchange\s+rate|who\s+won|who\s+is\s+winning|standings|release\s+date|wetter|preis\s+von|kurs\s+von|wer\s+hat\s+gewonnen|wechselkurs)\b/i
 
 // Verbs that inherently mean "make an image" even without a media noun
 // ("draw a cat", "zeichne eine Blume").
-const INHERENT_IMAGE_VERB_RE = /\b(draw|sketch|paint|illustrate|mal(e|en)?|zeichne(n|st)?|skizzier\w*)\b/i
+// "mal" ohne Endung ist im Deutschen meistens gar kein Verb, sondern die
+// Partikel: "erklaer mir mal", "sag mal", "warte mal". Als Malen-Befehl zaehlt
+// es deshalb nur am SATZANFANG, wo es wirklich Befehlsform ist ("Mal eine
+// Blume"). Vorher kaperte jede beilaeufige deutsche Frage die Bildgenerierung,
+// und ein Fehlalarm ist teuer: der Zug laeuft dann durch den
+// Werkzeug-Ausfuehrer, woran sich kleine Modelle nachweislich verschlucken.
+// "Mal mir ein Bild" bleibt auch mitten im Satz erkannt, das faengt die
+// Verb-plus-Substantiv-Regel darunter.
+const INHERENT_IMAGE_VERB_RE = /\b(draw|sketch|paint|illustrate|mal(e|en)|zeichne(n|st)?|skizzier\w*)\b|^\s*mal\b/i
 
 // Image / video creation: a creation verb co-occurring with a media noun.
 const CREATE_VERB_RE = /\b(draw|sketch|paint|generate|create|make|render|design|give\s+me|show\s+me|produce|turn|convert|mal(e|en)?|zeichne|erstell(e|en)?|generier(e|en)?|mach(e|en)?|gib\s+mir|zeig(e|en)?\s+mir|entwirf|produzier(e|en)?|verwandle|wandle)\b/i
@@ -89,11 +151,14 @@ export function detectChatToolCapability(text: string, hasImages = false): ChatT
   // WEB FETCH (explicit page/url) — before generic search so a URL routes to
   // fetch, not search.
   if (FETCH_VERB_RE.test(t)) return 'web'
-  if (URL_RE.test(t) && /\b(open|read|fetch|summari[sz]e|get|check|visit|öffne|lies|lese|fasse|besuche|schau)\b/i.test(t)) return 'web'
+  if (URL_RE.test(t) && URL_VERB_RE.test(t)) return 'web'
 
   // WEB SEARCH
   if (SEARCH_VERB_RE.test(t)) return 'web'
   if (LOOKUP_TOPIC_RE.test(t)) return 'web'
+  // Ein Netz-Wort plus ein nachschlagendes Verb ist eine Recherche, auch ohne
+  // Suchverb und ohne Adresse.
+  if (NETZ_ZIEL_RE.test(t) && NETZ_VERB_RE.test(t)) return 'web'
   // Freshness only counts when it actually modifies a lookup-ish topic, so
   // "what is the latest python version" routes but "how are you today" does not.
   if (FRESHNESS_RE.test(t) && FRESH_TOPIC_RE.test(t)) return 'web'
