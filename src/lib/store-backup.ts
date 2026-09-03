@@ -49,6 +49,11 @@ export const STORE_KEYS = [
   //                             re-downloading tens of GB
   'staged-changes', 'locally-uncensored-todos', 'locally-uncensored-ui',
   'lu_release_notes', 'locally-uncensored-downloads',
+  // Die lokale Modell-API (2.6.8). Sie MUSS hier stehen, denn sie traegt das
+  // einzige Geheimnis in dieser Liste: das API-Token. Geht es bei einem Update
+  // verloren, antwortet die API allen bereits eingerichteten Programmen des
+  // Nutzers mit 401 — und die Fehlermeldung dort sagt nichts ueber ein Update.
+  'lu-local-api',
 ]
 
 /** These persist through idbStorage (IndexedDB) since 2.5.0, because the

@@ -103,6 +103,6 @@ export function sectionsFor(tab: SettingsTab, flags: SettingsSectionFlags): stri
         ...(flags.agentMode ? ['MCP Servers', 'Coding Agent', 'Search Provider'] : []),
       ]
     case 'voice-remote':
-      return ['Speech', 'Remote Access']
+      return ['Speech', 'Remote Access', 'Local API']
   }
 }

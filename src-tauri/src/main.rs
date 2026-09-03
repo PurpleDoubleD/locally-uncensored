@@ -423,6 +423,10 @@ fn main() {
             commands::search::searxng_status,
             // Claude Code
             // Remote Access
+            commands::local_api::start_local_api,
+            commands::local_api::stop_local_api,
+            commands::local_api::local_api_status,
+            commands::local_api::local_api_new_token,
             commands::remote::start_remote_server,
             commands::remote::stop_remote_server,
             commands::remote::restart_remote_server,

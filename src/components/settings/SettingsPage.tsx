@@ -25,6 +25,7 @@ import { FEATURE_FLAGS } from '../../lib/constants'
 import { MemorySettings } from './MemorySettings'
 import { ChatBackupSettings } from './ChatBackupSettings'
 import { ImportScanSkeleton } from '../layout/ViewSkeletons'
+import { LocalApiSettings } from './LocalApiSettings'
 import { RemoteAccessSettings } from './RemoteAccessSettings'
 import { RemoteAccessDocs } from './RemoteAccessDocs'
 import { HardwareSettings } from './HardwareSettings'
@@ -1810,6 +1811,10 @@ export function SettingsPage() {
             <Disclosure label="How it works">
               <RemoteAccessDocs />
             </Disclosure>
+          </Section>
+
+          <Section title="Local API">
+            <LocalApiSettings />
           </Section>
         </>)}
 

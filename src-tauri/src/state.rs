@@ -257,6 +257,11 @@ pub struct AppState {
     pub python_bin: Arc<Mutex<String>>,
     // Remote Access
     pub remote: Mutex<RemoteServer>,
+    /// Die lokale Modell-API (commands/local_api.rs). `None` heisst: laeuft
+    /// nicht — und das ist der Zustand nach dem Start, bis der Nutzer sie
+    /// einschaltet. Sie hat absichtlich einen eigenen Lauscher neben `remote`:
+    /// der bindet 0.0.0.0 fuers Handy, diese hier 127.0.0.1 ab Werk.
+    pub local_api: Mutex<Option<crate::commands::local_api::LocalApiServer>>,
     /// Per-chat workspace overrides — when present, agent file ops with
     /// a relative path resolve against this folder instead of the
     /// default `~/agent-workspace/<chat_id>/`. Set when the user picks
@@ -385,6 +390,7 @@ impl AppState {
             // Claude Code
             // Remote Access
             remote: Mutex::new(RemoteServer::new()),
+            local_api: Mutex::new(None),
             chat_workspace_overrides: Arc::new(Mutex::new(HashMap::new())),
             // Bug BB v2.5.0 — start in "auto" mode so existing installs are
             // unchanged until the user explicitly picks a GPU in Settings.
