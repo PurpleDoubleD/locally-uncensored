@@ -186,3 +186,75 @@ describe('resolveChatToolRoute — context-aware media continuation', () => {
     expect(resolveChatToolRoute('ok go', false, recent)).toBeNull()
   })
 })
+
+// ── Deutsch bekommt dieselben Werkzeuge wie Englisch (Persona B3) ────────
+
+describe('die Erkennung darf nicht an der Sprache haengen', () => {
+  /**
+   * Persona-Lauf vom 03.09.2026, `llama3.2:3b`, normaler Chat. Zweimal in
+   * frischen Chats getippt:
+   *
+   *   „Hol bitte die Seite https://example.com und sag mir woertlich,
+   *    welche Ueberschrift dort steht."
+   *
+   * Im Netzwerk-Payload an Ollama stand **kein `tools`-Feld**. Das Modell
+   * antwortete, es koenne keine URLs aufrufen. Dieselbe Bitte auf Englisch,
+   * gleicher Chat, gleiches Modell: `tools: [web_search, web_fetch,
+   * file_write]` und eine korrekte Antwort. Die Plugins-Leiste sagte dabei
+   * die ganze Zeit „Chat Tools · web · file · image · video" — die App
+   * behauptete also, die Werkzeuge seien an.
+   *
+   * Zwei Luecken steckten darin:
+   *
+   * 1. „hol" fehlte in der deutschen Verbliste. Sie kannte oeffne/lies/
+   *    fasse/ruf…auf — aber nicht das Verb, das man am ehesten tippt.
+   * 2. Die Persona schreibt „woertlich" und „Ueberschrift", also deutsches
+   *    Umlaut-freies Tippen. Ein Muster, das auf „öffne" besteht, verfehlt
+   *    „oeffne" — und wer keine Umlaute tippt, tippt sie nirgends.
+   */
+  const persona = 'Hol bitte die Seite https://example.com und sag mir woertlich, welche Ueberschrift dort steht.'
+
+  it('erkennt den Satz der Persona', () => {
+    expect(detectChatToolCapability(persona)).toBe('web')
+  })
+
+  it('erkennt dieselbe Bitte mit den ueblichen deutschen Verben', () => {
+    for (const satz of [
+      'Hole bitte die Seite https://example.com',
+      'Oeffne die Seite https://example.com',
+      'Öffne die Seite https://example.com',
+      'Ruf die Webseite example.com auf',
+      'Zeig mir bitte die Seite https://example.com',
+      'Lade die Seite https://example.com und fasse sie zusammen',
+      'Schau dir bitte den Artikel auf example.com an',
+      'Besuche die Webseite example.com',
+    ]) {
+      expect(detectChatToolCapability(satz), satz).toBe('web')
+    }
+  })
+
+  it('umlautfrei getipptes Deutsch zaehlt ueberall gleich', () => {
+    // Nicht nur beim Abrufen: wer keine Umlaute tippt, tippt auch beim Bild
+    // und beim Video keine.
+    expect(detectChatToolCapability('Male mir ein Gemaelde von einer Katze')).toBe('image')
+    expect(detectChatToolCapability('Male mir ein Gemälde von einer Katze')).toBe('image')
+    expect(detectChatToolCapability('Erstelle ein Portraet von einem Hund')).toBe('image')
+    expect(isMediaContinuation('laenger bitte')).toBe(true)
+    expect(isMediaContinuation('länger bitte')).toBe(true)
+    expect(isMediaContinuation('tschuess')).toBe(false)
+  })
+
+  it('gewoehnliche Unterhaltung bleibt auf dem schnellen Weg', () => {
+    // Der Preis eines Fehlalarms ist echt: der Zug laeuft dann durch den
+    // Werkzeug-Ausfuehrer, und genau daran verschluckt sich ein 3B-Modell.
+    for (const satz of [
+      'Wie geht es dir heute?',
+      'Erklaer mir mal, wie Rekursion funktioniert',
+      'Ich habe auf https://example.com gelesen, dass Katzen viel schlafen',
+      'Danke, das war hilfreich',
+      'Was haeltst du von dieser Idee?',
+    ]) {
+      expect(detectChatToolCapability(satz), satz).toBeNull()
+    }
+  })
+})

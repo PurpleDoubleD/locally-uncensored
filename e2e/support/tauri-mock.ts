@@ -470,6 +470,11 @@ export function tauriMockInit(opts: TauriMockOptions) {
 
       // ── chat streaming: drive the onChunk Channel ─────────────────
       case 'proxy_localhost_stream_chunked': {
+        // Jeden Chat-Koerper mitschreiben. Eine Persona hat am 03.09.2026 am
+        // Netzwerk-Payload gemessen, dass auf Deutsch KEIN `tools`-Feld
+        // mitging — Specs koennen das jetzt genauso pruefen, statt sich auf
+        // das zu verlassen, was gerade auf dem Schirm steht.
+        ;(w.__E2E_CHAT_BODIES__ = w.__E2E_CHAT_BODIES__ || []).push(args?.body ?? '')
         const channel = args?.onChunk
         const script = opts.agentTurns
         const parts = script && script.length
@@ -489,6 +494,7 @@ export function tauriMockInit(opts: TauriMockOptions) {
         return Promise.resolve(null)
       }
       case 'proxy_localhost_stream':
+        ;(w.__E2E_CHAT_BODIES__ = w.__E2E_CHAT_BODIES__ || []).push(args?.body ?? '')
         return Promise.resolve(enc(chatSse(opts.assistantReply)))
       case 'cancel_proxy_stream':
         return Promise.resolve(null)

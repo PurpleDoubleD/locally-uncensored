@@ -28,11 +28,49 @@ export const CHAT_TOOLS = [
 
 export type ChatToolCapability = 'image' | 'video' | 'web' | 'file'
 
-const lower = (s: string) => (s || '').toLowerCase()
+/**
+ * Umlaute und ß auf ihre Ersatzschreibung bringen, BEVOR irgendein Muster
+ * greift (Persona B3, 03.09.2026).
+ *
+ * Die Persona tippte „woertlich" und „Ueberschrift" — deutsches Tippen ohne
+ * Umlaute, auf einer Tastatur ohne sie oder aus Gewohnheit. Wer so tippt,
+ * tippt ueberall so. Ein Muster, das auf „öffne" oder „gemälde" besteht,
+ * verfehlt dann jede einzelne Stelle. Deshalb wird EINMAL zentral normalisiert
+ * und jedes Muster unten in der Ersatzschreibung geschrieben; „öffne" und
+ * „oeffne" laufen danach durch dieselbe Zeile.
+ */
+export function entumlauten(s: string): string {
+  return s
+    .replace(/ä/g, 'ae')
+    .replace(/ö/g, 'oe')
+    .replace(/ü/g, 'ue')
+    .replace(/ß/g, 'ss')
+}
+
+const lower = (s: string) => entumlauten((s || '').toLowerCase())
 
 // A bare URL or an explicit "open/read this page" → web_fetch territory.
 const URL_RE = /\bhttps?:\/\/\S+|\bwww\.\S+|\b[a-z0-9-]+\.(com|org|net|io|dev|ai|de|co|gov|edu|app|news)\b(\/\S*)?/i
-const FETCH_VERB_RE = /\b(open|read|fetch|scrape|summari[sz]e|summari[sz]e|get|öffne|lies|lese|fasse|zusammenfass\w*|ruf\w*\s+auf)\b[^.?!]*\b(page|site|website|link|url|article|seite|webseite|link|url|artikel)\b/i
+//
+// Die deutsche Verbliste kannte lange nur oeffne/lies/fasse/ruf…auf. Eine
+// Persona tippte am 03.09.2026 zweimal „Hol bitte die Seite …" und bekam
+// beide Male gar kein `tools`-Feld im Payload, waehrend derselbe Satz auf
+// Englisch sauber lief. Das Verb, das man am ehesten tippt, fehlte schlicht.
+// Der Wortstamm steht deshalb jetzt an einer Stelle und wird unten zweimal
+// verwendet — sonst waechst die eine Liste und die andere nicht mit.
+const WEB_ZUGRIFF_VERBEN =
+  'open|read|fetch|scrape|summari[sz]e|get|visit|check|' +
+  // Trennbare Verben: im Deutschen steht die Vorsilbe am Satzende („Ruf die
+  // Webseite example.com AUF"), das alte Muster verlangte sie direkt hinter
+  // dem Verb und traf damit nur unnatuerliche Saetze.
+  'oeffne|lies|lese|fasse|zusammenfass\\w*|ruf(e|st|t)?|auf-?ruf\\w*|hol(e|st|t)?|abruf\\w*|' +
+  'besuch(e|st|t)?|lad(e|est)?|zeig(e|st)?|schau|guck|sieh|ansehen|anschauen'
+const FETCH_VERB_RE = new RegExp(
+  `\\b(${WEB_ZUGRIFF_VERBEN})\\b[^.?!]*\\b(page|site|website|link|url|article|seite|webseite|artikel)\\b`,
+  'i',
+)
+/** Derselbe Verbstamm, aber neben einer echten URL — da braucht es kein Substantiv. */
+const URL_VERB_RE = new RegExp(`\\b(${WEB_ZUGRIFF_VERBEN})\\b`, 'i')
 
 // Search intent: explicit search verbs, or a freshness/lookup signal that a
 // model cannot answer reliably from training memory.
@@ -45,11 +83,19 @@ const LOOKUP_TOPIC_RE = /\b(weather|temperature|forecast|price\s+of|stock\s+pric
 
 // Verbs that inherently mean "make an image" even without a media noun
 // ("draw a cat", "zeichne eine Blume").
-const INHERENT_IMAGE_VERB_RE = /\b(draw|sketch|paint|illustrate|mal(e|en)?|zeichne(n|st)?|skizzier\w*)\b/i
+// „mal" ohne Endung ist im Deutschen meistens gar kein Verb, sondern die
+// Partikel: „erklaer mir mal", „sag mal", „schau mal". Als Malen-Befehl zaehlt
+// es deshalb nur am SATZANFANG, wo es wirklich Befehlsform ist („Mal eine
+// Blume"). Vorher hijackte jede beilaeufige deutsche Frage die Bildgenerierung
+// — und ein Fehlalarm ist teuer: der Zug laeuft dann durch den
+// Werkzeug-Ausfuehrer, woran sich kleine Modelle nachweislich verschlucken.
+// „Mal mir ein Bild" bleibt auch mitten im Satz erkannt, das faengt die
+// Verb+Substantiv-Regel darunter.
+const INHERENT_IMAGE_VERB_RE = /\b(draw|sketch|paint|illustrate|mal(e|en)|zeichne(n|st)?|skizzier\w*)\b|^\s*mal\b/i
 
 // Image / video creation: a creation verb co-occurring with a media noun.
 const CREATE_VERB_RE = /\b(draw|sketch|paint|generate|create|make|render|design|give\s+me|show\s+me|produce|turn|convert|mal(e|en)?|zeichne|erstell(e|en)?|generier(e|en)?|mach(e|en)?|gib\s+mir|zeig(e|en)?\s+mir|entwirf|produzier(e|en)?|verwandle|wandle)\b/i
-const IMAGE_NOUN_RE = /\b(image|picture|pic|photo(graph)?|drawing|art(work)?|illustration|portrait|wallpaper|logo|icon|render|painting|bild(er)?|foto(s)?|grafik(en)?|zeichnung(en)?|gem[äa]lde|portr[äa]t|illustration(en)?)\b/i
+const IMAGE_NOUN_RE = /\b(image|picture|pic|photo(graph)?|drawing|art(work)?|illustration|portrait|wallpaper|logo|icon|render|painting|bild(er)?|foto(s)?|grafik(en)?|zeichnung(en)?|gemaelde|portraet|illustration(en)?)\b/i
 const VIDEO_NOUN_RE = /\b(video|clip|animation|movie|gif|film|animier\w*|animate)\b/i
 const ANIMATE_RE = /\banimate\b[^.?!]*\b(image|picture|photo|it|this|that)\b|\banimier\w*\b[^.?!]*\b(bild|foto|es|das)\b/i
 
@@ -89,7 +135,7 @@ export function detectChatToolCapability(text: string, hasImages = false): ChatT
   // WEB FETCH (explicit page/url) — before generic search so a URL routes to
   // fetch, not search.
   if (FETCH_VERB_RE.test(t)) return 'web'
-  if (URL_RE.test(t) && /\b(open|read|fetch|summari[sz]e|get|check|visit|öffne|lies|lese|fasse|besuche|schau)\b/i.test(t)) return 'web'
+  if (URL_RE.test(t) && URL_VERB_RE.test(t)) return 'web'
 
   // WEB SEARCH
   if (SEARCH_VERB_RE.test(t)) return 'web'
@@ -120,11 +166,11 @@ export function detectChatToolIntent(text: string, hasImages = false): boolean {
 
 // Praise / thanks / explicit stop — these END a media exchange and must NEVER
 // be treated as "do it again".
-const CONT_EXIT_RE = /\b(thanks|thank\s*you|danke|thx|bye|tsch[üu]ss|cool|nice|great|super|perfekt|perfect|stop|stopp|cancel|abbrechen|nevermind|egal|vergiss\s+es)\b/i
+const CONT_EXIT_RE = /\b(thanks|thank\s*you|danke|thx|bye|tschuess|cool|nice|great|super|perfekt|perfect|stop|stopp|cancel|abbrechen|nevermind|egal|vergiss\s+es)\b/i
 
 // STRONG signals push a media task forward at ANY length (redo / motion / a bare
 // create verb without a noun).
-const STRONG_CONT_RE = /\b(re-?generate|regenerier\w*|nochmal|noch\s*mal|neu|erneut|redo|again|zoom|spin|rotate|\bpan\b|animate|animier\w*|longer|shorter|faster|slower|l[äa]nger|k[üu]rzer|schneller|langsamer|generier\w*|generate)\b/i
+const STRONG_CONT_RE = /\b(re-?generate|regenerier\w*|nochmal|noch\s*mal|neu|erneut|redo|again|zoom|spin|rotate|\bpan\b|animate|animier\w*|longer|shorter|faster|slower|laenger|kuerzer|schneller|langsamer|generier\w*|generate)\b/i
 // WEAK signals (confirmations / "now") only count in a SHORT message, so "now"
 // inside "now tell me about cats" never hijacks the media tool.
 const WEAK_CONT_RE = /\b(go|do\s*it|yes|yep|yeah|sure|ok(ay)?|los|mach(\s*(es|mal|schon))?|tu\s*es|proceed|continue|weiter|jetzt|now|please|bitte|create|erstell\w*|render|produce|produzier\w*)\b/i
