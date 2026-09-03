@@ -1,4 +1,4 @@
-import { Trash2, Info, MessageSquare, Image, Video } from 'lucide-react'
+import { Trash2, Info, MessageSquare, Image, Video, Loader2 } from 'lucide-react'
 import { formatBytes } from '../../lib/formatters'
 import { BenchmarkButton } from './ModelBenchmark'
 import type { AIModel } from '../../types/models'
@@ -10,6 +10,21 @@ interface Props {
   onDelete: () => void
   onInfo: () => void
   canDelete?: boolean
+  /**
+   * A16 (A14-4a): the Use button the 2.6.8 notes promise twice on this tile.
+   *
+   * The Windows counter-check found only Bench and Details here. The tile
+   * itself was the switch, which works and is invisible: nothing on the row
+   * said that clicking it would move the chat backend and load the model, so
+   * the counter-check read the notes as broken and the button as missing.
+   *
+   * Passed only for rows where the word means something, an LU Engine row that
+   * is not already the active one, and it goes through `onSelect`, the same
+   * path the tile click takes.
+   */
+  onUse?: () => void
+  /** While that swap runs. The engine can take seconds to load a cold GGUF. */
+  useBusy?: boolean
 }
 
 const TYPE_CONFIG = {
@@ -18,7 +33,7 @@ const TYPE_CONFIG = {
   video: { label: 'Video', icon: Video, color: 'text-green-400' },
 }
 
-export function ModelCard({ model, isActive, onSelect, onDelete, onInfo, canDelete = true }: Props) {
+export function ModelCard({ model, isActive, onSelect, onDelete, onInfo, canDelete = true, onUse, useBusy = false }: Props) {
   const typeInfo = TYPE_CONFIG[model.type] || TYPE_CONFIG.text
   const TypeIcon = typeInfo.icon
 
@@ -55,6 +70,22 @@ export function ModelCard({ model, isActive, onSelect, onDelete, onInfo, canDele
 
       {/* Actions — always visible (LM-Studio: no hover-to-reveal) */}
       <div className="flex items-center gap-0.5 shrink-0">
+        {/* The pick marks the row Active at once, while the engine is still
+            loading the GGUF, so the button stays for as long as its own swap
+            runs. Dropping it there would take the Loading state off screen at
+            the exact moment it is the answer to "did that work". */}
+        {onUse && (!isActive || useBusy) && (
+          <button
+            onClick={(e) => { e.stopPropagation(); if (!useBusy) onUse() }}
+            disabled={useBusy}
+            data-testid="model-card-use"
+            className="px-2 py-0.5 mr-1 rounded text-[0.58rem] font-medium bg-gray-100 dark:bg-white/10 text-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-white/15 border border-gray-200 dark:border-white/10 transition-colors disabled:opacity-60 disabled:cursor-default inline-flex items-center gap-1"
+            title="Load this model on the LU Engine and use it for chat"
+          >
+            {useBusy && <Loader2 size={9} className="animate-spin" />}
+            {useBusy ? 'Loading…' : 'Use'}
+          </button>
+        )}
         {model.type === 'text' && (
           <div onClick={(e) => e.stopPropagation()}>
             <BenchmarkButton modelName={model.name} />

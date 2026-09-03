@@ -507,7 +507,11 @@ export function useModels() {
   // then started nothing and switched nothing. The user was left on a model
   // that answered from nowhere. Same route as the picker and the Use button
   // now: hand the slot over, say so, then start.
-  const activateModel = useCallback((name: string) => {
+  // A16: the answer is a promise now, so the caller can draw a Loading state
+  // for as long as the swap really runs. It resolves when the engine is up or
+  // has failed, and immediately on the paths that start nothing (a blocked
+  // click, a row that is not ours).
+  const activateModel = useCallback((name: string): Promise<void> => {
     const row = useModelStore.getState().models.find((m) => m.name === name)
     const isLuRow = isBuiltinEngineEntry(row as unknown as InstalledModelLike | undefined)
     // Did THIS click move the chat backend. A failure afterwards has to keep
@@ -530,7 +534,7 @@ export function useModels() {
       // dead button and gets clicked again.
       if (!tryAcquireLuEngineSwap()) {
         useLuEngineSwitchStore.getState().announce(LU_ENGINE_SWAP_BUSY_NOTE)
-        return
+        return Promise.resolve()
       }
       switched = ensureLuEngineIsChatProvider()
       if (switched) useLuEngineSwitchStore.getState().announce(LU_ENGINE_SWITCH_NOTE)
@@ -549,7 +553,7 @@ export function useModels() {
         useLuEngineSwitchStore.getState()
           .announce(switched ? `${LU_ENGINE_SWITCH_NOTE} ${line}` : line, 'error')
       }
-      void activateBuiltinModel(name)
+      return activateBuiltinModel(name)
         // False is not a shrug: the path could not be resolved even after a
         // refresh, so the row stands for a file that is no longer there.
         .then((swapped) => { if (!swapped && isLuRow) sayItFailed(LU_ENGINE_FILE_GONE) })
@@ -557,7 +561,8 @@ export function useModels() {
         // has nothing to say about it. Unchanged, non-critical.
         .catch((e) => { if (isLuRow) sayItFailed(e) })
         .finally(() => { if (isLuRow) releaseLuEngineSwap() })
-    } else if (isLuRow) {
+    }
+    if (isLuRow) {
       // Nothing was started, so nothing will release the bolt in a finally.
       // Unreachable today (an LU row that got this far has just been given the
       // slot by ensureLuEngineIsChatProvider, and its name carries the openai
@@ -565,6 +570,7 @@ export function useModels() {
       // costs the user his card until the 60 s limit runs out.
       releaseLuEngineSwap()
     }
+    return Promise.resolve()
   }, [setActiveModel])
 
   return {

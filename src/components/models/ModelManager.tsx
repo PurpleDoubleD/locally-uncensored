@@ -22,6 +22,7 @@ import { backendCall } from '../../api/backend'
 import { customModelDirs } from '../../api/engine'
 import { counterView } from '../../lib/inventory-counter'
 import { groupInstalledByProvider, needsLuEngineHeading } from '../../lib/lu-engine-rows'
+import { isBuiltinEngineEntry } from '../../lib/lmstudio-match'
 import { LuEngineSwitchBar } from '../chat/LuEngineSwitchBar'
 import type { InstalledModelLike } from '../../lib/lmstudio-match'
 import type { ModelCategory, AIModel } from '../../types/models'
@@ -64,6 +65,10 @@ export function ModelManager() {
   // A14: whether the LU Engine itself is serving the chat. Decides whether its
   // group needs a heading even when it is the only group (review 7).
   const luEngineHoldsChat = useProviderStore(s => s.providers.openai.enabled && s.providers.openai.managed === true)
+  // A16 (A14-4a): which row's Use button is mid swap. The engine has to stop,
+  // reload a GGUF that can be several gigabytes and come back healthy, and a
+  // button that looks idle through all of that gets pressed again.
+  const [usingModel, setUsingModel] = useState<string | null>(null)
   const [pullOpen, setPullOpen] = useState(false)
   const [infoOpen, setInfoOpen] = useState(false)
   const [modelInfo, setModelInfo] = useState<any>(null)
@@ -445,7 +450,20 @@ export function ModelManager() {
                             <ModelCard
                               model={model}
                               isActive={model.name === activeModel}
-                              onSelect={() => setActiveModel(model.name)}
+                              onSelect={() => { void setActiveModel(model.name) }}
+                              // The Use button the 2.6.8 notes promise on this
+                              // tile. Only where the word means anything: an
+                              // LU Engine row that is not already active. It
+                              // fires the same call the tile click does.
+                              onUse={
+                                isBuiltinEngineEntry(model as unknown as InstalledModelLike)
+                                  ? async () => {
+                                      setUsingModel(model.name)
+                                      try { await setActiveModel(model.name) } finally { setUsingModel(null) }
+                                    }
+                                  : undefined
+                              }
+                              useBusy={usingModel === model.name}
                               onDelete={() => setConfirmDelete(model.name)}
                               onInfo={() => handleInfo(model.name)}
                               canDelete={
