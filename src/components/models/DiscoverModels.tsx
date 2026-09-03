@@ -7,7 +7,7 @@ import {
   searchHuggingFaceModels,
   getImageBundles, getVideoBundles,
   getUncensoredTextModels, getMainstreamTextModels,
-  detectProviderModelPath, startModelDownloadToPath,
+  detectProviderModelPath, startModelDownloadToPath, luEngineDownloadDir,
   startModelDownload, searchCivitaiModels,
   installBundleComplete, checkBundlesInstalled, resolveHfGgufFiles, planModelDownload,
   type DiscoverModel, type DownloadProgress, type ModelBundle, type CivitAIModelResult, type HfGgufFile,
@@ -25,7 +25,6 @@ import { useWorkflowStore } from '../../stores/workflowStore'
 import { getProviderIdFromModel } from '../../api/providers'
 import { startBundledEngine } from '../../api/engine'
 import { diagnoseBuiltinEngine } from '../../api/builtin-ensure'
-import { BUILTIN_BACKEND_ID } from '../../lib/onboarding-backend'
 import type { InstalledModelLike } from '../../lib/lmstudio-match'
 import { findInstalledForDiscoverModel } from '../../lib/discover-installed'
 import { isBuiltinEngineEntry } from '../../lib/lmstudio-match'
@@ -704,7 +703,7 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
       // directly, so no <user>/<repo> nesting and no hfModelPath override
       // (that path belongs to the LM Studio flow).
       if (isActiveBuiltin) {
-        return await detectProviderModelPath(BUILTIN_BACKEND_ID)
+        return await luEngineDownloadDir()
       }
       const base = hfModelPath || (await detectProviderModelPath(providers.openai?.name || 'LM Studio'))
       if (!base) return null

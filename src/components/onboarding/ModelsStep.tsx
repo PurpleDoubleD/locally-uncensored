@@ -35,13 +35,13 @@ import { useSettingsStore } from '../../stores/settingsStore'
 import { useProviderStore } from '../../stores/providerStore'
 import { useDownloadStore } from '../../stores/downloadStore'
 import { useModelStore } from '../../stores/modelStore'
-import { detectProviderModelPath, startModelDownloadToPath } from '../../api/discover'
+import { detectProviderModelPath, startModelDownloadToPath, luEngineDownloadDir } from '../../api/discover'
 import { hfUrlToOllamaRef, hfUrlToLmStudioSubdir } from '../../lib/hf-to-provider'
 import { pullModelTauri, checkConnection as checkOllama } from '../../api/ollama'
 import { startBundledEngine } from '../../api/engine'
 import { backendCall } from '../../api/backend'
 import { getSystemVRAM } from '../../api/comfyui'
-import { BUILTIN_BACKEND_ID, classifyOnboardingBackend, resolveOnboardingBackend } from '../../lib/onboarding-backend'
+import { classifyOnboardingBackend, resolveOnboardingBackend } from '../../lib/onboarding-backend'
 import { ProgressBar } from '../ui/ProgressBar'
 import { formatBytes } from '../../lib/formatters'
 import { isReady } from './installer-state'
@@ -134,7 +134,7 @@ export function ModelsStep({ skin, scan, fleet, step, setStep, pulledModels, set
     // reuse the LM-Studio-style detection / user override.
     let destDir: string | null = null
     if (useBuiltinPath) {
-      destDir = await detectProviderModelPath(BUILTIN_BACKEND_ID)
+      destDir = await luEngineDownloadDir()
       if (!destDir) {
         setDownloadError('Could not create the LU Engine model folder. Check app permissions and retry.')
         return

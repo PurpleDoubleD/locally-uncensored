@@ -10,6 +10,8 @@ import type { DownloadProgress } from "../types/downloads"
 import { asNumber, asRecordArray, asString, isRecord, prop, propPath } from "../types/json-guards"
 import type { DiscoverModel, ModelBundle } from "./model-bundles"
 import { formatCount } from '../lib/formatters'
+import { BUILTIN_BACKEND_ID } from '../lib/onboarding-backend'
+import { customModelDirs } from './engine'
 import {
   CUSTOM_NODE_REGISTRY,
   getImageBundles, getVideoBundles, getAudioBundles, getLipsyncBundles, getMotionBundles,
@@ -1656,6 +1658,28 @@ export async function detectProviderModelPath(providerName: string): Promise<str
   } catch {
     return null
   }
+}
+
+/**
+ * Wohin eine frisch heruntergeladene GGUF fuer die LU Engine gehoert.
+ *
+ * Der Ordner, den der Nutzer unter Model Storage gesetzt hat, wenn er einen
+ * gesetzt hat, sonst der eigene der Anwendung.
+ *
+ * Persona P2, 04.09.2026: der Text im Panel verspricht "LU downloads GGUFs
+ * here and reads every .gguf in a folder you set". Gelesen wurde der gesetzte
+ * Ordner wirklich, heruntergeladen wurde aber weiter ins Roaming-Profil,
+ * zweimal gemessen mit verschiedenen Modellen. Wer seine GGUFs bewusst auf
+ * eine andere Platte legt, fand den frischen Download nicht dort. Der erste
+ * Halbsatz des Textes stimmte nicht.
+ *
+ * Gefunden wird die Datei danach wie jede andere: `listBundledModels` liest
+ * den eigenen Ordner UND den gesetzten, vier Ebenen tief.
+ */
+export async function luEngineDownloadDir(): Promise<string | null> {
+  const gesetzt = customModelDirs()[0]
+  if (gesetzt) return gesetzt
+  return await detectProviderModelPath(BUILTIN_BACKEND_ID)
 }
 
 /** Download a GGUF model to a specific directory (for non-Ollama providers) */
