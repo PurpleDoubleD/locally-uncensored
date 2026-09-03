@@ -128,7 +128,16 @@ describe('the once-per-session flag is raised on the attempt, not on the success
     listBundledModels.mockResolvedValue([CHAT, EMBED])
     await refresh()
     expect(bundledEngineStatus, 'a boot resume an hour after boot').not.toHaveBeenCalled()
-    expect(startBundledEmbed).not.toHaveBeenCalled()
+    // Der EINBETTUNGSSERVER dagegen darf und soll. Der Schuss gilt der
+    // Chat-Engine, weil ihr Start Arbeitsspeicher raeumt und einem Nutzer
+    // dazwischenfaehrt, der sie absichtlich angehalten hat. Der
+    // Einbettungsserver ist klein, niemand haelt ihn absichtlich an, und ohne
+    // ihn arbeitet Document Chat stumm nicht mehr. Persona P2 hat am
+    // 04.09.2026 gemessen, was der gemeinsame Schuss kostet: nach einem
+    // Providerwechsel zu LM Studio und zurueck war Port 8128 leer und blieb
+    // es. Die Chat-Engine heilt sich beim naechsten Abschicken, dieser Server
+    // hatte keinen solchen Anlass.
+    expect(startBundledEmbed, 'RAG bleibt sonst stumm tot').toHaveBeenCalledWith(EMBED.path)
   })
 
   // NEGATIVE CONTROL: the boot resume must still happen at boot. A flag raised
@@ -291,6 +300,9 @@ describe('two overlapping first passes', () => {
     listBundledModels.mockImplementation(async () => [CHAT, EMBED] as never)
     await again()
     expect(bundledEngineStatus).not.toHaveBeenCalled()
-    expect(startBundledEmbed).not.toHaveBeenCalled()
+    // Der Einbettungsserver steht seit dem 04.09.2026 nicht mehr unter
+    // diesem Schuss, siehe den Fall weiter oben. Der Schuss gilt der
+    // Chat-Engine, und der wird hier gezaehlt.
+    expect(startBundledEmbed).toHaveBeenCalledWith(EMBED.path)
   })
 })

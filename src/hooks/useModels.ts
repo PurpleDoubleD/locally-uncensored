@@ -134,14 +134,25 @@ export function __resetComfyInventoryRetryForTests(): void {
 // The bundled embeddings server serves RAG/memory for ANY local backend that
 // downloaded the embed GGUF in onboarding (LM Studio/openai-compat too), so
 // its resume must not depend on the chat engine being the managed builtin.
+//
+// Laeuft seit dem 04.09.2026 in JEDER Runde und nicht mehr nur einmal je
+// Sitzung, deshalb der Riegel: `fetchModels` wird von mehreren eingehaengten
+// Bauteilen zugleich gerufen, und zwei Durchlaeufe, die beide "laeuft nicht"
+// lesen, bevor einer gestartet hat, wuerden zwei Server auf einen Port
+// schicken. Der Riegel steht nur waehrend des Wartens und raeumt sich selbst.
+let embedResumeLaeuft = false
+
 async function resumeEmbedServer(bundled: BundledModel[]) {
+  if (embedResumeLaeuft) return
+  embedResumeLaeuft = true
   try {
     const embed = bundled.find((m) => isEmbeddingModel(m.name))
     if (embed) {
       const embedStatus = await bundledEmbedStatus()
       if (!embedStatus.running) await startBundledEmbed(embed.path)
     }
-  } catch { /* embeddings server unavailable — non-critical */ }
+  } catch { /* embeddings server unavailable, non-critical */ }
+  finally { embedResumeLaeuft = false }
 }
 
 export function useModels() {
@@ -338,13 +349,22 @@ export function useModels() {
         // LM Studio lists the model over its own API and the folder walk finds
         // the same file. The row that is already serving the chat wins.
         allModels.push(...dropDuplicateLuEngineRows(bundled, allModels))
-        if (mayResume) {
-          // Unchanged in both directions: the chat engine is only resumed when
-          // it holds the slot, and the embeddings server is resumed when it
-          // does not, so RAG survives a relaunch under a foreign backend.
-          if (managedBuiltin) void resumeBuiltinEngines(bundledRaw)
-          else void resumeEmbedServer(bundledRaw)
-        }
+        // Die Chat-Engine wird hoechstens EINMAL je Sitzung von hier aus
+        // wiederbelebt, und nur wenn sie den Steckplatz haelt: sie in jeder
+        // Runde neu zu starten hiesse, gegen einen Nutzer anzurennen, der sie
+        // absichtlich angehalten hat. `resumeBuiltinEngines` bringt den
+        // Einbettungsserver dabei mit.
+        //
+        // Der Einbettungsserver allein steht NICHT unter diesem Schuss.
+        // Persona P2, 04.09.2026: nach einem Providerwechsel zu LM Studio und
+        // zurueck war der Server auf Port 8128 weg und kam nicht wieder, weil
+        // der Schuss laengst verbraucht war. Die Chat-Engine heilt sich beim
+        // naechsten Abschicken einer Nachricht, der Einbettungsserver hat
+        // keinen solchen Anlass, und ohne ihn arbeitet Document Chat stumm
+        // nicht mehr. Der Aufruf fragt erst nach dem Zustand und startet nur,
+        // was nicht laeuft, kostet also nichts, wenn alles steht.
+        if (mayResume && managedBuiltin) void resumeBuiltinEngines(bundledRaw)
+        else void resumeEmbedServer(bundledRaw)
       }
       // The standby backend's rows, minus the ones our engine is already
       // serving from the same file. Appended after the LU Engine rows on
