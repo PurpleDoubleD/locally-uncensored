@@ -21,7 +21,8 @@ import { cloudTeaserModels } from '../../lib/cloud-teaser-models'
 import { splitLuEngineRows, needsLuEngineHeading, LU_ENGINE_GROUP } from '../../lib/lu-engine-rows'
 import { isBuiltinEngineEntry, type InstalledModelLike } from '../../lib/lmstudio-match'
 import {
-  ensureLuEngineIsChatProvider, LU_ENGINE_SWITCH_NOTE, LU_ENGINE_SWAP_BUSY_NOTE, luEngineStartFailureNote,
+  ensureLuEngineIsChatProvider, LU_ENGINE_SWITCH_NOTE, LU_ENGINE_SWAP_BUSY_NOTE,
+  announceLuEngineSwapBusy, luEngineStartFailureNote,
 } from '../../api/lu-engine-switch'
 import { tryAcquireLuEngineSwap, releaseLuEngineSwap } from '../../api/lu-engine-swap-lock'
 import { useLuEngineSwitchStore } from '../../stores/luEngineSwitchStore'
@@ -741,15 +742,26 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
     // first and says so.
     if ((isManagedBuiltinActive() && getProviderIdFromModel(model.name) === 'openai')
         || isBuiltinEngineEntry(model as unknown as InstalledModelLike)) {
-      if (selectingLms || togglingLms) return
       // A14 fourth review: `selectingLms` is this component's own state and it
       // only ever knew about this dropdown, while the Installed card had a
       // bolt of its own that only ever knew about the card. Two doors into one
       // llama-server, and a pick here while a card swap is running sent the
       // second swap_bundled_model at a process the first was still restarting.
       // Both doors share one bolt now (api/lu-engine-swap-lock), and a blocked
-      // pick says so in the dropdown's own line instead of doing nothing.
-      if (!tryAcquireLuEngineSwap()) {
+      // pick says so instead of doing nothing.
+      //
+      // A16 (A14-6): it did not, on this door. `if (selectingLms ||
+      // togglingLms) return` stood one line ABOVE the bolt and returned in
+      // total silence, so the second quick pick never reached the sentence
+      // written for it. The three conditions are one condition, "something is
+      // already going on", and they get one answer. The order matters: the
+      // bolt is only asked for, and therefore only taken, when the first two
+      // are clear.
+      if (selectingLms || togglingLms || !tryAcquireLuEngineSwap()) {
+        // Both places, because they outlive different things: the dropdown
+        // line dies when the dropdown closes, the standing row above the
+        // composer survives that and is where the card writes too.
+        announceLuEngineSwapBusy()
         setSelectError(LU_ENGINE_SWAP_BUSY_NOTE)
         return
       }

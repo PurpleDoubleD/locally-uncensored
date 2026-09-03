@@ -19,8 +19,8 @@ import { commandIsUnavailable } from '../lib/engine-command-availability'
 import { dropDuplicateLuEngineRows } from '../lib/lu-engine-rows'
 import { isBuiltinEngineEntry, type InstalledModelLike } from '../lib/lmstudio-match'
 import {
-  ensureLuEngineIsChatProvider, LU_ENGINE_SWITCH_NOTE, LU_ENGINE_FILE_GONE, LU_ENGINE_SWAP_BUSY_NOTE,
-  luEngineStartFailureNote,
+  ensureLuEngineIsChatProvider, LU_ENGINE_SWITCH_NOTE, LU_ENGINE_FILE_GONE,
+  announceLuEngineSwapBusy, luEngineStartFailureNote,
 } from '../api/lu-engine-switch'
 import { tryAcquireLuEngineSwap, releaseLuEngineSwap } from '../api/lu-engine-swap-lock'
 import { useLuEngineSwitchStore } from '../stores/luEngineSwitchStore'
@@ -533,7 +533,7 @@ export function useModels() {
       // And it says so. The click used to return in silence, which reads as a
       // dead button and gets clicked again.
       if (!tryAcquireLuEngineSwap()) {
-        useLuEngineSwitchStore.getState().announce(LU_ENGINE_SWAP_BUSY_NOTE)
+        announceLuEngineSwapBusy()
         return Promise.resolve()
       }
       switched = ensureLuEngineIsChatProvider()

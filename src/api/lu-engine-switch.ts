@@ -16,6 +16,8 @@
  * one the user already knows.
  */
 
+import { useLuEngineSwitchStore } from '../stores/luEngineSwitchStore'
+import { luEngineSwapInFlight } from './lu-engine-swap-lock'
 import { useProviderStore } from '../stores/providerStore'
 import { PROVIDER_PRESETS } from './providers/types'
 import { slotTakeoverUpdate } from '../lib/openai-slot-handover'
@@ -34,6 +36,24 @@ export const LU_ENGINE_SWITCH_NOTE = 'Switched your chat provider to the LU Engi
  * refusal.
  */
 export const LU_ENGINE_SWAP_BUSY_NOTE = 'The LU Engine is still switching, one moment.'
+
+/**
+ * Say it, from whichever door was blocked.
+ *
+ * A16 (A14-6): the Windows counter-check clicked two LU Engine tiles 150 ms
+ * apart and reported that the second click vanished without a word. Two things
+ * were behind that. The composer's picker checked its own `selectingLms` first
+ * and returned in silence BEFORE it ever reached the bolt that has this
+ * sentence, so on that door the line could not appear at all. And the line, on
+ * the door where it did appear, was on the ordinary twelve second clock, so it
+ * could be gone again while the swap it describes was still running, which is
+ * exactly the moment someone looks.
+ *
+ * One call for both doors now, and the line stands while the swap does.
+ */
+export function announceLuEngineSwapBusy(): void {
+  useLuEngineSwitchStore.getState().announce(LU_ENGINE_SWAP_BUSY_NOTE, 'info', luEngineSwapInFlight)
+}
 
 /**
  * The reason behind an `activateBuiltinModel` that answered false.

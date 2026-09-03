@@ -36,7 +36,7 @@ interface LuEngineSwitchState {
   /** Bumped on every announcement, so a timer belonging to an older one cannot
    *  clear a newer line. Same reason the slot-eviction timer keeps one. */
   generation: number
-  announce: (note: string, tone?: LuEngineNoteTone) => void
+  announce: (note: string, tone?: LuEngineNoteTone, holdWhile?: () => boolean) => void
   dismiss: () => void
 }
 
@@ -58,7 +58,7 @@ export const useLuEngineSwitchStore = create<LuEngineSwitchState>((set, get) => 
   note: null,
   tone: 'info',
   generation: 0,
-  announce: (note, tone = 'info') => {
+  announce: (note, tone = 'info', holdWhile) => {
     cancelPending()
     const generation = get().generation + 1
     set({ note, tone, generation })
@@ -73,10 +73,23 @@ export const useLuEngineSwitchStore = create<LuEngineSwitchState>((set, get) => 
     // So an error stands until it is dismissed by hand or replaced by the next
     // announcement, and the bar carries a Dismiss button for exactly that.
     if (tone === 'error') return
-    pending = setTimeout(() => {
-      pending = null
-      if (get().generation === generation) set({ note: null, tone: 'info' })
-    }, LU_ENGINE_SWITCH_NOTE_MS)
+    // A16 (A14-6): some info lines describe a condition rather than an event,
+    // and "The LU Engine is still switching, one moment." is one of them. A
+    // cold GGUF of a few gigabytes takes longer to load than the twelve
+    // seconds this timer allows, so the sentence could walk off the screen
+    // while the thing it describes was still going on, and the user who came
+    // back to look found the same nothing that made him click twice in the
+    // first place. `holdWhile` keeps such a line standing for as long as its
+    // condition holds, and it then clears on the normal clock afterwards.
+    const arm = () => {
+      pending = setTimeout(() => {
+        pending = null
+        if (get().generation !== generation) return
+        if (holdWhile?.()) { arm(); return }
+        set({ note: null, tone: 'info' })
+      }, LU_ENGINE_SWITCH_NOTE_MS)
+    }
+    arm()
   },
   dismiss: () => {
     cancelPending()

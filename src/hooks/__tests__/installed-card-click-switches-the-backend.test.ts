@@ -328,7 +328,11 @@ describe('the bolt is shared with the composer picker', () => {
       'utf8',
     )
     expect(src).toContain("from '../../api/lu-engine-swap-lock'")
-    expect(src).toContain('if (!tryAcquireLuEngineSwap()) {')
+    // A16: the picker's own in-flight state and the shared bolt are one
+    // condition now, with the bolt asked last so it is only taken when the
+    // other two are clear.
+    expect(src).toContain('if (selectingLms || togglingLms || !tryAcquireLuEngineSwap()) {')
+    expect(src, 'and a blocked pick says so on both surfaces').toContain('announceLuEngineSwapBusy()')
     expect(src, 'and gives it back in a finally').toContain('releaseLuEngineSwap()')
   })
 })
