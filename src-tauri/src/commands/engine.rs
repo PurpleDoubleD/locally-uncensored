@@ -787,7 +787,7 @@ fn port_is_bindable(port: u16) -> bool {
 /// Said when the whole bounded walk came back empty.
 pub(crate) fn no_free_port_message(first: u16, last: u16) -> String {
     format!(
-        "The built-in engine could not open a local port. Every port it may use between {first} and {last} is taken or blocked on this machine. Close whatever is holding them (a llama-server left over from an earlier session is the usual cause), or check whether a firewall or a reserved Windows port range covers that block, then try again."
+        "The LU Engine could not open a local port. Every port it may use between {first} and {last} is taken or blocked on this machine. Close whatever is holding them (a llama-server left over from an earlier session is the usual cause), or check whether a firewall or a reserved Windows port range covers that block, then try again."
     )
 }
 
@@ -836,7 +836,7 @@ fn wait_for_health(port: u16, timeout: Duration) -> Result<(), String> {
         std::thread::sleep(Duration::from_millis(300));
     }
     Err(format!(
-        "Built-in engine did not become healthy on port {port} within {}s (the budget scales with model size, huge GGUFs can take minutes on a cold first load)",
+        "LU Engine did not become healthy on port {port} within {}s (the budget scales with model size, huge GGUFs can take minutes on a cold first load)",
         timeout.as_secs()
     ))
 }
@@ -937,7 +937,7 @@ fn install_commands_for(lib: &str) -> Option<(&'static str, &'static str)> {
 /// ICDs), so "reinstall and it comes along" would be a lie there.
 pub(crate) fn missing_library_hint(lib: &str, on_linux: bool) -> String {
     let head = format!(
-        " A system library the built-in engine needs is missing on this machine: {lib}."
+        " A system library the LU Engine needs is missing on this machine: {lib}."
     );
     if !on_linux {
         return format!("{head} Install the package that provides it, then try again.");
@@ -1060,10 +1060,10 @@ pub(crate) fn start_failure_message(failure: &StartFailure, port: u16, budget: D
         // where the log carries a real bind sentence, because "cuda" appears in
         // the routine backend-init lines of every start on an NVIDIA box and
         // "set GPU Layers to 0" does not free a busy port.
-        format!("The built-in engine started and exited again before it could serve on port {port}. It was tried twice. This looks like a graphics-card problem. Open Settings, Built-in Engine and set GPU Layers to 0 to run on the CPU, then try again.")
+        format!("The LU Engine started and exited again before it could serve on port {port}. It was tried twice. This looks like a graphics-card problem. Open Settings, LU Engine and set GPU Layers to 0 to run on the CPU, then try again.")
     } else if failure.died && stderr_blames_the_port(&failure.stderr) {
         format!(
-            "The built-in engine could not open port {port}. Another program holds it, or the port sits in a range this system has reserved. The app already tried the next free ports and got the same answer. Close that program or reboot, then try again."
+            "The LU Engine could not open port {port}. Another program holds it, or the port sits in a range this system has reserved. The app already tried the next free ports and got the same answer. Close that program or reboot, then try again."
         )
     } else if failure.died {
         let hint = if let Some(lib) = stderr_names_a_missing_system_library(&failure.stderr) {
@@ -1073,10 +1073,10 @@ pub(crate) fn start_failure_message(failure: &StartFailure, port: u16, budget: D
         } else {
             " Reinstall Locally Uncensored if this keeps happening, or pick a different backend in Settings, AI Backends.".to_string()
         };
-        format!("The built-in engine started and exited again before it could serve on port {port}. It was tried twice.{hint}")
+        format!("The LU Engine started and exited again before it could serve on port {port}. It was tried twice.{hint}")
     } else {
         format!(
-            "The built-in engine did not become healthy on port {port} within {}s (the budget scales with model size, and huge GGUFs can take minutes on a cold first load).",
+            "The LU Engine did not become healthy on port {port} within {}s (the budget scales with model size, and huge GGUFs can take minutes on a cold first load).",
             budget.as_secs()
         )
     };
@@ -1240,7 +1240,7 @@ fn start_bundled_engine_blocking(
         // instruction, it is noise; the only real remedies are a reinstall or a
         // different backend (GH #118).
         format!(
-            "The built-in engine program ({}) is missing from this installation. Reinstall Locally Uncensored, or pick a different backend in Settings, AI Backends.",
+            "The LU Engine program ({}) is missing from this installation. Reinstall Locally Uncensored, or pick a different backend in Settings, AI Backends.",
             sidecar_binary_name()
         )
     })?;
@@ -3416,11 +3416,11 @@ mod tests {
         // Same sidecar, same loader, same missing package. Document Chat used
         // to answer this with the raw stderr tail alone.
         let msg = embed_start_failure_message(
-            "Built-in engine did not become healthy on port 8128 within 60s",
+            "LU Engine did not become healthy on port 8128 within 60s",
             "lu-llama-server: error while loading shared libraries: libgomp.so.1: cannot open shared object file: No such file or directory",
         );
         assert!(msg.contains("libgomp.so.1"), "{msg}");
-        assert!(msg.contains("A system library the built-in engine needs is missing"), "{msg}");
+        assert!(msg.contains("A system library the LU Engine needs is missing"), "{msg}");
         // The engine's own last words survive for a bug report.
         assert!(msg.contains("cannot open shared object file"), "{msg}");
         // No port or retry wording from the chat path: this one refuses a
@@ -3430,7 +3430,7 @@ mod tests {
         // Negative control: an ordinary slow load keeps the plain message and
         // gains no packaging advice.
         let slow = embed_start_failure_message(
-            "Built-in engine did not become healthy on port 8128 within 60s",
+            "LU Engine did not become healthy on port 8128 within 60s",
             "load_tensors: loading model tensors",
         );
         assert!(!slow.contains("A system library"), "{slow}");

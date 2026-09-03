@@ -130,7 +130,7 @@ describe('explainEngineTransportMessage keeps the raw line reachable', () => {
     const warn = vi.spyOn(log, 'warn').mockImplementation(() => {})
     const raw = 'proxy_localhost_stream_chunked: error sending request for url (http://127.0.0.1:8127/v1/chat/completions)'
     const text = explainEngineTransportMessage(raw, 'http://127.0.0.1:8127')
-    expect(text).toMatch(/built-in engine is not answering/)
+    expect(text).toMatch(/LU Engine is not answering/)
     expect(text).not.toContain('proxy_localhost')
     expect(warn).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ raw }))
     warn.mockRestore()

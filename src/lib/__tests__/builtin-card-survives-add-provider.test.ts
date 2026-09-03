@@ -70,13 +70,13 @@ describe('THE FIX: Add Provider no longer makes the built-in card disappear', ()
 
   it('so the list still has a card to draw for the built-in engine', () => {
     const after = { ...SHIPPED, ...slotTakeoverUpdate(SHIPPED, JAN) } as HandoverSlot
-    expect(standbyOccupant(after)?.name).toBe('Built-in Engine')
+    expect(standbyOccupant(after)?.name).toBe('LU Engine')
   })
 
   it('and Enable on that card hands the slot back to the built-in engine', () => {
     const after = { ...SHIPPED, ...slotTakeoverUpdate(SHIPPED, JAN) } as HandoverSlot
     const back = slotHandbackUpdate(after)!
-    expect(back.name).toBe('Built-in Engine')
+    expect(back.name).toBe('LU Engine')
     expect(back.baseUrl).toBe('http://127.0.0.1:8127/v1')
     expect(back.managed).toBe(true)
     expect(back.enabled).toBe(true)
@@ -100,9 +100,9 @@ describe('THE FIX: Add Provider no longer makes the built-in card disappear', ()
     // Two ways out on screen now: Enable on the Jan row it switched off,
     expect(isReturnableRow(janOff)).toBe(true)
     // and Enable on the built-in engine standing by.
-    expect(standbyOccupant(janOff)?.name).toBe('Built-in Engine')
+    expect(standbyOccupant(janOff)?.name).toBe('LU Engine')
     const back = slotHandbackUpdate(janOff)!
-    expect(back.name).toBe('Built-in Engine')
+    expect(back.name).toBe('LU Engine')
     expect(back.enabled).toBe(true)
     // Switching a backend off is not the same as giving up its slot, so the
     // Disable mark does not travel with the slot.
@@ -183,7 +183,7 @@ describe('NEGATIVE CONTROL: the counter-poles of R10 are untouched', () => {
     const after = { ...SHIPPED, ...slotTakeoverUpdate(SHIPPED, JAN) } as HandoverSlot
     const janOff = { ...after, enabled: false }
     const janOnAgain = { ...janOff, ...slotTakeoverUpdate(janOff, JAN) } as HandoverSlot
-    expect(standbyOccupant(janOnAgain)?.name).toBe('Built-in Engine')
+    expect(standbyOccupant(janOnAgain)?.name).toBe('LU Engine')
   })
 })
 

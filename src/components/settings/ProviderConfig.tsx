@@ -79,8 +79,8 @@ export function providerSlotView(id: ProviderId, config: ProviderConfig): SlotVi
       endpointEditable: false,
       needsKey: false,
       note: config.baseUrl
-        ? `Built-in engine, runs locally on ${config.baseUrl}, nothing to configure.`
-        : 'Built-in engine, runs locally, nothing to configure.',
+        ? `LU Engine, runs locally on ${config.baseUrl}, nothing to configure.`
+        : 'LU Engine, runs locally, nothing to configure.',
     }
   }
   return {

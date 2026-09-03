@@ -19,6 +19,7 @@ import { useProviderStore } from '../stores/providerStore'
 import { useSettingsStore } from '../stores/settingsStore'
 import type { CloudModel } from '../types/models'
 import type { BuiltinEngineTuning } from '../types/settings'
+import { LU_ENGINE_NAME } from '../lib/engine-name'
 
 /** The user's Built-in Engine expert tuning (settings-backed). Injected into
  * every start/swap below, so Onboarding, Discover, the model picker and the
@@ -365,7 +366,12 @@ export function bundledToAIModels(models: BundledModel[]): CloudModel[] {
     size: m.size,
     type: 'text' as const,
     provider: 'openai' as const,
-    providerName: 'Built-in Engine',
+    providerName: LU_ENGINE_NAME,
+    // Carried through since 2.6.8 (A14): the row IS a file, and the Installed
+    // list needs the path to tell "the same GGUF, seen twice" from "two
+    // downloads of the same model". A file under LM Studio's own store is the
+    // case that made this necessary.
+    path: m.path,
     // The projector answer from disk, carried as the app-wide capability flag
     // so the composer and the agent loop stop guessing from the model name.
     // Deliberately left absent (not false) when the backend did not report it,

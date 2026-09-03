@@ -18,6 +18,13 @@ import { lmStudioSlotUpdate, adoptionReplacesBuiltinEngine } from '../../lib/lms
 import { nextProbeDelayMs } from '../../lib/probe-backoff'
 import { noChatBackendEnabled } from '../../lib/provider-visibility'
 import { cloudTeaserModels } from '../../lib/cloud-teaser-models'
+import { splitLuEngineRows, needsLuEngineHeading, LU_ENGINE_GROUP } from '../../lib/lu-engine-rows'
+import { isBuiltinEngineEntry, type InstalledModelLike } from '../../lib/lmstudio-match'
+import {
+  ensureLuEngineIsChatProvider, LU_ENGINE_SWITCH_NOTE, LU_ENGINE_SWAP_BUSY_NOTE, luEngineStartFailureNote,
+} from '../../api/lu-engine-switch'
+import { tryAcquireLuEngineSwap, releaseLuEngineSwap } from '../../api/lu-engine-swap-lock'
+import { useLuEngineSwitchStore } from '../../stores/luEngineSwitchStore'
 import type { AIModel } from '../../types/models'
 
 // ── Local-mode cloud discovery (2.5.8): an "LU Cloud" section at the list's
@@ -233,7 +240,7 @@ function LmStudioServerHint({ onStarted }: { onStarted: () => void }) {
       </button>
       {replacesBuiltinEngine && (
         <p className="text-[0.55rem] text-gray-500 dark:text-gray-400 mt-1 leading-snug">
-          This also makes LM Studio your local chat backend in place of the built-in engine. You can switch back under Settings, AI Backends, Providers.
+          This also makes LM Studio your local chat backend in place of the LU Engine. You can switch back under Settings, AI Backends, Providers.
         </p>
       )}
       {startError && (
@@ -721,16 +728,41 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
       return
     }
 
-    // Built-in engine rows (ENG-4): swap the GGUF (await) BEFORE activating —
+    // LU Engine rows (ENG-4): swap the GGUF (await) BEFORE activating, the
     // same contract as the LM Studio path above. A failed llama-server start
     // keeps the dropdown open and shows the real reason (Rust appends the
     // stderr tail) instead of activating a model that can't answer. Idempotent
     // when the model is already loaded (the Rust side compares argv + health).
-    if (isManagedBuiltinActive() && getProviderIdFromModel(model.name) === 'openai') {
+    //
+    // A14: the second half of the condition is the case where the LU Engine is
+    // listed but not in front. The rows are visible now on a machine where
+    // Ollama or LM Studio holds the chat, and a row you can see and cannot use
+    // would be worse than the old invisibility, so the pick takes the slot
+    // first and says so.
+    if ((isManagedBuiltinActive() && getProviderIdFromModel(model.name) === 'openai')
+        || isBuiltinEngineEntry(model as unknown as InstalledModelLike)) {
       if (selectingLms || togglingLms) return
+      // A14 fourth review: `selectingLms` is this component's own state and it
+      // only ever knew about this dropdown, while the Installed card had a
+      // bolt of its own that only ever knew about the card. Two doors into one
+      // llama-server, and a pick here while a card swap is running sent the
+      // second swap_bundled_model at a process the first was still restarting.
+      // Both doors share one bolt now (api/lu-engine-swap-lock), and a blocked
+      // pick says so in the dropdown's own line instead of doing nothing.
+      if (!tryAcquireLuEngineSwap()) {
+        setSelectError(LU_ENGINE_SWAP_BUSY_NOTE)
+        return
+      }
       setSelectError(null)
       setSelectingLms(id)
       try {
+        // Announced BEFORE the start is attempted and NOT into this dropdown,
+        // which the pick closes a few lines further down. It goes to the
+        // standing status row above the composer, so it survives both the
+        // close on success and the error banner on failure (A14 review 2).
+        if (ensureLuEngineIsChatProvider()) {
+          useLuEngineSwitchStore.getState().announce(LU_ENGINE_SWITCH_NOTE)
+        }
         const swapped = await activateBuiltinModel(model.name)
         if (swapped) {
           // Raw store set — the useModels wrapper would fire a second
@@ -741,9 +773,12 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
         }
         setOpen(false)
       } catch (e) {
-        setSelectError(`Couldn't start the built-in engine with "${displayModelName(model.name)}": ${e instanceof Error ? e.message : String(e)}`)
+        // Shared with the Installed card, which used to swallow this failure
+        // whole. One sentence, one place it is written (A14 third review).
+        setSelectError(luEngineStartFailureNote(model.name, e))
       } finally {
         setSelectingLms(null)
+        releaseLuEngineSwap()
       }
       return
     }
@@ -791,6 +826,9 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
     return () => document.removeEventListener('mousedown', handler)
   }, [])
 
+  // Read reactively, not through isManagedBuiltinActive(): the grouping below
+  // has to redraw the moment a pick hands the slot to the engine.
+  const luEngineHoldsChat = useProviderStore((s) => s.providers.openai.enabled && s.providers.openai.managed === true)
   const activeModelObj = models.find((m) => m.name === activeModel)
   const activeDisplayName = activeModel
     ? (activeModelObj && 'displayName' in activeModelObj && activeModelObj.displayName) ||
@@ -811,7 +849,24 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
     ? allTextModels.filter((m) => m.name === activeModel || canUseTools({ name: m.name, supportsTools: m.supportsTools }))
     : allTextModels
   const hiddenForCode = allTextModels.length - textModels.length
-  const groups = groupByFamily(textModels)
+  // A14: while another backend holds the chat, the LU Engine rows are set
+  // apart under their own heading instead of blending into the family groups,
+  // because picking one of them moves the chat backend and a heading is the
+  // cheapest place to say that before the click. While the LU Engine IS the
+  // chat backend nothing is set apart and the picker groups by family exactly
+  // as it always has: there is no consequence to warn about then, and lineage
+  // is what people pick by.
+  const luEngineSplit = luEngineHoldsChat ? { luEngine: [], rest: textModels } : splitLuEngineRows(textModels)
+  const groups: { family: string; models: AIModel[] }[] = [
+    ...(luEngineSplit.luEngine.length > 0
+      ? [{ family: LU_ENGINE_GROUP, models: luEngineSplit.luEngine }]
+      : []),
+    ...groupByFamily(luEngineSplit.rest),
+  ]
+  // The one rule, asked rather than copied (second review): one group normally
+  // draws no heading, except an LU Engine group under a foreign chat backend,
+  // where the heading is the warning that picking from it moves the backend.
+  const showHeadings = needsLuEngineHeading(groups.map((g) => g.family), luEngineHoldsChat)
   const hasOllamaModels = textModels.some(m => ('provider' in m && m.provider === 'ollama') || !('provider' in m))
   textModelsEmptyRef.current = textModels.length === 0
 
@@ -887,7 +942,7 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
                 letting an empty local section read as a bug (G20). */}
             {appMode === 'cloud' && (
               <div className="px-2.5 py-1.5 border-b border-black/5 dark:border-white/[0.06] text-[0.55rem] text-gray-500">
-                Cloud mode shows hosted models only. Switch the app to Local mode to use Ollama, LM Studio or the Built-in Engine.
+                Cloud mode shows hosted models only. Switch the app to Local mode to use Ollama, LM Studio or the LU Engine.
               </div>
             )}
 
@@ -906,6 +961,7 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
                 {selectError}
               </div>
             )}
+
 
             {/* Scrollable model list */}
             <div className="py-1 max-h-[280px] overflow-y-auto scrollbar-thin">
@@ -936,8 +992,11 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
 
               {groups.map(({ family, models: groupModels }) => (
                 <div key={family}>
-                  {/* Section header */}
-                  {groups.length > 1 && (
+                  {/* Section header. One group normally draws none; an LU
+                      Engine group under a foreign chat backend draws one
+                      anyway, because that heading is the warning that picking
+                      from it moves the backend (A14 review 7). */}
+                  {showHeadings && (
                     <div className="px-2.5 pt-2 pb-0.5">
                       <span className="text-[0.55rem] font-medium uppercase tracking-widest text-gray-600">
                         {family}

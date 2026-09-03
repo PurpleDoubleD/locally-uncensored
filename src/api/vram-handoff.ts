@@ -935,7 +935,7 @@ async function runHandoff(kind: 'image' | 'video', args: VramHandoffArgs, seq: n
 
     // ── (b3) HANDOFF-OUT for the built-in engine (GH #85) ──────────
     if (willUnloadBundled && bundledTarget) {
-      emitHandoff('freeing_vram', { kind, detail: 'built-in engine' })
+      emitHandoff('freeing_vram', { kind, detail: 'LU Engine' })
       // Carry the conversation across the eviction: serialize the KV cache to
       // disk, then stop the engine. Restore happens in the finally. When
       // either half fails, the next chat turn just re-processes the history,

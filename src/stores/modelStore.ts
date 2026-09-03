@@ -8,6 +8,7 @@ import { isLmStudioProvider } from '../lib/hf-to-provider'
 import { isTauri, backendCall } from '../api/backend'
 import { useChatStore } from './chatStore'
 import { log } from '../lib/logger'
+import { isLuEngineName } from '../lib/engine-name'
 
 export interface PullState {
   progress: PullProgress
@@ -139,14 +140,15 @@ export const useModelStore = create<ModelState>()(
         const prevIsLms = isLmStudioProvider(
           (prevModel && 'providerName' in prevModel && prevModel.providerName) as string | undefined,
         )
-        // The built-in engine (llama.cpp sidecar) occupies the `openai::` slot
-        // with providerName 'Built-in Engine' and holds its GGUF in VRAM with
+        // The LU Engine (llama.cpp sidecar) occupies the `openai::` slot
+        // with providerName 'LU Engine' ('Built-in Engine' before 2.6.8, still
+        // on disk in older chats) and holds its GGUF in VRAM with
         // -ngl 999. It is NOT caught by the LM-Studio or the bare-Ollama branch
         // below, so before 2.5.7 wired this in, switching away from a built-in
         // model to an Ollama/LM-Studio model left the sidecar resident → two
         // models in VRAM at once (the exact case this guard exists to prevent).
         const prevIsBuiltin =
-          !!prevModel && 'providerName' in prevModel && prevModel.providerName === 'Built-in Engine'
+          !!prevModel && 'providerName' in prevModel && isLuEngineName(prevModel.providerName)
         if (prevIsLms) {
           const bareKey = prev.replace(/^[^:]+::/, '') // strip LU's routing prefix
           unloadLmStudioModel(bareKey).catch((e) =>
@@ -155,7 +157,7 @@ export const useModelStore = create<ModelState>()(
         } else if (prevIsBuiltin) {
           const nextModel = get().models.find((m) => m.name === name)
           const nextIsBuiltin =
-            !!nextModel && 'providerName' in nextModel && nextModel.providerName === 'Built-in Engine'
+            !!nextModel && 'providerName' in nextModel && isLuEngineName(nextModel.providerName)
           if (!nextIsBuiltin) {
             backendCall('stop_bundled_engine').catch((e) =>
               log.warn('[modelStore] failed to stop built-in engine on switch-away', { err: e }),

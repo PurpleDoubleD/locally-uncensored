@@ -70,9 +70,12 @@ describe('the Model Storage copy tells the truth', () => {
   it('says the folder is read, not only written to', () => {
     // The shipped sentence started "Custom location for downloaded GGUFs" and
     // stopped there, which is why two users concluded the setting was broken
-    // rather than one-directional.
-    expect(src).toMatch(/it also reads this folder/)
-    expect(src).toMatch(/listed under Installed/)
+    // rather than one-directional. A14 shortened the copy again, because the
+    // row is now labelled "LU Engine folder" and the two other backends have
+    // rows of their own, but both halves of the claim have to survive that.
+    expect(src).toMatch(/LU downloads GGUFs here and reads every/)
+    expect(src).toMatch(/up to four levels down/)
+    expect(src).toMatch(/Models here run on the LU Engine/)
   })
 
   it('is honest that image and video go through ComfyUI', () => {

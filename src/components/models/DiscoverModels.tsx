@@ -28,6 +28,9 @@ import { BUILTIN_BACKEND_ID } from '../../lib/onboarding-backend'
 import type { InstalledModelLike } from '../../lib/lmstudio-match'
 import { findInstalledForDiscoverModel } from '../../lib/discover-installed'
 import { isBuiltinEngineEntry } from '../../lib/lmstudio-match'
+import { ensureLuEngineIsChatProvider, LU_ENGINE_SWITCH_NOTE } from '../../api/lu-engine-switch'
+import { useLuEngineSwitchStore } from '../../stores/luEngineSwitchStore'
+import { LuEngineSwitchBar } from '../chat/LuEngineSwitchBar'
 import { resolveTextDownloadTarget } from '../../lib/text-download-target'
 import { hfUrlToOllamaRef, hfUrlToLmStudioSubdir, parseHfUrl, extractGgufQuant, isShardedOrIncompatibleGguf } from '../../lib/hf-to-provider'
 import { GlassCard } from '../ui/GlassCard'
@@ -243,6 +246,14 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
     setUsingModel(name)
     try {
       if (isBuiltinEngineEntry(entry)) {
+        // A14: the LU Engine's GGUFs are listed even while Ollama or LM Studio
+        // holds the chat, so Use has to hand the slot over first. It has to be
+        // FIRST: diagnoseBuiltinEngine answers nothing at all for a slot that
+        // is not ours, so the old order would repair nothing and then activate
+        // a model no request routes to.
+        if (ensureLuEngineIsChatProvider()) {
+          useLuEngineSwitchStore.getState().announce(LU_ENGINE_SWITCH_NOTE)
+        }
         const diagnosis = await diagnoseBuiltinEngine({ repair: true, preferModel: name })
         if (!diagnosis.ok && diagnosis.reason) setInstallError(diagnosis.reason)
       }
@@ -615,7 +626,7 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
         try {
           await startBundledEngine(`${targetDir}/${realName}`)
         } catch (e) {
-          setInstallError(`Model downloaded, but the built-in engine failed to start: ${e instanceof Error ? e.message : String(e)}`)
+          setInstallError(`Model downloaded, but the LU Engine failed to start: ${e instanceof Error ? e.message : String(e)}`)
         }
       }
       // Outside the built-in branch too: an LM Studio or openai-compat download
@@ -756,6 +767,11 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
           ))}
         </div>
       )}
+
+      {/* A14: the pick took the chat backend with it, and says so. The same
+          bar the composer shows, from the same store, so the sentence cannot
+          drift into two versions of itself. */}
+      <LuEngineSwitchBar />
 
       {/* Install error banner */}
       {installError && (

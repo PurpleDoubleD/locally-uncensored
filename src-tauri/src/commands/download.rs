@@ -1109,7 +1109,7 @@ pub fn detect_model_path(provider: String) -> Result<serde_json::Value, String> 
         // Accept the display name too ("Built-in Engine") — the Discover tab
         // passes `providers.openai.name`, not the internal id, so without these
         // aliases a built-in-active install couldn't add a second chat model.
-        "builtin" | "built-in engine" | "built in engine" => {
+        "builtin" | "lu engine" | "built-in engine" | "built in engine" => {
             return crate::commands::engine::builtin_models_dir()
                 .map(|p| serde_json::json!(p.to_string_lossy()));
         }
@@ -1201,6 +1201,63 @@ pub fn detect_model_path(provider: String) -> Result<serde_json::Value, String> 
             provider
         )),
     }
+}
+
+/// Where LM Studio keeps its models, and whether LM Studio is on this machine
+/// at all. Reads only: nothing is created.
+///
+/// `detect_model_path` cannot answer this. It is a DOWNLOAD TARGET, so for
+/// Ollama and LM Studio it creates the folder when it is missing, which is
+/// right for a download and wrong for a panel whose whole job is to say
+/// "LM Studio is not installed". Asking it here would create
+/// `~/.lmstudio/models` on a machine that has never seen LM Studio and then
+/// report that folder as evidence of an install.
+///
+/// Installed is answered from the folder first because that is free on every
+/// platform, and only then from `os_paths::lmstudio_installed()`, which knows
+/// the `lms` CLI and the app bundle. A user who has LM Studio but has not
+/// downloaded a model yet is therefore still recognised.
+///
+/// ASYNC + spawn_blocking, the same shape as `list_bundled_models`: a
+/// SYNCHRONOUS Tauri command runs on the MAIN thread, and neither half of this
+/// one is cheap enough for that. `lmstudio_dir_in` touches the disk, and
+/// `lmstudio_installed()` reaches `spotlight_app()`, which spawns `mdfind` and
+/// waits for it. Settings opens this on mount, so on a Mac with a busy
+/// Spotlight index that was the window freezing while a panel drew one line
+/// of grey text. That is the same mistake the Mac ComfyUI search made in
+/// 2.6.8, one door further along.
+#[tauri::command]
+pub async fn lmstudio_model_dir() -> Result<serde_json::Value, String> {
+    tokio::task::spawn_blocking(lmstudio_model_dir_blocking)
+        .await
+        .map_err(|e| format!("lmstudio_model_dir task: {e}"))?
+}
+
+fn lmstudio_model_dir_blocking() -> Result<serde_json::Value, String> {
+    let home = dirs::home_dir().ok_or("Cannot find home directory")?;
+    let found = lmstudio_dir_in(&home);
+    let installed = found.is_some() || crate::os_paths::lmstudio_installed();
+    Ok(serde_json::json!({
+        "installed": installed,
+        "path": found.map(|p| p.to_string_lossy().to_string()),
+    }))
+}
+
+/// The LM Studio models folder under a given home, or None. Creates nothing.
+///
+/// Split out from the command so the "creates nothing" half can be proven
+/// against a throwaway home directory instead of the tester's own.
+///
+/// Same two candidates and the same order as detect_model_path: LM Studio
+/// 0.3.x writes ~/.lmstudio/models on all three platforms, 0.2.x used
+/// ~/.cache/lm-studio/models.
+pub fn lmstudio_dir_in(home: &Path) -> Option<PathBuf> {
+    [
+        home.join(".lmstudio").join("models"),
+        home.join(".cache").join("lm-studio").join("models"),
+    ]
+    .into_iter()
+    .find(|p| p.is_dir())
 }
 
 #[allow(non_snake_case)]
@@ -1422,6 +1479,65 @@ pub async fn check_model_sizes(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn the_lm_studio_row_never_runs_on_the_main_thread() {
+        // A14 review 3. A SYNCHRONOUS Tauri command runs on the MAIN thread,
+        // and this one reaches os_paths::lmstudio_installed() ->
+        // find_lmstudio_app() -> spotlight_app(), which spawns mdfind and
+        // waits for it. Settings asks on mount, so the shipped shape would
+        // have frozen the window on a Mac with a busy Spotlight index for as
+        // long as mdfind took. Same mistake the Mac ComfyUI search made in
+        // 2.6.8, one door further along.
+        //
+        // The guard is the TYPE, not the source text. A source-text check
+        // would have been self-referential here: the assertion's own string
+        // literal lives in this file, so the file contains it whatever the
+        // signature says (tried, and it passed happily against a synchronous
+        // version). Awaiting the call only compiles while the command really
+        // returns a future, so a return to `pub fn` breaks the build.
+        let value = lmstudio_model_dir().await.expect("the command answers");
+        assert!(value.get("installed").is_some(), "{value}");
+        assert!(value.get("path").is_some(), "{value}");
+
+        // The blocking half answers the same question on its own, and it is
+        // the half whose behaviour the test below pins.
+        let direct = lmstudio_model_dir_blocking().expect("the blocking half answers");
+        assert_eq!(direct.get("installed"), value.get("installed"));
+    }
+
+    #[test]
+    fn the_lm_studio_row_looks_and_never_creates() {
+        // A14: Model Storage has to be able to say "LM Studio is not
+        // installed". detect_model_path cannot answer that, because it is a
+        // download target and calls create_dir_all on the way out, so asking
+        // it would conjure ~/.lmstudio/models on a machine that has never seen
+        // LM Studio and then report that folder as proof of an install.
+        let home = tempfile::tempdir().expect("tempdir");
+        let h = home.path();
+
+        // Nothing there: no answer, and nothing left behind.
+        assert!(lmstudio_dir_in(h).is_none());
+        assert!(!h.join(".lmstudio").exists(), "the look created a folder");
+        assert!(!h.join(".cache").exists(), "the look created a folder");
+
+        // The 0.2.x location alone is still an answer.
+        let legacy = h.join(".cache").join("lm-studio").join("models");
+        fs::create_dir_all(&legacy).expect("legacy dir");
+        assert_eq!(lmstudio_dir_in(h).as_deref(), Some(legacy.as_path()));
+
+        // With both present the modern one wins, same order as detect_model_path.
+        let modern = h.join(".lmstudio").join("models");
+        fs::create_dir_all(&modern).expect("modern dir");
+        assert_eq!(lmstudio_dir_in(h).as_deref(), Some(modern.as_path()));
+
+        // NEGATIVE CONTROL: a FILE named like the folder is not a folder, and
+        // must not be reported as one.
+        let other = tempfile::tempdir().expect("tempdir");
+        fs::create_dir_all(other.path().join(".lmstudio")).expect("parent");
+        fs::write(other.path().join(".lmstudio").join("models"), b"x").expect("file");
+        assert!(lmstudio_dir_in(other.path()).is_none());
+    }
 
     #[test]
     fn a_full_drive_is_named_before_the_first_byte() {

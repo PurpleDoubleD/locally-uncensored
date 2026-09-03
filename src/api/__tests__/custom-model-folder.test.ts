@@ -111,7 +111,7 @@ describe('a model found in that folder is an Installed row', () => {
     const rows = bundledToAIModels(bundled)
     expect(rows).toHaveLength(1)
     expect(rows[0].name).toBe('openai::Cydonia-24B-v4.1-Q4_K_M')
-    expect(rows[0].providerName).toBe('Built-in Engine')
+    expect(rows[0].providerName).toBe('LU Engine')
     expect(rows[0].size).toBe(14_000_000_000)
   })
 

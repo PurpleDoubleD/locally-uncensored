@@ -199,7 +199,7 @@ export function useRAG(conversationId: string | null) {
         const ollamaUp = await checkConnection(EMBED_PROBE_TIMEOUT_MS)
         if (!ollamaUp) {
           throw new Error(
-            "No embedding backend is running. Start the built-in engine (or Ollama) and try again."
+            "No embedding backend is running. Start the LU Engine (or Ollama) and try again."
           )
         }
 

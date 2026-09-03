@@ -10,6 +10,7 @@ import { persist } from 'zustand/middleware'
 import type { ProviderId, ProviderConfig } from '../api/providers/types'
 import { clearProviderCache } from '../api/providers/registry'
 import { onLocalSlotChanged } from '../lib/builtin-slot-eviction'
+import { LU_ENGINE_NAME, renameLegacyEngine } from '../lib/engine-name'
 import { secretGet, secretSet, secretDelete } from '../api/backend'
 import { CLOUD_BASE } from '../api/cloud/config'
 
@@ -71,7 +72,7 @@ const DEFAULT_PROVIDERS: Record<ProviderId, ProviderConfig> = {
   },
   openai: {
     id: 'openai',
-    name: 'Built-in Engine',
+    name: LU_ENGINE_NAME,
     enabled: true,
     baseUrl: 'http://127.0.0.1:8127/v1',
     apiKey: '',
@@ -281,10 +282,38 @@ export const useProviderStore = create<ProviderState>()(
       // hit an undefined config after an update.
       merge: (persisted: unknown, current: ProviderState): ProviderState => {
         const p = (persisted ?? {}) as Partial<ProviderState>
+        const merged = { ...DEFAULT_PROVIDERS, ...(p.providers ?? {}) }
+        // 2.6.8 (A14): every store written before the rename carries the label
+        // "Built-in Engine" on the openai slot, and a second copy of it in the
+        // `displaced` memory when another backend pushed the engine aside. Both
+        // are what the provider card and the standby card print, so both are
+        // relabelled here. Only that exact name is touched, so a backend the
+        // user named himself is left alone.
+        //
+        // This relabel MUST STAY WHILE OLD STORES EXIST. It is not a one-off
+        // migration that a version bump retires: `version` is still 1 and the
+        // blob is merged, not rewritten in place, so a machine that has not
+        // been opened since 2.6.7 arrives here with the old name on its very
+        // next launch, whenever that is. Deleting this puts "Built-in Engine"
+        // back on that user's provider card. The READ side (isLuEngineName)
+        // has to stay for the same reason, for rows recorded in old chats.
+        //
+        // Defensive on purpose: a hand-edited or truncated blob can carry a
+        // null entry, and a merge that throws takes the whole provider store
+        // down to defaults, which is every API key the user typed.
+        for (const id of Object.keys(merged) as ProviderId[]) {
+          const raw = merged[id]
+          if (!raw || typeof raw !== 'object') continue
+          const cfg = renameLegacyEngine(raw)
+          const displaced = cfg.displaced ? renameLegacyEngine(cfg.displaced) : cfg.displaced
+          if (cfg !== raw || displaced !== cfg.displaced) {
+            merged[id] = displaced ? { ...cfg, displaced } : cfg
+          }
+        }
         return {
           ...current,
           ...p,
-          providers: { ...DEFAULT_PROVIDERS, ...(p.providers ?? {}) },
+          providers: merged,
         }
       },
       // Don't persist transient state, only configs + user's "don't show again" preference.

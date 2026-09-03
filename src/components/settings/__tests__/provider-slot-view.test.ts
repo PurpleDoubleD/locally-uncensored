@@ -72,12 +72,12 @@ describe('the other slots keep working exactly as before', () => {
 
   it('leaves the built-in engine on its fixed address with no key', () => {
     const v = providerSlotView('openai', {
-      id: 'openai', name: 'Built-in Engine', enabled: true,
+      id: 'openai', name: 'LU Engine', enabled: true,
       baseUrl: 'http://127.0.0.1:8127/v1', apiKey: '', isLocal: true, managed: true,
     })
     expect(v.endpointEditable).toBe(false)
     expect(v.needsKey).toBe(false)
-    expect(v.note).toContain('Built-in')
+    expect(v.note).toContain('LU Engine')
   })
 
   it('keeps a local backend editable, since its port really is the user\'s', () => {

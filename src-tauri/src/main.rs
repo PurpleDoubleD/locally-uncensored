@@ -270,6 +270,7 @@ fn main() {
             commands::download::cancel_download,
             commands::download::resume_download,
             commands::download::detect_model_path,
+            commands::download::lmstudio_model_dir,
             commands::download::check_model_sizes,
             commands::download::delete_comfy_model,
             // Built-in inference engine (bundled llama-server, P1)

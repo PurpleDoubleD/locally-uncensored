@@ -556,7 +556,7 @@ pub(crate) fn builtin_model_conflict(
         return None;
     }
     Some(format!(
-        "The built-in engine has \"{loaded}\" loaded, but this request asked for \"{asked}\". \
+        "The LU Engine has \"{loaded}\" loaded, but this request asked for \"{asked}\". \
          The engine answers with the model it was started with, whatever the model field says, \
          so this request was refused instead of being answered by the wrong model. \
          Load \"{asked}\" first (Models, or the chat model picker) and send again."

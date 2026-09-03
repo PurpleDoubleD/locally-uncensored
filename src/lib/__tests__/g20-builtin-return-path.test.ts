@@ -32,7 +32,7 @@ describe('resetProvidersToDefaults hands the slot back to the Built-in Engine', 
   it('restores the shipped Built-in slot', () => {
     useProviderStore.getState().resetProvidersToDefaults()
     const openai = useProviderStore.getState().providers.openai
-    expect(openai.name).toBe('Built-in Engine')
+    expect(openai.name).toBe('LU Engine')
     expect(openai.managed).toBe(true)
     expect(openai.enabled).toBe(true)
     expect(openai.baseUrl).toBe('http://127.0.0.1:8127/v1')

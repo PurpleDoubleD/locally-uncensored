@@ -7,6 +7,8 @@
 
 // ── Provider Identity ──────────────────────────────────────────
 
+import { LU_ENGINE_NAME } from '../../lib/engine-name'
+
 export type ProviderId = 'ollama' | 'openai' | 'anthropic' | 'lu-cloud'
 
 export interface ProviderConfig {
@@ -64,7 +66,7 @@ export interface ProviderPreset {
 export const PROVIDER_PRESETS: ProviderPreset[] = [
   // Built-in engine (2.5.7) — bundled llama.cpp llama-server, OpenAI-compatible,
   // lifecycle owned by the app. Zero external install. Default backend.
-  { id: 'builtin', name: 'Built-in Engine', providerId: 'openai', baseUrl: 'http://127.0.0.1:8127/v1', isLocal: true, managed: true },
+  { id: 'builtin', name: LU_ENGINE_NAME, providerId: 'openai', baseUrl: 'http://127.0.0.1:8127/v1', isLocal: true, managed: true },
 
   // Ollama (dedicated provider)
   { id: 'ollama', name: 'Ollama', providerId: 'ollama', baseUrl: 'http://localhost:11434', isLocal: true },
