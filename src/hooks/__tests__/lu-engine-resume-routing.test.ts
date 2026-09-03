@@ -237,6 +237,50 @@ describe('two overlapping first passes', () => {
     expect(startBundledEmbed).toHaveBeenCalledTimes(1)
   })
 
+  // A14 fourth review: the claim taken before the await had a hole in it. The
+  // pass that ASKED first is not always the pass that is ANSWERED first, and
+  // the resume was tied to the asker. Pass A takes the claim and loses the
+  // launch race; pass B is handed the full list while A is still waiting, but
+  // B does not hold the claim, so B does nothing with it; A then gives the
+  // claim back. Nobody resumes, although the list was there the whole time,
+  // and the engine the user had running yesterday stays dead until some later
+  // refresh happens along.
+  it('resume on the pass that was ANSWERED, not on the pass that asked first', async () => {
+    managedBuiltin = true
+    vi.resetModules()
+    const { useModels } = await import('../useModels')
+    let call = 0
+    listBundledModels.mockImplementation((() => {
+      call += 1
+      // A asks first and never gets through. B asks second and gets the list,
+      // and B settles BEFORE A does, which is the ordering the old code lost.
+      return call === 1
+        ? new Promise((_r, reject) => setTimeout(() => reject(new Error('invoke timed out after 5000ms')), 20))
+        : Promise.resolve([CHAT, EMBED])
+    }) as never)
+    const a = renderHook(() => useModels())
+    const b = renderHook(() => useModels())
+    await act(async () => {
+      const first = a.result.current.fetchModels()
+      const second = b.result.current.fetchModels()
+      await Promise.all([first, second])
+    })
+    await act(async () => { await new Promise((r) => setTimeout(r, 30)) })
+    expect(bundledEngineStatus, 'the answer was there, so the resume runs').toHaveBeenCalled()
+    expect(startBundledEmbed, 'and exactly once').toHaveBeenCalledTimes(1)
+  })
+
+  // NEGATIVE CONTROL: the shot is still spent exactly once when BOTH passes
+  // are answered. A rule of "whoever is answered may resume" that forgot to
+  // spend the shot would start two llama-servers on one port, which is the
+  // crash the third review fixed.
+  it('and still only once when both of them are answered', async () => {
+    managedBuiltin = true
+    await twoPassesOn(async () => [CHAT, EMBED])
+    expect(startBundledEmbed).toHaveBeenCalledTimes(1)
+    expect(bundledEngineStatus).toHaveBeenCalledTimes(1)
+  })
+
   // NEGATIVE CONTROL: a refusal still spends the shot, even when the pass that
   // heard it was racing another one.
   it('spend the shot once on a refusal, and never ask again', async () => {

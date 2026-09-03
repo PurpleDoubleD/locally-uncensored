@@ -43,20 +43,6 @@ import type { PullProgress, AIModel, ModelCategory, ImageModel, VideoModel, Clou
 // starts a server that reports running:false.
 let builtinResumeAttempted = false
 
-// A14 third review: `fetchModels` runs from several mounted components at
-// once, and the flag above was READ before the await and WRITTEN after it, so
-// two first passes that overlapped both read "first pass" and both fired the
-// resume. That is two llama-server starts on one port, on the machine with the
-// least room to spare.
-//
-// The claim is taken here, before the await, and only the pass holding it may
-// spend the shot or hand it back. A pass that answered while the claim holder
-// was still waiting must NOT spend it: it skipped the resume, so spending it
-// would leave the resume owed forever. A claim holder that got no answer gives
-// the claim back, which keeps the Runde-3 contract (a timeout does not eat the
-// shot) intact under concurrency.
-let builtinResumeClaimed = false
-
 // A14 third review, the other half: two LU Engine cards clicked in quick
 // succession fired two `swap_bundled_model` calls at one engine. The picker
 // has had a bolt against this since ENG-4 (`selectingLms`); the Installed card
@@ -281,10 +267,6 @@ export function useModels() {
       //    coming up behind the window. Spending the shot there left the
       //    engine the user had running yesterday dead for the session.
       //
-      // A14 third review: the claim is taken BEFORE the await, so two passes
-      // racing out of two mounted components cannot both be the first one.
-      const firstPassThisSession = !builtinResumeAttempted && !builtinResumeClaimed
-      if (firstPassThisSession) builtinResumeClaimed = true
       let bundledRaw: BundledModel[] | null = null
       let backendAnswered = false
       try {
@@ -293,20 +275,38 @@ export function useModels() {
       } catch (e) {
         backendAnswered = commandIsUnavailable(e)
       }
-      // Only the pass that holds the claim may spend the shot or give it back.
-      // A pass that skipped the resume must not spend it on the holder's
-      // behalf, or the resume it skipped would never happen.
-      if (firstPassThisSession) {
-        if (backendAnswered) builtinResumeAttempted = true
-        else builtinResumeClaimed = false
-      }
+      // Who spends the shot. `fetchModels` runs from several mounted
+      // components at once, and the flag used to be READ before the await and
+      // WRITTEN after it, so two overlapping first passes both read "first
+      // pass" and both fired the resume: two llama-server starts on one port,
+      // on the machine with the least room to spare.
+      //
+      // A14 third review answered that with a claim taken before the await,
+      // and the fourth review found the hole in it. Pass A takes the claim and
+      // then gets no answer; pass B is handed the full list while A is still
+      // waiting, but B does not hold the claim, so B does nothing; A gives the
+      // claim back. Nobody resumes, although the answer was on the screen the
+      // whole time, and the engine the user had running yesterday stays dead
+      // until some later refresh happens to come along.
+      //
+      // Both halves live AFTER the await now, in one synchronous block with no
+      // await between the read and the write, which is as atomic as it gets on
+      // a single-threaded runtime. So the first pass to ANSWER spends the shot
+      // and does the resume, whether or not it was the first to ask, and the
+      // pass that answers second sees the flag already up. The contract from
+      // Runde 3 is unchanged and is what these two lines say: an answer spends
+      // the shot exactly once (a refusal is an answer, and it spends it
+      // without a resume because there is no list to resume from), while no
+      // answer at all teaches nothing and spends nothing.
+      const mayResume = backendAnswered && !builtinResumeAttempted
+      if (mayResume) builtinResumeAttempted = true
       if (bundledRaw) {
         const bundled = bundledToAIModels(bundledRaw).filter(m => !isEmbeddingModel(m.name))
         // One file, one row: with the folder pointed at ~/.lmstudio/models,
         // LM Studio lists the model over its own API and the folder walk finds
         // the same file. The row that is already serving the chat wins.
         allModels.push(...dropDuplicateLuEngineRows(bundled, allModels))
-        if (firstPassThisSession) {
+        if (mayResume) {
           // Unchanged in both directions: the chat engine is only resumed when
           // it holds the slot, and the embeddings server is resumed when it
           // does not, so RAG survives a relaunch under a foreign backend.
