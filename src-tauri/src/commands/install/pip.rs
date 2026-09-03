@@ -24,16 +24,12 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-#[cfg(target_os = "windows")]
-use std::os::windows::process::CommandExt;
 
 use crate::state::InstallState;
 use crate::os_error;
 use crate::python::python_command;
 
 use super::children::TrackedInstallerChild;
-#[cfg(target_os = "windows")]
-use super::CREATE_NO_WINDOW;
 
 // ── pip helpers (issue #32: PyTorch / ComfyUI install reliability) ───────────
 

@@ -187,7 +187,7 @@ fn install_ollama_windows_impl<F: Fn(&str, &str)>(
             update("starting", &format!("Installer finished (code {}). Starting Ollama...", code));
         }
         Err(e) => {
-            update("error", &format!("Could not run installer: {}", os_error::english(&e)));
+            update("error", &format!("Could not run installer: {}", crate::os_error::english(&e)));
             return;
         }
     }

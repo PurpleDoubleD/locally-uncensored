@@ -18,15 +18,11 @@ use std::path::{Path, PathBuf};
 use crate::python::python_command;
 use std::process::Stdio;
 
-#[cfg(target_os = "windows")]
-use std::os::windows::process::CommandExt;
 
 use crate::os_error;
 use crate::python::venv_python_path;
 use crate::state::AppState;
 
-#[cfg(target_os = "windows")]
-use super::CREATE_NO_WINDOW;
 
 // ── PEP 668 / venv helpers (Bug E — rzgrozt Arch externally-managed) ─────────
 

@@ -16,8 +16,6 @@
 
 use std::process::Stdio;
 
-#[cfg(target_os = "windows")]
-use std::os::windows::process::CommandExt;
 
 use tauri::{Manager, State};
 use tracing::{error, info};
@@ -28,8 +26,6 @@ use crate::python::python_command;
 
 use super::pip::pip_install_streaming_with_retry_cancellable;
 use super::venv::{is_pep668_protected, resolve_lu_python};
-#[cfg(target_os = "windows")]
-use super::CREATE_NO_WINDOW;
 
 // ── Whisper (faster-whisper) installer (§24.9 — STT install affordance) ──────
 
