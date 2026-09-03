@@ -121,6 +121,35 @@ export function dropDuplicateLuEngineRows<T extends InstalledModelLike>(
  *
  * `alreadyListed` is the whole list; the LU Engine rows are picked out of it
  * here, exactly as `dropDuplicateLuEngineRows` picks out the LM Studio ones.
+ *
+ * A17 counter-check 03.09., the asymmetry route 3 has and did not use: the
+ * three routes were the same in both directions, and route 3 asked that
+ * NEITHER side name a quant. On the Windows box that left
+ *
+ *     mlabonne_gemma-3-4b-it-abliterated-Q4_K_M   LU Engine
+ *     mlabonne_gemma-3-4b-it-abliterated          LM Studio, standby, OFF
+ *
+ * standing side by side, one file of 2 489 894 304 bytes under two names. The
+ * Qwen pair beside it collapsed only because LM Studio happened to spell
+ * "@q4_k_m" there.
+ *
+ * "Our own quant is evidence" was written for the other direction, where the
+ * row that goes is OUR row and its file would then be reachable nowhere. Here
+ * the row that goes is a standby row: it hides no file, LM Studio stays
+ * reachable through every other row it has, and the backend holding the slot
+ * is the one whose row works right now. So in this direction route 3 asks only
+ * what it can actually answer, the count. One file of that identity on our
+ * side and one nameless row on the other can only be each other. Two quants of
+ * ours and a nameless row cannot be told apart, and then the standby row
+ * stays, exactly as before.
+ *
+ * A fourth route on file size was considered and left out rather than written
+ * blind. A standby row is built by `cloudModelRow` out of a `ProviderModel`,
+ * and neither carries a size: every one of them is `size: 0`. A byte
+ * comparison would therefore never fire on a real pair, and worse, "same size"
+ * would be true of every standby row against every other, because they all
+ * carry the same zero. The day the standby listing learns a real size is the
+ * day that route is worth writing.
  */
 export function dropStandbyRowsServedByLuEngine<T extends InstalledModelLike>(
   standby: T[],
@@ -136,7 +165,7 @@ export function dropStandbyRowsServedByLuEngine<T extends InstalledModelLike>(
     const id = identityOf(row)
     if (id) ownByIdentity.set(id, (ownByIdentity.get(id) ?? 0) + 1)
   }
-  return standby.filter((row) => !luEngine.some((ours) => sameFile(ours, row, ownByIdentity)))
+  return standby.filter((row) => !luEngine.some((ours) => sameFile(ours, row, ownByIdentity, true)))
 }
 
 /** Every id a row can be recognised by. LM Studio reports its own key, our own
@@ -183,11 +212,19 @@ function namesAQuant(m: InstalledModelLike): boolean {
   return idsOf(m).some((id) => extractQuant(id) !== null)
 }
 
-/** Two rows pointing at one file on disk. */
+/**
+ * Two rows pointing at one file on disk.
+ *
+ * `otherHidesNoFile` is the one asymmetry between the two directions, and it
+ * only touches route 3. See the paragraph on
+ * `dropStandbyRowsServedByLuEngine` for why the same evidence is worth
+ * different things depending on which row would disappear.
+ */
 function sameFile(
   ours: InstalledModelLike,
   other: InstalledModelLike,
   ownByIdentity: Map<string, number>,
+  otherHidesNoFile = false,
 ): boolean {
   // Route 1: the same path, spelled either way round.
   const ourPath = normalisePath(pathOf(ours))
@@ -201,11 +238,19 @@ function sameFile(
   // Route 2: our file IS in LM Studio's store, so the identity settles it.
   if (sameModel && livesInLmStudioStore(ours)) return true
 
-  // Route 3: neither side names a quant and we hold exactly one such file.
-  // Our own quant, where we have one, is evidence and not noise: a collapsed
-  // LM Studio row could be any quant at any path, so it cannot be shown to be
-  // our Q8_0. Route 2 above is the way that case is settled honestly.
-  if (sameModel && !namesAQuant(other) && !namesAQuant(ours) && ownByIdentity.get(ourIdentity) === 1) return true
+  // Route 3: the other side names no quant and we hold exactly one file of
+  // that identity.
+  //
+  // Whether OUR quant has to be missing too is the asymmetry. Where dropping
+  // the row would hide a file (the LU Engine direction), our own quant is
+  // evidence and not noise: a collapsed LM Studio row could be any quant at
+  // any path, so it cannot be shown to be our Q8_0, and route 2 is the honest
+  // way that case is settled. Where dropping the row hides nothing (the
+  // standby direction), the count is the whole question: one file of that
+  // identity on our side and one nameless row on the other can only be each
+  // other, and our quant says nothing against it.
+  if (sameModel && !namesAQuant(other) && (otherHidesNoFile || !namesAQuant(ours))
+      && ownByIdentity.get(ourIdentity) === 1) return true
 
   // Otherwise the strict rule: same filename, or the same quant named on both
   // sides. A missing quant on either side is not evidence.
