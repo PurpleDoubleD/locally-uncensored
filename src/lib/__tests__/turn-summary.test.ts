@@ -215,3 +215,70 @@ describe('G27 must not eat the D#81 explanation', () => {
     expect(text).toContain('2 of 10')
   })
 })
+
+// ── Gezaehlt werden Dateien, nicht Schreibvorgaenge (Persona B3) ─────────
+
+describe('zweimal dieselbe Datei ist EINE Datei', () => {
+  /**
+   * Persona-Lauf vom 03.09.2026, Befund 10. Der Agent schrieb
+   * `interview-leitfaden.txt` zweimal: Schritt 1 korrekt mit drei Zeilen,
+   * Schritt 4 kaputt mit literalen Backslash-n. Die Schlusszeile lautete
+   *
+   *     „Task partly done: 2 files written, 1 operation completed.
+   *      3 steps failed."
+   *
+   * Es war EINE Datei. Und die zweite Fassung war schlechter als die erste —
+   * das merkte niemand, weil die Zeile nur Erfolge zaehlt. Ihre Worte: „Gezaehlt
+   * werden Schreibvorgaenge, nicht Dateien; und dass das Ergebnis am Ende
+   * schlechter war als nach Schritt 1, merkt niemand."
+   */
+  const schrieb = (path: string): TurnToolCall => ({
+    toolName: 'file_write', status: 'completed', result: `File saved: ${path}`, args: { path },
+  })
+
+  it('zaehlt die Datei einmal, nicht zweimal', () => {
+    const text = summarizeTurn({
+      calls: [schrieb('interview-leitfaden.txt'), schrieb('interview-leitfaden.txt')],
+      imageGenDone: 0, videoGenDone: 0, visionFeedbackGiven: false,
+    })
+    expect(text).toContain('1 file written')
+    expect(text).not.toContain('2 files written')
+  })
+
+  it('sagt, dass nur die letzte Fassung auf der Platte liegt', () => {
+    const text = summarizeTurn({
+      calls: [schrieb('interview-leitfaden.txt'), schrieb('interview-leitfaden.txt')],
+      imageGenDone: 0, videoGenDone: 0, visionFeedbackGiven: false,
+    })
+    expect(text).toContain('interview-leitfaden.txt')
+    expect(text).toMatch(/2×|twice/)
+    expect(text).toMatch(/last version/i)
+  })
+
+  it('zwei verschiedene Dateien bleiben zwei', () => {
+    const text = summarizeTurn({
+      calls: [schrieb('a.txt'), schrieb('b.txt')],
+      imageGenDone: 0, videoGenDone: 0, visionFeedbackGiven: false,
+    })
+    expect(text).toContain('2 files written')
+    expect(text).not.toMatch(/last version/i)
+  })
+
+  it('ohne Pfadangabe bleibt es beim Zaehlen der Aufrufe', () => {
+    // Aeltere gespeicherte Bloecke tragen keine args. Lieber die alte,
+    // ungenaue Zahl als eine Ausnahme im Schlusssatz.
+    const ohne: TurnToolCall = { toolName: 'file_write', status: 'completed', result: 'File saved: x' }
+    const text = summarizeTurn({
+      calls: [ohne, ohne], imageGenDone: 0, videoGenDone: 0, visionFeedbackGiven: false,
+    })
+    expect(text).toContain('2 files written')
+  })
+
+  it('derselbe Pfad, anders geschrieben, zaehlt trotzdem einmal', () => {
+    const text = summarizeTurn({
+      calls: [schrieb('./notiz.txt'), schrieb('notiz.txt')],
+      imageGenDone: 0, videoGenDone: 0, visionFeedbackGiven: false,
+    })
+    expect(text).toContain('1 file written')
+  })
+})

@@ -858,6 +858,9 @@ export function useAgentChat() {
             toolName: b.toolCall!.toolName,
             status: b.toolCall!.status,
             result: b.toolCall!.result,
+            // Fuer die Datei-Zaehlung: zwei Schreibvorgaenge auf denselben
+            // Pfad sind eine Datei, nicht zwei (Persona-Befund 10).
+            args: b.toolCall!.args as Record<string, unknown> | undefined,
           })),
         imageGenDone,
         videoGenDone,
