@@ -79,6 +79,20 @@ const SEARCH_VERB_RE = /\b(search|google|look\s*up|web\s*search|search\s+the\s+w
 // "today"/"now" in conversational phrasing ("how are you today") must not.
 const FRESHNESS_RE = /\b(latest|newest|current(ly)?|today'?s?|tonight|right\s+now|recent(ly)?|breaking|in\s+20\d\d|as\s+of\s+(today|now)|aktuell\w*|neueste\w*|heutige\w*)\b/i
 const FRESH_TOPIC_RE = /\b(version|release|update|news|results?|winner|champion|election|launch|price|prices|stock|standings|score|scores|ranking|patch|driver(s)?|model(s)?|treiber)\b/i
+// Die Substantivliste oben kennt Seite, Webseite und Artikel, also das
+// EINZELNE Dokument. Sie kannte kein einziges Wort fuer das Internet selbst.
+// Genau so tippen Kunden aber, wenn sie keine bestimmte Adresse im Kopf haben:
+// "schau im Netz nach", "hol mir das aus dem Internet", "schau online nach".
+// Alle drei liefen ins Leere, das Modell bekam kein tools-Feld und erfand die
+// Antwort, statt zu suchen. Belegt am 03.09.2026 an fuenf von fuenf Versuchen.
+//
+// Die Praeposition ist Absicht: sie trennt das Ziel vom Thema. "Schau im Netz
+// nach" meint das Internet, "erklaer mir den Unterschied zwischen Netz und
+// Graph" meint es nicht.
+const NETZ_ZIEL_RE = /\b(im|ins|aus\s+dem|beim|uebers|ueber\s+das)\s+(netz|internet|web)\b|\bonline\b/i
+// Nachschlagende Verben. Zusammengeschriebene Formen brauchen einen eigenen
+// Eintrag, weil die Wortgrenze "schau" in "nachschauen" nicht findet.
+const NETZ_VERB_RE = /\b(nach-?schau\w*|nach-?seh\w*|nach-?guck\w*|nach-?les\w*|schau(e|st)?|guck(e|st)?|sieh|such(e|en|st)?|hol(e|st|t)?|find(e|en|est)?|recherchier\w*|pruef(e|en|st)?|check(e|en)?|look|search|find)\b/i
 const LOOKUP_TOPIC_RE = /\b(weather|temperature|forecast|price\s+of|stock\s+price|exchange\s+rate|who\s+won|who\s+is\s+winning|standings|release\s+date|wetter|preis\s+von|kurs\s+von|wer\s+hat\s+gewonnen|wechselkurs)\b/i
 
 // Verbs that inherently mean "make an image" even without a media noun
@@ -140,6 +154,9 @@ export function detectChatToolCapability(text: string, hasImages = false): ChatT
   // WEB SEARCH
   if (SEARCH_VERB_RE.test(t)) return 'web'
   if (LOOKUP_TOPIC_RE.test(t)) return 'web'
+  // Ein Netz-Wort plus ein nachschlagendes Verb ist eine Recherche, auch ohne
+  // Suchverb und ohne Adresse.
+  if (NETZ_ZIEL_RE.test(t) && NETZ_VERB_RE.test(t)) return 'web'
   // Freshness only counts when it actually modifies a lookup-ish topic, so
   // "what is the latest python version" routes but "how are you today" does not.
   if (FRESHNESS_RE.test(t) && FRESH_TOPIC_RE.test(t)) return 'web'
