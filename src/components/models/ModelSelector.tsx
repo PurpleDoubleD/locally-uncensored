@@ -982,6 +982,14 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
   // Ebenfalls reaktiv, und aus demselben Grund: gibt ein Klick den Steckplatz
   // zurueck, verschwindet die Ueberschrift im selben Zug.
   const standbyName = useProviderStore((s) => standbyBackendOf(s.providers.openai as HandoverSlot)?.name ?? null)
+  // Der Name des fremden Backends, das den Steckplatz gerade haelt. Auch
+  // reaktiv, aus demselben Grund wie standbyName: ein Klick kann den Platz
+  // weiterreichen, und die Gruppierung muss das mitbekommen.
+  const holderName = useProviderStore((s) =>
+    s.providers.openai.enabled && s.providers.openai.managed !== true
+      ? (s.providers.openai.name ?? null)
+      : null,
+  )
   const activeModelObj = models.find((m) => m.name === activeModel)
   const foldedStandby = useModelStore((s) => s.foldedStandby)
   const activeDisplayName = activeModel
@@ -1011,10 +1019,15 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
   // wartenden Backends unter unserer eigenen Engine. Gibt es nichts zu
   // wechseln, gruppiert der Waehler nach Familie wie eh und je, denn dann gibt
   // es keine Folge zu melden und Abstammung ist, wonach Menschen waehlen.
-  const wechsel = splitBackendSwitchRows(textModels, luEngineHoldsChat, standbyName)
+  const wechsel = splitBackendSwitchRows(textModels, luEngineHoldsChat, standbyName, holderName)
   const groups: { family: string; models: AIModel[] }[] = [
     ...(wechsel.switching.length > 0 && wechsel.label
       ? [{ family: wechsel.label, models: wechsel.switching }]
+      : []),
+    // Das fremde Backend, das den Platz haelt, unter seinem eigenen Namen
+    // statt verstreut ueber die Familien.
+    ...(wechsel.holding.length > 0 && wechsel.holderLabel
+      ? [{ family: wechsel.holderLabel, models: wechsel.holding }]
       : []),
     ...groupByFamily(wechsel.rest),
   ]

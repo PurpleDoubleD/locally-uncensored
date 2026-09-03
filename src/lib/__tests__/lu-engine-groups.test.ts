@@ -11,6 +11,8 @@
  * Run: npx vitest run src/lib/__tests__/lu-engine-groups.test.ts
  */
 import { describe, it, expect } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { splitBackendSwitchRows, groupInstalledByProvider, dropDuplicateLuEngineRows, needsBackendSwitchHeading, LU_ENGINE_GROUP } from '../lu-engine-rows'
 
 const lu = (n: string) => ({ name: `openai::${n}`, model: n, provider: 'openai', providerName: 'LU Engine' })
@@ -80,6 +82,61 @@ describe('splitBackendSwitchRows, die LU Engine bedient den Chat', () => {
     const jan = { name: 'openai::x', model: 'x', provider: 'openai', providerName: 'Jan' }
     const { switching } = splitBackendSwitchRows([lms('c'), jan], true, 'LM Studio')
     expect(switching.map((m) => m.model)).toEqual(['c'])
+  })
+})
+
+// ── Persona 5, Punkt E2 (03./04.09.2026): die Sortierung war verkehrtherum ──
+//
+// Gemessen am echten Build: solange die LU Engine bediente, standen die
+// LM-Studio-Modelle unter einer eigenen Ueberschrift LM STUDIO. Richtig.
+// Sobald LM Studio selbst bediente, verteilten sich seine sieben Zeilen auf
+// QWEN und OTHER, unterscheidbar nur noch am kleinen Abzeichen am
+// Zeilenende. Genau dann, wenn jemand in LM Studio arbeitet, war das die
+// unbrauchbarste Sortierung.
+describe('splitBackendSwitchRows, ein fremdes Backend HAELT den Platz', () => {
+  const teilen = <T extends { model: string; provider: string; providerName: string }>(rows: T[]) =>
+    splitBackendSwitchRows(rows, false, null, 'LM Studio')
+
+  it('behaelt seinen Namen als Ueberschrift, statt in Familien zu zerfallen', () => {
+    const { holderLabel, holding, rest } = teilen([lms('qwen3-4b'), ollama('a'), lms('gemma')])
+    expect(holderLabel).toBe('LM Studio')
+    expect(holding.map((m) => m.model)).toEqual(['qwen3-4b', 'gemma'])
+    expect(rest.map((m) => m.model)).toEqual(['a'])
+  })
+
+  it('und die eigene Engine bleibt daneben die Wechselgruppe', () => {
+    const { label, switching, holderLabel, holding } =
+      splitBackendSwitchRows([lu('b'), lms('c')], false, null, 'LM Studio')
+    expect(label).toBe(LU_ENGINE_GROUP)
+    expect(switching.map((m) => m.model)).toEqual(['b'])
+    expect(holderLabel).toBe('LM Studio')
+    expect(holding.map((m) => m.model)).toEqual(['c'])
+  })
+
+  // NEGATIVKONTROLLE: haelt unsere eigene Engine den Platz, bleiben ihre
+  // GGUFs bei den Familien. Dort sagt die Ueberschrift etwas ueber die Datei,
+  // und QWEN neben PHI neben HERMES ist die Ordnung, nach der Menschen
+  // waehlen.
+  it('unsere eigene Engine bekommt keine Halter-Ueberschrift', () => {
+    const { holderLabel, holding } = splitBackendSwitchRows([lu('b')], true, 'LM Studio', 'LU Engine')
+    expect(holderLabel).toBeNull()
+    expect(holding).toEqual([])
+  })
+
+  // NEGATIVKONTROLLE: ohne Halternamen bleibt alles wie vorher.
+  it('ohne Halternamen aendert sich nichts', () => {
+    const { holderLabel, holding, rest } = splitBackendSwitchRows([lms('c'), ollama('a')], false, null)
+    expect(holderLabel).toBeNull()
+    expect(holding).toEqual([])
+    expect(rest.length).toBe(2)
+  })
+
+  it('der Waehler reicht den Halternamen wirklich durch', () => {
+    const src = readFileSync(
+      resolve(__dirname, '..', '..', 'components/models/ModelSelector.tsx'), 'utf8',
+    )
+    expect(src).toContain('splitBackendSwitchRows(textModels, luEngineHoldsChat, standbyName, holderName)')
+    expect(src).toContain('wechsel.holding.length > 0 && wechsel.holderLabel')
   })
 })
 

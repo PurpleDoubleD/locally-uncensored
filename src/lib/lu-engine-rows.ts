@@ -289,16 +289,42 @@ export function splitBackendSwitchRows<T extends InstalledModelLike>(
   models: T[],
   luEngineHoldsChat: boolean,
   standbyName: string | null,
-): { label: string | null; switching: T[]; rest: T[] } {
+  /**
+   * Der Name des fremden lokalen Backends, das den Steckplatz gerade HAELT,
+   * oder null, wenn unsere Engine ihn haelt.
+   *
+   * Persona P5, 03./04.09.2026: solange LM Studio den Chat bediente,
+   * verteilten sich seine sieben Zeilen auf QWEN und OTHER und waren nur noch
+   * am kleinen Abzeichen am Zeilenende zu unterscheiden. Genau in dem Moment,
+   * in dem jemand IN LM Studio arbeitet, war das die unbrauchbarste
+   * Sortierung.
+   *
+   * Familien sind eine Ordnung fuer UNSERE Dateien: sie kommen aus unserer
+   * Benennung. Die Kennungen eines fremden Backends (`qwen/qwen3-4b`,
+   * `qwen2.5-0.5b-instruct@q4_k_m`) tragen keine, und sie danach zu sortieren
+   * ist Raten, das ein Backend ueber mehrere Ueberschriften streut. Also
+   * behaelt ein fremdes Backend seinen Namen, egal auf welcher Seite des
+   * Steckplatzes es gerade steht.
+   */
+  holderName: string | null = null,
+): { label: string | null; switching: T[]; holderLabel: string | null; holding: T[]; rest: T[] } {
   const label = luEngineHoldsChat ? standbyName : LU_ENGINE_GROUP
   const gehoertDazu = luEngineHoldsChat
     ? (m: T) => isRowOfBackend(m, standbyName)
     : (m: T) => isBuiltinEngineEntry(m)
-  if (!label) return { label: null, switching: [], rest: models }
+  // Der Halter bekommt nur dann eine eigene Ueberschrift, wenn er fremd ist.
+  // Haelt unsere Engine den Platz, bleiben ihre GGUFs bei den Familien, denn
+  // dort sagt die Ueberschrift etwas ueber die Datei.
+  const halter = !luEngineHoldsChat && holderName ? holderName : null
+  const holding: T[] = []
   const switching: T[] = []
   const rest: T[] = []
-  for (const m of models) (gehoertDazu(m) ? switching : rest).push(m)
-  return { label, switching, rest }
+  for (const m of models) {
+    if (label && gehoertDazu(m)) switching.push(m)
+    else if (halter && isRowOfBackend(m, halter)) holding.push(m)
+    else rest.push(m)
+  }
+  return { label: label ?? null, switching, holderLabel: halter, holding, rest }
 }
 
 /** One heading and the rows under it. */
