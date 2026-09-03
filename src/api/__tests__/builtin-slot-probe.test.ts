@@ -100,11 +100,16 @@ describe('the AI Backends row goes through that reader', () => {
 
   it('there is a "Not running" state and it is not painted as a failure', () => {
     expect(providerConfig).toContain('Not running')
-    expect(providerConfig).toMatch(/status === 'stopped' \? 'bg-amber-500'/)
+    // Seit "Reachable, no models" dazukam, teilen sich die beiden
+    // bernsteinfarbenen Lagen den Punkt: ein Motor, der noch nicht gestartet
+    // ist, und ein Server, der laeuft und nichts anzubieten hat. Rot ist
+    // weiterhin keiner von beiden, und darum ging es hier.
+    expect(providerConfig).toMatch(/status === 'stopped' \|\| status === 'no-models' \? 'bg-amber-500'/)
+    expect(providerConfig).not.toMatch(/status === 'stopped' \? 'bg-red-500'/)
   })
 
   it('the user-facing strings on this row are English', () => {
-    for (const s of ['Not running', 'Connected', 'Failed']) {
+    for (const s of ['Not running', 'Connected', 'Failed', 'Reachable, no models']) {
       expect(providerConfig).toContain(s)
     }
   })

@@ -8,6 +8,7 @@ import { useSettingsStore } from '../../stores/settingsStore'
 import { useCodexStore } from '../../stores/codexStore'
 import { useRemoteStore, REMOTE_DEV_MODE_ERROR } from '../../stores/remoteStore'
 import { backendCall, isTauri } from '../../api/backend'
+import { useDismissOnEscape } from '../../hooks/useDismissOnEscape'
 import {
   conversationMatches, sameSidebarRows, toSidebarRow, type SidebarRow,
 } from './sidebar-rows'
@@ -72,6 +73,11 @@ export function Sidebar() {
   const [countdown, setCountdown] = useState('')
   const [dispatchPicker, setDispatchPicker] = useState(false)
   const [qrModalOpen, setQrModalOpen] = useState(false)
+  // Dieselbe Luecke wie in ChatView: das Zeilenmenue weiter unten hatte seinen
+  // Escape-Pfad, diese beiden Flaechen nie. Eine Datei mit drei Flaechen kam
+  // durch, weil EINE davon gepflegt war.
+  useDismissOnEscape(dispatchPicker, () => setDispatchPicker(false))
+  useDismissOnEscape(qrModalOpen, () => setQrModalOpen(false))
   // Right-click menu on a conversation row. sweenscapehub searched the whole
   // app and right-clicked the chats before asking in Discord how to delete one
   // (2026-07-30): the buttons existed, but at 10 px and only on hover, and the
