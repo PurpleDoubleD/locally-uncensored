@@ -4,7 +4,7 @@ import { resolve, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { toolResultIsFailure } from '../tool-result-failure'
 import { applyResultToToolCall } from '../../api/agents/tool-executor'
-import type { AgentToolCall } from '../../types/agent'
+import type { AgentToolCall } from '../../types/agent-mode'
 
 /**
  * Ein Haken in der Schrittliste muss heissen, dass es geklappt hat.
