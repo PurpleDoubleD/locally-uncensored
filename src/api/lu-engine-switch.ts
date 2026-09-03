@@ -182,12 +182,33 @@ export function handBackChatProviderForRow(row: InstalledModelLike | null | unde
 }
 
 /**
+ * How long the standby server gets to answer before it is treated as silent.
+ *
+ * A16 counter-check follow-up: this call is awaited in the middle of
+ * `fetchModels`, so a standby server that accepts the connection and then
+ * never answers held up the WHOLE model list, on every refresh, for as long as
+ * the platform's own timeout allowed. A local server that has hung is not an
+ * exotic case (LM Studio loading a large model on a busy disk does it), and
+ * the cost of guessing wrong here is one missing heading until the next
+ * refresh, against an empty Models page for minutes.
+ *
+ * Three seconds because the server is on this machine: `/v1/models` is a
+ * directory listing off local disk, and anything that has not answered in
+ * three seconds is not about to.
+ */
+export const STANDBY_MODEL_LIST_TIMEOUT_MS = 3_000
+
+/**
  * The standby backend's own model list, read straight from its server.
  *
  * A one-off client rather than the registry's cached one: the registry is
  * keyed on the slot, and the slot is currently the LU Engine. Nothing is
  * cached, so a server that has gone away since simply throws and the caller
  * adds no rows, which is exactly the old behaviour.
+ *
+ * A server that hangs instead of refusing gets the same treatment after
+ * `STANDBY_MODEL_LIST_TIMEOUT_MS`: an empty list, not an error, because there
+ * is nothing here for the user to act on and the rest of the list must go up.
  */
 export async function listStandbyBackendModels(occupant: SlotOccupant): Promise<ProviderModel[]> {
   const client = new OpenAIProvider({
@@ -198,5 +219,17 @@ export async function listStandbyBackendModels(occupant: SlotOccupant): Promise<
     apiKey: '',
     isLocal: occupant.isLocal,
   })
-  return client.listModels()
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await Promise.race([
+      client.listModels(),
+      new Promise<ProviderModel[]>((resolve) => {
+        timer = setTimeout(() => resolve([]), STANDBY_MODEL_LIST_TIMEOUT_MS)
+      }),
+    ])
+  } finally {
+    // Whichever side won, the timer goes. Left running it would hold this
+    // closure for three seconds after every single model refresh.
+    if (timer) clearTimeout(timer)
+  }
 }
