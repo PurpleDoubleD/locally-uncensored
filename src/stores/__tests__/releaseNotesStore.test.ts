@@ -87,9 +87,34 @@ describe('the notes table', () => {
       'repair environment', 'model storage', 'civitai', 'hip sdk',
       'vram_total', 'libvulkan1', 'working directory', 'document chat',
       'prompt history', 'side panel', 'researched rather than proven', 'apple music', 'too big to scan',
+      // A14 third review: "moves to a free port when 8127 is taken" reads on
+      // its own as if the engine then lives there. It does not, and the note
+      // has to say which one of the two it is.
+      'begins at 8127 again',
     ]) {
       expect(prose, `${shipping}: nothing about "${anchor}"`).toContain(anchor)
     }
+  })
+
+  it('says nothing in the shipping note twice, word for word', () => {
+    // A14 third review: "The built-in engine is called LU Engine from now on."
+    // stood in `lines` and again in `details.Local`, identical to the letter.
+    // Two copies of one sentence drift apart at the next edit, and until they
+    // do, the reader meets the same statement twice in one popup. The summary
+    // lines are a summary; the details are the detail.
+    const shipping = JSON.parse(
+      readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), '../../../package.json'), 'utf8'),
+    ).version as string
+    const note = releaseNoteFor(shipping)
+    // Long sentences only: a short one can legitimately repeat.
+    const sentences = (text: string) =>
+      text.split(/(?<=\.)\s+/).map((x) => x.trim().toLowerCase()).filter((x) => x.length > 30)
+    const inLines = new Set((note?.lines ?? []).flatMap(sentences))
+    const repeated = (note?.details ?? [])
+      .flatMap((s) => s.items)
+      .flatMap(sentences)
+      .filter((x) => inLines.has(x))
+    expect(repeated, 'said word for word in both places').toEqual([])
   })
 
   it('every file that carries the version carries the same one', () => {

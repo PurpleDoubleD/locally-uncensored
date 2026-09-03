@@ -47,8 +47,8 @@ export const RELEASE_NOTES: ReleaseNote[] = [
         items: [
           'The side panel folds away. While it is closed your latest chats sit on the main screen, and they belong to the panel again the moment you open it.',
           'What the open chat actually ran on stopped taking a chip of its own in the composer row. It is a small dot on the corner of the model picker now, with the full sentence in the picker\'s tooltip, and it is only there when the chat on screen and the pick beside it disagree.',
-          'The built-in engine is called LU Engine from now on. Same engine, same models, same folder; only the name in Settings, in the model list and in the messages changed.',
-          'The LU Engine moves to a free port when 8127 is taken or reserved by the system, and it retries the start once after a failure instead of giving up until the next restart. Windows port reservations are marked as researched rather than proven, because no such reservation could be staged here.',
+          'The built-in engine goes by LU Engine now. Same engine, same models, same folder; only the name in Settings, in the model list and in the messages changed.',
+          'The LU Engine moves to a free port when 8127 is taken or reserved by the system, and it retries the start once after a failure instead of giving up until the next restart. The next start begins at 8127 again rather than staying on the port it had to move to, so the detour lasts only as long as the reason for it. Windows port reservations are marked as researched rather than proven, because no such reservation could be staged here.',
           'A chat model you downloaded stays visible as Installed even while the engine is not running, and its tile carries a Use button that starts the engine and loads that model, instead of showing you a file you cannot reach.',
           'The ComfyUI installer proves that the environment it just built can really import ComfyUI, installs back what is missing, and names a missing Visual C++ runtime instead of ending in a silent crash.',
           'Repair environment runs the same check with a time limit and a Cancel that really cancels, and the trainer setup stopped blaming the network for failures that were never about the network.',
@@ -69,7 +69,7 @@ export const RELEASE_NOTES: ReleaseNote[] = [
       {
         title: 'Cloud',
         items: [
-          'Reasoning models carry an effort control next to the Think button. Low, Medium and High, with Max on GLM 5.3, decide how many tokens a reply may spend on thinking. The rungs come from the server per model, so a model that has only two of them is offered two, and a model with none keeps the plain Think button it always had.',
+          'A reasoning model gets an effort control beside its Think button. Low, Medium and High, with Max on GLM 5.3, decide how many tokens a reply may spend on thinking. The rungs come from the server per model, so a model that has only two of them is offered two, and a model with none keeps the plain Think button it always had.',
           'GLM 5.3 (Pro) and GLM 5.3 Flash (Hosted) are in the cloud catalogue.',
           'The cloud model list keeps one fixed order. The upstream provider shuffles its own list on every call, measured three times with three different orders, so a new chat opened on whatever happened to be first that time. The catalogue order decides now, and a new chat starts on the same model every time.',
           'Document Chat works in Cloud mode. Your files are indexed on your own machine and only the passages that match your question travel with the prompt, and if indexing runs on an Ollama you pointed at another machine, the panel says so instead of pretending otherwise.',
