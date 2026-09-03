@@ -1112,6 +1112,22 @@ fn stderr_blames_the_model_file(stderr: &str) -> bool {
 /// driver or engine build that does not know it fails at load time, and
 /// setting GPU Layers to 0 is the one setting in this app that gets the user
 /// chatting anyway.
+/// Put `note` directly under the first paragraph, ABOVE the engine's own log.
+///
+/// The order matters more than it looks. Persona P5 measured the message on
+/// the real build on 03.09.2026: the good news, "The model that was serving
+/// before is running again", sat at the very bottom, behind twelve lines of
+/// llama-server output with full Windows paths. It is the only sentence in
+/// that message a user can do anything with, and it was the last thing anyone
+/// would ever read. A message is read from the top, so the sentences a person
+/// needs belong at the top and the machine's own words at the end.
+pub(crate) fn with_note_on_top(message: &str, note: &str) -> String {
+    match message.split_once("\n\n") {
+        Some((head, log)) => format!("{head}\n\n{note}\n\n{log}"),
+        None => format!("{message}\n\n{note}"),
+    }
+}
+
 pub(crate) fn start_failure_message(failure: &StartFailure, port: u16, budget: Duration) -> String {
     let head = if failure.port_taken {
         format!(
@@ -1298,7 +1314,7 @@ fn start_bundled_engine_blocking(
         Ok(v) => Ok(v),
         Err(msg) => Err(match (vorher, resolve_engine_binary(app)) {
             (Some(p), Some(bin)) if restore_engine(&bin, state, &p) => {
-                format!("{msg}\n\n{RESTORED_NOTE}")
+                with_note_on_top(&msg, RESTORED_NOTE)
             }
             _ => msg,
         }),
@@ -3318,6 +3334,41 @@ mod tests {
         // Und der Startweg danach ist EINE Funktion, nicht wieder ein Rumpf
         // mit eigenen Ausgaengen.
         assert!(wechsel.contains("start_after_stop("));
+        // Die gute Nachricht wird eingesetzt, nicht angehaengt. Ein
+        // `format!("{msg}\n\n...")` schoebe sie wieder hinter das Protokoll.
+        assert!(
+            wechsel.contains("with_note_on_top(&msg, RESTORED_NOTE)"),
+            "the good news is appended again instead of put on top"
+        );
+    }
+
+    #[test]
+    fn die_gute_nachricht_steht_ueber_dem_protokoll_und_nicht_darunter() {
+        let f = StartFailure {
+            died: true,
+            port_taken: false,
+            stderr: KAPUTTE_VERSION_STDERR.into(),
+        };
+        let msg = with_note_on_top(
+            &start_failure_message(&f, 8127, Duration::from_secs(60)),
+            RESTORED_NOTE,
+        );
+        let notiz = msg.find(RESTORED_NOTE).expect("the note is gone");
+        let protokoll = msg.find("gguf_init_from_reader").expect("the log is gone");
+        assert!(
+            notiz < protokoll,
+            "the note sits behind the engine log again:\n{msg}"
+        );
+        // Und der Satz mit dem Handlungsvorschlag bleibt ganz oben.
+        assert!(msg.find("refused the model file").unwrap() < notiz, "{msg}");
+    }
+
+    #[test]
+    fn eine_meldung_ganz_ohne_protokoll_bekommt_die_notiz_trotzdem() {
+        // Negativkontrolle zum Aufteilen: ohne Leerzeile gibt es nichts zu
+        // trennen, und die Notiz darf nicht verloren gehen.
+        let msg = with_note_on_top("Es ging schief.", RESTORED_NOTE);
+        assert_eq!(msg, format!("Es ging schief.\n\n{RESTORED_NOTE}"));
     }
 
     #[test]
