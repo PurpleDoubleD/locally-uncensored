@@ -90,11 +90,30 @@ export function runsActive(): boolean {
  */
 export function runStatusOf(conversationId: string | null | undefined): CodexThreadStatus {
   if (!conversationId) return 'idle'
-  const generating = useGenerationStore.getState().generating[conversationId] === true
-  const thread = useCodexStore.getState().threads[conversationId]?.status
+  return runStatusFrom(
+    useGenerationStore.getState().generating[conversationId] === true,
+    useCodexStore.getState().threads[conversationId]?.status,
+    isRunStopped(conversationId),
+  )
+}
+
+/**
+ * Derselbe Spruch, aber aus mitgegebenen Werten statt aus dem Speicher.
+ *
+ * Eine React-Komponente darf den Speicher nicht per `getState()` lesen, sonst
+ * zeichnet sie nicht neu, wenn er sich aendert. Sie abonniert die beiden
+ * Quellen einzeln und fragt HIER nach dem Urteil, statt sich ein zweites
+ * daneben zu bauen. Genau das ist der Fehler, den AS-08 oben beschreibt.
+ * `runStatusOf` ist seitdem nur noch die Fassung, die selbst nachschlaegt.
+ */
+export function runStatusFrom(
+  generating: boolean,
+  thread: CodexThreadStatus | undefined,
+  stopped: boolean,
+): CodexThreadStatus {
   const active = generating || (thread !== undefined && isActiveCodexStatus(thread))
   if (!active) return thread === 'error' ? 'error' : 'idle'
-  if (isRunStopped(conversationId)) return 'cancelling'
+  if (stopped) return 'cancelling'
   if (thread && thread !== 'running' && isActiveCodexStatus(thread)) return thread
   return 'running'
 }
