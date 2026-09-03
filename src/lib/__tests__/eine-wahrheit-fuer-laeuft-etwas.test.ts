@@ -22,6 +22,7 @@ import {
   runStatusOf,
   isRunActive,
   whenRunsIdle,
+  subscribeRuns,
 } from '../run-idle'
 import {
   CODEX_THREAD_STATUSES,
@@ -344,5 +345,60 @@ describe('mehrere offene Laeufe nebeneinander', () => {
     useGenerationStore.getState().setGenerating('a', true)
     expect(runStatusOf('b')).toBe('idle')
     expect(isRunActive('b')).toBe(false)
+  })
+})
+
+describe('EINE Anmeldung fuer alle drei Quellen', () => {
+  // Die Oberflaeche soll "Senden", "Stop" und "Platz 2" zeigen koennen, und
+  // dafuer neu malen, sobald sich irgendetwas daran aendert. Die drei
+  // Quellen einzeln zu abonnieren waere dieselbe Liste ein zweites Mal, und
+  // wer beim naechsten Umbau eine davon vergisst, sieht keinen Fehler,
+  // sondern ein Plaettchen, das stehen bleibt.
+  //
+  // Die Antworten sind alle einfache Werte (eine Zeichenkette, eine Zahl, ein
+  // Ja/Nein), also genuegt `useSyncExternalStore(subscribeRuns, () =>
+  // runStatusOf(id))` ohne jede Zwischenspeicherung.
+  it('weckt bei einem Lauf, der anfaengt', () => {
+    let geweckt = 0
+    const ab = subscribeRuns(() => { geweckt++ })
+    useGenerationStore.getState().setGenerating('a', true)
+    expect(geweckt).toBeGreaterThan(0)
+    ab()
+  })
+
+  it('weckt bei einem Coding-Thread, der seinen Zustand wechselt', () => {
+    useCodexStore.getState().initThread('conv-c', '/tmp')
+    let geweckt = 0
+    const ab = subscribeRuns(() => { geweckt++ })
+    useCodexStore.getState().setThreadStatus('conv-c', 'running')
+    expect(geweckt).toBeGreaterThan(0)
+    ab()
+  })
+
+  it('weckt bei der Schlange, die keiner der beiden Speicher sieht', () => {
+    admit('local', 'a', () => {})
+    let geweckt = 0
+    const ab = subscribeRuns(() => { geweckt++ })
+    admit('local', 'b', () => {})
+    expect(geweckt).toBeGreaterThan(0)
+    ab()
+  })
+
+  it('GEGENPROBE: abgemeldet ist abgemeldet, in allen drei Quellen', () => {
+    admit('local', 'a', () => {})
+    useCodexStore.getState().initThread('conv-c', '/tmp')
+    let geweckt = 0
+    subscribeRuns(() => { geweckt++ })()
+    useGenerationStore.getState().setGenerating('x', true)
+    useCodexStore.getState().setThreadStatus('conv-c', 'running')
+    admit('local', 'b', () => {})
+    expect(geweckt).toBe(0)
+  })
+
+  it('die Antwort ist ein einfacher Wert, den useSyncExternalStore vergleichen kann', () => {
+    admit('local', 'a', () => {})
+    admit('local', 'b', () => {})
+    expect(runStatusOf('b')).toBe(runStatusOf('b'))
+    expect(typeof runStatusOf('b')).toBe('string')
   })
 })

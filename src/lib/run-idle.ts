@@ -163,6 +163,35 @@ export function isRunActive(conversationId: string | null | undefined): boolean 
 }
 
 /**
+ * Wake `listener` whenever ANY of the three sources moves: a generating flag,
+ * a coding thread's status, or the local lane's queue.
+ *
+ * This exists so the list of sources is written down ONCE. Every reader of
+ * this module needs the same three, and a reader that subscribes to two of
+ * them shows no error: it shows a Stop button that never turns back into
+ * Send, or a queue chip that stays on position 2 while the queue moves on.
+ * That is the house's most expensive pattern, two paths and one of them
+ * maintained, in the place where it is hardest to see.
+ *
+ * Meant for `useSyncExternalStore`, together with any of the verdict
+ * functions above as the snapshot:
+ *
+ *     useSyncExternalStore(subscribeRuns, () => runStatusOf(convId))
+ *
+ * All of them answer with a plain value (a string, a number, a boolean), so
+ * `Object.is` settles it and no snapshot has to be cached to keep its
+ * identity.
+ */
+export function subscribeRuns(listener: () => void): () => void {
+  const unsubs = [
+    useGenerationStore.subscribe(listener),
+    useCodexStore.subscribe(listener),
+    subscribeRunLanes(listener),
+  ]
+  return () => { for (const u of unsubs) u() }
+}
+
+/**
  * Call `show` now when no run is active, otherwise the moment the last run
  * ends. Returns a cancel function that withdraws a still-deferred `show`
  * without firing it; after `show` ran, cancelling is a no-op. Neither store
@@ -170,10 +199,11 @@ export function isRunActive(conversationId: string | null | undefined): boolean 
  * design, codexStore persists only the working directory), so a crash can
  * never leave this waiting on a ghost run.
  *
- * All THREE sources are listened to, and the third is the one that used to be
- * missing: a run that is only booked, waiting for the local lane, ends by
- * leaving a queue that neither store can see. Without that subscription the
- * last waiting run could go away and leave a deferred modal sitting.
+ * All THREE sources are listened to, through the one `subscribeRuns` above.
+ * The third is the one that used to be missing: a run that is only booked,
+ * waiting for the local lane, ends by leaving a queue that neither store can
+ * see. Without that subscription the last waiting run could go away and leave
+ * a deferred modal sitting.
  */
 export function whenRunsIdle(show: () => void): () => void {
   if (!runsActive()) {
@@ -181,18 +211,16 @@ export function whenRunsIdle(show: () => void): () => void {
     return () => {}
   }
   let done = false
-  const unsubs: (() => void)[] = []
+  let abmelden: (() => void) | null = null
   const check = () => {
     if (done || runsActive()) return
     done = true
-    for (const u of unsubs) u()
+    abmelden?.()
     show()
   }
-  unsubs.push(useGenerationStore.subscribe(check))
-  unsubs.push(useCodexStore.subscribe(check))
-  unsubs.push(subscribeRunLanes(check))
+  abmelden = subscribeRuns(check)
   return () => {
     done = true
-    for (const u of unsubs) u()
+    abmelden?.()
   }
 }
