@@ -108,6 +108,33 @@ export function luEngineStartFailureNote(modelName: string, reason: unknown): st
   return `Couldn't start the LU Engine with "${displayModelName(modelName)}": ${text}`
 }
 
+/**
+ * Write that sentence where it survives, and hand it back for the door it
+ * came through.
+ *
+ * Persona P5 measured this on the real Windows build on 03.09.2026: a click on
+ * a broken GGUF, then the picker closed after two seconds, the way a person
+ * uses it. The chat was without an engine for 7,4 seconds, two processes
+ * started and died, and for 75 seconds the page did not gain a single line of
+ * text. The failure was written into the dropdown only, and the dropdown was
+ * gone. The answer arrives 12 to 21 seconds after the click, so "the user is
+ * still looking at it" is not an assumption this app may make.
+ *
+ * The standing row above the composer is where it goes now, the same row the
+ * switch note uses, and an 'error' there has no self-clearing timer.
+ * `switched` folds in the sentence about the moved backend, because a start
+ * that failed after the slot was handed over is exactly when both facts
+ * matter.
+ */
+export function announceLuEngineStartFailure(
+  modelName: string, reason: unknown, switched: boolean,
+): string {
+  const line = luEngineStartFailureNote(modelName, reason)
+  const full = switched ? `${LU_ENGINE_SWITCH_NOTE} ${line}` : line
+  useLuEngineSwitchStore.getState().announce(full, 'error')
+  return full
+}
+
 /** The shipped address of the engine. The real port is written back by
  *  `syncBuiltinEnginePort` as soon as it starts, exactly as it is for a
  *  takeover from the provider card. */

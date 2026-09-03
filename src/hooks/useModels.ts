@@ -20,7 +20,7 @@ import { dropDuplicateLuEngineRows, dropStandbyRowsServedByLuEngine } from '../l
 import { isBuiltinEngineEntry, type InstalledModelLike } from '../lib/lmstudio-match'
 import {
   ensureLuEngineIsChatProvider, LU_ENGINE_SWITCH_NOTE, LU_ENGINE_FILE_GONE,
-  announceLuEngineSwapBusy, luEngineStartFailureNote,
+  announceLuEngineSwapBusy, announceLuEngineStartFailure,
   standbyChatBackend, listStandbyBackendModels, handBackChatProviderForRow,
   chatProviderSwitchNote,
 } from '../api/lu-engine-switch'
@@ -612,9 +612,7 @@ export function useModels() {
       // helper, in the status row that is drawn right above the list.
       const sayItFailed = (reason: unknown) => {
         if (vorherAktiv !== name) setActiveModel(vorherAktiv)
-        const line = luEngineStartFailureNote(name, reason)
-        useLuEngineSwitchStore.getState()
-          .announce(switched ? `${LU_ENGINE_SWITCH_NOTE} ${line}` : line, 'error')
+        announceLuEngineStartFailure(name, reason, switched)
       }
       return activateBuiltinModel(name)
         // False is not a shrug: the path could not be resolved even after a

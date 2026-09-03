@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useLayoutEffect } from 'react'
 import { useDismissOnEscape } from '../../hooks/useDismissOnEscape'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Ban, ChevronDown, Loader2, Power, PlayCircle, Settings as SettingsIcon, Wrench, X, Cloud } from 'lucide-react'
@@ -25,7 +25,7 @@ import { isBuiltinEngineEntry, type InstalledModelLike } from '../../lib/lmstudi
 import type { HandoverSlot } from '../../lib/openai-slot-handover'
 import {
   ensureLuEngineIsChatProvider, LU_ENGINE_SWITCH_NOTE, LU_ENGINE_SWAP_BUSY_NOTE,
-  announceLuEngineSwapBusy, luEngineStartFailureNote,
+  announceLuEngineSwapBusy, announceLuEngineStartFailure,
   LM_STUDIO_LOAD_BUSY_NOTE, announceLmStudioLoadBusy,
   handBackChatProviderForRow, chatProviderSwitchNote, standbyBackendOf,
 } from '../../api/lu-engine-switch'
@@ -621,6 +621,23 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
   const [ollamaLoaded, setOllamaLoaded] = useState<Set<string>>(new Set())
   const [togglingOllama, setTogglingOllama] = useState<string | null>(null)
   const ref = useRef<HTMLDivElement>(null)
+  /**
+   * Wie hoch das Aufklappmenue hoechstens werden darf, in Pixeln.
+   *
+   * Persona P5 hat am 03.09.2026 am echten Build gemessen: nach einem
+   * Fehlstart war das Menue 902 px hoch in einem 808 px hohen Fenster, der
+   * Kasten mit der Fehlermeldung begann bei -149 px, also oberhalb des
+   * Fensterrands, und weil das Menue `overflow-hidden` traegt, kam man da
+   * weder mit dem Mausrad noch mit `scrollTop` hin. Sichtbar blieb nur das
+   * rohe Maschinenprotokoll, der Satz mit dem Namen des Modells und dem
+   * Handlungsvorschlag war unerreichbar.
+   *
+   * Ein festes `max-h` in vh reicht dafuer nicht: das Menue haengt mit
+   * `bottom-full` am Ausloeser, und wie viel Platz DARUEBER ist, weiss nur
+   * der Ausloeser selbst. Also gemessen, bei jedem Oeffnen und bei jeder
+   * Groessenaenderung des Fensters.
+   */
+  const [menuePlatz, setMenuePlatz] = useState<number | null>(null)
 
   // Keep the per-row On/Off LOAD state LIVE while the dropdown is open
   // (David 2026-06-12: "on und offload button sehr delayed und nicht immer
@@ -857,12 +874,17 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
       }
       setSelectError(null)
       setSelectingLms(id)
+      // Der Fangzweig unten muss wissen, ob der Platz schon uebergeben war,
+      // also steht die Antwort ausserhalb des try. Die Uebergabe selbst bleibt
+      // drin, damit sie weiter mitgefangen wird.
+      let switched = false
       try {
         // Announced BEFORE the start is attempted and NOT into this dropdown,
         // which the pick closes a few lines further down. It goes to the
         // standing status row above the composer, so it survives both the
         // close on success and the error banner on failure (A14 review 2).
-        if (ensureLuEngineIsChatProvider()) {
+        switched = ensureLuEngineIsChatProvider()
+        if (switched) {
           useLuEngineSwitchStore.getState().announce(LU_ENGINE_SWITCH_NOTE)
         }
         const swapped = await activateBuiltinModel(model.name)
@@ -877,7 +899,14 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
       } catch (e) {
         // Shared with the Installed card, which used to swallow this failure
         // whole. One sentence, one place it is written (A14 third review).
-        setSelectError(luEngineStartFailureNote(model.name, e))
+        //
+        // Und in BEIDE Zeilen, nicht nur in diese hier. Persona P5 hat am
+        // 03.09.2026 am echten Build den Waehler zwei Sekunden nach dem Klick
+        // geschlossen, so wie ein Mensch es tut: die Antwort kommt erst 12 bis
+        // 21 s spaeter, sie stand nur in diesem Kasten, und der Kasten war
+        // weg. 7,4 s ohne Engine, zwei Prozessstarts, und 75 s lang keine
+        // einzige neue Textzeile auf der Seite.
+        setSelectError(announceLuEngineStartFailure(model.name, e, switched))
       } finally {
         setSelectingLms(null)
         releaseLuEngineSwap()
@@ -995,6 +1024,24 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
   const hasOllamaModels = textModels.some(m => ('provider' in m && m.provider === 'ollama') || !('provider' in m))
   textModelsEmptyRef.current = textModels.length === 0
 
+  // Messen, wie viel Fenster ueber (bzw. unter) dem Ausloeser noch frei ist.
+  // 18 px Abzug: 6 px Abstand des Menues zum Ausloeser plus 12 px Luft zum
+  // Fensterrand. Die Untergrenze von 200 px ist die Notbremse fuer ein sehr
+  // flaches Fenster, in dem sonst ein Menue ohne Inhalt herauskaeme.
+  useLayoutEffect(() => {
+    if (!open) return
+    const messen = () => {
+      const el = ref.current
+      if (!el) return
+      const r = el.getBoundingClientRect()
+      const frei = openUpward ? r.top : window.innerHeight - r.bottom
+      setMenuePlatz(Math.max(200, Math.round(frei - 18)))
+    }
+    messen()
+    window.addEventListener('resize', messen)
+    return () => window.removeEventListener('resize', messen)
+  }, [open, openUpward])
+
   return (
     <div ref={ref} className="relative">
       {/* ── Trigger Button ── */}
@@ -1048,7 +1095,9 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
       <AnimatePresence>
         {open && (
           <motion.div
-            className={`absolute w-72 rounded-lg overflow-hidden z-50 lu-elevated ${
+            data-testid="model-picker-menu"
+            style={menuePlatz === null ? undefined : { maxHeight: menuePlatz }}
+            className={`absolute w-72 rounded-lg overflow-x-hidden overflow-y-auto scrollbar-thin z-50 lu-elevated ${
               openUpward ? 'bottom-full mb-1.5 right-0' : 'top-full mt-1.5 left-1/2 -translate-x-1/2'
             }`}
             initial={{ opacity: 0, y: openUpward ? 6 : -6, scale: 0.98 }}
@@ -1081,7 +1130,10 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
             {/* §18 — surfaced when an LM Studio auto-load (on select) failed,
                 so the user isn't left wondering why the model didn't switch. */}
             {selectError && (
-              <div className="mx-2 mt-2 px-2 py-1.5 rounded bg-red-500/10 border border-red-500/20 t-micro text-red-600/90 dark:text-red-300/90 leading-snug">
+              <div
+                data-testid="model-picker-error"
+                className="mx-2 mt-2 px-2 py-1.5 rounded bg-red-500/10 border border-red-500/20 t-micro text-red-600/90 dark:text-red-300/90 leading-snug max-h-[22vh] overflow-y-auto overflow-x-hidden scrollbar-thin whitespace-pre-wrap break-words"
+              >
                 {selectError}
               </div>
             )}
