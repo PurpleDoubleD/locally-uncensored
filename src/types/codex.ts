@@ -36,6 +36,12 @@ export interface CodexEvent {
  *  - `cancelling` — Stop was pressed and the tail of the run has not unwound
  *    yet. `lib/run-stop.ts` holds that fact per conversation, deliberately
  *    sticky, because "a stopped run's tail work … must all see the stop".
+ *  - `queued`: the run has been asked for and is waiting for the local lane,
+ *    because another local run holds the single GPU (`lib/run-lanes.ts`, and
+ *    the VRAM reason is written out there). Same shape of bug as the three
+ *    above: the state exists, and without a name for it a waiting chat reads
+ *    as idle. The composer offers Send for a conversation that already has a
+ *    run booked, and pressing it books a second one.
  *
  * The reason this matters is the one the audit names: a state the app has but
  * its type does not becomes a silent `else` at every branch. `run-idle.ts`
@@ -50,6 +56,7 @@ export interface CodexEvent {
 export type CodexThreadStatus =
   | 'idle'
   | 'running'
+  | 'queued'
   | 'awaiting_approval'
   | 'applying'
   | 'cancelling'
@@ -70,10 +77,19 @@ export type CodexThreadStatus =
  * over again. A run writing files to disk is the last moment you want to be
  * told the app is idle. And a cancelling run is not a finished run — that is
  * exactly the distinction T-28 / T-51 had to be taught.
+ *
+ * `queued` is ACTIVE too, and that is the one entry here worth arguing about,
+ * because a queued run is the only active state that is provably burning
+ * nothing: no request in flight, no tokens, no GPU. It counts anyway, because
+ * every caller of this map asks the same practical question, "may I act as
+ * if this conversation were free?", and for a queued run the answer is no.
+ * The user already pressed Send. The work is booked, the Stop button has
+ * something to cancel, and a composer that offers Send again books it twice.
  */
 const RUN_ACTIVE_BY_STATUS: Record<CodexThreadStatus, boolean> = {
   idle: false,
   running: true,
+  queued: true,
   awaiting_approval: true,
   applying: true,
   cancelling: true,

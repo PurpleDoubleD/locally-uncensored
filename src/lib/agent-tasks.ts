@@ -48,6 +48,145 @@ export const TASK_RESULT_CHARS = 8000
 
 export type AgentTaskStatus = 'running' | 'done' | 'failed' | 'cancelled'
 
+/**
+ * Was eine Aufgabe an Tokens gekostet hat.
+ *
+ * ── DAS IST EIN VERBRAUCHSZAEHLER, KEIN FUELLSTAND ──────────────────────────
+ *
+ * Die wichtigste Zeile dieser Datei, weil die Verwechslung teuer und
+ * naheliegend ist. `message.usage` (types/chat.ts:74) traegt fast dieselben
+ * Felder und meint etwas anderes: dort gilt "der letzte Zug gewinnt", weil
+ * `promptEvalCount` den GANZEN Kontext eines Zuges misst und der letzte Zug
+ * den vollsten Prompt hatte. Das ist ein Fuellstand, und TokenCounter zeigt
+ * ihn gegen das Kontextfenster.
+ *
+ * Hier wird SUMMIERT, ueber alle Zuege eines Agentenlaufs. Ein Agent mit
+ * zwanzig Werkzeugschritten schickt den wachsenden Verlauf zwanzigmal, und
+ * genau das ist, was er gekostet hat. Wer diese Summe an ein Kontextfenster
+ * haelt, liest 400k auf einem 32k-Modell und meldet einen Fehler, den es
+ * nicht gibt.
+ *
+ * Getrennte Felder statt einer Summe: bezahlt wird verschieden. Ein Prompt-
+ * Token kostet bei jedem Anbieter weniger als ein erzeugtes, und ein Lauf,
+ * der viel liest und wenig schreibt, sieht nur getrennt richtig aus. Kein
+ * `total`-Feld daneben, weil eine mitgefuehrte Summe die dritte Zahl ist, die
+ * den beiden anderen widersprechen kann. `taskTokenTotal` rechnet sie aus.
+ */
+export interface TaskTokens {
+  prompt: number
+  completion: number
+  /**
+   * Geraten statt gemessen.
+   *
+   * Kein Schoenheitsfehler: der Hermes-XML-Transport und jeder Anbieter ohne
+   * `usage` liefern gar keine Zahlen, und eine Schaetzung, die sich als
+   * Messung ausgibt, wird zur Abrechnungsfrage. Die Anzeige muss es zeigen
+   * (`formatTaskTokens` setzt die Tilde davor).
+   */
+  estimated: boolean
+}
+
+/** Die Summe der beiden. Ausgerechnet und nicht mitgefuehrt, siehe oben. */
+export function taskTokenTotal(t: TaskTokens | undefined): number {
+  return t ? t.prompt + t.completion : 0
+}
+
+export const NO_TASK_TOKENS: TaskTokens = { prompt: 0, completion: 0, estimated: false }
+
+/**
+ * Zwei Staende zusammenzaehlen.
+ *
+ * DIE REGEL, DIE MAN LEICHT FALSCH BAUT: geschaetzt STECKT AN. Eine Summe aus
+ * einer gemessenen und einer geratenen Haelfte ist keine gemessene Zahl, auch
+ * wenn die gemessene die groessere war. Nebenan in hooks/codex/turn-usage.ts
+ * steht die verwandte Regel fuer den Fuellstand ("eine SCHAETZUNG darf eine
+ * ECHTE Zahl NIE ueberschreiben"); hier ist die Entsprechung fuers Summieren.
+ * Ohne sie verliert ein Lauf seine Tilde beim ersten Zug, der echte Zahlen
+ * meldet, und behauptet danach Genauigkeit fuer neunzehn geratene.
+ */
+export function addTaskTokens(a: TaskTokens | undefined, b: TaskTokens | undefined): TaskTokens {
+  if (!a) return b ?? NO_TASK_TOKENS
+  if (!b) return a
+  return {
+    prompt: a.prompt + b.prompt,
+    completion: a.completion + b.completion,
+    estimated: a.estimated || b.estimated,
+  }
+}
+
+/** Der Stand mehrerer Aufgaben, fuers Panel. Dieselbe Ansteckungsregel. */
+export function sumTaskTokens(tasks: ReadonlyArray<{ tokens?: TaskTokens }>): TaskTokens {
+  return tasks.reduce<TaskTokens>((acc, t) => addTaskTokens(acc, t.tokens), NO_TASK_TOKENS)
+}
+
+/**
+ * Die Zahlen EINES Modellzuges, gemessen wo moeglich, sonst geschaetzt.
+ *
+ * `chatWithTools` liefert `promptEvalCount`/`evalCount` (api/providers/types.ts:221),
+ * aber nur, wenn der Anbieter sie meldet. Fehlen sie, wird geschaetzt und die
+ * Zeile traegt es aus.
+ *
+ * `estimate` kommt als Argument herein und wird hier NICHT importiert. Die
+ * Hausschaetzung ist `estimateTokens` (lib/context-compaction.ts:22, also
+ * `ceil(Zeichen/4)+1` und nicht das blosse Zeichen/4, das man erwartet). Ihr
+ * Modul zieht ueber `getProviderForModel` und `useModelStore` den halben
+ * Anbieterbaum mit. agent-tasks.ts haengt bis heute an genau einem Import, und
+ * das soll so bleiben, weil es die reine Haelfte dieses Bereichs ist. Eine
+ * zweite eigene Schaetzformel hier waere schlimmer als der Import: dann gaebe
+ * es zwei, die auseinanderlaufen koennen. Also reicht der Aufrufer die eine
+ * herein.
+ *
+ * Eine 0 gilt als "nicht gemeldet", nicht als gemessene Null. Das ist die
+ * Auslegung, die reportTurnUsage schon trifft (`if (turn.promptEvalCount ||
+ * turn.evalCount)`); zwei verschiedene Auslegungen derselben 0 in einem Haus
+ * waeren die schlimmere Wahl.
+ */
+export function tokensFromTurn(
+  counts: { promptEvalCount?: number; evalCount?: number },
+  texte: { prompt: string; completion: string },
+  estimate: (text: string) => number,
+): TaskTokens {
+  const p = counts.promptEvalCount
+  const c = counts.evalCount
+  const echtPrompt = typeof p === 'number' && p > 0
+  const echtCompletion = typeof c === 'number' && c > 0
+  return {
+    prompt: echtPrompt ? p : estimate(texte.prompt),
+    completion: echtCompletion ? c : estimate(texte.completion),
+    // Nur wenn BEIDE Haelften gemessen sind, ist die Zeile eine Messung.
+    estimated: !(echtPrompt && echtCompletion),
+  }
+}
+
+/**
+ * Die Zahl fuers Panel, mit der Tilde bei einer Schaetzung.
+ *
+ * Die Tilde ist die Hauskonvention fuer eine geratene Zahl in einer engen
+ * Zeile (lib/formatters.ts:23, `~${...} left`). TokenCounter.tsx traegt sie
+ * NICHT: dort steht das Wort "Estimated:" im Tooltip und die Zahl bleibt
+ * nackt. Das geht dort, weil daneben ein Balken steht und Platz ist; eine
+ * Aufgabenzeile hat 240 Pixel und keinen Balken. Also beides: die Tilde in
+ * der Zeile, das Wort im Tooltip (`describeTaskTokens`).
+ *
+ * Bildschirmtext, deshalb englisch.
+ */
+export function formatTaskTokens(t: TaskTokens | undefined): string {
+  if (!t) return ''
+  const gesamt = taskTokenTotal(t)
+  if (gesamt <= 0) return ''
+  const k = gesamt >= 1000 ? `${(gesamt / 1000).toFixed(1)}k` : String(gesamt)
+  return `${t.estimated ? '~' : ''}${k} tok`
+}
+
+/** Der Tooltip dazu. Trennt die beiden Haelften und benennt die Schaetzung. */
+export function describeTaskTokens(t: TaskTokens | undefined): string {
+  if (!t || taskTokenTotal(t) <= 0) return ''
+  const kopf = t.estimated
+    ? 'Estimated tokens for this delegation'
+    : 'Tokens for this delegation, as reported by the model'
+  return `${kopf}: ${t.prompt.toLocaleString()} in, ${t.completion.toLocaleString()} out, summed over every step of the run`
+}
+
 /** Endzustände. Nur diese dürfen aus dem Ring fallen. */
 export const TERMINAL: readonly AgentTaskStatus[] = ['done', 'failed', 'cancelled']
 
@@ -61,7 +200,16 @@ export interface AgentTask {
   goal: string
   context: string
   status: AgentTaskStatus
-  /** Läuft im Hintergrund, der Elternzug wartet also nicht. */
+  /**
+   * Läuft im Hintergrund, der Elternzug wartet also nicht.
+   *
+   * `false` heisst Vordergrund: der Elternzug steht und wartet auf die
+   * Antwort (`sub-agent.ts`, `return await runner(...)`). Solche Laeufe
+   * bekamen frueher gar keine Zeile. Sie waren unsichtbar, und mit ihnen
+   * ihre Tokens, ihre Werkzeugzaehlung und die Zahl der Agenten, die gerade
+   * arbeiten. Das Feld allein reicht nicht, damit eine Vordergrundzeile
+   * gefahrlos mitlaeuft; was daran haengt, steht bei `taskAnswerDelivered`.
+   */
   background: boolean
   startedAt: number
   endedAt?: number
@@ -102,8 +250,57 @@ export interface AgentTask {
    * schlimmer als gar keiner: er wird geglaubt.
    */
   messages?: unknown[]
-  /** Wurde das Ende dem Elternagenten schon gemeldet? */
+  /**
+   * Wurde das Ende dem Elternagenten schon gemeldet?
+   *
+   * Gilt NUR fuer Hintergrundaufgaben. Eine Vordergrundzeile wird nie
+   * gemeldet, weil ihre Antwort den Elternagenten auf dem direkten Weg
+   * erreicht hat. Siehe `taskAnswerDelivered`.
+   */
   reported: boolean
+  /**
+   * Was der Lauf gekostet hat. `undefined` heisst: noch nichts gezaehlt.
+   *
+   * OPTIONAL mit Absicht, und das ist eine Vertragsentscheidung, keine
+   * Bequemlichkeit: `agentTaskStore.start` nimmt die Aufgabe als
+   * `Omit<AgentTask, 'status' | 'inbox' | ...>`, ein Pflichtfeld hier
+   * verlangte also sofort eine Aenderung an jeder Aufrufstelle in
+   * sub-agent.ts. Diese Datei und sub-agent.ts sollen unabhaengig voneinander
+   * geaendert werden koennen; optional macht genau das moeglich.
+   */
+  tokens?: TaskTokens
+}
+
+/**
+ * Ist die Antwort dieser Aufgabe schon beim Elternagenten angekommen?
+ *
+ * ── DIE SPERRKLINKE, DIE EINE VORDERGRUNDZEILE SONST VERKANTET ──────────────
+ *
+ * `reported` allein beantwortet das nur fuer Hintergrundaufgaben. Bei denen
+ * setzt `takeUnreported` den Merker in dem Moment, in dem die Antwort in den
+ * Verlauf des Elternzugs geht. Eine VORDERGRUNDaufgabe durchlaeuft diesen Weg
+ * nie: ihr Ergebnis ist der Rueckgabewert des Werkzeugaufrufs, es ist beim
+ * Elternagenten, bevor die Zeile ueberhaupt fertig geschrieben ist. Ihr
+ * `reported` bleibt fuer immer `false`.
+ *
+ * Zwei Dinge haengen daran, und beide gehen ohne diese Funktion schief:
+ *
+ *  1. DER RING (`applyTaskRing`) opfert in Rang 1 die, deren Antwort schon
+ *     angekommen ist, und schuetzt in Rang 2 die ungelesenen. Eine
+ *     Vordergrundzeile mit `reported: false` sieht wie eine ungelesene
+ *     Antwort aus und geniesst den Schutz, der den wirklich ungelesenen
+ *     gehoert. Vierzig fertige Vordergrunddelegationen verdraengten damit
+ *     Hintergrundantworten, die noch nie jemand gesehen hat, also genau den
+ *     Verlust, gegen den die zwei Raenge ueberhaupt gebaut wurden.
+ *  2. DIE MELDUNG (`takeUnreported`) holt alle beendeten, ungemeldeten
+ *     Zeilen. Eine Vordergrundzeile faende sich dort wieder und ginge ein
+ *     ZWEITES Mal an das Modell, diesmal als `[background-task]`: dieselbe
+ *     Antwort, die es eine Runde vorher schon als Werkzeugergebnis bekommen
+ *     hat. Ein Agent, der seine eigene Antwort zweimal liest, korrigiert sich
+ *     gegen sich selbst.
+ */
+export function taskAnswerDelivered(t: AgentTask): boolean {
+  return !t.background || t.reported
 }
 
 /** Kappt eine Werkzeugausgabe auf das, was eine Aufgabe behalten darf. */
@@ -138,8 +335,13 @@ export function applyTaskRing(tasks: AgentTask[], max = AGENT_TASKS_MAX_PER_CONV
   // Antwort ist kein Altpapier, sondern das Einzige, was von der Arbeit übrig
   // ist. Sie geht erst, wenn gar nichts anderes mehr da ist — und dann ist
   // der Speicher wirklich das kleinere Übel.
+  //
+  // `taskAnswerDelivered` und nicht `t.reported`: eine Vordergrundzeile wird
+  // nie gemeldet und traegt den Merker deshalb ewig auf `false`. Am rohen
+  // Merker gemessen saesse sie im Schutzrang der ungelesenen Antworten und
+  // verdraengte genau die. Die Begruendung steht ganz bei der Funktion.
   const opferbar = (t: AgentTask, rang: 1 | 2) =>
-    isTerminal(t.status) && (rang === 1 ? t.reported : true)
+    isTerminal(t.status) && (rang === 1 ? taskAnswerDelivered(t) : true)
 
   let weg = 0
   const raus = new Set<string>()
