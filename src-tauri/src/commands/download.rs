@@ -1813,14 +1813,14 @@ pub fn detect_model_path(provider: String) -> Result<serde_json::Value, String> 
 /// report that folder as evidence of an install.
 ///
 /// Installed is answered from the folder first because that is free on every
-/// platform, and only then from `install::lmstudio_lms_path()`, which knows the
-/// `lms` CLI on every layout. A user who has LM Studio but has not downloaded a
-/// model yet is therefore still recognised.
+/// platform, and only then from `install::lmstudio_installed()`, which knows
+/// the `lms` CLI and, on macOS, the app bundle. A user who has LM Studio but
+/// has not downloaded a model yet is therefore still recognised.
 ///
 /// ASYNC + spawn_blocking, the same shape as `list_bundled_models`: a
 /// SYNCHRONOUS Tauri command runs on the MAIN thread, and neither half of this
 /// one is cheap enough for that. `lmstudio_dir_in` touches the disk, and
-/// `lmstudio_lms_path()` walks several fixed paths and falls back to a `which`
+/// `lmstudio_installed()` walks several fixed paths and falls back to a `which`
 /// lookup, which spawns a process. Settings opens this on mount, so that was
 /// the window freezing while a panel drew one line of grey text. That is the
 /// same mistake the Mac ComfyUI search made in 2.6.8, one door further along.
@@ -1834,7 +1834,7 @@ pub async fn lmstudio_model_dir() -> Result<serde_json::Value, String> {
 fn lmstudio_model_dir_blocking() -> Result<serde_json::Value, String> {
     let home = dirs::home_dir().ok_or("Cannot find home directory")?;
     let found = lmstudio_dir_in(&home);
-    let installed = found.is_some() || crate::commands::install::lmstudio_lms_path().is_some();
+    let installed = found.is_some() || crate::commands::install::lmstudio_installed();
     Ok(serde_json::json!({
         "installed": installed,
         "path": found.map(|p| p.to_string_lossy().to_string()),
@@ -2100,15 +2100,42 @@ pub async fn check_model_sizes(
 mod tests {
     use super::*;
 
+    /// Der Rueckfall, den dieser Test verhindert, ist im Zusammenschluss des
+    /// Design-Stroms mit 2.6.8 einmal passiert: die Zeile fragte nur noch nach
+    /// der `lms`-CLI. Wer LM Studio ueber die Oberflaeche installiert und
+    /// `lms bootstrap` nie laufen laesst, hat keine CLI, und Settings meldete
+    /// "nicht installiert", obwohl das Programm da war.
+    ///
+    /// Die Nadeln sind aus zwei Haelften gebaut, damit dieser Test sie nicht
+    /// in sich selbst findet.
+    #[test]
+    fn the_lm_studio_row_asks_the_whole_question_not_just_the_cli() {
+        // Die ganze Datei, nicht nur die ausgelieferte Haelfte: sie hat mehrere
+        // Testmodule, ein Schnitt am ersten `#[cfg(test)]` liesse 98 Prozent
+        // des Quelltextes ungelesen und der Test waere still gruen.
+        let src = include_str!("download.rs");
+        let ganze_frage = format!("{}{}", "lmstudio_inst", "alled()");
+        let nur_cli = format!("{}{}", "lmstudio_lms_p", "ath().is_some()");
+        assert!(
+            src.contains(&ganze_frage),
+            "die Settings-Zeile fragt nicht mehr nach der ganzen Installation"
+        );
+        assert!(
+            !src.contains(&nur_cli),
+            "die Settings-Zeile fragt wieder nur nach der CLI, das App-Bundle faellt damit weg"
+        );
+    }
+
     #[tokio::test]
     async fn the_lm_studio_row_never_runs_on_the_main_thread() {
         // A14 review 3. A SYNCHRONOUS Tauri command runs on the MAIN thread,
-        // and this one reaches os_paths::lmstudio_installed() ->
-        // find_lmstudio_app() -> spotlight_app(), which spawns mdfind and
-        // waits for it. Settings asks on mount, so the shipped shape would
-        // have frozen the window on a Mac with a busy Spotlight index for as
-        // long as mdfind took. Same mistake the Mac ComfyUI search made in
-        // 2.6.8, one door further along.
+        // and this one reaches install::lmstudio_installed(), which walks
+        // fixed paths and can end in a `which` lookup that spawns a process.
+        // Settings asks on mount, so the synchronous shape froze the window
+        // for as long as that took. The Spotlight lookup that made the worst
+        // case seconds long is gone (see lmstudio_app_bundle), but disk and a
+        // spawned process are still not main-thread work. Same mistake the
+        // Mac ComfyUI search made in 2.6.8, one door further along.
         //
         // The guard is the TYPE, not the source text. A source-text check
         // would have been self-referential here: the assertion's own string

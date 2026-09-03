@@ -212,6 +212,42 @@ pub(super) fn lmstudio_gui_exe() -> Option<PathBuf> {
     if p.exists() { Some(p) } else { None }
 }
 
+/// Das App-Bundle an den zwei Stellen, an denen es unter macOS landet.
+///
+/// KEINE Spotlight-Suche. Die alte Fassung in `os_paths` hing hier ein
+/// `mdfind` an, und das war der Grund, warum die Settings-Zeile den
+/// Hauptthread blockieren konnte: auf einem Mac mit beschaeftigtem Index
+/// dauert der Aufruf Sekunden. Damit faellt der Fall weg, dass jemand LM
+/// Studio an eine ungewoehnliche Stelle gelegt hat. Wer das tut, hat fast
+/// immer auch `lms bootstrap` gelaufen, und dann findet ihn der Weg darueber.
+#[cfg(target_os = "macos")]
+fn lmstudio_app_bundle() -> Option<PathBuf> {
+    [
+        PathBuf::from("/Applications/LM Studio.app"),
+        dirs::home_dir()?.join("Applications").join("LM Studio.app"),
+    ]
+    .into_iter()
+    .find(|p| p.exists())
+}
+
+#[cfg(not(target_os = "macos"))]
+fn lmstudio_app_bundle() -> Option<PathBuf> {
+    // Windows deckt `lmstudio_lms_path` selbst ab, es kennt dort beide
+    // Programmverzeichnisse. Unter Linux liefert LM Studio ein AppImage ohne
+    // festen Ort, es gibt also nichts nachzusehen.
+    None
+}
+
+/// Ist LM Studio ueberhaupt da? Die `lms`-CLI ODER das App-Bundle.
+///
+/// Beide Haelften werden gebraucht: wer LM Studio ueber die Oberflaeche
+/// installiert und `lms bootstrap` nie laufen laesst, hat keine CLI und kein
+/// `~/.lmstudio`, und die Settings-Zeile meldete dann faelschlich "nicht
+/// installiert".
+pub(crate) fn lmstudio_installed() -> bool {
+    lmstudio_lms_path().is_some() || lmstudio_app_bundle().is_some()
+}
+
 /// Fast, BOUNDED reachability probe for the LM Studio server. A plain HTTP GET
 /// to a DOWN server is catastrophically slow on some Windows boxes: connecting
 /// to a closed `127.0.0.1:<port>` can take ~2 s to refuse (the IPv4 loopback
