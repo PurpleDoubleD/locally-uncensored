@@ -4,6 +4,120 @@ All notable changes to Locally Uncensored are documented here.
 
 ## [Unreleased]
 
+## [2.6.8] - 2026-09-03
+
+The effort release. A reasoning model gets a dial for how much thinking a
+reply may pay for, GLM 5.3 arrives in the cloud catalogue, and the built-in
+engine has a name of its own, the LU Engine.
+
+### Added
+
+- **An effort control beside the Think button** on a reasoning model. Low,
+  Medium and High, with Max on GLM 5.3, set how many tokens a reply may spend
+  on thinking. The steps come from the server for each model, so a model that
+  offers two shows two, and a model with none keeps the plain Think button it
+  always had.
+- **GLM 5.3 (Pro) and GLM 5.3 Flash (Hosted)** in the cloud catalogue.
+- **Document Chat works in Cloud mode.** Your files are indexed on your own
+  machine and only the passages that match your question travel with the
+  prompt. If indexing runs on an Ollama you pointed at another machine, the
+  panel says so.
+- **The side panel folds away**, and while it is closed your latest chats sit
+  on the main screen. They belong to the panel again the moment you open it.
+- **A Use button on an Installed tile.** It starts the LU Engine and loads that
+  model, rather than leaving you with a file you cannot reach.
+- **The Coding Agent's working directory can be removed again.** There is a
+  Remove button beside the folder picker and one in the header, both locked
+  while a run is going, and picking a different folder moves the current chat
+  over to it.
+- **The prompt history in Create can be cleared.** Every entry has its own
+  remove button, and Clear all at the top of the list wipes the lot after a
+  second click.
+- **The CivitAI API key has a field again**, under Settings, AI Backends,
+  Model Storage. Downloads from the CivitAI search carry the key, and a
+  download CivitAI refuses names the missing setting instead of a bare error
+  number.
+- **Settings shows the port the LU Engine actually runs on**, and the Model
+  Storage folder says when it could not be read or was too big to scan.
+- **A ComfyUI install or repair can be cancelled from Settings**, and it keeps
+  showing its progress while you look at other settings.
+
+### Changed
+
+- **The built-in engine goes by LU Engine.** Same engine, same models, same
+  folder; only the name in Settings, in the model list and in the messages
+  changed.
+- **Model Storage names the backend each folder belongs to.** It used to be one
+  field labelled "(auto-detect)" over a paragraph naming all three backends at
+  once. There are three rows now: the LU Engine folder you set, with the folder
+  that is actually being read spelled out while the field is empty; the LM
+  Studio folder, read only, or a sentence saying LM Studio is not installed;
+  and Ollama, which keeps its own store and has no folder to set.
+- **The cloud model list keeps one fixed order.** The upstream provider
+  shuffles its own list on every call, measured three times and returned in
+  three different orders, so a new chat opened on whatever happened to be
+  first. The catalogue order decides now.
+- **The model the open chat ran on lost its chip in the composer row.** It is a
+  small dot on the corner of the model picker, the full sentence sits in the
+  picker tooltip, and the dot only appears when the chat on screen and the pick
+  beside it disagree.
+- **On the Mac, picking a model folder under Desktop, Documents or Downloads
+  says up front that macOS will ask once for access to it**, instead of letting
+  that dialog arrive out of nowhere on the first scan.
+
+### Fixed
+
+- **The LU Engine moves to a free port when 8127 is taken** or reserved by the
+  system, and after a start that fails it retries once instead of giving up
+  until the next restart. The next start begins at 8127 again rather than
+  staying on the port it had to move to. Windows port reservations are marked
+  as researched rather than proven, because no such reservation could be staged
+  here.
+- **A chat model you downloaded stays visible as Installed** even while the
+  engine is not running.
+- **A running LM Studio stays in the model picker** after the chat has moved to
+  the LU Engine. Its models keep their own heading, and picking one hands the
+  local slot back to LM Studio with a line that says so. The way back is one
+  click, the same as the way out.
+- **The folder you set under Model Storage is read now, not only written to.**
+  Every GGUF in it, up to four levels down, appears under Installed and loads
+  from where it lies, whichever backend is serving your chat. On a machine
+  running Ollama, a GGUF in that folder was found on disk and then listed
+  nowhere.
+- **Subfolders named the way ComfyUI names its own**, loras or checkpoints, go
+  to ComfyUI through its extra model paths at the next start, so models on a
+  second drive show up there.
+- **The ComfyUI installer checks that the environment it just built can import
+  ComfyUI**, installs what is missing, and names a missing Visual C++ runtime
+  instead of ending in a silent crash.
+- **Repair environment runs the same check with a time limit and a Cancel
+  button that stops it**, and the trainer setup stopped blaming the network for
+  failures that had nothing to do with the network.
+- **AMD on Windows is read from the HIP SDK itself.** The only ROCm probe ran
+  rocm-smi, which the Windows SDK does not ship, so an installed ROCm went
+  unseen. LU reads HIP_PATH and hipinfo now and names the card architecture,
+  and an image run that fails names that architecture and get_arch_list instead
+  of a HIP traceback. Marked as researched rather than proven, because there is
+  no RDNA4 card here.
+- **The Model Manager stopped putting system RAM in the GPU field.** ComfyUI
+  reports system memory on a CPU device in a field called vram_total, so a
+  machine with 64 GB of RAM read as if it had 62 GB of video memory.
+- **The Linux packages ask for the libraries the LU Engine links against.** The
+  deb and the rpm named the desktop libraries but not libvulkan1 and libgomp1,
+  so on a machine without them the install went through, the engine died in the
+  loader, and the message blamed your graphics card. The missing library is
+  named now, together with the command that installs it. The AppImage needs the
+  Vulkan loader from your system as well, because an AppImage cannot carry that
+  one itself.
+- **On the Mac, LU stopped searching your whole home folder for a ComfyUI it
+  never runs there.** That search touched the Desktop and Music folders, so
+  macOS asked for access to Apple Music and to the Desktop at first launch, and
+  the window sat on LOADING while the search ran. On Windows and Linux the same
+  search moved off the main thread, so a slow disk no longer freezes the
+  window.
+- **Error messages from Windows arrive in English**, and a ComfyUI
+  requirements.txt that cannot be used is named instead of silently skipped.
+
 ## [2.6.7] - 2026-08-31
 
 The repair release. Every fix went back to a fresh tester who did not know what
