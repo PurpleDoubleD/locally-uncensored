@@ -82,8 +82,26 @@ engine has a name of its own, the LU Engine.
   packages rather than with the driver, so the card was found and its size was
   not. The size comes from the kernel now. An integrated AMD chip is
   deliberately left out, because the number it reports there is the fixed
-  carve-out rather than what it can actually use. This reading is covered by
-  tests but has not been run on an AMD card here.
+  carve-out rather than what it can actually use. This reading has now been
+  measured on a rented AMD Instinct card, where the kernel number and the
+  number ComfyUI reports for itself are the same number.
+- **An AMD compute card shows up at all now, and with its name.** A card built
+  without a display output reports itself to the system as a processing
+  accelerator rather than as graphics, and LU accepted only the three graphics
+  classes, so an AMD Instinct was missing from the hardware list entirely.
+  rocm-smi also names its columns differently from one version to the next, so
+  the card that was found came out as "AMD GPU" and its gfx target was thrown
+  away, although rocm-smi prints it in a column of its own. Measured on a
+  rented AMD Instinct MI325X: the card is listed with its name, its gfx target
+  and 255.7 GiB, PyTorch installs from the ROCm channel LU picks, and Create
+  rendered an image, a video, a song, a 4x upscale and a cutout on it.
+- **When ComfyUI does fall back to the processor, the reason it names is the
+  real one.** The only line in the output panel read "No NVIDIA driver
+  detected", which is the wrong hardware to name in front of someone holding
+  an AMD card: what actually decided it was the PyTorch inside that ComfyUI
+  environment reporting no usable card. The line says that now, it says
+  something different when the check did not answer at all, and it names the
+  switch when you chose Force CPU yourself.
 - **German phrasing reaches the chat tools.** Plain chat offers its tools only
   when it recognises what you asked for, and its German half misread two
   common cases. The filler word "mal", which turns up in most casual German

@@ -144,10 +144,14 @@ pub fn show_window(app: tauri::AppHandle) {
 /// - Not on macOS (Mac PyTorch uses MPS, which doesn't touch cuda APIs), AND
 /// - `nvidia-smi` is missing or exits non-zero (no NVIDIA card present).
 ///
-/// AMD ROCm + Intel XPU setups CURRENTLY fall into this branch too, which
-/// is conservative: they downgrade to CPU instead of crashing. A future
-/// enhancement can probe `rocm-smi` / Intel devices and skip `--cpu` for
-/// real hardware accel paths. For now the safe default is "no crash."
+/// This is only the BASELINE, and reading it as the whole decision is how the
+/// output panel came to tell an AMD user his NVIDIA driver was missing. The
+/// decision is `decide_comfy_cpu_flag`, which asks the comfy python's own torch
+/// when this baseline says yes: a ROCm or ZLUDA torch answers
+/// `torch.cuda.is_available() == True` and keeps `--cpu` off the command line.
+/// rhodium92 (AMD RX 6600 XT, 2026-07-01) is the report that added that step.
+/// So an AMD or Intel box only lands on the processor when its torch says it
+/// has no card, which is a different sentence and now says so.
 pub fn needs_cpu_fallback() -> bool {
     if cfg!(target_os = "macos") {
         return false;
@@ -422,6 +426,52 @@ pub(crate) fn force_gpu_warning(
         }
     };
     Some(format!("[LU] {head} {fix}"))
+}
+
+/// Warum laeuft ComfyUI gleich auf dem Prozessor? Ein Satz, oder None, wenn es
+/// gar nicht dazu kommt.
+///
+/// Die Zeile, die hier vorher stand, hiess "No NVIDIA driver detected" und war
+/// die einzige Erklaerung im Ausgabefenster. Fuer einen AMD-Nutzer benennt sie
+/// die falsche Hardware: er hat keinen NVIDIA-Treiber und wird auch nie einen
+/// haben, und der eigentliche Grund steht daneben, naemlich dass das torch in
+/// dieser Umgebung keine brauchbare Karte meldet. Das Band im Create-Tab sagt
+/// seit Runde 12 das Richtige, das Ausgabefenster sagte weiter das Falsche,
+/// und das Ausgabefenster ist die Stelle, an die jemand geht, wenn etwas
+/// klemmt.
+///
+/// Bewusst OHNE eine zweite Hardware-Abfrage: `gpu_vendors_present` schickt
+/// rocm-smi und lspci los, und der Start von ComfyUI ist genau der Moment, in
+/// dem der Nutzer wartet. Der Grund laesst sich ohne den Hersteller genau
+/// benennen, und der Weg zur AMD-Antwort steht im Band, das ohnehin erscheint.
+pub(crate) fn cpu_flag_reason(
+    mode: ComfyGpuMode,
+    baseline_needs_cpu: bool,
+    torch_gpu: Option<bool>,
+) -> Option<String> {
+    if !decide_comfy_cpu_flag(mode, baseline_needs_cpu, torch_gpu) {
+        return None;
+    }
+    Some(match mode {
+        ComfyGpuMode::ForceCpu => "ComfyUI GPU is set to Force CPU, so ComfyUI starts with --cpu. \
+             Set it back to Auto in Settings > Hardware to use the card again."
+            .to_string(),
+        // ForceGpu never passes --cpu, so the arm is unreachable through the
+        // guard above and says so instead of inventing a reason.
+        ComfyGpuMode::ForceGpu => "ComfyUI starts with --cpu.".to_string(),
+        ComfyGpuMode::Auto => match torch_gpu {
+            Some(false) => "The PyTorch in this ComfyUI environment reports no usable GPU, \
+                 so ComfyUI starts with --cpu. Reinstall the ComfyUI environment from \
+                 Settings > ComfyUI to rebuild PyTorch for the card LU detects."
+                .to_string(),
+            None => "The GPU probe in this ComfyUI environment did not answer, so ComfyUI \
+                 starts with --cpu for this start and the probe runs again next time."
+                .to_string(),
+            // Some(true) cannot reach this point: it is the one answer that
+            // drops the flag.
+            Some(true) => "ComfyUI starts with --cpu.".to_string(),
+        },
+    })
 }
 
 /// Skip these directories during ComfyUI search
@@ -1282,14 +1332,30 @@ fn comfy_needs_cpu(
     python: &str,
     mode: ComfyGpuMode,
     cache: Option<&Mutex<HashMap<String, bool>>>,
-) -> bool {
+) -> ComfyCpuDecision {
     let baseline = needs_cpu_fallback();
     let torch_gpu = if mode == ComfyGpuMode::Auto && baseline && !python.is_empty() {
         comfy_gpu_available_cached(python, cache)
     } else {
         None
     };
-    decide_comfy_cpu_flag(mode, baseline, torch_gpu)
+    ComfyCpuDecision {
+        needs_cpu: decide_comfy_cpu_flag(mode, baseline, torch_gpu),
+        baseline,
+        torch_gpu,
+    }
+}
+
+/// Das Ergebnis der Entscheidung samt der zwei Tatsachen, aus denen sie
+/// entstand. Die beiden wurden vorher weggeworfen, und genau deshalb musste
+/// die Zeile im Ausgabefenster raten, warum der Prozessor drankommt.
+struct ComfyCpuDecision {
+    /// Kommt `--cpu` an die Kommandozeile?
+    needs_cpu: bool,
+    /// `needs_cpu_fallback()`: kein NVIDIA-Treiber und kein macOS.
+    baseline: bool,
+    /// Was das torch dieser Umgebung ueber eine brauchbare Karte sagt.
+    torch_gpu: Option<bool>,
 }
 
 /// torch-GPU probe with an optional per-python cache (mirrors flash_attention_cached).
@@ -1502,7 +1568,8 @@ fn start_comfyui_blocking(state: &AppState) -> Result<serde_json::Value, String>
     // start). Detect NVIDIA via `nvidia-smi` and pass --cpu when absent,
     // except on macOS where PyTorch uses MPS and never calls cuda APIs.
     let gpu_mode = ComfyGpuMode::parse(&state.comfy_gpu_mode.lock().unwrap());
-    let needs_cpu_fallback = comfy_needs_cpu(&python, gpu_mode, Some(&state.comfy_gpu_cache));
+    let cpu_decision = comfy_needs_cpu(&python, gpu_mode, Some(&state.comfy_gpu_cache));
+    let needs_cpu_fallback = cpu_decision.needs_cpu;
     // shd_scorpion (RX 7900 XTX): remember what we actually launched with so
     // the Create tab can warn instead of letting a CPU gen time out silently.
     *state.comfy_started_cpu.lock().unwrap() = Some(needs_cpu_fallback);
@@ -1531,7 +1598,9 @@ fn start_comfyui_blocking(state: &AppState) -> Result<serde_json::Value, String>
     ];
     if needs_cpu_fallback {
         comfy_args.push("--cpu");
-        println!("[ComfyUI] No NVIDIA driver detected — passing --cpu to ComfyUI (CPU inference fallback)");
+        if let Some(reason) = cpu_flag_reason(gpu_mode, cpu_decision.baseline, cpu_decision.torch_gpu) {
+            println!("[ComfyUI] {reason}");
+        }
     }
     // Auto-enable Flash Attention when the package actually imports in THIS
     // python (David 2026-06-11: measured 4-5x faster WAN video sampling vs
@@ -2269,7 +2338,8 @@ pub fn auto_start_comfyui(state: &AppState) {
             // Bug J: same --cpu fallback as start_comfyui to avoid the
             // "Found no NVIDIA driver" crash loop on non-NVIDIA systems.
             let auto_gpu_mode = ComfyGpuMode::parse(&state.comfy_gpu_mode.lock().unwrap());
-            let auto_needs_cpu = comfy_needs_cpu(&python, auto_gpu_mode, Some(&state.comfy_gpu_cache));
+            let auto_decision = comfy_needs_cpu(&python, auto_gpu_mode, Some(&state.comfy_gpu_cache));
+            let auto_needs_cpu = auto_decision.needs_cpu;
             // Mirror of start_comfyui: expose the real launch mode to the UI.
             *state.comfy_started_cpu.lock().unwrap() = Some(auto_needs_cpu);
             let mut comfy_args: Vec<&str> = vec![
@@ -2280,7 +2350,9 @@ pub fn auto_start_comfyui(state: &AppState) {
             ];
             if auto_needs_cpu {
                 comfy_args.push("--cpu");
-                println!("[ComfyUI] Auto-start: no NVIDIA driver — passing --cpu");
+                if let Some(reason) = cpu_flag_reason(auto_gpu_mode, auto_decision.baseline, auto_decision.torch_gpu) {
+                    println!("[ComfyUI] Auto-start: {reason}");
+                }
             }
             // Mirror start_comfyui: auto-enable Flash Attention (FA2) when it
             // actually imports in this python. Boot auto-start previously never
@@ -2800,6 +2872,47 @@ mod tests {
         assert_eq!(force_gpu_warning(ComfyGpuMode::ForceGpu, None, true, "linux"), None);
         assert_eq!(force_gpu_warning(ComfyGpuMode::Auto, Some(false), true, "linux"), None);
         assert_eq!(force_gpu_warning(ComfyGpuMode::ForceCpu, Some(false), true, "linux"), None);
+    }
+
+    /// Der Satz, der bis 2.6.8 im Ausgabefenster stand, sobald ComfyUI mit
+    /// --cpu startete. Steht hier als Negativkontrolle: er darf nirgends mehr
+    /// herauskommen.
+    const ALTE_ZEILE: &str = "No NVIDIA driver detected";
+
+    #[test]
+    fn the_cpu_line_names_the_real_reason_and_never_a_missing_nvidia_driver() {
+        // Der Fall, den ein AMD-Nutzer wirklich trifft: kein NVIDIA-Treiber,
+        // Auto, und das torch dieser Umgebung meldet keine Karte.
+        let auto = cpu_flag_reason(ComfyGpuMode::Auto, true, Some(false))
+            .expect("hier kommt --cpu, also braucht es einen Grund");
+        assert!(!auto.contains(ALTE_ZEILE), "{auto}");
+        assert!(auto.contains("no usable GPU"), "{auto}");
+        assert!(auto.contains("Settings > ComfyUI"), "der Weg raus fehlt: {auto}");
+
+        // Die Sonde hat nicht geantwortet. Das ist etwas anderes als "keine
+        // Karte" und wird auch so gesagt, sonst schickt der Satz jemanden auf
+        // eine Neuinstallation, die nichts zu heilen hat.
+        let stumm = cpu_flag_reason(ComfyGpuMode::Auto, true, None)
+            .expect("auch hier kommt --cpu");
+        assert!(!stumm.contains(ALTE_ZEILE), "{stumm}");
+        assert!(stumm.contains("did not answer"), "{stumm}");
+        assert!(!stumm.contains("no usable GPU"), "keine falsche Gewissheit: {stumm}");
+
+        // Der Nutzer hat es selbst so eingestellt. Dann ist der Schalter der
+        // Grund, nicht die Hardware.
+        let gewollt = cpu_flag_reason(ComfyGpuMode::ForceCpu, true, None)
+            .expect("Force CPU heisst immer --cpu");
+        assert!(gewollt.contains("Force CPU"), "{gewollt}");
+        assert!(gewollt.contains("Auto"), "der Weg raus fehlt: {gewollt}");
+    }
+
+    #[test]
+    fn a_start_that_never_passes_cpu_says_nothing_at_all() {
+        // Kein Grund ohne Flagge. Sonst steht im Fenster eine Erklaerung fuer
+        // etwas, das gar nicht passiert.
+        assert_eq!(cpu_flag_reason(ComfyGpuMode::Auto, false, None), None, "NVIDIA da");
+        assert_eq!(cpu_flag_reason(ComfyGpuMode::Auto, true, Some(true)), None, "ROCm-torch sieht die Karte");
+        assert_eq!(cpu_flag_reason(ComfyGpuMode::ForceGpu, true, Some(false)), None, "Force GPU laesst --cpu weg");
     }
 }
 

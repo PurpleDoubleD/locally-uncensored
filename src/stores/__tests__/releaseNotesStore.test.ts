@@ -115,8 +115,14 @@ describe('the notes table', () => {
       // Der Grund gehoert dazu, sonst liest es sich wie eine Marotte.
       'without rocm installed',
       'fixed carve-out',
-      // Und die Hausformel fuer fremde Hardware auch hier, wortgleich.
-      'has not been run on an amd card here',
+      // AMD-Messung auf echter Hardware (MI325X, 03.09.): aus "ungeprueft"
+      // wird "gemessen", und die zwei Funde, die nur echte Hardware liefert.
+      'measured on a rented amd instinct card',
+      'processing accelerator rather than as graphics',
+      'its gfx target was thrown away',
+      // Und die Zeile im Ausgabefenster, die die falsche Hardware nannte.
+      'no nvidia driver detected',
+      'reporting no usable card',
       // Persona-Lauf 03.09.: deutsche Alltagssaetze erreichten die Werkzeuge
       // nicht. Beide Faelle sind benannt, weil ein Kunde nur den Effekt sieht.
       'schau im netz nach',

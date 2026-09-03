@@ -12,8 +12,14 @@
 //!
 //! The decisions live here as pure functions with the probes injected, so a
 //! test can drive every branch on a machine that has none of the hardware.
-//! We own no AMD card, so the ROCm side of this file is researched against
-//! download.pytorch.org and ComfyUI's own README rather than measured.
+//!
+//! The LINUX ROCm side is MEASURED as of 2026-09-03, on a rented AMD Instinct
+//! MI325X (gfx942, DigitalOcean tor1): the first channel below installs,
+//! `torch.cuda.is_available()` answers True, and ComfyUI rendered an image, a
+//! video, a song, a 4x upscale and a cutout on the card. Details in
+//! ~/Desktop/LU/amd-beweise/00-BEFUND.md. The WINDOWS side is still researched
+//! against AMD's own index and Comfy-Desktop, because no Windows box with an
+//! AMD card exists here.
 
 use std::time::Duration;
 
@@ -26,6 +32,12 @@ use std::time::Duration;
 /// branch below installs processor wheels instead of pretending. ComfyUI's
 /// own README names rocm7.2 as the AMD install line, so that one leads and
 /// the two older channels are there to catch a channel that gets retired.
+///
+/// MEASURED 2026-09-03, the first entry, end to end on an MI325X: the index
+/// served torch 2.14.0+rocm7.2 (6224.9 MB), `torch.version.hip` came back
+/// 7.2.53211, `torch.cuda.is_available()` True, and a bf16 matmul ran at 153
+/// TFLOP/s. This is the line the whole Linux branch stands on, and it is no
+/// longer taken on trust.
 pub(crate) const ROCM_CHANNELS: &[&str] = &[
     "https://download.pytorch.org/whl/rocm7.2",
     "https://download.pytorch.org/whl/rocm7.1",
@@ -225,6 +237,16 @@ fn radeon_rx_model(name: &str) -> Option<u32> {
 /// - MIOpen only, in neither BLAS layer: gfx900, gfx906.
 /// - In no layer at all: gfx1010, 1012, 1031, 1032, 1033 to 1036, 90c. That is
 ///   the byte-level ground for the Linux brake below.
+///
+/// RE-MEASURED 2026-09-03 in the INSTALLED 2.14.0+rocm7.2 on the MI325X, and
+/// it agrees point for point: gfx1103 in hipBLASLt and not in rocBLAS, gfx1030
+/// in rocBLAS and not in hipBLASLt, and none of gfx1010, 1012, 1031, 1032,
+/// 1033 to 1036 or 90c in any layer. One change from 2.13.0: gfx908 is in both
+/// BLAS layers now. The same list comes back a second way from the card itself,
+/// through `torch.cuda.get_arch_list()`, which reports gfx900, 906, 908, 90a,
+/// 942, 950, 1030, 1100, 1101, 1102, 1103, 1150, 1151, 1200, 1201. Note that
+/// gfx900 and gfx906 appear there and in NEITHER BLAS layer, which is exactly
+/// the "MIOpen only" nuance above rather than a contradiction of it.
 ///
 /// Windows: AMD names RX 9070 and 9070 XT, AI PRO R9700, RX 9060 XT,
 /// RX 7900 XTX and PRO W7900 in its own support promise, and publishes device
