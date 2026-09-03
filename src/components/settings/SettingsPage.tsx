@@ -270,9 +270,18 @@ function WorkflowSection() {
 // Models tab stayed empty beside a folder full of models. It is read now
 // (lib/custom-model-dir.ts), and the copy says what it does.
 
+/**
+ * How long typing has to stop before the folder is stored anyway (A14-2a).
+ *
+ * Long enough that it does not fire between two keystrokes of a typed path,
+ * short enough that walking away right after typing has already saved. The
+ * write itself is a settings update plus one model-list refresh, so a stray
+ * extra one costs nothing.
+ */
+export const MODEL_DIR_SAVE_DEBOUNCE_MS = 600
+
 export function HfDownloadPathSetting() {
   const override = useSettingsStore(s => s.settings.hfDownloadPathOverride)
-  const updateSettings = useSettingsStore(s => s.updateSettings)
   const [draft, setDraft] = useState(override)
   const [comfy, setComfy] = useState<CustomModelDirResult | null>(null)
   const [scan, setScan] = useState<ScannedDir | null>(null)
@@ -321,13 +330,63 @@ export function HfDownloadPathSetting() {
   // to ComfyUI is unaffected by that, so both lines belong on screen.
   const scanHidesHandoff = scan?.status === 'unreachable' || scan?.status === 'unusable'
 
-  function apply(next: string) {
-    setDraft(next)
-    updateSettings({ hfDownloadPathOverride: next })
+  // A16 (A14-2a), Windows counter-check 02.09.: the folder was stored on Enter
+  // or on blur and on nothing else. Type a path, walk away to another tab or
+  // close Settings, and the value stood in the box while
+  // `hfDownloadPathOverride` stayed empty and Installed never changed. The
+  // counter-check's first attempt concluded from that the folder was being
+  // ignored, which is the reading anyone would reach.
+  //
+  // Two things are added, and neither replaces the blur. A short debounce, so
+  // a value that has stopped changing is stored without any further gesture
+  // and a refresh of the list sees the folder. And a commit when the field
+  // goes away, so leaving the panel saves rather than discards.
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  /** Typed but not stored yet. Null means there is nothing owed. */
+  const pendingPath = useRef<string | null>(null)
+
+  /** Store it. Everything that saves goes through here, so cancelling the
+   *  debounce and clearing the debt cannot be forgotten on one path. */
+  function commit(next: string) {
+    if (saveTimer.current) { clearTimeout(saveTimer.current); saveTimer.current = null }
+    pendingPath.current = null
+    const store = useSettingsStore.getState()
+    if (store.settings.hfDownloadPathOverride === next) return
+    store.updateSettings({ hfDownloadPathOverride: next })
     // The Models tab is the surface this setting is about: refresh it now
     // instead of after the next navigation.
     window.dispatchEvent(new CustomEvent('lu-models-refresh'))
   }
+
+  function apply(next: string) {
+    setDraft(next)
+    commit(next)
+  }
+
+  /** One keystroke. The value is owed from here until something commits it. */
+  function typePath(next: string) {
+    setDraft(next)
+    pendingPath.current = next.trim()
+    if (saveTimer.current) clearTimeout(saveTimer.current)
+    saveTimer.current = setTimeout(() => {
+      saveTimer.current = null
+      const owed = pendingPath.current
+      if (owed !== null) commit(owed)
+    }, MODEL_DIR_SAVE_DEBOUNCE_MS)
+  }
+
+  // Closing Settings or switching tabs unmounts this field. Whatever was owed
+  // at that moment is stored, not thrown away.
+  useEffect(() => () => {
+    if (saveTimer.current) clearTimeout(saveTimer.current)
+    const owed = pendingPath.current
+    pendingPath.current = null
+    if (owed === null) return
+    const store = useSettingsStore.getState()
+    if (store.settings.hfDownloadPathOverride === owed) return
+    store.updateSettings({ hfDownloadPathOverride: owed })
+    window.dispatchEvent(new CustomEvent('lu-models-refresh'))
+  }, [])
 
   async function pickFolder() {
     try {
@@ -346,7 +405,7 @@ export function HfDownloadPathSetting() {
         <input
           type="text"
           value={draft}
-          onChange={(e) => setDraft(e.target.value)}
+          onChange={(e) => typePath(e.target.value)}
           onBlur={() => apply(draft.trim())}
           placeholder={luEngineFolderPlaceholder(autoDir)}
           aria-label="LU Engine folder"
