@@ -336,9 +336,16 @@ export function Sidebar() {
   // Models or Settings.
   const showSidebar = !isComparing && currentView === 'chat'
 
-  /** One rail button, active or not. Same shape as the web rail. */
+  /** One rail button, active or not. Same shape as the web rail.
+   *
+   *  D-T11: der Zustandswechsel dieser Schiene ist reine Farbe, Flaeche und
+   *  Text. `transition-colors` laeuft in derselben Voreinstellung (150 ms) wie
+   *  die pauschale Variante, die hier stand, benennt aber nur die
+   *  Eigenschaften, die sich wirklich bewegen. Dasselbe gilt fuer die beiden
+   *  Einzelknoepfe darunter (Aufklappen, New Chat) und den Zuklapp-Knopf in
+   *  der Reiterzeile. */
   const railBtn = (active: boolean) =>
-    `flex items-center justify-center w-9 h-9 rounded-md transition-all ${
+    `flex items-center justify-center w-9 h-9 rounded-md transition-colors ${
       active
         ? 'bg-gray-200 dark:bg-white/10 text-gray-900 dark:text-white'
         : 'text-gray-500 hover:text-gray-800 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/5'
@@ -366,7 +373,7 @@ export function Sidebar() {
             title="Expand sidebar"
             aria-label="Expand sidebar"
             data-testid="sidebar-toggle"
-            className="flex items-center justify-center w-9 h-9 rounded-md text-gray-500 hover:text-gray-800 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/5 transition-all"
+            className="flex items-center justify-center w-9 h-9 rounded-md text-gray-500 hover:text-gray-800 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/5 transition-colors"
           >
             <PanelLeftOpen size={16} />
           </button>
@@ -400,9 +407,13 @@ export function Sidebar() {
             onClick={handleNewChat}
             title={activeModel ? 'New Chat' : 'Pick or install a model first'}
             aria-label="New Chat"
-            className="flex items-center justify-center w-9 h-9 rounded-md text-gray-500 hover:text-gray-800 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/5 transition-all"
+            className="flex items-center justify-center w-9 h-9 rounded-md text-gray-500 hover:text-gray-800 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/5 transition-colors"
           >
-            <Plus size={17} />
+            {/* 16 statt 17: die 17 war die einzige im ganzen Baum und haette
+                eine sechzehnte Symbolgroesse aufgemacht (icon-leiter.test.ts).
+                16 ist ICON_MD, liegt bei 1x und 2x auf ganzen Geraetepixeln
+                und steht einen Knopf weiter oben schon am Aufklapp-Pfeil. */}
+            <Plus size={16} />
           </button>
         </motion.aside>
       )}
@@ -495,7 +506,22 @@ export function Sidebar() {
 
               Der Zuklapp-Knopf steht in derselben Zeile und haelt sich an
               dieselbe Leiter: md, quadratisch, damit er neben den Reitern
-              keine sechste Hoehe aufmacht. */}
+              keine sechste Hoehe aufmacht. Er schreibt das aber als Breite
+              plus `aspect-square` (das Rezept, das create/ui/NumberField und
+              der MaskEditor schon fuer quadratische Controls benutzen), nicht
+              als Hoehenklasse: er ist KEIN Reiter, und die zwei Zaehlungen in
+              die-spalte-kennt-ihre-breite und
+              die-spalte-zeigt-ihre-primaeraktion, die "alle drei Reiter
+              tragen dieselbe Stufe" pruefen, sollen ihn auch nicht fuer einen
+              halten. Die Stufe ist dieselbe, das Quadrat kommt aus dem
+              Seitenverhaeltnis.
+
+              Seine Ecke ist `rounded-md` (6 px), wie die Knoepfe der
+              eingeklappten Schiene. Das ist zugleich das Ziel, das der
+              D-T08-Block in index.css fuer die 5px-Ecken dieser Datei
+              festgelegt hat; eine einundzwanzigste 5px-Ecke waere in die
+              Gegenrichtung gelaufen, und die Sperrklinke im Test darf nur
+              sinken. Die uebrigen 20 wandern in ihrem eigenen Durchgang mit. */}
           <div className="flex items-center gap-[2.5px] px-2.5 pt-2.5 pb-1.25 text-[12px]">
             {/* Collapse back to the slim rail */}
             <button
@@ -503,7 +529,7 @@ export function Sidebar() {
               title="Collapse sidebar"
               aria-label="Collapse sidebar"
               data-testid="sidebar-toggle"
-              className="flex items-center justify-center w-[var(--control-h-md)] h-[var(--control-h-md)] rounded-[5px] text-gray-500 hover:text-gray-800 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/5 transition-all shrink-0"
+              className="flex items-center justify-center w-[var(--control-h-md)] aspect-square rounded-md text-gray-500 hover:text-gray-800 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/5 transition-colors shrink-0"
             >
               <PanelLeftClose size={13} />
             </button>

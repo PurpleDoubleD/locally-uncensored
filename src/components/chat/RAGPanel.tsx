@@ -286,7 +286,7 @@ function RAGPanelInner({ conversationId, onClose }: { conversationId: string; on
           {laneIsOnThisMachine(lane.lane) ? (
             <p
               data-testid="rag-cloud-privacy"
-              className="text-[0.6rem] leading-snug text-gray-500 dark:text-gray-400"
+              className="t-micro leading-snug text-gray-500 dark:text-gray-400"
             >
               Your documents are indexed on this computer and stay here. Only the passages
               that match your question are sent to the cloud model as context.
@@ -294,7 +294,7 @@ function RAGPanelInner({ conversationId, onClose }: { conversationId: string; on
           ) : (
             <p
               data-testid="rag-cloud-privacy-remote"
-              className="flex items-start gap-1.5 text-[0.6rem] leading-snug text-amber-600 dark:text-amber-400"
+              className="flex items-start gap-1.5 t-micro leading-snug text-amber-600 dark:text-amber-400"
             >
               <AlertTriangle size={11} className="shrink-0 mt-0.5" />
               <span>
@@ -312,7 +312,7 @@ function RAGPanelInner({ conversationId, onClose }: { conversationId: string; on
         <div className="px-3 pt-2">
           <div className="flex items-start gap-1.5 p-2 rounded-lg bg-amber-500/10 border border-amber-500/20">
             <AlertTriangle size={12} className="text-amber-500 shrink-0 mt-0.5" />
-            <span data-testid="rag-retrieval-error" className="text-[0.6rem] text-amber-600 dark:text-amber-400 leading-tight">
+            <span data-testid="rag-retrieval-error" className="t-micro text-amber-600 dark:text-amber-400 leading-tight">
               {retrievalError}
             </span>
           </div>

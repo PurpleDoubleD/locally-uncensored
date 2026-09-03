@@ -136,7 +136,7 @@ export function ModelsStep({ skin, scan, fleet, step, setStep, pulledModels, set
     if (useBuiltinPath) {
       destDir = await detectProviderModelPath(BUILTIN_BACKEND_ID)
       if (!destDir) {
-        setDownloadError('Could not create the built-in engine model folder. Check app permissions and retry.')
+        setDownloadError('Could not create the LU Engine model folder. Check app permissions and retry.')
         return
       }
     } else if (!useOllamaPath) {
@@ -221,7 +221,7 @@ export function ModelsStep({ skin, scan, fleet, step, setStep, pulledModels, set
           try {
             await startBundledEngine(`${destDir}/${model.filename}`)
           } catch (e) {
-            setDownloadError(`Model downloaded, but the built-in engine failed to start: ${e instanceof Error ? e.message : String(e)}`)
+            setDownloadError(`Model downloaded, but the LU Engine failed to start: ${e instanceof Error ? e.message : String(e)}`)
           }
         } else {
           // LM Studio etc.: nest under <user>/<repo>/ so the scanner finds

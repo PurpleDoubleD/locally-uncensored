@@ -341,10 +341,16 @@ describe('the turn end starts the write before it starts anything else', () => {
   // that difference would be pinning noise.
 
   it('all four turn ends were found and parsed', () => {
+    // `useCodex/runInstruction` und nicht mehr `sendInstruction`: 2.6.8 hat den
+    // grossen useCallback in `runInstruction` umbenannt und `sendInstruction`
+    // zur duennen Huelle mit beginSend/endSend gemacht. Das Rundenende sitzt
+    // seither in `runInstruction`. Die Liste steht hier woertlich, damit ein
+    // solcher Umbau auffaellt, statt den Vertrag still auf drei Bloecke zu
+    // verkuerzen.
     expect(TURN_ENDS.map((b) => b.name)).toEqual([
       'useChat/runGroupRound',
       'useChat/sendMessage',
-      'useCodex/sendInstruction',
+      'useCodex/runInstruction',
       'useAgentChat/sendAgentMessage',
     ])
   })

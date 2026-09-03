@@ -39,22 +39,28 @@ export function onProviderSlotsDarkened(fn: DarkenedSlotsListener): void {
 }
 
 /**
- * Ansagen. Ohne Zuhörer passiert nichts — genauso wie der frühere dynamische
+ * Ansagen. Ohne Zuhörer passiert nichts, genauso wie der frühere dynamische
  * Import mit `.catch(() => {})` endete: die nächste Inventar-Aktualisierung
  * prüft die Wahl ohnehin erneut.
  *
  * Die Zustellung ist nachgelagert, weil der frühere `import()` es auch war: der
  * Aufruf lief hinter der laufenden `set()`-Runde des providerStore, und dabei
- * bleibt es — ein Schreiben im Modell-Store soll nicht mitten im Schreiben des
+ * bleibt es, ein Schreiben im Modell-Store soll nicht mitten im Schreiben des
  * Provider-Stores passieren.
+ *
+ * Deshalb wird keine fertige Liste übergeben, sondern eine Frage: welche Slots
+ * sind zum Zeitpunkt der Zustellung NOCH dunkel. Zwischen Ansage und Zustellung
+ * liegt eine Mikrotask, und in der kann derselbe Slot längst wieder an sein.
+ * Eine im Voraus eingefrorene Liste räumt dann eine Wahl, deren Backend wieder
+ * läuft.
  */
-export function announceDarkenedSlots(darkened: readonly ProviderId[]): void {
-  if (darkened.length === 0) return
+export function announceDarkenedSlots(stillDarkened: () => readonly ProviderId[]): void {
   const fn = listener
   if (!fn) return
   void Promise.resolve().then(() => {
     try {
-      fn(darkened)
+      const darkened = stillDarkened()
+      if (darkened.length > 0) fn(darkened)
     } catch { /* best-effort: the next inventory refresh re-checks */ }
   })
 }

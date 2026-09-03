@@ -136,10 +136,18 @@ function dropPicksForDarkenedSlots(
   before: Partial<Record<ProviderId, ProviderConfig>>,
   after: Partial<Record<ProviderId, ProviderConfig>>,
 ): void {
-  announceDarkenedSlots(
-    (Object.keys(after) as ProviderId[]).filter(
-      (id) => before[id]?.enabled === true && after[id]?.enabled === false,
-    ),
+  const darkened = (Object.keys(after) as ProviderId[]).filter(
+    (id) => before[id]?.enabled === true && after[id]?.enabled === false,
+  )
+  if (darkened.length === 0) return
+  // Die Zustellung liegt eine Mikrotask hinter diesem Aufruf, also wird dort
+  // noch einmal gefragt statt hier eingefroren. Sonst raeumt ein Slot, der in
+  // derselben Runde wieder eingeschaltet wird, eine Wahl, die er weiterhin
+  // bedient: resetProvidersToDefaults() schaltet Ollama aus (Voreinstellung),
+  // und der naechste setProviderConfig('ollama', { enabled: true }) direkt
+  // danach wieder an. Genau diese Runde laeuft im Onboarding.
+  announceDarkenedSlots(() =>
+    darkened.filter((id) => useProviderStore.getState().providers[id]?.enabled === false),
   )
 }
 

@@ -151,7 +151,7 @@ export function BuiltinEngineSettings() {
       {/* A13: which port the engine really holds. It starts its walk at 8127
           and takes the next free one when that is held, and until now the only
           place that said so was the log. */}
-      <div className="text-[0.6rem] text-gray-500" data-testid="builtin-engine-port">
+      <div className="t-micro text-gray-500" data-testid="builtin-engine-port">
         {enginePortLine(status, ENGINE_PORT)}
       </div>
 

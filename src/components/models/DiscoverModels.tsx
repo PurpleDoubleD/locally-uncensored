@@ -809,9 +809,9 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
           // Abbruch) oder das Ende der Ansicht. Keiner davon ist ein Fehler,
           // und keiner darf spaeter noch eine Engine hochfahren.
           if (outcome === 'paused') {
-            setInstallNotice(`Download paused. The built-in engine keeps the model it is running — resume ${f.filename} to finish the switch.`)
+            setInstallNotice(`Download paused. The LU Engine keeps the model it is running. Resume ${f.filename} to finish the switch.`)
           } else if (outcome === 'cancelled') {
-            setInstallNotice('Download cancelled. The built-in engine keeps the model it is running.')
+            setInstallNotice('Download cancelled. The LU Engine keeps the model it is running.')
           }
           return
         }

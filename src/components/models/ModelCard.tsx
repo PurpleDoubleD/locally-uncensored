@@ -93,7 +93,7 @@ export function ModelCard({ model, isActive, onSelect, onDelete, onInfo, canDele
             onClick={(e) => { e.stopPropagation(); if (!useBusy) onUse() }}
             disabled={useBusy}
             data-testid="model-card-use"
-            className="px-2 py-0.5 mr-1 rounded text-[0.58rem] font-medium bg-gray-100 dark:bg-white/10 text-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-white/15 border border-gray-200 dark:border-white/10 transition-colors disabled:opacity-60 disabled:cursor-default inline-flex items-center gap-1"
+            className="px-2 py-0.5 mr-1 rounded t-micro font-medium bg-gray-100 dark:bg-white/10 text-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-white/15 border border-gray-200 dark:border-white/10 transition-colors disabled:opacity-60 disabled:cursor-default inline-flex items-center gap-1"
             title="Load this model on the LU Engine and use it for chat"
           >
             {useBusy && <Loader2 size={9} className="animate-spin" />}

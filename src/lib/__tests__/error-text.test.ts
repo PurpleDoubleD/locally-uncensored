@@ -80,9 +80,23 @@ describe('the surfaces that used to set foreign text as the whole message', () =
   })
 
   it('Settings frames its installer log tails too', () => {
-    const src = read('components/settings/SettingsPage.tsx')
+    // PATH ONLY (2026-09-02): SettingsPage.tsx used to hold the ComfyUI and
+    // Python install state and framed the log tails where it set them. That
+    // state moved into stores/comfyInstallStore.ts so install and repair
+    // progress survives a section switch; SettingsPage renders the store now
+    // and sets no install error of its own. The store is read here too, so
+    // the claim still covers the whole Settings surface instead of going
+    // green on a file that no longer frames anything.
+    const src = [
+      read('components/settings/SettingsPage.tsx'),
+      read('stores/comfyInstallStore.ts'),
+    ].join('\n')
     expect(src).toContain('withInstallerOutput')
-    expect(src).not.toMatch(/setInstallErr\(lastLog \|\|/)
+    // The shape the frame replaced: a log tail set as the whole message.
+    expect(src).not.toMatch(/error: lastLog\b/)
+    // And Settings itself really is out of the installer business, so there is
+    // no second, unframed path left behind in the file that renders it.
+    expect(read('components/settings/SettingsPage.tsx')).not.toContain('lastLog')
   })
 
   it('the updater frames what the update plugin reports', () => {

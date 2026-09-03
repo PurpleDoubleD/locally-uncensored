@@ -571,12 +571,22 @@ export function ChatInput({ onSend, onStop, isGenerating, pendingApproval, onApp
           {/* Reasoning effort. Same shape and size as the Think button beside
               it, because it is the same kind of statement about the same
               model; a second visual language here would read as a second
-              subject. */}
+              subject. Deshalb dasselbe Rezept und keine eigene Klassenkette:
+              hier stand dasselbe blaue Pill, das am Think-Knopf nebenan
+              abgebaut wurde, weil es die Farbe des Fokusrings zweitverwendet
+              (Audit §4, Composer-Grammatik).
+
+              Der Zustand ist die STUFE, und die steht im Knopf und im
+              zugaenglichen Namen. Kein `aria-pressed`: vier Stufen sind kein
+              Ein/Aus-Zustand, und „gedrueckt" waere fuer „low" so wahr wie
+              fuer „max". Sichtbar ist der Knopf ohnehin nur, solange Denken an
+              ist, und der Behaelter am Think-Knopf daneben sagt das bereits. */}
           {showEffort && (
             <button
               data-testid="effort-toggle"
               onClick={() => updateSettings({ reasoningEffort: nextEffort(effortLevels, effortNow) })}
-              className="flex items-center gap-1 px-1.5 py-1.5 rounded-md transition-all shrink-0 text-[0.6rem] font-medium bg-blue-500/15 text-blue-400 border border-blue-500/30"
+              aria-label={`Reasoning effort: ${effortLabel(effortNow)}`}
+              className="lu-control"
               title={`Reasoning effort: ${effortLabel(effortNow)}. Click to cycle. Higher effort spends more output tokens.`}
             >
               <Gauge size={11} />

@@ -52,6 +52,27 @@
  * `<button>`), und die drei Knoepfe laufen durch dieselbe
  * Formsprachen-Pruefung wie alle anderen.
  *
+ * NACHGEZOGEN (Zusammenfuehrung mit der 2.6.8-Linie): der Effort-Knopf und
+ * `chat/DocsButton.tsx`. Beide sind an der Grammatik vorbeigekommen, und der
+ * zweite auf die gefaehrlichere Art:
+ *
+ *   • Der Effort-Knopf ist neu (`ChatInput.tsx`, neben Think) und brachte
+ *     genau die Klassenkette mit, die der Composer-Commit am Think-Knopf
+ *     abgebaut hatte: `bg-blue-500/15 text-blue-400 border-blue-500/30`,
+ *     dazu `transition-all` und `text-[0.6rem]`. Er faellt hier durch die
+ *     bestehenden Pruefungen: der Waechter war an dieser Stelle ROT.
+ *   • Docs ist in eine eigene Datei gezogen (A9, drei Zustaende) und wird
+ *     seither als `<DocsButton />` eingehaengt. `controlClassNames` sucht
+ *     `<button>`, hat dieses Control also gar nicht mehr GESEHEN: keine
+ *     Meldung, kein Rot, ein blinder Fleck. Und weil gleichzeitig der
+ *     Effort-Knopf dazukam, stand die Zaehlung weiter auf zwoelf. Zwei
+ *     Fehler, die sich gegenseitig gedeckt haben. Genau dafuer ist die Zahl
+ *     da, also wird sie hier nicht gerettet, sondern richtiggestellt.
+ *
+ * DocsButton wird deshalb, wie VoiceButton vorher, eine gleichberechtigte
+ * Region; die Zaehlung geht von zwoelf auf DREIZEHN, und die Aufzaehlung
+ * unten nennt jedes einzelne.
+ *
  * Ausdruecklich NICHT geprueft, weil ausserhalb dieser Dateien:
  *   • `chat/CodexModeDropdown.tsx` — das einzige Control der CODE-Leiste,
  *     eigene Datei, und `the-code-composer-is-one-quiet-row.test.ts` pinnt
@@ -81,6 +102,7 @@ function ohneKommentare(src: string): string {
 
 const INPUT = read('../ChatInput.tsx')
 const VOICE = read('../VoiceButton.tsx')
+const DOCS = read('../DocsButton.tsx')
 const VIEW = read('../ChatView.tsx')
 const PLUGINS = read('../PluginsDropdown.tsx')
 const SELECTOR = read('../../models/ModelSelector.tsx')
@@ -174,8 +196,33 @@ const FORM_LANGUAGE = [
  */
 const SLOT_FILL = /\bw-full h-full\b/
 
-function formLanguageIn(className: string): string[] {
-  const cleaned = className.replace(SLOT_FILL, ' ')
+/** Der Name der Docs-Region, damit Ausnahme und REGIONS nicht driften. */
+const DOCS_REGION = 'DocsButton, ein Control'
+
+/**
+ * Die EINE Ausnahme, die nicht ueberall gilt, sondern an einer BENANNTEN
+ * Region haengt. Muster wie SLOT_FILL: mit Namen und Grund an der Regel,
+ * statt als Loch in FORM_LANGUAGE, das an jeder Call-Site aufginge.
+ *
+ * Der Docs-Knopf dimmt sich auf 60 %, solange keine Einbettungs-Spur da
+ * ist. Das ist keine zweite Formsprache: Geometrie, Farbe, Hover und der
+ * Ein-Behaelter kommen vollstaendig aus `.lu-control`, gedimmt wird nur die
+ * fertige Haut. Und der Knopf DARF dafuer nicht `disabled` werden, dessen
+ * 40 % das Rezept schon kennt. Hinter ihm liegt die einzige Stelle, an der
+ * die Engine ueberhaupt installiert werden kann (Review B1, gepinnt in
+ * docs-in-cloud-chat.test.ts). Fuer „daempfen, aber bedienbar" hat das
+ * Rezept heute keinen Zustand, also steht die Daempfung an der Call-Site.
+ * Sie ist unten ausdruecklich festgenagelt: waechst sie, wandert sie oder
+ * faellt sie weg, faellt dieser Test.
+ */
+const AUSNAHMEN: Record<string, RegExp> = {
+  [DOCS_REGION]: /(?<![\w-])opacity-60(?![\w-])/,
+}
+
+function formLanguageIn(className: string, region = ''): string[] {
+  let cleaned = className.replace(SLOT_FILL, ' ')
+  const erlaubt = AUSNAHMEN[region]
+  if (erlaubt) cleaned = cleaned.replace(erlaubt, ' ')
   return FORM_LANGUAGE.filter((re) => re.test(cleaned)).map(String)
 }
 
@@ -190,6 +237,15 @@ const PLUGINS_TRIGGER = PLUGINS.slice(
   PLUGINS.indexOf('{iconOnly ? ('),
   PLUGINS.indexOf('{open && ('),
 )
+/**
+ * Der oeffnende Tag des Effort-Knopfes, bis zu seinem ersten Kind. Nur so
+ * gehoert das, was hier geprueft wird, wirklich DIESEM Knopf und nicht dem
+ * naechsten in der Zeile.
+ */
+const EFFORT = INPUT_BAR.slice(
+  INPUT_BAR.indexOf('data-testid="effort-toggle"'),
+  INPUT_BAR.indexOf('<Gauge'),
+)
 /** Der Trigger des Modellwaehlers, ohne die Liste darunter. */
 const SELECTOR_TRIGGER = SELECTOR.slice(
   SELECTOR.indexOf('{/* ── Trigger Button ── */}'),
@@ -197,14 +253,16 @@ const SELECTOR_TRIGGER = SELECTOR.slice(
 )
 
 /**
- * Das Mikrofon haengt als KOMPONENTE in der Leiste (`<VoiceButton />` in
- * ChatInput), nicht als `<button>` — deshalb hat die Zaehlung ueber
- * INPUT_BAR es nie gesehen. Die ganze Datei ist die Region: sie enthaelt
- * nichts ausser diesem einen Control in seinen drei Zustaenden.
+ * Mikrofon und Docs haengen als KOMPONENTE in der Leiste (`<VoiceButton />`
+ * in ChatInput, `<DocsButton />` in composerActions), nicht als `<button>`,
+ * deshalb hat die Zaehlung ueber INPUT_BAR und VIEW_ACTIONS sie nicht
+ * gesehen. Die ganze Datei ist jeweils die Region: sie enthaelt nichts
+ * ausser diesem einen Control in seinen Zustaenden.
  */
 const REGIONS: Array<[string, string]> = [
   ['ChatInput, Aktionszeile', INPUT_BAR],
   ['VoiceButton, drei Zustaende', VOICE],
+  [DOCS_REGION, DOCS],
   ['ChatView, composerActions', VIEW_ACTIONS],
   ['PluginsDropdown, Trigger', PLUGINS_TRIGGER],
   ['ModelSelector, Trigger', SELECTOR_TRIGGER],
@@ -224,16 +282,16 @@ describe('die Abschnitte, die dieser Test liest, existieren ueberhaupt', () => {
     }
   })
 
-  it('findet zusammen genau die zwoelf Controls der Leiste', () => {
-    // Paperclip · Think · Stop · Send (ChatInput) · Mikrofon nicht
+  it('findet zusammen genau die dreizehn Controls der Leiste', () => {
+    // Paperclip · Think · Effort · Stop · Send (ChatInput) · Mikrofon nicht
     // verfuegbar · Mikrofon transkribiert · Mikrofon bereit/aufnehmend
-    // (VoiceButton) · Docs · Tools (ChatView) · Plugins-Icon ·
+    // (VoiceButton) · Docs (DocsButton) · Tools (ChatView) · Plugins-Icon ·
     // Plugins-Label (PluginsDropdown) · Modellwaehler (ModelSelector).
     // Der Dismiss-Knopf im Tools-Menue liegt ausserhalb von
     // composerActions. Aendert sich die Zahl, ist ein Control
     // dazugekommen oder verschwunden — beides gehoert angesehen.
     const all = REGIONS.flatMap(([, region]) => controlClassNames(region))
-    expect(all).toHaveLength(12)
+    expect(all).toHaveLength(13)
   })
 
   it('das Mikrofon steckt wirklich in dieser Leiste, nicht irgendwo sonst', () => {
@@ -241,6 +299,22 @@ describe('die Abschnitte, die dieser Test liest, existieren ueberhaupt', () => {
     // nichts mehr zu tun hat, und niemand merkte es.
     expect(INPUT_BAR).toContain('<VoiceButton')
     expect(controlClassNames(VOICE)).toHaveLength(3)
+  })
+
+  it('und Docs genauso, sonst haette die Region wieder einen blinden Fleck', () => {
+    // Dieselbe Wache wie fuer das Mikrofon, und aus demselben Anlass: Docs
+    // ist aus composerActions in eine eigene Datei gezogen, und solange
+    // niemand die Region nachzog, hat der Test dieses Control schlicht
+    // nicht mehr angesehen.
+    expect(VIEW_ACTIONS).toContain('<DocsButton')
+    expect(controlClassNames(DOCS)).toHaveLength(1)
+  })
+
+  it('der Effort-Knopf ist wirklich in der Aktionszeile und wird mitgezaehlt', () => {
+    // Er ist der dreizehnte. Ohne diese Zeile koennte er aus INPUT_BAR
+    // herausrutschen, und die Zahl oben faende einen anderen Grund, zu
+    // stimmen.
+    expect(INPUT_BAR).toContain('data-testid="effort-toggle"')
   })
 })
 
@@ -277,10 +351,20 @@ describe('jedes Control der Leiste traegt eins der zwei Rezepte', () => {
 describe('keine achte Formsprache — die Mutationssonde greift hier', () => {
   it.each(REGIONS)('%s: kein Knopf bringt eine eigene Form mit', (name, region) => {
     const offenders = controlClassNames(region)
-      .map((c) => [c, formLanguageIn(c)] as const)
+      .map((c) => [c, formLanguageIn(c, name)] as const)
       .filter(([, hits]) => hits.length > 0)
       .map(([c, hits]) => `${c.slice(0, 120)} → ${hits.join(' ')}`)
     expect(offenders, `${name}: eigene Formsprache am Control`).toEqual([])
+  })
+
+  it('es gibt genau EINE benannte Ausnahme, und sie steht wirklich dort', () => {
+    // Ohne diese Zeile waere `AUSNAHMEN` ein bequemer Ort: wer hier einen
+    // Eintrag hinzufuegt, muss ihn erklaeren, und wer die Daempfung am
+    // Docs-Knopf ausbaut, muss die Ausnahme mit ausbauen.
+    expect(Object.keys(AUSNAHMEN)).toEqual([DOCS_REGION])
+    expect(controlClassNames(DOCS).join(' ')).toMatch(AUSNAHMEN[DOCS_REGION])
+    // Und sie deckt genau diese eine Utility, nicht „Deckung" allgemein.
+    expect(formLanguageIn('lu-control opacity-40', DOCS_REGION)).not.toEqual([])
   })
 
   it('die Leiste kennt nur noch eine Hoehe, einen Radius, eine Schriftgroesse', () => {
@@ -458,8 +542,37 @@ describe('der Zustand kommt aus ARIA, nicht aus einer zweiten Klassenkette', () 
   })
 
   it('Docs meldet seinen Ein-Zustand als aria-pressed', () => {
-    expect(VIEW_ACTIONS).toMatch(/aria-pressed=\{ragPanelOpen \|\| ragEnabled\}/)
+    // Das Control ist in eine eigene Datei gezogen, die Aussage nicht: „Ein"
+    // heisst weiterhin Panel offen ODER RAG an fuer diese Unterhaltung.
+    // Geprueft werden deshalb beide Haelften: der Knopf, der es meldet, und
+    // die Verdrahtung, die ihm die zwei Wahrheiten reicht. Ohne die zweite
+    // koennte ChatView den falschen Zustand hineingeben, ohne dass es hier
+    // auffaellt.
+    expect(DOCS).toMatch(/aria-pressed=\{open \|\| ragEnabled\}/)
+    expect(VIEW_ACTIONS).toMatch(/open=\{ragPanelOpen\}/)
+    expect(VIEW_ACTIONS).toMatch(/ragEnabled=\{ragEnabled\}/)
+    // Und das gruene Pill ist weg, aus demselben Grund wie das blaue am
+    // Think-Knopf: es war eine eigene Formsprache fuer einen Zustand, den
+    // das Rezept schon kennt.
+    expect(DOCS).not.toContain('bg-green-500/15')
     expect(VIEW_ACTIONS).not.toContain('bg-green-500/15')
+  })
+
+  it('der Effort-Knopf sagt seine Stufe, statt sie zu faerben', () => {
+    // `aria-pressed` waere hier FALSCH und steht deshalb ausdruecklich nicht
+    // da: der Knopf schaltet nicht ein und aus, er geht eine Leiter durch
+    // (low/medium/high/max). „Gedrueckt" traefe auf `low` genauso zu wie auf
+    // `max` und saehe an beiden Enden gleich aus. Die Stufe steht deshalb im
+    // zugaenglichen Namen und sichtbar im Knopf; sichtbar ist er ohnehin nur,
+    // solange Denken an ist, und das meldet der Think-Knopf daneben.
+    expect(EFFORT).toMatch(/aria-label=\{`Reasoning effort: \$\{effortLabel\(effortNow\)\}`\}/)
+    expect(EFFORT).not.toContain('aria-pressed')
+    expect(INPUT).toContain('<span>{effortLabel(effortNow)}</span>')
+    // Das blaue Pill der Release-Linie ist weg. Es war dieselbe Farbe wie der
+    // Fokusring, direkt neben dem Knopf, an dem sie schon abgebaut war.
+    // Geprueft wird der KNOPF, nicht die Datei: das Blau der Ablegeflaeche
+    // („hier fallen lassen") ist eine andere Aussage und behaelt es.
+    expect(EFFORT).not.toMatch(/blue-\d/)
   })
 
   it('die drei Aufklapper melden aria-expanded', () => {

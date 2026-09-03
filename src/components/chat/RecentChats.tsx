@@ -8,6 +8,7 @@
  * component is only the list.
  */
 import { motion } from 'framer-motion'
+import { MOTION_S } from '../ui/motion'
 import { MessageSquare } from 'lucide-react'
 import { useChatStore } from '../../stores/chatStore'
 import { useUIStore } from '../../stores/uiStore'
@@ -42,7 +43,7 @@ export function RecentChats() {
 
   if (recents.length === 0) {
     return (
-      <p data-testid="home-recent-chats" className="text-[0.7rem] text-gray-400 dark:text-gray-500">
+      <p data-testid="home-recent-chats" className="t-micro text-gray-400 dark:text-gray-500">
         No chats yet.
       </p>
     )
@@ -54,9 +55,9 @@ export function RecentChats() {
       className="w-full max-w-[340px]"
       initial={{ opacity: 0, y: 6 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.25, ease: 'easeOut' }}
+      transition={{ duration: MOTION_S.base, ease: 'easeOut' }}
     >
-      <div className="mb-1 px-1 text-[0.58rem] font-medium uppercase tracking-[0.08em] text-gray-400 dark:text-gray-600">
+      <div className="mb-1 px-1 t-label font-medium text-gray-400 dark:text-gray-600">
         Recent chats
       </div>
       <ul>
@@ -65,7 +66,7 @@ export function RecentChats() {
             key={c.id}
             initial={{ opacity: 0, y: 4 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.2, delay: 0.03 + i * 0.03, ease: 'easeOut' }}
+            transition={{ duration: MOTION_S.base, delay: 0.03 + i * 0.03, ease: 'easeOut' }}
           >
             <button
               type="button"
@@ -73,10 +74,10 @@ export function RecentChats() {
               className="w-full flex items-center gap-2 rounded-md px-1.5 py-[5px] text-left hover:bg-gray-50 dark:hover:bg-white/[0.04] transition-colors"
             >
               <MessageSquare size={11} className="shrink-0 text-gray-300 dark:text-gray-600" />
-              <span className="flex-1 truncate text-[0.7rem] text-gray-600 dark:text-gray-300">
+              <span className="flex-1 truncate t-micro text-gray-600 dark:text-gray-300">
                 {c.title}
               </span>
-              <span className="shrink-0 text-[0.6rem] tabular-nums text-gray-300 dark:text-gray-600">
+              <span className="shrink-0 t-micro tabular-nums text-gray-300 dark:text-gray-600">
                 {timeAgo(c.updatedAt)}
               </span>
             </button>

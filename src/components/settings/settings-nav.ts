@@ -91,7 +91,8 @@ export function sectionsFor(tab: SettingsTab, flags: SettingsSectionFlags): stri
       return [
         'Providers',
         'Model Storage',
-        ...(flags.builtinExpert ? ['Built-in Engine (expert)'] : []),
+        'CivitAI API key',
+        ...(flags.builtinExpert ? ['LU Engine (expert)'] : []),
         flags.comfyui ? 'ComfyUI (Image & Video)' : 'Local Media (Apple MLX)',
       ]
     case 'agent':

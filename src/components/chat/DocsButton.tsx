@@ -20,25 +20,25 @@ interface Props {
 
 export function DocsButton({ availability, open, ragEnabled, docCount, onToggle }: Props) {
   if (!availability.visible) return null
-  const active = open || ragEnabled
   return (
     <button
       data-testid="docs-toggle"
       data-needs-setup={availability.needsSetup ? 'true' : 'false'}
       onClick={onToggle}
       disabled={!availability.enabled}
+      // Der Ein-Zustand (Panel offen ODER RAG an) kommt aus ARIA, nicht aus
+      // einer zweiten Klassenkette: `.lu-control` liest `aria-pressed` und
+      // setzt den Behaelter. Vorher war Ein ein gruenes Pill mit eigenem
+      // Rand, also eine achte Formsprache in einer Leiste, die nur noch zwei
+      // kennt (composer-grammar.test.ts).
+      aria-pressed={open || ragEnabled}
       title={availability.title}
-      className={
-        'flex items-center gap-1 px-2 py-1.5 rounded-md transition-all shrink-0 text-[0.6rem] font-medium ' +
-        (active
-          ? 'bg-green-500/15 text-green-400 border border-green-500/30'
-          : availability.needsSetup
-            ? // Damped, not dead. The panel behind this button is the only
-              // place that can install the embedding engine, so disabling it
-              // would lock the door to the repair shop (review B1).
-              'text-gray-600 hover:text-gray-400 hover:bg-white/5 opacity-60'
-            : 'text-gray-500 hover:text-gray-300 hover:bg-white/5')
-      }
+      // Damped, not dead. The panel behind this button is the only place that
+      // can install the embedding engine, so disabling it would lock the door
+      // to the repair shop (review B1). Die Daempfung ist das EINZIGE, was
+      // diese Call-Site dem Rezept hinzufuegt; Farbe, Hover und der
+      // Ein-Behaelter kommen aus `.lu-control`.
+      className={'lu-control' + (availability.needsSetup ? ' opacity-60' : '')}
     >
       <FileText size={11} />
       <span>Docs</span>

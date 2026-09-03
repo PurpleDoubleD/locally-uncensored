@@ -371,7 +371,7 @@ mod tests {
                     "\n  SKIPPED gguf::a_real_gguf_parses_or_the_run_says_why_it_could_not\n  \
                      reason: no real {REAL_MODEL_FILE} on this machine, so the parser was \
                      not checked against a file llama.cpp produced.\n  looked at:\n    {}\n  \
-                     to run it for real, download the built-in engine's model once.\n",
+                     to run it for real, download the LU Engine's model once.\n",
                     pfad.display()
                 );
             }

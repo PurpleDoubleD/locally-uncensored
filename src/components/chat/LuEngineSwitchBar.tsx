@@ -33,7 +33,7 @@ export function LuEngineSwitchBar() {
         <div
           data-testid="lu-engine-switch-note"
           data-tone={tone}
-          className={`mx-3 mb-1.5 flex items-start gap-2 px-2 py-1 rounded-md border text-[0.62rem] ${skin}`}
+          className={`mx-3 mb-1.5 flex items-start gap-2 px-2 py-1 rounded-md border t-micro ${skin}`}
         >
           <span className="flex-1 leading-snug">{note}</span>
           <button

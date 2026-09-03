@@ -15,7 +15,7 @@ export function RetrievalErrorBar() {
   return (
     <div
       data-testid="retrieval-error-bar"
-      className="mx-3 mb-1.5 flex items-start gap-2 px-2 py-1 rounded-md bg-amber-500/10 border border-amber-500/20 text-[0.62rem] text-amber-700 dark:text-amber-300"
+      className="mx-3 mb-1.5 flex items-start gap-2 px-2 py-1 rounded-md bg-amber-500/10 border border-amber-500/20 t-micro text-amber-700 dark:text-amber-300"
     >
       <AlertTriangle size={11} className="shrink-0 mt-0.5" />
       <span className="flex-1 leading-snug">{message}</span>

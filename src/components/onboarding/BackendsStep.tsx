@@ -103,7 +103,7 @@ export function BackendsStep({ skin, scan, fleet, setStep, nextStepAfterBackends
           >
             <Cpu size={16} className={selectedBackend === BUILTIN_BACKEND_ID ? (isDark ? 'text-white' : 'text-gray-900') : 'text-gray-500'} />
             <div className="flex-1 min-w-0">
-              <p className="text-[0.72rem] font-medium">Built-in Engine</p>
+              <p className="text-[0.72rem] font-medium">LU Engine</p>
               <p className={`text-[0.55rem] ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>Runs on your machine · nothing to install</p>
             </div>
             {selectedBackend === BUILTIN_BACKEND_ID && <Check size={14} className="text-green-400 shrink-0" />}

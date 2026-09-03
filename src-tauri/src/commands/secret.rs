@@ -23,13 +23,13 @@
 //! and the frontend (providerStore.hydrateProviderKeys) falls back.
 
 /// Keychain service name. The "account" is the provider id (ollama / openai /
-/// anthropic). Keep this stable — changing it would orphan stored keys.
+/// anthropic). Keep this stable: changing it would orphan stored keys.
 ///
-/// Der Name ist KEIN Pfad, gehört aber zur selben Trennung: ohne eigenen
-/// Service-Namen läse der Experiment-Build die echten API-Schlüssel des
-/// Nutzers aus dem Schlüsselbund und überschriebe sie beim nächsten Speichern.
-/// Deshalb kommt er aus `crate::app_identity` und trägt auf diesem Branch
-/// denselben Suffix wie die Verzeichnisse.
+/// Der Name ist KEIN Pfad, gehört aber zur selben Sammelstelle. Ein Build mit
+/// abweichendem Service-Namen liest die echten API-Schlüssel des Nutzers nicht
+/// mehr und legt beim nächsten Speichern einen zweiten Satz daneben. Deshalb
+/// kommt er aus `crate::app_identity`, wo ein Test seinen Wert festhält, und
+/// nicht als Literal aus dieser Datei.
 #[cfg(any(target_os = "windows", target_os = "macos"))]
 const SERVICE: &str = crate::app_identity::KEYCHAIN_SERVICE;
 

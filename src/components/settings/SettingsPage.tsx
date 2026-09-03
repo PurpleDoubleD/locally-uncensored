@@ -389,7 +389,7 @@ export function HfDownloadPathSetting() {
 
   return (
     <div className="space-y-2 py-1">
-      <p className="text-[0.62rem] font-semibold text-gray-700 dark:text-gray-300">LU Engine folder</p>
+      <p className="t-micro font-semibold text-gray-700 dark:text-gray-300">LU Engine folder</p>
       <div className="text-[0.6rem] text-gray-500 leading-relaxed">
         LU downloads GGUFs here and reads every <code className="font-mono">.gguf</code> in a folder you set, up to four levels down. Models here run on the LU Engine. Leave it empty and LU uses its own folder, which it reads two levels down.
       </div>
@@ -426,12 +426,12 @@ export function HfDownloadPathSetting() {
           started reading a folder. Shown for the path the user typed as well
           as for one he picked, and only on the Mac. */}
       {macOsWillAskForFolder(draft || override, isMacOS()) && (
-        <div data-testid="macos-folder-access-note" className="text-[0.6rem] leading-relaxed text-gray-500">
+        <div data-testid="macos-folder-access-note" className="t-micro leading-relaxed text-gray-500">
           {MACOS_FOLDER_ACCESS_NOTE}
         </div>
       )}
       {override && scanNote && (
-        <div data-testid="model-dir-scan-note" className="text-[0.6rem] leading-relaxed text-amber-600 dark:text-amber-400">
+        <div data-testid="model-dir-scan-note" className="t-micro leading-relaxed text-amber-600 dark:text-amber-400">
           {scanNote}
         </div>
       )}
@@ -481,7 +481,7 @@ export function modelDirScanNote(status: ScannedDir['status'] | null | undefined
  * would be a lie (Rust answers `unsupported` for that host).
  */
 function CustomModelDirNote({ result }: { result: CustomModelDirResult }) {
-  const cls = "text-[0.6rem] leading-relaxed"
+  const cls = "t-micro leading-relaxed"
   if (result.status === 'unusable') {
     return (
       <div className={`${cls} text-amber-600 dark:text-amber-400`}>
@@ -538,11 +538,11 @@ export function LmStudioFolderSetting() {
   const path = lmStudioFolderPath(dir)
   return (
     <div className="space-y-1 py-1 border-t border-white/5 mt-2 pt-2">
-      <p className="text-[0.62rem] font-semibold text-gray-700 dark:text-gray-300">LM Studio folder</p>
+      <p className="t-micro font-semibold text-gray-700 dark:text-gray-300">LM Studio folder</p>
       {path && (
-        <code data-testid="lmstudio-folder-path" className="block text-[0.6rem] text-gray-400 font-mono break-all select-text">{path}</code>
+        <code data-testid="lmstudio-folder-path" className="block t-micro text-gray-400 font-mono break-all select-text">{path}</code>
       )}
-      <div data-testid="lmstudio-folder-note" className="text-[0.6rem] text-gray-500 leading-relaxed">
+      <div data-testid="lmstudio-folder-note" className="t-micro text-gray-500 leading-relaxed">
         {lmStudioFolderNote(dir)}
       </div>
     </div>
@@ -593,8 +593,8 @@ export function ImportLocalModels() {
 
   return (
     <div className="space-y-2 py-1 border-t border-white/5 mt-2 pt-2">
-      <p className="text-[0.62rem] font-semibold text-gray-700 dark:text-gray-300">Ollama</p>
-      <div data-testid="ollama-store-note" className="text-[0.6rem] text-gray-500 leading-relaxed">
+      <p className="t-micro font-semibold text-gray-700 dark:text-gray-300">Ollama</p>
+      <div data-testid="ollama-store-note" className="t-micro text-gray-500 leading-relaxed">
         Ollama keeps its own model store. LU pulls Ollama models with <code className="font-mono">ollama pull</code>; a folder cannot be set here.
       </div>
       <div className="text-[0.6rem] text-gray-500 leading-relaxed">
@@ -1027,7 +1027,7 @@ export function ComfyUISettings() {
           </button>
         )}
         {(!status?.found || status?.complete === false) && installIdle && (
-          <p className="w-full text-[0.55rem] text-gray-600">
+          <p className="w-full t-micro text-gray-600">
             Installs to your home folder by default. Set Path above (e.g. D:\ComfyUI) to install on another drive.
           </p>
         )}
@@ -1036,7 +1036,7 @@ export function ComfyUISettings() {
             <p
               data-testid="comfy-install-notice"
               data-kind={installNoticeKind}
-              className={`flex-1 text-[0.55rem] leading-relaxed ${
+              className={`flex-1 t-micro leading-relaxed ${
                 installNoticeKind === 'warn'
                   ? 'text-amber-500 dark:text-amber-400'
                   : 'text-emerald-600 dark:text-emerald-400'
@@ -1058,7 +1058,7 @@ export function ComfyUISettings() {
               onClick={clearInstallNotice}
               aria-label="Dismiss this message"
               title="Dismiss"
-              className="shrink-0 inline-flex items-center gap-1 px-1.5 py-[1px] rounded border border-white/15 text-[0.55rem] text-gray-400 hover:text-gray-200 hover:bg-white/10 transition-colors"
+              className="shrink-0 inline-flex items-center gap-1 px-1.5 py-[1px] rounded border border-white/15 t-micro text-gray-400 hover:text-gray-200 hover:bg-white/10 transition-colors"
             >
               <X size={9} /> Dismiss
             </button>
@@ -1083,7 +1083,7 @@ export function ComfyUISettings() {
                 <button
                   onClick={() => useComfyInstallStore.getState().reset()}
                   title="Clear this message"
-                  className="ml-auto px-1.5 py-[1px] rounded border border-white/15 text-[0.55rem] text-gray-400 hover:text-gray-200 hover:bg-white/10 transition-colors"
+                  className="ml-auto px-1.5 py-[1px] rounded border border-white/15 t-micro text-gray-400 hover:text-gray-200 hover:bg-white/10 transition-colors"
                 >
                   Dismiss
                 </button>
@@ -1093,7 +1093,7 @@ export function ComfyUISettings() {
                   onClick={handleCancelInstall}
                   disabled={cancelling}
                   title={installPhase === 'repair' ? 'Stop the repair' : 'Stop the ComfyUI install'}
-                  className="ml-auto px-1.5 py-[1px] rounded border border-red-500/40 text-[0.55rem] text-red-500 dark:text-red-300 hover:bg-red-500/10 transition-colors disabled:opacity-50 disabled:cursor-default"
+                  className="ml-auto px-1.5 py-[1px] rounded border border-red-500/40 t-micro text-red-500 dark:text-red-300 hover:bg-red-500/10 transition-colors disabled:opacity-50 disabled:cursor-default"
                 >
                   {cancelling ? 'Cancelling…' : 'Cancel'}
                 </button>
@@ -1104,7 +1104,7 @@ export function ComfyUISettings() {
                 {installLogs.slice(-6).map((log, i) => <div key={i} className="truncate">{log}</div>)}
               </div>
             )}
-            {installErr && <p className="text-[0.55rem] text-red-400 whitespace-pre-line">{installErr}</p>}
+            {installErr && <p className="t-micro text-red-400 whitespace-pre-line">{installErr}</p>}
           </div>
         )}
       </div>

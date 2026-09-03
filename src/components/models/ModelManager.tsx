@@ -441,7 +441,7 @@ export function ModelManager() {
                           return providerGroups.map(({ label, models: rows }) => (
                             <div key={label} className="space-y-1.5">
                               {showHeadings && (
-                                <p className="px-1 pt-1 text-[0.55rem] font-medium uppercase tracking-widest text-gray-500 dark:text-gray-500">
+                                <p className="px-1 pt-1 t-label font-medium text-gray-500 dark:text-gray-500">
                                   {label}
                                 </p>
                               )}

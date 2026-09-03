@@ -80,6 +80,10 @@ describe('who gets the key', () => {
   })
 })
 
+// Die Nutzlast wird als GANZES verglichen, nicht feldweise. Deshalb stehen
+// `expectedBytes` und `expectedSha256` hier mit, obwohl sie mit dem Schlüssel
+// nichts zu tun haben: ein Feld, das dazukommt, soll diesen Test rot machen,
+// damit jemand nachsieht, ob der Schlüssel dabei mitgewandert ist.
 describe('the download carries it', () => {
   it('hands the key to a CivitAI download', async () => {
     await startModelDownload(CIVITAI, 'checkpoints', 'pony.safetensors')
@@ -88,6 +92,7 @@ describe('the download carries it', () => {
       subfolder: 'checkpoints',
       filename: 'pony.safetensors',
       expectedBytes: null,
+      expectedSha256: null,
       authToken: KEY,
     })
   })
@@ -98,6 +103,8 @@ describe('the download carries it', () => {
       id: 'pony.safetensors',
       url: CIVITAI,
       subfolder: 'checkpoints',
+      expectedBytes: null,
+      expectedSha256: null,
       authToken: KEY,
     })
   })
@@ -110,6 +117,7 @@ describe('the download carries it', () => {
       subfolder: 'checkpoints',
       filename: 'model.gguf',
       expectedBytes: 42,
+      expectedSha256: null,
       authToken: null,
     })
   })
