@@ -217,6 +217,12 @@ export class MCPExternalClient {
       // finds .exe from the bare name but never resolves .cmd, so neither a
       // blanket rewrite nor the bare name alone works for every install.
       // Try the likelier candidate first and fall back to the other.
+      // Vor dem Versuch, nicht danach: ein Start, den dieses Fenster gar nicht
+      // darf, scheitert mit Tauris Bereichsmeldung, und die erklaert dem
+      // Nutzer nichts ueber seinen eigenen Eintrag.
+      if (!isStartableMcpCommand(this.config.command)) {
+        throw new Error(notStartableMessage(this.config.name, this.config.command))
+      }
       const candidates = commandCandidatesForPlatform(this.config.command)
       let spawnError: unknown = null
       for (const program of candidates) {
@@ -501,6 +507,51 @@ export class MCPExternalClient {
  * both spellings are returned with the likelier one first. Commands with
  * an extension or a path separator are returned as-is.
  */
+/**
+ * Die Programme, mit denen dieses Fenster ueberhaupt einen Prozess starten
+ * darf.
+ *
+ * Die Wahrheit steht in `src-tauri/capabilities/default.json` unter
+ * `shell:allow-spawn`, und nur dort: die Liste HIER ist eine Kopie, damit die
+ * App vor dem Start sagen kann, warum ein Server nicht laeuft. Dass beide
+ * gleich sind, haelt ein Test fest
+ * (`__tests__/nur-zwei-starter.test.ts`), sonst waere es das teuerste Muster
+ * im Haus.
+ *
+ * Warum nur diese zwei: bis 2.6.8 standen hier zwanzig Eintraege, darunter
+ * node, python, deno, bun und docker. Jedes davon nimmt einen Einzeiler
+ * entgegen (`node -e`, `python -c`) oder haendigt gleich die ganze Platte aus
+ * (`docker run -v /:/host`). Mit denen in der Liste war jeder Skriptfehler in
+ * der WebView, auch einer in einer Abhaengigkeit, Codeausfuehrung auf dem
+ * Rechner des Nutzers statt Unfug innerhalb der App.
+ */
+export const MCP_STARTER = ['npx', 'uvx'] as const
+
+/**
+ * Kann dieses Fenster den Server mit diesem Befehl ueberhaupt starten.
+ *
+ * Der `.cmd`-Anhang gehoert dazu: unter Windows gibt es npx nur als Shim.
+ */
+export function isStartableMcpCommand(command: string): boolean {
+  const nackt = command.trim().toLowerCase().replace(/\.cmd$/, '')
+  return (MCP_STARTER as readonly string[]).includes(nackt)
+}
+
+/**
+ * Der Satz, den ein Nutzer liest, dessen MCP-Server nicht mehr startet.
+ *
+ * Er nennt den Befehl, den er eingetragen hat, und die zwei, die gehen. Ohne
+ * ihn kam Tauris eigene Meldung durch, die von einem Bereich spricht, den
+ * niemand konfiguriert hat, und der Nutzer sucht den Fehler bei seinem Server.
+ */
+export function notStartableMessage(name: string, command: string): string {
+  return (
+    `LU cannot start "${name}": it is set to run \`${command}\`, and LU only starts `
+    + `MCP servers through ${MCP_STARTER.join(' or ')}. Point the server at one of those, `
+    + `or run it yourself and connect over its URL.`
+  )
+}
+
 export function commandCandidatesForPlatform(
   command: string,
   platform: string = typeof navigator !== 'undefined' ? navigator.platform : ''
