@@ -1031,6 +1031,36 @@ fn stderr_blames_the_model(stderr: &str) -> bool {
     MARKERS.iter().any(|m| lower.contains(m))
 }
 
+/// The subset of those markers that can ONLY come from the bytes in the file:
+/// a header llama.cpp cannot parse, an architecture it does not know, a tensor
+/// count that does not match the metadata.
+///
+/// Measured 2026-09-03 on the Windows release build with a deliberately
+/// truncated GGUF (valid magic, 2 MB of zeroes). llama-server said
+/// `error loading model: unknown model architecture: ''` and exited, and the
+/// app answered "This looks like a graphics-card problem. Set GPU Layers to 0",
+/// which cannot repair a file. It answered that because the routine
+/// backend-init lines of every start on an NVIDIA box carry the word `cuda`,
+/// `stderr_blames_the_gpu` matches on that bare word, and the graphics-card
+/// branch is asked first.
+///
+/// So this question is asked BEFORE the card. `failed to load model` is
+/// deliberately NOT in here: a CUDA out-of-memory prints that line too, and on
+/// that failure GPU Layers 0 is exactly the right advice. Only markers that a
+/// working card can never produce belong here.
+fn stderr_blames_the_model_file(stderr: &str) -> bool {
+    const MARKERS: &[&str] = &[
+        "unknown model architecture",
+        "invalid magic",
+        "unsupported model",
+        "wrong number of tensors",
+        "gguf_init_from_file",
+        "failed to open gguf",
+    ];
+    let lower = stderr.to_ascii_lowercase();
+    MARKERS.iter().any(|m| lower.contains(m))
+}
+
 /// One English sentence a user can act on, plus llama-server's own last words
 /// so a bug report still carries them.
 ///
@@ -1049,6 +1079,7 @@ pub(crate) fn start_failure_message(failure: &StartFailure, port: u16, budget: D
         && stderr_names_a_missing_system_library(&failure.stderr).is_none()
         && stderr_blames_the_gpu(&failure.stderr)
         && !stderr_blames_the_port(&failure.stderr)
+        && !stderr_blames_the_model_file(&failure.stderr)
     {
         // A missing system library is asked before the card: the loader line
         // "error while loading shared libraries: libvulkan.so.1" carries the
@@ -1060,6 +1091,11 @@ pub(crate) fn start_failure_message(failure: &StartFailure, port: u16, budget: D
         // where the log carries a real bind sentence, because "cuda" appears in
         // the routine backend-init lines of every start on an NVIDIA box and
         // "set GPU Layers to 0" does not free a busy port.
+        // And the FILE is asked before the card, for the same kind of reason
+        // one step further: llama.cpp answers any load error through its
+        // auto-fit path, whose line carries the words "device memory", so a
+        // GGUF with a header it cannot parse used to arrive here and be sent
+        // away as a graphics-card problem. No setting repairs a broken file.
         format!("The LU Engine started and exited again before it could serve on port {port}. It was tried twice. This looks like a graphics-card problem. Open Settings, LU Engine and set GPU Layers to 0 to run on the CPU, then try again.")
     } else if failure.died && stderr_blames_the_port(&failure.stderr) {
         format!(
@@ -3474,6 +3510,54 @@ mod tests {
         let msg = start_failure_message(&f, 8127, Duration::from_secs(60));
         assert!(msg.contains("refused the model file"), "{msg}");
         assert!(!msg.contains("GPU Layers"), "{msg}");
+    }
+
+    /// The real tail of a real failure, captured 2026-09-03 on the Windows
+    /// release build after starting a deliberately truncated GGUF (valid
+    /// magic, 2 MB of zeroes) through the Use button.
+    ///
+    /// It carries no `cuda` line at all. What put it on the graphics-card
+    /// branch is llama.cpp's own auto-fit line, "trying to fit params to free
+    /// DEVICE MEMORY", which it prints on any load error, and which matches
+    /// the `device memory` marker in `stderr_blames_the_gpu`. So the user was
+    /// told to set GPU Layers to 0 on a file that no setting can repair.
+    const KAPUTTE_GGUF_STDERR: &str = "\
+srv    load_model: loading model 'C:\\Users\\x\\models\\diag-kaputt.gguf'
+llama_model_load: error loading model: unknown model architecture: ''
+llama_model_load_from_file_impl: failed to load model
+common_fit_params: encountered an error while trying to fit params to free device memory: failed to load model
+cmn    common_init_: failed to load model 'C:\\Users\\x\\models\\diag-kaputt.gguf'
+srv    llama_server: exiting due to model loading error";
+
+    #[test]
+    fn a_broken_file_is_not_reported_as_a_graphics_card_problem() {
+        let f = StartFailure {
+            died: true,
+            port_taken: false,
+            stderr: KAPUTTE_GGUF_STDERR.into(),
+        };
+        let msg = start_failure_message(&f, 8127, Duration::from_secs(60));
+        assert!(msg.contains("refused the model file"), "{msg}");
+        assert!(!msg.contains("GPU Layers"), "{msg}");
+        assert!(!msg.contains("graphics-card"), "{msg}");
+        // The engine's own last words still travel, for a bug report.
+        assert!(msg.contains("unknown model architecture"), "{msg}");
+    }
+
+    #[test]
+    fn a_card_that_runs_out_of_memory_keeps_the_gpu_layers_way_out() {
+        // The negative control for the test above, and the reason
+        // `failed to load model` is NOT one of the file-structure markers: a
+        // CUDA out-of-memory prints that same line, and there GPU Layers 0 is
+        // exactly the advice that gets the user chatting.
+        let f = StartFailure {
+            died: true,
+            port_taken: false,
+            stderr: "ggml_backend_cuda_buffer_type_alloc_buffer: allocating 9216.00 MiB on device 0: cudaMalloc failed: out of memory\nllama_model_load: error loading model: unable to allocate CUDA0 buffer\nllama_model_load_from_file_impl: failed to load model".into(),
+        };
+        let msg = start_failure_message(&f, 8127, Duration::from_secs(60));
+        assert!(msg.contains("GPU Layers"), "{msg}");
+        assert!(!msg.contains("refused the model file"), "{msg}");
     }
 
     #[test]

@@ -380,10 +380,35 @@ export function bundledToAIModels(models: BundledModel[]): CloudModel[] {
   }))
 }
 
+/** Activations already on their way, keyed by GGUF path plus tuning, so two
+ *  callers asking for the SAME model share one engine start. */
+const activationsInFlight = new Map<string, Promise<boolean>>()
+
 /**
  * Activate a built-in model by its picker id (`openai::<name>` or bare `<name>`).
  * Resolves the GGUF path from the last listBundledModels() and swaps the engine.
  * No-op if the path is unknown (list not yet fetched).
+ *
+ * TWO CALLERS, ONE ENGINE (measured 2026-09-03, Windows release build).
+ * Every activation happens twice. `useModels.activateModel` calls
+ * `setActiveModel(name)`, and the store chokepoint (`stores/modelStore.ts`)
+ * fires an activation of its own inside that update; the hook then calls this
+ * function again in the same tick. The picker (`ModelSelector`) does the same
+ * in the other order. The store's comment says Rust's argv idempotence turns
+ * the second call into a no-op, and for a model that LOADS that is true.
+ *
+ * For a model that does not load it is false, and expensively so. There is no
+ * running engine to compare argv against, so the second command runs the whole
+ * routine again: Rust tries once, retries once, and does it all a second time.
+ * One click on a broken GGUF spawned FOUR llama-server processes (measured:
+ * 4 spawns, in two pairs 5.7 s apart, all with identical argv), while the
+ * message on screen said "It was tried twice". Twice the wait, twice the VRAM
+ * churn, and a sentence that is off by a factor of two.
+ *
+ * So the coalescing lives here, at the one door both callers come through,
+ * rather than in either of them. Concurrent callers share the promise, failure
+ * included. A LATER click is a fresh call, because the entry is dropped as soon
+ * as the run settles, and a user retrying a failed start must really retry.
  */
 export async function activateBuiltinModel(nameOrPrefixed: string, tuning?: BuiltinEngineTuning): Promise<boolean> {
   const name = nameOrPrefixed.includes('::') ? nameOrPrefixed.split('::')[1] : nameOrPrefixed
@@ -395,6 +420,25 @@ export async function activateBuiltinModel(nameOrPrefixed: string, tuning?: Buil
     path = pathByName.get(name)
   }
   if (!path) return false
-  await swapBundledModel(path, tuning)
-  return true
+  // The tuning is part of the key: two callers wanting the same file with
+  // different settings want two different engines, and the second must not be
+  // handed the first one's promise.
+  const key = `${path}\u0000${JSON.stringify(tuning ?? null)}`
+  const laufend = activationsInFlight.get(key)
+  if (laufend) return laufend
+  const lauf = (async () => {
+    await swapBundledModel(path as string, tuning)
+    return true
+  })()
+  activationsInFlight.set(key, lauf)
+  try {
+    return await lauf
+  } finally {
+    if (activationsInFlight.get(key) === lauf) activationsInFlight.delete(key)
+  }
+}
+
+/** Test-only: forget every in-flight activation. */
+export function __resetActivationsForTests(): void {
+  activationsInFlight.clear()
 }
