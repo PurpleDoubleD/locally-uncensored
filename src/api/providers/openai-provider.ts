@@ -140,6 +140,9 @@ interface OpenAIModelEntry {
  */
 function toModelEntry(m: Record<string, unknown>): OpenAIModelEntry {
   const think = asString(m.think)
+  const levels = Array.isArray(m.reasoning_effort_levels)
+    ? m.reasoning_effort_levels.filter((x): x is string => typeof x === 'string')
+    : []
   return {
     // A catalogue row with no string id is unusable downstream (it keys
     // KNOWN_CONTEXT and every heuristic); '' keeps the row and keeps
@@ -155,6 +158,19 @@ function toModelEntry(m: Record<string, unknown>): OpenAIModelEntry {
       : undefined,
     supports_tools: asBoolean(m.supports_tools),
     think: think === 'toggle' || think === 'always' || think === 'never' ? think : undefined,
+    // The ladder is deliberately NOT checked against a fixed list of rungs:
+    // which rungs exist is the server's decision, and pinning them here would
+    // mean a new rung needs a client release before anyone can pick it. What
+    // is checked is the shape. A list that holds no string after filtering is
+    // no ladder at all, so it comes back as absent rather than as an empty
+    // array, which is the difference between "this model has no rungs" and
+    // "this model does not reason".
+    reasoning_effort_levels: levels.length > 0 ? levels : undefined,
+    // A default the server sends outside its own ladder is not dropped here.
+    // `clampEffort` is the one place that decides what an unreachable rung
+    // becomes, and it already answers this case; a second answer here would be
+    // a second place to keep right.
+    reasoning_effort_default: asString(m.reasoning_effort_default),
   }
 }
 
