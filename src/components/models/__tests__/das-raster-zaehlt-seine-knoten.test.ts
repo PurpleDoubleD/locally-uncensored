@@ -88,12 +88,15 @@ function messeReiter(models: DiscoverModel[]) {
 
 describe('D-S26 · was das Raster wirklich kostet', () => {
   it('der Katalog ergibt die Kacheln, die der Audit gezaehlt hat', () => {
-    // 02.09.2026: Mainstream 53 -> 54. Die Schranke hat getan, was oben
-    // versprochen ist ("jetzt neu messen"), also wurde neu gemessen und nicht
-    // nur die Zahl hochgesetzt.
-    //
-    // Zugang: GLM 5.3 744B, zwei Quants unter EINEM `group` — also eine
-    // Kachel, nicht zwei. Der Zuwachs ist +1 auf 54.
+    // 02.–03.09.2026, zwei Bewegungen, netto null:
+    //   +1  GLM 5.3 744B (zwei Quants unter EINEM `group` = eine Kachel)
+    //   -1  Hunyuan 3 295B entfernt (ebenfalls eine Kachel; `hy_v3` kennt der
+    //       gepinnte llama.cpp nicht, siehe Kommentar an der Fundstelle in
+    //       discover.ts)
+    // Die Schranke ist beide Male aufgefallen und beide Male neu bewertet
+    // worden statt nur nachgezogen. Sie steht wieder auf 53 — nicht, weil sie
+    // dorthin zurueckgesetzt wurde, sondern weil der Katalog wieder so gross
+    // ist.
     //
     // Traegt die Messung oben noch? Ja, und zwar ohne neuen Browserlauf: die
     // Kurve dort ist an ZWEI Punkten belegt (53 -> 0,2 ms · 303 -> 1,1 ms),
@@ -106,7 +109,7 @@ describe('D-S26 · was das Raster wirklich kostet', () => {
     // waren, war Zufall: es sind zwei getrennte Listen (Mainstream und
     // Uncensored), und GLM 5.3 gibt es uncensored nur als Flash, das lokal
     // nicht laeuft (siehe api/__tests__/glm53-nur-was-laeuft.test.ts).
-    expect(messeReiter(getMainstreamTextModels()).kacheln).toBe(54)
+    expect(messeReiter(getMainstreamTextModels()).kacheln).toBe(53)
     expect(messeReiter(getUncensoredTextModels()).kacheln).toBe(53)
   })
 

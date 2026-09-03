@@ -1217,8 +1217,6 @@ export function getMainstreamTextModels(): DiscoverModel[] {
     { name: 'DeepSeek V4 Flash 0731 IQ1', group: 'DeepSeek V4 Flash 0731', description: 'DeepSeek V4-Flash-0731 · the official V4-Flash release, sharper agentic tuning. 284B MoE (13B active), 1M context, MIT. Smallest quant, runs on 96 GB RAM rigs. Multi-part download.', pulls: '4K+', tags: ['284B MoE', 'UD-IQ1_S', '82.5 GB', 'Multi-part'], updated: 'Hot', agent: true, released: '2026-07', downloadUrl: HF('unsloth/DeepSeek-V4-Flash-0731-GGUF', 'UD-IQ1_S/DeepSeek-V4-Flash-0731-UD-IQ1_S-00001-of-00003.gguf'), filename: 'DeepSeek-V4-Flash-0731-UD-IQ1_S-00001-of-00003.gguf', sizeGB: 82.5 },
     { name: 'DeepSeek V4 Flash 0731 Q2', group: 'DeepSeek V4 Flash 0731', description: 'DeepSeek V4-Flash-0731 · Unsloth Dynamic Q2_K_XL, the quality/size sweet spot for this MoE. 1M context, MIT. Multi-part download.', pulls: '4K+', tags: ['284B MoE', 'UD-Q2_K_XL', '96.8 GB', 'Multi-part'], updated: 'Hot', agent: true, released: '2026-07', downloadUrl: HF('unsloth/DeepSeek-V4-Flash-0731-GGUF', 'UD-Q2_K_XL/DeepSeek-V4-Flash-0731-UD-Q2_K_XL-00001-of-00003.gguf'), filename: 'DeepSeek-V4-Flash-0731-UD-Q2_K_XL-00001-of-00003.gguf', sizeGB: 96.8 },
     { name: 'DeepSeek V4 Flash 0731 Q4', group: 'DeepSeek V4 Flash 0731', description: 'DeepSeek V4-Flash-0731 · UD-Q4_K_XL full quality. Needs ~155 GB disk and serious RAM. 1M context, MIT. Multi-part download.', pulls: '4K+', tags: ['284B MoE', 'UD-Q4_K_XL', '155 GB', 'Multi-part'], updated: 'Hot', agent: true, released: '2026-07', downloadUrl: HF('unsloth/DeepSeek-V4-Flash-0731-GGUF', 'UD-Q4_K_XL/DeepSeek-V4-Flash-0731-UD-Q4_K_XL-00001-of-00005.gguf'), filename: 'DeepSeek-V4-Flash-0731-UD-Q4_K_XL-00001-of-00005.gguf', sizeGB: 155 },
-    { name: 'Hunyuan 3 295B Q4', group: 'Hunyuan 3 295B', description: 'Tencent Hunyuan 3 · 295B MoE (21B active), Apache-2.0 without territorial limits. Needs a current llama.cpp / LM Studio build.', pulls: '20K+', tags: ['295B MoE', 'Q4_K_M', '170 GB'], updated: 'New', agent: true, released: '2026-07', downloadUrl: HF('AngelSlim/Hy3-GGUF', 'Hy3-Q4_K_M.gguf'), filename: 'Hy3-Q4_K_M.gguf', sizeGB: 170 },
-    { name: 'Hunyuan 3 295B IQ1', group: 'Hunyuan 3 295B', description: 'Tencent Hunyuan 3 · 1 bit quant for 96 to 128 GB setups. Real quality tradeoff, but it runs. Apache-2.0.', pulls: '20K+', tags: ['295B MoE', 'IQ1_M', '83.3 GB'], updated: 'New', agent: true, released: '2026-07', downloadUrl: HF('AngelSlim/Hy3-GGUF', 'Hy3-IQ1_M.gguf'), filename: 'Hy3-IQ1_M.gguf', sizeGB: 83.3 },
     // ── GLM 5.3 ─────────────────────────────────────────────────────────
     //
     // Nur die GROSSE Variante steht hier, und das ist eine gemessene
@@ -1248,6 +1246,31 @@ export function getMainstreamTextModels(): DiscoverModel[] {
     // Der Waechter __tests__/katalog-architektur.live.test.ts prueft das ab
     // jetzt selbst; seine Gegenprobe wird GRUEN-nach-ROT, sobald llama.cpp
     // glm5next kennt. Dann gehoert Flash hier hinein.
+    // ── Hunyuan 3 295B: entfernt am 03.09.2026, und warum ───────────────
+    //
+    // Hier standen zwei Eintraege, 170 GB und 83,3 GB. Ihre GGUFs tragen
+    // `general.architecture = hy_v3`. Der in scripts/build-llama.sh gepinnte
+    // Stand (LLAMA_TAG b9949 / LLAMA_COMMIT 049326a0, 09.07.2026) kennt die
+    // Architektur NICHT; sie kam am 14.07.2026 mit llama.cpp #25395 dazu und
+    // steht ab Tag b10000.
+    //
+    // Der Nutzer haette also bis zu 170 GB geladen und die Datei danach nicht
+    // oeffnen koennen. Die Eintraege sagten das sogar selbst — "Needs a current
+    // llama.cpp / LM Studio build" — und die App liefert keinen.
+    //
+    // Warum nicht stattdessen der Tag gehoben wurde: das Bauskript pinnt
+    // TAG UND COMMIT und prueft beides bei jedem Lauf; ein Sprung ist kein
+    // Einzeiler, sondern ein Engine-Wechsel. Der Windows-Sidecar, den das
+    // Release wirklich ausliefert, ist ausserdem ein 2.6.3-Build und gar nicht
+    // b9949 (EXPERIMENT-CHANGELOG.md) — ein gehobener Tag im Skript haette den
+    // Architektur-Waechter gruen gemacht, waehrend der Nutzer weiterhin
+    // 170 GB umsonst laedt. Und der Qwen-3.8-27B-Eintrag oben begruendet sich
+    // ausdruecklich damit, dass sein MTP-Kopf "loads fine on the pinned
+    // llama.cpp b9949" — ein Sprung ohne Ladelauf stellt das unbewiesen.
+    //
+    // Zurueck kommen die zwei, wenn LLAMA_TAG/LLAMA_COMMIT gehoben UND ein
+    // echter Ladelauf gemacht ist. Der Waechter dafuer steht schon:
+    // __tests__/katalog-architektur.live.test.ts.
     { name: 'GLM 5.3 744B IQ1', group: 'GLM 5.3 744B', description: 'ZhipuAI GLM 5.3 · dieselbe Basis wie 5.2, der ganze Sprung kommt aus dem Post-Training: +50 % auf Z.ai Code Bench, Open-Weights-SOTA auf Terminal Bench 3.0. 744B MoE (40B aktiv), 1M Kontext. Kleinstes Quant, mehrteilig.', pulls: '74K+', tags: ['744B MoE', 'UD-IQ1_S', '217 GB', 'Multi-part'], updated: 'Hot', agent: true, released: '2026-08', downloadUrl: HF('unsloth/GLM-5.3-GGUF', 'UD-IQ1_S/GLM-5.3-UD-IQ1_S-00001-of-00006.gguf'), filename: 'GLM-5.3-UD-IQ1_S-00001-of-00006.gguf', sizeGB: 216.7 },
     { name: 'GLM 5.3 744B Q2', group: 'GLM 5.3 744B', description: 'ZhipuAI GLM 5.3 · Unsloth Dynamic Q2_K_XL, der Qualitaets-/Groessen-Punkt fuer dieses MoE. 744B MoE (40B aktiv), 1M Kontext, GLM-5.3-Lizenz. Mehrteilig.', pulls: '74K+', tags: ['744B MoE', 'UD-Q2_K_XL', '254 GB', 'Multi-part'], updated: 'Hot', agent: true, released: '2026-08', downloadUrl: HF('unsloth/GLM-5.3-GGUF', 'UD-Q2_K_XL/GLM-5.3-UD-Q2_K_XL-00001-of-00007.gguf'), filename: 'GLM-5.3-UD-Q2_K_XL-00001-of-00007.gguf', sizeGB: 253.9 },
     { name: 'GLM 5.2 744B MoE', description: 'ZhipuAI GLM 5.2 · 744B MoE (40B active), 1M context, MIT. The agentic-coding successor to GLM 5.1. Multi-part, ~304 GB.', pulls: '50K+', tags: ['744B MoE', 'UD-Q2_K_XL', '304 GB', 'Multi-part'], updated: 'Hot', agent: true, released: '2026-06', downloadUrl: HF('unsloth/GLM-5.2-GGUF', 'UD-Q2_K_XL/GLM-5.2-UD-Q2_K_XL-00001-of-00007.gguf'), filename: 'GLM-5.2-UD-Q2_K_XL-00001-of-00007.gguf', sizeGB: 304 },
