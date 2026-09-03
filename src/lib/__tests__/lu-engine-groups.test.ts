@@ -11,22 +11,26 @@
  * Run: npx vitest run src/lib/__tests__/lu-engine-groups.test.ts
  */
 import { describe, it, expect } from 'vitest'
-import { splitLuEngineRows, groupInstalledByProvider, dropDuplicateLuEngineRows, needsLuEngineHeading, LU_ENGINE_GROUP } from '../lu-engine-rows'
+import { splitBackendSwitchRows, groupInstalledByProvider, dropDuplicateLuEngineRows, needsBackendSwitchHeading, LU_ENGINE_GROUP } from '../lu-engine-rows'
 
 const lu = (n: string) => ({ name: `openai::${n}`, model: n, provider: 'openai', providerName: 'LU Engine' })
 const luOld = (n: string) => ({ name: `openai::${n}`, model: n, provider: 'openai', providerName: 'Built-in Engine' })
 const lms = (n: string) => ({ name: `openai::${n}`, model: n, provider: 'openai', providerName: 'LM Studio' })
 const ollama = (n: string) => ({ name: n, model: n, provider: 'ollama', providerName: 'Ollama' })
 
-describe('splitLuEngineRows', () => {
+describe('splitBackendSwitchRows, ein fremdes Backend bedient den Chat', () => {
+  const teilen = <T extends { model: string; provider: string; providerName: string }>(rows: T[]) =>
+    splitBackendSwitchRows(rows, false, 'LM Studio')
+
   it('separates the engine rows from everything else, order untouched', () => {
-    const { luEngine, rest } = splitLuEngineRows([ollama('a'), lu('b'), lms('c'), lu('d')])
-    expect(luEngine.map((m) => m.model)).toEqual(['b', 'd'])
+    const { label, switching, rest } = teilen([ollama('a'), lu('b'), lms('c'), lu('d')])
+    expect(label).toBe(LU_ENGINE_GROUP)
+    expect(switching.map((m) => m.model)).toEqual(['b', 'd'])
     expect(rest.map((m) => m.model)).toEqual(['a', 'c'])
   })
 
   it('a row recorded under the old name belongs to the same group', () => {
-    expect(splitLuEngineRows([luOld('b')]).luEngine.length).toBe(1)
+    expect(teilen([luOld('b')]).switching.length).toBe(1)
   })
 
   // NEGATIVE CONTROL: LM Studio shares provider id 'openai' with the engine.
@@ -34,7 +38,48 @@ describe('splitLuEngineRows', () => {
   // LU Engine group and offer to switch the backend for models that are
   // already running on the one in front.
   it('never takes an LM Studio row along', () => {
-    expect(splitLuEngineRows([lms('c')]).luEngine).toEqual([])
+    expect(teilen([lms('c')]).switching).toEqual([])
+  })
+})
+
+// ── Persona 2, Punkt 9 (03.09.2026): der Weg zurueck hatte keine Ueberschrift ──
+//
+// Versprochen war „a running LM Studio stays in the model picker after the
+// chat has moved to the LU Engine. Its models keep their own heading in the
+// list". Im Waehler standen sie zwischen Qwen und Hermes, ohne ein Wort
+// darueber, dass ein Klick den Steckplatz zurueckgibt.
+describe('splitBackendSwitchRows, die LU Engine bedient den Chat', () => {
+  const teilen = <T extends { model: string; provider: string; providerName: string }>(rows: T[]) =>
+    splitBackendSwitchRows(rows, true, 'LM Studio')
+
+  it('setzt die Zeilen des wartenden Backends unter dessen eigenen Namen ab', () => {
+    const { label, switching, rest } = teilen([ollama('a'), lu('b'), lms('c'), lms('e')])
+    expect(label).toBe('LM Studio')
+    expect(switching.map((m) => m.model)).toEqual(['c', 'e'])
+    expect(rest.map((m) => m.model)).toEqual(['a', 'b'])
+  })
+
+  // NEGATIVKONTROLLE: unsere eigenen Zeilen sind jetzt die laufenden. Sie
+  // abzusetzen hiesse, vor einem Wechsel zu warnen, den es nicht gibt.
+  it('nimmt die eigene Engine nie mit', () => {
+    expect(teilen([lu('b'), luOld('x')]).switching).toEqual([])
+  })
+
+  // NEGATIVKONTROLLE: wartet niemand, gibt es nichts abzusetzen und der
+  // Waehler gruppiert nach Familie wie eh und je.
+  it('ohne wartendes Backend bleibt alles beim Rest', () => {
+    const { label, switching, rest } = splitBackendSwitchRows([lms('c'), lu('b')], true, null)
+    expect(label).toBeNull()
+    expect(switching).toEqual([])
+    expect(rest.length).toBe(2)
+  })
+
+  // Ein drittes lokales Backend, das gerade NICHT wartet, wird nicht
+  // mitgenommen: der Name entscheidet, nicht die Protokoll-Familie.
+  it('trennt zwei OpenAI-Backends an ihrem Namen', () => {
+    const jan = { name: 'openai::x', model: 'x', provider: 'openai', providerName: 'Jan' }
+    const { switching } = splitBackendSwitchRows([lms('c'), jan], true, 'LM Studio')
+    expect(switching.map((m) => m.model)).toEqual(['c'])
   })
 })
 
@@ -194,7 +239,7 @@ describe('de-duplication asks about the FILE, never about the model', () => {
 
 // ── A14 review 7: the heading is the warning, so it cannot be optional ──────
 
-describe('when the LU Engine heading has to be drawn', () => {
+describe('when the switch heading has to be drawn', () => {
   const labels = <T extends { label: string }>(g: T[]) => g.map((x) => x.label)
   const luGroup = labels(groupInstalledByProvider([lu('a')]))
   const ollamaGroup = labels(groupInstalledByProvider([ollama('a')]))
@@ -204,29 +249,36 @@ describe('when the LU Engine heading has to be drawn', () => {
   // Engine folder, with Ollama or LM Studio in front, got one unlabelled list
   // and a click that moved his chat backend without a word of warning.
   it('one LU Engine group under a foreign backend still gets its heading', () => {
-    expect(needsLuEngineHeading(luGroup, false)).toBe(true)
+    expect(needsBackendSwitchHeading(luGroup, LU_ENGINE_GROUP)).toBe(true)
   })
 
   it('and so does a list with more than one backend in it, either way round', () => {
-    expect(needsLuEngineHeading(both, false)).toBe(true)
-    expect(needsLuEngineHeading(both, true)).toBe(true)
+    expect(needsBackendSwitchHeading(both, LU_ENGINE_GROUP)).toBe(true)
+    expect(needsBackendSwitchHeading(both, null)).toBe(true)
+  })
+
+  // Und dieselbe Regel andersherum: eine einzige LM-Studio-Gruppe unter
+  // unserer eigenen Engine traegt ihre Ueberschrift, weil der Klick darauf
+  // den Steckplatz zurueckgibt.
+  it('eine einzelne Gruppe des wartenden Backends bekommt sie ebenso', () => {
+    expect(needsBackendSwitchHeading(['LM Studio'], 'LM Studio')).toBe(true)
   })
 
   // NEGATIVE CONTROL: a plain Ollama box looks exactly as it did before. A
   // heading over the only list there names nothing the user did not know.
   it('a single foreign group draws none', () => {
-    expect(needsLuEngineHeading(ollamaGroup, false)).toBe(false)
-    expect(needsLuEngineHeading(ollamaGroup, true)).toBe(false)
+    expect(needsBackendSwitchHeading(ollamaGroup, LU_ENGINE_GROUP)).toBe(false)
+    expect(needsBackendSwitchHeading(ollamaGroup, null)).toBe(false)
   })
 
   // NEGATIVE CONTROL: with the LU Engine itself in front there is no switch to
   // warn about, so its own single group needs no heading either.
   it('and neither does the LU Engine when it is already the chat backend', () => {
-    expect(needsLuEngineHeading(luGroup, true)).toBe(false)
+    expect(needsBackendSwitchHeading(luGroup, null)).toBe(false)
   })
 
   it('an empty list needs nothing', () => {
-    expect(needsLuEngineHeading([], false)).toBe(false)
+    expect(needsBackendSwitchHeading([], LU_ENGINE_GROUP)).toBe(false)
   })
 })
 
@@ -247,12 +299,12 @@ describe('the Installed list and the picker ask the same rule', () => {
 
   it('the composer picker calls it instead of counting groups itself', async () => {
     const src = await read('../../components/models/ModelSelector.tsx')
-    expect(src).toContain('needsLuEngineHeading(groups.map((g) => g.family), luEngineHoldsChat)')
+    expect(src).toContain('needsBackendSwitchHeading(groups.map((g) => g.family), wechsel.label)')
     expect(src).not.toMatch(/family === LU_ENGINE_GROUP\)\) &&/)
   })
 
   it('and so does the Installed list', async () => {
     const src = await read('../../components/models/ModelManager.tsx')
-    expect(src).toContain('needsLuEngineHeading(providerGroups.map((g) => g.label), luEngineHoldsChat)')
+    expect(src).toContain('needsBackendSwitchHeading(providerGroups.map((g) => g.label), luEngineHoldsChat ? null : LU_ENGINE_GROUP)')
   })
 })

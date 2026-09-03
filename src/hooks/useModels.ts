@@ -593,6 +593,14 @@ export function useModels() {
       switched = ensureLuEngineIsChatProvider()
       if (switched) useLuEngineSwitchStore.getState().announce(LU_ENGINE_SWITCH_NOTE)
     }
+    // Was vorher bediente. Die Auswahl wird gesetzt, BEVOR die Engine laeuft,
+    // damit die Kachel sofort reagiert; scheitert der Start, muss sie wieder
+    // zurueck. Ohne das stand die Kachel eines kaputten Modells auf ACTIVE,
+    // verlor ihren Use-Knopf und auf dem Port lag nichts (Gegenprobe zu
+    // 29f22a1a am 03.09.2026, Befund 2). Die Rust-Seite holt im selben Fall
+    // die vorherige Engine zurueck, also ist genau dieses Modell auch das,
+    // was danach wirklich wieder bedient.
+    const vorherAktiv = useModelStore.getState().activeModel
     setActiveModel(name)
     const cfg = useProviderStore.getState().providers.openai
     if (cfg.enabled && cfg.managed && getProviderIdFromModel(name) === 'openai') {
@@ -603,6 +611,7 @@ export function useModels() {
       // tail Rust appends; the card says the same sentence now, from the same
       // helper, in the status row that is drawn right above the list.
       const sayItFailed = (reason: unknown) => {
+        if (vorherAktiv !== name) setActiveModel(vorherAktiv)
         const line = luEngineStartFailureNote(name, reason)
         useLuEngineSwitchStore.getState()
           .announce(switched ? `${LU_ENGINE_SWITCH_NOTE} ${line}` : line, 'error')

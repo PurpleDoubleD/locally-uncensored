@@ -23,7 +23,7 @@ import {
   slotHandbackUpdate, standbyOccupant,
   type HandoverSlot, type SlotOccupant,
 } from '../lib/openai-slot-handover'
-import { isBuiltinEngineEntry, type InstalledModelLike } from '../lib/lmstudio-match'
+import { isRowOfBackend, type InstalledModelLike } from '../lib/lmstudio-match'
 import { OpenAIProvider } from './providers/openai-provider'
 import type { ProviderModel } from './providers/types'
 import { PROVIDER_PRESETS } from './providers/types'
@@ -164,7 +164,18 @@ export function chatProviderSwitchNote(name: string): string {
  * to list from a machine that may be offline, and "managed" is us.
  */
 export function standbyChatBackend(): SlotOccupant | null {
-  const slot = useProviderStore.getState().providers.openai as HandoverSlot
+  return standbyBackendOf(useProviderStore.getState().providers.openai as HandoverSlot)
+}
+
+/**
+ * Dieselbe Frage an einen Steckplatz, den der Aufrufer schon hat.
+ *
+ * Der Waehler braucht die Antwort REAKTIV: die Gruppierung muss neu zeichnen,
+ * sobald ein Klick den Steckplatz weiterreicht, und ein Blick in
+ * `getState()` benachrichtigt niemanden. Deshalb steht die Regel hier, wo
+ * beide Wege sie holen, statt ein zweites Mal im Bauteil.
+ */
+export function standbyBackendOf(slot: HandoverSlot): SlotOccupant | null {
   if (!(slot.enabled && slot.managed === true)) return null
   const waiting = standbyOccupant(slot)
   if (!waiting || !waiting.isLocal || waiting.managed) return null
@@ -179,11 +190,7 @@ export function standbyChatBackend(): SlotOccupant | null {
  * and it is the same name the standby card carries.
  */
 export function isStandbyBackendRow(row: InstalledModelLike | null | undefined): boolean {
-  if (!row || row.provider !== 'openai') return false
-  if (isBuiltinEngineEntry(row)) return false
-  const waiting = standbyChatBackend()
-  if (!waiting) return false
-  return (row.providerName || '').toLowerCase() === waiting.name.toLowerCase()
+  return isRowOfBackend(row, standbyChatBackend()?.name)
 }
 
 /**

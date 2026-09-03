@@ -197,6 +197,32 @@ describe('when the engine does not come up for the card that was clicked', () =>
     expect(useProviderStore.getState().providers.openai.managed).toBe(true)
   })
 
+  // Gegenprobe zu 29f22a1a, 03.09.2026, Befund 2: nach dem Fehlschlag stand
+  // die Kachel des kaputten Modells auf ACTIVE und verlor ihren Use-Knopf,
+  // waehrend auf dem Port kein Prozess lag. Die Auswahl wird vor dem Start
+  // gesetzt, damit die Kachel sofort reagiert, also muss sie bei einem
+  // Fehlschlag auch wieder zurueck.
+  it('laesst die Kachel des Modells nicht auf ACTIVE stehen', async () => {
+    activateBuiltinModel.mockRejectedValue(new Error('llama-server exited'))
+    await clickCard(GGUF)
+    expect(useModelStore.getState().activeModel).toBe(OLLAMA)
+  })
+
+  it('und auch nicht, wenn die Datei gar nicht mehr da ist', async () => {
+    activateBuiltinModel.mockResolvedValue(false)
+    await clickCard(GGUF)
+    expect(useModelStore.getState().activeModel).toBe(OLLAMA)
+  })
+
+  // NEGATIVKONTROLLE: ein geglueckter Start laesst die Auswahl stehen. Ohne
+  // diesen Fall ginge der obige auch auf einer Fassung durch, die die Auswahl
+  // grundsaetzlich zurueckdreht.
+  it('ein geglueckter Start behaelt das gewaehlte Modell', async () => {
+    activateBuiltinModel.mockResolvedValue(true)
+    await clickCard(GGUF)
+    expect(useModelStore.getState().activeModel).toBe(GGUF)
+  })
+
   it('treats a false answer as a failure too, and says which file is gone', async () => {
     // activateBuiltinModel answers false when it cannot resolve the GGUF path,
     // even after refreshing the list once. Nothing was started.

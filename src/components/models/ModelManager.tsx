@@ -21,7 +21,7 @@ import { MlxMediaSettings } from '../settings/MlxMediaSettings'
 import { backendCall } from '../../api/backend'
 import { customModelDirs } from '../../api/engine'
 import { counterView } from '../../lib/inventory-counter'
-import { groupInstalledByProvider, needsLuEngineHeading } from '../../lib/lu-engine-rows'
+import { groupInstalledByProvider, needsBackendSwitchHeading, LU_ENGINE_GROUP } from '../../lib/lu-engine-rows'
 import { isBuiltinEngineEntry } from '../../lib/lmstudio-match'
 import { LuEngineSwitchBar } from '../chat/LuEngineSwitchBar'
 import type { InstalledModelLike } from '../../lib/lmstudio-match'
@@ -436,7 +436,7 @@ export function ModelManager() {
                           // is an LU Engine group while another backend holds
                           // the chat: then the heading is not decoration, it is
                           // the warning that a click here moves the backend.
-                          const showHeadings = needsLuEngineHeading(providerGroups.map((g) => g.label), luEngineHoldsChat)
+                          const showHeadings = needsBackendSwitchHeading(providerGroups.map((g) => g.label), luEngineHoldsChat ? null : LU_ENGINE_GROUP)
                           let drawn = 0
                           return providerGroups.map(({ label, models: rows }) => (
                             <div key={label} className="space-y-1.5">

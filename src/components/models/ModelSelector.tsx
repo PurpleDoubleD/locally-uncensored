@@ -20,13 +20,14 @@ import { lmStudioSlotUpdate, adoptionReplacesBuiltinEngine } from '../../lib/lms
 import { nextProbeDelayMs } from '../../lib/probe-backoff'
 import { noChatBackendEnabled } from '../../lib/provider-visibility'
 import { cloudTeaserModels } from '../../lib/cloud-teaser-models'
-import { splitLuEngineRows, needsLuEngineHeading, LU_ENGINE_GROUP } from '../../lib/lu-engine-rows'
+import { splitBackendSwitchRows, needsBackendSwitchHeading } from '../../lib/lu-engine-rows'
 import { isBuiltinEngineEntry, type InstalledModelLike } from '../../lib/lmstudio-match'
+import type { HandoverSlot } from '../../lib/openai-slot-handover'
 import {
   ensureLuEngineIsChatProvider, LU_ENGINE_SWITCH_NOTE, LU_ENGINE_SWAP_BUSY_NOTE,
   announceLuEngineSwapBusy, luEngineStartFailureNote,
   LM_STUDIO_LOAD_BUSY_NOTE, announceLmStudioLoadBusy,
-  handBackChatProviderForRow, chatProviderSwitchNote,
+  handBackChatProviderForRow, chatProviderSwitchNote, standbyBackendOf,
 } from '../../api/lu-engine-switch'
 import { tryAcquireLuEngineSwap, releaseLuEngineSwap, luEngineSwapInFlight } from '../../api/lu-engine-swap-lock'
 import { useLuEngineSwitchStore } from '../../stores/luEngineSwitchStore'
@@ -949,6 +950,9 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
   // Read reactively, not through isManagedBuiltinActive(): the grouping below
   // has to redraw the moment a pick hands the slot to the engine.
   const luEngineHoldsChat = useProviderStore((s) => s.providers.openai.enabled && s.providers.openai.managed === true)
+  // Ebenfalls reaktiv, und aus demselben Grund: gibt ein Klick den Steckplatz
+  // zurueck, verschwindet die Ueberschrift im selben Zug.
+  const standbyName = useProviderStore((s) => standbyBackendOf(s.providers.openai as HandoverSlot)?.name ?? null)
   const activeModelObj = models.find((m) => m.name === activeModel)
   const activeDisplayName = activeModel
     ? (activeModelObj && 'displayName' in activeModelObj && activeModelObj.displayName) ||
@@ -969,24 +973,25 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
     ? allTextModels.filter((m) => m.name === activeModel || canUseTools({ name: m.name, supportsTools: m.supportsTools }))
     : allTextModels
   const hiddenForCode = allTextModels.length - textModels.length
-  // A14: while another backend holds the chat, the LU Engine rows are set
-  // apart under their own heading instead of blending into the family groups,
-  // because picking one of them moves the chat backend and a heading is the
-  // cheapest place to say that before the click. While the LU Engine IS the
-  // chat backend nothing is set apart and the picker groups by family exactly
-  // as it always has: there is no consequence to warn about then, and lineage
-  // is what people pick by.
-  const luEngineSplit = luEngineHoldsChat ? { luEngine: [], rest: textModels } : splitLuEngineRows(textModels)
+  // A14: die Zeilen, deren Wahl das lokale Backend wechselt, stehen unter
+  // ihrer eigenen Ueberschrift statt zwischen den Modellfamilien, denn ein
+  // Klick darauf hat eine Folge und die Ueberschrift ist die billigste Stelle,
+  // sie VOR dem Klick zu nennen. Welche Zeilen das sind, haengt daran, wer den
+  // Steckplatz haelt: unsere GGUFs unter einem fremden Backend, die Zeilen des
+  // wartenden Backends unter unserer eigenen Engine. Gibt es nichts zu
+  // wechseln, gruppiert der Waehler nach Familie wie eh und je, denn dann gibt
+  // es keine Folge zu melden und Abstammung ist, wonach Menschen waehlen.
+  const wechsel = splitBackendSwitchRows(textModels, luEngineHoldsChat, standbyName)
   const groups: { family: string; models: AIModel[] }[] = [
-    ...(luEngineSplit.luEngine.length > 0
-      ? [{ family: LU_ENGINE_GROUP, models: luEngineSplit.luEngine }]
+    ...(wechsel.switching.length > 0 && wechsel.label
+      ? [{ family: wechsel.label, models: wechsel.switching }]
       : []),
-    ...groupByFamily(luEngineSplit.rest),
+    ...groupByFamily(wechsel.rest),
   ]
   // The one rule, asked rather than copied (second review): one group normally
-  // draws no heading, except an LU Engine group under a foreign chat backend,
-  // where the heading is the warning that picking from it moves the backend.
-  const showHeadings = needsLuEngineHeading(groups.map((g) => g.family), luEngineHoldsChat)
+  // draws no heading, except the switch group, where the heading is the
+  // warning that picking from it moves the backend.
+  const showHeadings = needsBackendSwitchHeading(groups.map((g) => g.family), wechsel.label)
   const hasOllamaModels = textModels.some(m => ('provider' in m && m.provider === 'ollama') || !('provider' in m))
   textModelsEmptyRef.current = textModels.length === 0
 

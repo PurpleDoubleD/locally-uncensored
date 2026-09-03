@@ -73,6 +73,25 @@ export function isLmStudioEntry(m: InstalledModelLike): boolean {
 }
 
 /**
+ * Gehoert diese Zeile dem lokalen Backend namens `name`.
+ *
+ * Jedes Backend, das das OpenAI-Protokoll spricht, traegt `provider: 'openai'`
+ * — das ist der eine Steckplatz, den sie sich teilen. Auseinander halten kann
+ * sie nur der Anzeigename, und der ist derselbe, den die Karte in den
+ * Einstellungen zeigt. Unsere eigene Engine ist nie gemeint: sie hat ihre
+ * eigene Erkennung eine Zeile weiter unten, und wer sie hier mitzaehlt, haelt
+ * das Laufende fuer das Wartende.
+ */
+export function isRowOfBackend(
+  m: InstalledModelLike | null | undefined,
+  name: string | null | undefined,
+): boolean {
+  if (!m || !name || m.provider !== 'openai') return false
+  if (isBuiltinEngineEntry(m)) return false
+  return (m.providerName || '').toLowerCase() === name.toLowerCase()
+}
+
+/**
  * An LU Engine entry. `bundledToAIModels` stamps every downloaded GGUF with
  * `provider: 'openai'` and `providerName: 'LU Engine'` ('Built-in Engine'
  * before 2.6.8, still on disk in older chats), and its `model` is the file

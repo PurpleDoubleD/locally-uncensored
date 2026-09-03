@@ -1237,8 +1237,90 @@ fn start_bundled_engine_blocking(
         }
     }
 
+    // Was gerade bedient wird, damit ein misslungener Wechsel es
+    // zurueckbringen kann. Ein Wechsel ist ein Halt UND ein Start, und bis
+    // 2.6.8 war nur der Halt sicher: ein Klick auf eine kaputte GGUF beendete
+    // die gesunde Engine 0,4 s spaeter, also bevor der erste Versuch mit der
+    // neuen Datei ueberhaupt begann, und niemand holte sie zurueck. Wer ein
+    // kaputtes Modell antippte, stand ohne Chat da (gemessen am 03.09.2026,
+    // 21:11:48.611, Gegenprobe zu 29f22a1a).
+    let vorher = {
+        let guard = state.bundled_engine.lock().unwrap();
+        guard.as_ref().map(|e| PreviousEngine {
+            model_path: e.model_path.clone(),
+            args: e.args.clone(),
+            port: e.port,
+            ctx: e.ctx,
+        })
+    };
+
     // Different model (or dead) → stop the old process before spawning.
     stop_engine_locked(state);
+
+    match start_after_stop(app, state, &model_path, &tuning, port, slot_dir.as_deref(), mmproj.as_deref())
+    {
+        Ok(v) => Ok(v),
+        Err(msg) => Err(match (vorher, resolve_engine_binary(app)) {
+            (Some(p), Some(bin)) if restore_engine(&bin, state, &p) => {
+                format!("{msg}\n\n{RESTORED_NOTE}")
+            }
+            _ => msg,
+        }),
+    }
+}
+
+/// Die Engine, die vor einem Wechsel bediente.
+struct PreviousEngine {
+    model_path: String,
+    args: Vec<String>,
+    port: u16,
+    ctx: Option<u32>,
+}
+
+/// Der Satz, der an die Fehlermeldung geht, wenn das alte Modell wieder laeuft.
+/// Ohne ihn liest sich ein geglueckter Rueckfall wie ein Totalausfall, und der
+/// Nutzer sucht nach etwas, das schon in Ordnung ist.
+const RESTORED_NOTE: &str = "The model that was serving before is running again.";
+
+/// Die vorherige Engine wieder starten, nachdem ein Wechsel gescheitert ist.
+///
+/// Der alte Prozess ist tot und laesst sich nicht zurueckholen, also wird er
+/// aus genau dem argv neu gestartet, mit dem er lief. EIN Versuch, keine
+/// Wiederholung: er bediente vor Sekunden noch, und ein zweiter Fehlschlag
+/// hier waere nichts, woran ein Nutzer etwas aendern koennte. Er wuerde nur
+/// die Fehlermeldung des eigentlichen Problems um Minuten verzoegern.
+fn restore_engine(binary: &Path, state: &AppState, vorher: &PreviousEngine) -> bool {
+    println!("[Engine] the switch failed, bringing back {}", vorher.model_path);
+    let ok = spawn_engine_attempt(
+        state,
+        binary,
+        &vorher.args,
+        &vorher.model_path,
+        vorher.port,
+        vorher.ctx,
+    )
+    .is_ok();
+    if !ok {
+        println!("[Engine] could not bring back {}", vorher.model_path);
+    }
+    ok
+}
+
+/// Der Startweg ab dem Punkt, an dem die alte Engine bereits gestoppt ist.
+///
+/// Eigene Funktion, damit JEDER Fehlerausgang darin durch den Rueckfall oben
+/// laeuft. Vorher standen hier vier `return Err(...)` im selben Rumpf wie der
+/// Stopp, und ein Rueckfall haette an vier Stellen wiederholt werden muessen.
+#[allow(clippy::too_many_arguments)]
+fn start_after_stop(
+    app: &AppHandle,
+    state: &State<'_, AppState>,
+    model_path: &str,
+    tuning: &EngineTuning,
+    port: u16,
+    slot_dir: Option<&str>,
+    mmproj: Option<&str>,
+) -> Result<serde_json::Value, String> {
 
     // The port must actually be FREE now: our own previous child (if any) was
     // killed AND reaped above, so anything still holding it is an orphaned or
@@ -1334,11 +1416,11 @@ fn start_bundled_engine_blocking(
         println!("[Engine] port {preferred_port} is taken, the LU Engine moves to {port}");
     }
     let desired_args =
-        build_server_args(&model_path, &tuning, port, slot_dir.as_deref(), mmproj.as_deref());
+        build_server_args(model_path, tuning, port, slot_dir, mmproj);
 
-    let deadline = health_timeout_for(&model_path);
-    let ctx = effective_ctx(&tuning);
-    let first = spawn_engine_attempt(state, &binary, &desired_args, &model_path, port, ctx);
+    let deadline = health_timeout_for(model_path);
+    let ctx = Some(effective_ctx(tuning));
+    let first = spawn_engine_attempt(state, &binary, &desired_args, model_path, port, ctx);
     let failure = match first {
         Ok(()) => {
             println!("[Engine] LU Engine healthy on port {port}");
@@ -1379,14 +1461,14 @@ fn start_bundled_engine_blocking(
     } else {
         println!("[Engine] the first attempt could not open port {port}, retrying on {retry_port}");
         build_server_args(
-            &model_path,
-            &tuning,
+            model_path,
+            tuning,
             retry_port,
-            slot_dir.as_deref(),
-            mmproj.as_deref(),
+            slot_dir,
+            mmproj,
         )
     };
-    match spawn_engine_attempt(state, &binary, &retry_args, &model_path, retry_port, ctx) {
+    match spawn_engine_attempt(state, &binary, &retry_args, model_path, retry_port, ctx) {
         Ok(()) => {
             println!("[Engine] LU Engine healthy on port {retry_port} (second attempt)");
             Ok(serde_json::json!({
@@ -1417,12 +1499,12 @@ pub(crate) struct StartFailure {
 /// child. Reaps the child on every failure path so no half-loaded server is
 /// left behind.
 fn spawn_engine_attempt(
-    state: &State<'_, AppState>,
+    state: &AppState,
     binary: &Path,
     args: &[String],
     model_path: &str,
     port: u16,
-    ctx: u32,
+    ctx: Option<u32>,
 ) -> Result<(), StartFailure> {
     println!("[Engine] Starting LU Engine llama-server on port {port}, model {model_path}");
     let mut cmd = Command::new(binary);
@@ -1468,7 +1550,7 @@ fn spawn_engine_attempt(
         child,
         model_path: model_path.to_string(),
         port,
-        ctx: Some(ctx),
+        ctx,
         args: args.to_vec(),
     });
 
@@ -2293,6 +2375,8 @@ pub(crate) fn stop_embed_locked(state: &AppState) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
 
     #[test]
     fn health_timeout_scales_with_model_size_and_caps() {
@@ -3067,6 +3151,137 @@ mod tests {
 
         assert_eq!(out, HealthWait::ChildExited);
         assert!(took < Duration::from_secs(5), "waited {took:?}, which is the old dead wait");
+    }
+
+    // ── Der Rueckfall nach einem misslungenen Wechsel ─────────────────────
+    //
+    // Gegenprobe zu 29f22a1a am 03.09.2026: ein Klick auf eine kaputte GGUF
+    // beendete die laufende, gesunde Engine 0,4 s spaeter und liess den
+    // Nutzer ohne Chat zurueck. Der Wechsel ist ein Halt und ein Start; nur
+    // der Halt war sicher.
+
+    /// Ein winziger Server, der auf `/health` mit 200 antwortet, bis der
+    /// Schalter faellt. Damit ist der GESUNDE Ausgang von
+    /// `spawn_engine_attempt` pruefbar, ohne eine echte llama-server-Binaerdatei:
+    /// die Funktion fragt nur diesen einen Port.
+    fn gesunder_port() -> (u16, Arc<AtomicBool>, std::thread::JoinHandle<()>) {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+        let port = listener.local_addr().unwrap().port();
+        listener.set_nonblocking(true).unwrap();
+        let stop = Arc::new(AtomicBool::new(false));
+        let mein_stop = Arc::clone(&stop);
+        let handle = std::thread::spawn(move || {
+            while !mein_stop.load(Ordering::Relaxed) {
+                match listener.accept() {
+                    Ok((mut sock, _)) => {
+                        let mut puffer = [0u8; 1024];
+                        let _ = sock.set_read_timeout(Some(Duration::from_millis(200)));
+                        let _ = sock.read(&mut puffer);
+                        let _ = sock.write_all(
+                            b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok",
+                        );
+                    }
+                    Err(_) => std::thread::sleep(Duration::from_millis(20)),
+                }
+            }
+        });
+        (port, stop, handle)
+    }
+
+    #[test]
+    #[cfg_attr(target_os = "windows", ignore = "uses sh")]
+    fn a_failed_switch_puts_the_previous_model_back_on_its_own_port() {
+        let (port, stop, handle) = gesunder_port();
+        let state = AppState::new();
+        let vorher = PreviousEngine {
+            model_path: "/tmp/hermes.gguf".into(),
+            args: vec!["-c".into(), "sleep 30".into()],
+            port,
+            ctx: Some(8192),
+        };
+
+        let zurueck = restore_engine(
+            Path::new(&crate::test_support::posix_shell()),
+            &state,
+            &vorher,
+        );
+
+        assert!(zurueck, "the previous engine did not come back");
+        {
+            let guard = state.bundled_engine.lock().unwrap();
+            let e = guard.as_ref().expect("the slot is empty after a restore");
+            // Genau das alte Modell, auf genau seinem Port, mit genau seinem
+            // Kontext. Ein Rueckfall, der irgendetwas anderes startet, waere
+            // schlimmer als keiner: der Nutzer chattet dann mit einem Modell,
+            // das er nie gewaehlt hat.
+            assert_eq!(e.model_path, "/tmp/hermes.gguf");
+            assert_eq!(e.port, port);
+            assert_eq!(e.ctx, Some(8192));
+            assert_eq!(e.args, vorher.args);
+        }
+
+        stop.store(true, Ordering::Relaxed);
+        let mut engine = state.bundled_engine.lock().unwrap().take().unwrap();
+        let _ = engine.child.kill();
+        let _ = engine.child.wait();
+        let _ = handle.join();
+    }
+
+    #[test]
+    #[cfg_attr(target_os = "windows", ignore = "uses sh")]
+    fn a_restore_that_fails_says_so_instead_of_claiming_success() {
+        // Negativkontrolle. Ohne sie ginge der Fall oben auch auf einer
+        // Funktion durch, die einfach immer `true` zurueckgibt, und die
+        // Fehlermeldung verspraeche dem Nutzer ein Modell, das nicht laeuft.
+        let state = AppState::new();
+        let vorher = PreviousEngine {
+            model_path: "/tmp/hermes.gguf".into(),
+            args: vec!["-c".into(), "exit 1".into()],
+            port: DEAD_PORT,
+            ctx: Some(8192),
+        };
+
+        assert!(!restore_engine(
+            Path::new(&crate::test_support::posix_shell()),
+            &state,
+            &vorher
+        ));
+        assert!(
+            state.bundled_engine.lock().unwrap().is_none(),
+            "a dead child was left in the slot, so the app would report it as running"
+        );
+    }
+
+    #[test]
+    fn every_failed_switch_runs_through_the_fallback() {
+        // Quellanker: der Wechsel merkt sich die laufende Engine VOR dem Stopp
+        // und hat genau EINEN Fehlerausgang, der den Rueckfall versucht. Vier
+        // einzelne `return Err` im selben Rumpf waren der Grund, warum der
+        // Rueckfall ueberhaupt fehlen konnte.
+        let src = include_str!("engine.rs");
+        let wechsel = src
+            .split("fn start_bundled_engine_blocking(")
+            .nth(1)
+            .expect("the switch is gone")
+            .split("\nfn ")
+            .next()
+            .unwrap();
+        assert!(
+            wechsel.contains("let vorher = {"),
+            "the switch no longer remembers what was serving"
+        );
+        assert!(
+            wechsel.contains("restore_engine("),
+            "the switch no longer brings the previous engine back"
+        );
+        // Der Stopp steht VOR dem Start, sonst gaebe es nichts zu merken.
+        let stopp = wechsel.find("stop_engine_locked(state);").expect("no stop");
+        let merken = wechsel.find("let vorher = {").expect("no memory");
+        assert!(merken < stopp, "the engine is stopped before it is remembered");
+        // Und der Startweg danach ist EINE Funktion, nicht wieder ein Rumpf
+        // mit eigenen Ausgaengen.
+        assert!(wechsel.contains("start_after_stop("));
     }
 
     #[test]

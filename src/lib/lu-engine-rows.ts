@@ -21,8 +21,8 @@
  */
 
 import {
-  isSameGgufFile, isLmStudioEntry, isBuiltinEngineEntry, modelIdentity, extractQuant,
-  type InstalledModelLike,
+  isSameGgufFile, isLmStudioEntry, isBuiltinEngineEntry, isRowOfBackend, modelIdentity,
+  extractQuant, type InstalledModelLike,
 } from './lmstudio-match'
 
 /** The heading LU Engine rows sit under, in Installed and in the picker. */
@@ -263,16 +263,42 @@ function sameFile(
 }
 
 /**
- * The LU Engine rows and everything else, kept apart.
+ * Die Zeilen, deren Wahl das lokale Chat-Backend WECHSELT, und der Rest.
  *
- * Order within each half is left exactly as it came in: the list is built in a
- * deliberate order upstream and this is a split, not a sort.
+ * Es ist immer genau eine Sorte, und welche, haengt daran, wer den Steckplatz
+ * gerade haelt:
+ *
+ *  - Ein fremdes Backend bedient den Chat: dann sind es unsere eigenen
+ *    GGUF-Zeilen. Ein Klick darauf holt den Chat zur LU Engine.
+ *  - Die LU Engine bedient den Chat: dann sind es die Zeilen des Backends, das
+ *    daneben wartet. Ein Klick darauf gibt ihm den Steckplatz zurueck.
+ *
+ * Bis 2.6.8 stand hier nur die erste Haelfte, und die zweite fehlte still: die
+ * Release-Notiz versprach „a running LM Studio ... its models keep their own
+ * heading in the list", die Kommentare in api/lu-engine-switch.ts beschrieben
+ * denselben Weg zurueck, und im Waehler standen die LM-Studio-Zeilen ohne
+ * Ueberschrift zwischen den Modellfamilien (Persona 2 am 03.09.2026, Punkt 9).
+ * Die Ueberschrift ist keine Zierde, sie ist die Warnung vor der Folge, und
+ * die Folge gibt es in beide Richtungen.
+ *
+ * `standbyName` ist der Anzeigename des wartenden Backends oder null. Die
+ * Reihenfolge innerhalb beider Haelften bleibt, wie sie ankam: das ist eine
+ * Teilung, keine Sortierung.
  */
-export function splitLuEngineRows<T extends InstalledModelLike>(models: T[]): { luEngine: T[]; rest: T[] } {
-  const luEngine: T[] = []
+export function splitBackendSwitchRows<T extends InstalledModelLike>(
+  models: T[],
+  luEngineHoldsChat: boolean,
+  standbyName: string | null,
+): { label: string | null; switching: T[]; rest: T[] } {
+  const label = luEngineHoldsChat ? standbyName : LU_ENGINE_GROUP
+  const gehoertDazu = luEngineHoldsChat
+    ? (m: T) => isRowOfBackend(m, standbyName)
+    : (m: T) => isBuiltinEngineEntry(m)
+  if (!label) return { label: null, switching: [], rest: models }
+  const switching: T[] = []
   const rest: T[] = []
-  for (const m of models) (isBuiltinEngineEntry(m) ? luEngine : rest).push(m)
-  return { luEngine, rest }
+  for (const m of models) (gehoertDazu(m) ? switching : rest).push(m)
+  return { label, switching, rest }
 }
 
 /** One heading and the rows under it. */
@@ -282,7 +308,9 @@ export interface ProviderGroup<T> {
 }
 
 /**
- * Must the LU Engine heading be drawn even though there is only one group.
+ * Muss die Wechsel-Ueberschrift gezeichnet werden, obwohl es nur eine Gruppe
+ * gibt. `switchLabel` ist die Ueberschrift der Zeilen, deren Wahl das Backend
+ * wechselt, oder null, wenn es solche Zeilen gerade nicht gibt.
  *
  * A14 review 7: the render dropped every heading at one group, which is right
  * for a plain Ollama box and wrong for the exact machine this whole change is
@@ -294,9 +322,9 @@ export interface ProviderGroup<T> {
  * of warning. The heading is the warning, so it is drawn whenever a foreign
  * backend holds the chat, group count be damned.
  */
-export function needsLuEngineHeading(labels: string[], luEngineHoldsChat: boolean): boolean {
+export function needsBackendSwitchHeading(labels: string[], switchLabel: string | null): boolean {
   if (labels.length > 1) return true
-  return !luEngineHoldsChat && labels.includes(LU_ENGINE_GROUP)
+  return switchLabel !== null && labels.includes(switchLabel)
 }
 
 /**

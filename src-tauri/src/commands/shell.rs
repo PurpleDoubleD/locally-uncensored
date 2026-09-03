@@ -68,6 +68,67 @@ pub(crate) fn drain(mut pipe: impl Read + Send + 'static) -> (Arc<Mutex<Captured
     (buf, done)
 }
 
+/// Terminal-Steuerzeichen aus eingefangener Ausgabe entfernen.
+///
+/// Kindprozesse faerben ihre Ausgabe, wenn sie ein Terminal vermuten, und eine
+/// Pipe reicht vielen dafuer aus: llama-server, pip und ComfyUI tun es alle.
+/// Die Sequenzen kommen bis 2.6.8 ungefiltert im Fenster an und stehen dort
+/// als Kaestchen mitten im Satz (gemessen am 03.09.2026 im Fehlerfeld der
+/// Engine).
+///
+/// Entfernt wird, was ein Terminal steuert, nicht was es zeigt: CSI
+/// (`ESC [ … Endbuchstabe`, also auch Farben und Cursorbewegungen), OSC
+/// (`ESC ] … BEL` oder `ESC \`, wo Programme Fenstertitel setzen) und die
+/// kurzen Zwei-Zeichen-Escapes. Text ohne ESC laeuft unveraendert durch, und
+/// ein einzelnes ESC am Ende eines abgeschnittenen Puffers faellt weg statt
+/// den Rest zu verschlucken.
+///
+/// Hier und nicht in der Fehlermeldung: JEDE eingefangene Ausgabe geht durch
+/// diese Stelle, also auch die Installerprotokolle und die Agentenausgabe. Und
+/// die Mustererkennung darueber (`stderr_blames_the_model` und ihre
+/// Geschwister) liest denselben Text; ein Farbcode mitten im Wort hat dort
+/// schon Treffer gekostet.
+pub(crate) fn strip_ansi(roh: &str) -> String {
+    if !roh.contains('\u{1b}') {
+        return roh.to_string();
+    }
+    let mut aus = String::with_capacity(roh.len());
+    let mut zeichen = roh.chars().peekable();
+    while let Some(c) = zeichen.next() {
+        if c != '\u{1b}' {
+            aus.push(c);
+            continue;
+        }
+        match zeichen.next() {
+            // CSI: Parameter- und Zwischenbytes, dann ein Endbuchstabe 0x40..0x7E.
+            Some('[') => {
+                for z in zeichen.by_ref() {
+                    if ('\u{40}'..='\u{7e}').contains(&z) {
+                        break;
+                    }
+                }
+            }
+            // OSC: laeuft bis BEL oder bis ESC \.
+            Some(']') => {
+                while let Some(z) = zeichen.next() {
+                    if z == '\u{7}' {
+                        break;
+                    }
+                    if z == '\u{1b}' {
+                        if zeichen.peek() == Some(&'\\') {
+                            zeichen.next();
+                        }
+                        break;
+                    }
+                }
+            }
+            // Alles andere ist ein Zwei-Zeichen-Escape und ist damit erledigt.
+            Some(_) | None => {}
+        }
+    }
+    aus
+}
+
 /// Decode captured bytes leniently. Build tools on a non-UTF-8 Windows codepage
 /// emit bytes `read_to_string` rejects outright — that used to throw the whole
 /// output away and hand the model an empty string next to a successful exit code.
@@ -76,7 +137,7 @@ pub(crate) fn captured_text(buf: &Arc<Mutex<Captured>>) -> String {
         Ok(c) => c,
         Err(poisoned) => poisoned.into_inner(),
     };
-    let mut text = String::from_utf8_lossy(&c.kept).into_owned();
+    let mut text = strip_ansi(&String::from_utf8_lossy(&c.kept));
     if c.total > c.kept.len() {
         text.push_str(&format!(
             "\n[output truncated: {} of {} bytes shown]",
@@ -631,6 +692,17 @@ mod tests {
     }
 
     #[test]
+    fn eingefangene_ausgabe_kommt_ohne_farbcodes_heraus() {
+        // Die Verdrahtung, nicht der Filter: `strip_ansi` allein gruen zu
+        // haben hiess bis hierher gar nichts, denn die Ausgabe lief an ihm
+        // vorbei ins Fenster (gemessen am 03.09.2026 im Fehlerfeld der
+        // Engine). Geprueft wird deshalb der Weg, den die echte Ausgabe nimmt.
+        let text = capture(b"\x1b[0;33mwarn: \x1b[0mno kernel for this quant".to_vec());
+        assert_eq!(text, "warn: no kernel for this quant");
+        assert!(!text.contains('\u{1b}'), "an escape sequence reached the window: {text:?}");
+    }
+
+    #[test]
     fn oversized_output_is_capped_and_says_so() {
         let text = capture(vec![b'x'; MAX_CAPTURE + 5_000]);
         assert!(text.contains("output truncated"), "no truncation note: {:?}", &text[..64]);
@@ -745,5 +817,58 @@ mod tests {
             );
             std::thread::sleep(std::time::Duration::from_millis(100));
         }
+    }
+}
+
+#[cfg(test)]
+mod farbcode_tests {
+    use super::strip_ansi;
+
+    /// Genau die Zeile, die am 03.09.2026 im Fehlerfeld stand: llama-server
+    /// faerbt seine Warnungen, und die Escape-Sequenzen kamen als Kaestchen
+    /// mitten im Satz an.
+    const ECHT: &str = "\u{1b}[0;33mwarn: \u{1b}[0mfailed to load model\u{1b}[0m";
+
+    #[test]
+    fn eine_gefaerbte_zeile_kommt_als_reiner_text_an() {
+        assert_eq!(strip_ansi(ECHT), "warn: failed to load model");
+    }
+
+    #[test]
+    fn text_ohne_steuerzeichen_bleibt_zeichen_fuer_zeichen_gleich() {
+        // Negativkontrolle gegen einen Filter, der zu gierig ist. Umlaute,
+        // Klammern und eckige Klammern stehen in Pfaden und in pip-Ausgaben.
+        let roh = "C:\\Users\\Jörg\\models\\qwen[q4].gguf (3,2 GiB) 100%";
+        assert_eq!(strip_ansi(roh), roh);
+    }
+
+    #[test]
+    fn zeilenumbrueche_und_wagenruecklaeufe_ueberleben() {
+        // Fortschrittsbalken schreiben \r. Wer den mitentfernt, klebt zwei
+        // Zeilen zusammen und macht das Protokoll unlesbar.
+        assert_eq!(strip_ansi("a\r\nb\n"), "a\r\nb\n");
+    }
+
+    #[test]
+    fn ein_fenstertitel_verschluckt_nicht_den_rest_der_zeile() {
+        // OSC endet mit BEL oder mit ESC-Backslash. Wer nur CSI kennt, laesst
+        // den Titel als Text stehen; wer das Ende nicht kennt, frisst alles
+        // danach.
+        assert_eq!(strip_ansi("\u{1b}]0;Titel\u{7}fertig"), "fertig");
+        assert_eq!(strip_ansi("\u{1b}]0;Titel\u{1b}\\fertig"), "fertig");
+    }
+
+    #[test]
+    fn ein_abgeschnittener_puffer_verliert_nur_das_bruchstueck() {
+        // Der Einfangpuffer hat eine Obergrenze und kann mitten in einer
+        // Sequenz enden. Dann faellt das Bruchstueck weg, nicht der Text davor.
+        assert_eq!(strip_ansi("fertig\u{1b}[0;3"), "fertig");
+        assert_eq!(strip_ansi("fertig\u{1b}"), "fertig");
+    }
+
+    #[test]
+    fn cursorbewegungen_gehen_mit_und_nicht_nur_farben() {
+        // ComfyUI setzt den Cursor zurueck, um seinen Balken zu ueberschreiben.
+        assert_eq!(strip_ansi("\u{1b}[2K\u{1b}[1Gnode 3/7"), "node 3/7");
     }
 }
