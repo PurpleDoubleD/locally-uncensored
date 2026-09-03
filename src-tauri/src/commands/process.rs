@@ -1,4 +1,5 @@
 use crate::os_error;
+use crate::python::python_command;
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -1226,7 +1227,7 @@ pub(crate) fn probe_flash_attention(python: &str) -> Option<bool> {
     if python.is_empty() {
         return Some(false);
     }
-    let mut cmd = Command::new(python);
+    let mut cmd = python_command(python);
     cmd.args(["-c", "from flash_attn import flash_attn_func"])
         .stdin(Stdio::null())
         .stdout(Stdio::null())
@@ -1326,7 +1327,7 @@ pub(crate) fn probe_comfy_gpu(python: &str) -> Option<bool> {
     if python.is_empty() {
         return Some(false);
     }
-    let mut cmd = Command::new(python);
+    let mut cmd = python_command(python);
     cmd.args([
         "-c",
         "import torch,sys; sys.exit(0 if torch.cuda.is_available() else 1)",
@@ -1556,22 +1557,20 @@ fn start_comfyui_blocking(state: &AppState) -> Result<serde_json::Value, String>
         comfy_args.push(file);
         println!("[ComfyUI] Extra model paths: {}", file);
     }
-    let mut cmd = Command::new(&python);
+    let mut cmd = python_command(&python);
     cmd.args(&comfy_args)
         .current_dir(&comfy_path)
         .env("TQDM_DISABLE", "1")
         .env("PYTHONUNBUFFERED", "1")
-        // Windows fix (plum133, Discord 2026-06-07): ComfyUI / its nodes print
-        // Unicode progress glyphs (e.g. '▍' U+258D) to stdout. On a non-UTF-8
-        // Windows console codepage (cp1252) Python's *piped* stdout defaults to
-        // the locale codec and raises UnicodeEncodeError ("'charmap' codec
-        // can't encode character '▍' …"), which propagates out of the
-        // KSampler progress callback and aborts generation ("Generation
-        // failed: … (KSampler)"). Force UTF-8 I/O so any Unicode output is
-        // encodable on every locale — also keeps the Rust-side line reader's
-        // UTF-8 assumption valid.
-        .env("PYTHONIOENCODING", "utf-8")
-        .env("PYTHONUTF8", "1")
+        // Die UTF-8-Umgebung fuer dieses Kind setzt python_command oben, nicht
+        // diese Kette. Warum sie hier lebensnotwendig ist (plum133, Discord
+        // 07.06.2026): ComfyUI und seine Knoten drucken Unicode-Zeichen fuer den
+        // Fortschritt nach stdout. Auf einer Windows-Konsole ohne UTF-8 nimmt
+        // Pythons umgeleitetes stdout den Codec der Systemsprache und wirft
+        // einen UnicodeEncodeError, der aus dem Fortschrittsaufruf des KSampler
+        // herausfaellt und die Erzeugung abbricht. Ausserdem haelt es die
+        // Annahme des Zeilenlesers auf der Rust-Seite gueltig, dass die Ausgabe
+        // UTF-8 ist.
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -2293,16 +2292,15 @@ pub fn auto_start_comfyui(state: &AppState) {
                 comfy_args.push("--use-flash-attention");
                 println!("[ComfyUI] Auto-start: flash-attn detected — enabling Flash Attention");
             }
-            let mut cmd = Command::new(&python);
+            let mut cmd = python_command(&python);
             cmd.args(&comfy_args)
                 .current_dir(&path)
                 .env("TQDM_DISABLE", "1")
                 .env("PYTHONUNBUFFERED", "1")
-                // Windows UTF-8 fix — see start_comfyui (plum133 2026-06-07):
-                // prevents the cp1252 'charmap' UnicodeEncodeError crash when
-                // ComfyUI prints Unicode progress glyphs to the piped stdout.
-                .env("PYTHONIOENCODING", "utf-8")
-                .env("PYTHONUTF8", "1")
+                // UTF-8 kommt aus python_command, siehe start_comfyui. Ohne
+                // das stirbt ComfyUI auf einer Windows-Konsole ohne UTF-8 an
+                // einem UnicodeEncodeError, sobald es Fortschrittszeichen
+                // druckt (plum133, 07.06.2026).
                 .stdin(Stdio::null())
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped());
@@ -2345,6 +2343,54 @@ pub fn auto_start_comfyui(state: &AppState) {
             }
         }
         None => println!("[ComfyUI] Not found. Install ComfyUI or set path in settings."),
+    }
+}
+
+#[cfg(test)]
+mod utf8_start_waechter {
+    /// Dieselbe Regel wie in install.rs, eine Datei weiter.
+    ///
+    /// Ticket 003 (anglefire, 03.09.) hat gezeigt, wie teuer eine halb
+    /// durchgezogene Regel ist: ein Windows-Benutzername ausserhalb von ASCII
+    /// laesst jedes Python-Kind mit umgeleiteter Ausgabe auf einen
+    /// UnicodeEncodeError laufen, sobald es einen Pfad druckt. install.rs ist
+    /// seitdem geschlossen. process.rs war es nicht, obwohl hier der Prozess
+    /// startet, dessen Ausgabe der Kunde tatsaechlich zu sehen bekommt.
+    ///
+    /// Die beiden ComfyUI-Starts hatten die Variablen schon seit dem Bericht
+    /// von plum133 (07.06.), aber von Hand und an zwei Stellen. Genau das ist
+    /// "zwei Pfade, einer gepflegt": die eine Stelle wuchs mit, die andere
+    /// haette es nicht muessen. Jetzt fuehrt eine Hilfsfunktion die Regel.
+    #[test]
+    fn every_python_start_in_this_file_goes_through_python_command() {
+        let whole = include_str!("process.rs");
+        let src = whole.split("#[cfg(test)]").next().expect("die ausgelieferte Haelfte");
+        let mut daneben: Vec<&str> = Vec::new();
+        for line in src.lines() {
+            let Some(at) = line.find("Command::new(") else { continue };
+            let rest = &line[at + "Command::new(".len()..];
+            let arg = rest.split(')').next().unwrap_or(rest).to_ascii_lowercase();
+            if arg.contains("python") || arg.contains("pip") {
+                daneben.push(line.trim());
+            }
+        }
+        assert!(
+            daneben.is_empty(),
+            "diese Python-Starts gehen an python_command vorbei und laufen ohne \
+             PYTHONIOENCODING/PYTHONUTF8:\n{}",
+            daneben.join("\n"),
+        );
+        for name in ["PYTHONIOENCODING", "PYTHONUTF8"] {
+            assert!(
+                !src.contains(name),
+                "{name} wird in process.rs von Hand gesetzt statt in python_command",
+            );
+        }
+        assert!(
+            src.contains("python_command("),
+            "kein einziger Aufruf von python_command in process.rs, \
+             der Waechter wuerde ein Zurueckdrehen nicht bemerken",
+        );
     }
 }
 
