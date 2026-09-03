@@ -983,6 +983,7 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
   // zurueck, verschwindet die Ueberschrift im selben Zug.
   const standbyName = useProviderStore((s) => standbyBackendOf(s.providers.openai as HandoverSlot)?.name ?? null)
   const activeModelObj = models.find((m) => m.name === activeModel)
+  const foldedStandby = useModelStore((s) => s.foldedStandby)
   const activeDisplayName = activeModel
     ? (activeModelObj && 'displayName' in activeModelObj && activeModelObj.displayName) ||
       displayModelName(activeModel).split(':')[0]
@@ -1124,6 +1125,20 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
             {hiddenForCode > 0 && (
               <div className="px-2.5 py-1.5 border-b border-black/5 dark:border-white/[0.06] text-[0.55rem] text-gray-500">
                 {hiddenForCode} cloud {hiddenForCode === 1 ? 'model is' : 'models are'} hidden here because they cannot call tools. They are still in Chat.
+              </div>
+            )}
+
+            {/* Dieselbe Ehrlichkeit eine Zeile weiter: was das wartende
+                Backend anbietet und unsere Engine aus derselben Datei schon
+                bedient, steht nur einmal da. Ohne diesen Satz sieht es aus,
+                als seien Modelle verschwunden (Persona P5, 03./04.09.2026:
+                LM Studio meldet 7, der Waehler zeigt 4). */}
+            {foldedStandby && (
+              <div
+                data-testid="picker-folded-standby"
+                className="px-2.5 py-1.5 border-b border-black/5 dark:border-white/[0.06] text-[0.55rem] text-gray-500"
+              >
+                {foldedStandby.count} {foldedStandby.backend} {foldedStandby.count === 1 ? 'model is' : 'models are'} listed once, under the LU Engine, because they are the same file.
               </div>
             )}
 

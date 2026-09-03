@@ -350,7 +350,20 @@ export function useModels() {
       // serving from the same file. Appended after the LU Engine rows on
       // purpose: see the note where `standbyRows` is filled.
       if (standbyRows.length > 0) {
-        allModels.push(...dropStandbyRowsServedByLuEngine(standbyRows, allModels))
+        const bleiben = dropStandbyRowsServedByLuEngine(standbyRows, allModels)
+        allModels.push(...bleiben)
+        // Was eingeklappt wurde, wird gezaehlt und gesagt. Persona P5 hat am
+        // 03./04.09.2026 gemessen, dass LM Studio 7 Modelle meldet und der
+        // Waehler 4 zeigt: die drei fehlenden sind Dateien, die unsere Engine
+        // gerade selbst bedient. Richtig eingeklappt, nur eben stumm, und
+        // fuer den Nutzer sehen drei seiner Modelle verschwunden aus.
+        useModelStore.getState().setFoldedStandby(
+          bleiben.length < standbyRows.length && standby
+            ? { backend: standby.name, count: standbyRows.length - bleiben.length }
+            : null,
+        )
+      } else {
+        useModelStore.getState().setFoldedStandby(null)
       }
       const ollamaEnabled = useProviderStore.getState().providers.ollama.enabled
       const hasOllamaModels = allModels.some(m => m.provider === 'ollama')

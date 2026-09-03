@@ -42,6 +42,18 @@ interface ModelState {
    *  because fetchModels is called from several mounted components at once
    *  and the first one to finish must not declare the count settled. */
   inventoryRefreshes: number
+  /**
+   * Wie viele Zeilen des wartenden Backends eingeklappt wurden, weil unsere
+   * Engine dieselbe Datei schon anbietet, und wessen Zeilen das waren.
+   *
+   * Persona P5, 03./04.09.2026: LM Studio meldete ueber die eigene
+   * Schnittstelle 7 Modelle, der Waehler zeigte unter LM STUDIO nur 4. Die
+   * drei fehlenden sind genau die, deren Datei auch als LU-Engine-Zeile
+   * dasteht. Das Einklappen ist richtig, das Schweigen darueber nicht: fuer
+   * den Nutzer sehen drei seiner Modelle einfach verschwunden aus.
+   */
+  foldedStandby: { backend: string; count: number } | null
+  setFoldedStandby: (folded: { backend: string; count: number } | null) => void
   beginInventoryRefresh: () => void
   endInventoryRefresh: () => void
   setModels: (models: AIModel[]) => void
@@ -282,6 +294,9 @@ export const useModelStore = create<ModelState>()(
           return { activePulls: rest }
         })
       },
+
+      foldedStandby: null,
+      setFoldedStandby: (folded) => set({ foldedStandby: folded }),
 
       setIsModelLoading: (loading) => set({ isModelLoading: loading }),
       setCategoryFilter: (category) => set({ categoryFilter: category }),
