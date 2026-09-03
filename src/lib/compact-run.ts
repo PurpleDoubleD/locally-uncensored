@@ -203,6 +203,20 @@ export async function runCompactSummary(input: CompactRunInput): Promise<Compact
       temperature: COMPACT_TEMPERATURE,
       maxTokens: COMPACT_MAX_TOKENS,
       contextWindow,
+      // Denken AUS, und zwar gemessen (03.09.2026, Qwen3.5-9B, genau diese
+      // Werte): das Modell verbrauchte alle 1200 Token im Denk-Kanal — 4553
+      // Zeichen Ueberlegung — und schrieb KEINE EINZIGE ZEILE Antwort. In der
+      // App landet das eine Zeile weiter unten in `fail('unusable', 'empty
+      // answer')`. Auf einem Denkmodell war die Verdichtung damit nicht
+      // langsam, sondern unmoeglich.
+      //
+      // Das ist kein Sparen an der Qualitaet: eine Verdichtung ist eine
+      // Umschreibung dessen, was schon dasteht, keine Ueberlegung. Die
+      // Stripper unten bleiben trotzdem — als Absicherung fuer Modelle, die
+      // `think: false` ignorieren oder ihre Ueberlegung in den Text schreiben.
+      // Der Anbieter nimmt `think` bei einem 400 selbst wieder heraus, aeltere
+      // Ollama-Staende und Nicht-Denkmodelle bleiben also unberuehrt.
+      thinking: false,
       signal: deadline.signal,
     })
     for await (const chunk of stream) {

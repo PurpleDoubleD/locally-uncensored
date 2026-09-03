@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { buildCompactPrompt, parseCompactSummary } from '../compact-summary'
+import { COMPACT_MAX_TOKENS, COMPACT_TEMPERATURE } from '../compact-run'
 
 /**
  * Haelt die Verdichtung die Sprache des Gespraechs und die Werte woertlich?
@@ -58,7 +59,15 @@ async function zusammenfassen(prompt: string): Promise<string> {
       model: MODELL,
       messages: [{ role: 'user', content: prompt }],
       stream: true,
-      options: { temperature: 0 },
+      // Wie `runCompactSummary` seit dem 03.09.2026: Denken AUS. Ohne das
+      // verbrauchte Qwen3.5-9B alle 1200 Token im Denk-Kanal (4553 Zeichen
+      // Ueberlegung) und schrieb keine Zeile Antwort — nachgemessen, und der
+      // Grund fuer die Aenderung in compact-run.ts.
+      think: false,
+      // DIESELBEN Werte, die `runCompactSummary` schickt. Ein Pruefstand, der
+      // grosszuegiger rechnet als die App, misst nicht die App: die 1200
+      // Token sind genau die Grenze, an der es im Betrieb eng wird.
+      options: { temperature: COMPACT_TEMPERATURE, num_predict: COMPACT_MAX_TOKENS },
     }),
   })
   if (!res.body) throw new Error('Ollama antwortete ohne Koerper')
@@ -66,6 +75,11 @@ async function zusammenfassen(prompt: string): Promise<string> {
   const dec = new TextDecoder()
   let rest = ''
   let text = ''
+  // Getrennt mitzaehlen: bei einem Denkmodell laeuft alles zuerst in den
+  // Denk-Kanal, und `content` bleibt leer, bis das Denken zu Ende ist. Wenn
+  // das Token-Budget vorher aufgebraucht ist, kommt gar keine Antwort — und
+  // dann muss die Fehlermeldung DAS sagen und nicht 'leere Antwort'.
+  let gedacht = 0
   for (;;) {
     const { done, value } = await leser.read()
     if (done) break
@@ -74,10 +88,17 @@ async function zusammenfassen(prompt: string): Promise<string> {
     rest = zeilen.pop() ?? ''
     for (const z of zeilen) {
       if (!z.trim()) continue
-      const teil = JSON.parse(z) as { message?: { content?: string }; error?: string }
+      const teil = JSON.parse(z) as { message?: { content?: string; thinking?: string }; error?: string }
       if (teil.error) throw new Error(teil.error)
       text += teil.message?.content ?? ''
+      gedacht += (teil.message?.thinking ?? '').length
     }
+  }
+  if (!text.trim()) {
+    throw new Error(
+      `Das Modell hat ${gedacht} Zeichen gedacht und ${COMPACT_MAX_TOKENS} Token verbraucht, ` +
+      'ohne eine einzige Zeile Antwort zu schreiben.',
+    )
   }
   return text
 }
@@ -103,6 +124,6 @@ describe.runIf(LIVE)('Verdichtung gegen ein echtes Modell', () => {
       const englisch = (alles.match(/\b(the|and|was|should|is|for|with|that)\b/gi) ?? []).length
       expect(deutsch, `deutsch=${deutsch} englisch=${englisch}`).toBeGreaterThan(englisch)
     },
-    900_000,
+    600_000,
   )
 })
