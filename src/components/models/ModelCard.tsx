@@ -4,6 +4,7 @@ import { formatBytes } from '../../lib/formatters'
 import { BenchmarkButton } from './ModelBenchmark'
 import { ContextMenu } from '../ui/ContextMenu'
 import { buildModelCardMenu, type ModelMenuHandlers } from '../ui/menu-actions'
+import { displayModelName } from '../../api/providers/model-name'
 import type { AIModel } from '../../types/models'
 
 interface Props {
@@ -63,8 +64,18 @@ export function ModelCard({ model, isActive, onSelect, onDelete, onInfo, canDele
       {/* Type icon */}
       <TypeIcon size={13} className={`${typeInfo.color} shrink-0`} />
 
-      {/* Name — grows to fill the row (single-line, LM-Studio style) */}
-      <span className="flex-1 min-w-0 text-[0.7rem] text-gray-800 dark:text-gray-200 font-medium truncate">{model.name}</span>
+      {/* Name — grows to fill the row (single-line, LM-Studio style).
+          Ohne das `openai::` davor: das ist unser Steckplatzname, kein Name,
+          den ein Kunde je gewaehlt hat. Persona P5, 03./04.09.2026: "Fuer
+          einen Kunden, der LU Engine benutzt und mit OpenAI nichts zu tun
+          hat, ist das verwirrend." Der volle Name bleibt im title, denn ein
+          Fehlerbericht braucht ihn. */}
+      <span
+        title={model.name}
+        className="flex-1 min-w-0 text-[0.7rem] text-gray-800 dark:text-gray-200 font-medium truncate"
+      >
+        {displayModelName(model.name)}
+      </span>
 
       {isActive && <span className="shrink-0 text-[0.5rem] text-blue-400 font-medium uppercase">Active</span>}
 

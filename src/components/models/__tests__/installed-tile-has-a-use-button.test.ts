@@ -70,6 +70,7 @@ const { ModelManager } = await import('../ModelManager')
 const { useModelStore } = await import('../../../stores/modelStore')
 const { useProviderStore } = await import('../../../stores/providerStore')
 const { __resetLuEngineSwapLockForTests } = await import('../../../api/lu-engine-swap-lock')
+const { displayModelName } = await import('../../../api/providers/model-name')
 
 const ACTIVE = 'openai::Phi-4-mini-instruct-Q4_K_M'
 const OTHER = 'openai::mlabonne_gemma-3-4b-it-abliterated-Q4_K_M'
@@ -97,9 +98,14 @@ async function openInstalled() {
   })
 }
 
-/** The Use button on the row for `name`, or null when the row has none. */
+/** The Use button on the row for `name`, or null when the row has none.
+ *
+ *  Gesucht wird nach dem Namen, den der Nutzer SIEHT. Die Kachel zeigt seit
+ *  dem 04.09.2026 den Anzeigenamen ohne `openai::`, denn das ist unser
+ *  Steckplatzname und kein Name, den ein Kunde je gewaehlt hat (Persona P5).
+ *  Der volle Name lebt weiter im title. */
 function useButtonFor(name: string): HTMLElement | null {
-  const row = screen.getByText(name).closest('div[class*="rounded-lg"]')
+  const row = screen.getByText(displayModelName(name)).closest('div[class*="rounded-lg"]')
   return row?.querySelector('[data-testid="model-card-use"]') as HTMLElement | null
 }
 
@@ -155,6 +161,20 @@ describe('the Use button the 2.6.8 notes promise on the Installed tile', () => {
   it('is absent on a row that is not ours', async () => {
     await openInstalled()
     expect(useButtonFor(OLLAMA)).toBeNull()
+  })
+
+  // Persona P5, 03./04.09.2026: "openai:: steht vor jedem lokalen
+  // Modellnamen. Fuer einen Kunden, der LU Engine benutzt und mit OpenAI
+  // nichts zu tun hat, ist das verwirrend." Es ist unser Steckplatzname,
+  // nicht seiner.
+  it('nennt kein Modell mit dem Steckplatz-Praefix', async () => {
+    await openInstalled()
+    expect(document.body.textContent).not.toContain('openai::')
+    // Gegenprobe zur Gegenprobe: der Name ist wirklich da, nur ohne Praefix.
+    expect(document.body.textContent).toContain('Phi-4-mini-instruct-Q4_K_M')
+    // Und der volle Name bleibt fuer einen Fehlerbericht erreichbar.
+    const zeile = screen.getByText(displayModelName(ACTIVE))
+    expect(zeile.getAttribute('title')).toBe(ACTIVE)
   })
 
   // NEGATIVE CONTROL: the button is a door into the same house, so it obeys

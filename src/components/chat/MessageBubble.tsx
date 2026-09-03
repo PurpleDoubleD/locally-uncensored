@@ -9,6 +9,7 @@ import { groupAgentBlocks } from '../../lib/tool-call-groups'
 import { VramSwitchCard } from './VramSwitchCard'
 import { SpeakerButton } from './SpeakerButton'
 import { ChatArtifactCard } from './ChatArtifactCard'
+import { displayModelName } from '../../api/providers/model-name'
 import type { Message } from '../../types/chat'
 import { stripModelNoise } from '../../lib/strip-model-noise'
 import { truncationNotice } from '../../lib/answer-notes'
@@ -292,7 +293,13 @@ function MessageBubbleImpl({ message, onRegenerate, onEdit, pendingApprovalId, o
             chat. Turns from before that carry none and get no line, rather
             than a guess. */}
         {!isUser && message.modelId && (
-          <div className="t-mono text-gray-500 dark:text-gray-400 pl-1">{message.modelId}</div>
+          // Ohne Steckplatz-Praefix: `openai::` ist unsere interne Adresse
+          // fuer jedes Backend, das das OpenAI-Protokoll spricht, und stand
+          // damit vor jedem lokalen Modellnamen im Chat (Persona P5,
+          // 03./04.09.2026). Der volle Name bleibt im title.
+          <div title={message.modelId} className="t-mono text-gray-500 dark:text-gray-400 pl-1">
+            {displayModelName(message.modelId)}
+          </div>
         )}
         {/* Thinking block — auto-expands while this (last) turn is still
             producing so the reasoning streams LIVE, then collapses (David 2026-06-04). */}
