@@ -26,6 +26,16 @@ import { displayModelName } from './providers'
 export const LU_ENGINE_SWITCH_NOTE = 'Switched your chat provider to the LU Engine for this model.'
 
 /**
+ * What a click that ran into the swap bolt says (api/lu-engine-swap-lock).
+ *
+ * A14 fourth review: the blocked click returned in silence, which reads as a
+ * dead button, and a dead button gets clicked again. One short sentence, the
+ * same one on the card and in the picker, saying it is a wait and not a
+ * refusal.
+ */
+export const LU_ENGINE_SWAP_BUSY_NOTE = 'The LU Engine is still switching, one moment.'
+
+/**
  * The reason behind an `activateBuiltinModel` that answered false.
  *
  * It resolves the GGUF path from the last `list_bundled_models`, refreshes

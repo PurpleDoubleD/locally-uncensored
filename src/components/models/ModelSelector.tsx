@@ -20,7 +20,10 @@ import { noChatBackendEnabled } from '../../lib/provider-visibility'
 import { cloudTeaserModels } from '../../lib/cloud-teaser-models'
 import { splitLuEngineRows, needsLuEngineHeading, LU_ENGINE_GROUP } from '../../lib/lu-engine-rows'
 import { isBuiltinEngineEntry, type InstalledModelLike } from '../../lib/lmstudio-match'
-import { ensureLuEngineIsChatProvider, LU_ENGINE_SWITCH_NOTE, luEngineStartFailureNote } from '../../api/lu-engine-switch'
+import {
+  ensureLuEngineIsChatProvider, LU_ENGINE_SWITCH_NOTE, LU_ENGINE_SWAP_BUSY_NOTE, luEngineStartFailureNote,
+} from '../../api/lu-engine-switch'
+import { tryAcquireLuEngineSwap, releaseLuEngineSwap } from '../../api/lu-engine-swap-lock'
 import { useLuEngineSwitchStore } from '../../stores/luEngineSwitchStore'
 import type { AIModel } from '../../types/models'
 
@@ -739,6 +742,17 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
     if ((isManagedBuiltinActive() && getProviderIdFromModel(model.name) === 'openai')
         || isBuiltinEngineEntry(model as unknown as InstalledModelLike)) {
       if (selectingLms || togglingLms) return
+      // A14 fourth review: `selectingLms` is this component's own state and it
+      // only ever knew about this dropdown, while the Installed card had a
+      // bolt of its own that only ever knew about the card. Two doors into one
+      // llama-server, and a pick here while a card swap is running sent the
+      // second swap_bundled_model at a process the first was still restarting.
+      // Both doors share one bolt now (api/lu-engine-swap-lock), and a blocked
+      // pick says so in the dropdown's own line instead of doing nothing.
+      if (!tryAcquireLuEngineSwap()) {
+        setSelectError(LU_ENGINE_SWAP_BUSY_NOTE)
+        return
+      }
       setSelectError(null)
       setSelectingLms(id)
       try {
@@ -764,6 +778,7 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
         setSelectError(luEngineStartFailureNote(model.name, e))
       } finally {
         setSelectingLms(null)
+        releaseLuEngineSwap()
       }
       return
     }

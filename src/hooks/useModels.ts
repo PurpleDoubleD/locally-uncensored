@@ -19,8 +19,10 @@ import { commandIsUnavailable } from '../lib/engine-command-availability'
 import { dropDuplicateLuEngineRows } from '../lib/lu-engine-rows'
 import { isBuiltinEngineEntry, type InstalledModelLike } from '../lib/lmstudio-match'
 import {
-  ensureLuEngineIsChatProvider, LU_ENGINE_SWITCH_NOTE, LU_ENGINE_FILE_GONE, luEngineStartFailureNote,
+  ensureLuEngineIsChatProvider, LU_ENGINE_SWITCH_NOTE, LU_ENGINE_FILE_GONE, LU_ENGINE_SWAP_BUSY_NOTE,
+  luEngineStartFailureNote,
 } from '../api/lu-engine-switch'
+import { tryAcquireLuEngineSwap, releaseLuEngineSwap } from '../api/lu-engine-swap-lock'
 import { useLuEngineSwitchStore } from '../stores/luEngineSwitchStore'
 import { useModelStore } from '../stores/modelStore'
 import { useProviderStore } from '../stores/providerStore'
@@ -42,13 +44,6 @@ import type { PullProgress, AIModel, ModelCategory, ImageModel, VideoModel, Clou
 // Runs at most once per app session (fetchModels fires repeatedly), and only
 // starts a server that reports running:false.
 let builtinResumeAttempted = false
-
-// A14 third review, the other half: two LU Engine cards clicked in quick
-// succession fired two `swap_bundled_model` calls at one engine. The picker
-// has had a bolt against this since ENG-4 (`selectingLms`); the Installed card
-// had none, and a hook-local ref would not have been one either, because the
-// two clicks can land in two different mounted components.
-let luEngineSwapInFlight = false
 
 // GH #118: the boot resume used to be a single shot, and a failure was
 // swallowed without a word. The one moment it runs is the worst moment to ask
@@ -520,11 +515,23 @@ export function useModels() {
     // talking to has already been unloaded to make room.
     let switched = false
     if (isLuRow) {
-      // A14 third review: the bolt the picker has had since ENG-4. Two LU
-      // cards clicked in quick succession used to send two swap_bundled_model
-      // calls at one engine, and the second one lands on a process the first
-      // one is still restarting.
-      if (luEngineSwapInFlight) return
+      // The bolt against two swap_bundled_model calls at one engine, where the
+      // second lands on a process the first is still restarting. It is taken
+      // HERE, before the slot is handed over, so a blocked click leaves the
+      // chat exactly where it was.
+      //
+      // A14 fourth review moved it out of this file. It used to be a variable
+      // up at the top of this module, which held the Installed card and
+      // nothing else, while the picker guarded the same engine with its own
+      // component state. Two doors, one llama-server, one bolt now
+      // (api/lu-engine-swap-lock).
+      //
+      // And it says so. The click used to return in silence, which reads as a
+      // dead button and gets clicked again.
+      if (!tryAcquireLuEngineSwap()) {
+        useLuEngineSwitchStore.getState().announce(LU_ENGINE_SWAP_BUSY_NOTE)
+        return
+      }
       switched = ensureLuEngineIsChatProvider()
       if (switched) useLuEngineSwitchStore.getState().announce(LU_ENGINE_SWITCH_NOTE)
     }
@@ -537,7 +544,6 @@ export function useModels() {
       // provider had moved. The picker names the real reason with the stderr
       // tail Rust appends; the card says the same sentence now, from the same
       // helper, in the status row that is drawn right above the list.
-      if (isLuRow) luEngineSwapInFlight = true
       const sayItFailed = (reason: unknown) => {
         const line = luEngineStartFailureNote(name, reason)
         useLuEngineSwitchStore.getState()
@@ -550,7 +556,14 @@ export function useModels() {
         // Not an LU row: some other model in the openai slot, and the engine
         // has nothing to say about it. Unchanged, non-critical.
         .catch((e) => { if (isLuRow) sayItFailed(e) })
-        .finally(() => { if (isLuRow) luEngineSwapInFlight = false })
+        .finally(() => { if (isLuRow) releaseLuEngineSwap() })
+    } else if (isLuRow) {
+      // Nothing was started, so nothing will release the bolt in a finally.
+      // Unreachable today (an LU row that got this far has just been given the
+      // slot by ensureLuEngineIsChatProvider, and its name carries the openai
+      // prefix the check reads), and left here because an unreleased bolt
+      // costs the user his card until the 60 s limit runs out.
+      releaseLuEngineSwap()
     }
   }, [setActiveModel])
 

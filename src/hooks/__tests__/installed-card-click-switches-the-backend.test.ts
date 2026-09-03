@@ -68,6 +68,10 @@ const { useModels } = await import('../useModels')
 const { useModelStore } = await import('../../stores/modelStore')
 const { useProviderStore } = await import('../../stores/providerStore')
 const { useLuEngineSwitchStore } = await import('../../stores/luEngineSwitchStore')
+const { LU_ENGINE_SWAP_BUSY_NOTE } = await import('../../api/lu-engine-switch')
+const {
+  tryAcquireLuEngineSwap, releaseLuEngineSwap, __resetLuEngineSwapLockForTests,
+} = await import('../../api/lu-engine-swap-lock')
 
 const GGUF = 'openai::Qwen2.5-0.5B-Instruct-Q8_0'
 const SECOND_GGUF = 'openai::gemma-3-4b-it-Q4_K_M'
@@ -95,7 +99,10 @@ beforeEach(() => {
   activateBuiltinModel.mockReset()
   activateBuiltinModel.mockResolvedValue(true)
   unloadModel.mockClear()
-  useLuEngineSwitchStore.setState({ note: null, generation: 0 })
+  useLuEngineSwitchStore.setState({ note: null, tone: 'info', generation: 0 })
+  // The bolt is app state, not hook state, so a test that leaves it shut would
+  // silently block every test after it.
+  __resetLuEngineSwapLockForTests()
   useProviderStore.getState().resetProvidersToDefaults()
   // Ollama in front, the openai slot parked, which is what onboarding leaves
   // behind when the user picks Ollama.
@@ -255,5 +262,73 @@ describe('two LU Engine cards clicked in quick succession', () => {
     expect(useModelStore.getState().activeModel).toBe(OLLAMA)
     await act(async () => { release(true) })
     await act(async () => { await new Promise((r) => setTimeout(r, 0)) })
+  })
+})
+
+// ── A14 fourth review: the card and the picker are two doors, one engine ────
+
+describe('the bolt is shared with the composer picker', () => {
+  it('a swap the picker started blocks a card click', async () => {
+    // Exactly what ModelSelector does one line before it calls
+    // activateBuiltinModel. Before the bolt was shared, the card knew nothing
+    // about this and sent a second swap_bundled_model at a llama-server the
+    // picker's swap was still restarting.
+    expect(tryAcquireLuEngineSwap(), 'the picker holds it').toBe(true)
+    await clickCard(GGUF)
+    expect(activateBuiltinModel, 'one engine, one swap').not.toHaveBeenCalled()
+    // And the blocked click left the chat exactly where it was: the bolt is
+    // taken BEFORE the slot is handed over, so nothing was evicted for a swap
+    // that never happened.
+    expect(useModelStore.getState().activeModel).toBe(OLLAMA)
+    expect(useProviderStore.getState().providers.openai.managed).not.toBe(true)
+  })
+
+  // A14 fourth review, the small half: the blocked click returned in silence,
+  // and a button that does nothing gets clicked again.
+  it('and says so instead of doing nothing', async () => {
+    tryAcquireLuEngineSwap()
+    await clickCard(GGUF)
+    expect(useLuEngineSwitchStore.getState().note).toBe(LU_ENGINE_SWAP_BUSY_NOTE)
+    expect(useLuEngineSwitchStore.getState().tone, 'a wait is not a failure').toBe('info')
+  })
+
+  it('and a card swap blocks the picker the same way round', async () => {
+    let release: (v: boolean) => void = () => {}
+    activateBuiltinModel.mockImplementation(() => new Promise<boolean>((r) => { release = r }))
+    const { result } = renderHook(() => useModels())
+    await act(async () => { result.current.setActiveModel(GGUF) })
+    expect(tryAcquireLuEngineSwap(), 'the picker asks this before it swaps').toBe(false)
+
+    // NEGATIVE CONTROL in the same frame: a bolt that never opens is a lock.
+    await act(async () => { release(true) })
+    await act(async () => { await new Promise((r) => setTimeout(r, 0)) })
+    expect(tryAcquireLuEngineSwap(), 'the card is done, the picker may go').toBe(true)
+    releaseLuEngineSwap()
+  })
+
+  // NEGATIVE CONTROL: an engine that refuses to start must free the next
+  // click, or one bad GGUF takes the model list down for the session.
+  it('frees the bolt after a swap that was rejected', async () => {
+    activateBuiltinModel.mockRejectedValue(new Error('llama-server exited'))
+    await clickCard(GGUF)
+    expect(tryAcquireLuEngineSwap(), 'a failed start is a finished start').toBe(true)
+    releaseLuEngineSwap()
+  })
+
+  // The picker itself has no render harness (see model-selector-lms.test.ts),
+  // so its half of the wiring is pinned by reading the source. The weaker
+  // proof, and labelled as such: it catches the picker going back to a bolt of
+  // its own, not a picker that fails to render.
+  it('and the picker really goes through the shared bolt', async () => {
+    const { readFileSync } = await import('node:fs')
+    const { resolve, dirname } = await import('node:path')
+    const { fileURLToPath } = await import('node:url')
+    const src = readFileSync(
+      resolve(dirname(fileURLToPath(import.meta.url)), '../../components/models/ModelSelector.tsx'),
+      'utf8',
+    )
+    expect(src).toContain("from '../../api/lu-engine-swap-lock'")
+    expect(src).toContain('if (!tryAcquireLuEngineSwap()) {')
+    expect(src, 'and gives it back in a finally').toContain('releaseLuEngineSwap()')
   })
 })
