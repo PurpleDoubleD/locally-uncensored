@@ -974,14 +974,21 @@ export function ComfyUISettings() {
             </p>
             {/* Review 03.09.: nothing ever put this line away, so one finished
                 run kept unfolding the section on every visit for the rest of
-                the session. */}
+                the session.
+
+                A16 (A15-5): the counter-check reported the closing line as
+                having no dismiss at all. It had one, a bare 10px X with the
+                word only in the tooltip, standing beside a failed run whose
+                dismiss is a labelled button reading "Dismiss". One of the two
+                is findable and it was not this one. Same control, same word,
+                and the X stays as the icon beside it. */}
             <button
               onClick={clearInstallNotice}
               aria-label="Dismiss this message"
               title="Dismiss"
-              className="shrink-0 p-0.5 rounded text-gray-500 hover:text-gray-300 hover:bg-white/5 transition-colors"
+              className="shrink-0 inline-flex items-center gap-1 px-1.5 py-[1px] rounded border border-white/15 text-[0.55rem] text-gray-400 hover:text-gray-200 hover:bg-white/10 transition-colors"
             >
-              <X size={10} />
+              <X size={9} /> Dismiss
             </button>
           </div>
         )}

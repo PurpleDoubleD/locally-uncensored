@@ -83,6 +83,20 @@ describe('the closing line can be dismissed', () => {
     expect(comfySectionShouldOpen(useComfyInstallStore.getState())).toBe(false)
   })
 
+  // A16 (A15-5): the Windows counter-check reported "die Erfolgsnotiz hat kein
+  // Dismiss daneben, nur die Fehlerkarte hat eines". The control existed, as a
+  // bare 10px X with the word in a tooltip, next to a failed run whose dismiss
+  // is a button that says Dismiss. A control nobody can find is not a control.
+  it('carries the word Dismiss, not only an icon', async () => {
+    await panelShowing('Repair finished. ComfyUI is ready.', 'ok')
+    const button = screen.getByLabelText('Dismiss this message')
+    expect(button.textContent, 'the closing line offers an unlabelled icon again').toContain('Dismiss')
+    // And it is the same offer the failed run makes, which is what the
+    // counter-check compared it against.
+    await act(async () => { fireEvent.click(button) })
+    expect(useComfyInstallStore.getState().notice).toBe('')
+  })
+
   it('shows no dismiss control when there is nothing to dismiss', async () => {
     // Negative control: an idle panel with no line carries no stray button.
     render(createElement(ComfyUISettings))
