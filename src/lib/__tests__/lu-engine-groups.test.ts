@@ -99,20 +99,42 @@ describe('de-duplication asks about the FILE, never about the model', () => {
 
   // A14 second review: the collapsed id is the COMMON case, not the exotic
   // one. LM Studio reports "qwen/qwen2.5-0.5b-instruct" with no quant at all
-  // whenever it holds exactly one quant of a model, which is most of the time,
-  // and the strict rule kept both rows for one file. One nameless row and
-  // exactly one file of that identity can only be each other.
-  it('drops the row for a collapsed LM Studio id when we hold exactly one such file', () => {
-    const q8 = luFile('Qwen2.5-0.5B-Instruct-Q8_0')
-    expect(dropDuplicateLuEngineRows([q8], lmsHas('qwen/qwen2.5-0.5b-instruct'))).toEqual([])
+  // whenever it holds exactly one quant of a model, which is most of the time.
+  // A14 third review pinned the price of that shortcut: it may only be walked
+  // when OUR side is nameless too. One nameless row and one nameless file of
+  // that identity can only be each other.
+  it('drops the row for a collapsed LM Studio id when our file names no quant either', () => {
+    const ours = luFile('Qwen2.5-0.5B-Instruct')
+    // The plain spelling, where the two filenames already match.
+    expect(dropDuplicateLuEngineRows([ours], lmsHas('qwen/qwen2.5-0.5b-instruct'))).toEqual([])
+    // And the one route 3 exists for: the same model identity written without
+    // the trailing decoration word, so no filename comparison can join them.
+    expect(dropDuplicateLuEngineRows([ours], lmsHas('qwen/qwen2.5-0.5b'))).toEqual([])
   })
 
-  // NEGATIVE CONTROL for that route: with TWO quants of the model in our
-  // folder, a nameless LM Studio row cannot say which of them it is. Dropping
-  // either would be a guess, so both stay.
+  // THE A14 THIRD REVIEW FINDING, and David's own machine: ~/lu-e2e-models
+  // holds Qwen2.5-0.5B-Instruct-Q8_0.gguf, LM Studio reports the collapsed id
+  // because it happens to hold one quant, and that quant may be a Q4_K_M in a
+  // completely different folder. Our file names its quant, so the two are not
+  // the same file as far as anyone here can prove, and the row that would go
+  // missing is the one the whole feature exists to show.
+  it('keeps our named quant beside a collapsed LM Studio id', () => {
+    const q8 = {
+      name: 'openai::Qwen2.5-0.5B-Instruct-Q8_0',
+      model: 'Qwen2.5-0.5B-Instruct-Q8_0',
+      path: '/Users/d/lu-e2e-models/Qwen2.5-0.5B-Instruct-Q8_0.gguf',
+      provider: 'openai',
+      providerName: 'LU Engine',
+    }
+    expect(dropDuplicateLuEngineRows([q8], lmsHas('qwen/qwen2.5-0.5b-instruct'))).toEqual([q8])
+  })
+
+  // NEGATIVE CONTROL for that route: with TWO nameless files of the model in
+  // our folder, a nameless LM Studio row cannot say which of them it is.
+  // Dropping either would be a guess, so both stay.
   it('keeps both when a collapsed id could mean either of two files we hold', () => {
-    const rows = [luFile('Qwen2.5-0.5B-Instruct-Q8_0'), luFile('Qwen2.5-0.5B-Instruct-Q4_K_M')]
-    expect(dropDuplicateLuEngineRows(rows, lmsHas('qwen/qwen2.5-0.5b-instruct'))).toEqual(rows)
+    const rows = [luFile('Qwen2.5-0.5B-Instruct'), luFile('Qwen2.5-0.5B-Chat')]
+    expect(dropDuplicateLuEngineRows(rows, lmsHas('qwen/qwen2.5-0.5b'))).toEqual(rows)
   })
 
   it('drops the row when the file itself lies in LM Studio own store', () => {

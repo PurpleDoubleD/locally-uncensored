@@ -57,10 +57,20 @@ export const LU_ENGINE_GROUP = 'LU Engine'
  *   2. our file lies inside LM Studio's own store, which is what happens the
  *      moment the folder is pointed at ~/.lmstudio/models. Then it IS LM
  *      Studio's file and the model identity is enough.
- *   3. LM Studio names no quant and we hold exactly ONE file of that identity.
- *      One file and one nameless row can only be each other. Two files of the
- *      same identity and a nameless row cannot be told apart, so nothing is
- *      dropped and the user keeps both.
+ *   3. NEITHER side names a quant and we hold exactly ONE file of that
+ *      identity. One nameless file and one nameless row can only be each
+ *      other. Two files of the same identity and a nameless row cannot be told
+ *      apart, so nothing is dropped and the user keeps both.
+ *
+ * A14 third review: route 3 used to ask only whether LM STUDIO named a quant,
+ * so a Q8_0 of our own went away behind a collapsed row that may well have
+ * been a Q4_K_M somewhere else entirely. That is the "two files, one of them
+ * hidden" the paragraph above forbids, arrived at from the other side, and it
+ * hit the exact machine this change is about: ~/lu-e2e-models holding
+ * Qwen2.5-0.5B-Instruct-Q8_0.gguf. Our own quant is knowledge, and a route
+ * that throws knowledge away to reach a guess is not a route. The case where
+ * the collapsed row really is our file is already covered by route 2, which
+ * proves it from the path instead of guessing it from the name.
  */
 export function dropDuplicateLuEngineRows<T extends InstalledModelLike>(
   bundled: T[],
@@ -137,8 +147,11 @@ function sameFile(
   // Route 2: our file IS in LM Studio's store, so the identity settles it.
   if (sameModel && livesInLmStudioStore(ours)) return true
 
-  // Route 3: LM Studio names no quant and we hold exactly one such file.
-  if (sameModel && !namesAQuant(other) && ownByIdentity.get(ourIdentity) === 1) return true
+  // Route 3: neither side names a quant and we hold exactly one such file.
+  // Our own quant, where we have one, is evidence and not noise: a collapsed
+  // LM Studio row could be any quant at any path, so it cannot be shown to be
+  // our Q8_0. Route 2 above is the way that case is settled honestly.
+  if (sameModel && !namesAQuant(other) && !namesAQuant(ours) && ownByIdentity.get(ourIdentity) === 1) return true
 
   // Otherwise the strict rule: same filename, or the same quant named on both
   // sides. A missing quant on either side is not evidence.
