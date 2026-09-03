@@ -14,6 +14,7 @@ import { Users } from 'lucide-react'
 import { useChatStore } from '../../stores/chatStore'
 import { useProviderStore } from '../../stores/providerStore'
 import { isGroupChat } from '../../lib/group-chat'
+import { COMPOSER_MAX_W } from './composer-width'
 
 /** The line itself. Kept pure so the wording is testable without a renderer.
  *
@@ -51,7 +52,7 @@ export function GroupCostHint() {
     : 0
 
   return (
-    <div className="w-full max-w-[70%] mx-auto px-3 pb-1 flex justify-center">
+    <div className={`w-full ${COMPOSER_MAX_W} mx-auto px-3 pb-1 flex justify-center`}>
       <div className="w-full flex items-center gap-1.5 px-2 py-1 rounded-md border border-amber-500/20 bg-amber-500/[0.04]">
         <Users size={9} className="text-amber-400 shrink-0" />
         <span className="text-[0.55rem] uppercase tracking-wider text-gray-500 shrink-0">group</span>

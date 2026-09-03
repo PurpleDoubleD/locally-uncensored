@@ -8,6 +8,7 @@ import { useEffect, useState } from 'react'
 import { RefreshCw, Square } from 'lucide-react'
 import { useAgentLoopStore } from '../../stores/agentLoopStore'
 import { useChatStore } from '../../stores/chatStore'
+import { COMPOSER_MAX_W } from './composer-width'
 
 interface Props {
   /** Stops the run AND the pending pass. */
@@ -31,7 +32,7 @@ export function LoopBar({ onStop }: Props) {
   const passLabel = loop.cap > 0 ? `pass ${loop.pass} of ${loop.cap}` : `pass ${loop.pass}`
 
   return (
-    <div className="w-full max-w-[70%] mx-auto px-3 pb-1 flex justify-center">
+    <div className={`w-full ${COMPOSER_MAX_W} mx-auto px-3 pb-1 flex justify-center`}>
       <div className="w-full flex items-center gap-1.5 px-2 py-1 rounded-md border border-blue-500/25 bg-blue-500/[0.05]">
         <RefreshCw size={9} className="text-blue-400 shrink-0 animate-spin" style={{ animationDuration: '3s' }} />
         <span className="text-[0.55rem] uppercase tracking-wider text-gray-500 shrink-0">loop</span>

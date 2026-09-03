@@ -11,6 +11,7 @@ import { isThinkingCompatible, isVisionCompatible, declaredVision } from '../../
 import { clampEffort, effortChoices, effortLabel, nextEffort, DEFAULT_EFFORT } from '../../lib/effort'
 import type { AgentToolCall } from '../../types/agent-mode'
 import type { ImageAttachment } from '../../types/chat'
+import { COMPOSER_MAX_W } from './composer-width'
 
 interface Props {
   onSend: (content: string, images?: ImageAttachment[]) => void
@@ -261,7 +262,7 @@ export function ChatInput({ onSend, onStop, isGenerating, pendingApproval, onApp
   }, [addFiles])
 
   return (
-    <div className="px-3 pb-2 pt-1 w-full max-w-[70%] mx-auto">
+    <div className={`px-3 pb-2 pt-1 w-full ${COMPOSER_MAX_W} mx-auto`}>
       {/* Approval used to live here as a popup over the chat input.
           Per user feedback ("eventuell in den chat einarbeiten") it now
           renders INSIDE the pending tool-call block in MessageList, so
