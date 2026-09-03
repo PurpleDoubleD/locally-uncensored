@@ -116,6 +116,20 @@ function rustStrings(line: string): string {
   return (line.match(/"(?:[^"\\]|\\.)*"/g) ?? []).join(' ')
 }
 
+/**
+ * Rust joins a long message across lines with a trailing backslash:
+ *
+ *     "Could not link the model ({e}). \
+ *      Linking needs both ends on one drive."
+ *
+ * Line by line, neither half has a closing quote, so `rustStrings` would walk
+ * past the whole message. Pull those continuations back into one line first;
+ * the reported line number is then the line the literal started on.
+ */
+function joinRustContinuations(src: string): string {
+  return src.replace(/\\\r?\n[ \t]*/g, ' ')
+}
+
 describe('the old engine name is gone from everything a user can read', () => {
   it('leaves no "built-in engine" or "built-in embeddings" in src/', () => {
     const left: string[] = []
@@ -136,7 +150,7 @@ describe('the old engine name is gone from everything a user can read', () => {
     const left: string[] = []
     for (const file of sourceFiles(RUST_SRC, /\.rs$/)) {
       const rel = relative(RUST_SRC, file).replace(/\\/g, '/')
-      withoutComments(readFileSync(file, 'utf8')).forEach((line, i) => {
+      withoutComments(joinRustContinuations(readFileSync(file, 'utf8'))).forEach((line, i) => {
         if (RUST_EXEMPT_LINES.some((e) => line.includes(e))) return
         if (OLD_NAME.test(rustStrings(line))) left.push(`src-tauri/src/${rel}:${i + 1}: ${line.trim()}`)
       })
@@ -182,6 +196,14 @@ describe('the old engine name is gone from everything a user can read', () => {
     expect(OLD_NAME.test(rustStrings('pub fn builtin_models_dir() -> Result<PathBuf, String> {'))).toBe(false)
     expect(OLD_NAME.test(rustStrings('    let dir = builtin_models_dir()?;'))).toBe(false)
     expect(OLD_NAME.test(rustStrings('    println!("[Engine] Starting built-in llama-server");'))).toBe(true)
+    const continued = [
+      '        format!(',
+      '            "Could not link the model into the built-in folder ({e}). \\',
+      '             Linking needs source and destination on the same drive."',
+      '        )',
+    ].join('\n')
+    const seen = withoutComments(joinRustContinuations(continued)).some((l) => OLD_NAME.test(rustStrings(l)))
+    expect(seen, 'a literal continued with a trailing backslash is read as one').toBe(true)
   })
 
   // NEGATIVE CONTROL: the exemptions are exemptions, not a hole big enough to
