@@ -230,3 +230,54 @@ describe('der aufgeschobene Dialog erbt die volle Union', () => {
     expect(shown).toBe(1)
   })
 })
+
+describe('die dritte Quelle weckt jetzt auch selbst', () => {
+  // Im Kopf von run-idle.ts stand dafuer eine EHRLICHE LUECKE: `whenRunsIdle`
+  // weckte nur an den beiden Speichern, und ein Wartender, der aus der
+  // Schlange faellt, aendert keinen von beiden. Der aufgeschobene Dialog
+  // wartete dann auf die naechste FREMDE Aenderung, also im Zweifel bis der
+  // Nutzer irgendwo anders etwas anfaengt.
+  it('der letzte Wartende bricht ab, und der aufgeschobene Dialog geht auf', () => {
+    admit('local', 'conv-a', () => {})
+    admit('local', 'conv-b', () => {})
+    expect(runsActive()).toBe(true)
+
+    let shown = 0
+    whenRunsIdle(() => shown++)
+    expect(shown).toBe(0)
+
+    // Nur die Schlange aendert sich. Kein generating, kein Thread, keine
+    // Store-Benachrichtigung.
+    release('conv-b')
+    expect(shown).toBe(1)
+  })
+
+  it('und ebenso, wenn der letzte Wartende drankommt', () => {
+    admit('local', 'conv-a', () => {})
+    admit('local', 'conv-b', () => {})
+    let shown = 0
+    whenRunsIdle(() => shown++)
+    release('conv-a')
+    expect(shown).toBe(1)
+  })
+
+  it('GEGENPROBE: solange noch jemand wartet, bleibt der Dialog zu', () => {
+    admit('local', 'conv-a', () => {})
+    admit('local', 'conv-b', () => {})
+    admit('local', 'conv-c', () => {})
+    let shown = 0
+    whenRunsIdle(() => shown++)
+    release('conv-b')
+    expect(shown).toBe(0)
+  })
+
+  it('GEGENPROBE: ein zurueckgezogener Aufschub geht auch an der Schlange nicht auf', () => {
+    admit('local', 'conv-a', () => {})
+    admit('local', 'conv-b', () => {})
+    let shown = 0
+    const zurueck = whenRunsIdle(() => shown++)
+    zurueck()
+    release('conv-b')
+    expect(shown).toBe(0)
+  })
+})

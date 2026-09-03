@@ -31,6 +31,9 @@ import {
   anyRunQueued,
   localLaneHolder,
   queuedRunIds,
+  subscribeRunLanes,
+  localLaneSnapshot,
+  runQueuePosition,
   __resetRunLanesForTests,
 } from '../run-lanes'
 import { quelldateien, quelltext } from '../../components/__tests__/quelldateien'
@@ -239,5 +242,128 @@ describe('die Begruendung ueberlebt den naechsten Umbau', () => {
   it('und die Pflicht, den Platz zurueckzugeben, steht bei admit', () => {
     expect(QUELLE).toMatch(/finally/)
     expect(QUELLE).toMatch(/release/)
+  })
+})
+
+// ── Die Schlange muss ablesbar UND beobachtbar sein ─────────────────────────
+//
+// Zwei Loecher, die derselbe Griff stopft:
+//
+//  1. Die Oberflaeche soll ein Warteplaettchen zeigen ("wartet auf die
+//     Grafikkarte, Platz 2"). Sie kann das nur, wenn sie die Reihenfolge
+//     bekommt UND gesagt bekommt, wann sie sich aendert. Modulzustand weckt
+//     React von sich aus nicht.
+//  2. `run-idle.ts` trug dafuer eine EHRLICHE LUECKE im Kopf: faellt der
+//     letzte Wartende aus der Schlange, aendert das keinen der beiden
+//     Speicher, an denen `whenRunsIdle` haengt. Ein aufgeschobener Dialog
+//     wartete dann auf die naechste fremde Aenderung.
+describe('die Schlange sagt Bescheid, wenn sie sich aendert', () => {
+  it('Anstellen, Nachruecken und Ausscheiden wecken den Beobachter', () => {
+    let geweckt = 0
+    const ab = subscribeRunLanes(() => { geweckt++ })
+
+    admit('local', 'a', () => {})   // Halter genommen
+    expect(geweckt).toBe(1)
+    admit('local', 'b', () => {})   // angestellt
+    expect(geweckt).toBe(2)
+    admit('local', 'c', () => {})
+    expect(geweckt).toBe(3)
+    release('b')                    // ausgeschieden, ohne Nachruecken
+    expect(geweckt).toBe(4)
+    release('a')                    // Nachruecken
+    expect(geweckt).toBe(5)
+    release('c')                    // Spur frei
+    expect(geweckt).toBe(6)
+    ab()
+  })
+
+  it('GEGENPROBE: ein Cloud-Lauf und ein wirkungsloses release wecken niemanden', () => {
+    // Sonst zappelt die Oberflaeche bei jedem Cloud-Lauf, obwohl sich an der
+    // Karte nichts getan hat.
+    let geweckt = 0
+    const ab = subscribeRunLanes(() => { geweckt++ })
+    admit('cloud', 'wolke', () => {})
+    expect(geweckt).toBe(0)
+    release('gibt-es-nicht')
+    expect(geweckt).toBe(0)
+    ab()
+  })
+
+  it('GEGENPROBE: ein abgemeldeter Beobachter wird nicht mehr geweckt', () => {
+    let geweckt = 0
+    const ab = subscribeRunLanes(() => { geweckt++ })
+    ab()
+    admit('local', 'a', () => {})
+    expect(geweckt).toBe(0)
+  })
+
+  it('ein werfender Beobachter reisst die Spur nicht mit', () => {
+    // Die Spur ist die gefaehrlichste Stelle der App: bleibt sie haengen,
+    // steht jeder weitere lokale Lauf bis zum Neustart. Ein Fehler in einer
+    // fremden Anzeige darf das nicht ausloesen.
+    const ab = subscribeRunLanes(() => { throw new Error('Anzeige kaputt') })
+    expect(() => admit('local', 'a', () => {})).not.toThrow()
+    expect(localLaneHolder()).toBe('a')
+    expect(() => release('a')).not.toThrow()
+    expect(localLaneHolder()).toBeNull()
+    ab()
+  })
+})
+
+describe('die Momentaufnahme fuer die Oberflaeche', () => {
+  it('nennt Halter und Wartende in ihrer Reihenfolge', () => {
+    admit('local', 'a', () => {})
+    admit('local', 'b', () => {})
+    admit('local', 'c', () => {})
+    expect(localLaneSnapshot()).toEqual({ holder: 'a', queued: ['b', 'c'] })
+  })
+
+  it('behaelt ihre Identitaet, solange sich nichts aendert', () => {
+    // `useSyncExternalStore` vergleicht die Momentaufnahmen mit ===. Ein
+    // frisches Objekt bei jedem Abruf ist dort kein Schoenheitsfehler,
+    // sondern eine Endlosschleife im Render.
+    admit('local', 'a', () => {})
+    expect(localLaneSnapshot()).toBe(localLaneSnapshot())
+  })
+
+  it('wechselt die Identitaet, sobald sich etwas aendert', () => {
+    admit('local', 'a', () => {})
+    const vorher = localLaneSnapshot()
+    admit('local', 'b', () => {})
+    expect(localLaneSnapshot()).not.toBe(vorher)
+    expect(localLaneSnapshot().queued).toEqual(['b'])
+  })
+
+  it('die leere Spur ist auch eine Momentaufnahme', () => {
+    expect(localLaneSnapshot()).toEqual({ holder: null, queued: [] })
+  })
+})
+
+describe('die Warteposition, die das Plaettchen anzeigt', () => {
+  it('zaehlt ab eins, vorne zuerst', () => {
+    admit('local', 'a', () => {})
+    admit('local', 'b', () => {})
+    admit('local', 'c', () => {})
+    expect(runQueuePosition('b')).toBe(1)
+    expect(runQueuePosition('c')).toBe(2)
+  })
+
+  it('rueckt auf, wenn der Vordermann drankommt', () => {
+    admit('local', 'a', () => {})
+    admit('local', 'b', () => {})
+    admit('local', 'c', () => {})
+    release('a')
+    expect(runQueuePosition('c')).toBe(1)
+  })
+
+  it('GEGENPROBE: der Halter und ein Unbeteiligter haben keine', () => {
+    // Der Halter rechnet. Stuende bei ihm "Platz 0", zeigte das Plaettchen
+    // einen Wartenden an, der gerade arbeitet.
+    admit('local', 'a', () => {})
+    admit('local', 'b', () => {})
+    expect(runQueuePosition('a')).toBeNull()
+    expect(runQueuePosition('fremd')).toBeNull()
+    expect(runQueuePosition(null)).toBeNull()
+    expect(runQueuePosition(undefined)).toBeNull()
   })
 })

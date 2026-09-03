@@ -60,7 +60,7 @@
 import { useGenerationStore } from '../stores/generationStore'
 import { useCodexStore } from '../stores/codexStore'
 import { isRunStopped } from './run-stop'
-import { anyRunQueued, isRunQueued } from './run-lanes'
+import { anyRunQueued, isRunQueued, subscribeRunLanes } from './run-lanes'
 import { isActiveCodexStatus, type CodexThreadStatus } from '../types/codex'
 
 /**
@@ -95,12 +95,13 @@ export function anyRunActive(
  * half-second before the queue promotes it puts the modal over a run instead
  * of before it.
  *
- * HONEST GAP: `whenRunsIdle` wakes on store subscriptions, and dropping a
- * waiting run out of the queue (Stop pressed before its turn) changes neither
- * store. A deferred `show` then waits for the next store change instead of
- * firing immediately. That errs toward not opening a modal, which is the
- * harmless direction, and it is written down here rather than papered over
- * with a fourth subscription.
+ * That gap used to be wider than a read: `whenRunsIdle` woke on the two store
+ * subscriptions only, and dropping a waiting run out of the queue (Stop
+ * pressed before its turn) changes NEITHER store, so a deferred `show` sat
+ * there until some unrelated store change happened to come along. The queue
+ * now says so itself (`subscribeRunLanes`), and `whenRunsIdle` listens to all
+ * three. That is not a fourth copy of the fact: it is the same module state,
+ * read the same way, with a wake-up attached.
  */
 export function runsActive(): boolean {
   if (anyRunQueued()) return true
@@ -168,6 +169,11 @@ export function isRunActive(conversationId: string | null | undefined): boolean 
  * persists a running flag across a restart (generationStore is ephemeral by
  * design, codexStore persists only the working directory), so a crash can
  * never leave this waiting on a ghost run.
+ *
+ * All THREE sources are listened to, and the third is the one that used to be
+ * missing: a run that is only booked, waiting for the local lane, ends by
+ * leaving a queue that neither store can see. Without that subscription the
+ * last waiting run could go away and leave a deferred modal sitting.
  */
 export function whenRunsIdle(show: () => void): () => void {
   if (!runsActive()) {
@@ -184,6 +190,7 @@ export function whenRunsIdle(show: () => void): () => void {
   }
   unsubs.push(useGenerationStore.subscribe(check))
   unsubs.push(useCodexStore.subscribe(check))
+  unsubs.push(subscribeRunLanes(check))
   return () => {
     done = true
     for (const u of unsubs) u()
