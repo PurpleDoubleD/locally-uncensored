@@ -575,6 +575,71 @@ async fn handle_health(AxumState(state): AxumState<LocalApiState>) -> Response {
     .into_response()
 }
 
+/// Die LU-Werkzeuge, die ein Agent auf diesem Rechner hat — mitsamt der Frage,
+/// welche Erlaubnis jedes braucht.
+///
+/// ── WOZU DAS GUT IST ───────────────────────────────────────────────────────
+///
+/// Ein Programm, das die lokale API benutzt, kann /v1/chat/completions rufen
+/// und bekommt ein Modell. Was es NICHT weiss: dass dieser Rechner Dateien
+/// lesen, im Netz suchen und Code ausfuehren kann, und was davon der Nutzer
+/// freigegeben hat. Diese Liste ist die Antwort darauf, und sie ist ehrlich —
+/// die Namen und Erlaubnisstufen sind DIESELBEN, die `gate_for` in remote.rs
+/// durchsetzt, nicht eine gepflegte Zweitliste.
+///
+/// ── WAS HIER (NOCH) NICHT STEHT ────────────────────────────────────────────
+///
+/// Ein Endpunkt, der einen ganzen Agentenlauf ausfuehrt — Modell rufen,
+/// Werkzeugaufrufe lesen, ausfuehren, zurueckgeben, wiederholen. Der Grund ist
+/// nicht Zeitmangel allein, sondern wo der Ausfuehrer heute steht: er ist ein
+/// rund 400 Zeilen langes `match` INNERHALB von `handle_agent_tool` in
+/// remote.rs, verwoben mit `RemoteState`, dem Erlaubnis-Schloss und dem
+/// Arbeitsordner-Ueberschreiben je Chat. Ihn herauszuloesen ist ein Eingriff in
+/// eine 4.900-Zeilen-Datei, an der gerade parallel gearbeitet wird — und ihn
+/// hier ein zweites Mal zu schreiben, waere genau die Zweitliste, vor der der
+/// Kommentar bei GATE_KEYWORDS warnt.
+///
+/// Der Weg dahin ist vorgezeichnet: `gate_for` und der `match`-Block wandern in
+/// ein eigenes Modul mit einer Signatur ohne `RemoteState`, dann rufen ihn
+/// beide Server. Das ist eine Aufgabe fuer sich, mit eigenen Sperren.
+fn lu_werkzeuge() -> serde_json::Value {
+    // (Name, Erlaubnis, was es tut) — Erlaubnis `null` heisst: immer offen.
+    let liste: [(&str, Option<&str>, &str); 13] = [
+        ("file_read",     Some("filesystem"),      "Read a file, windowed by offset/limit."),
+        ("file_write",    Some("filesystem"),      "Write a file inside the agent workspace."),
+        ("file_list",     Some("filesystem"),      "List a directory."),
+        ("file_search",   Some("filesystem"),      "Search file contents."),
+        ("screenshot",    Some("filesystem"),      "Capture the screen."),
+        ("shell_execute", Some("shell"),           "Run a shell command. RCE-class, off by default."),
+        ("code_execute",  Some("shell"),           "Run code. RCE-class, off by default."),
+        ("image_generate", Some("process_control"), "Generate an image via the local pipeline."),
+        ("web_search",    None,                    "Search the web."),
+        ("web_fetch",     None,                    "Read a URL."),
+        ("process_list",  Some("process_control"), "List running processes."),
+        ("system_info",   None,                    "OS, CPU and memory of this machine."),
+        ("get_current_time", None,                 "The clock of this machine."),
+    ];
+    serde_json::json!({
+        "object": "list",
+        "data": liste.iter().map(|(name, perm, was)| serde_json::json!({
+            "name": name,
+            "requires_permission": perm,
+            "description": was,
+        })).collect::<Vec<_>>(),
+        // Ehrlich dazugesagt, statt es den Aufrufer selbst herausfinden zu
+        // lassen: diese Liste sagt, was es GIBT, nicht was gerade erlaubt ist.
+        // Der Erlaubnisstand haengt am Remote-Panel des Nutzers und wird hier
+        // bewusst nicht gespiegelt — eine gespiegelte Erlaubnis, die hinter der
+        // echten herhinkt, ist gefaehrlicher als gar keine Angabe.
+        "note": "Availability depends on the permissions the user granted in Settings → Remote Access. This list is the catalogue, not the current grant.",
+        "agent_runs": "not exposed yet — see the comment on lu_werkzeuge() in local_api.rs",
+    })
+}
+
+async fn handle_tools() -> Response {
+    Json(lu_werkzeuge()).into_response()
+}
+
 pub fn build_local_api_router(state: LocalApiState) -> Router {
     // Keine CORS-Schicht: diese API ist fuer Programme, nicht fuer Webseiten.
     // Eine erlaubende CORS-Antwort hiesse, dass jede geoeffnete Seite im
@@ -586,11 +651,12 @@ pub fn build_local_api_router(state: LocalApiState) -> Router {
         .route("/v1/completions", post(handle_completions))
         .route("/v1/embeddings", post(handle_embeddings))
         .route("/lu/v1/health", get(handle_health))
+        .route("/lu/v1/tools", get(handle_tools))
         .fallback(|method: Method, uri: axum::http::Uri| async move {
             fehler(
                 StatusCode::NOT_FOUND,
                 "invalid_request_error",
-                &format!("No route {} {}. This server speaks /v1/models, /v1/chat/completions, /v1/completions, /v1/embeddings and /lu/v1/health.", method, uri.path()),
+                &format!("No route {} {}. This server speaks /v1/models, /v1/chat/completions, /v1/completions, /v1/embeddings, /lu/v1/health and /lu/v1/tools.", method, uri.path()),
             )
         })
         .layer(axum::middleware::from_fn_with_state(state.clone(), auth))
@@ -718,6 +784,83 @@ pub fn local_api_new_token() -> String {
 /// Das braeuchte einen mithoerenden Upstream, also eine Attrappe — und die
 /// waere hier genau das Falsche. Diese Zusicherung steht als reine Funktion
 /// im Modul `tests` oben (`das_token_des_aufrufers_geht_nicht_nach_oben`).
+#[cfg(test)]
+mod werkzeugliste {
+    use super::*;
+
+    /// Die Liste in `lu_werkzeuge` und das Schloss `gate_for` in remote.rs
+    /// muessen dasselbe sagen.
+    ///
+    /// Der Fehler, den das verhindert, ist leise: jemand nimmt ein Werkzeug in
+    /// `gate_for` auf oder verschiebt es auf eine strengere Erlaubnis, und die
+    /// Liste hier sagt weiter das Alte. Ein Programm, das sie liest, plant dann
+    /// mit einem Werkzeug, das es nicht bekommt — oder haelt eines fuer
+    /// gesperrt, das offen ist. Beides merkt niemand, weil beide Seiten fuer
+    /// sich stimmen.
+    ///
+    /// Gelesen wird der QUELLTEXT von remote.rs, nicht eine Kopie: eine
+    /// gepflegte Zweitliste waere genau das Problem, das hier bewacht wird.
+    #[test]
+    fn sie_sagt_dasselbe_wie_das_schloss_in_remote_rs() {
+        let hier = std::path::Path::new(file!()).parent().unwrap().to_path_buf();
+        let remote = std::fs::read_to_string(hier.join("remote.rs"))
+            .expect("remote.rs liegt nicht mehr neben local_api.rs");
+
+        let anfang = remote.find("fn gate_for(tool: &str) -> ToolGate {")
+            .expect("gate_for heisst nicht mehr so");
+        let block = &remote[anfang..anfang + remote[anfang..].find("\n}\n").unwrap()];
+
+        // Zeilenumbrueche raus, bevor gesucht wird: ein Zweig darf ueber
+        // mehrere Zeilen gehen, und genau daran ist meine erste Fassung
+        // gescheitert — sie las acht von zehn Eintraegen und haette den Rest
+        // stillschweigend als "nicht vorhanden" gewertet. Ein Waechter, der
+        // die Haelfte uebersieht, ist schlimmer als keiner.
+        let flach = block.split_whitespace().collect::<Vec<_>>().join(" ");
+        let teile: Vec<&str> = flach.split("=>").collect();
+
+        let mut aus_remote: std::collections::BTreeMap<String, Option<String>> = Default::default();
+        for i in 0..teile.len().saturating_sub(1) {
+            let links = teile[i];
+            let rechts = teile[i + 1];
+            let erlaubnis = if rechts.trim_start().starts_with("ToolGate::Open") {
+                None
+            } else if let Some(j) = rechts.find("Needs(\"") {
+                // Nur wenn das Needs VOR dem naechsten Zweig steht.
+                if j > 40 { continue }
+                let rest = &rechts[j + 7..];
+                Some(rest[..rest.find('"').unwrap()].to_string())
+            } else {
+                continue // der Unknown-Zweig
+            };
+            // Der linke Teil endet auf den Mustern dieses Zweigs; alles davor
+            // gehoert zum vorigen. Vom Ende her lesen.
+            for name in links.rsplit('|') {
+                let n = name.trim().trim_matches(|c| c == '"' || c == ' ' || c == '}' || c == '{');
+                let n = n.rsplit(' ').next().unwrap_or(n).trim_matches('"');
+                if n.is_empty() || n == "_" || n.contains('(') { break }
+                aus_remote.insert(n.to_string(), erlaubnis.clone());
+            }
+        }
+        assert!(aus_remote.len() >= 10, "gate_for wurde nicht gelesen: {:?}", aus_remote);
+
+        let liste = lu_werkzeuge();
+        let mut aus_liste: std::collections::BTreeMap<String, Option<String>> = Default::default();
+        for e in liste["data"].as_array().unwrap() {
+            aus_liste.insert(
+                e["name"].as_str().unwrap().to_string(),
+                e["requires_permission"].as_str().map(str::to_string),
+            );
+        }
+
+        assert_eq!(
+            aus_liste, aus_remote,
+            "\nlu_werkzeuge() und gate_for() sind auseinandergelaufen.\n\
+             links = die Liste, die die lokale API ausgibt\n\
+             rechts = das Schloss, das wirklich entscheidet\n"
+        );
+    }
+}
+
 #[cfg(test)]
 mod local_api_echt {
     use super::*;
@@ -895,6 +1038,28 @@ mod local_api_echt {
             .send().await.unwrap().json().await.unwrap();
         assert_eq!(v["reach"], "localhost");
         assert!(v["lanes"]["ollama"]["models"].as_u64().unwrap_or(0) > 0);
+        h.abort();
+    }
+
+    #[tokio::test]
+    async fn die_werkzeugliste_kommt_durch_und_nur_mit_token() {
+        if !an() { return }
+        let Some((base, h)) = starte().await else { return };
+        let c = reqwest::Client::new();
+
+        // Auch die Werkzeugliste ist keine oeffentliche Auskunft: sie sagt,
+        // was auf DIESEM Rechner moeglich ist.
+        assert_eq!(c.get(format!("{}/lu/v1/tools", base)).send().await.unwrap().status(), 401);
+
+        let v: serde_json::Value = c.get(format!("{}/lu/v1/tools", base))
+            .bearer_auth(TOKEN).send().await.unwrap().json().await.unwrap();
+        let namen: Vec<&str> = v["data"].as_array().unwrap().iter()
+            .map(|e| e["name"].as_str().unwrap()).collect();
+        assert!(namen.contains(&"file_read"));
+        assert!(namen.contains(&"shell_execute"));
+        // Und der ehrliche Zusatz: die Liste ist der Katalog, nicht die
+        // aktuelle Freigabe.
+        assert!(v["note"].as_str().unwrap().contains("permissions"));
         h.abort();
     }
 
