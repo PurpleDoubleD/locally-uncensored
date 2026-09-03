@@ -107,18 +107,50 @@ fn detect_amd() -> Vec<DetectedGpu> {
     // parse loosely. Format with `--showid --showproductname`:
     //   GPU[0] : Product Name: AMD Radeon RX 6800 XT
     //   GPU[0] : Memory: 16368 MiB
-    let raw = match run_cmd("rocm-smi", &["--showid", "--showproductname", "--showmeminfo", "vram", "--csv"]) {
-        Some(s) => s,
-        None => return vec![],
-    };
+    match run_cmd("rocm-smi", &["--showid", "--showproductname", "--showmeminfo", "vram", "--csv"]) {
+        Some(raw) => parse_rocm_smi_csv(&raw),
+        None => vec![],
+    }
+}
+
+/// Der reine Teil des AMD-Wegs, vom Aufruf getrennt aus demselben Grund wie
+/// beim lspci-Weg: ein Auswerter, den nur die Zielmaschine je zu sehen bekommt,
+/// ist ein Auswerter, den nur die Zielmaschine je beweist. So bekommt ihn ein
+/// Test mit dem Ausdruck einer echten Karte zu fressen.
+fn parse_rocm_smi_csv(raw: &str) -> Vec<DetectedGpu> {
     // Try CSV parse first (newer rocm-smi). Header line then card lines.
     let mut gpus: Vec<DetectedGpu> = Vec::new();
     let mut lines = raw.lines().filter(|l| !l.trim().is_empty());
     if let Some(header) = lines.next() {
-        let cols: Vec<&str> = header.split(',').map(|s| s.trim()).collect();
-        let card_col = cols.iter().position(|c| c.eq_ignore_ascii_case("device") || c.eq_ignore_ascii_case("card"));
-        let name_col = cols.iter().position(|c| c.to_lowercase().contains("product"));
-        let mem_col = cols.iter().position(|c| c.to_lowercase().contains("vram") && c.to_lowercase().contains("total"));
+        let cols: Vec<String> = header.split(',').map(|s| s.trim().to_lowercase()).collect();
+        let card_col = cols.iter().position(|c| c == "device" || c == "card");
+        // Die Namensspalte heisst je nach Fassung und Flags anders. Reihenfolge
+        // ist Absicht: "Product Name" der aelteren Fassungen zuerst, dann
+        // "Device Name" aus --showid, dann "Card Series" aus
+        // --showproductname. Auf der MI325X sagen die beiden letzten dasselbe,
+        // das ist gemessen; welche auf einer Consumer-Radeon schoener klingt,
+        // ist es nicht.
+        let name_col = ["product", "device name", "card series", "name"]
+            .iter()
+            .find_map(|wanted| cols.iter().position(|c| c.contains(wanted)));
+        // "VRAM Total Memory (B)" ja, "VRAM Total Used Memory (B)" nein. Beide
+        // enthalten "vram" und "total", und wer nur danach sucht, meldet auf
+        // einer Fassung, die die belegte Spalte zuerst druckt, ein paar hundert
+        // MiB als Kartengroesse.
+        let mem_col = cols
+            .iter()
+            .position(|c| c.contains("vram") && c.contains("total") && !c.contains("used"));
+        // rocm-smi druckt das gfx-Ziel selbst, in einer eigenen Spalte. Es
+        // wegzuwerfen und der Karte danach zu sagen, man kenne ihre
+        // Architektur nicht, war unter Linux der Normalfall: dort ist rocm-smi
+        // die einzige Quelle dafuer, hipinfo laeuft nur unter Windows.
+        let arch_col = cols.iter().position(|c| c.contains("gfx") && c.contains("version"));
+        // Keine der beiden tragenden Spalten gefunden, also ist das kein CSV.
+        // Aeltere rocm-smi kennen --csv nicht und drucken Bloecke; dann wurde
+        // die erste Zeile als Kopf verbraucht und jede weitere als Karte
+        // gemeldet, namenlos und ohne Groesse. Lieber nichts melden: dann
+        // greift der lspci-Rueckfall und die Karte kommt darueber herein.
+        if card_col.is_none() && mem_col.is_none() { return gpus }
         for line in lines {
             let parts: Vec<&str> = line.split(',').map(|s| s.trim()).collect();
             let index: u32 = card_col
@@ -134,6 +166,11 @@ fn detect_amd() -> Vec<DetectedGpu> {
                 .and_then(|i| parts.get(i))
                 .and_then(|s| s.parse::<u64>().ok())
                 .map(|bytes| bytes / 1024 / 1024);
+            let arch = arch_col
+                .and_then(|i| parts.get(i))
+                .map(|s| s.trim())
+                .filter(|s| !s.is_empty())
+                .map(|s| s.to_string());
             gpus.push(DetectedGpu {
                 index,
                 vendor: "amd".into(),
@@ -142,7 +179,7 @@ fn detect_amd() -> Vec<DetectedGpu> {
                 source: "rocm-smi".into(),
                 note: None,
                 note_severity: None,
-                arch: None,
+                arch,
             });
         }
     }
@@ -186,6 +223,31 @@ fn detect_other_via_lspci(have_rocm: bool) -> Vec<DetectedGpu> {
 /// Dazu kommen die schon eingelesenen sysfs-Eintraege. Eine AMD-Karte holt
 /// ihre Speichergroesse daraus, denn lspci selbst nennt keine. Eine leere
 /// Liste ist der Normalfall auf jeder Maschine ohne amdgpu und aendert nichts.
+/// Ist diese `lspci -nn` Zeile ein Geraet, das rechnen kann?
+///
+/// Die drei Grafikklassen und dazu die Rechenbeschleuniger. Die vierte kam
+/// dazu, nachdem eine MI325X am 03.09.2026 in tor1 gemessen wurde: eine
+/// Instinct hat keinen Bildausgang und meldet deshalb Klasse 1200,
+/// "Processing accelerators", nicht 0300. Der alte Filter kannte nur die
+/// Grafikklassen, also war die Karte fuer LU schlicht nicht vorhanden, und
+/// zwar auf jeder Maschine ohne rocm-smi, weil erst danach der Rueckfall
+/// greift. Kein Testrechner hier hat so eine Karte, deswegen fiel es nie auf.
+///
+/// Geprueft wird gegen die Zahl in eckigen Klammern UND gegen den Klartext.
+/// Die Zahl ist die eigentliche Auskunft, der Klartext kommt aus der lokalen
+/// pci.ids und fehlt, sobald die Datei alt ist.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn is_graphics_or_compute_class(lower: &str) -> bool {
+    lower.contains("[0300]")      // VGA compatible controller
+        || lower.contains("[0302]")   // 3D controller
+        || lower.contains("[0380]")   // Display controller
+        || lower.contains("[1200]")   // Processing accelerators
+        || lower.contains("vga")
+        || lower.contains("3d controller")
+        || lower.contains("display controller")
+        || lower.contains("processing accelerator")
+}
+
 fn detect_other_via_lspci_from(
     raw: &str,
     have_rocm: bool,
@@ -199,7 +261,7 @@ fn detect_other_via_lspci_from(
     let mut next: std::collections::HashMap<&str, u32> = std::collections::HashMap::new();
     for line in raw.lines() {
         let lower = line.to_lowercase();
-        if !(lower.contains("vga") || lower.contains("3d controller") || lower.contains("display controller")) { continue }
+        if !is_graphics_or_compute_class(&lower) { continue }
         let vendor = if lower.contains("[8086:") { "intel" }
                      else if lower.contains("[10de:") { "nvidia" }
                      else if lower.contains("[1002:") { "amd" }
@@ -1601,6 +1663,99 @@ End of search: 3 match(es) found.
         assert!(sycl, "ONEAPI_DEVICE_SELECTOR should be set to level_zero:0,level_zero:1");
     }
 
+
+    // ── AMD Instinct auf echter Hardware (MI325X, DigitalOcean tor1,
+    // 2026-09-03) ────────────────────────────────────────────────────────
+    //
+    // Alles hier ist abgeschrieben, nicht ausgedacht: `lspci -nn`, die
+    // Kopfzeile von rocm-smi und die Zahl aus mem_info_vram_total stammen von
+    // einer laufenden Karte. Eine Rechenkarte meldet sich der PCI-Klasse nach
+    // NICHT als Grafik, und rocm-smi nennt seine Spalten anders als die
+    // Fassung, gegen die dieser Auswerter geschrieben wurde. Beides faellt auf
+    // keiner Baumaschine auf, weil auf keiner eine AMD-Karte steckt.
+
+    /// Die Karte, so wie `lspci -nn` sie druckt. Klasse 1200, nicht 0300.
+    const LSPCI_INSTINCT: &str = "83:00.0 Processing accelerators [1200]: Advanced Micro Devices, Inc. [AMD/ATI] Device [1002:74b9]";
+
+    /// Was `rocm-smi --showid --showproductname --showmeminfo vram --csv` auf
+    /// ROCm 7.2 wirklich nach stdout schreibt. Die Warnung ueber den
+    /// Stromsparzustand geht nach stderr und kommt hier gar nicht erst an.
+    const ROCM_SMI_INSTINCT: &str = "\
+device,Device Name,Device ID,Device Rev,Subsystem ID,GUID,VRAM Total Memory (B),VRAM Total Used Memory (B),Card Series,Card Model,Card Vendor,Card SKU,Node ID,GFX Version
+card0,AMD Instinct Mi325X VF,0x74b9,0x00,0x74a5,43855,274542362624,299687936,AMD Instinct Mi325X VF,0x74b9,Advanced Micro Devices Inc. [AMD/ATI],M3250101,1,gfx942
+";
+
+    #[test]
+    fn a_compute_card_is_a_gpu_even_though_pci_calls_it_something_else() {
+        // NEGATIVE CONTROL: die alte Regel. Sie sucht drei Woerter, und keins
+        // davon steht in der Zeile, also war die Karte fuer LU nicht da.
+        let lower = LSPCI_INSTINCT.to_lowercase();
+        assert!(!lower.contains("vga"));
+        assert!(!lower.contains("3d controller"));
+        assert!(!lower.contains("display controller"));
+
+        let sysfs = vec![SysfsDrmCard {
+            pci_address: "0000:83:00.0".into(),
+            vendor_id: Some("0x1002".into()),
+            vram_total: Some("274542362624".into()),
+        }];
+        let gpus = detect_other_via_lspci_from(LSPCI_INSTINCT, false, &sysfs);
+        assert_eq!(gpus.len(), 1, "die Rechenkarte muss durchkommen: {gpus:?}");
+        assert_eq!(gpus[0].vendor, "amd");
+        assert_eq!(gpus[0].memory_mib, Some(261824), "255 GiB aus dem sysfs");
+        assert_eq!(gpus[0].source, "sysfs");
+    }
+
+    #[test]
+    fn rocm_smi_names_the_card_and_its_gfx_target() {
+        // NEGATIVE CONTROL: die alte Namensregel sucht eine Spalte mit
+        // "product" darin. In dieser Kopfzeile steht keine, also hiess die
+        // Karte im Auswahlfeld "AMD GPU" statt bei ihrem Namen.
+        let header = ROCM_SMI_INSTINCT.lines().next().unwrap();
+        assert!(
+            !header.to_lowercase().split(',').any(|c| c.contains("product")),
+            "sonst greift die alte Regel doch und der Test beweist nichts"
+        );
+
+        let gpus = parse_rocm_smi_csv(ROCM_SMI_INSTINCT);
+        assert_eq!(gpus.len(), 1, "eine Karte, nicht eine je Zeile: {gpus:?}");
+        assert_eq!(gpus[0].index, 0);
+        assert_eq!(gpus[0].name, "AMD Instinct Mi325X VF");
+        assert_eq!(gpus[0].memory_mib, Some(261824));
+        assert_eq!(gpus[0].source, "rocm-smi");
+        // rocm-smi druckt das gfx-Ziel selbst. Es zu ignorieren und danach zu
+        // sagen, man kenne es nicht, ist genau der Satz, den Zhorts las.
+        assert_eq!(gpus[0].arch.as_deref(), Some("gfx942"));
+    }
+
+    #[test]
+    fn the_used_column_is_never_mistaken_for_the_total() {
+        // Dieselben Spalten, umgedreht. "VRAM Total Used Memory" enthaelt
+        // ebenfalls "vram" und "total", und wer die erste Spalte nimmt, die
+        // beides enthaelt, meldet auf dieser Fassung 285 MiB statt 255 GiB.
+        let umgedreht = "\
+device,VRAM Total Used Memory (B),VRAM Total Memory (B),Card Series,GFX Version
+card0,299687936,274542362624,AMD Instinct Mi325X VF,gfx942
+";
+        let gpus = parse_rocm_smi_csv(umgedreht);
+        assert_eq!(gpus.len(), 1);
+        assert_eq!(gpus[0].memory_mib, Some(261824), "belegt ist nicht gesamt");
+    }
+
+    #[test]
+    fn an_output_without_a_header_invents_no_cards() {
+        // Aeltere rocm-smi kennen --csv nicht und drucken Bloecke. Die erste
+        // Zeile wurde dann als Kopfzeile verbraucht und jede weitere als
+        // Karte, also stand im Auswahlfeld eine Reihe namenloser "AMD GPU"
+        // ohne Groesse. Lieber gar nichts melden, dann greift der
+        // lspci-Rueckfall und die echte Karte kommt darueber herein.
+        let block = "\
+GPU[0] : Product Name: AMD Radeon RX 6800 XT
+GPU[0] : Memory: 16368 MiB
+";
+        assert!(parse_rocm_smi_csv(block).is_empty(), "kein CSV, keine Karten");
+        assert!(parse_rocm_smi_csv("").is_empty());
+    }
 
     // ── AMD without ROCm tools (numbrain forum help-image-gen, lapbo Win11 +
     // ZLUDA, nosferatue412 asking before buying a 9060 XT) ────────────────
