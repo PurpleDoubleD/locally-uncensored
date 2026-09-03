@@ -20,6 +20,20 @@ import { COMPOSER_MAX_W } from '../composer-width'
 
 const CHAT = resolve(__dirname, '..')
 const CREATE_COMPOSER = resolve(__dirname, '../../create/experimental/Composer.tsx')
+const CSS = readFileSync(resolve(__dirname, '../../../index.css'), 'utf8')
+
+/**
+ * Der Faktor, den die App-Wurzel als `zoom` traegt. Jede px-Zahl der App wird
+ * damit multipliziert, seit das Wurzelmass auf 16px steht. Eine Breite im
+ * Quelltext und eine Breite auf dem Schirm sind seither ZWEI Zahlen. Wer sie
+ * verwechselt, vergleicht 713 mit einer Messung in Geraetepixeln und bekommt
+ * eine Antwort, die nichts bedeutet.
+ */
+function uiScale(): number {
+  const m = /--ui-scale\s*:\s*([\d.]+)\s*;/.exec(CSS)
+  expect(m, '--ui-scale fehlt in index.css').not.toBeNull()
+  return Number.parseFloat(m![1])
+}
 
 /** Die vier Stellen, die zusammen das Promptfenster und seine Leisten sind. */
 const STELLEN = ['ChatInput.tsx', 'LoopBar.tsx', 'GoalBar.tsx', 'GroupCostHint.tsx']
@@ -53,6 +67,9 @@ describe('das Promptfenster ist so breit wie im Create-Tab', () => {
     // "so gross wie im create tab, eventuell minimal groesser": nicht
     // schmaler, und nicht mehr als 120 px darueber, sonst ist es nicht mehr
     // minimal und der Wunsch ist wieder verfehlt.
+    // Beide Zahlen stehen im selben 16px-Entwurfsraster und bekommen
+    // --ui-scale gleichermassen aufgeschlagen, der Vergleich ist also
+    // massstabsfrei. Die eine Messung, die es NICHT ist, steht unten.
     expect(breite).toBeGreaterThanOrEqual(createBreite)
     expect(breite).toBeLessThanOrEqual(createBreite + 120)
   })
@@ -63,8 +80,16 @@ describe('das Promptfenster ist so breit wie im Create-Tab', () => {
     // Innenrand 18). Waehrend eines Laufs kommen der Effort-Regler und der
     // Stop-Knopf dazu, und ein langer Modellname wiegt schwerer als der
     // gemessene. Deshalb ist hier Luft eingefordert und nicht nur Deckung.
+    //
+    // Die 532 sind GERENDERTE Pixel. Die Konstante steht seit dem
+    // Massstabwechsel im 16px-Raster und wird von --ui-scale mitskaliert, ist
+    // also eine Entwurfszahl. Verglichen wird deshalb Gerendertes mit
+    // Gerendertem; vorher standen hier zwei Masssysteme nebeneinander und der
+    // Vergleich war nur zufaellig gruen. Die geforderte Luft deckt mit ab,
+    // dass die px-Geometrie der Leiste den Faktor seit dem Wechsel ebenfalls
+    // traegt, waehrend die Beschriftungen gleich gross geblieben sind.
     const GEMESSENE_MINDESTBREITE = 532
     const breite = Number(COMPOSER_MAX_W.match(/(\d+)/)![1])
-    expect(breite).toBeGreaterThan(GEMESSENE_MINDESTBREITE + 200)
+    expect(breite * uiScale()).toBeGreaterThan(GEMESSENE_MINDESTBREITE + 200)
   })
 })
