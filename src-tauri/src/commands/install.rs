@@ -13,7 +13,7 @@ use std::os::windows::process::CommandExt;
 use tauri::{Manager, State};
 use tracing::{error, info};
 
-use crate::python::venv_python_path;
+use crate::python::{python_command, venv_python_path};
 use crate::state::{AppState, InstallState};
 
 /// Windows: hide console windows for spawned processes
@@ -176,7 +176,7 @@ pub fn is_pep668_protected(python_bin: &str) -> bool {
     if python_bin.is_empty() {
         return false;
     }
-    let mut cmd = Command::new(python_bin);
+    let mut cmd = python_command(python_bin);
     cmd.args([
         "-c",
         "import os, sysconfig; \
@@ -185,8 +185,6 @@ pub fn is_pep668_protected(python_bin: &str) -> bool {
     ])
     .stdout(Stdio::piped())
     .stderr(Stdio::piped());
-    #[cfg(target_os = "windows")]
-    cmd.creation_flags(CREATE_NO_WINDOW);
     let Ok(out) = cmd.output() else { return false };
     if !out.status.success() {
         return false;
@@ -224,12 +222,10 @@ pub fn create_comfyui_venv(comfyui_dir: &Path, python_bin: &str) -> Result<PathB
         return Ok(venv_python_path(comfyui_dir));
     }
 
-    let mut cmd = Command::new(python_bin);
+    let mut cmd = python_command(python_bin);
     cmd.args(["-m", "venv", venv_dir.to_string_lossy().as_ref()])
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    #[cfg(target_os = "windows")]
-    cmd.creation_flags(CREATE_NO_WINDOW);
 
     let out = cmd
         .output()
@@ -306,10 +302,8 @@ fn is_transient_pip_error(stderr: &str) -> bool {
 /// riddle into an instruction: willes0504 (Discord 2026-07-28) had a stray
 /// 3.8 first in PATH and needed a volunteer plus a day to find that out.
 fn interpreter_description(python_bin: &str) -> String {
-    let mut cmd = Command::new(python_bin);
+    let mut cmd = python_command(python_bin);
     cmd.arg("--version");
-    #[cfg(target_os = "windows")]
-    cmd.creation_flags(CREATE_NO_WINDOW);
     match cmd.output() {
         Ok(out) => {
             let text = format!(
@@ -1285,18 +1279,14 @@ fn run_import_probe_bounded(
     max: std::time::Duration,
 ) -> Result<ImportProbeReport, String> {
     let script = import_probe_script(modules);
-    let mut cmd = Command::new(python_bin);
+    // Die Begruendung fuer die Kodierung wohnt jetzt in python_command, weil
+    // sie fuer jeden Python-Start gilt und nicht nur fuer diesen hier
+    // (Ticket 003).
+    let mut cmd = python_command(python_bin);
     cmd.arg("-c").arg(&script);
-    // A piped python child on Windows encodes stdio with the legacy code page,
-    // and an exception text with one non ASCII character would then abort the
-    // probe with a UnicodeEncodeError instead of reporting the import.
-    cmd.env("PYTHONIOENCODING", "utf-8");
-    cmd.env("PYTHONUTF8", "1");
     cmd.stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    #[cfg(target_os = "windows")]
-    cmd.creation_flags(CREATE_NO_WINDOW);
     let mut child = match cmd.spawn() {
         Ok(c) => c,
         Err(e) => {
@@ -1599,12 +1589,10 @@ pub(crate) fn pip_install_streaming_with_retry_raw(
         }
         let announced_total = Arc::new(AtomicU64::new(0));
 
-        let mut cmd = Command::new(python_bin);
+        let mut cmd = python_command(python_bin);
         cmd.args(args)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
-        #[cfg(target_os = "windows")]
-        cmd.creation_flags(CREATE_NO_WINDOW);
 
         let mut child = match cmd.spawn() {
             Ok(c) => c,
@@ -4639,13 +4627,11 @@ pub fn install_tts(
         // pip died on WinError 5, so read-aloud never got its voice. All that
         // is actually missing then is the voice file — go straight to it.
         let piper_ready = {
-            let mut probe = Command::new(&target_python);
+            let mut probe = python_command(&target_python);
             probe
                 .args(["-c", "import piper.download_voices"])
                 .stdout(Stdio::null())
                 .stderr(Stdio::null());
-            #[cfg(target_os = "windows")]
-            probe.creation_flags(CREATE_NO_WINDOW);
             probe.status().map(|s| s.success()).unwrap_or(false)
         };
 
@@ -4676,7 +4662,7 @@ pub fn install_tts(
                     ),
                 );
                 let _ = std::fs::create_dir_all(&voices_dir);
-                let mut cmd = Command::new(&target_python);
+                let mut cmd = python_command(&target_python);
                 cmd.args([
                     "-m",
                     "piper.download_voices",
@@ -4686,8 +4672,6 @@ pub fn install_tts(
                 ])
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped());
-                #[cfg(target_os = "windows")]
-                cmd.creation_flags(CREATE_NO_WINDOW);
                 match cmd.output() {
                     Ok(o) if o.status.success() => {
                         update("complete", "Neural TTS is ready.");
@@ -4956,13 +4940,11 @@ fn install_node_requirements(
     }
     println!("[Install] Installing requirements for {} via {}", node_name, python_bin);
     let run_pip = |extra: &[&str]| -> Result<std::process::Output, String> {
-        let mut pip = Command::new(&python_bin);
+        let mut pip = python_command(&python_bin);
         pip.args(["-m", "pip", "install", "--no-input"]);
         pip.args(extra);
         pip.arg("-r").arg(&reqs);
         pip.stdout(Stdio::piped()).stderr(Stdio::piped());
-        #[cfg(target_os = "windows")]
-        pip.creation_flags(CREATE_NO_WINDOW);
         pip.output()
             .map_err(|e| format!("Failed to spawn pip for {} requirements: {}", node_name, os_error::english(&e)))
     };
@@ -6960,6 +6942,57 @@ mod tests {
             .expect("install_comfyui ignores an existing venv");
         let pep_at = install_body.find("is_pep668_protected").expect("the PEP 668 branch");
         assert!(venv_at < pep_at, "the venv is only considered after the PEP 668 branch");
+    }
+
+    // ── Ticket 003: jeder Python-Start setzt die Kodierung ────────────────
+
+    #[test]
+    fn every_python_start_in_this_file_goes_through_python_command() {
+        // anglefire (Ticket 003, 03.09.): sein Windows-Benutzer heisst
+        // "1 בוגר", also stehen in jedem Pfad, den ein Kind druckt, Zeichen
+        // ausserhalb der alten Codepage. Genau eine Startstelle hat sich davor
+        // geschuetzt, run_import_probe_bounded, und ihre Begruendung gilt
+        // woertlich fuer jede andere: ein Python-Kind mit umgeleiteter Ausgabe
+        // kodiert unter Windows mit der alten Codepage, und ein Text mit einem
+        // Zeichen ausserhalb von ASCII bricht den Lauf dann mit einem
+        // UnicodeEncodeError ab. Fuenf von sechs Stellen waren ungeschuetzt,
+        // darunter beide pip-Laeufe, die am meisten Pfade drucken.
+        //
+        // Der Waechter liest nur die ausgelieferte Haelfte der Datei. Die
+        // Nadeln stehen damit nicht in dem Text, den er durchsucht, und koennen
+        // sich nicht selbst finden.
+        let whole = include_str!("install.rs");
+        let src = whole.split("#[cfg(test)]").next().expect("die ausgelieferte Haelfte");
+        let mut daneben: Vec<&str> = Vec::new();
+        for line in src.lines() {
+            let Some(at) = line.find("Command::new(") else { continue };
+            let rest = &line[at + "Command::new(".len()..];
+            let arg = rest.split(')').next().unwrap_or(rest).to_ascii_lowercase();
+            if arg.contains("python") || arg.contains("pip") {
+                daneben.push(line.trim());
+            }
+        }
+        assert!(
+            daneben.is_empty(),
+            "diese Python-Starts gehen an python_command vorbei und laufen ohne \
+             PYTHONIOENCODING/PYTHONUTF8:\n{}",
+            daneben.join("\n"),
+        );
+        // Und niemand setzt die beiden Variablen hier noch einmal von Hand:
+        // zwei Pfade, einer gepflegt, ist genau die Krankheit dieses Falls.
+        for name in ["PYTHONIOENCODING", "PYTHONUTF8"] {
+            assert!(
+                !src.contains(name),
+                "{name} wird in install.rs von Hand gesetzt statt in python_command",
+            );
+        }
+        // Der Waechter muss die Starts auch wirklich sehen: die Hilfsfunktion
+        // wird hier oft genug benutzt, dass ein stilles Zurueckdrehen auffaellt.
+        assert!(
+            src.matches("python_command(").count() >= 8,
+            "es gibt weniger Python-Starts ueber die Hilfsfunktion als erwartet, \
+             wurde einer wieder direkt gebaut?",
+        );
     }
 
     // ── §24.9 — Whisper pip args builder ──────────────────────────────────

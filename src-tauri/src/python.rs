@@ -7,6 +7,29 @@ use std::os::windows::process::CommandExt;
 #[cfg(target_os = "windows")]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 
+/// Die eine Stelle, die ein Python-Kommando baut.
+///
+/// Ein Python-Kind mit umgeleiteter Ausgabe kodiert unter Windows mit der alten
+/// Codepage, und ein Ausnahmetext mit einem einzigen Zeichen ausserhalb von
+/// ASCII bricht den Lauf dann mit einem UnicodeEncodeError ab, statt zu sagen,
+/// was los ist. Diese Begruendung stand seit 2.6.8 ueber genau einem von acht
+/// Python-Starts im Installer, dem Import-Test, und sie gilt woertlich fuer
+/// jeden anderen. Ungeschuetzt waren ausgerechnet die beiden pip-Laeufe, die
+/// die laengste Ausgabe erzeugen und dabei staendig Pfade drucken.
+///
+/// anglefire (Ticket 003, 03.09.) heisst auf seinem Windows "1 בוגר", also
+/// stehen in jedem gedruckten Pfad hebraeische Zeichen. `CREATE_NO_WINDOW`
+/// sitzt hier mit drin, damit auch das nicht Stelle fuer Stelle nachgezogen
+/// werden muss.
+pub fn python_command<S: AsRef<std::ffi::OsStr>>(python_bin: S) -> Command {
+    let mut cmd = Command::new(python_bin);
+    cmd.env("PYTHONIOENCODING", "utf-8");
+    cmd.env("PYTHONUTF8", "1");
+    #[cfg(target_os = "windows")]
+    cmd.creation_flags(CREATE_NO_WINDOW);
+    cmd
+}
+
 /// True when a `PYTHONHOME` / `PYTHONPATH` value points inside an AppImage's
 /// throwaway mount instead of a real Python installation.
 ///
@@ -301,6 +324,41 @@ pub fn is_real_python(bin: &str) -> bool {
 mod tests {
     use super::*;
     use std::fs;
+
+    // ── Ticket 003: die Kodierung haengt am Kommando, nicht am Aufrufer ────
+
+    #[test]
+    fn python_command_carries_the_utf8_environment() {
+        let cmd = python_command("python3");
+        let envs: Vec<(String, Option<String>)> = cmd
+            .get_envs()
+            .map(|(k, v)| {
+                (
+                    k.to_string_lossy().to_string(),
+                    v.map(|v| v.to_string_lossy().to_string()),
+                )
+            })
+            .collect();
+        assert!(
+            envs.contains(&("PYTHONIOENCODING".to_string(), Some("utf-8".to_string()))),
+            "ohne PYTHONIOENCODING bricht ein Pfad mit hebraeischen Zeichen den Lauf ab: {envs:?}",
+        );
+        assert!(
+            envs.contains(&("PYTHONUTF8".to_string(), Some("1".to_string()))),
+            "ohne PYTHONUTF8 bleibt die alte Codepage die Voreinstellung: {envs:?}",
+        );
+        assert_eq!(cmd.get_program(), "python3", "das Programm darf nicht verloren gehen");
+    }
+
+    #[test]
+    fn python_command_takes_a_path_as_well_as_a_string() {
+        // Die Aufrufstellen halten mal einen String, mal einen Pfad. Beide
+        // muessen durch dieselbe Tuer passen, sonst baut die naechste sich
+        // wieder ihr eigenes Kommando.
+        let p = std::path::PathBuf::from("/usr/bin/python3");
+        assert_eq!(python_command(&p).get_program(), p.as_os_str());
+        assert_eq!(python_command(String::from("py")).get_program(), "py");
+    }
 
     // ── AppImage Python env poisoning (numbrain, Discord 2026-07-28) ────────
 
