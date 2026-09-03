@@ -17,6 +17,7 @@
  */
 
 import type { AgentToolCall } from '../../types/agent-mode'
+import { toolResultIsFailure } from '../../lib/tool-result-failure'
 import type { AgentRunContext } from '../agent-context'
 import { deriveSideEffectKey } from './side-effect-key'
 import { validateToolArgs, formatValidationErrors, type JsonSchema } from './args-validator'
@@ -505,6 +506,16 @@ export function applyResultToToolCall(call: AgentToolCall, result: ExecutionResu
           ? 'rejected'
           : 'failed'
   if (result.result !== undefined) call.result = result.result
+  // Ein Werkzeug, das seinen Fehler als Text zurueckgibt, wirft nicht — und
+  // galt damit als erledigt. Ein gruener Haken ueber „Web search failed" ist
+  // die eine Auskunft, die der Kunde nicht nachpruefen kann (Testlauf
+  // 03.09.2026: drei Haken, dreimal nichts gefunden, und eine erfundene
+  // Tabelle als Ergebnis). Siehe `lib/tool-result-failure.ts`, warum das nur
+  // am Anfang der Antwort greift.
+  if (call.status === 'completed' && toolResultIsFailure(result.result)) {
+    call.status = 'failed'
+    if (call.error === undefined) call.error = String(result.result).split('\n')[0].slice(0, 300)
+  }
   if (result.error !== undefined) call.error = result.error
   if (result.errorHint !== undefined) call.errorHint = result.errorHint
   call.duration = result.durationMs
