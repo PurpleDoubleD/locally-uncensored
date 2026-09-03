@@ -40,6 +40,7 @@ import { WorkflowList } from '../agents/WorkflowList'
 import { WorkflowBuilder } from '../agents/WorkflowBuilder'
 import { useUpdateStore, isNewerVersion } from '../../stores/updateStore'
 import { backendCall, isTauri, openExternal } from '../../api/backend'
+import { troubleshootHinweis, type TroubleshootHinweis } from './troubleshoot-message'
 import { isMlxImageHost } from '../../api/mlx-image'
 import { ArrowUpCircle, KeyRound, RefreshCw } from 'lucide-react'
 import { CLOUD_BASE } from '../../api/cloud/config'
@@ -2041,16 +2042,16 @@ function ProbeBadge({ probe }: { probe: BackendProbe }) {
 function TroubleshootSection() {
   const [report, setReport] = useState<SystemHealthReport | null>(null)
   const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [hinweis, setHinweis] = useState<TroubleshootHinweis | null>(null)
 
   const run = async () => {
     setLoading(true)
-    setError(null)
+    setHinweis(null)
     try {
       const r = await backendCall<SystemHealthReport>('system_health', {})
       setReport(r)
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
+      setHinweis(troubleshootHinweis(e, isTauri()))
     } finally {
       setLoading(false)
     }
@@ -2068,9 +2069,18 @@ function TroubleshootSection() {
         the app behaves oddly. Most "model not found" / {isMlxImageHost() ? '"backend doesn\'t respond"' : '"ComfyUI doesn\'t respond"'} issues become obvious here.
       </p>
 
-      {error && (
-        <div className="rounded-lg bg-red-500/[0.08] border border-red-500/20 p-2.5 text-[0.65rem] text-red-400">
-          system_health failed: {error}
+      {hinweis && (
+        <div
+          className={`rounded-lg p-2.5 text-[0.65rem] ${
+            hinweis.art === 'grenze'
+              ? 'bg-white/[0.03] border border-white/[0.08] text-gray-400'
+              : 'bg-red-500/[0.08] border border-red-500/20 text-red-400'
+          }`}
+        >
+          <p className="leading-relaxed">{hinweis.titel}</p>
+          {hinweis.detail && (
+            <p className="mt-1 font-mono text-[0.6rem] opacity-70 break-all">{hinweis.detail}</p>
+          )}
         </div>
       )}
 
