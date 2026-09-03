@@ -9,15 +9,15 @@ import {
 } from '../app-identity'
 
 /**
- * Dieser Branch (`experiment/audits-komplett`) hat bewusst eigene
- * Datenverzeichnisse: der Experiment-Build hat am 2026-08-31 in
- * `~/Library/Application Support/lu-labs/` — dem Verzeichnis der ECHTEN App —
- * geschrieben und dabei ein Store-Backup überschrieben.
+ * Die Namen der app-eigenen Verzeichnisse stehen an zwei Stellen: Rust für die
+ * Tauri-App, TypeScript für die vite-Middlewares von `npm run dev`. Beide legen
+ * dieselben Dateien an, und ein Build, der sich verrechnet, schreibt in ein
+ * fremdes Datenverzeichnis. Am 2026-08-31 ist genau das passiert und hat ein
+ * Store-Backup überschrieben.
  *
- * Die Namen stehen an zwei Stellen (Rust für die Tauri-App, TypeScript für die
- * vite-Middlewares von `npm run dev`). Diese Datei ist die Klammer: sie liest
- * die Rust-Konstanten und vergleicht sie mit den TS-Konstanten, damit die
- * beiden Seiten nicht auseinander laufen können.
+ * Diese Datei ist die Klammer: sie liest die Rust-Konstanten und vergleicht sie
+ * mit den TS-Konstanten, damit die beiden Seiten nicht auseinander laufen
+ * können.
  */
 describe('Verzeichnisnamen dieses Builds', () => {
   const rust = readFileSync(
@@ -25,16 +25,11 @@ describe('Verzeichnisnamen dieses Builds', () => {
     'utf8',
   )
 
-  /** `pub const NAME: &str = concat!("basis", branch_dir_suffix!());` auflösen. */
+  /** `pub const NAME: &str = "wert";` auflösen. */
   function rustConst(name: string): string {
-    const suffix = /macro_rules!\s+branch_dir_suffix\s*\{\s*\(\)\s*=>\s*\{\s*"([^"]*)"/.exec(rust)
-    expect(suffix, 'branch_dir_suffix!() nicht in app_identity.rs gefunden').not.toBeNull()
-    const re = new RegExp(
-      `pub const ${name}: &str =\\s*concat!\\("([^"]*)",\\s*branch_dir_suffix!\\(\\)\\);`,
-    )
-    const m = re.exec(rust)
+    const m = new RegExp(`pub const ${name}: &str =\\s*"([^"]*)";`).exec(rust)
     expect(m, `${name} nicht in app_identity.rs gefunden`).not.toBeNull()
-    return `${m![1]}${suffix![1]}`
+    return m![1]
   }
 
   it('stimmen mit der Rust-Seite überein', () => {
@@ -46,13 +41,15 @@ describe('Verzeichnisnamen dieses Builds', () => {
     expect(APP_DISPLAY_DIR).toBe(rustConst('APP_DISPLAY_DIR'))
   })
 
-  it('sind keine Verzeichnisnamen der echten App', () => {
+  it('sind die Verzeichnisnamen dieser App und tragen keinen Anhang', () => {
     // Bewusst eigene Literale: ein Test, der seine Erwartung aus dem ableitet,
-    // was er absichern soll, prüft nichts.
-    const echt = ['lu-labs', 'locally-uncensored', 'Locally Uncensored', 'agent-workspace']
-    for (const name of [AGENT_WORKSPACE_DIR, APP_CONFIG_DIR, APP_DIR, APP_DISPLAY_DIR]) {
-      expect(echt, `'${name}' ist der Verzeichnisname der ECHTEN App`).not.toContain(name)
-    }
+    // was er absichern soll, prüft nichts. Ein Build aus einem
+    // Experimentierzweig trägt hier einen Suffix und fällt damit durch, bevor
+    // er beim Nutzer die falschen Ordner anlegt.
+    expect(AGENT_WORKSPACE_DIR).toBe('agent-workspace')
+    expect(APP_CONFIG_DIR).toBe('locally-uncensored')
+    expect(APP_DIR).toBe('lu-labs')
+    expect(APP_DISPLAY_DIR).toBe('Locally Uncensored')
   })
 
   it('werden im vite-Dev-Server nicht von Hand zusammengebaut', () => {
