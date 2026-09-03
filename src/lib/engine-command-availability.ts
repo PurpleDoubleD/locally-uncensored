@@ -22,6 +22,14 @@ const NO_SUCH_COMMAND = [
   // the shapes the HTTP bridge and the web build produce for the same thing.
   'not found',
   'unknown command',
+  // A14 third review: the one refusal this module was written for was the one
+  // it did not recognise. `backendCall` outside Tauri routes through the HTTP
+  // bridge's endpoint table and throws `Unknown backend command: <name>` for
+  // anything not in it, which matches none of the fragments above, so the web
+  // and remote-bridge builds re-asked the same dead question on every single
+  // model refresh. The literal lives in src/api/backend.ts and is pinned by
+  // engine-command-availability.test.ts.
+  'unknown backend command',
   'no such command',
   'invalid command',
   'command not allowed',

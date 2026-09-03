@@ -20,7 +20,7 @@ import { noChatBackendEnabled } from '../../lib/provider-visibility'
 import { cloudTeaserModels } from '../../lib/cloud-teaser-models'
 import { splitLuEngineRows, needsLuEngineHeading, LU_ENGINE_GROUP } from '../../lib/lu-engine-rows'
 import { isBuiltinEngineEntry, type InstalledModelLike } from '../../lib/lmstudio-match'
-import { ensureLuEngineIsChatProvider, LU_ENGINE_SWITCH_NOTE } from '../../api/lu-engine-switch'
+import { ensureLuEngineIsChatProvider, LU_ENGINE_SWITCH_NOTE, luEngineStartFailureNote } from '../../api/lu-engine-switch'
 import { useLuEngineSwitchStore } from '../../stores/luEngineSwitchStore'
 import type { AIModel } from '../../types/models'
 
@@ -759,7 +759,9 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
         }
         setOpen(false)
       } catch (e) {
-        setSelectError(`Couldn't start the LU Engine with "${displayModelName(model.name)}": ${e instanceof Error ? e.message : String(e)}`)
+        // Shared with the Installed card, which used to swallow this failure
+        // whole. One sentence, one place it is written (A14 third review).
+        setSelectError(luEngineStartFailureNote(model.name, e))
       } finally {
         setSelectingLms(null)
       }

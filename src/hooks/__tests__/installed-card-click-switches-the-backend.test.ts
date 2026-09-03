@@ -70,14 +70,17 @@ const { useProviderStore } = await import('../../stores/providerStore')
 const { useLuEngineSwitchStore } = await import('../../stores/luEngineSwitchStore')
 
 const GGUF = 'openai::Qwen2.5-0.5B-Instruct-Q8_0'
+const SECOND_GGUF = 'openai::gemma-3-4b-it-Q4_K_M'
 const OLLAMA = 'llama3.2:3b'
+const SWITCH_NOTE = 'Switched your chat provider to the LU Engine for this model.'
 
-/** The Installed list as David's Mac draws it: an Ollama model in front, one
- *  GGUF from the LU Engine folder beside it. */
+/** The Installed list as David's Mac draws it: an Ollama model in front, two
+ *  GGUFs from the LU Engine folder beside it. */
 function installedList() {
   return [
     { name: OLLAMA, model: OLLAMA, size: 1, type: 'text', provider: 'ollama', providerName: 'Ollama' },
     { name: GGUF, model: 'Qwen2.5-0.5B-Instruct-Q8_0', size: 1, type: 'text', provider: 'openai', providerName: 'LU Engine' },
+    { name: SECOND_GGUF, model: 'gemma-3-4b-it-Q4_K_M', size: 1, type: 'text', provider: 'openai', providerName: 'LU Engine' },
   ] as never
 }
 
@@ -89,7 +92,8 @@ async function clickCard(name: string) {
 }
 
 beforeEach(() => {
-  activateBuiltinModel.mockClear()
+  activateBuiltinModel.mockReset()
+  activateBuiltinModel.mockResolvedValue(true)
   unloadModel.mockClear()
   useLuEngineSwitchStore.setState({ note: null, generation: 0 })
   useProviderStore.getState().resetProvidersToDefaults()
@@ -116,8 +120,8 @@ describe('clicking an LU Engine card while Ollama holds the chat', () => {
 
   it('says on screen that the chat backend moved', async () => {
     await clickCard(GGUF)
-    expect(useLuEngineSwitchStore.getState().note)
-      .toBe('Switched your chat provider to the LU Engine for this model.')
+    expect(useLuEngineSwitchStore.getState().note).toBe(SWITCH_NOTE)
+    expect(useLuEngineSwitchStore.getState().tone, 'nothing went wrong yet').toBe('info')
   })
 
   it('and the model really is the active one afterwards', async () => {
@@ -157,5 +161,99 @@ describe('clicking an LU Engine card while Ollama holds the chat', () => {
     await clickCard(LMS)
     expect(useProviderStore.getState().providers.openai.name).toBe('LM Studio')
     expect(useLuEngineSwitchStore.getState().note).toBeNull()
+  })
+})
+
+// ── A14 third review: a start that dies must not look like a start ──────────
+
+describe('when the engine does not come up for the card that was clicked', () => {
+  it('names the real reason instead of swallowing it', async () => {
+    activateBuiltinModel.mockRejectedValue(new Error('llama-server exited: unknown model architecture'))
+    await clickCard(GGUF)
+    const { note, tone } = useLuEngineSwitchStore.getState()
+    // The picker's sentence, word for word, from the shared helper.
+    expect(note).toContain('Couldn\'t start the LU Engine with "Qwen2.5-0.5B-Instruct-Q8_0"')
+    // Including the tail Rust appends, which is the whole point of showing it.
+    expect(note).toContain('unknown model architecture')
+    expect(tone, 'a dead engine is not a quiet grey line').toBe('error')
+  })
+
+  it('keeps saying that the chat backend has already moved', async () => {
+    // The slot was handed over BEFORE the start, and the Ollama model was
+    // unloaded to make room. A failure that only names the failure would leave
+    // the user guessing what he is talking to now.
+    activateBuiltinModel.mockRejectedValue(new Error('port 8127 is taken'))
+    await clickCard(GGUF)
+    const note = useLuEngineSwitchStore.getState().note
+    expect(note, 'the switch sentence has to survive the failure').toContain(SWITCH_NOTE)
+    expect(note, 'and stand beside the failure, not instead of it').toContain('port 8127 is taken')
+    expect(useProviderStore.getState().providers.openai.managed).toBe(true)
+  })
+
+  it('treats a false answer as a failure too, and says which file is gone', async () => {
+    // activateBuiltinModel answers false when it cannot resolve the GGUF path,
+    // even after refreshing the list once. Nothing was started.
+    activateBuiltinModel.mockResolvedValue(false)
+    await clickCard(GGUF)
+    const { note, tone } = useLuEngineSwitchStore.getState()
+    expect(note).toContain('Couldn\'t start the LU Engine with "Qwen2.5-0.5B-Instruct-Q8_0"')
+    expect(note).toContain('not in the LU Engine folder any more')
+    expect(tone).toBe('error')
+  })
+
+  // NEGATIVE CONTROL: a start that works says nothing about a failure, and the
+  // line stays the quiet one.
+  it('says nothing of the sort when the start works', async () => {
+    await clickCard(GGUF)
+    expect(useLuEngineSwitchStore.getState().note).toBe(SWITCH_NOTE)
+    expect(useLuEngineSwitchStore.getState().tone).toBe('info')
+  })
+})
+
+// ── A14 third review: one swap at a time, as in the picker ─────────────────
+
+describe('two LU Engine cards clicked in quick succession', () => {
+  it('send one swap, not two', async () => {
+    // Two cards, two clicks, and the first swap still running. Without the
+    // bolt this is two swap_bundled_model calls at one engine, the second one
+    // landing on a process the first is still restarting.
+    let release: (v: boolean) => void = () => {}
+    activateBuiltinModel.mockImplementation(() => new Promise<boolean>((r) => { release = r }))
+    const { result } = renderHook(() => useModels())
+    await act(async () => {
+      result.current.setActiveModel(GGUF)
+      result.current.setActiveModel(SECOND_GGUF)
+    })
+    expect(activateBuiltinModel).toHaveBeenCalledTimes(1)
+    expect(activateBuiltinModel).toHaveBeenCalledWith(GGUF)
+    // The blocked click changed nothing else either: it never reached the
+    // store, so the engine is still pointed at the first card.
+    expect(useModelStore.getState().activeModel).toBe(GGUF)
+
+    // NEGATIVE CONTROL in the same frame: the bolt is a bolt, not a lock. Once
+    // the first swap is done the next click gets through. Counted as "more
+    // than before" rather than as an exact number, because the store's own
+    // chokepoint swaps built-in to built-in as well and Rust's argv
+    // idempotence makes that pair a no-op (modelStore.ts).
+    await act(async () => { release(true) })
+    await act(async () => { await new Promise((r) => setTimeout(r, 0)) })
+    const before = activateBuiltinModel.mock.calls.length
+    await act(async () => { result.current.setActiveModel(SECOND_GGUF) })
+    expect(activateBuiltinModel.mock.calls.length).toBeGreaterThan(before)
+    expect(activateBuiltinModel).toHaveBeenLastCalledWith(SECOND_GGUF)
+    await act(async () => { release(true) })
+  })
+
+  // NEGATIVE CONTROL: the bolt belongs to the LU Engine path only. An Ollama
+  // card clicked while a swap is running is not blocked by it.
+  it('never blocks a click on another backend', async () => {
+    let release: (v: boolean) => void = () => {}
+    activateBuiltinModel.mockImplementation(() => new Promise<boolean>((r) => { release = r }))
+    const { result } = renderHook(() => useModels())
+    await act(async () => { result.current.setActiveModel(GGUF) })
+    await act(async () => { result.current.setActiveModel(OLLAMA) })
+    expect(useModelStore.getState().activeModel).toBe(OLLAMA)
+    await act(async () => { release(true) })
+    await act(async () => { await new Promise((r) => setTimeout(r, 0)) })
   })
 })

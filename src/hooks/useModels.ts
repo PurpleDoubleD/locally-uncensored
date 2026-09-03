@@ -18,7 +18,9 @@ import { engineStartIsWorthRetrying } from '../lib/engine-start-failure'
 import { commandIsUnavailable } from '../lib/engine-command-availability'
 import { dropDuplicateLuEngineRows } from '../lib/lu-engine-rows'
 import { isBuiltinEngineEntry, type InstalledModelLike } from '../lib/lmstudio-match'
-import { ensureLuEngineIsChatProvider, LU_ENGINE_SWITCH_NOTE } from '../api/lu-engine-switch'
+import {
+  ensureLuEngineIsChatProvider, LU_ENGINE_SWITCH_NOTE, LU_ENGINE_FILE_GONE, luEngineStartFailureNote,
+} from '../api/lu-engine-switch'
 import { useLuEngineSwitchStore } from '../stores/luEngineSwitchStore'
 import { useModelStore } from '../stores/modelStore'
 import { useProviderStore } from '../stores/providerStore'
@@ -40,6 +42,27 @@ import type { PullProgress, AIModel, ModelCategory, ImageModel, VideoModel, Clou
 // Runs at most once per app session (fetchModels fires repeatedly), and only
 // starts a server that reports running:false.
 let builtinResumeAttempted = false
+
+// A14 third review: `fetchModels` runs from several mounted components at
+// once, and the flag above was READ before the await and WRITTEN after it, so
+// two first passes that overlapped both read "first pass" and both fired the
+// resume. That is two llama-server starts on one port, on the machine with the
+// least room to spare.
+//
+// The claim is taken here, before the await, and only the pass holding it may
+// spend the shot or hand it back. A pass that answered while the claim holder
+// was still waiting must NOT spend it: it skipped the resume, so spending it
+// would leave the resume owed forever. A claim holder that got no answer gives
+// the claim back, which keeps the Runde-3 contract (a timeout does not eat the
+// shot) intact under concurrency.
+let builtinResumeClaimed = false
+
+// A14 third review, the other half: two LU Engine cards clicked in quick
+// succession fired two `swap_bundled_model` calls at one engine. The picker
+// has had a bolt against this since ENG-4 (`selectingLms`); the Installed card
+// had none, and a hook-local ref would not have been one either, because the
+// two clicks can land in two different mounted components.
+let luEngineSwapInFlight = false
 
 // GH #118: the boot resume used to be a single shot, and a failure was
 // swallowed without a word. The one moment it runs is the worst moment to ask
@@ -257,7 +280,11 @@ export function useModels() {
       //    so nothing is spent. This is the launch race: the command layer
       //    coming up behind the window. Spending the shot there left the
       //    engine the user had running yesterday dead for the session.
-      const firstPassThisSession = !builtinResumeAttempted
+      //
+      // A14 third review: the claim is taken BEFORE the await, so two passes
+      // racing out of two mounted components cannot both be the first one.
+      const firstPassThisSession = !builtinResumeAttempted && !builtinResumeClaimed
+      if (firstPassThisSession) builtinResumeClaimed = true
       let bundledRaw: BundledModel[] | null = null
       let backendAnswered = false
       try {
@@ -266,7 +293,13 @@ export function useModels() {
       } catch (e) {
         backendAnswered = commandIsUnavailable(e)
       }
-      if (backendAnswered) builtinResumeAttempted = true
+      // Only the pass that holds the claim may spend the shot or give it back.
+      // A pass that skipped the resume must not spend it on the holder's
+      // behalf, or the resume it skipped would never happen.
+      if (firstPassThisSession) {
+        if (backendAnswered) builtinResumeAttempted = true
+        else builtinResumeClaimed = false
+      }
       if (bundledRaw) {
         const bundled = bundledToAIModels(bundledRaw).filter(m => !isEmbeddingModel(m.name))
         // One file, one row: with the folder pointed at ~/.lmstudio/models,
@@ -481,15 +514,43 @@ export function useModels() {
   // now: hand the slot over, say so, then start.
   const activateModel = useCallback((name: string) => {
     const row = useModelStore.getState().models.find((m) => m.name === name)
-    if (isBuiltinEngineEntry(row as unknown as InstalledModelLike | undefined)) {
-      if (ensureLuEngineIsChatProvider()) {
-        useLuEngineSwitchStore.getState().announce(LU_ENGINE_SWITCH_NOTE)
-      }
+    const isLuRow = isBuiltinEngineEntry(row as unknown as InstalledModelLike | undefined)
+    // Did THIS click move the chat backend. A failure afterwards has to keep
+    // saying so: the slot has already changed hands and the model the user was
+    // talking to has already been unloaded to make room.
+    let switched = false
+    if (isLuRow) {
+      // A14 third review: the bolt the picker has had since ENG-4. Two LU
+      // cards clicked in quick succession used to send two swap_bundled_model
+      // calls at one engine, and the second one lands on a process the first
+      // one is still restarting.
+      if (luEngineSwapInFlight) return
+      switched = ensureLuEngineIsChatProvider()
+      if (switched) useLuEngineSwitchStore.getState().announce(LU_ENGINE_SWITCH_NOTE)
     }
     setActiveModel(name)
     const cfg = useProviderStore.getState().providers.openai
     if (cfg.enabled && cfg.managed && getProviderIdFromModel(name) === 'openai') {
-      void activateBuiltinModel(name).catch(() => { /* engine unavailable, non-critical */ })
+      // A14 third review: this used to be `.catch(() => {})`. A dead
+      // llama-server then left the slot handed over, the Ollama model already
+      // unloaded to make room, and one cheerful line on screen saying the chat
+      // provider had moved. The picker names the real reason with the stderr
+      // tail Rust appends; the card says the same sentence now, from the same
+      // helper, in the status row that is drawn right above the list.
+      if (isLuRow) luEngineSwapInFlight = true
+      const sayItFailed = (reason: unknown) => {
+        const line = luEngineStartFailureNote(name, reason)
+        useLuEngineSwitchStore.getState()
+          .announce(switched ? `${LU_ENGINE_SWITCH_NOTE} ${line}` : line, 'error')
+      }
+      void activateBuiltinModel(name)
+        // False is not a shrug: the path could not be resolved even after a
+        // refresh, so the row stands for a file that is no longer there.
+        .then((swapped) => { if (!swapped && isLuRow) sayItFailed(LU_ENGINE_FILE_GONE) })
+        // Not an LU row: some other model in the openai slot, and the engine
+        // has nothing to say about it. Unchanged, non-critical.
+        .catch((e) => { if (isLuRow) sayItFailed(e) })
+        .finally(() => { if (isLuRow) luEngineSwapInFlight = false })
     }
   }, [setActiveModel])
 

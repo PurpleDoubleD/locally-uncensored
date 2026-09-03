@@ -20,9 +20,34 @@ import { useProviderStore } from '../stores/providerStore'
 import { PROVIDER_PRESETS } from './providers/types'
 import { slotTakeoverUpdate } from '../lib/openai-slot-handover'
 import { LU_ENGINE_NAME } from '../lib/engine-name'
+import { displayModelName } from './providers'
 
 /** What the user is told when the pick moved his chat backend. */
 export const LU_ENGINE_SWITCH_NOTE = 'Switched your chat provider to the LU Engine for this model.'
+
+/**
+ * The reason behind an `activateBuiltinModel` that answered false.
+ *
+ * It resolves the GGUF path from the last `list_bundled_models`, refreshes
+ * that list once, and only then gives up, so a false here means the file the
+ * row stands for is not in the folder any more.
+ */
+export const LU_ENGINE_FILE_GONE =
+  'the file behind that row is not in the LU Engine folder any more. Check Settings, AI Backends, Model Storage.'
+
+/**
+ * The one sentence a failed engine start gets, wherever it was triggered.
+ *
+ * A14 third review: the picker said this and the Installed card said nothing.
+ * The card swallowed the failure with `.catch(() => {})`, so a dead
+ * llama-server left the slot handed over, the Ollama model already unloaded,
+ * and one cheerful line on screen saying the chat provider had moved. Both
+ * doors read from here now, so the two cannot drift apart.
+ */
+export function luEngineStartFailureNote(modelName: string, reason: unknown): string {
+  const text = reason instanceof Error ? reason.message : String(reason)
+  return `Couldn't start the LU Engine with "${displayModelName(modelName)}": ${text}`
+}
 
 /** The shipped address of the engine. The real port is written back by
  *  `syncBuiltinEnginePort` as soon as it starts, exactly as it is for a

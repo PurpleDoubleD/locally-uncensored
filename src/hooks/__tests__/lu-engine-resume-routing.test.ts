@@ -113,7 +113,9 @@ describe('the once-per-session flag is raised on the attempt, not on the success
     // No sidecar, and the backend SAYS so: the command is not in this build's
     // invoke handler, which is the web and remote-bridge case and a broken
     // install. A refusal is an answer, so the one shot is spent.
-    listBundledModels.mockRejectedValue(new Error('command list_bundled_models not found'))
+    // The literal from src/api/backend.ts, not an invented wording:
+    // the HTTP bridge's endpoint table throws exactly this.
+    listBundledModels.mockRejectedValue(new Error('Unknown backend command: list_bundled_models'))
     const refresh = await bootAndRefresh()
     expect(startBundledEmbed).not.toHaveBeenCalled()
     expect(bundledEngineStatus).not.toHaveBeenCalled()
@@ -181,10 +183,70 @@ describe('a call that never got through does not spend the one shot', () => {
   // asks the same dead question on every single model refresh forever.
   it('but a plain refusal still spends it', async () => {
     managedBuiltin = true
-    listBundledModels.mockRejectedValue(new Error('Unknown command list_bundled_models'))
+    listBundledModels.mockRejectedValue(new Error('Unknown backend command: list_bundled_models'))
     const refresh = await bootAndRefresh()
     listBundledModels.mockResolvedValue([CHAT, EMBED])
     await refresh()
     expect(bundledEngineStatus).not.toHaveBeenCalled()
+  })
+})
+
+// ── A14 third review: two mounted components are two first passes ───────────
+
+describe('two overlapping first passes', () => {
+  /** Both passes wait on ONE pending list call, which is what the launch race
+   *  looks like: the Models page and the composer both mount, both ask, and
+   *  the backend answers both at once. */
+  async function twoPassesOn(answer: () => Promise<unknown>) {
+    vi.resetModules()
+    const { useModels } = await import('../useModels')
+    listBundledModels.mockImplementation(answer as never)
+    const a = renderHook(() => useModels())
+    const b = renderHook(() => useModels())
+    const both = async () => {
+      await act(async () => {
+        await Promise.all([a.result.current.fetchModels(), b.result.current.fetchModels()])
+      })
+      await act(async () => { await new Promise((r) => setTimeout(r, 0)) })
+    }
+    await both()
+    return both
+  }
+
+  it('start the boot resume once, not twice', async () => {
+    managedBuiltin = true
+    // The flag used to be READ before the await and WRITTEN after it, so both
+    // passes read "first pass" and both fired the resume: two llama-server
+    // starts on one port, on the machine with the least room to spare.
+    // resumeEmbedServer runs once per resume, so its start counts them.
+    await twoPassesOn(async () => [CHAT, EMBED])
+    expect(startBundledEmbed).toHaveBeenCalledTimes(1)
+  })
+
+  // NEGATIVE CONTROL: the claim is given back when nothing was learned. Two
+  // passes that both lose the launch race must leave the resume owed, exactly
+  // as one pass does, or the Runde-3 contract dies the moment a second
+  // component is mounted.
+  it('leave the resume owed when neither of them got an answer', async () => {
+    managedBuiltin = true
+    const again = await twoPassesOn(async () => { throw new Error('invoke timed out after 5000ms') })
+    expect(startBundledEmbed).not.toHaveBeenCalled()
+    listBundledModels.mockImplementation(async () => [CHAT, EMBED] as never)
+    await again()
+    expect(bundledEngineStatus, 'the resume was still owed').toHaveBeenCalled()
+    expect(startBundledEmbed).toHaveBeenCalledTimes(1)
+  })
+
+  // NEGATIVE CONTROL: a refusal still spends the shot, even when the pass that
+  // heard it was racing another one.
+  it('spend the shot once on a refusal, and never ask again', async () => {
+    managedBuiltin = true
+    const again = await twoPassesOn(async () => {
+      throw new Error('Unknown backend command: list_bundled_models')
+    })
+    listBundledModels.mockImplementation(async () => [CHAT, EMBED] as never)
+    await again()
+    expect(bundledEngineStatus).not.toHaveBeenCalled()
+    expect(startBundledEmbed).not.toHaveBeenCalled()
   })
 })

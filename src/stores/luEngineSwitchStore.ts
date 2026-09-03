@@ -21,12 +21,21 @@ import { create } from 'zustand'
  *  short enough that it is gone by the time the user sends his next message. */
 export const LU_ENGINE_SWITCH_NOTE_MS = 12_000
 
+/**
+ * How the line is drawn. 'info' is the switch itself, which is not an alarm:
+ * the user asked for it by picking the model. 'error' is a start that failed
+ * after the slot had already been handed over, which is the one case where the
+ * user has to act (A14 third review).
+ */
+export type LuEngineNoteTone = 'info' | 'error'
+
 interface LuEngineSwitchState {
   note: string | null
+  tone: LuEngineNoteTone
   /** Bumped on every announcement, so a timer belonging to an older one cannot
    *  clear a newer line. Same reason the slot-eviction timer keeps one. */
   generation: number
-  announce: (note: string) => void
+  announce: (note: string, tone?: LuEngineNoteTone) => void
   dismiss: () => void
 }
 
@@ -46,18 +55,19 @@ function cancelPending(): void {
 
 export const useLuEngineSwitchStore = create<LuEngineSwitchState>((set, get) => ({
   note: null,
+  tone: 'info',
   generation: 0,
-  announce: (note) => {
+  announce: (note, tone = 'info') => {
     cancelPending()
     const generation = get().generation + 1
-    set({ note, generation })
+    set({ note, tone, generation })
     pending = setTimeout(() => {
       pending = null
-      if (get().generation === generation) set({ note: null })
+      if (get().generation === generation) set({ note: null, tone: 'info' })
     }, LU_ENGINE_SWITCH_NOTE_MS)
   },
   dismiss: () => {
     cancelPending()
-    set({ note: null, generation: get().generation + 1 })
+    set({ note: null, tone: 'info', generation: get().generation + 1 })
   },
 }))

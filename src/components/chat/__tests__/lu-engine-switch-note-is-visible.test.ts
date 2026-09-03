@@ -81,6 +81,31 @@ describe('the line survives the pick that caused it', () => {
     expect(useProviderStore.getState().providers.openai.managed).toBe(true)
   })
 
+  // A14 third review: the Installed card used to swallow a failed start
+  // whole, so the only line on screen was the cheerful one. The failure goes
+  // into this same bar now, and it must not be drawn as the quiet grey note
+  // beside it.
+  it('draws a failed start as an error, not as the quiet switch line', async () => {
+    render(createElement(LuEngineSwitchBar))
+    await act(async () => {
+      pickAnLuEngineModel()
+      useLuEngineSwitchStore.getState().announce('Couldn\'t start the LU Engine with "x": boom', 'error')
+    })
+    const line = screen.getByTestId('lu-engine-switch-note')
+    expect(line.getAttribute('data-tone')).toBe('error')
+    expect(line.className).toContain('red')
+  })
+
+  // NEGATIVE CONTROL: the switch itself is not an alarm. The user asked for
+  // it by picking the model, so it keeps the quiet skin.
+  it('keeps the plain skin for the switch itself', async () => {
+    render(createElement(LuEngineSwitchBar))
+    await act(async () => { pickAnLuEngineModel() })
+    const line = screen.getByTestId('lu-engine-switch-note')
+    expect(line.getAttribute('data-tone')).toBe('info')
+    expect(line.className).not.toContain('red')
+  })
+
   it('clears itself after a while instead of standing forever', async () => {
     vi.useFakeTimers()
     render(createElement(LuEngineSwitchBar))
