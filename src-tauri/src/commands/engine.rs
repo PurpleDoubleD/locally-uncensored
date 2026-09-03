@@ -1274,7 +1274,7 @@ fn start_bundled_engine_blocking(
         }
     };
     if port != preferred_port {
-        println!("[Engine] port {preferred_port} is taken, the built-in engine moves to {port}");
+        println!("[Engine] port {preferred_port} is taken, the LU Engine moves to {port}");
     }
     let desired_args =
         build_server_args(&model_path, &tuning, port, slot_dir.as_deref(), mmproj.as_deref());
@@ -1284,7 +1284,7 @@ fn start_bundled_engine_blocking(
     let first = spawn_engine_attempt(state, &binary, &desired_args, &model_path, port, ctx);
     let failure = match first {
         Ok(()) => {
-            println!("[Engine] Built-in engine healthy on port {port}");
+            println!("[Engine] LU Engine healthy on port {port}");
             return Ok(serde_json::json!({
                 "status": "started",
                 "port": port,
@@ -1331,7 +1331,7 @@ fn start_bundled_engine_blocking(
     };
     match spawn_engine_attempt(state, &binary, &retry_args, &model_path, retry_port, ctx) {
         Ok(()) => {
-            println!("[Engine] Built-in engine healthy on port {retry_port} (second attempt)");
+            println!("[Engine] LU Engine healthy on port {retry_port} (second attempt)");
             Ok(serde_json::json!({
                 "status": "started",
                 "port": retry_port,
@@ -2029,7 +2029,7 @@ pub(crate) fn stop_engine_locked(state: &AppState) -> bool {
     if let Some(mut engine) = guard.take() {
         let _ = engine.child.kill();
         let _ = engine.child.wait();
-        println!("[Engine] Built-in engine stopped (port {})", engine.port);
+        println!("[Engine] LU Engine stopped (port {})", engine.port);
         true
     } else {
         false
@@ -2106,7 +2106,7 @@ fn start_bundled_embed_blocking(
         )
     })?;
 
-    println!("[Engine] Starting built-in embeddings server on port {port}, model {model_path}");
+    println!("[Engine] Starting the LU Engine embeddings server on port {port}, model {model_path}");
     let mut cmd = Command::new(&binary);
     cmd.args(build_embed_args(&model_path, port))
         .stdin(Stdio::null())

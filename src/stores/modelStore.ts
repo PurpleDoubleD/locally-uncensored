@@ -160,7 +160,7 @@ export const useModelStore = create<ModelState>()(
             !!nextModel && 'providerName' in nextModel && isLuEngineName(nextModel.providerName)
           if (!nextIsBuiltin) {
             backendCall('stop_bundled_engine').catch((e) =>
-              log.warn('[modelStore] failed to stop built-in engine on switch-away', { err: e }),
+              log.warn('[modelStore] failed to stop the LU Engine on switch-away', { err: e }),
             )
           } else if (name) {
             // built-in → DIFFERENT built-in: llama-server serves exactly ONE
@@ -173,7 +173,7 @@ export const useModelStore = create<ModelState>()(
             // selection, name = null, has nothing to swap to; nextIsBuiltin
             // is false then anyway, this branch just spells it out for tsc.)
             activateBuiltinModel(name).catch((e) =>
-              log.warn('[modelStore] failed to swap built-in engine to the picked model', { model: name, err: e }),
+              log.warn('[modelStore] failed to swap the LU Engine to the picked model', { model: name, err: e }),
             )
           }
         } else if (!prev.includes('::')) {

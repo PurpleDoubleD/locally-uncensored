@@ -79,9 +79,9 @@ async function resumeBuiltinEngines(bundled: BundledModel[]) {
     worthRetrying: engineStartIsWorthRetrying,
     sleep: wait,
     onError: (attempt, err) =>
-      log.warn('[useModels] built-in engine resume failed', { attempt, err }),
+      log.warn('[useModels] LU Engine resume failed', { attempt, err }),
   })
-  log.info('[useModels] built-in engine resume', outcome)
+  log.info('[useModels] LU Engine resume', outcome)
   await embedResumed
 }
 

@@ -259,7 +259,7 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
       }
       setActiveModel(name)
     } catch (e) {
-      log.warn('[DiscoverModels] built-in engine repair failed', { err: e })
+      log.warn('[DiscoverModels] LU Engine repair failed', { err: e })
       setActiveModel(name)
     } finally {
       setUsingModel(null)

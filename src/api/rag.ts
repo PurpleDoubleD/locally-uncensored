@@ -141,7 +141,7 @@ async function embedViaBuiltin(texts: string[], model: string): Promise<number[]
     })
   } catch (err) {
     throw new Error(
-      `Cannot reach the built-in embeddings server. (${err instanceof Error ? err.message : String(err)})`
+      `Cannot reach the LU Engine embeddings server. (${err instanceof Error ? err.message : String(err)})`
     )
   }
 
@@ -152,7 +152,7 @@ async function embedViaBuiltin(texts: string[], model: string): Promise<number[]
       detail = body?.error?.message || body?.error || ""
     } catch { /* ignore parse errors */ }
     throw new Error(
-      `Embedding failed (HTTP ${res.status}): ${detail || "the built-in embeddings server may still be loading"}`
+      `Embedding failed (HTTP ${res.status}): ${detail || "the LU Engine embeddings server may still be loading"}`
     )
   }
 

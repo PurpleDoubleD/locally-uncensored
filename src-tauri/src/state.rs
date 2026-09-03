@@ -501,7 +501,7 @@ impl AppState {
         if let Ok(mut engine) = self.bundled_engine.lock() {
             if let Some(ref mut e) = *engine {
                 let _ = e.child.kill();
-                println!("[Engine] Built-in engine stopped (explicit shutdown)");
+                println!("[Engine] LU Engine stopped (explicit shutdown)");
             }
             *engine = None;
         }
@@ -510,7 +510,7 @@ impl AppState {
         if let Ok(mut embed) = self.bundled_embed.lock() {
             if let Some(ref mut e) = *embed {
                 let _ = e.child.kill();
-                println!("[Engine] Built-in embeddings server stopped (explicit shutdown)");
+                println!("[Engine] LU Engine embeddings server stopped (explicit shutdown)");
             }
             *embed = None;
         }
