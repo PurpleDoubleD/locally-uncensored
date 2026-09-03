@@ -68,6 +68,9 @@ export interface InstallStatus {
 export interface GenerateParams {
   id: string
   prompt: string
+  steps?: number
+  width?: number
+  height?: number
   seconds?: number
   fps?: number
   initImage?: string
@@ -115,6 +118,9 @@ export async function generateVideo(params: GenerateParams): Promise<GenerateRes
   const body = {
     id: params.id,
     prompt: params.prompt,
+    steps: params.steps,
+    width: params.width,
+    height: params.height,
     seconds: params.seconds,
     fps: params.fps,
     init_image: params.initImage,

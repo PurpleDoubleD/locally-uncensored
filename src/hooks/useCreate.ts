@@ -583,15 +583,27 @@ export function useCreate() {
 
       setIsGenerating(true)
       state.setProgressPhase('loading-model')
-      setProgress(0, 'Starting MLX video generation...')
+      setProgress(0, 'Freeing unified memory for MLX video...')
       addToPromptHistory(prompt)
       const startTime = Date.now()
       abortRef.current = new AbortController()
+      // Apple Silicon has one unified memory pool: a resident Ollama model and
+      // MLX video weights compete for the same RAM. Use the same reversible
+      // hand-off as ComfyUI renders so a large local chat model cannot push
+      // mlx-video into swap. The selected Ollama model is restored afterward.
+      let renderEviction: RenderEviction | null = null
+      try {
+        renderEviction = await evictChatBackendsForRender()
+      } catch { /* unified-memory housekeeping is best-effort */ }
+      setProgress(0, 'Starting MLX video generation...')
       let result: Awaited<ReturnType<typeof generateVideo>>
       try {
         result = await generateVideo({
           id: catalogId,
           prompt,
+          steps,
+          width,
+          height,
           seconds: Math.max(0.5, frames / Math.max(1, fps)),
           fps,
           seed: runSeed,
@@ -600,6 +612,7 @@ export function useCreate() {
         useCreateStore.getState().setError(`Failed to start: ${e instanceof Error ? e.message : String(e)}`)
         useCreateStore.getState().setIsGenerating(false)
         abortRef.current = null
+        if (renderEviction) void restoreChatBackendsAfterRender(renderEviction)
         return
       }
       try {
@@ -673,6 +686,7 @@ export function useCreate() {
         useCreateStore.getState().setIsGenerating(false)
         useCreateStore.getState().setProgress(0)
         abortRef.current = null
+        if (renderEviction) void restoreChatBackendsAfterRender(renderEviction)
       }
       return
     }

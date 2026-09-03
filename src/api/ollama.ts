@@ -363,10 +363,11 @@ export async function scanInstalledModels(): Promise<ModelCapabilityCheck[]> {
   return Promise.all(probeable.map(m => checkModelCapability(m.name)))
 }
 
-export async function loadModel(name: string): Promise<void> {
+export async function loadModel(name: string, numCtx?: number): Promise<void> {
+  const options = typeof numCtx === 'number' && numCtx > 0 ? { num_ctx: numCtx } : undefined
   const res = await localFetch(ollamaUrl("/generate"), {
     method: "POST",
-    body: JSON.stringify({ model: name, prompt: "", stream: false, keep_alive: "10m" }),
+    body: JSON.stringify({ model: name, prompt: "", stream: false, keep_alive: "10m", ...(options ? { options } : {}) }),
   })
   if (!res.ok) {
     const { parseOllamaError, ModelLoadError } = await import("../lib/ollama-errors")

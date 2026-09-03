@@ -31,6 +31,7 @@ use std::path::PathBuf;
 use std::process::Command;
 
 pub const MLX_PORT: u16 = 47712;
+const IMAGE_ENGINE_READY_MARKER: &str = ".image-engine-ready";
 
 fn mlx_root() -> PathBuf {
     crate::os_paths::data_dir().join("mlx")
@@ -40,8 +41,8 @@ fn venv_python() -> PathBuf {
     mlx_root().join("venv/bin/python")
 }
 
-fn venv_pip() -> PathBuf {
-    mlx_root().join("venv/bin/pip")
+fn image_engine_is_installed(root: &std::path::Path) -> bool {
+    root.join("venv/bin/python").is_file() && root.join(IMAGE_ENGINE_READY_MARKER).is_file()
 }
 
 /// The HuggingFace token the user stored in Settings, held in memory for the
@@ -96,7 +97,13 @@ fn sidecar_running() -> bool {
 }
 
 pub async fn mlx_status(_state: &AppState, _args: &Value) -> CmdResult {
-    let installed = venv_python().exists();
+    // A venv is created before pip runs. Its Python existing therefore proves
+    // only that setup started, not that torch/diffusers ever installed. A pip
+    // failure used to strand the Mac permanently: the next click saw the bare
+    // venv as "installed", skipped repair, and downloaded a model the engine
+    // could not load. The marker is written only after the dependency install
+    // succeeds.
+    let installed = image_engine_is_installed(&mlx_root());
     let running = sidecar_running();
     // When the sidecar is up, surface what it's holding so the UI can show a
     // "free memory" control while a model is resident.
@@ -225,8 +232,8 @@ fn install_mlx_steps(slot: &crate::install_state::InstallSlot) -> Result<(), Str
     std::fs::write(&server_path, SERVER_PY).map_err(|e| format!("write server.py: {}", os_error::english(&e)))?;
 
     slot.log("running pip install (this pulls torch + diffusers, ~3 GB)");
-    let out = Command::new(venv_pip())
-        .args(["install", "--upgrade", "-r", req_path.to_str().unwrap()])
+    let out = crate::python::isolated_pip_install_command(venv_python())
+        .args(["-r", req_path.to_str().unwrap()])
         .output()
         .map_err(|e| format!("pip install spawn: {}", os_error::english(&e)))?;
     if !out.status.success() {
@@ -236,6 +243,10 @@ fn install_mlx_steps(slot: &crate::install_state::InstallSlot) -> Result<(), Str
         ));
     }
     slot.log("pip install complete");
+
+    std::fs::write(mlx_root().join(IMAGE_ENGINE_READY_MARKER), b"ready\n")
+        .map_err(|e| format!("write image engine ready marker: {}", os_error::english(&e)))?;
+    slot.log("image engine dependencies ready");
 
     // Same pattern set as the catalog entry, so the fp32 duplicates (10+ GB)
     // stay on HuggingFace and image_model_is_installed() flips true.
@@ -1007,6 +1018,18 @@ mod tests {
         let p = venv_python();
         let s = p.to_string_lossy();
         assert!(s.ends_with("venv/bin/python"));
+    }
+
+    #[test]
+    fn a_bare_venv_is_not_a_finished_image_engine() {
+        let root = std::env::temp_dir().join(format!("lu-mlx-ready-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("venv/bin")).unwrap();
+        std::fs::write(root.join("venv/bin/python"), b"stub").unwrap();
+        assert!(!image_engine_is_installed(&root));
+        std::fs::write(root.join(IMAGE_ENGINE_READY_MARKER), b"ready\n").unwrap();
+        assert!(image_engine_is_installed(&root));
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

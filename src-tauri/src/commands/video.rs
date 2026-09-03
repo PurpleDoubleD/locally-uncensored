@@ -269,8 +269,8 @@ pub(crate) fn ensure_python_module(
         return Ok(());
     }
     slot.log(format!("installing {pip_spec} (one-time)"));
-    let mut cmd = Command::new(python);
-    cmd.args(["-m", "pip", "install", "--upgrade", pip_spec]);
+    let mut cmd = crate::python::isolated_pip_install_command(python);
+    cmd.arg(pip_spec);
     run_streamed(slot, &mut cmd)
         .map_err(|e| format!("pip install {pip_spec}: {e}"))?;
     if !python_has_module(python, module) {
@@ -398,14 +398,8 @@ pub fn video_install_mlx(state: &AppState, _args: &Value) -> CmdResult {
     slot.start();
     let slot2 = slot.clone();
     std::thread::spawn(move || {
-        let mut cmd = Command::new(&python);
-        cmd.args([
-            "-m",
-            "pip",
-            "install",
-            "--upgrade",
-            "git+https://github.com/Blaizzy/mlx-video.git",
-        ]);
+        let mut cmd = crate::python::isolated_pip_install_command(&python);
+        cmd.arg("git+https://github.com/Blaizzy/mlx-video.git");
         if let Err(e) = run_streamed(&slot2, &mut cmd) {
             slot2.fail(e);
         } else if !mlx_video_installed(&python) {
@@ -558,6 +552,12 @@ struct GenerateArgs {
     id: String,
     prompt: String,
     #[serde(default)]
+    steps: Option<u32>,
+    #[serde(default)]
+    width: Option<u32>,
+    #[serde(default)]
+    height: Option<u32>,
+    #[serde(default)]
     seconds: Option<f32>,
     #[serde(default)]
     fps: Option<u32>,
@@ -612,6 +612,17 @@ pub fn video_generate(state: &AppState, args: &Value) -> CmdResult {
 
     let mdir = weights_dir(entry);
 
+    let width = a.width.unwrap_or(entry.default_width);
+    let height = a.height.unwrap_or(entry.default_height);
+    for (label, value) in [("width", width), ("height", height)] {
+        if !valid_video_dimension(value) {
+            return Err(bad_request(format!(
+                "{label} must be between 64 and 2048 and divisible by 16 (got {value})"
+            )));
+        }
+    }
+    let steps = a.steps.map(|n| n.clamp(1, 100));
+
     // Frame count: caller can override via `seconds * fps`; otherwise use
     // the catalog default. mlx-video's frame flags count frames, not seconds.
     let fps = a.fps.unwrap_or(24).max(1);
@@ -634,9 +645,9 @@ pub fn video_generate(state: &AppState, args: &Value) -> CmdResult {
         cmd.arg("--model-dir")
             .arg(mdir.as_os_str())
             .arg("--width")
-            .arg(entry.default_width.to_string())
+            .arg(width.to_string())
             .arg("--height")
-            .arg(entry.default_height.to_string())
+            .arg(height.to_string())
             .arg("--num-frames")
             .arg(frames.to_string())
             .arg("--output-path")
@@ -650,6 +661,9 @@ pub fn video_generate(state: &AppState, args: &Value) -> CmdResult {
             .arg(out_path.as_os_str())
             .arg("-n")
             .arg(frames.to_string());
+    }
+    if let Some(steps) = steps {
+        cmd.arg("--steps").arg(steps.to_string());
     }
     if let Some(seed) = a.seed {
         cmd.arg("--seed").arg(seed.to_string());
@@ -778,6 +792,10 @@ fn clamp_frames(family: &str, frames: u32) -> u32 {
     f - ((f - 1) % 4)
 }
 
+fn valid_video_dimension(value: u32) -> bool {
+    (64..=2048).contains(&value) && value % 16 == 0
+}
+
 pub(crate) fn run_streamed(slot: &crate::install_state::InstallSlot, cmd: &mut Command) -> Result<(), String> {
     use std::io::{BufRead, BufReader};
     cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
@@ -856,6 +874,16 @@ mod tests {
         assert_eq!(clamp_frames("wan_2", 1), 5);
         assert_eq!(clamp_frames("ltx_2", 80), 80);
         assert_eq!(clamp_frames("ltx_2", 0), 1);
+    }
+
+    #[test]
+    fn video_dimensions_match_mlx_grid_and_safety_bounds() {
+        assert!(valid_video_dimension(320));
+        assert!(valid_video_dimension(832));
+        assert!(valid_video_dimension(2048));
+        assert!(!valid_video_dimension(63));
+        assert!(!valid_video_dimension(321));
+        assert!(!valid_video_dimension(2064));
     }
 
     #[test]

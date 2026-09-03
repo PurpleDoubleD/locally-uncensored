@@ -2583,7 +2583,8 @@ pub(crate) fn offload_local_models_blocking(state: &AppState, include_comfyui: O
     }
 
     // 3) Ollama — keep `serve` up (cheap, idle) but evict every loaded model.
-    if offload_ollama_loaded_models() {
+    let ollama_models = offload_ollama_loaded_models();
+    if !ollama_models.is_empty() {
         freed.push("ollama");
     }
 
@@ -2595,18 +2596,18 @@ pub(crate) fn offload_local_models_blocking(state: &AppState, include_comfyui: O
     }
 
     println!("[Offload] released local model backends (comfyui={}): {:?}", free_comfy, freed);
-    Ok(serde_json::json!({ "offloaded": freed }))
+    Ok(serde_json::json!({ "offloaded": freed, "ollama_models": ollama_models }))
 }
 
 /// Evict every model Ollama currently holds in memory via `keep_alive: 0`,
 /// leaving `ollama serve` running (idle serve is cheap). Best-effort.
-pub(crate) fn offload_ollama_loaded_models() -> bool {
+pub(crate) fn offload_ollama_loaded_models() -> Vec<String> {
     let client = match reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_secs(2))
         .build()
     {
         Ok(c) => c,
-        Err(_) => return false,
+        Err(_) => return Vec::new(),
     };
     let ps = match client
         .get("http://localhost:11434/api/ps")
@@ -2615,13 +2616,13 @@ pub(crate) fn offload_ollama_loaded_models() -> bool {
         .and_then(|r| r.json::<serde_json::Value>().ok())
     {
         Some(v) => v,
-        None => return false,
+        None => return Vec::new(),
     };
     let models = match ps.get("models").and_then(|m| m.as_array()) {
         Some(a) => a,
-        None => return false,
+        None => return Vec::new(),
     };
-    let mut any = false;
+    let mut unloaded = Vec::new();
     for m in models {
         if let Some(name) = m
             .get("name")
@@ -2632,10 +2633,10 @@ pub(crate) fn offload_ollama_loaded_models() -> bool {
                 .post("http://localhost:11434/api/generate")
                 .json(&serde_json::json!({ "model": name, "keep_alive": 0 }))
                 .send();
-            any = true;
+            unloaded.push(name.to_string());
         }
     }
-    any
+    unloaded
 }
 
 /// Ask ComfyUI to unload checkpoints and free memory, keeping the server up so

@@ -65,7 +65,7 @@ import { useSettingsStore } from '../../stores/settingsStore'
 const GB = 1024 * 1024 * 1024
 
 /** backendCall programmed like the live box: engine up, save works. */
-function mockBackends(opts?: { engineRunning?: boolean; saveOk?: boolean }) {
+function mockBackends(opts?: { engineRunning?: boolean; saveOk?: boolean; offloadedOllama?: string[] }) {
   backendCall.mockImplementation(async (cmd: unknown, args?: unknown) => {
     if (cmd === 'bundled_engine_status') {
       return (opts?.engineRunning ?? true)
@@ -78,6 +78,7 @@ function mockBackends(opts?: { engineRunning?: boolean; saveOk?: boolean }) {
       return { ok: true }
     }
     if (cmd === 'lmstudio_list_loaded') return { loaded: [] }
+    if (cmd === 'offload_local_models') return { ollama_models: opts?.offloadedOllama ?? [] }
     return {}
   })
 }
@@ -106,7 +107,7 @@ beforeEach(() => {
     json: async () => ({ models: [{ name: 'qwen:14b', size_vram: 9 * GB }] }),
   })
   mockBackends()
-  useSettingsStore.getState().updateSettings({ exclusiveVramMode: 'auto' })
+  useSettingsStore.getState().updateSettings({ exclusiveVramMode: 'auto', contextWindowOverride: 0 })
 })
 
 afterEach(() => {
@@ -146,6 +147,13 @@ describe('evictChatBackendsForRender', () => {
     expect(haul.bundled?.slotSaved).toBe(false)
     expect(callsTo('offload_local_models')).toHaveLength(1)
   })
+
+  it('remembers the Ollama model returned by the authoritative Rust offloader', async () => {
+    localFetch.mockResolvedValue({ ok: true, json: async () => ({ models: [] }) })
+    mockBackends({ offloadedOllama: ['qwen-from-offloader:30b'] })
+    const haul = await evictChatBackendsForRender()
+    expect(haul.ollamaModel).toBe('qwen-from-offloader:30b')
+  })
 })
 
 describe('restoreChatBackendsAfterRender', () => {
@@ -168,6 +176,12 @@ describe('restoreChatBackendsAfterRender', () => {
     const lmsLoads = callsTo('lmstudio_load_model')
     expect(lmsLoads).toHaveLength(1)
     expect(lmsLoads[0][1]).toMatchObject({ model: 'lms-model', contextLength: 16384 })
+  })
+
+  it('restores Ollama with the context window selected in LU', async () => {
+    useSettingsStore.getState().updateSettings({ contextWindowOverride: 16_384 })
+    await restoreChatBackendsAfterRender(fullHaul(), 0)
+    expect(loadModel).toHaveBeenCalledWith('qwen:14b', 16_384)
   })
 
   it('NEGATIVE: an unsaved slot is not restored (engine still restarts)', async () => {
@@ -225,6 +239,10 @@ describe('wiring: useCreate uses the hand-off helpers', () => {
     const src = read('../../hooks/useCreate.ts')
     expect(src).toContain('evictChatBackendsForRender()')
     expect(src).toContain('restoreChatBackendsAfterRender(renderEviction)')
+    // One pair protects the Apple-Silicon MLX-video lane and one protects the
+    // ComfyUI lane. Both compete with Ollama for local GPU/unified memory.
+    expect(src.match(/evictChatBackendsForRender\(\)/g)?.length).toBeGreaterThanOrEqual(2)
+    expect(src.match(/restoreChatBackendsAfterRender\(renderEviction\)/g)?.length).toBeGreaterThanOrEqual(3)
     // The exact uncaptured kill Z36 flagged must not come back.
     expect(src).not.toContain("backendCall('offload_local_models'")
     expect(src).not.toContain("backendCall('lmstudio_unload_model'")
