@@ -9,14 +9,26 @@
  * ignored. It is the reading anyone would reach, and a field that keeps
  * showing a value it never saved has earned it.
  *
- * Two ways to save were added and the blur was kept: a short debounce after
- * typing stops, and a commit when the field is unmounted.
+ * The first answer to that was a 600 ms debounce beside the blur, and the
+ * follow-up counter-check showed what it cost. The debounce stored the TRIMMED
+ * value while the user was still typing, the store value flowed straight back
+ * into the box, and a path with a space in it lost the space mid word:
+ * "C:\Program " became "C:\Program" with the cursor at the end, and typing on
+ * produced "C:\ProgramFiles". The same write sent a half typed path to the
+ * folder scan, which answered with a red "unreachable" line under a field
+ * nobody had finished filling in.
+ *
+ * No timer writes anything now. Blur, Enter and unmount commit, and the third
+ * is what the original finding was about: walking away from a field IS a blur
+ * or an unmount.
  *
  * Run: npx vitest run src/components/settings/__tests__/model-folder-survives-walking-away.test.ts
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { createElement } from 'react'
 import { render, screen, cleanup, act, fireEvent } from '@testing-library/react'
+
+const listBundledModels = vi.fn(async () => [])
 
 vi.mock('../../../api/backend', () => ({
   backendCall: vi.fn(async () => null),
@@ -31,17 +43,20 @@ vi.mock('../../../api/engine', async () => {
   const actual = await vi.importActual<typeof import('../../../api/engine')>('../../../api/engine')
   return {
     ...actual,
-    listBundledModels: vi.fn(async () => []),
+    listBundledModels: () => listBundledModels(),
     lastCustomScanDir: () => null,
     lastScanDirs: () => [],
     syncCustomModelDir: vi.fn(async () => null),
   }
 })
 
-const { HfDownloadPathSetting, MODEL_DIR_SAVE_DEBOUNCE_MS } = await import('../SettingsPage')
+const { HfDownloadPathSetting } = await import('../SettingsPage')
 const { useSettingsStore } = await import('../../../stores/settingsStore')
 
 const TYPED = 'C:\\lu-e2e-models'
+/** Longer than the debounce that used to sit here, so a timer that came back
+ *  would fire inside this window and be caught. */
+const A_PAUSE_MS = 700
 
 function storedFolder() {
   return useSettingsStore.getState().settings.hfDownloadPathOverride
@@ -57,6 +72,7 @@ async function fieldWithTypedPath() {
 
 beforeEach(() => {
   vi.useFakeTimers()
+  listBundledModels.mockClear()
   useSettingsStore.getState().updateSettings({ hfDownloadPathOverride: '' })
 })
 afterEach(() => {
@@ -77,9 +93,41 @@ describe('a folder typed into the LU Engine field', () => {
     expect(storedFolder(), 'the typed folder was thrown away on the way out').toBe(TYPED)
   })
 
-  it('is stored on its own shortly after typing stops', async () => {
-    await fieldWithTypedPath()
-    await act(async () => { await vi.advanceTimersByTimeAsync(MODEL_DIR_SAVE_DEBOUNCE_MS + 50) })
+  it('survives a pause in the middle of a path that has a space in it', async () => {
+    // The counter-check's own example. "C:\Program " is a path in the middle
+    // of being typed, and the trailing space is part of it.
+    render(createElement(HfDownloadPathSetting))
+    await act(async () => { await Promise.resolve(); await Promise.resolve() })
+    const box = screen.getByLabelText('LU Engine folder')
+    const scansBefore = listBundledModels.mock.calls.length
+
+    fireEvent.change(box, { target: { value: 'C:\\Program ' } })
+    await act(async () => { await vi.advanceTimersByTimeAsync(A_PAUSE_MS) })
+
+    // The pause must not have eaten the space, or the next word joins the
+    // previous one.
+    expect((box as HTMLInputElement).value, 'the trailing space was trimmed away under the cursor')
+      .toBe('C:\\Program ')
+    // And it must not have sent half a path to the folder scan, which answers
+    // a half path with a red "unreachable" line.
+    expect(storedFolder(), 'half a path reached the store').toBe('')
+    expect(
+      listBundledModels.mock.calls.length,
+      'the folder scan ran on a path the user had not finished typing',
+    ).toBe(scansBefore)
+
+    fireEvent.change(box, { target: { value: 'C:\\Program Files' } })
+    expect((box as HTMLInputElement).value).toBe('C:\\Program Files')
+    fireEvent.blur(box)
+    expect(storedFolder()).toBe('C:\\Program Files')
+  })
+
+  it('is stored on Enter, trimmed', async () => {
+    render(createElement(HfDownloadPathSetting))
+    await act(async () => { await Promise.resolve() })
+    const box = screen.getByLabelText('LU Engine folder')
+    fireEvent.change(box, { target: { value: `  ${TYPED}  ` } })
+    fireEvent.keyDown(box, { key: 'Enter' })
     expect(storedFolder()).toBe(TYPED)
   })
 
@@ -87,25 +135,25 @@ describe('a folder typed into the LU Engine field', () => {
     const refreshes: Event[] = []
     const onRefresh = (e: Event) => refreshes.push(e)
     window.addEventListener('lu-models-refresh', onRefresh)
-    await fieldWithTypedPath()
-    await act(async () => { await vi.advanceTimersByTimeAsync(MODEL_DIR_SAVE_DEBOUNCE_MS + 50) })
+    const box = await fieldWithTypedPath()
+    fireEvent.blur(box)
     window.removeEventListener('lu-models-refresh', onRefresh)
     expect(refreshes.length).toBeGreaterThan(0)
   })
 
-  // NEGATIVE CONTROL: it is a debounce, not a write per keystroke. A path
-  // being typed must not be stored half finished, or the scan runs against
-  // "C:\lu" while the user is still on the second syllable.
-  it('is not stored mid word', async () => {
+  // NEGATIVE CONTROL: nothing is written while the user is still typing. A
+  // path stored half finished sends the scan against "C:\lu" while the user is
+  // on the second syllable, and the scan's verdict about that folder is worse
+  // than no verdict at all.
+  it('is not stored mid word, however long the pause', async () => {
     render(createElement(HfDownloadPathSetting))
     await act(async () => { await Promise.resolve() })
     const box = screen.getByLabelText('LU Engine folder')
     fireEvent.change(box, { target: { value: 'C:\\lu' } })
-    await act(async () => { await vi.advanceTimersByTimeAsync(MODEL_DIR_SAVE_DEBOUNCE_MS - 200) })
-    fireEvent.change(box, { target: { value: TYPED } })
-    await act(async () => { await vi.advanceTimersByTimeAsync(MODEL_DIR_SAVE_DEBOUNCE_MS - 200) })
+    await act(async () => { await vi.advanceTimersByTimeAsync(A_PAUSE_MS * 5) })
     expect(storedFolder(), 'a half typed path reached the store').toBe('')
-    await act(async () => { await vi.advanceTimersByTimeAsync(300) })
+    fireEvent.change(box, { target: { value: TYPED } })
+    fireEvent.blur(box)
     expect(storedFolder()).toBe(TYPED)
   })
 
@@ -117,6 +165,17 @@ describe('a folder typed into the LU Engine field', () => {
     const box = screen.getByLabelText('LU Engine folder')
     fireEvent.change(box, { target: { value: `  ${TYPED}  ` } })
     fireEvent.blur(box)
+    expect(storedFolder()).toBe(TYPED)
+  })
+
+  // NEGATIVE CONTROL: the unmount trims too, so walking away and blurring
+  // cannot store two different strings for one typed path.
+  it('trims on the way out as well', async () => {
+    render(createElement(HfDownloadPathSetting))
+    await act(async () => { await Promise.resolve() })
+    const box = screen.getByLabelText('LU Engine folder')
+    fireEvent.change(box, { target: { value: `  ${TYPED}  ` } })
+    cleanup()
     expect(storedFolder()).toBe(TYPED)
   })
 

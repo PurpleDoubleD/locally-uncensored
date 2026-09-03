@@ -270,16 +270,6 @@ function WorkflowSection() {
 // Models tab stayed empty beside a folder full of models. It is read now
 // (lib/custom-model-dir.ts), and the copy says what it does.
 
-/**
- * How long typing has to stop before the folder is stored anyway (A14-2a).
- *
- * Long enough that it does not fire between two keystrokes of a typed path,
- * short enough that walking away right after typing has already saved. The
- * write itself is a settings update plus one model-list refresh, so a stray
- * extra one costs nothing.
- */
-export const MODEL_DIR_SAVE_DEBOUNCE_MS = 600
-
 export function HfDownloadPathSetting() {
   const override = useSettingsStore(s => s.settings.hfDownloadPathOverride)
   const [draft, setDraft] = useState(override)
@@ -290,7 +280,17 @@ export function HfDownloadPathSetting() {
   // from, so the empty field can name it instead of saying "(auto-detect)"
   // and leaving the user to guess.
   const [autoDir, setAutoDir] = useState('')
-  useEffect(() => { setDraft(override) }, [override])
+  /** Typed but not stored yet. Null means there is nothing owed. Declared
+   *  before the effect below because that effect asks it. */
+  const pendingPath = useRef<string | null>(null)
+  // The store value flows back into the box, EXCEPT while the user is in the
+  // middle of typing one. A16 counter-check follow-up: with a half typed path
+  // owed, a store write from anywhere would have pulled the box back to the
+  // stored value under the cursor.
+  useEffect(() => {
+    if (pendingPath.current !== null) return
+    setDraft(override)
+  }, [override])
 
   // How the GGUF scan itself fared in that folder. A folder too big to finish
   // within the budget returns a real but partial list, and the only person who
@@ -337,18 +337,25 @@ export function HfDownloadPathSetting() {
   // counter-check's first attempt concluded from that the folder was being
   // ignored, which is the reading anyone would reach.
   //
-  // Two things are added, and neither replaces the blur. A short debounce, so
-  // a value that has stopped changing is stored without any further gesture
-  // and a refresh of the list sees the folder. And a commit when the field
-  // goes away, so leaving the panel saves rather than discards.
-  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-  /** Typed but not stored yet. Null means there is nothing owed. */
-  const pendingPath = useRef<string | null>(null)
+  // The first answer to that was a 600 ms debounce, and the follow-up
+  // counter-check showed what it cost. The debounce wrote the TRIMMED value
+  // into the store while the field was still being typed in, the effect above
+  // pushed the store value straight back into the box, and a path with a space
+  // in it lost that space mid word: "C:\Program " became "C:\Program", the
+  // cursor jumped to the end, and the next keystrokes produced
+  // "C:\ProgramFiles". A half typed path also reached the folder scan, which
+  // then hung a red "unreachable" line under a field nobody had finished
+  // filling in.
+  //
+  // So no timer writes anything any more. The field commits on blur, on Enter
+  // and when it goes away, and the third of those is what the finding was
+  // actually about: walking away from a settings field IS a blur or an
+  // unmount, so nothing is lost without a clock having to guess when the user
+  // is done.
 
-  /** Store it. Everything that saves goes through here, so cancelling the
-   *  debounce and clearing the debt cannot be forgotten on one path. */
+  /** Store it. Everything that saves goes through here, so clearing the debt
+   *  cannot be forgotten on one path. */
   function commit(next: string) {
-    if (saveTimer.current) { clearTimeout(saveTimer.current); saveTimer.current = null }
     pendingPath.current = null
     const store = useSettingsStore.getState()
     if (store.settings.hfDownloadPathOverride === next) return
@@ -363,28 +370,24 @@ export function HfDownloadPathSetting() {
     commit(next)
   }
 
-  /** One keystroke. The value is owed from here until something commits it. */
+  /** One keystroke. Stored verbatim, trailing space and all: it is trimmed at
+   *  commit time and not before, so a path that is still being typed keeps the
+   *  space the next word needs. */
   function typePath(next: string) {
     setDraft(next)
-    pendingPath.current = next.trim()
-    if (saveTimer.current) clearTimeout(saveTimer.current)
-    saveTimer.current = setTimeout(() => {
-      saveTimer.current = null
-      const owed = pendingPath.current
-      if (owed !== null) commit(owed)
-    }, MODEL_DIR_SAVE_DEBOUNCE_MS)
+    pendingPath.current = next
   }
 
   // Closing Settings or switching tabs unmounts this field. Whatever was owed
   // at that moment is stored, not thrown away.
   useEffect(() => () => {
-    if (saveTimer.current) clearTimeout(saveTimer.current)
     const owed = pendingPath.current
     pendingPath.current = null
     if (owed === null) return
     const store = useSettingsStore.getState()
-    if (store.settings.hfDownloadPathOverride === owed) return
-    store.updateSettings({ hfDownloadPathOverride: owed })
+    const trimmed = owed.trim()
+    if (store.settings.hfDownloadPathOverride === trimmed) return
+    store.updateSettings({ hfDownloadPathOverride: trimmed })
     window.dispatchEvent(new CustomEvent('lu-models-refresh'))
   }, [])
 
@@ -407,6 +410,7 @@ export function HfDownloadPathSetting() {
           value={draft}
           onChange={(e) => typePath(e.target.value)}
           onBlur={() => apply(draft.trim())}
+          onKeyDown={(e) => { if (e.key === 'Enter') apply(draft.trim()) }}
           placeholder={luEngineFolderPlaceholder(autoDir)}
           aria-label="LU Engine folder"
           className="flex-1 px-2 py-1 rounded bg-transparent border border-white/8 text-[0.65rem] text-gray-700 dark:text-gray-300 font-mono focus:outline-none focus:border-white/20"
