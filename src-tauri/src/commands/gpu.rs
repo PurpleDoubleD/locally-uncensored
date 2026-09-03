@@ -175,14 +175,22 @@ fn detect_other_via_lspci(have_rocm: bool) -> Vec<DetectedGpu> {
         Some(s) => s,
         None => return vec![],
     };
-    detect_other_via_lspci_from(&raw, have_rocm)
+    detect_other_via_lspci_from(&raw, have_rocm, &read_sysfs_drm_cards())
 }
 
 /// The parser, split from the command so it can be run against real captured
 /// `lspci -nn` output instead of whatever the build machine happens to have.
 /// Deliberately NOT gated on Linux: a parser that only compiles on the target
 /// is a parser only the target ever proves, and the CI runners are not Linux.
-fn detect_other_via_lspci_from(raw: &str, have_rocm: bool) -> Vec<DetectedGpu> {
+///
+/// Dazu kommen die schon eingelesenen sysfs-Eintraege. Eine AMD-Karte holt
+/// ihre Speichergroesse daraus, denn lspci selbst nennt keine. Eine leere
+/// Liste ist der Normalfall auf jeder Maschine ohne amdgpu und aendert nichts.
+fn detect_other_via_lspci_from(
+    raw: &str,
+    have_rocm: bool,
+    sysfs: &[SysfsDrmCard],
+) -> Vec<DetectedGpu> {
     let mut gpus: Vec<DetectedGpu> = Vec::new();
     // Per-vendor counters: HIP_VISIBLE_DEVICES and ONEAPI_DEVICE_SELECTOR are
     // both vendor-scoped, so a machine with an Intel iGPU and an AMD card must
@@ -203,13 +211,29 @@ fn detect_other_via_lspci_from(raw: &str, have_rocm: bool) -> Vec<DetectedGpu> {
         // was invisible in the picker while his system reported it correctly.
         if vendor == "nvidia" { continue }
         if vendor == "amd" && have_rocm { continue }
+        // Nur AMD hat ueberhaupt eine Kerneldatei mit der Groesse darin:
+        // mem_info_vram_total gehoert amdgpu, i915 und xe legen nichts
+        // Vergleichbares an. Eine Intel-Zeile behaelt deshalb genau das, was
+        // sie vorher hatte, naemlich keine Zahl.
+        //
+        // Die Quelle nennt die Datei, aus der die Zahl kommt, nicht das
+        // Werkzeug, das den Namen fand. Dieselbe Regel wie auf dem
+        // Windows-Weg, wo eine Karte aus wmic mit der Groesse aus der
+        // Registry als "registry" gefuehrt wird.
+        let (memory_mib, source) = match vendor {
+            "amd" => match sysfs_vram_mib_for(lspci_slot(line), sysfs) {
+                Some(mib) => (Some(mib), "sysfs"),
+                None => (None, "lspci"),
+            },
+            _ => (None, "lspci"),
+        };
         let index = next.entry(vendor).or_insert(0);
         gpus.push(DetectedGpu {
             index: *index,
             vendor: vendor.into(),
             name: lspci_device_name(line),
-            memory_mib: None,
-            source: "lspci".into(),
+            memory_mib,
+            source: source.into(),
             note: note_for(vendor),
             note_severity: note_for(vendor).map(|_| "warn".to_string()),
             arch: None,
@@ -252,6 +276,257 @@ fn lspci_device_name(line: &str) -> String {
     }
     let out = name.trim().trim_end_matches(',').trim().to_string();
     if out.is_empty() { "GPU".to_string() } else { out }
+}
+
+// ----------------------------------------------------------------------
+// Linux ohne ROCm: die Groesse steht im Kernel, nicht im ROCm-Paket
+//
+// Arch-Linux-Kunde, September 2026: "app still does not recognize my VRAM in
+// troubleshoot probe", und mehrere Meldungen mit genau diesem Wortlaut. Ohne
+// rocm-smi faellt die AMD-Erkennung auf lspci zurueck, und lspci nennt nur den
+// Namen. Die Karte stand damit in der Liste, aber ohne Zahl, und alles was
+// gegen die Zahl rechnet entschied so, als haette die Maschine gar keinen
+// Grafikspeicher.
+//
+// Der amdgpu-Treiber legt die Zahl selbst offen, ohne jedes ROCm-Paket:
+//   /sys/class/drm/card<N>/device/mem_info_vram_total   Byte, dezimal als Text
+//   /sys/class/drm/card<N>/device/vendor                0x1002 bei AMD
+// "device" ist dabei ein Verweis auf den PCI-Pfad, dessen letzter Bestandteil
+// die PCI-Adresse traegt (0000:03:00.0). Dieselbe Adresse steht vorne in jeder
+// lspci-Zeile (03:00.0), und genau darueber laeuft die Zuordnung. Nicht ueber
+// die Reihenfolge: zwei AMD-Karten in einer Maschine duerfen nicht tauschen,
+// sonst zeigt HIP_VISIBLE_DEVICES am Ende auf die andere.
+//
+// Lesen und Auswerten sind getrennt, wie bei lspci, wmic und der Registry
+// auch. Die Maschine, die den Fehler zeigt, ist nicht die Maschine, auf der
+// die Tests laufen: hier steckt keine AMD-Karte.
+//
+// Wo das hier aufhoert, ausgeschrieben statt verschwiegen: gelesen wird nur
+// fuer Karten, die lspci schon gefunden hat. Fehlt lspci selbst, weil pciutils
+// nicht installiert ist, bleibt die Liste leer wie bisher. sysfs kennt zwar
+// die Groesse, aber keinen Namen, nur die Geraetenummer, und eine Liste aus
+// Nummern ist eine zweite Aenderung mit einer eigenen Beweislast.
+
+/// Die PCI-Herstellernummer von AMD, wie sie in /sys/.../vendor steht. lspci
+/// druckt dieselbe Zahl als [1002:....].
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+const PCI_VENDOR_AMD: u16 = 0x1002;
+
+/// Hoechstens so viele Bytes werden aus einer sysfs-Datei gelesen.
+///
+/// Die Dateien hier tragen eine einzige kurze Zeile. Ein Pfad, der wider
+/// Erwarten auf etwas Grosses zeigt, soll den Hardware-Dialog nicht mit einem
+/// Dateiinhalt vollaufen lassen.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+const SYSFS_READ_LIMIT: u64 = 256;
+
+/// Untergrenze fuer die Zahl aus dem Kernel.
+///
+/// Eine integrierte AMD-Grafik meldet in mem_info_vram_total den fest
+/// abgezweigten Anteil, ab Werk oft 512 MiB, und nicht das GTT-Budget, aus dem
+/// sie wirklich rechnet. Diese Zahl als Grafikspeicher zu melden waere
+/// schlechter als gar keine: der Fit-Check wuerde Modelle ablehnen, die die
+/// APU sehr wohl laedt. Unterhalb der Grenze bleibt die Groesse deshalb
+/// ungesetzt, also genau der Zustand, den dieselbe Karte auch heute schon hat.
+/// Wer im BIOS bewusst mehr abzweigt, bekommt seine Zahl gemeldet, denn dann
+/// ist der Speicher wirklich fuer die Grafik reserviert.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+const SYSFS_MIN_TRUSTED_MIB: u64 = 1024;
+
+/// Obergrenze, aus demselben Grund von der anderen Seite. Die groessten
+/// Beschleuniger liegen heute im dreistelligen GB-Bereich; ein Vielfaches
+/// davon ist kein Speicher mehr, sondern ein missratener Registerwert, und ein
+/// zu grosses Versprechen laesst den Fit-Check eine Ladung zusagen, die nie
+/// passt.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+const SYSFS_MAX_TRUSTED_MIB: u64 = 1024 * 1024;
+
+/// Ein Verzeichnis /sys/class/drm/card<N>/device, schon eingelesen.
+///
+/// Die Felder sind Text, genau wie er in den Dateien steht. Was daraus eine
+/// Zahl wird, entscheiden die reinen Funktionen darunter, damit echte
+/// Beispieldaten einer Kundenmaschine im Test stehen koennen statt einer
+/// Nachbildung des Dateisystems.
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+struct SysfsDrmCard {
+    /// Letzter Bestandteil des device-Verweises, also die PCI-Adresse.
+    pci_address: String,
+    /// Inhalt von "vendor", oder None wenn die Datei fehlt oder zu ist.
+    vendor_id: Option<String>,
+    /// Inhalt von "mem_info_vram_total", ungeprueft.
+    vram_total: Option<String>,
+}
+
+/// Der Slot vorne in einer lspci-Zeile, also "03:00.0".
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn lspci_slot(line: &str) -> &str {
+    line.split_whitespace().next().unwrap_or("")
+}
+
+/// "03:00.0" und "0000:03:00.0" auf eine Schreibweise gebracht.
+///
+/// lspci druckt die PCI-Domain nur, wenn sie nicht null ist; sysfs schreibt sie
+/// immer aus. Beide Schreibweisen muessen gleich sein, sonst greift die
+/// Zuordnung auf jeder normalen Maschine mit einer einzigen Domain ins Leere.
+/// Was nicht wie eine Adresse aussieht, gibt None, damit nichts zusammenfaellt,
+/// das nur aehnlich aussieht.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn normalised_pci_address(raw: &str) -> Option<String> {
+    let text = raw.trim().to_ascii_lowercase();
+    let (domain, rest) = match text.matches(':').count() {
+        2 => text.split_once(':')?,
+        1 => ("0000", text.as_str()),
+        _ => return None,
+    };
+    let (bus, device_function) = rest.split_once(':')?;
+    let (device, function) = device_function.split_once('.')?;
+    // from_str_radix schluckt ein fuehrendes Pluszeichen, deshalb steht die
+    // Zeichenpruefung davor.
+    let hex = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_hexdigit());
+    if !(hex(domain) && hex(bus) && hex(device) && hex(function)) {
+        return None;
+    }
+    let domain = u32::from_str_radix(domain, 16).ok()?;
+    let bus = u32::from_str_radix(bus, 16).ok()?;
+    let device = u32::from_str_radix(device, 16).ok()?;
+    let function = u32::from_str_radix(function, 16).ok()?;
+    // Die Breiten stehen in der PCI-Spezifikation: 16 Bit Domain, 8 Bit Bus,
+    // 5 Bit Geraet, 3 Bit Funktion.
+    if domain > 0xffff || bus > 0xff || device > 0x1f || function > 0x7 {
+        return None;
+    }
+    Some(format!("{domain:04x}:{bus:02x}:{device:02x}.{function}"))
+}
+
+/// "0x1002" als Zahl. Alles andere gibt None.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn parse_sysfs_hex_id(raw: &str) -> Option<u16> {
+    let text = raw.trim().to_ascii_lowercase();
+    let digits = text.strip_prefix("0x")?;
+    if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return None;
+    }
+    u16::from_str_radix(digits, 16).ok()
+}
+
+/// mem_info_vram_total in MiB, oder None wenn die Zahl nicht zu gebrauchen ist.
+///
+/// Die Datei traegt eine Dezimalzahl in Byte. Alles andere, was dort stehen
+/// kann, ist keine Groesse: eine leere Datei, eine Fehlerzeile eines Treibers,
+/// eine Zahl mit Einheit dahinter. Statt zu raten bleibt die Groesse dann
+/// unbekannt, denn der Fit-Check rechnet gegen diesen Wert.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn parse_sysfs_vram_mib(raw: &str) -> Option<u64> {
+    let text = raw.trim();
+    if text.is_empty() || !text.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    let mib = text.parse::<u64>().ok()? / 1024 / 1024;
+    if !(SYSFS_MIN_TRUSTED_MIB..=SYSFS_MAX_TRUSTED_MIB).contains(&mib) {
+        return None;
+    }
+    Some(mib)
+}
+
+/// Die Speichergroesse zu einer PCI-Adresse, wenn sysfs sie hergibt.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn sysfs_vram_mib_for(pci_address: &str, cards: &[SysfsDrmCard]) -> Option<u64> {
+    let wanted = normalised_pci_address(pci_address)?;
+    let card = cards
+        .iter()
+        .find(|c| normalised_pci_address(&c.pci_address).as_deref() == Some(wanted.as_str()))?;
+    // Sagt die Karte im sysfs etwas anderes als lspci, wird geschwiegen. Eine
+    // unlesbare vendor-Datei ist dagegen kein Widerspruch, sondern eine
+    // Auskunft weniger, und die Adresse allein ist eindeutig.
+    let disagrees = card
+        .vendor_id
+        .as_deref()
+        .is_some_and(|id| parse_sysfs_hex_id(id) != Some(PCI_VENDOR_AMD));
+    if disagrees {
+        return None;
+    }
+    parse_sysfs_vram_mib(card.vram_total.as_deref()?)
+}
+
+/// Nur "card0", "card1" und so weiter. "card0-DP-1" ist ein Anschluss und
+/// "renderD128" der Renderknoten; beide tragen keine eigene Karte.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn is_drm_card_dir(name: &str) -> bool {
+    name.strip_prefix("card")
+        .is_some_and(|rest| !rest.is_empty() && rest.bytes().all(|b| b.is_ascii_digit()))
+}
+
+/// Eine einzeilige sysfs-Datei, oder None.
+///
+/// Kein unwrap und kein Panic: auf jeder Maschine ohne amdgpu fehlt hier
+/// alles, und das ist der Normalfall, nicht die Ausnahme. Gelesen wird
+/// gedeckelt, genommen wird die erste Zeile, und was kein UTF-8 ist faellt
+/// still durch.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn read_sysfs_value(path: &std::path::Path) -> Option<String> {
+    use std::io::Read;
+    let file = std::fs::File::open(path).ok()?;
+    let mut text = String::new();
+    file.take(SYSFS_READ_LIMIT).read_to_string(&mut text).ok()?;
+    let first = text.lines().next()?.trim().to_string();
+    if first.is_empty() {
+        None
+    } else {
+        Some(first)
+    }
+}
+
+/// Die PCI-Adresse aus dem device-Verweis.
+///
+/// card0/device zeigt auf den PCI-Pfad, meist relativ ("../../0000:03:00.0").
+/// Der letzte Bestandteil ist die Adresse. read_link zuerst, weil es den
+/// Verweis nicht aufloesen muss; canonicalize als Rueckfall, falls dort kein
+/// Verweis liegt, sondern ein echtes Verzeichnis.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn sysfs_pci_address(device_dir: &std::path::Path) -> Option<String> {
+    let target = std::fs::read_link(device_dir)
+        .or_else(|_| std::fs::canonicalize(device_dir))
+        .ok()?;
+    let last = target.file_name()?.to_string_lossy().into_owned();
+    // Was sich nicht als Adresse lesen laesst, ist keine.
+    normalised_pci_address(&last).map(|_| last)
+}
+
+/// Alle Karten unter einem Wurzelverzeichnis, eingelesen und sonst nichts.
+///
+/// Nimmt die Wurzel als Parameter statt sie fest zu verdrahten, damit ein Test
+/// einen echten kleinen Baum anlegen und diesen Weg auch ohne AMD-Karte
+/// abgehen kann. Ein Verzeichnis, das es nicht gibt, gibt eine leere Liste:
+/// das ist jede Nicht-Linux-Maschine und jeder Rechner ohne DRM-Treiber.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn read_sysfs_drm_cards_at(root: &std::path::Path) -> Vec<SysfsDrmCard> {
+    let mut cards: Vec<SysfsDrmCard> = Vec::new();
+    let Ok(entries) = std::fs::read_dir(root) else {
+        return cards;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if !is_drm_card_dir(&name) {
+            continue;
+        }
+        let device = entry.path().join("device");
+        let Some(pci_address) = sysfs_pci_address(&device) else {
+            continue;
+        };
+        cards.push(SysfsDrmCard {
+            pci_address,
+            vendor_id: read_sysfs_value(&device.join("vendor")),
+            vram_total: read_sysfs_value(&device.join("mem_info_vram_total")),
+        });
+    }
+    cards
+}
+
+/// Der Ort, an dem der Kernel die Karten auflistet.
+#[cfg(target_os = "linux")]
+fn read_sysfs_drm_cards() -> Vec<SysfsDrmCard> {
+    read_sysfs_drm_cards_at(std::path::Path::new("/sys/class/drm"))
 }
 
 #[cfg(not(target_os = "linux"))]
@@ -1389,7 +1664,7 @@ End of search: 3 match(es) found.
 
         // No rocm-smi: the AMD card MUST show up, or the picker is empty and
         // the customer concludes LU cannot see his hardware.
-        let found = detect_other_via_lspci_from(&raw, false);
+        let found = detect_other_via_lspci_from(&raw, false, &[]);
         let amd: Vec<_> = found.iter().filter(|g| g.vendor == "amd").collect();
         assert_eq!(amd.len(), 1);
         assert!(amd[0].name.contains("9070 XT"));
@@ -1401,7 +1676,7 @@ End of search: 3 match(es) found.
 
         // rocm-smi answered: its entry carries VRAM, so this one would be a
         // worse duplicate.
-        let deduped = detect_other_via_lspci_from(&raw, true);
+        let deduped = detect_other_via_lspci_from(&raw, true, &[]);
         assert!(!deduped.iter().any(|g| g.vendor == "amd"));
 
         // nvidia-smi ships with the driver, so NVIDIA is never taken from here.
@@ -2001,5 +2276,326 @@ gcnArchName:                      gfx942:sramecc+:xnack-
             key.contains("VISIBLE_DEVICES") || key == "ONEAPI_DEVICE_SELECTOR"
         });
         assert!(!any_gpu_env, "empty indices must not set any GPU env-var");
+    }
+
+    // ---- Linux, AMD, kein ROCm: die Zahl aus dem Kernel -------------------
+    //
+    // Arch-Linux-Kunde, September 2026: "app still does not recognize my VRAM
+    // in troubleshoot probe", und mehrere Meldungen mit demselben Wortlaut.
+    // Die Karte kam aus lspci, und lspci nennt keine Groesse. amdgpu schon,
+    // ganz ohne die ROCm-Pakete, die niemand installiert hat, der ein fertiges
+    // ROCm-Ollama oder ein ZLUDA-ComfyUI faehrt.
+
+    /// Zweite AMD-Karte fuer die Faelle mit zwei Karten in einer Maschine.
+    const LSPCI_AMD_SECOND: &str = "0b:00.0 VGA compatible controller [0300]: Advanced Micro Devices, Inc. [AMD/ATI] Navi 21 [Radeon RX 6800 XT] [1002:73bf] (rev c1)";
+
+    /// Inhalt von "vendor" bei AMD, mit dem Zeilenumbruch, den sysfs anhaengt.
+    const AMD_VENDOR_FILE: &str = "0x1002";
+    /// mem_info_vram_total einer 16-GB-Karte, in Byte.
+    const VRAM_16_GB: &str = "17163091968";
+    /// dieselbe Datei bei einer 24-GB-Karte.
+    const VRAM_24_GB: &str = "25753026560";
+
+    fn sysfs_card(pci: &str, vendor: &str, vram: &str) -> SysfsDrmCard {
+        SysfsDrmCard {
+            pci_address: pci.to_string(),
+            vendor_id: Some(vendor.to_string()),
+            vram_total: Some(vram.to_string()),
+        }
+    }
+
+    #[test]
+    fn an_amd_card_without_rocm_gets_its_size_from_the_kernel() {
+        let raw = format!("{LSPCI_INTEL}\n{LSPCI_AMD}\n");
+        let cards = vec![sysfs_card("0000:03:00.0", AMD_VENDOR_FILE, VRAM_16_GB)];
+        let found = detect_other_via_lspci_from(&raw, false, &cards);
+        let amd = found.iter().find(|g| g.vendor == "amd").expect("amd present");
+        assert_eq!(amd.memory_mib, Some(16368), "{found:?}");
+        // Die Quelle nennt die Datei, aus der die Zahl kommt, nicht das
+        // Werkzeug, das den Namen fand. Die Oberflaeche schreibt sie als
+        // "via sysfs" hin, und das ist dann wahr.
+        assert_eq!(amd.source, "sysfs");
+        assert!(amd.name.contains("9070 XT"), "{found:?}");
+        // Der Hinweis bleibt, wie er war: die Groesse ist bekannt, der
+        // Rechenweg deshalb noch lange nicht.
+        assert!(amd.note.as_deref().unwrap_or_default().contains("ROCm"));
+        assert_eq!(amd.note_severity.as_deref(), Some("warn"));
+
+        // NEGATIVE CONTROL: derselbe Rechner, wie der Kunde ihn meldet. Karte
+        // in der Liste, Groesse nicht.
+        let blind = detect_other_via_lspci_from(&raw, false, &[]);
+        let blind_amd = blind.iter().find(|g| g.vendor == "amd").expect("amd present");
+        assert_eq!(blind_amd.memory_mib, None);
+        assert_eq!(blind_amd.source, "lspci");
+    }
+
+    #[test]
+    fn two_amd_cards_are_matched_by_address_not_by_order() {
+        let raw = format!("{LSPCI_AMD}\n{LSPCI_AMD_SECOND}\n");
+        // sysfs zaehlt hier in der anderen Reihenfolge. Das ist keine
+        // Konstruktion: card0 ist die Karte, die der Kernel zuerst gebunden
+        // hat, und nicht die mit der kleineren Busnummer.
+        let cards = vec![
+            sysfs_card("0000:0b:00.0", AMD_VENDOR_FILE, VRAM_16_GB),
+            sysfs_card("0000:03:00.0", AMD_VENDOR_FILE, VRAM_24_GB),
+        ];
+        let found = detect_other_via_lspci_from(&raw, false, &cards);
+        let size_of = |n: &str| {
+            found.iter().find(|g| g.name.contains(n)).expect("card present").memory_mib
+        };
+        assert_eq!(size_of("9070 XT"), Some(24560), "{found:?}");
+        assert_eq!(size_of("6800 XT"), Some(16368), "{found:?}");
+        assert!(found.iter().all(|g| g.source == "sysfs"), "{found:?}");
+
+        // NEGATIVE CONTROL: nach der Reihenfolge zugeordnet traegt jede Karte
+        // die Groesse der anderen, und der Fit-Check prueft ein Budget, das
+        // der Karte gehoert, die HIP_VISIBLE_DEVICES gar nicht meint.
+        assert_ne!(size_of("9070 XT"), Some(16368), "matched positionally");
+    }
+
+    #[test]
+    fn a_machine_without_matching_sysfs_entries_is_left_exactly_as_it_was() {
+        let raw = format!("{LSPCI_NVIDIA}\n{LSPCI_AMD}\n{LSPCI_INTEL}\n");
+        let before = detect_other_via_lspci_from(&raw, false, &[]);
+        // Eine Liste, in der keine der Adressen vorkommt, aendert genauso
+        // wenig wie gar keine Liste. Das ist der Normalfall auf jeder
+        // Maschine ohne amdgpu.
+        let foreign = vec![sysfs_card("0000:07:00.0", AMD_VENDOR_FILE, VRAM_16_GB)];
+        let after = detect_other_via_lspci_from(&raw, false, &foreign);
+        assert_eq!(before.len(), after.len(), "{after:?}");
+        for (b, a) in before.iter().zip(after.iter()) {
+            assert_eq!(b.vendor, a.vendor);
+            assert_eq!(b.name, a.name);
+            assert_eq!(b.memory_mib, a.memory_mib);
+            assert_eq!(b.source, a.source);
+        }
+        assert!(after.iter().all(|g| g.memory_mib.is_none()), "{after:?}");
+    }
+
+    #[test]
+    fn a_file_that_carries_no_number_leaves_the_size_unknown() {
+        // Fehlt die Datei, ist sie leer, oder steht Muell darin: die Groesse
+        // bleibt unbekannt und die Karte trotzdem in der Liste. Nichts davon
+        // ist ein Fehlerfall, den jemand zu sehen bekommt.
+        let cases: Vec<Option<&str>> = vec![
+            None,
+            Some(""),
+            Some("   "),
+            Some("n/a"),
+            Some("unknown"),
+            Some("0x400000000"),
+            Some("-1"),
+            Some("17163091968 bytes"),
+            Some("1.6e10"),
+            Some("<error>"),
+        ];
+        for vram in cases {
+            let cards = vec![SysfsDrmCard {
+                pci_address: "0000:03:00.0".to_string(),
+                vendor_id: Some(AMD_VENDOR_FILE.to_string()),
+                vram_total: vram.map(|s| s.to_string()),
+            }];
+            let found = detect_other_via_lspci_from(LSPCI_AMD, false, &cards);
+            assert_eq!(found.len(), 1, "{vram:?}");
+            assert_eq!(found[0].memory_mib, None, "a size was invented from {vram:?}");
+            assert_eq!(found[0].source, "lspci", "{vram:?}");
+        }
+        // Und die eine Zeichenkette, die wirklich eine Zahl ist.
+        assert_eq!(parse_sysfs_vram_mib(VRAM_16_GB), Some(16368));
+    }
+
+    #[test]
+    fn nothing_but_amd_takes_a_number_out_of_sysfs() {
+        let raw = format!("{LSPCI_NVIDIA}\n{LSPCI_INTEL}\n");
+        // Eintraege auf genau den Adressen der beiden anderen Karten, jeder
+        // mit einer Zahl, die nach 16 GB aussieht. Intel bekommt sie nicht:
+        // i915 legt mem_info_vram_total nicht an, also kann die Zahl dort
+        // nicht herkommen, und eine geratene Zahl ist schlechter als keine.
+        let cards = vec![
+            sysfs_card("0000:00:02.0", "0x8086", VRAM_16_GB),
+            sysfs_card("0000:01:00.0", "0x10de", VRAM_16_GB),
+        ];
+        let found = detect_other_via_lspci_from(&raw, false, &cards);
+        // NVIDIA kommt aus diesem Weg weiterhin gar nicht: nvidia-smi liegt
+        // beim Treiber und weiss mehr.
+        assert!(!found.iter().any(|g| g.vendor == "nvidia"), "{found:?}");
+        let intel = found.iter().find(|g| g.vendor == "intel").expect("intel present");
+        assert_eq!(intel.memory_mib, None);
+        assert_eq!(intel.source, "lspci");
+    }
+
+    #[test]
+    fn rocm_smi_stays_the_better_source_when_it_is_there() {
+        let raw = format!("{LSPCI_AMD}\n{LSPCI_INTEL}\n");
+        let cards = vec![sysfs_card("0000:03:00.0", AMD_VENDOR_FILE, VRAM_16_GB)];
+        // rocm-smi hat geantwortet, also laesst der lspci-Weg AMD aus, mit
+        // sysfs genau wie ohne. Sonst stuende die Karte zweimal da.
+        let with_rocm = detect_other_via_lspci_from(&raw, true, &cards);
+        assert!(!with_rocm.iter().any(|g| g.vendor == "amd"), "{with_rocm:?}");
+        let without_sysfs = detect_other_via_lspci_from(&raw, true, &[]);
+        assert_eq!(with_rocm.len(), without_sysfs.len());
+        for (a, b) in with_rocm.iter().zip(without_sysfs.iter()) {
+            assert_eq!((&a.vendor, &a.name, a.memory_mib, &a.source), (&b.vendor, &b.name, b.memory_mib, &b.source));
+        }
+        // NEGATIVE CONTROL: ohne rocm-smi ist die Karte da, mitsamt Zahl.
+        let alone = detect_other_via_lspci_from(&raw, false, &cards);
+        assert_eq!(
+            alone.iter().find(|g| g.vendor == "amd").expect("amd present").memory_mib,
+            Some(16368),
+        );
+    }
+
+    #[test]
+    fn an_integrated_carve_out_is_not_sold_as_video_memory() {
+        // Eine APU meldet hier den fest abgezweigten Anteil, ab Werk oft
+        // 512 MiB, waehrend sie in Wahrheit aus dem GTT-Budget rechnet. Diese
+        // Zahl zu melden waere schlechter als keine: der Fit-Check wuerde
+        // Modelle ablehnen, die die APU sehr wohl laedt.
+        assert_eq!(parse_sysfs_vram_mib("536870912"), None, "512 MiB carve-out");
+        // Wer im BIOS mehr abzweigt, hat den Speicher wirklich fuer die
+        // Grafik reserviert und bekommt seine Zahl.
+        assert_eq!(parse_sysfs_vram_mib("8589934592"), Some(8192));
+        // Ein grosser Beschleuniger bleibt unangetastet.
+        assert_eq!(parse_sysfs_vram_mib("206158430208"), Some(196608));
+        // Von oben dasselbe Argument: was groesser ist als jede Karte, die es
+        // gibt, ist ein missratener Registerwert und kein Speicher.
+        assert_eq!(parse_sysfs_vram_mib("18446744073709551615"), None);
+        assert_eq!(parse_sysfs_vram_mib("0"), None);
+    }
+
+    #[test]
+    fn the_address_lspci_prints_and_the_one_sysfs_writes_are_the_same_address() {
+        // lspci laesst die Domain weg, solange sie null ist; sysfs schreibt
+        // sie immer aus. Ohne diese Umrechnung greift die Zuordnung auf jeder
+        // normalen Maschine ins Leere.
+        assert_eq!(normalised_pci_address("03:00.0"), normalised_pci_address("0000:03:00.0"));
+        assert_eq!(normalised_pci_address("03:00.0").as_deref(), Some("0000:03:00.0"));
+        assert_eq!(normalised_pci_address("0000:0B:00.0").as_deref(), Some("0000:0b:00.0"));
+        assert_eq!(lspci_slot(LSPCI_AMD), "03:00.0");
+        assert_eq!(lspci_slot(""), "");
+
+        // NEGATIVE CONTROL: eine zweite Domain ist ein anderer Bus, kein
+        // Zufallstreffer.
+        assert_ne!(normalised_pci_address("0001:03:00.0"), normalised_pci_address("0000:03:00.0"));
+        // Was keine Adresse ist, wird auch keine.
+        for junk in [
+            "",
+            "   ",
+            "garbage",
+            "03:00",
+            "zz:00.0",
+            "0000:03:00",
+            "0000:03:00.x",
+            "0:0:0:0.0",
+            "0000:03:2f.0",
+            "0000:03:00.9",
+            "10000:03:00.0",
+        ] {
+            assert_eq!(normalised_pci_address(junk), None, "{junk} was read as an address");
+        }
+    }
+
+    #[test]
+    fn a_vendor_id_that_contradicts_lspci_is_not_believed() {
+        // Dieselbe Adresse, im sysfs aber eine andere Firma. Dann stimmt
+        // etwas nicht, und Schweigen ist besser als eine Zahl von der
+        // falschen Karte.
+        let wrong = vec![sysfs_card("0000:03:00.0", "0x10de", VRAM_16_GB)];
+        assert_eq!(detect_other_via_lspci_from(LSPCI_AMD, false, &wrong)[0].memory_mib, None);
+        // Muell in der vendor-Datei zaehlt genauso als Widerspruch.
+        let junk = vec![sysfs_card("0000:03:00.0", "AMD", VRAM_16_GB)];
+        assert_eq!(detect_other_via_lspci_from(LSPCI_AMD, false, &junk)[0].memory_mib, None);
+        // Fehlt die Datei dagegen ganz, bleibt die Adresse eindeutig, und die
+        // kommt aus derselben lspci-Zeile, die schon [1002:....] trug.
+        let silent = vec![SysfsDrmCard {
+            pci_address: "0000:03:00.0".to_string(),
+            vendor_id: None,
+            vram_total: Some(VRAM_16_GB.to_string()),
+        }];
+        assert_eq!(
+            detect_other_via_lspci_from(LSPCI_AMD, false, &silent)[0].memory_mib,
+            Some(16368),
+        );
+        assert_eq!(parse_sysfs_hex_id("0x1002"), Some(PCI_VENDOR_AMD));
+        assert_eq!(parse_sysfs_hex_id(" 0X1002 "), Some(PCI_VENDOR_AMD));
+        assert_eq!(parse_sysfs_hex_id("1002"), None);
+        assert_eq!(parse_sysfs_hex_id("0x"), None);
+        assert_eq!(parse_sysfs_hex_id(""), None);
+    }
+
+    /// Der Leseweg selbst, an einem echten kleinen Baum.
+    ///
+    /// Ohne diesen Test waere nur die Auswertung bewiesen und das Einlesen
+    /// nirgends. Der Baum wird angelegt wie /sys/class/drm aussieht: card0 mit
+    /// einem Verweis "device" auf das PCI-Verzeichnis, daneben ein Anschluss
+    /// und ein Renderknoten, die keine Karten sind.
+    #[cfg(unix)]
+    #[test]
+    fn the_reader_walks_a_real_drm_tree_and_skips_what_is_not_a_card() {
+        use std::os::unix::fs::symlink;
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let drm = tmp.path().join("sys/class/drm");
+        let pci = tmp.path().join("sys/devices/pci0000:00");
+        let card_dir = |addr: &str| pci.join(addr);
+        std::fs::create_dir_all(&drm).expect("drm dir");
+        for addr in ["0000:03:00.0", "0000:0b:00.0", "not-an-address"] {
+            std::fs::create_dir_all(card_dir(addr)).expect("pci dir");
+        }
+        // Die Karte, um die es geht. Mit dem Zeilenumbruch, den sysfs
+        // wirklich anhaengt.
+        std::fs::write(card_dir("0000:03:00.0").join("vendor"), "0x1002\n").expect("vendor");
+        std::fs::write(
+            card_dir("0000:03:00.0").join("mem_info_vram_total"),
+            format!("{VRAM_16_GB}\n"),
+        )
+        .expect("vram");
+        // Die zweite Karte hat an der Stelle der Zahl ein Verzeichnis. Lesen
+        // schlaegt fehl, und genau das darf nichts umwerfen.
+        std::fs::write(card_dir("0000:0b:00.0").join("vendor"), "0x1002\n").expect("vendor");
+        std::fs::create_dir_all(card_dir("0000:0b:00.0").join("mem_info_vram_total"))
+            .expect("vram as a directory");
+
+        let link = |card: &str, target: &std::path::Path| {
+            std::fs::create_dir_all(drm.join(card)).expect("card dir");
+            symlink(target, drm.join(card).join("device")).expect("device link");
+        };
+        link("card0", &card_dir("0000:03:00.0"));
+        link("card1", &card_dir("0000:0b:00.0"));
+        // Ein Anschluss und ein Renderknoten tragen keine eigene Karte, auch
+        // wenn dort ein device-Verweis liegt.
+        link("card0-DP-1", &card_dir("0000:03:00.0"));
+        link("renderD128", &card_dir("0000:03:00.0"));
+        // Eine Karte ohne device-Verweis, und eine, deren Verweis auf etwas
+        // zeigt, das keine PCI-Adresse ist.
+        std::fs::create_dir_all(drm.join("card2")).expect("card2");
+        link("card3", &card_dir("not-an-address"));
+
+        let mut cards = read_sysfs_drm_cards_at(&drm);
+        cards.sort_by(|a, b| a.pci_address.cmp(&b.pci_address));
+        assert_eq!(cards.len(), 2, "{cards:?}");
+        assert_eq!(
+            cards[0],
+            SysfsDrmCard {
+                pci_address: "0000:03:00.0".to_string(),
+                vendor_id: Some("0x1002".to_string()),
+                vram_total: Some(VRAM_16_GB.to_string()),
+            },
+        );
+        assert_eq!(cards[1].pci_address, "0000:0b:00.0");
+        assert_eq!(cards[1].vram_total, None, "a directory is not a number");
+
+        // Und durch die Auswertung, wie es im Betrieb zusammenlaeuft.
+        let raw = format!("{LSPCI_AMD}\n{LSPCI_AMD_SECOND}\n");
+        let found = detect_other_via_lspci_from(&raw, false, &cards);
+        let card = |n: &str| found.iter().find(|g| g.name.contains(n)).expect("card present");
+        assert_eq!((card("9070 XT").memory_mib, card("9070 XT").source.as_str()), (Some(16368), "sysfs"));
+        assert_eq!((card("6800 XT").memory_mib, card("6800 XT").source.as_str()), (None, "lspci"));
+
+        // NEGATIVE CONTROL: ein Verzeichnis, das es nicht gibt. Das ist jeder
+        // Mac, jedes Windows und jedes Linux ohne DRM-Treiber, und es muss
+        // still eine leere Liste geben statt zu scheitern.
+        assert!(read_sysfs_drm_cards_at(&tmp.path().join("no/such/place")).is_empty());
+        assert!(read_sysfs_value(&tmp.path().join("no/such/file")).is_none());
+        assert!(sysfs_pci_address(&tmp.path().join("no/such/link")).is_none());
     }
 }
