@@ -49,7 +49,16 @@ describe('all three branches decide through the one place', () => {
   }
 
   it('the one place is imported, not re-declared here', () => {
-    expect(src).toContain("import { shouldDowngradeThinking } from './codex/thinking-downgrade'")
+    // Die Zusicherung ist „kommt aus dem einen Modul", nicht „die Zeile sieht
+    // genau so aus". Am 03.09.2026 kam `engineDeniedThinking` aus demselben
+    // Modul dazu (die Absage der Engine wird jetzt gemerkt, statt bei jeder
+    // Nachricht erneut zu kosten) — die Aussage hielt, der Wortlaut nicht.
+    // Ein Waechter, der bei richtigem Code Alarm gibt, wird abgeschaltet.
+    expect(src).toMatch(
+      /import \{[^}]*\bshouldDowngradeThinking\b[^}]*\} from '\.\/codex\/thinking-downgrade'/,
+    )
+    // Und die Gegenprobe zur Aussage: nirgends eine eigene Fassung daneben.
+    expect(src).not.toMatch(/function shouldDowngradeThinking/)
   })
 
   it('exactly three call sites — no branch downgrades past the guard', () => {

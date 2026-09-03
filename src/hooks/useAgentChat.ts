@@ -1,4 +1,5 @@
 import { useRef, useState, useCallback, useEffect } from 'react'
+import { markCannotThink } from '../lib/model-compatibility'
 import {
   type ApprovalEntry,
   subscribeApprovals,
@@ -92,7 +93,7 @@ import { useTodoStore } from '../stores/todoStore'
 import { platformPromptLine, hostClockLine } from '../lib/host-platform'
 import { explainSendRefusal } from '../lib/template-refusal'
 import { httpStatusOf, isTerminalModelError, retryDelayMs } from '../lib/http-status'
-import { shouldDowngradeThinking } from './codex/thinking-downgrade'
+import { shouldDowngradeThinking, engineDeniedThinking } from './codex/thinking-downgrade'
 import { asString, errorText, prop } from '../types/json-guards'
 import type { ToolArgs } from '../api/mcp/types'
 import { CREDITS_EXHAUSTED_MESSAGE } from '../lib/credits-exhausted'
@@ -1160,6 +1161,10 @@ export function useAgentChat() {
                 // a byte-identical request, charging the user twice (review
                 // 2026-08-14).
                 if (shouldDowngradeThinking(chatOptions.thinking, thinkErr)) {
+                  // Die Absage der Engine ueberlebt diesen Zug: sonst kostet
+                  // sie bei JEDER weiteren Nachricht wieder eine verlorene
+                  // Anfrage (Testlauf 03.09.2026).
+                  if (engineDeniedThinking(thinkErr)) markCannotThink(modelToUse)
                   turn = await streamOllamaChatWithTools(
                     modelToUse,
                     sendMessages,

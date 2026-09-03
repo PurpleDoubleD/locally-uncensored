@@ -1,4 +1,5 @@
 import { useRef, useState, useCallback } from "react"
+import { markCannotThink } from '../lib/model-compatibility'
 import { v4 as uuid } from "uuid"
 import { useChatStore } from "../stores/chatStore"
 import { endTurnDurably } from "../stores/durability"
@@ -40,7 +41,7 @@ import { builtinReloadNeeded, ensureBuiltinEngineAlive } from "../api/builtin-en
 import { emptyAnswerExplanation } from "../lib/answer-notes"
 import { log } from "../lib/logger"
 import { CREDITS_EXHAUSTED_MESSAGE } from '../lib/credits-exhausted'
-import { shouldDowngradeThinking } from './codex/thinking-downgrade'
+import { shouldDowngradeThinking, engineDeniedThinking } from './codex/thinking-downgrade'
 import { ProviderError } from '../api/providers/types'
 import { useBackgroundAgentWake } from './useBackgroundAgentWake'
 
@@ -855,6 +856,10 @@ export function useChat() {
           // codex paths. So it was never a peculiarity of this transport, it
           // was missing from the others. See that module's "DIE 422-FRAGE".
           if (shouldDowngradeThinking(useThinking, err)) {
+            // Die Absage der Engine ueberlebt diesen Zug: sonst kostet sie bei
+            // JEDER weiteren Nachricht wieder eine verlorene Anfrage
+            // (Testlauf 03.09.2026).
+            if (engineDeniedThinking(err)) markCannotThink(modelId)
             yield* provider.chatStream(modelId, messages, { ...chatOpts, thinking: undefined })
           } else {
             throw err

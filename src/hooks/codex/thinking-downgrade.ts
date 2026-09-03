@@ -101,6 +101,21 @@ export function isThinkingUnsupportedError(err: unknown): boolean {
 }
 
 /**
+ * Hat die Engine das Denken AUSDRUECKLICH abgelehnt?
+ *
+ * Enger als `isThinkingUnsupportedError`, und das mit Absicht: dort zaehlen
+ * 400 und 422 als Klasse, weil fuer die WIEDERHOLUNG im Zweifel ein Versuch
+ * ohne Denkmodus richtig ist. Fuer ein GEDAECHTNIS reicht das nicht — ein 400
+ * kann jeder falsche Parameter sein, und ein Modell dauerhaft fuer denkunfaehig
+ * zu erklaeren, weil einmal etwas anderes schieflief, waere schlimmer als die
+ * verlorene Anfrage, die wir sparen wollen. Gemerkt wird nur der Satz, der
+ * keine zweite Lesart hat.
+ */
+export function engineDeniedThinking(err: unknown): boolean {
+  return errorText(err).includes('does not support thinking')
+}
+
+/**
  * Die ganze Frage, an EINER Stelle: lohnt die Wiederholung ohne Denkmodus?
  *
  * `requestedThinking` ist der Wert, den dieser Zug ANGEFRAGT hat — genau der,

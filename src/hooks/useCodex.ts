@@ -1,4 +1,5 @@
 import { useRef, useState, useCallback } from 'react'
+import { markCannotThink } from '../lib/model-compatibility'
 import { v4 as uuid } from 'uuid'
 import { useCodexStore } from '../stores/codexStore'
 import { useModelStore } from '../stores/modelStore'
@@ -94,7 +95,7 @@ import { codexModeRefusal } from './codex/mode-refusal'
 import { createAgentBlockSink } from './codex/agent-blocks'
 import { createLivePaint } from './codex/live-paint'
 import { seedEstimatedUsage, reportTurnUsage } from './codex/turn-usage'
-import { shouldDowngradeThinking } from './codex/thinking-downgrade'
+import { shouldDowngradeThinking, engineDeniedThinking } from './codex/thinking-downgrade'
 import { recoverToolCallsFromContent } from './codex/tool-call-recovery'
 import { codexStallVerdict } from './codex/stall-verdict'
 import { createStagedWriter } from './codex/staged-writes'
@@ -1287,6 +1288,8 @@ export function useCodex() {
               // fragt fuer jeden Transport dasselbe, die Zusatzbedingung
               // eingeschlossen (KF-21, siehe codex/thinking-downgrade.ts).
               if (shouldDowngradeThinking(chatOptions.thinking, thinkErr)) {
+                // Siehe useChat.ts: die Absage der Engine wird gemerkt.
+                if (engineDeniedThinking(thinkErr)) markCannotThink(modelToUse)
                 turn = await streamWithTools(
                   modelToUse, sendMessages, tools,
                   { temperature: 0.1, thinking: undefined, maxTokens: chatOptions.maxTokens, contextWindow: numCtx, signal: abort.signal },
