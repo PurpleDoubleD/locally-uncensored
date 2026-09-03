@@ -595,6 +595,32 @@ button:not(:disabled) {
   background: transparent;
 }
 
+/* ── Das Scrollrad (Kopfnavigation, Create-Werkzeuge) ────────────────────
+   Die Spur scrollt waagerecht und zeigt dabei keinen Balken. Zwei Regeln
+   sind noetig, weil die beiden Engines es verschieden loesen: WebKit ueber
+   das Pseudo-Element, Firefox ueber `scrollbar-width`. Ein Balken waere hier
+   falsch, die Reihe ist eine Navigation und kein Textfeld; angefasst wird sie
+   mit Trackpad, Rad oder Klick.
+
+   `overscroll-behavior-x: contain` haelt die Geste in der Spur. Ohne sie
+   loest ein waagerechtes Wischen am Ende der Reihe unter macOS die
+   Zurueck-Navigation des WebViews aus, und der Nutzer verliert die Ansicht,
+   weil er die Werkzeugleiste zu weit geschoben hat.
+
+   Kein `scroll-behavior: smooth` hier: das Anfahren macht `WheelNav` selbst
+   und fragt dabei `prefers-reduced-motion`. Stuende es zusaetzlich im
+   Stylesheet, waere jede Scrollbewegung animiert, auch die des Nutzers am
+   Trackpad, und die Einstellung des Betriebssystems waere umgangen. */
+.lu-wheel-track {
+  scrollbar-width: none;
+  overscroll-behavior-x: contain;
+}
+.lu-wheel-track::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
 /* Global scrollbar (David 2026-06-02): every scrollable surface — not only
    .scrollbar-thin containers — gets the themed scrollbar so the bare white
    Windows/WebView2 default never shows (it was visible on the coding file-tree

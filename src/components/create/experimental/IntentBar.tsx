@@ -5,6 +5,7 @@ import { isIntentLocked, visibleIntents } from './intents'
 import { isMlxImageHost } from '../../../api/mlx-image'
 import { cn } from '../ui/cn'
 import { ICON_SM } from '../../ui/icon-size'
+import { WheelNav } from '../../ui/WheelNav'
 
 // Jede Pille traegt ihre Beschriftung, immer. Bis 2.6.7 stand hier ein
 // `max-width`-Aufklappen: nur die AKTIVE Pille zeigte ihren Namen, die
@@ -32,16 +33,20 @@ import { ICON_SM } from '../../ui/icon-size'
 // Standardfenster um 452 px. `short` traegt bis hinunter zu ~1096 px
 // Fensterbreite in einer Zeile.
 //
-// Darunter reicht der Platz nicht mehr. Nachgemessen bei 700 px Fenster, mit
-// `flex-wrap` versuchsweise abgeschaltet: die Leiste laeuft 50 px ueber ihren
-// Container hinaus — die Pillen stauchen NICHT, weil ein Flex-Item mit
-// `whitespace-nowrap`-Inhalt und ohne `min-w-0` seine Mindestbreite behaelt.
-// Der Ausgang waere also die abgeschnittene letzte Pille am rechten Rand,
-// nicht ein zerschnittenes Wort.
-// Deshalb `flex-wrap`: dieselbe Leiste bricht in eine zweite Zeile um
-// (gemessen 35,6 -> 71,3 px Hoehe; die Buehne darunter ist `flex-1` und gibt
-// die 35,7 px her). Kein Ueberlauf, kein abgeschnittener Text, nichts
-// verschwindet.
+// Darunter reicht der Platz nicht mehr. Nachgemessen bei 700 px Fenster:
+// die Leiste laeuft 50 px ueber ihren Container hinaus, die Pillen stauchen
+// NICHT, weil ein Flex-Item mit `whitespace-nowrap`-Inhalt und ohne `min-w-0`
+// seine Mindestbreite behaelt. Der Ausgang waere die abgeschnittene letzte
+// Pille am rechten Rand.
+//
+// Bis 2.6.8 war die Antwort darauf ein Umbruch in eine zweite Zeile. Seit dem
+// Scrollrad (David, 03.09.2026) ist sie eine andere: die Leiste bleibt EINE
+// Zeile und scrollt. Das loest dasselbe Problem und noch eins dazu, denn beim
+// Umbruch sprang die Buehne darunter um 35,7 px, sobald das Fenster die
+// Grenze kreuzte. Der aktive Eintrag steht immer in der Mitte, fuenf Nachbarn
+// je Seite werden nach aussen blasser, und ein Klick faehrt das Ziel weich
+// dorthin. Kein Ueberlauf, kein abgeschnittener Text, keine springende
+// Hoehe.
 //
 // Der volle Name bleibt in `title`/`aria-label` — „Edit" auf der Pille,
 // „Edit / Image to Image" fuer Hover und Screenreader.
@@ -83,8 +88,13 @@ export function IntentBar() {
       // jede rem-Laenge dieser Leiste ist ihr altes Mass mal 0,763, in
       // ganzen Pixeln des 16px-Rasters (36px Pille -> 28px, 16px Icon ->
       // 12px = ICON_SM, 12px Label -> 9px).
-      className="flex flex-wrap items-center justify-center gap-x-[3px] gap-y-[3px] px-3 py-[1.5px] [--text-control:9px]"
+      className="px-3 py-[1.5px] [--text-control:9px]"
     >
+      <WheelNav
+        activeIndex={intents.findIndex((m) => m.id === intent)}
+        radius={5}
+        reihenClass="gap-x-[3px]"
+      >
       {intents.map((meta) => {
         const locked = isIntentLocked(meta, backend, mlxHost)
         const selected = !locked && intent === meta.id
@@ -129,6 +139,7 @@ export function IntentBar() {
           </button>
         )
       })}
+      </WheelNav>
     </div>
   )
 }

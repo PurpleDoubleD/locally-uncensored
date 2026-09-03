@@ -82,7 +82,11 @@ describe('D-S20: ein Breakpoint, nicht zwei', () => {
   })
 
   it('Leiste und Kebab schalten am selben Punkt', () => {
-    expect(NAV).toContain('hidden lg:flex')
+    // Die Leiste ist seit dem Scrollrad (03.09.2026) ein `block`-Behaelter mit
+    // einer eigenen Scrollspur darin und kein `flex`-Behaelter mehr. Der
+    // Umschaltpunkt ist derselbe geblieben, und genau das haelt dieser Test
+    // fest, nicht die Art des Behaelters.
+    expect(NAV).toContain('hidden lg:block')
     expect(NAV).toContain('relative lg:hidden')
   })
 
@@ -151,7 +155,7 @@ describe('D-S47: die Kebab-Regel ist an der Anordnung ablesbar', () => {
   })
 
   it('und nimmt genau die Ziele auf, die die Leiste zeigt — dieselbe Liste', () => {
-    const leiste = NAV.slice(NAV.indexOf('hidden lg:flex'), NAV.indexOf('relative lg:hidden'))
+    const leiste = NAV.slice(NAV.indexOf('hidden lg:block'), NAV.indexOf('relative lg:hidden'))
     const menue = NAV.slice(NAV.indexOf('relative lg:hidden'))
     expect(leiste).toContain('navTargets.map')
     expect(menue).toContain('navTargets.map')

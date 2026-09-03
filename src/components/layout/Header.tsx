@@ -18,6 +18,7 @@ import { checkModelCapability } from '../../api/ollama'
 import { closeDialog, isTopDialog, nextFocusIndex, openDialog } from '../ui/dialog-a11y'
 import { MONOGRAM, MONOGRAM_INVERT } from './brand'
 import type { View } from '../../stores/uiStore'
+import { WheelNav } from '../ui/WheelNav'
 
 /**
  * Die Navigation als Daten, nicht als sechs abgeschriebene Knoepfe.
@@ -362,7 +363,22 @@ export function Header() {
             aendert. `lg` (1024px) traegt die sechs Ziele mit Rand: sechs
             Beschriftungen in `px-2` plus Logo, Burger und vier
             Dienstprogramme kommen zusammen auf rund 570px. */}
-        <div className="hidden lg:flex items-center gap-0.5">
+        {/* Das Scrollrad (David, 03.09.2026): der aktive Reiter steht in der
+            Mitte, drei Nachbarn je Seite werden nach aussen blasser, ein Klick
+            faehrt das Ziel weich in die Mitte und macht es voll lesbar. Die
+            Begruendung fuer Polster, Scrollflaeche und Deckkraft steht in
+            `ui/WheelNav`.
+
+            `max-w-md` und nicht die volle Slotbreite: das Rad soll ein
+            Ausschnitt sein. Bei sechs Zielen und voller Breite stuenden alle
+            sechs nebeneinander, der Klick bewegte nichts, und der Verlauf
+            waere nur Dekoration statt Orientierung. */}
+        <WheelNav
+          activeIndex={navTargets.findIndex(isNavActive)}
+          radius={3}
+          reihenClass="gap-0.5"
+          className="hidden lg:block w-full max-w-md"
+        >
           {navTargets.map((t) => (
             <button
               key={t.id}
@@ -373,7 +389,7 @@ export function Header() {
               {t.label}
             </button>
           ))}
-        </div>
+        </WheelNav>
 
         {/* Dieselben Ziele, zusammengeklappt. Ein echtes Menue — siehe die
             Begruendung oben bei `menuId`. */}
