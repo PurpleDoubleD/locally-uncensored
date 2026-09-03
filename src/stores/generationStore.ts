@@ -54,9 +54,15 @@ import type { RunLane } from '../lib/run-lanes'
  * Eintrag. Wer die beiden zusammenlegt, verliert genau den Zustand, den
  * dieser Auftrag sichtbar machen soll.
  *
- * Gebucht und geraeumt wird an EINER Stelle, `lib/run-slot.ts`. Sie ist auch
- * die einzige, die die Spur bei `run-lanes` nimmt und zurueckgibt.
+ * `bookRun` und `endRun` ruft nur `lib/run-slot.ts`, dieselbe Stelle, die die
+ * Spur bei `run-lanes.ts` nimmt und zurueckgibt. Buchung und Platz entstehen
+ * und vergehen damit zusammen. Die eine Ausnahme ist `abortConversation`
+ * weiter unten: es raeumt das ganze Gespraech weg, also auch die Buchung, und
+ * ist dafuer da, dass ein geloeschter Chat nichts hinterlaesst. Es nimmt
+ * keinen Platz und gibt keinen zurueck; das bleibt beim `finally` in
+ * `run-slot.ts`, auch auf diesem Weg.
  */
+
 /**
  * Ein gebuchter Lauf: die Spur, auf der er rechnet, und seit wann er gebucht
  * ist. Kein Status, keine Fahne, kein Abbruchgriff, das steht alles daneben
@@ -95,9 +101,10 @@ interface GenerationState {
   /**
    * conversationId → der gebuchte Lauf dieses Gespraechs, mit seiner Spur.
    *
-   * Geschrieben ausschliesslich von `lib/run-slot.ts`, das auch die Spur bei
-   * `lib/run-lanes.ts` nimmt und zurueckgibt. Ein zweiter Schreiber waere
-   * genau der Pfad, der irgendwann nicht mehr gepflegt wird.
+   * Gebucht und beendet nur von `lib/run-slot.ts`, das auch die Spur bei
+   * `lib/run-lanes.ts` nimmt und zurueckgibt; dazu weggeraeumt von
+   * `abortConversation`, wenn das ganze Gespraech verschwindet. Ein dritter
+   * Schreiber waere genau der Pfad, der irgendwann nicht mehr gepflegt wird.
    */
   runs: Record<string, ActiveRun>
   /** Diesen Lauf mit seiner Spur eintragen. Zweite Buchung behaelt `bookedAt`. */
