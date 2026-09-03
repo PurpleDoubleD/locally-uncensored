@@ -1219,6 +1219,37 @@ export function getMainstreamTextModels(): DiscoverModel[] {
     { name: 'DeepSeek V4 Flash 0731 Q4', group: 'DeepSeek V4 Flash 0731', description: 'DeepSeek V4-Flash-0731 · UD-Q4_K_XL full quality. Needs ~155 GB disk and serious RAM. 1M context, MIT. Multi-part download.', pulls: '4K+', tags: ['284B MoE', 'UD-Q4_K_XL', '155 GB', 'Multi-part'], updated: 'Hot', agent: true, released: '2026-07', downloadUrl: HF('unsloth/DeepSeek-V4-Flash-0731-GGUF', 'UD-Q4_K_XL/DeepSeek-V4-Flash-0731-UD-Q4_K_XL-00001-of-00005.gguf'), filename: 'DeepSeek-V4-Flash-0731-UD-Q4_K_XL-00001-of-00005.gguf', sizeGB: 155 },
     { name: 'Hunyuan 3 295B Q4', group: 'Hunyuan 3 295B', description: 'Tencent Hunyuan 3 · 295B MoE (21B active), Apache-2.0 without territorial limits. Needs a current llama.cpp / LM Studio build.', pulls: '20K+', tags: ['295B MoE', 'Q4_K_M', '170 GB'], updated: 'New', agent: true, released: '2026-07', downloadUrl: HF('AngelSlim/Hy3-GGUF', 'Hy3-Q4_K_M.gguf'), filename: 'Hy3-Q4_K_M.gguf', sizeGB: 170 },
     { name: 'Hunyuan 3 295B IQ1', group: 'Hunyuan 3 295B', description: 'Tencent Hunyuan 3 · 1 bit quant for 96 to 128 GB setups. Real quality tradeoff, but it runs. Apache-2.0.', pulls: '20K+', tags: ['295B MoE', 'IQ1_M', '83.3 GB'], updated: 'New', agent: true, released: '2026-07', downloadUrl: HF('AngelSlim/Hy3-GGUF', 'Hy3-IQ1_M.gguf'), filename: 'Hy3-IQ1_M.gguf', sizeGB: 83.3 },
+    // ── GLM 5.3 ─────────────────────────────────────────────────────────
+    //
+    // Nur die GROSSE Variante steht hier, und das ist eine gemessene
+    // Entscheidung, keine Auslassung. Aus den GGUF-Kopfbytes gelesen
+    // (02.09.2026, siehe api/gguf-arch.ts):
+    //
+    //   unsloth/GLM-5.3-GGUF          general.architecture = glm-dsa
+    //   unsloth/GLM-5.3-Flash-GGUF    general.architecture = glm5next
+    //   antirez, AesSedai (Flash)     general.architecture = glm5-next
+    //
+    // Die zweite Schreibweise ist kein Tippfehler von mir: die Flash-GGUFs
+    // tragen je nach Konvertierdatum `glm5next` ODER `glm5-next`. llama.cpp
+    // kennt beide nicht — weder am gepinnten Tag noch auf master. Vier PRs
+    // waren an dem Tag offen (#27752, #27754, #27773, #27917 fuer MTP), kein
+    // einziger gemergt. Ein Flash-Eintrag hiesse: der Nutzer laedt zweistellig
+    // Gigabyte und die Engine oeffnet die Datei nicht.
+    //
+    // Uncensored gibt es GLM 5.3 derzeit nur als Flash (AliceThirty, darask0,
+    // orcarouter, Blackfrost) — also genau in der Variante, die lokal nicht
+    // laeuft. Fuer die grosse gibt es nur NVFP4/FP8 (dealignai), und das sind
+    // vLLM-Formate, keine GGUF.
+    //
+    // Ollama fuehrt glm-5.3 und glm-5.3-flash ausschliesslich als `:cloud` —
+    // ohne lokale Gewichte. In diesem Katalog waere das ein Eintrag, der
+    // "lokal" verspricht und auf fremden Rechnern rechnet.
+    //
+    // Der Waechter __tests__/katalog-architektur.live.test.ts prueft das ab
+    // jetzt selbst; seine Gegenprobe wird GRUEN-nach-ROT, sobald llama.cpp
+    // glm5next kennt. Dann gehoert Flash hier hinein.
+    { name: 'GLM 5.3 744B IQ1', group: 'GLM 5.3 744B', description: 'ZhipuAI GLM 5.3 · dieselbe Basis wie 5.2, der ganze Sprung kommt aus dem Post-Training: +50 % auf Z.ai Code Bench, Open-Weights-SOTA auf Terminal Bench 3.0. 744B MoE (40B aktiv), 1M Kontext. Kleinstes Quant, mehrteilig.', pulls: '74K+', tags: ['744B MoE', 'UD-IQ1_S', '217 GB', 'Multi-part'], updated: 'Hot', agent: true, released: '2026-08', downloadUrl: HF('unsloth/GLM-5.3-GGUF', 'UD-IQ1_S/GLM-5.3-UD-IQ1_S-00001-of-00006.gguf'), filename: 'GLM-5.3-UD-IQ1_S-00001-of-00006.gguf', sizeGB: 216.7 },
+    { name: 'GLM 5.3 744B Q2', group: 'GLM 5.3 744B', description: 'ZhipuAI GLM 5.3 · Unsloth Dynamic Q2_K_XL, der Qualitaets-/Groessen-Punkt fuer dieses MoE. 744B MoE (40B aktiv), 1M Kontext, GLM-5.3-Lizenz. Mehrteilig.', pulls: '74K+', tags: ['744B MoE', 'UD-Q2_K_XL', '254 GB', 'Multi-part'], updated: 'Hot', agent: true, released: '2026-08', downloadUrl: HF('unsloth/GLM-5.3-GGUF', 'UD-Q2_K_XL/GLM-5.3-UD-Q2_K_XL-00001-of-00007.gguf'), filename: 'GLM-5.3-UD-Q2_K_XL-00001-of-00007.gguf', sizeGB: 253.9 },
     { name: 'GLM 5.2 744B MoE', description: 'ZhipuAI GLM 5.2 · 744B MoE (40B active), 1M context, MIT. The agentic-coding successor to GLM 5.1. Multi-part, ~304 GB.', pulls: '50K+', tags: ['744B MoE', 'UD-Q2_K_XL', '304 GB', 'Multi-part'], updated: 'Hot', agent: true, released: '2026-06', downloadUrl: HF('unsloth/GLM-5.2-GGUF', 'UD-Q2_K_XL/GLM-5.2-UD-Q2_K_XL-00001-of-00007.gguf'), filename: 'GLM-5.2-UD-Q2_K_XL-00001-of-00007.gguf', sizeGB: 304 },
     { name: 'Kimi K2.7 Code 1T', description: 'Moonshot Kimi K2.7-Code · 1T MoE (32B active) coding flagship. Even the 2-bit quant is ~370 GB · multi-GPU / Mac-cluster territory.', pulls: '392K+', tags: ['1T MoE', 'UD-Q2_K_XL', '371 GB', 'Multi-part'], updated: 'Hot', agent: true, released: '2026-06', downloadUrl: HF('unsloth/Kimi-K2.7-Code-GGUF', 'UD-Q2_K_XL/Kimi-K2.7-Code-UD-Q2_K_XL-00001-of-00008.gguf'), filename: 'Kimi-K2.7-Code-UD-Q2_K_XL-00001-of-00008.gguf', sizeGB: 371 },
   ])

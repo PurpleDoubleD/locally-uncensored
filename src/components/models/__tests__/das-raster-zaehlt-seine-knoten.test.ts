@@ -87,8 +87,26 @@ function messeReiter(models: DiscoverModel[]) {
 }
 
 describe('D-S26 · was das Raster wirklich kostet', () => {
-  it('der Katalog ergibt die 53 Kacheln, die der Audit gezaehlt hat', () => {
-    expect(messeReiter(getMainstreamTextModels()).kacheln).toBe(53)
+  it('der Katalog ergibt die Kacheln, die der Audit gezaehlt hat', () => {
+    // 02.09.2026: Mainstream 53 -> 54. Die Schranke hat getan, was oben
+    // versprochen ist ("jetzt neu messen"), also wurde neu gemessen und nicht
+    // nur die Zahl hochgesetzt.
+    //
+    // Zugang: GLM 5.3 744B, zwei Quants unter EINEM `group` — also eine
+    // Kachel, nicht zwei. Der Zuwachs ist +1 auf 54.
+    //
+    // Traegt die Messung oben noch? Ja, und zwar ohne neuen Browserlauf: die
+    // Kurve dort ist an ZWEI Punkten belegt (53 -> 0,2 ms · 303 -> 1,1 ms),
+    // und 54 liegt am unteren. Ein Punkt mehr auf derselben Geraden aendert
+    // die Schlussfolgerung nicht — und die lautete ohnehin, dass selbst 303
+    // Kacheln das Budget nicht reissen. Neu zu messen waere bei einem Sprung
+    // in die Hunderter noetig, nicht bei +1.
+    //
+    // Die beiden Zahlen sind ab jetzt verschieden. Dass sie vorher beide 53
+    // waren, war Zufall: es sind zwei getrennte Listen (Mainstream und
+    // Uncensored), und GLM 5.3 gibt es uncensored nur als Flash, das lokal
+    // nicht laeuft (siehe api/__tests__/glm53-nur-was-laeuft.test.ts).
+    expect(messeReiter(getMainstreamTextModels()).kacheln).toBe(54)
     expect(messeReiter(getUncensoredTextModels()).kacheln).toBe(53)
   })
 
