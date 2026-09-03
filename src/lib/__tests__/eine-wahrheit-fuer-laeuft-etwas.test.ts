@@ -22,6 +22,7 @@ import {
   runStatusOf,
   isRunActive,
   whenRunsIdle,
+  subscribeRuns,
 } from '../run-idle'
 import {
   CODEX_THREAD_STATUSES,
@@ -228,5 +229,176 @@ describe('der aufgeschobene Dialog erbt die volle Union', () => {
     expect(shown).toBe(0)
     useCodexStore.getState().setThreadStatus('conv-c', 'idle')
     expect(shown).toBe(1)
+  })
+})
+
+describe('die dritte Quelle weckt jetzt auch selbst', () => {
+  // Im Kopf von run-idle.ts stand dafuer eine EHRLICHE LUECKE: `whenRunsIdle`
+  // weckte nur an den beiden Speichern, und ein Wartender, der aus der
+  // Schlange faellt, aendert keinen von beiden. Der aufgeschobene Dialog
+  // wartete dann auf die naechste FREMDE Aenderung, also im Zweifel bis der
+  // Nutzer irgendwo anders etwas anfaengt.
+  it('der letzte Wartende bricht ab, und der aufgeschobene Dialog geht auf', () => {
+    admit('local', 'conv-a', () => {})
+    admit('local', 'conv-b', () => {})
+    expect(runsActive()).toBe(true)
+
+    let shown = 0
+    whenRunsIdle(() => shown++)
+    expect(shown).toBe(0)
+
+    // Nur die Schlange aendert sich. Kein generating, kein Thread, keine
+    // Store-Benachrichtigung.
+    release('conv-b')
+    expect(shown).toBe(1)
+  })
+
+  it('und ebenso, wenn der letzte Wartende drankommt', () => {
+    admit('local', 'conv-a', () => {})
+    admit('local', 'conv-b', () => {})
+    let shown = 0
+    whenRunsIdle(() => shown++)
+    release('conv-a')
+    expect(shown).toBe(1)
+  })
+
+  it('GEGENPROBE: solange noch jemand wartet, bleibt der Dialog zu', () => {
+    admit('local', 'conv-a', () => {})
+    admit('local', 'conv-b', () => {})
+    admit('local', 'conv-c', () => {})
+    let shown = 0
+    whenRunsIdle(() => shown++)
+    release('conv-b')
+    expect(shown).toBe(0)
+  })
+
+  it('GEGENPROBE: ein zurueckgezogener Aufschub geht auch an der Schlange nicht auf', () => {
+    admit('local', 'conv-a', () => {})
+    admit('local', 'conv-b', () => {})
+    let shown = 0
+    const zurueck = whenRunsIdle(() => shown++)
+    zurueck()
+    release('conv-b')
+    expect(shown).toBe(0)
+  })
+})
+
+describe('mehrere offene Laeufe nebeneinander', () => {
+  // Bis zu diesem Auftrag konnte hoechstens EINER offen sein: der Senden-Knopf
+  // hiess waehrend jedes Laufs app-weit "Stop generation". Jetzt laufen
+  // Cloud-Laeufe echt gleichzeitig, und ein lokaler steht daneben in der
+  // Schlange. Damit wird "laeuft ueberhaupt etwas?" zum ersten Mal eine Frage
+  // ueber eine MENGE, und jede Antwort darueber, die den ersten Eintrag fuer
+  // die ganze Menge nimmt, faellt hier auf.
+  it('jeder Chat bekommt seine eigene Antwort, nicht die des Nachbarn', () => {
+    useGenerationStore.getState().setGenerating('wolke-1', true)
+    useGenerationStore.getState().setGenerating('wolke-2', true)
+    admit('local', 'karte', () => {})
+    useGenerationStore.getState().setGenerating('karte', true)
+    admit('local', 'wartend', () => {})
+
+    expect(runStatusOf('wolke-1')).toBe('running')
+    expect(runStatusOf('wolke-2')).toBe('running')
+    expect(runStatusOf('karte')).toBe('running')
+    expect(runStatusOf('wartend')).toBe('queued')
+    expect(runStatusOf('unbeteiligt')).toBe('idle')
+  })
+
+  it('der letzte zaehlt: einer nach dem anderen faellt weg, erst dann ist Ruhe', () => {
+    useGenerationStore.getState().setGenerating('a', true)
+    useGenerationStore.getState().setGenerating('b', true)
+    useGenerationStore.getState().setGenerating('c', true)
+    expect(runsActive()).toBe(true)
+
+    useGenerationStore.getState().setGenerating('a', false)
+    expect(runsActive()).toBe(true)
+    useGenerationStore.getState().setGenerating('b', false)
+    expect(runsActive()).toBe(true)
+    useGenerationStore.getState().setGenerating('c', false)
+    expect(runsActive()).toBe(false)
+  })
+
+  it('der aufgeschobene Dialog wartet auf den letzten und geht genau einmal auf', () => {
+    useGenerationStore.getState().setGenerating('a', true)
+    useGenerationStore.getState().setGenerating('b', true)
+    admit('local', 'a', () => {})
+    admit('local', 'c', () => {})
+
+    let shown = 0
+    whenRunsIdle(() => shown++)
+    expect(shown).toBe(0)
+
+    useGenerationStore.getState().setGenerating('b', false)
+    expect(shown).toBe(0)
+    release('c')                                     // der Wartende gibt auf
+    expect(shown).toBe(0)
+    useGenerationStore.getState().setGenerating('a', false)
+    expect(shown).toBe(1)
+
+    // Und danach nicht noch einmal, egal was sich sonst bewegt.
+    useGenerationStore.getState().setGenerating('d', true)
+    useGenerationStore.getState().setGenerating('d', false)
+    expect(shown).toBe(1)
+  })
+
+  it('GEGENPROBE: ein Chat, in dem nichts laeuft, faerbt die Nachbarn nicht ein', () => {
+    useGenerationStore.getState().setGenerating('a', true)
+    expect(runStatusOf('b')).toBe('idle')
+    expect(isRunActive('b')).toBe(false)
+  })
+})
+
+describe('EINE Anmeldung fuer alle drei Quellen', () => {
+  // Die Oberflaeche soll "Senden", "Stop" und "Platz 2" zeigen koennen, und
+  // dafuer neu malen, sobald sich irgendetwas daran aendert. Die drei
+  // Quellen einzeln zu abonnieren waere dieselbe Liste ein zweites Mal, und
+  // wer beim naechsten Umbau eine davon vergisst, sieht keinen Fehler,
+  // sondern ein Plaettchen, das stehen bleibt.
+  //
+  // Die Antworten sind alle einfache Werte (eine Zeichenkette, eine Zahl, ein
+  // Ja/Nein), also genuegt `useSyncExternalStore(subscribeRuns, () =>
+  // runStatusOf(id))` ohne jede Zwischenspeicherung.
+  it('weckt bei einem Lauf, der anfaengt', () => {
+    let geweckt = 0
+    const ab = subscribeRuns(() => { geweckt++ })
+    useGenerationStore.getState().setGenerating('a', true)
+    expect(geweckt).toBeGreaterThan(0)
+    ab()
+  })
+
+  it('weckt bei einem Coding-Thread, der seinen Zustand wechselt', () => {
+    useCodexStore.getState().initThread('conv-c', '/tmp')
+    let geweckt = 0
+    const ab = subscribeRuns(() => { geweckt++ })
+    useCodexStore.getState().setThreadStatus('conv-c', 'running')
+    expect(geweckt).toBeGreaterThan(0)
+    ab()
+  })
+
+  it('weckt bei der Schlange, die keiner der beiden Speicher sieht', () => {
+    admit('local', 'a', () => {})
+    let geweckt = 0
+    const ab = subscribeRuns(() => { geweckt++ })
+    admit('local', 'b', () => {})
+    expect(geweckt).toBeGreaterThan(0)
+    ab()
+  })
+
+  it('GEGENPROBE: abgemeldet ist abgemeldet, in allen drei Quellen', () => {
+    admit('local', 'a', () => {})
+    useCodexStore.getState().initThread('conv-c', '/tmp')
+    let geweckt = 0
+    subscribeRuns(() => { geweckt++ })()
+    useGenerationStore.getState().setGenerating('x', true)
+    useCodexStore.getState().setThreadStatus('conv-c', 'running')
+    admit('local', 'b', () => {})
+    expect(geweckt).toBe(0)
+  })
+
+  it('die Antwort ist ein einfacher Wert, den useSyncExternalStore vergleichen kann', () => {
+    admit('local', 'a', () => {})
+    admit('local', 'b', () => {})
+    expect(runStatusOf('b')).toBe(runStatusOf('b'))
+    expect(typeof runStatusOf('b')).toBe('string')
   })
 })
