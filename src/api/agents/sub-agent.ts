@@ -43,6 +43,7 @@ import { AgentBudget } from './budget'
 import { explainError as explainToolError } from './error-hints'
 import { platformPromptLine, hostClockLine } from '../../lib/host-platform'
 import { clampTaskResult, describeToolCalls, makeTaskId } from '../../lib/agent-tasks'
+import { istNurAnkuendigung, ANKUENDIGUNG_STEER } from './ankuendigung'
 import { MAX_EXPLICIT_FANOUT } from '../../lib/agent-fanout'
 
 // NOTE: the toolRegistry import is done LAZILY inside defaultSubAgentRunner
@@ -485,6 +486,11 @@ export async function defaultSubAgentRunner(
 
 
   let finalContent = ''
+  // Hat dieser Unterauftrag ueberhaupt schon einen Handgriff getan, und hat er
+  // seinen einen Anstoss schon bekommen? Beides zusammen entscheidet, ob ein
+  // Zug ohne Werkzeugaufruf als Antwort zaehlt — siehe ankuendigung.ts.
+  let werkzeugGelaufen = false
+  let angestossen = false
   // Die Schleifengrenze kommt aus DEMSELBEN Budget, das auch zaehlt. Vorher
   // stand hier die Konstante, waehrend `options.budget` die eingestellte Kappe
   // trug — zwei Zahlen fuer eine Regel, und die stillere haette gewonnen.
@@ -521,7 +527,23 @@ export async function defaultSubAgentRunner(
     // Denk-Audit, Loch 11). Same settlement as every visible surface.
     const settled = settleThinking(turn.content || '', '', false).content
     finalContent = settled || finalContent
-    if (!turn.toolCalls || turn.toolCalls.length === 0) break
+    if (!turn.toolCalls || turn.toolCalls.length === 0) {
+      // Persona B2 (03.09.2026): drei Unterauftraege, 251 Sekunden, und
+      // zurueck kamen zwei Ankuendigungen — „Ich recherchiere das Hamburger
+      // Transparenzgesetz fuer Sie." Ein kleines Modell sagt erst hoeflich an,
+      // was es tun wird, und faellt genau hier hinaus, bevor es einen
+      // Handgriff getan hat. Ein Anstoss, einmal, und nur solange noch nichts
+      // lief: mehr waere eine Schleife, und ein Anstoss nach getaner Arbeit
+      // waere Bevormundung einer kurzen, richtigen Antwort.
+      if (!werkzeugGelaufen && !angestossen && istNurAnkuendigung(settled)) {
+        angestossen = true
+        messages.push({ role: 'assistant', content: settled })
+        messages.push({ role: 'user', content: ANKUENDIGUNG_STEER })
+        continue
+      }
+      break
+    }
+    werkzeugGelaufen = true
 
     options.budget.addToolCalls(turn.toolCalls.length)
     if (tasks && options.taskId) {

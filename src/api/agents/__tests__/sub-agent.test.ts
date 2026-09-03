@@ -420,3 +420,76 @@ describe('sub-agent — abort signal (AGT-1)', () => {
     expect(out).toMatch(/stopped by the user/)
   })
 })
+
+// ── Eine Ankuendigung ist keine Antwort (Persona B2) ─────────────────────
+
+describe('der Unterauftrag darf nicht auf seiner eigenen Ansage stehenbleiben', () => {
+  /**
+   * Drei delegierte Agenten, 251 Sekunden, und zurueck kamen zwei
+   * Ankuendigungen („Ich recherchiere das Hamburger Transparenzgesetz fuer
+   * Sie…") und ein Leerlauf. Der Grund ist eine Zeile: ein Zug ohne
+   * Werkzeugaufrufe beendet die Schleife, und sein Text wird zur Antwort.
+   *
+   * Genau EIN Anstoss, und nur solange noch kein Werkzeug lief. Mehr waere
+   * eine Schleife, und ein Anstoss nach getaner Arbeit waere Bevormundung.
+   */
+  beforeEach(() => {
+    _setDepth(0)
+    permLevel = 'auto'
+    chatWithTools.mockReset()
+    toolExecute.mockReset()
+    toolExecute.mockResolvedValue('Antwortfrist: ein Monat (§ 13 HmbTG)')
+    resetApprovals()
+  })
+
+  it('stupst einmal an, wenn nur angekuendigt und noch nichts getan wurde', async () => {
+    chatWithTools
+      .mockResolvedValueOnce({ content: 'Ich recherchiere das Hamburger Transparenzgesetz für Sie.', toolCalls: [] })
+      .mockResolvedValueOnce({
+        content: '',
+        toolCalls: [{ id: 'tc1', function: { name: 'shell_execute', arguments: { command: 'ls' } } }],
+      })
+      .mockResolvedValueOnce({ content: 'Die Antwortfrist betraegt einen Monat.', toolCalls: [] })
+
+    const out = await runSub(makeRun())
+    expect(out).toBe('Die Antwortfrist betraegt einen Monat.')
+    expect(out).not.toMatch(/Ich recherchiere/)
+    // Der Anstoss steht als Nutzer-Zug in der Historie. (Nicht die LETZTE
+    // Nachricht pruefen: die Schleife mutiert dasselbe Array weiter, das der
+    // Mock aufgezeichnet hat — am Ende steht dort das Werkzeugergebnis.)
+    const verlauf = messagesOfTurn(1)
+    expect(verlauf.some((m) => /not an answer/i.test(String(m.content ?? '')))).toBe(true)
+  })
+
+  it('stupst NICHT an, wenn schon ein Werkzeug lief', async () => {
+    // Nach getaner Arbeit ist eine kurze Antwort eine Antwort. Ein Anstoss
+    // hier waere eine zusaetzliche Runde fuer nichts.
+    chatWithTools
+      .mockResolvedValueOnce({
+        content: '',
+        toolCalls: [{ id: 'tc1', function: { name: 'shell_execute', arguments: { command: 'ls' } } }],
+      })
+      .mockResolvedValueOnce({ content: 'Ich recherchiere weiter.', toolCalls: [] })
+
+    const out = await runSub(makeRun())
+    expect(out).toBe('Ich recherchiere weiter.')
+    expect(chatWithTools).toHaveBeenCalledTimes(2)
+  })
+
+  it('stupst hoechstens einmal — zweimal waere eine Schleife', async () => {
+    chatWithTools
+      .mockResolvedValueOnce({ content: 'Ich recherchiere das für Sie.', toolCalls: [] })
+      .mockResolvedValueOnce({ content: 'Ich beginne mit einer Suche.', toolCalls: [] })
+
+    const out = await runSub(makeRun())
+    expect(chatWithTools).toHaveBeenCalledTimes(2)
+    expect(out).toBe('Ich beginne mit einer Suche.')
+  })
+
+  it('eine echte kurze Antwort ohne Werkzeug geht sofort durch', async () => {
+    chatWithTools.mockResolvedValueOnce({ content: 'Die Frist betraegt einen Monat.', toolCalls: [] })
+    const out = await runSub(makeRun())
+    expect(out).toBe('Die Frist betraegt einen Monat.')
+    expect(chatWithTools).toHaveBeenCalledOnce()
+  })
+})
