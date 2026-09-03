@@ -281,3 +281,68 @@ describe('die dritte Quelle weckt jetzt auch selbst', () => {
     expect(shown).toBe(0)
   })
 })
+
+describe('mehrere offene Laeufe nebeneinander', () => {
+  // Bis zu diesem Auftrag konnte hoechstens EINER offen sein: der Senden-Knopf
+  // hiess waehrend jedes Laufs app-weit "Stop generation". Jetzt laufen
+  // Cloud-Laeufe echt gleichzeitig, und ein lokaler steht daneben in der
+  // Schlange. Damit wird "laeuft ueberhaupt etwas?" zum ersten Mal eine Frage
+  // ueber eine MENGE, und jede Antwort darueber, die den ersten Eintrag fuer
+  // die ganze Menge nimmt, faellt hier auf.
+  it('jeder Chat bekommt seine eigene Antwort, nicht die des Nachbarn', () => {
+    useGenerationStore.getState().setGenerating('wolke-1', true)
+    useGenerationStore.getState().setGenerating('wolke-2', true)
+    admit('local', 'karte', () => {})
+    useGenerationStore.getState().setGenerating('karte', true)
+    admit('local', 'wartend', () => {})
+
+    expect(runStatusOf('wolke-1')).toBe('running')
+    expect(runStatusOf('wolke-2')).toBe('running')
+    expect(runStatusOf('karte')).toBe('running')
+    expect(runStatusOf('wartend')).toBe('queued')
+    expect(runStatusOf('unbeteiligt')).toBe('idle')
+  })
+
+  it('der letzte zaehlt: einer nach dem anderen faellt weg, erst dann ist Ruhe', () => {
+    useGenerationStore.getState().setGenerating('a', true)
+    useGenerationStore.getState().setGenerating('b', true)
+    useGenerationStore.getState().setGenerating('c', true)
+    expect(runsActive()).toBe(true)
+
+    useGenerationStore.getState().setGenerating('a', false)
+    expect(runsActive()).toBe(true)
+    useGenerationStore.getState().setGenerating('b', false)
+    expect(runsActive()).toBe(true)
+    useGenerationStore.getState().setGenerating('c', false)
+    expect(runsActive()).toBe(false)
+  })
+
+  it('der aufgeschobene Dialog wartet auf den letzten und geht genau einmal auf', () => {
+    useGenerationStore.getState().setGenerating('a', true)
+    useGenerationStore.getState().setGenerating('b', true)
+    admit('local', 'a', () => {})
+    admit('local', 'c', () => {})
+
+    let shown = 0
+    whenRunsIdle(() => shown++)
+    expect(shown).toBe(0)
+
+    useGenerationStore.getState().setGenerating('b', false)
+    expect(shown).toBe(0)
+    release('c')                                     // der Wartende gibt auf
+    expect(shown).toBe(0)
+    useGenerationStore.getState().setGenerating('a', false)
+    expect(shown).toBe(1)
+
+    // Und danach nicht noch einmal, egal was sich sonst bewegt.
+    useGenerationStore.getState().setGenerating('d', true)
+    useGenerationStore.getState().setGenerating('d', false)
+    expect(shown).toBe(1)
+  })
+
+  it('GEGENPROBE: ein Chat, in dem nichts laeuft, faerbt die Nachbarn nicht ein', () => {
+    useGenerationStore.getState().setGenerating('a', true)
+    expect(runStatusOf('b')).toBe('idle')
+    expect(isRunActive('b')).toBe(false)
+  })
+})
