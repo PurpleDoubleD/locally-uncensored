@@ -156,7 +156,7 @@ describe('diagnoseBuiltinEngine', () => {
   })
 
   it('says so when the model folder itself cannot be read', async () => {
-    backend({ running: false, healthy: false }, new Error('Create built-in models dir: permission denied'))
+    backend({ running: false, healthy: false }, new Error('Create LU Engine models folder: permission denied'))
     const d = await diagnoseBuiltinEngine({ repair: true })
     expect(d.reason).toMatch(/model folder could not be read/i)
     expect(d.reason).toContain('permission denied')

@@ -592,7 +592,7 @@ pub fn builtin_models_dir() -> Result<PathBuf, String> {
     let base = dirs::data_dir().ok_or("Cannot resolve app data directory")?;
     let dir = base.join("Locally Uncensored").join("models");
     std::fs::create_dir_all(&dir)
-        .map_err(|e| format!("Create built-in models dir: {}", os_error::english(&e)))?;
+        .map_err(|e| format!("Create LU Engine models folder: {}", os_error::english(&e)))?;
     Ok(dir)
 }
 
@@ -1367,7 +1367,7 @@ fn spawn_engine_attempt(
     port: u16,
     ctx: u32,
 ) -> Result<(), StartFailure> {
-    println!("[Engine] Starting built-in llama-server on port {port}, model {model_path}");
+    println!("[Engine] Starting LU Engine llama-server on port {port}, model {model_path}");
     let mut cmd = Command::new(binary);
     cmd.args(args)
         .stdin(Stdio::null())
@@ -1818,13 +1818,13 @@ pub(crate) fn import_model_file(src: &Path, dest_dir: &Path, name: &str) -> Resu
     let target = dest_dir.join(sanitize_model_file_name(name));
     if target.exists() {
         return Err(format!(
-            "A model named {} already exists in the built-in models folder",
+            "A model named {} already exists in the LU Engine models folder",
             target.file_name().and_then(|s| s.to_str()).unwrap_or("?")
         ));
     }
     std::fs::hard_link(src, &target).map_err(|e| {
         format!(
-            "Could not link the model into the built-in folder ({e}). \
+            "Could not link the model into the LU Engine folder ({e}). \
              Linking needs source and destination on the same drive. \
              Move the models folder (Settings, Model Storage) to that drive, \
              or copy the file there yourself."
@@ -2165,7 +2165,7 @@ fn start_bundled_embed_blocking(
         ));
     }
 
-    println!("[Engine] Built-in embeddings server healthy on port {port}");
+    println!("[Engine] LU Engine embeddings server healthy on port {port}");
     Ok(serde_json::json!({
         "status": "started",
         "port": port,
@@ -2226,7 +2226,7 @@ pub(crate) fn stop_embed_locked(state: &AppState) -> bool {
     if let Some(mut embed) = guard.take() {
         let _ = embed.child.kill();
         let _ = embed.child.wait();
-        println!("[Engine] Built-in embeddings server stopped (port {})", embed.port);
+        println!("[Engine] LU Engine embeddings server stopped (port {})", embed.port);
         true
     } else {
         false

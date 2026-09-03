@@ -160,7 +160,7 @@ async function embedViaBuiltin(texts: string[], model: string): Promise<number[]
   // OpenAI shape: { data: [{ embedding: number[], index }] }. Sort by index so
   // the vectors line up with the input order even if the server reorders them.
   if (!data?.data || !Array.isArray(data.data)) {
-    throw new Error("Unexpected response from the built-in /v1/embeddings endpoint")
+    throw new Error("Unexpected response from the LU Engine /v1/embeddings endpoint")
   }
   return [...data.data]
     .sort((a: any, b: any) => (a.index ?? 0) - (b.index ?? 0))
