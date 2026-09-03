@@ -51,6 +51,29 @@ export const RECENCY_HALF_LIFE_MS = 14 * 86_400_000 // 14 days
  */
 export const RETRIEVAL_FLOOR = 0.08
 
+/**
+ * Minimum RAW cosine for the semantic signal to count as evidence on its own.
+ *
+ * RETRIEVAL_FLOOR alone cannot keep a foreign memory out, and the reason is
+ * structural: it sits on the blended score, which is normalized ACROSS THE
+ * CANDIDATE SET. The best of two unrelated memories always gets semantic = 1.0,
+ * and recency (0.15) plus the type boost (0.05) already clear 0.08 by
+ * themselves — so a fresh, entirely unrelated memory was retrieved every time.
+ * On 2026-09-03 that put two entries from a foreign dairy-farm conversation
+ * into the conclusion AND into every sub-agent of an unrelated research run.
+ *
+ * So relevance is decided on the raw signal, before normalization. The number
+ * is measured, not guessed — nomic-embed-text, German research question,
+ * 2026-09-03:
+ *
+ *   unrelated 0.454 / 0.442 · half-related 0.559 · related 0.712 · same topic 0.947
+ *
+ * 0.5 sits in the gap between "unrelated" and "half-related". Recalibrate this
+ * when the embedding model changes; the keyword hit below is the safety net
+ * that keeps a literal match alive even if the number drifts.
+ */
+export const MIN_RAW_SEMANTIC = 0.5
+
 export interface BlendCandidate {
   memory: MemoryFile
   /**
@@ -69,6 +92,13 @@ export interface BlendScored {
   semantic: number
   keyword: number
   recency: number
+  /**
+   * The same signals BEFORE normalization. `semantic`/`keyword` above only say
+   * how a candidate ranks inside its own set; these say whether it is related
+   * to the question at all, which is what the evidence rule needs.
+   */
+  rawSemantic: number
+  rawKeyword: number
 }
 
 /** A memory is "stale" when it's been superseded or explicitly flagged. */
@@ -101,6 +131,18 @@ function recencyScore(updatedAt: number, now: number): number {
  * Stale entries are excluded by default (never injected into a live prompt)
  * but the input `candidates` array is never mutated.
  */
+/**
+ * Does this candidate have any evidence of belonging to THIS question?
+ *
+ * Two independent kinds count: a shared word (bm25 > 0 means at least one
+ * query term literally occurs in the memory) or a raw cosine above the
+ * measured threshold. Recency is explicitly not evidence — being new says
+ * nothing about being relevant, and letting it decide alone was the bug.
+ */
+function istRelevant(s: BlendScored): boolean {
+  return s.rawKeyword > 0 || s.rawSemantic >= MIN_RAW_SEMANTIC
+}
+
 export function scoreMemoriesBlended(
   queryVec: number[],
   query: string,
@@ -149,10 +191,19 @@ export function scoreMemoriesBlended(
       KEYWORD_WEIGHT * keyword +
       RECENCY_WEIGHT * recency
     if (BOOSTED_TYPES.has(c.memory.type)) score += TYPE_BOOST
-    return { memory: c.memory, score, semantic, keyword, recency }
+    return {
+      memory: c.memory,
+      score,
+      semantic,
+      keyword,
+      recency,
+      rawSemantic: rawSemantic[i],
+      rawKeyword: rawKeyword[i],
+    }
   })
 
   return scored
+    .filter(istRelevant)
     .filter((s) => s.score >= RETRIEVAL_FLOOR)
     .sort((a, b) => b.score - a.score)
 }

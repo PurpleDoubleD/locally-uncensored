@@ -594,8 +594,12 @@ export const useMemoryStore = create<MemoryState>()(
           const scored = scoreMemoriesBlended(queryVec, query, blendCandidates)
           const ordered = scored.slice(0, budget.maxMemories).map(s => s.memory)
 
-          // Defensive: a degenerate blend that filtered everything out should
-          // not silently inject nothing when keyword would have found matches.
+          // An empty blend is a legitimate answer ("nothing here belongs to
+          // this question"), not a degenerate one — see MIN_RAW_SEMANTIC. We
+          // still ask the keyword path, because it is the second, independent
+          // gate: it only returns entries that share a word with the query, so
+          // it cannot re-admit what the blend just rejected as unrelated. What
+          // it CAN still catch is an entry whose embedding is missing or bad.
           if (ordered.length === 0) return fallback()
 
           return renderRememberedContext(ordered, budget.budgetTokens)

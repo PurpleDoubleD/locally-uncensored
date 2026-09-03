@@ -222,3 +222,73 @@ describe('weight normalization', () => {
     expect(ranked[0].score).toBeGreaterThan(0)
   })
 })
+
+// ── Fremdes Gedaechtnis kommt nicht ungefragt in den Prompt ──────────────
+
+describe('ein Eintrag muss zur Frage passen, nicht bloss frisch sein', () => {
+  /**
+   * Ein Persona-Lauf am 03.09.2026 recherchierte Transparenzgesetze und bekam
+   * im Fazit „Für Ihren Dairy Farm Case: Bei bilanziellen Bedenken (Land als
+   * Sicherheit)…" — aus einem fremden, aelteren Gespraech. Zwei Eintraege
+   * hingen still in jedem Prompt UND in jedem Unterauftrag. Fuer eine
+   * Recherche ist eine unbemerkte Fremdquelle im Ergebnis ein
+   * Ausschlusskriterium.
+   *
+   * Die Rechnung dahinter war eindeutig: der Riegel `RETRIEVAL_FLOOR = 0.08`
+   * sitzt auf dem GEMISCHTEN, ueber die Kandidatenmenge NORMALISIERTEN Wert.
+   * Aktualitaet allein bringt bis zu RECENCY_WEIGHT (0.15), der Typ-Bonus
+   * weitere 0.05 — ein frischer, voellig fremder Eintrag lag also immer
+   * darueber. Und weil normalisiert wird, bekommt der beste von zwei fremden
+   * Eintraegen semantisch 1.0, auch wenn seine echte Aehnlichkeit 0.45 ist.
+   *
+   * Deshalb prueft der Riegel jetzt das ROHSIGNAL, und die Zahl ist gemessen,
+   * nicht geraten (nomic-embed-text, 03.09.2026, deutsche Recherchefrage):
+   *
+   *   fremd (der echte Fall) 0.454 · fremd 0.442 · halb verwandt 0.559 ·
+   *   verwandt 0.712 · gleiches Thema 0.947
+   *
+   * Ein Stichworttreffer rettet einen Eintrag weiterhin — die Schwelle gilt
+   * fuer den Fall, dass es GAR KEINE gemeinsame Sprache gibt.
+   */
+  const vektor = (x: number, y: number) => [x, y]
+  const frage = vektor(1, 0)
+
+  const kandidat = (titel: string, inhalt: string, v: number[], updatedAt = Date.now()): BlendCandidate => ({
+    memory: mem({ title: titel, content: inhalt, updatedAt, type: 'project' }),
+    vector: v,
+  })
+
+  it('wirft einen frischen, fachfremden Eintrag hinaus', () => {
+    // cos = 0.45: genau der gemessene Wert des echten Falls.
+    const fremd = kandidat('Dairy Farm Financials', 'Dairy farm with 90 cows on organic soil.', [0.45, Math.sqrt(1 - 0.45 ** 2)])
+    expect(scoreMemoriesBlended(frage, 'Transparenzgesetz Antragsfristen Gebuehren', [fremd])).toEqual([])
+  })
+
+  it('laesst einen verwandten Eintrag durch', () => {
+    // cos = 0.71, der gemessene Wert fuer „verwandt".
+    const nah = kandidat('Transparenzrecht', 'Der Nutzer recherchiert Informationsfreiheitsgesetze.', [0.71, Math.sqrt(1 - 0.71 ** 2)])
+    expect(scoreMemoriesBlended(frage, 'Transparenzgesetz Antragsfristen', [nah])).toHaveLength(1)
+  })
+
+  it('ein Stichworttreffer rettet auch bei schwacher Aehnlichkeit', () => {
+    // Ohne diese Ausnahme faellt jeder Eintrag heraus, dessen Einbettung
+    // schwach ist, obwohl er woertlich dasselbe Wort traegt — und die
+    // Schwelle haengt am Einbettungsmodell, das jederzeit wechseln kann.
+    const woertlich = kandidat('Transparenzgesetz Hamburg', 'Antragsfristen nach dem Transparenzgesetz.', [0.45, Math.sqrt(1 - 0.45 ** 2)])
+    expect(scoreMemoriesBlended(frage, 'Transparenzgesetz Antragsfristen', [woertlich])).toHaveLength(1)
+  })
+
+  it('zwei fremde Eintraege bleiben beide draussen — auch der bessere von beiden', () => {
+    // Der Kern des Fehlers: Normalisierung macht den besten Kandidaten immer
+    // zum Treffer, egal wie fremd das ganze Feld ist.
+    const a = kandidat('Dairy Farm Financials', 'Dairy farm with 90 cows.', [0.454, Math.sqrt(1 - 0.454 ** 2)])
+    const b = kandidat('Preferred Structure Variant', 'Variant 1 is best.', [0.442, Math.sqrt(1 - 0.442 ** 2)])
+    expect(scoreMemoriesBlended(frage, 'Transparenzgesetz Antragsfristen Gebuehren', [a, b])).toEqual([])
+  })
+
+  it('ohne jede Einbettung entscheidet weiterhin das Stichwort allein', () => {
+    // Der Weg fuer Modelle ohne Vektoren darf sich nicht aendern.
+    const ohne: BlendCandidate = { memory: mem({ title: 'Transparenzgesetz', content: 'Antragsfristen' }), vector: null }
+    expect(scoreMemoriesBlended([], 'Transparenzgesetz Antragsfristen', [ohne])).toHaveLength(1)
+  })
+})
