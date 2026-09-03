@@ -4,10 +4,10 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>GLM-5.3 lokal nutzen: die ehrliche Hardware-Rechnung</title>
-<meta name="description" content="GLM-5.3-Flash ist seit dem 27. August 2026 oeffentlich, das Flaggschiff seit dem 28. August. Echte Quant-Groessen, warum das grosse Modell in llama.cpp laeuft und das kleinere Flash nicht, und die eine Einstellung, die ueber die Nutzbarkeit entscheidet.">
+<meta name="description" content="GLM-5.3-Flash ist seit dem 27. August 2026 öffentlich, das Flaggschiff seit dem 28. August. Echte Quant-Größen, warum das große Modell in llama.cpp läuft und das kleinere Flash nicht, und die eine Einstellung, die über die Nutzbarkeit entscheidet.">
 <meta name="keywords" content="glm 5.3 lokal, glm 5.3 deutsch, glm 5.3 installieren, glm 5.3 hardware, glm 5.3 vram, glm 5.3 unzensiert, unzensierte ki lokal, lokale ki deutsch, glm 5.3 flash">
 <meta property="og:title" content="GLM-5.3 lokal nutzen: die ehrliche Hardware-Rechnung">
-<meta property="og:description" content="216,7 GB fuer die kleinste grosse Fassung, 93,1 GB fuer Flash. Echte Zahlen, an den Dateien geprueft.">
+<meta property="og:description" content="216,7 GB für die kleinste große Fassung, 93,1 GB für Flash. Echte Zahlen, an den Dateien geprüft.">
 <meta property="og:image" content="https://raw.githubusercontent.com/PurpleDoubleD/locally-uncensored/master/docs/social-preview.png">
 <meta property="og:url" content="https://locallyuncensored.com/blog/glm-5-3-lokal-nutzen.html">
 <meta property="og:type" content="article">
@@ -19,7 +19,7 @@
 <meta property="article:tag" content="Anleitung">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="GLM-5.3 lokal nutzen: die ehrliche Hardware-Rechnung">
-<meta name="twitter:description" content="216,7 GB fuer die kleinste grosse Fassung, 93,1 GB fuer Flash. Echte Zahlen, an den Dateien geprueft.">
+<meta name="twitter:description" content="216,7 GB für die kleinste große Fassung, 93,1 GB für Flash. Echte Zahlen, an den Dateien geprüft.">
 <meta name="twitter:image" content="https://raw.githubusercontent.com/PurpleDoubleD/locally-uncensored/master/docs/social-preview.png">
 <link rel="canonical" href="https://locallyuncensored.com/blog/glm-5-3-lokal-nutzen.html">
 <link rel="alternate" hreflang="en" href="https://locallyuncensored.com/blog/run-glm-5-3-locally.html">
@@ -79,23 +79,23 @@
   <article>
     <h1>GLM-5.3 lokal nutzen: die ehrliche Hardware-Rechnung</h1>
 
-    <p><strong>Die kurze Antwort:</strong> auf dem Rechner, den Sie besitzen, mit hoher Wahrscheinlichkeit nicht. Die kleinste brauchbare Fassung des grossen Modells ist <strong>216,7 GB</strong>, die kleinste Fassung des leichteren GLM-5.3-Flash liegt bei <strong>93,1 GB</strong>. Das sind Downloadgroessen, noch ohne Kontext und Zwischenspeicher. Wer eine Grafikkarte mit 24 GB hat, ist bei diesem Modell nicht gemeint, und daran aendert auch keine Quantisierung etwas.</p>
+    <p><strong>Die kurze Antwort:</strong> auf dem Rechner, den Sie besitzen, mit hoher Wahrscheinlichkeit nicht. Die kleinste brauchbare Fassung des großen Modells ist <strong>216,7 GB</strong>, die kleinste Fassung des leichteren GLM-5.3-Flash liegt bei <strong>93,1 GB</strong>. Das sind Downloadgrößen, noch ohne Kontext und Zwischenspeicher. Wer eine Grafikkarte mit 24 GB hat, ist bei diesem Modell nicht gemeint, und daran ändert auch keine Quantisierung etwas.</p>
 
-    <p>Das ist die ehrliche Fassung. Der Rest dieser Seite ist die Begruendung dazu, geprueft an den echten Dateien statt an der Ankuendigung.</p>
+    <p>Das ist die ehrliche Fassung. Der Rest dieser Seite ist die Begründung dazu, geprüft an den echten Dateien statt an der Ankündigung.</p>
 
     <h2>Was erschienen ist, und wann</h2>
 
-    <p>Z.ai hat GLM-5.3 zuerst ueber die eigene Schnittstelle ausgeliefert und die Gewichte zurueckgehalten. Ein belastbares Datum fuer diesen Schnittstellenstart haben wir in keiner Primaerquelle gefunden, deshalb steht hier keines. Die Gewichte dagegen sind dokumentiert: <strong>GLM-5.3-Flash ist seit dem 27. August 2026 um 10:33 UTC oeffentlich</strong>, <strong>das Flaggschiff GLM-5.3 seit dem 28. August 2026 um 15:22 UTC</strong>. Eine Unschaerfe bleibt: das GGUF-Paket von Unsloth fuer Flash traegt den 26. August 2026, und niemand baut ein GGUF aus Gewichten, die es noch nicht gibt. Fuer Flash gilt der 26. August also als Untergrenze.</p>
+    <p>Z.ai hat GLM-5.3 zuerst über die eigene Schnittstelle ausgeliefert und die Gewichte zurückgehalten. Ein belastbares Datum für diesen Schnittstellenstart haben wir in keiner Primärquelle gefunden, deshalb steht hier keines. Die Gewichte dagegen sind dokumentiert: <strong>GLM-5.3-Flash ist seit dem 27. August 2026 um 10:33 UTC öffentlich</strong>, <strong>das Flaggschiff GLM-5.3 seit dem 28. August 2026 um 15:22 UTC</strong>. Eine Unschärfe bleibt: das GGUF-Paket von Unsloth für Flash trägt den 26. August 2026, und niemand baut ein GGUF aus Gewichten, die es noch nicht gibt. Für Flash gilt der 26. August also als Untergrenze.</p>
 
-    <p>Als Grund fuer das Zurueckhalten nennt das Unternehmen Sicherheitspruefung und Haertung, und es benennt auch, worum es dabei geht: das Modell ist deutlich besser darin geworden, Sicherheitsluecken in Software zu finden und auszunutzen. Das hilft Verteidigern und Angreifern gleichermassen, sobald die Gewichte frei verfuegbar sind.</p>
+    <p>Als Grund für das Zurückhalten nennt das Unternehmen Sicherheitsprüfung und Härtung, und es benennt auch, worum es dabei geht: das Modell ist deutlich besser darin geworden, Sicherheitslücken in Software zu finden und auszunutzen. Das hilft Verteidigern und Angreifern gleichermaßen, sobald die Gewichte frei verfügbar sind.</p>
 
-    <p>Erschienen sind zwei Modelle, und sie haben weniger gemeinsam, als der geteilte Name vermuten laesst.</p>
+    <p>Erschienen sind zwei Modelle, und sie haben weniger gemeinsam, als der geteilte Name vermuten lässt.</p>
 
     <table>
       <thead><tr><th></th><th>GLM-5.3</th><th>GLM-5.3-Flash</th></tr></thead>
       <tbody>
         <tr><td>Parameter</td><td>753,9 Milliarden</td><td>320,8 Milliarden</td></tr>
-        <tr><td>aktiv je Token</td><td>nicht veroeffentlicht</td><td>18 Milliarden</td></tr>
+        <tr><td>aktiv je Token</td><td>nicht veröffentlicht</td><td>18 Milliarden</td></tr>
         <tr><td>Kontextfenster</td><td>1.048.576 Token</td><td>1.048.576 Token</td></tr>
         <tr><td>Rohgewichte</td><td>756 GB</td><td>328 GB</td></tr>
         <tr><td>Lizenz</td><td>eigene, nicht MIT</td><td><strong>MIT</strong></td></tr>
@@ -103,15 +103,15 @@
       </tbody>
     </table>
 
-    <p>Der Lizenzunterschied wiegt schwerer, als am ersten Tag auffaellt. <strong>Flash steht unter MIT</strong>, also gewerbliche Nutzung, Veraenderung und Weitergabe ohne Rueckfrage. Das grosse Modell nicht. Es kommt unter Z.ais eigenen Bedingungen, und wer ein Produkt darauf bauen will, sollte diesen Text wirklich lesen statt ueberfliegen.</p>
+    <p>Der Lizenzunterschied wiegt schwerer, als am ersten Tag auffällt. <strong>Flash steht unter MIT</strong>, also gewerbliche Nutzung, Veränderung und Weitergabe ohne Rückfrage. Das große Modell nicht. Es kommt unter Z.ais eigenen Bedingungen, und wer ein Produkt darauf bauen will, sollte diesen Text wirklich lesen statt überfliegen.</p>
 
     <h2>Was es auf der Festplatte kostet</h2>
 
-    <p>Zuhause laeuft niemand die Rohgewichte. Man nimmt eine quantisierte Fassung, und die lagen innerhalb weniger Stunden bereit. Das Unsloth-Paket fuer Flash traegt den 26. August 2026, das fuer das Flaggschiff den 28. August, und seit dem 2. September 2026 gibt es MLX-Fassungen des Flaggschiffs als <code>mlx-community/GLM-5.3-4bit</code>. Die folgenden Zahlen sind die tatsaechlichen Groessen der Unsloth-Pakete, gelesen am Abend des 28. August 2026.</p>
+    <p>Zuhause läuft niemand die Rohgewichte. Man nimmt eine quantisierte Fassung, und die lagen innerhalb weniger Stunden bereit. Das Unsloth-Paket für Flash trägt den 26. August 2026, das für das Flaggschiff den 28. August, und seit dem 2. September 2026 gibt es MLX-Fassungen des Flaggschiffs als <code>mlx-community/GLM-5.3-4bit</code>. Die folgenden Zahlen sind die tatsächlichen Größen der Unsloth-Pakete, gelesen am Abend des 28. August 2026.</p>
 
-    <h3>GLM-5.3, das grosse Modell</h3>
+    <h3>GLM-5.3, das große Modell</h3>
     <table>
-      <thead><tr><th>Quant</th><th>Downloadgroesse</th><th>realistisch fuer</th></tr></thead>
+      <thead><tr><th>Quant</th><th>Downloadgröße</th><th>realistisch für</th></tr></thead>
       <tbody>
         <tr><td><strong>UD-IQ1_S</strong></td><td><strong>216,7 GB</strong></td><td>256 GB, und es wird eng</td></tr>
         <tr><td>UD-IQ1_M</td><td>228,5 GB</td><td>256 GB, mit weniger Luft</td></tr>
@@ -123,7 +123,7 @@
 
     <h3>GLM-5.3-Flash</h3>
     <table>
-      <thead><tr><th>Quant</th><th>Downloadgroesse</th><th>realistisch fuer</th></tr></thead>
+      <thead><tr><th>Quant</th><th>Downloadgröße</th><th>realistisch für</th></tr></thead>
       <tbody>
         <tr><td><strong>UD-IQ1_S</strong></td><td><strong>93,1 GB</strong></td><td>128 GB gemeinsamer Speicher</td></tr>
         <tr><td>UD-IQ1_M</td><td>97,6 GB</td><td>128 GB</td></tr>
@@ -135,47 +135,47 @@
       </tbody>
     </table>
 
-    <p>Fuer Flash gibt es eine zweite Datei, wenn das Modell Bilder ansehen soll: <code>mmproj-F16.gguf</code> mit 1,13 GB. Laden Sie sie zusammen mit dem Modell. Ohne sie ist Flash ein starkes Textmodell, das stillschweigend nichts sieht, und es gibt keine Fehlermeldung, die darauf hinweist.</p>
+    <p>Für Flash gibt es eine zweite Datei, wenn das Modell Bilder ansehen soll: <code>mmproj-F16.gguf</code> mit 1,13 GB. Laden Sie sie zusammen mit dem Modell. Ohne sie ist Flash ein starkes Textmodell, das stillschweigend nichts sieht, und es gibt keine Fehlermeldung, die darauf hinweist.</p>
 
-    <p><strong>Das sind Dateigroessen, kein Speicherbedarf.</strong> Die Gewichte sind die Untergrenze. Kontextfenster und Zwischenspeicher wollen zusaetzlichen Platz, und bei einem Modell, das mit einer Million Token wirbt, ist dieser Zwischenspeicher kein Rundungsfehler. Eine Fassung, die mit etwas Luft auf die Platte passt, passt deshalb noch lange nicht in den Arbeitsspeicher.</p>
+    <p><strong>Das sind Dateigrößen, kein Speicherbedarf.</strong> Die Gewichte sind die Untergrenze. Kontextfenster und Zwischenspeicher wollen zusätzlichen Platz, und bei einem Modell, das mit einer Million Token wirbt, ist dieser Zwischenspeicher kein Rundungsfehler. Eine Fassung, die mit etwas Luft auf die Platte passt, passt deshalb noch lange nicht in den Arbeitsspeicher.</p>
 
     <h2>Die Falle, die alles umdreht</h2>
 
-    <p><strong>Das grosse Modell mit 754 Milliarden Parametern laeuft in einem normalen, aktuellen llama.cpp. Das kleinere Flash nicht.</strong> Wer das vorher nicht weiss, verliert daran einen Nachmittag.</p>
+    <p><strong>Das große Modell mit 754 Milliarden Parametern läuft in einem normalen, aktuellen llama.cpp. Das kleinere Flash nicht.</strong> Wer das vorher nicht weiß, verliert daran einen Nachmittag.</p>
 
-    <p>Das klingt verkehrt herum, bis man den Grund kennt. GLM-5.3 ist baugleich mit GLM-5.2: dieselben 78 Schichten, dieselben 256 Experten, dasselbe Millionenfenster und exakt dieselbe Parameterzahl bis auf die letzte Stelle. Es ist derselbe Koerper mit einem anderen Nachtraining. Seine Architektur <code>glm-dsa</code> wird deshalb seit GLM-5.2 unterstuetzt und braucht nichts Neues.</p>
+    <p>Das klingt verkehrt herum, bis man den Grund kennt. GLM-5.3 ist baugleich mit GLM-5.2: dieselben 78 Schichten, dieselben 256 Experten, dasselbe Millionenfenster und exakt dieselbe Parameterzahl bis auf die letzte Stelle. Es ist derselbe Körper mit einem anderen Nachtraining. Seine Architektur <code>glm-dsa</code> wird deshalb seit GLM-5.2 unterstützt und braucht nichts Neues.</p>
 
     <p>Flash ist das wirklich Neue. Es meldet sich als <code>glm5next</code>, und diese Architektur steht <strong>nicht im Hauptzweig von llama.cpp</strong>. Die Modellkarte von Unsloth verweist stattdessen auf <a href="https://github.com/ggml-org/llama.cpp/pull/27754" rel="nofollow noopener" target="_blank">Pull Request 27754</a> oder die eigene Desktop-Anwendung.</p>
 
-    <p>Wir haben den Hauptzweig am 2. September 2026 erneut geprueft: er kennt <code>chatglm</code>, <code>glm4</code>, <code>glm4moe</code> und <code>glm-dsa</code>, aber kein <code>glm5next</code>. Pull Request 27754 war an diesem Tag noch offen. Das kann sich aendern, moeglicherweise noch bevor Sie das hier lesen. <strong>Pruefen Sie es, bevor Sie neu bauen.</strong> Wenn Ihr llama.cpp einen Flash-Download mit einem Fehler ueber eine unbekannte Architektur ablehnt, liegt es daran, und Sie haben nichts falsch eingestellt.</p>
+    <p>Wir haben den Hauptzweig am 2. September 2026 erneut geprüft: er kennt <code>chatglm</code>, <code>glm4</code>, <code>glm4moe</code> und <code>glm-dsa</code>, aber kein <code>glm5next</code>. Pull Request 27754 war an diesem Tag noch offen. Das kann sich ändern, möglicherweise noch bevor Sie das hier lesen. <strong>Prüfen Sie es, bevor Sie neu bauen.</strong> Wenn Ihr llama.cpp einen Flash-Download mit einem Fehler über eine unbekannte Architektur ablehnt, liegt es daran, und Sie haben nichts falsch eingestellt.</p>
 
-    <h2>Die eine Einstellung, die ueber das Tempo entscheidet</h2>
+    <h2>Die eine Einstellung, die über das Tempo entscheidet</h2>
 
     <p>GLM-5.3 nimmt einen Parameter <code>reasoning_effort</code> mit drei Stufen: <code>low</code>, <code>high</code> und <code>max</code>.</p>
 
-    <p>Wer ihn weglaesst, bekommt <code>max</code>. Wer sich vertippt, bekommt ebenfalls <code>max</code>. Es gibt keine mittlere Voreinstellung und keine Warnung. Bei einem Modell dieser Groesse bedeutet das langes, teures Nachdenken bei jeder einzelnen Nachricht, und es ist der haeufigste Grund, warum ein starkes Modell sich unbenutzbar anfuehlt. Fangen Sie mit <code>low</code> an und erhoehen Sie, wenn eine Aufgabe es verdient.</p>
+    <p>Wer ihn weglässt, bekommt <code>max</code>. Wer sich vertippt, bekommt ebenfalls <code>max</code>. Es gibt keine mittlere Voreinstellung und keine Warnung. Bei einem Modell dieser Größe bedeutet das langes, teures Nachdenken bei jeder einzelnen Nachricht, und es ist der häufigste Grund, warum ein starkes Modell sich unbenutzbar anfühlt. Fangen Sie mit <code>low</code> an und erhöhen Sie, wenn eine Aufgabe es verdient.</p>
 
     <h2>Beide Modelle laufen jetzt in der LU Labs Cloud</h2>
 
-    <p>Wenn die Zahlen oben Ihren Rechner ausschliessen, ist das der Normalfall und kein Versagen Ihrerseits. Es gibt einen Weg daran vorbei: beide Modelle stehen im Katalog der LU Labs Cloud. <strong>GLM-5.3-Flash liegt im Hosted-Plan und damit in jedem Plan</strong>, das Flaggschiff GLM-5.3 im Pro- und im Max-Plan. Sie tauchen in der Modellauswahl der Web-App und der Desktop-App unter Windows, Linux und Mac auf.</p>
+    <p>Wenn die Zahlen oben Ihren Rechner ausschließen, ist das der Normalfall und kein Versagen Ihrerseits. Es gibt einen Weg daran vorbei: beide Modelle stehen im Katalog der LU Labs Cloud. <strong>GLM-5.3-Flash liegt im Hosted-Plan und damit in jedem Plan</strong>, das Flaggschiff GLM-5.3 im Pro- und im Max-Plan. Sie tauchen in der Modellauswahl der Web-App und der Desktop-App unter Windows, Linux und Mac auf.</p>
 
-    <p>Weil beide Modelle vor jeder Antwort nachdenken, gibt es neben dem Brain-Knopf jetzt einen <strong>Effort</strong>-Knopf mit vier Stufen: Low, Medium, High und Max. Er steuert, wie viel das Modell vor der Antwort nachdenkt. Eine hoehere Stufe erzeugt mehr Ausgabetoken und kostet damit mehr Credits, deshalb ist Low die vernuenftige Voreinstellung und Max das, was man einer Aufgabe gibt, die es verdient. Der Knopf gilt fuer jedes Reasoning-Modell im Katalog, nicht nur fuer GLM.</p>
+    <p>Weil beide Modelle vor jeder Antwort nachdenken, sitzt neben dem Brain-Knopf jetzt ein <strong>Effort</strong>-Knopf, und der steuert, wie viel das Modell vor der Antwort nachdenkt. In der Web-App von LU Labs Cloud ist er heute schon da, in die Desktop-App kommt er mit dem nächsten Update 2.6.8 für Windows, Linux und Mac. Die meisten Reasoning-Modelle haben drei Stufen: Low, Medium und High. GLM-5.3 und GLM-5.3-Flash haben darüber noch eine vierte, Max, deshalb zeigt der Knopf bei diesen beiden vier Stufen und sonst überall drei. Er startet auf High. Eine höhere Stufe erzeugt mehr Ausgabetoken, und Ausgabetoken sind das, was am Guthaben zieht. Low ist also die Ersparnis, und Max lohnt sich für eine Aufgabe, die es verdient. Der Knopf gilt nicht nur für GLM, sondern für jedes Reasoning-Modell im Katalog.</p>
 
     <p>Werkzeuge laufen bei beiden Modellen nativ, der Agent-Modus und der Coding-Agent arbeiten also ganz normal, und Flash nimmt Bilder an.</p>
 
     <h2>Gibt es eine unzensierte Fassung</h2>
 
-    <p>Fuer Flash ja, und rechtlich sauber. Die MIT-Lizenz erlaubt Feinabstimmungen und Abliterationen ohne Rueckfrage, und die ersten Gemeinschaftsfassungen tauchten noch am Tag der Veroeffentlichung auf, darunter unzensierte GGUF-Pakete.</p>
+    <p>Für Flash ja, und rechtlich sauber. Die MIT-Lizenz erlaubt Feinabstimmungen und Abliterationen ohne Rückfrage, und die ersten Gemeinschaftsfassungen tauchten noch am Tag der Veröffentlichung auf, darunter unzensierte GGUF-Pakete.</p>
 
-    <p>Beim grossen Modell gilt Z.ais eigene Lizenz statt MIT, was Sie veroeffentlichen duerfen, richtet sich also nach diesem Text und nicht nach Gewohnheit. Und bei 216,7 GB fuer die kleinste Fassung kommt die praktische Grenze fuer fast alle ohnehin vor der rechtlichen.</p>
+    <p>Beim großen Modell gilt Z.ais eigene Lizenz statt MIT, was Sie veröffentlichen dürfen, richtet sich also nach diesem Text und nicht nach Gewohnheit. Und bei 216,7 GB für die kleinste Fassung kommt die praktische Grenze für fast alle ohnehin vor der rechtlichen.</p>
 
-    <p>Wenn es Ihnen um unzensierte KI auf dem eigenen Rechner geht, lautet die ehrliche Empfehlung: nehmen Sie ein Modell, das fuer normale Hardware gebaut ist. Unser <a href="unzensierte-ki-lokal.html">Guide zu unzensierter KI auf dem eigenen PC</a> zeigt die Modelle, die wirklich passen, und <a href="how-to-run-qwen-3-8-27b-locally.html">Qwen 3.8 27B</a> ist derzeit der beste Kompromiss fuer eine einzelne Grafikkarte.</p>
+    <p>Wenn es Ihnen um unzensierte KI auf dem eigenen Rechner geht, lautet die ehrliche Empfehlung: nehmen Sie ein Modell, das für normale Hardware gebaut ist. Unser <a href="unzensierte-ki-lokal.html">Guide zu unzensierter KI auf dem eigenen PC</a> zeigt die Modelle, die wirklich passen, und <a href="how-to-run-qwen-3-8-27b-locally.html">Qwen 3.8 27B</a> ist derzeit der beste Kompromiss für eine einzelne Grafikkarte.</p>
 
-    <h2>Was wir nicht nachgeprueft haben</h2>
+    <h2>Was wir nicht nachgeprüft haben</h2>
 
-    <p>Z.ai veroeffentlicht Verbesserungen von GLM-5.3 gegenueber GLM-5.2, darunter einen Anstieg bei CyberGym von 77,2 auf 84,5 Prozent und bei ExploitBench von 24,4 auf 54,4 Prozent. Beide Zahlen stammen vom Hersteller, aus dessen eigener Testumgebung, mit dessen Einstellungen, veroeffentlicht am Tag der Vorstellung ueber dessen eigenes Produkt.</p>
+    <p>Z.ai veröffentlicht Verbesserungen von GLM-5.3 gegenüber GLM-5.2, darunter einen Anstieg bei CyberGym von 77,2 auf 84,5 Prozent und bei ExploitBench von 24,4 auf 54,4 Prozent. Beide Zahlen stammen vom Hersteller, aus dessen eigener Testumgebung, mit dessen Einstellungen, veröffentlicht am Tag der Vorstellung über dessen eigenes Produkt.</p>
 
-    <p>Wir haben sie nicht nachgefahren, und zum Zeitpunkt dieses Textes hat das ausserhalb von Z.ai niemand getan. Behandeln Sie sie als Richtungsangabe, nicht als Beleg. Alle Angaben auf dieser Seite zu Dateigroessen, Parametern, Architekturen und Lizenzen stammen dagegen aus den Modellablagen und dem Quelltext von llama.cpp, nicht aus der Ankuendigung.</p>
+    <p>Wir haben sie nicht nachgefahren, und zum Zeitpunkt dieses Textes hat das außerhalb von Z.ai niemand getan. Behandeln Sie sie als Richtungsangabe, nicht als Beleg. Alle Angaben auf dieser Seite zu Dateigrößen, Parametern, Architekturen und Lizenzen stammen dagegen aus den Modellablagen und dem Quelltext von llama.cpp, nicht aus der Ankündigung.</p>
 
     <hr>
 
