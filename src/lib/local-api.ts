@@ -23,12 +23,12 @@ export const LOCAL_API_DEFAULT_PORT = 8129
  */
 export const BELEGTE_PORTS: Record<number, string> = {
   1234: 'LM Studio',
-  5173: 'der Vite-Entwicklungsserver',
-  5273: 'der Vite-Server dieses Experiment-Builds',
-  8127: 'die LU Engine (llama-server)',
+  5173: 'the Vite dev server',
+  5273: 'the Vite server of this experiment build',
+  8127: 'the LU Engine (llama-server)',
   8188: 'ComfyUI',
   11434: 'Ollama',
-  11435: 'der Remote-Access-Server fuers Handy',
+  11435: 'the Remote Access server for your phone',
 }
 
 export type PortUrteil =
@@ -42,11 +42,11 @@ export type PortUrteil =
  * Start scheitert, ist schlechter als einer, der gar nicht erst angeboten wird.
  */
 export function pruefePort(port: number): PortUrteil {
-  if (!Number.isInteger(port)) return { ok: false, grund: 'Der Port muss eine ganze Zahl sein.' }
-  if (port < 1024) return { ok: false, grund: 'Ports unter 1024 brauchen Administratorrechte.' }
-  if (port > 65535) return { ok: false, grund: 'Der groesste moegliche Port ist 65535.' }
+  if (!Number.isInteger(port)) return { ok: false, grund: 'The port has to be a whole number.' }
+  if (port < 1024) return { ok: false, grund: 'Ports below 1024 need administrator rights.' }
+  if (port > 65535) return { ok: false, grund: 'The highest possible port is 65535.' }
   const wem = BELEGTE_PORTS[port]
-  if (wem) return { ok: false, grund: `Port ${port} gehoert ${wem}.` }
+  if (wem) return { ok: false, grund: `Port ${port} belongs to ${wem}.` }
   return { ok: true }
 }
 
@@ -61,7 +61,7 @@ export function pruefePort(port: number): PortUrteil {
  */
 export function localApiBaseUrl(port: number, lan: boolean, lanHost?: string): string {
   if (!lan) return `http://127.0.0.1:${port}/v1`
-  return `http://${lanHost && lanHost.trim() ? lanHost.trim() : '<IP-dieses-Rechners>'}:${port}/v1`
+  return `http://${lanHost && lanHost.trim() ? lanHost.trim() : '<this-machine-IP>'}:${port}/v1`
 }
 
 /**
@@ -104,13 +104,13 @@ export function clientFelder(base: string, token: string): Array<{ feld: string;
  */
 export function reichweiteText(lan: boolean): string {
   return lan
-    ? 'Jedes Geraet in deinem Netz kann die API erreichen — auch Gaeste im selben WLAN. Das Token ist dann die einzige Grenze.'
-    : 'Nur Programme auf diesem Rechner erreichen die API. Andere Geraete im Netz nicht.'
+    ? 'Any device on your network can reach the API — guests on the same Wi-Fi included. The token is then the only boundary.'
+    : 'Only programs on this machine reach the API. Other devices on the network do not.'
 }
 
 /** Ob der aktuelle Stand ueberhaupt startbar ist. */
 export function kannStarten(token: string, port: number): PortUrteil {
-  if (!token.trim()) return { ok: false, grund: 'Ohne Token startet die API nicht. Erzeuge zuerst eines.' }
+  if (!token.trim()) return { ok: false, grund: 'The API will not start without a token. Generate one first.' }
   return pruefePort(port)
 }
 

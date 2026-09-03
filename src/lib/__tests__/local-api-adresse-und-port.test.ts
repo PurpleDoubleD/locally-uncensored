@@ -31,7 +31,7 @@ describe('Die Adresse zum Kopieren', () => {
     const ohne = localApiBaseUrl(8129, true)
     expect(mit).toBe('http://192.168.0.42:8129/v1')
     expect(ohne).not.toContain('0.0.0.0')
-    expect(ohne).toContain('<IP-dieses-Rechners>')
+    expect(ohne).toContain('<this-machine-IP>')
   })
 
   it('endet immer auf /v1, weil Clients das anhaengen erwarten', () => {
@@ -82,7 +82,7 @@ describe('Der Start', () => {
     // ausgraut, statt in einen Fehler zu laufen.
     const u = kannStarten('   ', LOCAL_API_DEFAULT_PORT)
     expect(u.ok).toBe(false)
-    expect(u.ok === false && u.grund).toContain('Token')
+    expect(u.ok === false && u.grund).toContain('token')
   })
 
   it('mit Token und freiem Port ja', () => {
@@ -114,9 +114,12 @@ describe('Was der Nutzer angezeigt bekommt', () => {
 
   it('der LAN-Hinweis sagt, wer wirklich gemeint ist', () => {
     // "andere Geraete" ist hoeflich und falsch. Es ist jedes Geraet im Netz,
-    // und in einem WLAN mit Gaesten sind das fremde.
-    expect(reichweiteText(true)).toContain('Gaeste')
-    expect(reichweiteText(false)).toContain('Nur Programme auf diesem Rechner')
+    // und in einem WLAN mit Gaesten sind das fremde. (Der Text ist am
+    // 02.09.2026 ins Englische gewechselt — siehe den Kopf von
+    // LocalApiSettings.tsx. Die Aussage ist dieselbe geblieben: er muss die
+    // Gaeste benennen, nicht nur "andere Geraete".)
+    expect(reichweiteText(true)).toContain('guests')
+    expect(reichweiteText(false)).toContain('Only programs on this machine')
   })
 })
 
@@ -162,5 +165,76 @@ describe('die CORS-Liste laesst nur herein, was benannt wurde', () => {
     expect(corsText([])).toContain('unaffected')
     expect(corsText(['http://localhost:3000'])).toBe('Open to http://localhost:3000 only.')
     expect(corsText(['a', 'b'])).toContain('2 origins')
+  })
+})
+
+// ── Die Sprache der Oberflaeche ─────────────────────────────────────────────
+//
+// Am 02.09.2026 habe ich die App im Browser aufgemacht und hingesehen: das
+// Local-API-Panel war die EINZIGE Stelle im ganzen Projekt mit deutscher
+// Oberflaeche. 8.671 gruene Tests, und keiner hat es gemeldet — die Tests
+// dieses Hauses laufen in `environment: 'node'` und rendern kein einziges
+// `.tsx`. Was hier steht, ist die Sicherung, die es haette geben muessen.
+//
+// Kommentare und Bezeichner bleiben deutsch. Das ist Hausstil und der Grund,
+// warum die Pruefung NICHT einfach nach Umlauten sucht.
+
+describe('was der Nutzer liest, ist englisch', () => {
+  const dateien = [
+    'src/lib/local-api.ts',
+    'src/components/settings/LocalApiSettings.tsx',
+  ]
+
+  /** Zeilen ohne Kommentar — nur die koennen sichtbaren Text tragen. */
+  function ohneKommentare(quelle: string): string[] {
+    const raus: string[] = []
+    let block = false
+    let imports = false
+    for (const zeile of quelle.split('\n')) {
+      const t = zeile.trim()
+      if (t.startsWith('/*')) block = true
+      if (block) { if (t.includes('*/')) block = false; continue }
+      if (t.startsWith('//') || t.startsWith('*')) continue
+      // Mehrzeilige Importlisten sehen wie Prosa aus (nur Namen und Kommas)
+      // und tragen Bezeichner, keinen Text. `kannStarten` schlug hier an.
+      if (t.startsWith('import ')) { imports = !t.includes('from '); continue }
+      if (imports) { if (t.includes('from ')) imports = false; continue }
+      raus.push(zeile)
+    }
+    return raus
+  }
+
+  it.each(dateien)('%s traegt keinen deutschen Oberflaechentext', (datei) => {
+    const quelle = readFileSync(resolve(__dirname, '../../..', datei), 'utf8')
+    // Woerter, die im Deutschen stehen und im Englischen nichts zu suchen
+    // haben. Umlaute taugen nicht als Merkmal: der Hausstil schreibt sie als
+    // ae/oe/ue, und die stehen auch in englischen Eigennamen.
+    const verdaechtig = [
+      'Rechner', 'Geraet', 'Netz erreichbar', 'Freigabe', 'Starten', 'Stoppen',
+      'Erzeuge', 'Kopieren', 'Verbergen', 'Zeigen', 'noch keines', 'gehoert',
+      'braucht', 'Lokale API',
+    ]
+    // Nur was WIRKLICH ausgegeben wird: Zeichenketten und JSX-Text. Der erste
+    // Entwurf suchte in ganzen Zeilen und schlug auf `kannStarten` an — ein
+    // Bezeichner, kein Text. Ein Waechter, der bei richtigem Code Alarm gibt,
+    // wird abgeschaltet, und dann faengt er auch das Echte nicht mehr.
+    const ausgegeben: string[] = []
+    for (const zeile of ohneKommentare(quelle)) {
+      for (const m of zeile.matchAll(/'([^']*)'|"([^"]*)"|`([^`]*)`/g)) {
+        ausgegeben.push(m[1] ?? m[2] ?? m[3] ?? '')
+      }
+      // JSX-Text ist Prosa: eine Zeile ohne Klammern, Zuweisung, Semikolon
+      // und spitze Klammern. Der Entwurf davor liess `export function
+      // kannStarten(` durch, weil er nur den Zeilenanfang ansah.
+      const t = zeile.trim()
+      if (t && !/[(){}<>=;]/.test(t)) ausgegeben.push(t)
+    }
+    const treffer: string[] = []
+    for (const text of ausgegeben) {
+      for (const w of verdaechtig) {
+        if (text.includes(w)) treffer.push(`${w}: ${text.slice(0, 80)}`)
+      }
+    }
+    expect(treffer, `deutscher Oberflaechentext in ${datei}`).toEqual([])
   })
 })

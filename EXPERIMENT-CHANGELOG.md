@@ -347,6 +347,66 @@ der Typecheck monatelang gar nichts geprüft hat.
   vergessen kann, gilt sie für jeden Knopf, den es je geben wird. Wer nach dem
   Plantext greppt, hält das für offen — deshalb steht es hier.
 
+## fix(UI) — 8.671 grüne Tests und ein Panel in der falschen Sprache
+
+Der Local-API-Durchgang in der echten Oberfläche stand seit gestern als
+„blockiert" im Protokoll: der Zugriff aufs App-Fenster war verweigert worden.
+Heute Nacht ist mir aufgefallen, dass die Sperre gar nicht nötig war — die
+Desktop-App ist eine React-Anwendung, ihr Vite-Server lauscht auf 5273, und
+der spricht HTTP. Also im Browser aufgemacht und hingesehen.
+
+Das Onboarding hängt dort in Schritt 1, weil es auf einen Tauri-Aufruf wartet,
+den ein nackter Browser nie liefert. Über `chat-settings.onboardingDone` ist
+es zu umgehen; danach rendert die vollständige Anwendung.
+
+**Und dann stand da ein deutsches Panel in einer englischen App.**
+
+`LocalApiSettings.tsx` war die **einzige** Datei im ganzen Projekt mit
+deutscher Oberfläche — gemessen, nicht geschätzt. „Lokale API", „Starten",
+„Im Netz erreichbar", „nur dieser Rechner", „Ohne Token startet die API
+nicht", „noch keines", „Kopieren". Meine neue CORS-Zeile war zusätzlich
+englisch, das Panel also inzwischen gemischt.
+
+Kein Test hat das gemeldet, und keiner konnte es: die Tests dieses Hauses
+laufen in `environment: 'node'` und rendern kein einziges `.tsx`. 8.671 grüne
+Tests, und die Oberfläche sprach die falsche Sprache. Das ist genau die Lücke,
+die im Plan unter „die untestbare React-Schicht" steht — sie ist nicht
+theoretisch.
+
+Alles auf Englisch, dazu ein Wächter, der die Wörter in **Zeichenketten und
+JSX-Text** sucht statt in ganzen Zeilen. Der erste Entwurf tat Letzteres und
+schlug sofort auf `kannStarten` an — ein Bezeichner, kein Text. Ein Wächter,
+der bei richtigem Code Alarm gibt, wird abgeschaltet, und dann fängt er auch
+das Echte nicht mehr. Deutsche Kommentare und Bezeichner bleiben; das ist
+Hausstil, und deshalb sucht die Prüfung nicht nach Umlauten.
+
+Beim Schärfen hat der Wächter dann etwas gefunden, das ich übersehen hatte:
+`<IP-dieses-Rechners>` stand als Platzhalter **in der LAN-Basisadresse, die
+der Nutzer in seinen Client kopiert**. Nicht in einem Kommentar — in dem Text,
+der bei ihm ankommt.
+
+### Der Durchgang, der als blockiert galt
+
+Danach das Feld wirklich benutzt. Eingetippt:
+
+```
+http://localhost:3000, *, http://localhost:3000/app, https://studio.example
+```
+
+Die Zeile darunter sagte: *„Open to 2 origins: http://localhost:3000,
+https://studio.example."* Der Platzhalter fiel weg, der Eintrag mit Pfad fiel
+weg, und beim Verlassen des Feldes schrieb sich der Inhalt selbst auf die
+bereinigte Liste um. Genau das, was `parseCorsOrigins` verspricht — zum ersten
+Mal nicht als Unit-Test, sondern in React, im Browser, mit echtem Zustand.
+
+**Zwei Tests hingen am deutschen Wortlaut** (`toContain('Token')`,
+`toContain('Gaeste')`). Kategorie: alte Sprache, keine Regression — die
+Aussagen sind unverändert, der LAN-Hinweis muss weiterhin die Gäste benennen.
+
+**Tore:** typecheck sauber · eslint sauber · 8.673 Frontend-Tests (vorher
+8.671) · Mutationssonde: ein einziges zurückgesetztes `title="Kopieren"`
+bringt den Wächter rot.
+
 ## feat(Katalog) — „such mehr nach uncensored, irgendwas muss es geben"
 
 Das war die Antwort auf meine Absage zu GLM 5.3 unzensiert. Sie war
