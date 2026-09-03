@@ -578,6 +578,37 @@ pub(crate) fn pip_failure_hint(kind: PipFailureKind, text: &str) -> String {
     }
 }
 
+/// What Repair says about a folder with no requirements.txt.
+///
+/// A16 (A15-2), Windows counter-check 02.09.: the sentence itself was right and
+/// arrived after 181,6 seconds, because the file was only looked at when pip
+/// was about to be pointed at it, which is after the venv has been deleted and
+/// PyTorch has been downloaded into the new one. Three minutes and two
+/// gigabytes to learn that the folder was never a ComfyUI checkout, and a
+/// half-built environment left behind for it. The check runs before any of
+/// that now, and the wording is here so the early check and the late one, kept
+/// as a guard against the file going away mid run, cannot drift apart.
+fn missing_requirements_for_repair(dir: &Path) -> String {
+    format!(
+        "The folder {} has no requirements.txt, so it is not a complete ComfyUI \
+         checkout and the environment cannot be rebuilt from it. Rename or delete \
+         that folder and install ComfyUI again.",
+        dir.display()
+    )
+}
+
+/// Everything Repair can rule out before it destroys or downloads anything.
+///
+/// One function so the order is not a matter of where a call happens to sit:
+/// this is called first in the run, and what it refuses costs the user
+/// nothing.
+fn repair_precheck(comfy_dir: &Path) -> Result<(), String> {
+    if !comfy_dir.join("requirements.txt").exists() {
+        return Err(missing_requirements_for_repair(comfy_dir));
+    }
+    Ok(())
+}
+
 /// Why a requirements.txt could not be installed, in a few words.
 ///
 /// A15, Windows Nachlauf 02.09.: a requirements.txt whose first line named a
@@ -2380,6 +2411,16 @@ pub fn repair_comfyui_env(state: State<'_, AppState>) -> Result<serde_json::Valu
         // line and the line the finished run leaves behind agree (A15).
         let mut requirements_fallback: Option<(String, &'static str)> = None;
 
+        // A16 (A15-2): before anything is deleted and before anything is
+        // downloaded. A folder with no requirements.txt is not a ComfyUI
+        // checkout, and nothing later in this run can change that, so there is
+        // no reason to spend three minutes and two gigabytes finding out, nor
+        // to throw away a venv for a rebuild that cannot finish.
+        if let Err(msg) = repair_precheck(&comfy_dir) {
+            update("error", &msg);
+            return;
+        }
+
         // A broken venv must go entirely: pip inside it would report the
         // damaged packages as already satisfied, which is the exact dead end
         // this command exists to break.
@@ -2431,16 +2472,11 @@ pub fn repair_comfyui_env(state: State<'_, AppState>) -> Result<serde_json::Valu
         }
 
         let reqs = comfy_dir.join("requirements.txt");
+        // Checked once at the top already. Kept as a guard for the file being
+        // renamed or deleted while the rebuild was running, which is a real
+        // few minutes on a slow line.
         if !reqs.exists() {
-            update(
-                "error",
-                &format!(
-                    "The folder {} has no requirements.txt, so it is not a complete ComfyUI \
-                     checkout and the environment cannot be rebuilt from it. Rename or delete \
-                     that folder and install ComfyUI again.",
-                    comfy_dir.display()
-                ),
-            );
+            update("error", &missing_requirements_for_repair(&comfy_dir));
             return;
         }
         {
@@ -5283,6 +5319,56 @@ mod tests {
         // NEGATIVE CONTROL: the extra is never bolted onto the normal channels.
         let plain = pytorch_pip_args(Some("https://download.pytorch.org/whl/cu130"), TORCH_TRIO);
         assert!(!plain.iter().any(|a| a.contains('[')), "{plain:?}");
+    }
+
+    // ── A16 (A15-2): Repair rules out the hopeless case before it spends ──
+
+    #[test]
+    fn repair_refuses_a_folder_without_requirements_before_it_spends_anything() {
+        // The counter-check renamed requirements.txt and pressed Repair. The
+        // run deleted the venv, downloaded two gigabytes of PyTorch and then,
+        // after 181,6 seconds, said the folder was never a ComfyUI checkout.
+        let tmp = tempfile::tempdir().unwrap();
+        let comfy = tmp.path().join("ComfyUI");
+        std::fs::create_dir(&comfy).unwrap();
+        std::fs::create_dir(comfy.join("venv")).unwrap();
+
+        let refused = repair_precheck(&comfy).expect_err("a folder with no requirements.txt was accepted");
+
+        assert!(refused.contains("requirements.txt"), "the file is not named: {refused}");
+        assert!(refused.contains(&comfy.display().to_string()), "the folder is not named: {refused}");
+        assert!(refused.contains("install ComfyUI again"), "no way out is offered: {refused}");
+        // Nothing was touched on the way to that answer.
+        assert!(comfy.join("venv").exists(), "the venv was removed by a run that could not finish");
+    }
+
+    #[test]
+    fn repair_lets_a_real_checkout_through() {
+        // Negative control. Without it the check above would pass on a
+        // precheck that refused every folder, which would kill Repair outright.
+        let tmp = tempfile::tempdir().unwrap();
+        let comfy = tmp.path().join("ComfyUI");
+        std::fs::create_dir(&comfy).unwrap();
+        std::fs::write(comfy.join("requirements.txt"), "torch\n").unwrap();
+
+        assert!(repair_precheck(&comfy).is_ok(), "a real ComfyUI checkout was refused");
+    }
+
+    #[test]
+    fn the_repair_precheck_really_runs_before_the_venv_and_the_download() {
+        // The weaker proof, and labelled as such: the repair body is a thread
+        // inside a Tauri command and cannot be driven from here, so the ORDER
+        // is pinned by reading this file. It catches the check drifting back
+        // down the function, which is exactly what the counter-check found.
+        let src = include_str!("install.rs");
+        let call = src.find("if let Err(msg) = repair_precheck(&comfy_dir) {")
+            .expect("Repair no longer prechecks at all");
+        let venv = src.find("\"Removing the old venv (models, outputs and custom nodes stay untouched)...\",")
+            .expect("the venv removal step is gone");
+        let torch = src.find("\"Downloading PyTorch into the fresh venv (~2 GB). Live pip output below.\",")
+            .expect("the PyTorch step is gone");
+        assert!(call < venv, "the precheck runs after the venv is deleted");
+        assert!(call < torch, "the precheck runs after the PyTorch download");
     }
 
     // ── install_custom_node helpers (#72 bob: VHS install loop) ─────────
