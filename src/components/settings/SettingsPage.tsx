@@ -2079,7 +2079,7 @@ function TroubleshootSection() {
         >
           <p className="leading-relaxed">{hinweis.titel}</p>
           {hinweis.detail && (
-            <p className="mt-1 font-mono text-[0.6rem] opacity-70 break-all">{hinweis.detail}</p>
+            <p className="mt-1 font-mono t-micro opacity-70 break-all">{hinweis.detail}</p>
           )}
         </div>
       )}
