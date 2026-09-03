@@ -20,6 +20,9 @@ import { createElement } from 'react'
 import { render, screen, cleanup, act, fireEvent } from '@testing-library/react'
 
 const activateBuiltinModel = vi.fn(async () => true)
+/** Was die Engine gerade tut. Ueberschreibbar, siehe den Fall zum toten
+ *  Prozess weiter unten. */
+const engineStatus = vi.fn(async () => ({ running: true, healthy: true, port: 8127 }))
 
 vi.mock('../../../api/backend', () => ({
   isTauri: () => true,
@@ -59,7 +62,7 @@ vi.mock('../../../api/engine', async () => {
     listBundledModels: vi.fn(async () => []),
     customModelDirs: vi.fn(async () => []),
     isManagedBuiltinActive: () => true,
-    bundledEngineStatus: vi.fn(async () => ({ running: true, healthy: true, port: 8127 })),
+    bundledEngineStatus: (...a: unknown[]) => engineStatus(...(a as [])),
     bundledEmbedStatus: vi.fn(async () => ({ running: true, healthy: true, port: 8128 })),
     startBundledEmbed: vi.fn(),
     activateBuiltinModel: (...a: unknown[]) => activateBuiltinModel(...(a as [])),
@@ -112,6 +115,8 @@ function useButtonFor(name: string): HTMLElement | null {
 beforeEach(() => {
   activateBuiltinModel.mockReset()
   activateBuiltinModel.mockResolvedValue(true)
+  engineStatus.mockReset()
+  engineStatus.mockResolvedValue({ running: true, healthy: true, port: 8127 })
   __resetLuEngineSwapLockForTests()
   useProviderStore.getState().resetProvidersToDefaults()
   useProviderStore.getState().setProviderConfig('openai', {
@@ -167,6 +172,26 @@ describe('the Use button the 2.6.8 notes promise on the Installed tile', () => {
   // Modellnamen. Fuer einen Kunden, der LU Engine benutzt und mit OpenAI
   // nichts zu tun hat, ist das verwirrend." Es ist unser Steckplatzname,
   // nicht seiner.
+  // Persona P2, 04.09.2026: nach `Stop-Process` auf den Engine-Prozess behielt
+  // genau das Modell, das lief, sein ACTIVE und verlor seinen Use-Knopf, 40
+  // bzw. 90 s lang unveraendert, waehrend das Einstellungsfenster den Tod
+  // schon nach 2 s meldete. Nach einem Absturz war ausgerechnet das zuletzt
+  // benutzte Modell das einzige, das man von hier aus nicht neu starten
+  // konnte.
+  it('gibt der aktiven Zeile ihren Use-Knopf zurueck, wenn die Engine steht', async () => {
+    engineStatus.mockResolvedValue({ running: false, healthy: false, port: 8127 })
+    await openInstalled()
+    expect(useButtonFor(ACTIVE)).not.toBeNull()
+  })
+
+  // NEGATIVKONTROLLE: laeuft die Engine, bleibt es beim alten Verhalten. Der
+  // Knopf auf der Zeile, die gerade bedient wird, waere sonst ein Angebot,
+  // etwas zu starten, das laeuft.
+  it('und nimmt ihn wieder weg, solange die Engine laeuft', async () => {
+    await openInstalled()
+    expect(useButtonFor(ACTIVE)).toBeNull()
+  })
+
   it('nennt kein Modell mit dem Steckplatz-Praefix', async () => {
     await openInstalled()
     expect(document.body.textContent).not.toContain('openai::')

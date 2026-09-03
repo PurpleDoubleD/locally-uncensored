@@ -23,6 +23,7 @@ import { customModelDirs } from '../../api/engine'
 import { counterView } from '../../lib/inventory-counter'
 import { groupInstalledByProvider, needsBackendSwitchHeading, LU_ENGINE_GROUP } from '../../lib/lu-engine-rows'
 import { isBuiltinEngineEntry } from '../../lib/lmstudio-match'
+import { useBuiltinEngineStatus, engineIsIdle } from '../../hooks/useBuiltinEngineStatus'
 import { LuEngineSwitchBar } from '../chat/LuEngineSwitchBar'
 import type { InstalledModelLike } from '../../lib/lmstudio-match'
 import type { ModelCategory, AIModel } from '../../types/models'
@@ -69,6 +70,8 @@ export function ModelManager() {
   // reload a GGUF that can be several gigabytes and come back healthy, and a
   // button that looks idle through all of that gets pressed again.
   const [usingModel, setUsingModel] = useState<string | null>(null)
+  // Dieselbe Frage, die das Einstellungsfenster stellt, und dieselbe Antwort.
+  const engineRuht = engineIsIdle(useBuiltinEngineStatus())
   const [pullOpen, setPullOpen] = useState(false)
   const [infoOpen, setInfoOpen] = useState(false)
   // Gesetzt wird das aus `{ name, ...await showModel(name) }` (unten in
@@ -471,6 +474,9 @@ export function ModelManager() {
                                   : undefined
                               }
                               useBusy={usingModel === model.name}
+                              // Steht die Engine, darf auch die aktive Zeile
+                              // wieder gestartet werden (Persona P2).
+                              engineStopped={engineRuht}
                               onDelete={() => setConfirmDelete(model.name)}
                               onInfo={() => handleInfo(model.name)}
                               canDelete={

@@ -5,12 +5,12 @@
 // (same path the model picker uses); when stopped, the next start picks the
 // values up automatically.
 
-import { useEffect, useRef, useState } from 'react'
+import { useRef, useState } from 'react'
 import { Loader2, AlertTriangle, Check, Zap } from 'lucide-react'
 import { useSettingsStore } from '../../stores/settingsStore'
-import { bundledEngineStatus, swapBundledModel, ENGINE_PORT, type EngineStatus } from '../../api/engine'
+import { bundledEngineStatus, swapBundledModel, ENGINE_PORT } from '../../api/engine'
+import { useBuiltinEngineStatus } from '../../hooks/useBuiltinEngineStatus'
 import { enginePortLine } from '../../lib/engine-port'
-import { isTauri } from '../../api/backend'
 import type { BuiltinEngineTuning } from '../../types/settings'
 import { formatCount } from '../../lib/formatters'
 
@@ -44,24 +44,10 @@ function modelNameFromPath(path: string | null): string | null {
  * is wrong about a process that is gone is worse than no display: it is the
  * answer to "why does chat not work" and it is the wrong answer.
  */
-export const SIDECAR_GONE_EVENT = 'lu-sidecar-gone'
-
-/**
- * The fallback poll, for the case where the event never lands.
- *
- * The event is the fast path and normally does the whole job. This is the belt:
- * an event lost in a reload, a listener that failed to register, a sidecar the
- * watch has not reached yet. Three seconds keeps the worst case inside the five
- * the requirement names, and the call behind it is the same status read the
- * panel already makes on mount.
- */
-export const ENGINE_STATUS_POLL_MS = 3_000
-
 export function BuiltinEngineSettings() {
   const tuning = useSettingsStore((s) => s.settings.builtinEngine)
   const updateSettings = useSettingsStore((s) => s.updateSettings)
 
-  const [status, setStatus] = useState<EngineStatus | null>(null)
   const [dirty, setDirty] = useState(false)
   const [busy, setBusy] = useState(false)
   const [applied, setApplied] = useState(false)
@@ -69,33 +55,11 @@ export function BuiltinEngineSettings() {
 
   // A restart this panel started reads the status itself when it is done, and
   // a poll landing in the middle of it would show the gap as "not running".
+  // Die Schleife selbst steht in hooks/useBuiltinEngineStatus, weil die
+  // Models-Seite dieselbe Frage stellen muss (Persona P2, 04.09.2026).
   const busyRef = useRef(false)
   busyRef.current = busy
-
-  useEffect(() => {
-    if (!isTauri()) return
-    let alive = true
-    const read = () => {
-      if (busyRef.current) return
-      bundledEngineStatus()
-        .then((s) => { if (alive) setStatus(s) })
-        .catch(() => { if (alive) setStatus(null) })
-    }
-    read()
-    const timer = setInterval(read, ENGINE_STATUS_POLL_MS)
-    // The fast path: Rust's watch reaps the dead handle and says so, and this
-    // asks again the moment it hears it, instead of waiting out the poll.
-    let unlisten: (() => void) | null = null
-    void import('@tauri-apps/api/event')
-      .then(({ listen }) => listen(SIDECAR_GONE_EVENT, () => read()))
-      .then((off) => { if (alive) unlisten = off; else off() })
-      .catch(() => {})
-    return () => {
-      alive = false
-      clearInterval(timer)
-      unlisten?.()
-    }
-  }, [])
+  const { status, setStatus } = useBuiltinEngineStatus(() => busyRef.current)
 
   const patch = (p: Partial<BuiltinEngineTuning>) => {
     updateSettings({ builtinEngine: { ...tuning, ...p } })

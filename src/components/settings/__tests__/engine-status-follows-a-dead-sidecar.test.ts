@@ -43,8 +43,12 @@ vi.mock('@tauri-apps/api/event', () => ({
   },
 }))
 
-const { BuiltinEngineSettings, ENGINE_STATUS_POLL_MS, SIDECAR_GONE_EVENT } =
-  await import('../BuiltinEngineSettings')
+const { BuiltinEngineSettings } = await import('../BuiltinEngineSettings')
+// Die Schleife wohnt seit dem 04.09.2026 im Hook, weil die Models-Seite
+// dieselbe Frage stellen muss (Persona P2). Das Fenster hier bleibt der Ort,
+// an dem sie geprueft wird, aber die Namen kommen von dort.
+const { ENGINE_STATUS_POLL_MS, SIDECAR_GONE_EVENT } =
+  await import('../../../hooks/useBuiltinEngineStatus')
 
 const RUNNING = { running: true, healthy: true, port: 8127, model_path: 'C:\\m\\Phi-4-mini-instruct-Q4_K_M.gguf', ctx: 8192 }
 const DEAD = { running: false, healthy: false, port: 8127, model_path: null, ctx: null }

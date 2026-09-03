@@ -27,6 +27,17 @@ interface Props {
    * path the tile click takes.
    */
   onUse?: () => void
+  /**
+   * Die LU Engine bedient gerade gar nichts.
+   *
+   * Persona P2, 04.09.2026: nach einem `Stop-Process` auf den Engine-Prozess
+   * behielt genau das Modell, das lief, sein ACTIVE und verlor seinen
+   * Use-Knopf, 40 bzw. 90 Sekunden lang unveraendert, waehrend das
+   * Einstellungsfenster den Tod schon nach 2 Sekunden meldete. Nach einem
+   * Absturz war ausgerechnet das zuletzt benutzte Modell das einzige, das man
+   * von hier aus nicht neu starten konnte.
+   */
+  engineStopped?: boolean
   /** While that swap runs. The engine can take seconds to load a cold GGUF. */
   useBusy?: boolean
 }
@@ -37,7 +48,7 @@ const TYPE_CONFIG = {
   video: { label: 'Video', icon: Video, color: 'text-green-400' },
 }
 
-export function ModelCard({ model, isActive, onSelect, onDelete, onInfo, canDelete = true, onUse, useBusy = false }: Props) {
+export function ModelCard({ model, isActive, onSelect, onDelete, onInfo, canDelete = true, onUse, useBusy = false, engineStopped = false }: Props) {
   const typeInfo = TYPE_CONFIG[model.type] || TYPE_CONFIG.text
   const TypeIcon = typeInfo.icon
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null)
@@ -99,7 +110,7 @@ export function ModelCard({ model, isActive, onSelect, onDelete, onInfo, canDele
             loading the GGUF, so the button stays for as long as its own swap
             runs. Dropping it there would take the Loading state off screen at
             the exact moment it is the answer to "did that work". */}
-        {onUse && (!isActive || useBusy) && (
+        {onUse && (!isActive || useBusy || engineStopped) && (
           <button
             onClick={(e) => { e.stopPropagation(); if (!useBusy) onUse() }}
             disabled={useBusy}
