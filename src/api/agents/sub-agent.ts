@@ -650,10 +650,10 @@ export function buildDelegateExecutor(
     let budget: AgentBudget
     try {
       const { useSettingsStore } = await import('../../stores/settingsStore')
-      budget = new AgentBudget(resolveSubAgentBudget(useSettingsStore.getState().settings))
+      budget = new AgentBudget(resolveSubAgentBudget(useSettingsStore.getState().settings), 'sub')
     } catch {
       // Ohne Einstellungen die Vorgabe, statt den Lauf zu verlieren.
-      budget = new AgentBudget({ ...SUB_AGENT_BUDGET })
+      budget = new AgentBudget({ ...SUB_AGENT_BUDGET }, 'sub')
     }
 
     if (!background) {

@@ -670,6 +670,7 @@ function ComfyUISettings() {
         <span className="text-[0.7rem] text-gray-700 dark:text-gray-400">Port</span>
         <div className="flex gap-1.5">
           <input
+                aria-label="Port"
             type="number"
             value={customPort || status?.port || 8188}
             onChange={e => { setCustomPort(e.target.value); setPortSuccess(false) }}
@@ -957,6 +958,7 @@ function CodexAgentSettings() {
           </div>
         </div>
         <input
+                aria-label="Maximum /loop passes"
           type="number"
           min={0}
           value={settings.loopMaxPasses}
@@ -1432,6 +1434,7 @@ export function SettingsPage() {
             <div className="flex items-center justify-between">
               <span className="t-micro text-gray-700 dark:text-gray-400">Max Tokens</span>
               <input
+                aria-label="Max Tokens"
                 type="number"
                 value={settings.maxTokens}
                 onChange={(e) => updateSettings({ maxTokens: Math.max(0, parseInt(e.target.value) || 0) })}
@@ -1447,6 +1450,7 @@ export function SettingsPage() {
             <div className="flex items-center justify-between">
               <span className="t-micro text-gray-700 dark:text-gray-400" title="Forwarded as Ollama num_ctx. 0 = provider default (Ollama defaults to 2048, which clips RAG and long chats). Bump up to use the model's full context. Ignored by cloud providers.">Context window (Ollama)</span>
               <input
+                aria-label="Context window (Ollama)"
                 type="number"
                 value={settings.contextWindowOverride ?? 0}
                 onChange={(e) => updateSettings({ contextWindowOverride: Math.max(0, parseInt(e.target.value) || 0) })}
@@ -1470,6 +1474,7 @@ export function SettingsPage() {
               >Auto-compact at</span>
               <div className="flex items-center gap-1">
                 <input
+                aria-label="Auto-compact at"
                   type="number"
                   value={Math.round((settings.autoCompactThreshold || 0) * 100)}
                   onChange={(e) => {
@@ -1527,6 +1532,7 @@ export function SettingsPage() {
             <div className="flex items-center justify-between">
               <span className="text-[0.7rem] text-gray-700 dark:text-gray-400">Image timeout (min)</span>
               <input
+                aria-label="Image timeout (min)"
                 type="number"
                 value={settings.imageGenTimeoutMinutes ?? 20}
                 onChange={(e) => updateSettings({ imageGenTimeoutMinutes: Math.min(480, Math.max(1, parseInt(e.target.value) || 20)) })}
@@ -1539,6 +1545,7 @@ export function SettingsPage() {
             <div className="flex items-center justify-between">
               <span className="text-[0.7rem] text-gray-700 dark:text-gray-400">Video timeout (min)</span>
               <input
+                aria-label="Video timeout (min)"
                 type="number"
                 value={settings.videoGenTimeoutMinutes ?? 60}
                 onChange={(e) => updateSettings({ videoGenTimeoutMinutes: Math.min(480, Math.max(1, parseInt(e.target.value) || 60)) })}
@@ -1718,6 +1725,7 @@ export function SettingsPage() {
                 Sub-agent tool calls
               </span>
               <input
+                aria-label="Sub-agent tool calls"
                 type="number"
                 value={settings.subAgentMaxToolCalls ?? 0}
                 onChange={(e) => updateSettings({ subAgentMaxToolCalls: Math.max(0, parseInt(e.target.value) || 0) })}
@@ -1734,6 +1742,7 @@ export function SettingsPage() {
                 Sub-agent steps
               </span>
               <input
+                aria-label="Sub-agent steps"
                 type="number"
                 value={settings.subAgentMaxIterations ?? 0}
                 onChange={(e) => updateSettings({ subAgentMaxIterations: Math.max(0, parseInt(e.target.value) || 0) })}

@@ -77,3 +77,49 @@ describe('AgentBudget', () => {
     expect(b.exceeded().kind).toBe('tool_calls')
   })
 })
+
+// ── Die Abbruchmeldung nennt den Regler (Persona B2) ─────────────────────
+
+describe('wer abbricht, sagt auch wo man das aendert', () => {
+  /**
+   * Persona-Lauf vom 03.09.2026, Befund 8: „Die Abbruchmeldung nennt sie
+   * nicht, sondern raet nur ‚rephrase and retry'. Ohne Suchen im
+   * Einstellungsbaum kommt da niemand hin."
+   *
+   * Er hatte recht und musste die Regler selbst finden — und sie standen
+   * damals auch noch am falschen Ort (jetzt: Settings → Agent → Sub-agents,
+   * siehe unteragenten-stehen-beim-agenten.test.ts). Eine Grenze, die man
+   * ohne Hinweis nicht findet, ist fuer den Nutzer keine Einstellung,
+   * sondern eine Wand.
+   */
+  const erschoepft = (caps: { maxToolCalls: number; maxIterations: number }, scope?: 'run' | 'sub') => {
+    const b = new AgentBudget(caps, scope)
+    // Genau bis an die Kappe, nicht darueber — sonst steht in der Meldung
+    // eine Zahl, die im Betrieb nie vorkommt.
+    for (let i = 0; i < caps.maxIterations; i++) b.addIteration()
+    return b.haltMessage()
+  }
+
+  it('der Unterauftrag nennt seinen eigenen Ort', () => {
+    const m = erschoepft({ maxToolCalls: 10, maxIterations: 5 }, 'sub')
+    expect(m).toMatch(/Settings/)
+    expect(m).toMatch(/Sub-agents/)
+  })
+
+  it('der Hauptlauf nennt seinen', () => {
+    const m = erschoepft({ maxToolCalls: 50, maxIterations: 25 }, 'run')
+    expect(m).toMatch(/Settings/)
+    expect(m).toMatch(/Generation/)
+    expect(m).not.toMatch(/Sub-agents/)
+  })
+
+  it('ohne Angabe bleibt es beim Hauptlauf — die haeufigere Herkunft', () => {
+    expect(erschoepft({ maxToolCalls: 50, maxIterations: 25 })).toMatch(/Generation/)
+  })
+
+  it('die Zahlen stehen weiterhin drin', () => {
+    // Ohne sie waere der Hinweis unbrauchbar: man will wissen, worauf man
+    // etwas anhebt, nicht nur dass es einen Regler gibt.
+    expect(erschoepft({ maxToolCalls: 10, maxIterations: 5 }, 'sub')).toMatch(/5 \/ 5|5\/5/)
+  })
+})
