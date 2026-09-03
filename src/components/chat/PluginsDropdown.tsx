@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useDismissOnEscape } from '../../hooks/useDismissOnEscape'
 import { Plug, ChevronDown, Bone, User, Users, Wrench } from 'lucide-react'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { useChatStore } from '../../stores/chatStore'
@@ -28,6 +29,7 @@ export function PluginsDropdown({
   iconOnly = false,
 }: { openUpward?: boolean; iconOnly?: boolean } = {}) {
   const [open, setOpen] = useState(false)
+  useDismissOnEscape(open, () => setOpen(false))
   const [cavemanOpen, setCavemanOpen] = useState(false)
   const [personaOpen, setPersonaOpen] = useState(false)
   const [groupOpen, setGroupOpen] = useState(false)

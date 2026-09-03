@@ -1,4 +1,5 @@
 import { useId, useState, type ReactNode } from 'react'
+import { useDismissOnEscape } from '../../hooks/useDismissOnEscape'
 import { ChevronDown, Check, Loader2, AlertTriangle } from 'lucide-react'
 import { useModelStore } from '../../stores/modelStore'
 import { useChatStore } from '../../stores/chatStore'
@@ -62,6 +63,7 @@ export function ContextDropdown({ children }: { children?: ReactNode }) {
   const override = useSettingsStore((s) => s.settings.contextWindowOverride)
   const updateSettings = useSettingsStore((s) => s.updateSettings)
   const [open, setOpen] = useState(false)
+  useDismissOnEscape(open, () => setOpen(false))
   const [busy, setBusy] = useState(false)
   // Reload failure, surfaced instead of swallowed: the engine's start error
   // (out of memory for the new ctx, port held by a stranger) is actionable,

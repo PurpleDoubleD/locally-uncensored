@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { useDismissOnEscape } from '../../hooks/useDismissOnEscape'
 import { createPortal } from 'react-dom'
 import { Brain, X, Plus, Trash2, ChevronDown, Archive } from 'lucide-react'
 import { useMemoryStore } from '../../stores/memoryStore'
@@ -43,6 +44,7 @@ export function MemoryDebugToggle() {
 }
 
 function MemoryPopover({ onClose }: { onClose: () => void }) {
+  useDismissOnEscape(true, onClose)
   const entries = useMemoryStore((s) => s.entries)
   const addMemory = useMemoryStore((s) => s.addMemory)
   const removeMemory = useMemoryStore((s) => s.removeMemory)

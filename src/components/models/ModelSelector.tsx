@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
+import { useDismissOnEscape } from '../../hooks/useDismissOnEscape'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Ban, ChevronDown, Loader2, Power, PlayCircle, Settings as SettingsIcon, Wrench, X, Cloud } from 'lucide-react'
 import { useModels } from '../../hooks/useModels'
@@ -547,6 +548,7 @@ export function ModelSelector({ openUpward = false, surface = 'chat' }: ModelSel
   const noBackendEnabled = useProviderStore((s) => noChatBackendEnabled(s.providers, appMode))
   const openSettingsAt = useUIStore((s) => s.openSettingsAt)
   const [open, setOpen] = useState(false)
+  useDismissOnEscape(open, () => setOpen(false))
   // Read by the empty-state probe below, which runs before the render that
   // computes textModels. A ref keeps it out of the effect's dependency list.
   const textModelsEmptyRef = useRef(true)

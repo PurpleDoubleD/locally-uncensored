@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useDismissOnEscape } from '../../hooks/useDismissOnEscape'
 import { ChevronDown, ShieldCheck, Zap, ClipboardList } from 'lucide-react'
 import { useChatStore } from '../../stores/chatStore'
 import { useCodexStore } from '../../stores/codexStore'
@@ -43,6 +44,7 @@ const MODE_ACTIVE_ROW: Record<CodexMode, string> = {
 
 export function CodexModeDropdown({ openUpward = false }: { openUpward?: boolean } = {}) {
   const [open, setOpen] = useState(false)
+  useDismissOnEscape(open, () => setOpen(false))
   const activeConvId = useChatStore((s) => s.activeConversationId)
   const defaultMode = useSettingsStore((s) => s.settings.codexDefaultMode)
   const modeByConversation = useCodexStore((s) => s.modeByConversation)
