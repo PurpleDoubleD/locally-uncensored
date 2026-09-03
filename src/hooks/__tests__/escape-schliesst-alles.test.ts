@@ -59,4 +59,46 @@ describe('jede aufgelegte Flaeche laesst sich mit Escape schliessen', () => {
     })
     expect(offen).toEqual([])
   })
+
+  /**
+   * Die Datei-Pruefung oben ist zu grob, und das hat GENAU EINMAL gereicht,
+   * um die Sache zu verschlafen: `ChatView.tsx` legt ZWEI Flaechen auf
+   * (Export und Tools) und kam durch, weil ganz woanders in derselben Datei
+   * ein Genehmigungsdialog auf `'Escape'` hoert. Nachgemessen am 03.09.2026
+   * im laufenden Build: das Tools-Menue im Composer blieb nach Escape offen
+   * (`aria-expanded="true"`), und ein Klick auf „New Chat" landete danach auf
+   * `DIV.fixed inset-0 z-40` statt auf dem Knopf. Zwei Personas hatten das
+   * als „schluckt Klicks" gemeldet.
+   *
+   * Also wird pro Flaeche gefragt, nicht pro Datei: wer eine Flaeche mit
+   * `onClick={() => setX(false)}` wieder wegnimmt, muss dasselbe `setX` auch
+   * aus einem Escape-Pfad heraus aufrufen.
+   */
+  const SCHLIESSER = /fixed inset-0[^>]*?onClick=\{\(\)\s*=>\s*([A-Za-z0-9_$]+)\(/g
+
+  /** Textfenster, in denen ein Aufruf als „von Escape aus" zaehlt. */
+  function escapeFenster(quelle: string): string[] {
+    const fenster: string[] = []
+    for (const m of quelle.matchAll(/useDismissOnEscape\(/g)) {
+      fenster.push(quelle.slice(m.index, m.index + 200))
+    }
+    for (const m of quelle.matchAll(/['"]Escape['"]/g)) {
+      fenster.push(quelle.slice(m.index, m.index + 300))
+    }
+    return fenster
+  }
+
+  it('jede einzelne Flaeche wird auch von Escape geschlossen, nicht nur die erste', () => {
+    const offen: string[] = []
+    for (const rel of kandidaten) {
+      if (AUSNAHMEN.has(rel)) continue
+      const q = readFileSync(join(wurzel, rel), 'utf8')
+      const fenster = escapeFenster(q)
+      for (const m of q.matchAll(SCHLIESSER)) {
+        const setzer = m[1]
+        if (!fenster.some((f) => f.includes(`${setzer}(`))) offen.push(`${rel}: ${setzer}`)
+      }
+    }
+    expect(offen).toEqual([])
+  })
 })

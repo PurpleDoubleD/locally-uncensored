@@ -13,6 +13,7 @@ import { AgentModeToggle } from './AgentModeToggle'
 import { AgentWorkspaceBadge } from './AgentWorkspaceBadge'
 import { ErrorBoundary } from '../ui/ErrorBoundary'
 import { useSettingsStore } from '../../stores/settingsStore'
+import { useDismissOnEscape } from '../../hooks/useDismissOnEscape'
 import { FileText, ChevronDown, Download, Wrench, Radio, RefreshCw, X } from 'lucide-react'
 import { PluginsDropdown } from './PluginsDropdown'
 import { ModelSelector } from '../models/ModelSelector'
@@ -65,6 +66,14 @@ export function ChatView() {
   const [exportOpen, setExportOpen] = useState(false)
   const [exportToast, setExportToast] = useState<string>('')
   const [toolsDropdownOpen, setToolsDropdownOpen] = useState(false)
+  // Beide Aufklapplisten dieser Datei legen eine volle `fixed inset-0`-Flaeche
+  // ueber die App, und beide hatten Escape nie bekommen. Der Datei-Waechter
+  // hat es uebersehen, weil weiter unten der Genehmigungsdialog auf 'Escape'
+  // hoert: eine Datei, zwei Pfade, einer gepflegt. Nachgemessen: nach Escape
+  // stand `aria-expanded="true"`, und ein Klick auf „New Chat" traf
+  // `DIV.fixed inset-0 z-40` statt den Knopf.
+  useDismissOnEscape(exportOpen, () => setExportOpen(false))
+  useDismissOnEscape(toolsDropdownOpen, () => setToolsDropdownOpen(false))
   const chatMode = useCodexStore((s) => s.chatMode)
   const setView = useUIStore((s) => s.setView)
 
