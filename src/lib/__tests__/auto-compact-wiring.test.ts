@@ -57,7 +57,7 @@ vi.mock('../compact-run', async (importOriginal) => {
   return { ...actual, runCompactSummary: vi.fn(actual.runCompactSummary) }
 })
 
-import { maybeAutoCompact } from '../run-compact-command'
+import { maybeAutoCompact, runCompactForConversation } from '../run-compact-command'
 import { runCompactSummary } from '../compact-run'
 import { resolveAgentNumCtxWithConfidence } from '../agent-num-ctx'
 import { usableThreshold, MIN_MESSAGES_TO_COMPACT, MIN_MESSAGES_SINCE_COMPACT } from '../compact-trigger'
@@ -415,9 +415,24 @@ describe('Auto-Kompaktierung, die schiefgeht, sagt es', () => {
     expect(hinweise(id)).toHaveLength(0)
   })
 
-  it('schreibt nichts in den Verlauf, wenn es geklappt hat', async () => {
-    // Der Erfolg hat seine eigene Darstellung: den Compact-Block an der
-    // Schnittstelle. Ein zusaetzlicher Hinweis waere dasselbe zweimal.
+  it('meldet den Erfolg GENAU einmal — und zwar am Ende', async () => {
+    // Diese Zusicherung hiess bis zum 03.09.2026 „schreibt nichts in den
+    // Verlauf, wenn es geklappt hat", begruendet mit: der Erfolg habe seine
+    // eigene Darstellung, den Compact-Block an der Schnittstelle, ein
+    // zusaetzlicher Hinweis waere dasselbe zweimal.
+    //
+    // Die Praemisse stimmt zur Haelfte. Den Block gibt es wirklich
+    // (CompactBlock, verankert per compactionAnchors) — aber er steht am
+    // SCHNITTPUNKT, also mitten in einem Gespraech, das gerade lang genug
+    // geworden ist, um verdichtet zu werden. Der Leser steht in diesem Moment
+    // unten am Eingabefeld, dreissig Nachrichten weiter. Eine Persona hat
+    // genau dort gestanden, den Ueberlauf komplett verpasst und ihn erst im
+    // Netzwerkverkehr gefunden.
+    //
+    // Die Sorge des alten Tests bleibt trotzdem richtig, deshalb steht sie
+    // jetzt als Zahl da: GENAU eine Notiz, nicht zwei. Der Block sagt, WO
+    // geschnitten wurde; die Notiz sagt, DASS es eben passiert ist, an der
+    // Stelle, auf die der Leser ohnehin schaut.
     setzeSchwelle(0.5)
     const id = vollesGespraech()
     zusammenfassen.mockResolvedValue({
@@ -427,7 +442,7 @@ describe('Auto-Kompaktierung, die schiefgeht, sagt es', () => {
 
     const rec = await maybeAutoCompact({ conversationId: id, activeModel: MODELL })
     expect(rec).not.toBeNull()
-    expect(hinweise(id)).toHaveLength(0)
+    expect(hinweise(id)).toHaveLength(1)
   })
 })
 
@@ -494,5 +509,84 @@ describe('Der Auto-Ausloeser rechnet gegen das SENDEfenster, nicht das Modellfen
     expect(rec).toBeNull()
     expect(fensterAufloesen).not.toHaveBeenCalled()
     expect(zusammenfassen).not.toHaveBeenCalled()
+  })
+})
+
+
+// ── Der stumme Erfolg ─────────────────────────────────────────────────────
+
+describe('Auto-Kompaktierung, die klappt, sagt es auch', () => {
+  // Eine Persona hat am 03.09.2026 ein langes Gespraech gefahren und den
+  // Ueberlauf erst im Netzwerkverkehr gefunden: im Fenster stand weiter der
+  // volle Text, geschickt wurde er nicht mehr. Ihr Satz dazu: „Ich glaube, das
+  // Werkzeug hat alles, und uebernehme falsche Zahlen in einen Artikel."
+  //
+  // Die Asymmetrie war der Fehler. Ein FEHLSCHLAG schrieb seit jeher eine
+  // sichtbare Notiz in den Verlauf — der ERFOLG schrieb nichts, obwohl genau
+  // er aendert, was das Modell noch sieht. Der Kunde erfuhr also nur, wenn es
+  // NICHT geklappt hat.
+  const zusammenfassen = vi.mocked(runCompactSummary)
+  const ZUSAMMENFASSUNG = { task: 'T', requests: 'R', progress: 'P', decisions: 'D', facts: 'F', open: 'O', rest: '' }
+
+  beforeEach(() => {
+    fensterAufloesen.mockClear()
+    zusammenfassen.mockReset()
+  })
+  afterEach(() => { vi.restoreAllMocks() })
+
+  function vollesGespraech(): string {
+    const id = seedGespraech(MIN_MESSAGES_TO_COMPACT + 4)
+    for (let i = 0; i < 40; i++) {
+      useChatStore.getState().addMessage(id, {
+        id: `lang${i}`, role: i % 2 === 0 ? 'user' : 'assistant',
+        content: 'x'.repeat(4000), timestamp: 1000 + i,
+      })
+    }
+    return id
+  }
+
+  const hinweise = (id: string) =>
+    (useChatStore.getState().conversations.find((c) => c.id === id)?.messages ?? [])
+      .filter((m) => m.role === 'system' && !!m.notice)
+
+  it('hinterlaesst eine sichtbare Notiz im Verlauf', async () => {
+    setzeSchwelle(0.5)
+    const id = vollesGespraech()
+    zusammenfassen.mockResolvedValue({ ok: true, summary: ZUSAMMENFASSUNG } as never)
+
+    const rec = await maybeAutoCompact({ conversationId: id, activeModel: MODELL })
+    expect(rec).not.toBeNull()
+
+    const n = hinweise(id)
+    expect(n).toHaveLength(1)
+    // Kein 'warn': es ist nichts schiefgegangen, es ist etwas passiert.
+    expect(n[0].notice).toBe('info')
+    expect(n[0].content).toContain('Summarised')
+    // Der Satz, der die Angst nimmt — der Verlauf ist nicht weg, nur die
+    // Nutzlast ist kuerzer. Ohne ihn liest sich die Notiz wie ein Datenverlust.
+    expect(n[0].content).toContain('The full conversation is still here')
+  })
+
+  it('die Notiz steht NACH den Nachrichten, die sie ersetzt', async () => {
+    // Am Schnittpunkt, nicht am Anfang: sonst behauptet sie, das ganze
+    // Gespraech sei zusammengefasst.
+    setzeSchwelle(0.5)
+    const id = vollesGespraech()
+    zusammenfassen.mockResolvedValue({ ok: true, summary: ZUSAMMENFASSUNG } as never)
+
+    await maybeAutoCompact({ conversationId: id, activeModel: MODELL })
+    const alle = useChatStore.getState().conversations.find((c) => c.id === id)!.messages
+    expect(alle[alle.length - 1].notice).toBe('info')
+  })
+
+  it('der manuelle Weg verdoppelt die Notiz nicht', async () => {
+    // /compact zeigt sein Ergebnis selbst an. Zwei Notizen fuer einen Vorgang
+    // waeren eine Falschmeldung ueber die Anzahl der Vorgaenge.
+    setzeSchwelle(0.5)
+    const id = vollesGespraech()
+    zusammenfassen.mockResolvedValue({ ok: true, summary: ZUSAMMENFASSUNG } as never)
+
+    await runCompactForConversation({ conversationId: id, activeModel: MODELL, trigger: 'manual' })
+    expect(hinweise(id)).toHaveLength(0)
   })
 })

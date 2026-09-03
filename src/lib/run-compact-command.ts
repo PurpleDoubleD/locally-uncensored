@@ -328,8 +328,12 @@ export async function maybeAutoCompact(opts: {
     trigger: 'auto',
     signal: opts.signal,
   })
-  if (!outcome.ok) meldeAutoFehlschlag(opts.conversationId, outcome)
-  return outcome.ok ? outcome.record : null
+  if (!outcome.ok) {
+    meldeAutoFehlschlag(opts.conversationId, outcome)
+    return null
+  }
+  meldeAutoErfolg(opts.conversationId, outcome)
+  return outcome.record
 }
 
 /**
@@ -384,6 +388,35 @@ export async function maybeAutoCompact(opts: {
  * der Nutzer sieht, und er ueberlebt einen Neustart.
  */
 const AUTO_FAIL_PREFIX = 'autocompact-fail-'
+
+/**
+ * Same prefix trick for the case that WORKED.
+ *
+ * The asymmetry was the bug. A failed auto-compaction has written a visible
+ * notice into the transcript since it existed; a successful one wrote nothing
+ * — although success is the case that changes what the model can still see.
+ * The window kept showing the full conversation, the request no longer carried
+ * it, and the only way to find out was to read the network traffic. A tester
+ * put the cost plainly on 2026-09-03: „Ich glaube, das Werkzeug hat alles, und
+ * uebernehme falsche Zahlen in einen Artikel."
+ *
+ * `notice: 'info'`, not 'warn': nothing went wrong. Something happened, and the
+ * person it happened to gets to know. The wording is `compactOutcomeMessage`,
+ * the same sentence the manual /compact has always shown — including the half
+ * that takes the fright out of it: the conversation is still here, only the
+ * payload got shorter.
+ */
+const AUTO_OK_PREFIX = 'autocompact-ok-'
+
+function meldeAutoErfolg(convId: string, outcome: CompactOutcome & { ok: true }): void {
+  useChatStore.getState().addMessage(convId, {
+    id: `${AUTO_OK_PREFIX}${outcome.record.id}`,
+    role: 'system',
+    notice: 'info',
+    content: compactOutcomeMessage(outcome),
+    timestamp: Date.now(),
+  })
+}
 
 function meldeAutoFehlschlag(convId: string, outcome: CompactOutcome & { ok: false }): void {
   if (outcome.reason === 'aborted' || outcome.reason === 'nothing-to-compact') return
