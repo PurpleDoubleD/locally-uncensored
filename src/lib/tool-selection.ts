@@ -213,6 +213,24 @@ const TOOL_GROUPS: ToolGroup[] = [
 // task turns out to need a plan is usually mid-run, several tool results after
 // the prompt that routed the catalog. Keyword-gating it would mean the agent
 // can only plan when the user happened to say "plan".
+/**
+ * Die Werkzeuge, deren Gruppe "die Nachricht handelt von diesem Rechner" sagt.
+ *
+ * Nicht dieselbe Liste wie ALWAYS_INCLUDE, und der Unterschied ist der Punkt:
+ * hier steht, WORAN man ein Projektanliegen erkennt, dort, was ein Zug immer
+ * dabei hat. Trifft eine Gruppe mit einem dieser Werkzeuge, ist die Nachricht
+ * kein "erklaer mir das mal" mehr, sondern eine Arbeit an Dateien — und dann
+ * gehoert das Web-Paar nicht ungefragt in einen Deckel mit zwei freien Plaetzen.
+ *
+ * `screenshot` fehlt bewusst: ein Bildschirmfoto sagt nichts darueber, ob es um
+ * das Projekt geht. `pr_resume` steht drin, weil ein PR immer einer ueber
+ * diesen Baum ist.
+ */
+const LOKALE_WERKZEUGE = new Set<string>([
+  'file_read', 'file_write', 'file_edit', 'file_list', 'file_search',
+  'shell_execute', 'pr_resume',
+])
+
 export const ALWAYS_INCLUDE = ['file_read', 'file_write', 'file_edit', 'todo_write']
 
 /**
@@ -248,8 +266,19 @@ export function selectRelevantTools(
   const selectedNames = new Set<string>(ALWAYS_INCLUDE)
 
   // Match tool groups by keywords
+  //
+  // `lokaleArbeit` haelt fest, ob eine der getroffenen Gruppen von Dateien
+  // oder der Shell handelt. Ohne diese Notiz ist das eine Zeile weiter unten
+  // nicht mehr erkennbar: die Gruppe fuer 'fix'/'refactor'/'edit' fuehrt
+  // file_write und file_edit, und beide stehen ohnehin in ALWAYS_INCLUDE. Ein
+  // Treffer dieser Gruppe aendert die MENGE also nicht — "fix the current bug
+  // in auth.ts" kommt am Rueckfall unten mit genau vier Namen an und ist von
+  // "erklaer mir das mal" nicht mehr zu unterscheiden. Genau daran hing der
+  // Fehler, den dieser Block behebt.
+  let lokaleArbeit = false
   for (const group of TOOL_GROUPS) {
     if (group.keywords.some(kw => msg.includes(kw))) {
+      if (group.tools.some(t => LOKALE_WERKZEUGE.has(t))) lokaleArbeit = true
       group.tools.forEach(t => selectedNames.add(t))
     }
   }
@@ -276,7 +305,31 @@ export function selectRelevantTools(
     selectedNames.add('shell_execute')
     selectedNames.add('file_list')
     selectedNames.add('file_search')
-    selectedNames.add('web_search')
+    // Web nur fuer Nachrichten, die NICHT erkennbar vom Projekt handeln — und
+    // dann als PAAR. Beide Haelften dieser Bedingung sind gemessen:
+    //
+    // Halb (web_search allein) war der Zustand bis 02.09.2026. "was ist die
+    // hauptstadt von frankreich" bekam eine Suche und keinen Weg, die Treffer
+    // zu lesen. Schwerer wiegt, dass der Hermes-Systemprompt seine Warnung an
+    // das PAAR haengt (`has('web_search') && has('web_fetch')`): "web_search
+    // returns ONLY short snippets, NOT real data." Ohne web_fetch verschwindet
+    // genau der Satz, der erklaert, warum Schnipsel keine Antwort sind.
+    //
+    // Ungefragt (das Paar auch fuer Coding-Zuege) war der erste Versuch, das
+    // zu beheben, und er kostete mehr, als er brachte. Unter dem
+    // Small-Model-Deckel (SMALL_MODEL_MAX_TOOLS = 6, davon vier belegt) bleiben
+    // zwei Plaetze. Gemessen fuer "fix the current bug in auth.ts":
+    //
+    //   vorher            … web_search, file_list
+    //   Paar ungefragt    … web_search, web_fetch     ← file_list weg
+    //
+    // Der Coding-Zug verlor damit sein letztes Werkzeug, um Dateien zu finden
+    // — dieselbe Regression, gegen die die Sperren in tool-selection.test.ts
+    // ("coding intent routing") gebaut wurden.
+    if (!lokaleArbeit) {
+      selectedNames.add('web_search')
+      selectedNames.add('web_fetch')
+    }
   }
 
   // Coding-discovery safety net (independent of the total count above). Any
@@ -295,6 +348,19 @@ export function selectRelevantTools(
     selectedNames.add('file_list')
     selectedNames.add('file_search')
   }
+
+  // Das Web-Paar bleibt zusammen — die zweite Sicherung.
+  //
+  // Der Rueckfall oben legt das Paar schon vollstaendig ab, diese Zeile faengt
+  // die anderen Wege: die Verbatim-Erwaehnung ("nimm web_search dafuer") nennt
+  // eine Haelfte, und jeder kuenftige Pfad, der das wieder tut, laeuft hier
+  // hinein statt am Nutzer. Der Grund ist derselbe wie oben — der Hermes-Prompt
+  // haengt seine Snippet-Warnung an `has('web_search') && has('web_fetch')`.
+  //
+  // NUR in diese Richtung: web_fetch kommt zu web_search, nicht umgekehrt. Wer
+  // eine URL hat, braucht keine Suche, und unter dem Small-Model-Deckel kostet
+  // jedes ungefragte Werkzeug einen von zwei freien Plaetzen.
+  if (selectedNames.has('web_search')) selectedNames.add('web_fetch')
 
   // Filter by permissions (blocked categories excluded)
   const available = allTools.filter(t => permissions[t.category] !== 'blocked')
