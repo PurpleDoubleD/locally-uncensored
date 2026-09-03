@@ -29,6 +29,7 @@ import {
   type CodexThreadStatus,
 } from '../../types/codex'
 import { beginRun, stopRun, __resetRunStopsForTests } from '../run-stop'
+import { admit, release, __resetRunLanesForTests } from '../run-lanes'
 import { useGenerationStore } from '../../stores/generationStore'
 import { useCodexStore } from '../../stores/codexStore'
 
@@ -36,6 +37,7 @@ beforeEach(() => {
   useGenerationStore.setState({ generating: {}, aborters: {} })
   useCodexStore.setState({ threads: {} })
   __resetRunStopsForTests()
+  __resetRunLanesForTests()
 })
 
 describe('die Zustandsunion bildet den echten Lauf ab', () => {
@@ -48,12 +50,16 @@ describe('die Zustandsunion bildet den echten Lauf ab', () => {
   })
 
   it('jeder Zustand hat ein Urteil — kein stilles else', () => {
-    // Die Urteilstabelle ist die Quelle der Liste. Ein siebter Zustand ohne
+    // Die Urteilstabelle ist die Quelle der Liste. Ein weiterer Zustand ohne
     // Eintrag ist ein Compilerfehler, kein `false`.
     for (const status of CODEX_THREAD_STATUSES) {
       expect(typeof isActiveCodexStatus(status)).toBe('boolean')
     }
-    expect(CODEX_THREAD_STATUSES).toHaveLength(6)
+    // Die Zahl ist eine Momentaufnahme, keine Regel. Sie stand auf 6, bis
+    // `queued` dazukam (die Spurwarteschlange, lib/run-lanes.ts). Sie bleibt
+    // trotzdem stehen: sie faengt einen Zustand, der still danebengelegt wird,
+    // ohne dass jemand hier vorbeikommt und ihn einordnet.
+    expect(CODEX_THREAD_STATUSES).toHaveLength(7)
   })
 
   it('warten auf Freigabe, Schreiben auf Platte und Abbrechen zählen als aktiv', () => {
@@ -139,6 +145,64 @@ describe('eine Stelle beantwortet die Frage — für eine Konversation', () => {
   it('GEGENPROBE: ohne Konversation gibt es nichts zu beantworten', () => {
     expect(runStatusOf(null)).toBe('idle')
     expect(isRunActive(undefined)).toBe(false)
+  })
+})
+
+describe('der eingereihte Lauf ist die dritte Quelle', () => {
+  it('wer auf die lokale Spur wartet, ist nicht idle, sonst zeigt der Chat "Senden"', () => {
+    // Der Fall in einem Satz: ein lokaler Lauf haelt die Karte, der zweite
+    // Chat hat schon gesendet und wartet. Er steht in KEINEM der beiden
+    // Speicher, also kein generating und kein Thread, weil noch nichts
+    // angefangen hat, was etwas setzen koennte.
+    admit('local', 'conv-a', () => {})
+    expect(admit('local', 'conv-b', () => {})).toBe('queued')
+
+    expect(useGenerationStore.getState().generating['conv-b']).toBeUndefined()
+    expect(useCodexStore.getState().threads['conv-b']).toBeUndefined()
+
+    expect(runStatusOf('conv-b')).toBe('queued')
+    expect(isRunActive('conv-b')).toBe(true)
+    expect(runsActive()).toBe(true)
+  })
+
+  it('der Wartende geht vor einem alten Fehler, der gilt einem beendeten Lauf', () => {
+    // Ohne die Reihenfolge stuende an einem Gespraech, dessen naechster Lauf
+    // schon gebucht ist, das Urteil des vorletzten.
+    useCodexStore.getState().initThread('conv-b', '/tmp')
+    useCodexStore.getState().setThreadStatus('conv-b', 'error')
+    expect(runStatusOf('conv-b')).toBe('error')
+
+    admit('local', 'conv-a', () => {})
+    admit('local', 'conv-b', () => {})
+    expect(runStatusOf('conv-b')).toBe('queued')
+  })
+
+  it('drankommen loescht das Warten: der Nachrueckende ist nicht mehr eingereiht', () => {
+    admit('local', 'conv-a', () => {})
+    admit('local', 'conv-b', () => {})
+    expect(runStatusOf('conv-b')).toBe('queued')
+
+    release('conv-a')
+    // conv-b haelt jetzt die Spur. Es wartet nicht mehr, und weil sein Lauf
+    // im selben Zug generating setzt, ist es 'running' statt 'idle'.
+    expect(runStatusOf('conv-b')).toBe('idle')
+    useGenerationStore.getState().setGenerating('conv-b', true)
+    expect(runStatusOf('conv-b')).toBe('running')
+  })
+
+  it('GEGENPROBE: der Halter selbst gilt nicht als eingereiht', () => {
+    // Er rechnet ja. Stuende er als 'queued' da, waere die Anzeige genau
+    // falsch herum: der laufende wartet, der wartende laeuft.
+    expect(admit('local', 'conv-a', () => {})).toBe('started')
+    expect(runStatusOf('conv-a')).toBe('idle')
+    expect(runsActive()).toBe(false)
+  })
+
+  it('GEGENPROBE: eine Cloud-Spur reiht nie ein', () => {
+    admit('cloud', 'conv-a', () => {})
+    admit('cloud', 'conv-b', () => {})
+    expect(runStatusOf('conv-b')).toBe('idle')
+    expect(runsActive()).toBe(false)
   })
 })
 
