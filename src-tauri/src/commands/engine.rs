@@ -1112,6 +1112,49 @@ fn stderr_blames_the_model_file(stderr: &str) -> bool {
 /// driver or engine build that does not know it fails at load time, and
 /// setting GPU Layers to 0 is the one setting in this app that gets the user
 /// chatting anyway.
+/// Der Anfang einer GGUF: die Marke und die Formatversion.
+const GGUF_MAGIC: &[u8; 4] = b"GGUF";
+
+/// Ab hier sind die Bytes kein Kopf mehr, sondern Muell.
+///
+/// Das ist ausdruecklich KEINE Prüfung auf "die Version, die ich kenne". Die
+/// steht heute bei 3, und eine llama.cpp, die morgen 4 liest, soll das auch
+/// duerfen: eine feste Obergrenze auf dem heutigen Stand wuerde einer
+/// neueren Engine ihre eigenen Dateien verbieten. Gesucht wird nur der Fall,
+/// in dem an dieser Stelle offensichtlich gar keine Versionsnummer steht.
+/// Die kaputte Datei aus der Messung vom 03.09.2026 meldete 684 680 038.
+const GGUF_VERSION_UNSINN: u32 = 16;
+
+/// Warum diese Datei kein Modell ist, oder None, wenn ihr Kopf in Ordnung ist.
+///
+/// Liest acht Bytes. Ein Lesefehler ist KEIN Grund: die Datei kann auf einem
+/// langsamen Netzlaufwerk liegen oder gerade geschrieben werden, und dann
+/// soll die Engine es versuchen und ihre eigene Antwort geben, statt dass
+/// diese Vorpruefung sie ersetzt.
+fn gguf_header_reason(path: &Path) -> Option<String> {
+    use std::io::Read;
+    let name = path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("this file")
+        .to_string();
+    let mut kopf = [0u8; 8];
+    let mut datei = std::fs::File::open(path).ok()?;
+    datei.read_exact(&mut kopf).ok()?;
+    if &kopf[..4] != GGUF_MAGIC {
+        return Some(format!(
+            "\"{name}\" does not start with the GGUF marker, so it is not a model file. Open Models, Discover and download it again."
+        ));
+    }
+    let version = u32::from_le_bytes([kopf[4], kopf[5], kopf[6], kopf[7]]);
+    if version == 0 || version > GGUF_VERSION_UNSINN {
+        return Some(format!(
+            "\"{name}\" carries a GGUF version of {version}, which is not a version at all. The file is damaged, most likely a download that did not finish. Open Models, Discover and download it again."
+        ));
+    }
+    None
+}
+
 /// Put `note` directly under the first paragraph, ABOVE the engine's own log.
 ///
 /// The order matters more than it looks. Persona P5 measured the message on
@@ -1242,6 +1285,16 @@ fn start_bundled_engine_blocking(
 
     if !Path::new(&model_path).exists() {
         return Err(format!("Model file not found: {model_path}"));
+    }
+
+    // Acht Bytes lesen, bevor irgendetwas angehalten wird. Persona P5 hat am
+    // 03./04.09.2026 am echten Build gemessen, was ein Klick auf eine
+    // unbrauchbare Datei kostet: die gesunde Engine wird abgeraeumt, zwei
+    // Versuche scheitern, die alte wird wieder hochgezogen, und der Nutzer
+    // sitzt 7,4 s ohne Chat da. Fuer eine Datei, deren erste acht Bytes schon
+    // sagen, dass llama.cpp sie nicht laden wird.
+    if let Some(grund) = gguf_header_reason(Path::new(&model_path)) {
+        return Err(grund);
     }
 
     // KV-slot directory next to the built-in models (GH #85). Best effort: a
@@ -3885,6 +3938,98 @@ srv    llama_server: exiting due to model loading error";
 0.00.262.723 E gguf_init_from_reader: this GGUF file is version 684680038 but this software only supports up to version 3
 0.00.262.887 E cmn  common_init_: failed to load model
 0.00.264.147 E srv  llama_server: exiting due to model loading error"#;
+
+    /// Eine Datei mit `kopf` als erste Bytes, unter einem eigenen Namen.
+    fn datei_mit(name: &str, kopf: &[u8]) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("lu-kopf-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = dir.join(format!("{name}.gguf"));
+        std::fs::write(&p, kopf).unwrap();
+        p
+    }
+
+    #[test]
+    fn ein_kaputter_kopf_wird_erkannt_bevor_irgendetwas_angehalten_wird() {
+        // Genau die Datei aus der Messung vom 03.09.2026: GGUF-Marke vorn,
+        // dahinter Muell, und die Versionsnummer las sich als 684680038.
+        let mut kopf = b"GGUF".to_vec();
+        kopf.extend_from_slice(&684_680_038u32.to_le_bytes());
+        let p = datei_mit("P5-Kaputt-Test-Q4_K_M", &kopf);
+        let grund = gguf_header_reason(&p).expect("der Kopf ist Muell");
+        assert!(grund.contains("684680038"), "{grund}");
+        assert!(grund.contains("P5-Kaputt-Test-Q4_K_M"), "{grund}");
+        assert!(grund.contains("download it again"), "{grund}");
+        // Und kein Wort ueber die Grafikkarte.
+        assert!(!grund.to_lowercase().contains("gpu"), "{grund}");
+        let _ = std::fs::remove_file(&p);
+    }
+
+    #[test]
+    fn eine_datei_ohne_gguf_marke_ist_kein_modell() {
+        let p = datei_mit("Nicht-Ein-Modell", b"PK\x03\x04abcd");
+        let grund = gguf_header_reason(&p).expect("keine Marke");
+        assert!(grund.contains("GGUF marker"), "{grund}");
+        let _ = std::fs::remove_file(&p);
+    }
+
+    #[test]
+    fn eine_gesunde_gguf_kommt_ungehindert_durch() {
+        // Negativkontrolle. Version 3 ist der heutige Stand.
+        let mut kopf = b"GGUF".to_vec();
+        kopf.extend_from_slice(&3u32.to_le_bytes());
+        let p = datei_mit("Gesund-Q4_K_M", &kopf);
+        assert_eq!(gguf_header_reason(&p), None);
+        let _ = std::fs::remove_file(&p);
+    }
+
+    #[test]
+    fn eine_kuenftige_formatversion_wird_nicht_verboten() {
+        // Die Vorpruefung sucht Muell, nicht "die Version, die ich kenne".
+        // Eine llama.cpp, die morgen Version 4 liest, soll das duerfen.
+        for v in [4u32, 5, 9, GGUF_VERSION_UNSINN] {
+            let mut kopf = b"GGUF".to_vec();
+            kopf.extend_from_slice(&v.to_le_bytes());
+            let p = datei_mit(&format!("Zukunft-v{v}"), &kopf);
+            assert_eq!(gguf_header_reason(&p), None, "Version {v} wurde verboten");
+            let _ = std::fs::remove_file(&p);
+        }
+    }
+
+    #[test]
+    fn eine_datei_die_sich_nicht_lesen_laesst_haelt_niemanden_auf() {
+        // Ein Lesefehler ist kein Urteil. Die Datei kann auf einem langsamen
+        // Netzlaufwerk liegen oder gerade geschrieben werden; dann soll die
+        // Engine es versuchen und ihre eigene Antwort geben.
+        let fehlt = std::env::temp_dir().join("lu-kopf-gibt-es-nicht.gguf");
+        let _ = std::fs::remove_file(&fehlt);
+        assert_eq!(gguf_header_reason(&fehlt), None);
+        // Und eine Datei, die kuerzer als acht Bytes ist, ebenso.
+        let kurz = datei_mit("Zu-Kurz", b"GGUF");
+        assert_eq!(gguf_header_reason(&kurz), None);
+        let _ = std::fs::remove_file(&kurz);
+    }
+
+    #[test]
+    fn der_kopf_wird_vor_dem_halt_der_laufenden_engine_gelesen() {
+        // Der Sinn der ganzen Pruefung. Steht sie hinter dem Halt, kostet ein
+        // Klick auf eine kaputte Datei weiterhin 7,4 s Chat.
+        //
+        // Der Rumpf wird begrenzt wie im Test darueber. Ein erster Anlauf las
+        // die ganze Datei und suchte darin nach zwei Zeichenketten; die
+        // stehen aber auch in diesem Test selbst, also fand er sich selbst
+        // und war immer gruen. Genau die Falle, die eine Gegenprobe aufdeckt:
+        // die Vorpruefung entfernen und nichts wurde rot.
+        let wechsel = include_str!("engine.rs")
+            .split("fn start_bundled_engine_blocking(")
+            .nth(1)
+            .expect("the switch is gone")
+            .split("\nfn ")
+            .next()
+            .unwrap();
+        let pruefung = wechsel.find("gguf_header_reason(").expect("keine Vorpruefung");
+        let halt = wechsel.find("stop_engine_locked(state);").expect("kein Halt");
+        assert!(pruefung < halt, "die Pruefung steht hinter dem Halt");
+    }
 
     #[test]
     fn eine_unlesbare_versionsnummer_ist_auch_kein_grafikkartenproblem() {
