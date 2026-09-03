@@ -109,26 +109,69 @@ export function ChatInput({ onSend, onStop, isGenerating, pendingApproval, onApp
    * desselben Fehlers, nur teurer (Arbeit weg), darum wird er beiseitegelegt
    * und beim Zurueckkommen wieder hingelegt. Bilder reisen mit dem Text, sonst
    * hinge die Anlage am falschen Satz.
+   *
+   * WIE der Wechsel bemerkt wird, ist nicht Geschmack, sondern die Stelle, an
+   * der dieser Block zweimal mit React aneinandergeriet. Er stand bis zum
+   * 03.09.2026 als Effekt hier, mit zwei Refs davor, und war der einzige rote
+   * Punkt von `npm run lint`. In Wahrheit zwei, denn eslint meldet pro
+   * Komponente nur den ersten:
+   *
+   *   1. `react-hooks/refs`, "Cannot access refs during render". Der Stand des
+   *      Feldes wurde blank im Renderkoerper in ein Ref geschrieben
+   *      (`standRef.current = { input, images }`), damit der Effekt beim
+   *      Wechsel noch an die Werte VOR dem Wechsel kam.
+   *   2. `react-hooks/set-state-in-effect`. Der Effekt rief `setInput` und
+   *      `setImages` direkt auf, also genau die Kaskade, vor der die Regel
+   *      warnt: erst ein Commit mit dem alten Entwurf, dann ein zweiter mit
+   *      dem neuen.
+   *
+   * Beide Regeln haben recht, und beide zeigen auf dieselbe Ursache: ein
+   * Effekt ist der falsche Ort. React nennt den richtigen selbst ("You Might
+   * Not Need an Effect" → Zustand anpassen, wenn sich etwas geaendert hat):
+   * der Vergleich mit dem vorigen Wert steht IM Render, und die Anpassung
+   * geschieht dort. React laeuft die Komponente sofort noch einmal, bevor es
+   * ueberhaupt etwas uebergibt.
+   *
+   * Damit fallen beide Fehler zusammen mit ihrer Ursache weg. Das Ref fuer den
+   * Stand braucht es nicht mehr: im Wechselrender fuehren `input` und `images`
+   * noch den alten Entwurf, denn geleert wird erst hier, eine Zeile weiter
+   * unten. Das ist derselbe Wert, den das Ref transportiert hat, nur ohne
+   * Umweg. Und die Kaskade entfaellt, weil der Wechsel keinen eigenen Commit
+   * mehr kostet: das Feld ist schon leer, wenn der neue Chat zum ersten Mal
+   * zu sehen ist, statt fuer einen Frame den fremden Satz zu zeigen.
+   *
+   * Die beiden Refs sind deshalb Zustand geworden. Ein Ref darf im Render
+   * nicht gelesen werden (Regel 1), und gelesen werden muessen hier beide.
    */
   const conversationId = useChatStore((s) => s.activeConversationId)
-  const entwuerfe = useRef(new Map<string, { text: string; bilder: ImageAttachment[] }>())
-  const letztesGespraech = useRef(conversationId)
-  const standRef = useRef({ input: '', images: [] as ImageAttachment[] })
-  standRef.current = { input, images }
-  useEffect(() => {
-    const vorher = letztesGespraech.current
-    if (vorher === conversationId) return
-    letztesGespraech.current = conversationId
+  const [entwuerfe, setEntwuerfe] = useState<Record<string, { text: string; bilder: ImageAttachment[] }>>({})
+  const [letztesGespraech, setLetztesGespraech] = useState(conversationId)
+  if (letztesGespraech !== conversationId) {
+    const vorher = letztesGespraech
+    setLetztesGespraech(conversationId)
     if (vorher) {
-      const { input: t, images: b } = standRef.current
-      if (t || b.length) entwuerfe.current.set(vorher, { text: t, bilder: b })
-      else entwuerfe.current.delete(vorher)
+      const text = input
+      const bilder = images
+      // Der Aktualisierer laeuft unter StrictMode zweimal und muss deshalb
+      // beim zweiten Mal dasselbe Ergebnis liefern wie beim ersten. Er
+      // rechnet nur aus `bisher`, haengt also an nichts, was er selbst
+      // veraendert.
+      setEntwuerfe((bisher) => {
+        if (text || bilder.length) return { ...bisher, [vorher]: { text, bilder } }
+        if (!(vorher in bisher)) return bisher
+        const ohne = { ...bisher }
+        delete ohne[vorher]
+        return ohne
+      })
     }
-    const zurueck = conversationId ? entwuerfe.current.get(conversationId) : undefined
+    // Gelesen wird der Stand VOR dieser Anpassung, und das ist richtig:
+    // geschrieben wurde gerade der Schluessel `vorher`, geholt wird
+    // `conversationId`, und die beiden sind hier nie dasselbe.
+    const zurueck = conversationId ? entwuerfe[conversationId] : undefined
     setInput(zurueck?.text ?? '')
     setImages(zurueck?.bilder ?? [])
     setCmdMenu([])
-  }, [conversationId])
+  }
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   // Text already in the box when dictation started. Interim + final transcripts
