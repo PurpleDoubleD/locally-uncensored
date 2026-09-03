@@ -32,6 +32,7 @@ import {
   previewLanguageFor,
 } from '../../lib/file-preview'
 import { isWithinRoot, type ExplorerNode } from '../../lib/explorer-tree'
+import { formatCount } from '../../lib/formatters'
 
 interface Props {
   node: ExplorerNode
@@ -175,7 +176,7 @@ export function FilePreview({ node, root, onClose }: Props) {
 
         {state.status === 'binary' && (
           <p className="px-2 py-2 text-[0.55rem] text-gray-400 dark:text-gray-600">
-            Binary file{state.bytes ? `, ${state.bytes.toLocaleString()} bytes` : ''}. Not previewed.
+            Binary file{state.bytes ? `, ${formatCount(state.bytes)} bytes` : ''}. Not previewed.
           </p>
         )}
 

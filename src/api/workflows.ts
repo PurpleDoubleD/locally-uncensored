@@ -20,6 +20,7 @@ import {
   inputNumber, linkTarget,
 } from '../types/comfy-graph'
 import { prop } from '../types/json-guards'
+import { formatCount } from '../lib/formatters'
 
 // ─── Validation ───
 //
@@ -739,8 +740,8 @@ export async function searchCivitai(query: string, host: string = 'civitai.com')
       if (rawDesc) descParts.push(rawDesc.slice(0, 150))
       if (item.stats) {
         const stats: string[] = []
-        if (item.stats.downloadCount) stats.push(`${item.stats.downloadCount.toLocaleString()} Downloads`)
-        if (item.stats.thumbsUpCount) stats.push(`${item.stats.thumbsUpCount.toLocaleString()} Likes`)
+        if (item.stats.downloadCount) stats.push(`${formatCount(item.stats.downloadCount)} Downloads`)
+        if (item.stats.thumbsUpCount) stats.push(`${formatCount(item.stats.thumbsUpCount)} Likes`)
         if (stats.length > 0) descParts.push(stats.join(' | '))
       }
       if (item.creator?.username) descParts.push(`by ${item.creator.username}`)

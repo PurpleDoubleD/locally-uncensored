@@ -5,6 +5,7 @@ import { useSendSizeStore } from '../../stores/sendSizeStore'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { shouldAutoCompact, autoCompactHint } from '../../lib/compact-trigger'
 import { newestCompaction, isModelVisible } from '../../lib/run-compact-command'
+import { formatCount } from '../../lib/formatters'
 
 export function TokenCounter() {
   const activeConversationId = useChatStore((s) => s.activeConversationId)
@@ -82,13 +83,13 @@ export function TokenCounter() {
         : 'model context'
   const capped = ctx.sendWindow > 0 && ctx.contextWindow > ctx.sendWindow
   const capNote = capped
-    ? `. Capped: a step sends at most ${maxTokens.toLocaleString()} of this model's ${ctx.contextWindow.toLocaleString()} tokens (Settings, send window), and tool results older than the newest step go out shortened`
+    ? `. Capped: a step sends at most ${formatCount(maxTokens)} of this model's ${formatCount(ctx.contextWindow)} tokens (Settings, send window), and tool results older than the newest step go out shortened`
     : ''
   const title = fill.source === 'built'
-    ? `Last request: ${usedTokens.toLocaleString()} / ${maxTokens.toLocaleString()} tokens, the size of the payload actually built for the last step, tool catalog, decay and compaction included${capNote}`
+    ? `Last request: ${formatCount(usedTokens)} / ${formatCount(maxTokens)} tokens, the size of the payload actually built for the last step, tool catalog, decay and compaction included${capNote}`
     : isReal
-      ? `Context: ${usedTokens.toLocaleString()} / ${maxTokens.toLocaleString()} tokens (${source}), anchored on the model's last reported usage (includes system prompt + tools + RAG); reasoning tokens are not context and aren't counted${capNote}`
-      : `Estimated: ${usedTokens.toLocaleString()} / ${maxTokens.toLocaleString()} tokens (${source}), estimate until the model reports real usage${capNote}`
+      ? `Context: ${formatCount(usedTokens)} / ${formatCount(maxTokens)} tokens (${source}), anchored on the model's last reported usage (includes system prompt + tools + RAG); reasoning tokens are not context and aren't counted${capNote}`
+      : `Estimated: ${formatCount(usedTokens)} / ${formatCount(maxTokens)} tokens (${source}), estimate until the model reports real usage${capNote}`
 
   // ── Wie weit ist es noch bis zur automatischen Kompaktierung ────────────
   //

@@ -41,6 +41,7 @@ import { shouldAutoCompact, MIN_MESSAGES_SINCE_COMPACT } from './compact-trigger
 import { effectiveSendWindow } from './send-window'
 import { useSendSizeStore } from '../stores/sendSizeStore'
 import type { CompactionRecord, Message } from '../types/chat'
+import { formatCount } from './formatters'
 
 /**
  * How many of the newest messages stay verbatim behind a summary.
@@ -160,7 +161,7 @@ export function compactOutcomeMessage(outcome: CompactOutcome): string {
   if (outcome.ok) {
     const { replaced, tokensBefore, tokensAfter } = outcome.record
     const saved = Math.max(0, tokensBefore - tokensAfter)
-    return `Summarised ${replaced} earlier message${replaced === 1 ? '' : 's'} — about ${saved.toLocaleString()} tokens less in every following request. The full conversation is still here; only what gets sent changed.`
+    return `Summarised ${replaced} earlier message${replaced === 1 ? '' : 's'}, about ${formatCount(saved)} tokens less in every following request. The full conversation is still here; only what gets sent changed.`
   }
   switch (outcome.reason) {
     case 'nothing-to-compact':

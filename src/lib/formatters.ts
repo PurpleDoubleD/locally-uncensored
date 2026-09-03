@@ -1,3 +1,22 @@
+/**
+ * Eine Zahl mit Tausendertrennern fuer die Oberflaeche.
+ *
+ * Mit fester Sprache, nicht mit der des Betriebssystems. Persona P2 hat am
+ * 04.09.2026 auf der deutschen Windows-Box gemessen, was `toLocaleString()`
+ * ohne Sprache anrichtet: die Statuszeile der Engine lautete
+ * "Engine running · Phi-4-mini-instruct-Q4_K_M · ctx 8.192". Gemeint sind
+ * 8192 Token, in einer englischen Oberflaeche liest sich "8.192" als eine
+ * Zahl kleiner als neun. Dieselbe Zahl stand zwei Zeilen tiefer im
+ * Eingabefeld richtig als 8192. Auch "9.766 downloads" in den
+ * CivitAI-Treffern war betroffen.
+ *
+ * Die Oberflaeche dieser Anwendung ist Englisch, also sind es ihre Zahlen
+ * auch. Hausregel: keine lokalisierten Systemtexte durchreichen.
+ */
+export function formatCount(n: number): string {
+  return n.toLocaleString('en-US')
+}
+
 export function formatBytes(bytes: number): string {
   if (bytes === 0) return '0 B'
   const k = 1024

@@ -12,6 +12,7 @@ import { bundledEngineStatus, swapBundledModel, ENGINE_PORT, type EngineStatus }
 import { enginePortLine } from '../../lib/engine-port'
 import { isTauri } from '../../api/backend'
 import type { BuiltinEngineTuning } from '../../types/settings'
+import { formatCount } from '../../lib/formatters'
 
 type KvType = BuiltinEngineTuning['cacheTypeK']
 
@@ -142,7 +143,7 @@ export function BuiltinEngineSettings() {
         {running ? (
           <>
             Engine running{loadedModel ? <> · <span className="text-gray-300">{loadedModel}</span></> : null}
-            {typeof status?.ctx === 'number' ? <> · ctx {status.ctx.toLocaleString()}</> : null}
+            {typeof status?.ctx === 'number' ? <> · ctx {formatCount(status.ctx)}</> : null}
           </>
         ) : (
           'Engine not running, settings apply automatically on the next start.'

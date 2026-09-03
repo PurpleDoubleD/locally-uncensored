@@ -14,6 +14,7 @@
  */
 
 import { truncateToolResult } from './truncate-tool-result'
+import { formatCount } from './formatters'
 
 /**
  * Wie viele Aufgaben eine Konversation behält.
@@ -184,7 +185,7 @@ export function describeTaskTokens(t: TaskTokens | undefined): string {
   const kopf = t.estimated
     ? 'Estimated tokens for this delegation'
     : 'Tokens for this delegation, as reported by the model'
-  return `${kopf}: ${t.prompt.toLocaleString()} in, ${t.completion.toLocaleString()} out, summed over every step of the run`
+  return `${kopf}: ${formatCount(t.prompt)} in, ${formatCount(t.completion)} out, summed over every step of the run`
 }
 
 /** Endzustände. Nur diese dürfen aus dem Ring fallen. */

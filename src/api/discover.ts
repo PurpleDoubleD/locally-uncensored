@@ -9,6 +9,7 @@ import { waitForModelsVisible } from "../lib/bundle-install"
 import type { DownloadProgress } from "../types/downloads"
 import { asNumber, asRecordArray, asString, isRecord, prop, propPath } from "../types/json-guards"
 import type { DiscoverModel, ModelBundle } from "./model-bundles"
+import { formatCount } from '../lib/formatters'
 import {
   CUSTOM_NODE_REGISTRY,
   getImageBundles, getVideoBundles, getAudioBundles, getLipsyncBundles, getMotionBundles,
@@ -1902,7 +1903,7 @@ export async function searchCivitaiModels(
       const descParts: string[] = []
       const rawDesc = (asString(prop(item, 'description')) ?? '').replace(/<[^>]*>/g, '').trim()
       if (rawDesc) descParts.push(rawDesc.slice(0, 120))
-      if (downloadCount) descParts.push(`${downloadCount.toLocaleString()} downloads`)
+      if (downloadCount) descParts.push(`${formatCount(downloadCount)} downloads`)
       if (creator) descParts.push(`by ${creator}`)
 
       return {

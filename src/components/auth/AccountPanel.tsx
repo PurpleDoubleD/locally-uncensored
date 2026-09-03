@@ -12,6 +12,7 @@ import { loginWithProvider } from '../../api/cloud/supabase'
 import { CLOUD_BASE } from '../../api/cloud/config'
 import { MONOGRAM } from '../layout/brand'
 import { openExternal } from '../../api/backend'
+import { formatCount } from '../../lib/formatters'
 
 /**
  * Run a sign-out and report what happened, in that order.
@@ -45,7 +46,7 @@ function Meter({ label, used, limit }: { label: string; used: number; limit: num
       <div className="flex items-center justify-between text-[0.65rem]">
         <span className="text-gray-600 dark:text-gray-400">{label}</span>
         <span className="text-gray-500 dark:text-gray-500 tabular-nums">
-          {used.toLocaleString()} / {limit.toLocaleString()}
+          {formatCount(used)} / {formatCount(limit)}
         </span>
       </div>
       <div className="h-1 rounded-full bg-gray-200 dark:bg-white/10 overflow-hidden">
