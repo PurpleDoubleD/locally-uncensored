@@ -19,7 +19,7 @@ use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
 use serde::Serialize;
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::state::{AppState, BundledEngine};
 
@@ -1953,6 +1953,77 @@ pub(crate) fn live_sidecar(slot: &mut Option<BundledEngine>) -> Option<(u16, Str
     slot.as_ref().map(|e| (e.port, e.model_path.clone(), e.ctx))
 }
 
+// ── The watch that tells the UI a sidecar died ───────────────────────────────
+//
+// A16, Windows counter-check 02.09.: `reap_dead_engine` was only ever reached
+// by someone ASKING, and Settings asks once, when the section is mounted. So
+// killing lu-llama-server with the panel open left "Engine running / Port:
+// 8127" on screen for 30 seconds and counting; folding the section and
+// unfolding it was the only thing that corrected it, because that asked again.
+// Reaping on a timer turns the same knowledge into something the app says by
+// itself, and the event it emits is what lets the panel be right without
+// polling the backend into the ground.
+
+/// The event a sidecar's death raises. Payload: `{ sidecar, port }`.
+pub const SIDECAR_GONE_EVENT: &str = "lu-sidecar-gone";
+
+/// Which sidecar the event is about. The chat engine has a display in
+/// Settings; the embeddings server has none, and is reported anyway so a
+/// future display, or a log reader, gets the same answer for both.
+pub(crate) const SIDECAR_ENGINE: &str = "engine";
+pub(crate) const SIDECAR_EMBED: &str = "embed";
+
+/// How often the watch looks.
+///
+/// The requirement is that the display is right within five seconds of a kill,
+/// and the UI has its own poll behind this event, so the budget is shared. A
+/// second and a half costs two `try_wait` calls and a mutex each, which is
+/// nothing next to the health probe the status command already makes on every
+/// poll, and leaves the worst case (the event lost, the poll doing the work)
+/// comfortably inside the five.
+pub(crate) const SIDECAR_WATCH_INTERVAL: Duration = Duration::from_millis(1500);
+
+/// Reap one slot and, when something really was reaped, say which port it held.
+///
+/// Split out from the loop so the decision is testable without a Tauri app:
+/// the port has to be read BEFORE the reap, because the reap is what throws
+/// the handle away.
+pub(crate) fn reaped_sidecar_port(slot: &mut Option<BundledEngine>) -> Option<u16> {
+    let port = slot.as_ref().map(|e| e.port);
+    if reap_dead_engine(slot) { port } else { None }
+}
+
+/// Start the watch. One thread for both sidecars, for the life of the app.
+///
+/// The two slots are locked one after the other and never together: everything
+/// else in this file takes exactly one of them at a time, and a watch that took
+/// both would be the only place in the process able to build a lock cycle.
+pub fn spawn_sidecar_watch(app: AppHandle) {
+    std::thread::spawn(move || {
+        loop {
+            std::thread::sleep(SIDECAR_WATCH_INTERVAL);
+            let state = app.state::<AppState>();
+            let mut gone: Vec<(&'static str, u16)> = Vec::new();
+            if let Ok(mut guard) = state.bundled_engine.lock() {
+                if let Some(port) = reaped_sidecar_port(&mut guard) {
+                    gone.push((SIDECAR_ENGINE, port));
+                }
+            }
+            if let Ok(mut guard) = state.bundled_embed.lock() {
+                if let Some(port) = reaped_sidecar_port(&mut guard) {
+                    gone.push((SIDECAR_EMBED, port));
+                }
+            }
+            for (sidecar, port) in gone {
+                let _ = app.emit(SIDECAR_GONE_EVENT, serde_json::json!({
+                    "sidecar": sidecar,
+                    "port": port,
+                }));
+            }
+        }
+    });
+}
+
 pub(crate) fn stop_engine_locked(state: &AppState) -> bool {
     let mut guard = state.bundled_engine.lock().unwrap();
     if let Some(mut engine) = guard.take() {
@@ -3049,6 +3120,69 @@ mod tests {
         let mut engine = slot.take().unwrap();
         let _ = engine.child.kill();
         let _ = engine.child.wait();
+    }
+
+    // ── A16: the watch that says a sidecar died without being asked ─────────
+
+    #[test]
+    #[cfg_attr(target_os = "windows", ignore = "uses sh")]
+    fn the_watch_names_the_port_of_a_sidecar_that_died() {
+        // What the loop does once per tick. The port has to come out of the
+        // slot before the reap clears it, which is the whole reason this is a
+        // function and not two lines inside the thread.
+        let mut child = std::process::Command::new("sh")
+            .args(["-c", "exit 0"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("spawn a child that exits immediately");
+        let _ = child.wait();
+        let mut slot = engine_around(child, DEFAULT_ENGINE_PORT);
+
+        assert_eq!(
+            reaped_sidecar_port(&mut slot),
+            Some(DEFAULT_ENGINE_PORT),
+            "the watch could not say which sidecar had gone",
+        );
+        assert!(slot.is_none(), "the handle survived its process");
+        // A second tick has nothing to report: the event fires once, not on
+        // every tick for the rest of the session.
+        assert_eq!(reaped_sidecar_port(&mut slot), None);
+    }
+
+    #[test]
+    #[cfg_attr(target_os = "windows", ignore = "uses sh")]
+    fn the_watch_stays_quiet_about_a_sidecar_that_is_still_running() {
+        // Negative control. Without it the test above would pass on a watch
+        // that announced a death on every tick and cleared the slot with it,
+        // which would take the running engine off the screen.
+        let child = std::process::Command::new("sh")
+            .args(["-c", "sleep 30"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("spawn a long lived child");
+        let mut slot = engine_around(child, DEFAULT_EMBED_PORT);
+
+        assert_eq!(reaped_sidecar_port(&mut slot), None, "a live sidecar was declared dead");
+        assert!(slot.is_some());
+
+        let mut engine = slot.take().unwrap();
+        let _ = engine.child.kill();
+        let _ = engine.child.wait();
+    }
+
+    #[test]
+    fn the_watch_looks_often_enough_to_beat_the_five_second_promise() {
+        // The display has to be right within five seconds of a kill. The tick
+        // is the coarse half of that budget (the UI's own poll is the other),
+        // so a tick slower than the promise would break it silently.
+        assert!(
+            SIDECAR_WATCH_INTERVAL <= Duration::from_secs(2),
+            "the sidecar watch ticks too slowly to keep the five second promise",
+        );
     }
 
     #[test]

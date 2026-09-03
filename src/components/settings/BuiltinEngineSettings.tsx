@@ -5,7 +5,7 @@
 // (same path the model picker uses); when stopped, the next start picks the
 // values up automatically.
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Loader2, AlertTriangle, Check, Zap } from 'lucide-react'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { bundledEngineStatus, swapBundledModel, ENGINE_PORT, type EngineStatus } from '../../api/engine'
@@ -32,6 +32,30 @@ function modelNameFromPath(path: string | null): string | null {
   return path.split(/[\\/]/).pop()?.replace(/\.gguf$/i, '') ?? null
 }
 
+/**
+ * The Rust event a sidecar's death raises (commands/engine.rs).
+ *
+ * A16, Windows counter-check 02.09.: the panel read the engine status exactly
+ * once, on mount. Kill lu-llama-server with the section standing open and the
+ * line said "Engine running · Port: 8127" for the full thirty seconds the
+ * counter-check watched, and only folding the section and unfolding it put it
+ * right, because that mounted the panel again and asked again. A display that
+ * is wrong about a process that is gone is worse than no display: it is the
+ * answer to "why does chat not work" and it is the wrong answer.
+ */
+export const SIDECAR_GONE_EVENT = 'lu-sidecar-gone'
+
+/**
+ * The fallback poll, for the case where the event never lands.
+ *
+ * The event is the fast path and normally does the whole job. This is the belt:
+ * an event lost in a reload, a listener that failed to register, a sidecar the
+ * watch has not reached yet. Three seconds keeps the worst case inside the five
+ * the requirement names, and the call behind it is the same status read the
+ * panel already makes on mount.
+ */
+export const ENGINE_STATUS_POLL_MS = 3_000
+
 export function BuiltinEngineSettings() {
   const tuning = useSettingsStore((s) => s.settings.builtinEngine)
   const updateSettings = useSettingsStore((s) => s.updateSettings)
@@ -42,9 +66,34 @@ export function BuiltinEngineSettings() {
   const [applied, setApplied] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  // A restart this panel started reads the status itself when it is done, and
+  // a poll landing in the middle of it would show the gap as "not running".
+  const busyRef = useRef(false)
+  busyRef.current = busy
+
   useEffect(() => {
     if (!isTauri()) return
-    bundledEngineStatus().then(setStatus).catch(() => setStatus(null))
+    let alive = true
+    const read = () => {
+      if (busyRef.current) return
+      bundledEngineStatus()
+        .then((s) => { if (alive) setStatus(s) })
+        .catch(() => { if (alive) setStatus(null) })
+    }
+    read()
+    const timer = setInterval(read, ENGINE_STATUS_POLL_MS)
+    // The fast path: Rust's watch reaps the dead handle and says so, and this
+    // asks again the moment it hears it, instead of waiting out the poll.
+    let unlisten: (() => void) | null = null
+    void import('@tauri-apps/api/event')
+      .then(({ listen }) => listen(SIDECAR_GONE_EVENT, () => read()))
+      .then((off) => { if (alive) unlisten = off; else off() })
+      .catch(() => {})
+    return () => {
+      alive = false
+      clearInterval(timer)
+      unlisten?.()
+    }
   }, [])
 
   const patch = (p: Partial<BuiltinEngineTuning>) => {

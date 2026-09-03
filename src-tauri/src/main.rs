@@ -406,6 +406,14 @@ fn main() {
                 });
             }
 
+            // ─── The watch on the two llama-server sidecars ───
+            // A16: a sidecar killed from outside (Task Manager, a crash, a
+            // driver reset) was only noticed when something asked for its
+            // status, and Settings asks once per mount. The watch asks on a
+            // timer and emits `lu-sidecar-gone`, so the panel can be right
+            // while it is standing open.
+            commands::engine::spawn_sidecar_watch(app.handle().clone());
+
             // ─── System Tray ───
             let show = MenuItem::with_id(app, "show", "Show", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
