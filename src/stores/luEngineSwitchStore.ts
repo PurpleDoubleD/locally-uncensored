@@ -17,8 +17,9 @@
 
 import { create } from 'zustand'
 
-/** How long the line stays before it clears itself. Long enough to read twice,
- *  short enough that it is gone by the time the user sends his next message. */
+/** How long an INFO line stays before it clears itself. Long enough to read
+ *  twice, short enough that it is gone by the time the user sends his next
+ *  message. An error line is not on this clock, see announce(). */
 export const LU_ENGINE_SWITCH_NOTE_MS = 12_000
 
 /**
@@ -61,6 +62,17 @@ export const useLuEngineSwitchStore = create<LuEngineSwitchState>((set, get) => 
     cancelPending()
     const generation = get().generation + 1
     set({ note, tone, generation })
+    // A14 fourth review: the self-clear was armed for both tones, so a failed
+    // engine start faded out after twelve seconds exactly like the harmless
+    // switch line. The two are not the same kind of sentence. The switch line
+    // reports something the user asked for and can be forgotten; the error
+    // reports a chat backend that has already changed hands with nothing
+    // listening at the other end, and the way out of it is work the user has
+    // to do (hand the slot back, unload the Ollama model that took the VRAM).
+    // A message that asks for an action must not walk away before the action.
+    // So an error stands until it is dismissed by hand or replaced by the next
+    // announcement, and the bar carries a Dismiss button for exactly that.
+    if (tone === 'error') return
     pending = setTimeout(() => {
       pending = null
       if (get().generation === generation) set({ note: null, tone: 'info' })

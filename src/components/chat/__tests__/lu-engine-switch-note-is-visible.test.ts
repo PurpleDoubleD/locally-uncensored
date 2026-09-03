@@ -115,6 +115,50 @@ describe('the line survives the pick that caused it', () => {
     expect(screen.queryByTestId('lu-engine-switch-note')).toBeNull()
   })
 
+  // A14 fourth review: the self-clear was armed for both tones, so the one
+  // line the user has to ACT on faded out on the same twelve second clock as
+  // the harmless switch note. He looks up from the keyboard, the chat backend
+  // has changed hands, nothing is listening at the other end, and the screen
+  // says nothing at all.
+  it('leaves a failed start standing past the span the switch line gets', () => {
+    vi.useFakeTimers()
+    render(createElement(LuEngineSwitchBar))
+    act(() => { useLuEngineSwitchStore.getState().announce('Couldn\'t start the LU Engine with "x": boom', 'error') })
+    act(() => { vi.advanceTimersByTime(LU_ENGINE_SWITCH_NOTE_MS * 3) })
+    const line = screen.getByTestId('lu-engine-switch-note')
+    expect(line, 'the error has to survive its own timeout').toBeTruthy()
+    expect(line.getAttribute('data-tone')).toBe('error')
+    // And no timer was armed at all, so nothing is waiting to clear it later.
+    expect(vi.getTimerCount(), 'an error must not be on a clock').toBe(0)
+  })
+
+  // NEGATIVE CONTROL in the same frame: the harmless line still goes away by
+  // itself. Turning the self-clear off for everything would leave the switch
+  // note standing over the composer for the rest of the session.
+  it('but the plain switch line on the same clock still clears itself', () => {
+    vi.useFakeTimers()
+    render(createElement(LuEngineSwitchBar))
+    act(() => { pickAnLuEngineModel() })
+    act(() => { vi.advanceTimersByTime(LU_ENGINE_SWITCH_NOTE_MS + 10) })
+    expect(screen.queryByTestId('lu-engine-switch-note')).toBeNull()
+  })
+
+  it('and the standing error still goes when the user dismisses it', async () => {
+    render(createElement(LuEngineSwitchBar))
+    await act(async () => { useLuEngineSwitchStore.getState().announce('boom', 'error') })
+    await act(async () => { screen.getByLabelText('Dismiss').click() })
+    expect(screen.queryByTestId('lu-engine-switch-note')).toBeNull()
+  })
+
+  it('and the next announcement replaces it rather than queueing behind it', async () => {
+    render(createElement(LuEngineSwitchBar))
+    await act(async () => { useLuEngineSwitchStore.getState().announce('boom', 'error') })
+    await act(async () => { pickAnLuEngineModel() })
+    const line = screen.getByTestId('lu-engine-switch-note')
+    expect(line.textContent).toContain('Switched your chat provider')
+    expect(line.getAttribute('data-tone')).toBe('info')
+  })
+
   it('is a polite live region that stays mounted, so it is really announced', async () => {
     const { container } = render(createElement(LuEngineSwitchBar))
     const region = container.querySelector('[role="status"]')
