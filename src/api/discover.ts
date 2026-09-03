@@ -178,7 +178,15 @@ export interface OrphanDownload {
  */
 export async function findOrphanDownloads(extraDirs: string[] = []): Promise<OrphanDownload[]> {
   try {
-    return await backendCall("find_orphan_downloads", { extraDirs })
+    // Die Antwort wird geprueft und nicht geglaubt. Der Aufrufer im
+    // downloadStore liest sofort `.length`, und eine Gegenstelle, die statt
+    // der Liste `null` oder gar nichts schickt (eine aeltere Rust-Seite, ein
+    // Bridge-Aufruf, der still leer zurueckkommt), erzeugte dort eine
+    // unbehandelte Zurueckweisung statt eines leeren Ergebnisses. Ein
+    // fehlgeschlagener Suchlauf ist "es liegt nichts herum", nicht ein Fehler,
+    // den der Nutzer sieht.
+    const antwort = await backendCall("find_orphan_downloads", { extraDirs })
+    return Array.isArray(antwort) ? antwort : []
   } catch (err) {
     log.warn('[discover] orphan scan failed', { err })
     return []
