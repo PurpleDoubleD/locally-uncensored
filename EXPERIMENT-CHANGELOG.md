@@ -330,7 +330,22 @@ der Typecheck monatelang gar nichts geprüft hat.
   mehr. Als Stilfrage bleibt er offen und ist hier notiert statt still
   mitgezählt.
 
-  Welle 3 unberührt.
+  **Welle 3 ebenfalls nachgemessen** (2026-09-02), weil auch diese Notiz
+  stehengeblieben war: 11 von 11 Posten erledigt.
+  Caret (`lu-caret-blink`, index.css:1510) · Skeletons (9 exportierte in
+  `ViewSkeletons.tsx`) · Druck-Rückmeldung · Copy-Feedback (8 Komponenten) ·
+  HUD-Ziffern (16 × `tabular-nums`) · Icon-Leiter (`.lu-control--icon`) ·
+  SVG-Monogramm · 2-px-Fokusring · Befehlspalette (`CommandPalette.tsx`, in
+  der AppShell montiert) · Kontextmenüs (4) · Tonalität.
+
+  Ein Posten verdient eine eigene Zeile, weil die Suche danach zuerst ins
+  Leere lief: `active:scale` findet sich **nirgends** im Quelltext. Es ist
+  trotzdem erledigt — besser als geplant sogar. Die Tailwind-Variante wurde
+  entfernt (index.css:40 nennt sie „totes Gewicht") und durch **eine** globale
+  Regel ersetzt, `:is(button, [role='button']):not(:disabled):not([aria-disabled='true']):active`
+  (index.css:849). Statt einer Klasse, die jemand an jedem neuen Knopf
+  vergessen kann, gilt sie für jeden Knopf, den es je geben wird. Wer nach dem
+  Plantext greppt, hält das für offen — deshalb steht es hier.
 
 ## feat(Katalog) — „such mehr nach uncensored, irgendwas muss es geben"
 
