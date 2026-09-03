@@ -10,6 +10,7 @@ import { canUseTools } from '../../lib/tool-support'
 import { FEATURE_FLAGS } from '../../lib/constants'
 import { AgentWorkspaceDialog } from './AgentWorkspaceDialog'
 import type { AgentWorkspace } from '../../types/agent-workspace'
+import { MOTION_S } from '../ui/motion'
 
 export function AgentModeToggle() {
   const [showNewChatModal, setShowNewChatModal] = useState(false)
@@ -153,12 +154,12 @@ export function AgentModeToggle() {
       </button>
 
       {/* New Chat Required Modal */}
-      <Modal open={showNewChatModal} onClose={() => { setShowNewChatModal(false); setNeverShowChecked(false) }} title="">
+      <Modal open={showNewChatModal} onClose={() => { setShowNewChatModal(false); setNeverShowChecked(false) }} title="" ariaLabel="New chat required">
         <div className="space-y-4">
           <motion.div
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.2 }}
+            transition={{ duration: MOTION_S.base }}
             className="text-center space-y-3"
           >
             <div className="flex justify-center">
@@ -169,7 +170,7 @@ export function AgentModeToggle() {
             </div>
 
             <h3 className="text-base font-semibold text-white">New Chat Required</h3>
-            <p className="text-[0.75rem] text-gray-400 leading-relaxed">
+            <p className="text-[12px] text-gray-400 leading-relaxed">
               Agent Mode needs to be active from the start of a conversation to work properly. Start a new chat with Agent Mode enabled.
             </p>
           </motion.div>
@@ -182,7 +183,7 @@ export function AgentModeToggle() {
               onChange={(e) => setNeverShowChecked(e.target.checked)}
               className="w-3.5 h-3.5 rounded border-white/20 bg-white/5 text-green-500 focus:ring-green-500/30 focus:ring-offset-0 cursor-pointer"
             />
-            <span className="text-[0.65rem] text-gray-500 group-hover:text-gray-400 transition-colors select-none">
+            <span className="t-micro text-gray-500 group-hover:text-gray-400 transition-colors select-none">
               Don't show this again
             </span>
           </label>

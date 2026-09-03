@@ -34,10 +34,11 @@ vi.mock('../comfyui', async (importOriginal) => {
 import { buildDynamicWorkflow, WorkflowUnavailableError } from '../dynamic-workflow'
 import { getAllNodeInfo } from '../comfyui-nodes'
 import { isI2VModel, isT2VCapable } from '../comfyui'
+import { nodeOf } from './graph-test-support'
 
-type WfNode = { class_type: string; inputs: Record<string, any> }
-const nodeOf = (wf: Record<string, any>, klass: string): [string, WfNode] | undefined =>
-  (Object.entries(wf) as [string, WfNode][]).find(([, n]) => n.class_type === klass)
+// nodeOf/classTypes/nodesOf leben jetzt in graph-test-support.ts — siehe dort,
+// warum eine Fixture als ComfyApiGraph und nicht als Record<string, any> gelesen
+// wird.
 
 // Core nodes every video family shares in these fixtures.
 const CORE = {

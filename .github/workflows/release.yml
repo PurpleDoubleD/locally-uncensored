@@ -30,7 +30,63 @@ env:
   VULKAN_SDK_VERSION: '1.4.313.2'
 
 jobs:
+  # The Latest flag comes off FIRST, before anything is gated or built.
+  #
+  # `enforce-prerelease` at the bottom of this file is the final word, and it is
+  # correct — but it runs after `gate` and `build-tauri`, so between "someone
+  # clicked Publish release" and "the flag comes off" there is a window in which
+  # GitHub has already pointed `releases/latest` at an unverified build. The
+  # download routes on lu-labs.ai follow that pointer and so does every
+  # installed updater. On 2026-08-10 that window was minutes and 2.6.4 went out
+  # through it. The audit's own first suggestion for M6 was to pull the Latest
+  # check forward rather than only to invert it; 6a472f16 did the inverting.
+  #
+  # Adding the tauri-build lane to ci.yml (Audit M6, the build gate) made that
+  # window materially longer, because `gate` now compiles and bundles the app on
+  # two platforms before `build-tauri` even starts. So the demotion happens here
+  # too, in a job with no `needs:`, which starts within seconds of the trigger.
+  #
+  # Same script, deliberately: it is idempotent and it can never undo a
+  # deliberate flip (see the header of scripts/enforce-prerelease.mjs). Running
+  # it twice in one run is two identical PATCHes tens of minutes apart, not a
+  # race. This does NOT replace enforce-prerelease: that one also has to run
+  # when the build fails, and it is what holds the promise on a re-run.
+  #
+  # Only on the `release` trigger. The window this closes is "GitHub flagged
+  # this Latest by itself, just now", which exists on `release: published` and
+  # nowhere else; on workflow_dispatch the flag is a human's verdict.
+  demote-on-arrival:
+    if: github.event_name == 'release'
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 20
+      - name: Take the Latest flag off before anything is built
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          TAG: ${{ github.event.release.tag_name }}
+          PUBLISHED_TAG: ${{ github.event.release.tag_name }}
+        run: node scripts/enforce-prerelease.mjs
+
+  # A build is not a decision — and neither is a green master. Until this job
+  # existed, `release.yml` typechecked nothing, ran no test and no lint: any
+  # commit that happened to sit on master when someone clicked "Publish release"
+  # became a signed installer, and the updater handed it to every install.
+  #
+  # Reusing ci.yml instead of restating its steps is deliberate: the release is
+  # then held to EXACTLY the checks master is held to, and a check added to CI
+  # can never silently skip the release path. `ref` pins the gate to the tagged
+  # commit, so what is verified and what is built are the same bytes.
+  gate:
+    uses: ./.github/workflows/ci.yml
+    with:
+      ref: ${{ github.event.release.tag_name || github.event.inputs.tag }}
+
   build-tauri:
+    needs: gate
     strategy:
       fail-fast: false
       matrix:
@@ -53,10 +109,14 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
-          # Build from the release's target branch (master) instead of the tag ref.
-          # Prevents shipping a stale snapshot when fixes land after tag creation
-          # but before the release is published.
-          ref: ${{ github.event.release.target_commitish || 'master' }}
+          # The tag, and only the tag. `target_commitish` is a BRANCH name, so
+          # the old value built whatever master happened to point at when the
+          # runner started — the tag then named one commit while the signed
+          # installer contained another, and nothing recorded which. That breaks
+          # the one thing a release tag is for (and AGPL-3.0 §6: the
+          # "corresponding source" must be the source the binary was made from).
+          # If fixes land after tagging, move the tag; do not silently ship past it.
+          ref: ${{ github.event.release.tag_name || github.event.inputs.tag }}
 
       - name: Setup Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
@@ -218,4 +278,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           TAG: ${{ github.event.release.tag_name || github.event.inputs.tag }}
+          # Set only when a release publish started this run. Empty on
+          # workflow_dispatch, where the Latest flag is a human's verdict and
+          # must survive. See scripts/release-rules.mjs.
+          PUBLISHED_TAG: ${{ github.event.release.tag_name }}
         run: node scripts/enforce-prerelease.mjs

@@ -35,6 +35,43 @@ export function fileUrlToPath(url: string): string | null {
   }
 }
 
+/**
+ * The outcome of one local-file read, tagged with the path it was made for.
+ *
+ * The tag is not decoration: the read is async, so a result can land after the
+ * block has moved on to a different file, and an untagged outcome would paint
+ * the previous file's blob — or its "gone" — over the new one.
+ */
+export interface MediaRead {
+  path: string
+  url: string | null
+  missing: boolean
+}
+
+/**
+ * What a tool result's media area shows.
+ *
+ * Extracted from ToolCallBlock's `useDisplayableMediaUrl` so the rule can be
+ * exercised directly — the repo has no render harness, and the rule is the part
+ * worth guarding. It is the same rule the hook has always followed:
+ *
+ *  - a `blob:` URL in a STORED result is necessarily dead (nothing mints them
+ *    any more, so it came from an older window) → say the file is gone;
+ *  - anything that is not one of our `file://` URLs is handed straight back;
+ *  - one of ours shows nothing until its read lands, then either the fresh
+ *    blob or "gone".
+ */
+export function displayableMedia(
+  rawUrl: string | null,
+  path: string | null,
+  read: MediaRead | null,
+): { url: string | null; missing: boolean } {
+  if (rawUrl && rawUrl.startsWith('blob:')) return { url: null, missing: true }
+  if (!path) return { url: rawUrl, missing: false }
+  const current = read && read.path === path ? read : null
+  return { url: current?.url ?? null, missing: current?.missing ?? false }
+}
+
 export function guessMimeFromName(filename: string): string {
   const ext = filename.toLowerCase().split('.').pop() || ''
   if (ext === 'mp4') return 'video/mp4'

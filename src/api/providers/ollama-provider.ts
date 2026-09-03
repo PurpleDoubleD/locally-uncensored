@@ -12,25 +12,53 @@ import type {
 import { ProviderError } from './types'
 import { localFetch, localFetchStream, ollamaUrl } from '../backend'
 import { parseNDJSONStream } from '../stream'
+import { idleAbortGuard, isStreamIdleTimeout, STREAM_IDLE_TIMEOUT_MS } from '../stream-idle'
 import { repairToolCallArgs, extractToolCallsFromContent } from '../../lib/tool-call-repair'
 import { applyTemplateContract } from './normalize-system'
+import { parseOllamaChatChunk, isRecord, prop, asString, asNumber, asRecordArray } from './wire'
 
 // ── Ollama-specific types ──────────────────────────────────────
 
-interface OllamaChatChunk {
-  message?: { content: string; thinking?: string; tool_calls?: { function: { name: string; arguments: Record<string, any> } }[] }
-  done?: boolean
-  // Why generation ended ('stop' | 'length' | 'load' | …), final chunk only.
-  done_reason?: string
-  // Server-reported timing in the final done:true chunk (Bug M v2.4.7).
-  // Ollama returns nanoseconds; we convert to ms before yielding upstream.
-  eval_count?: number          // tokens the model produced
-  eval_duration?: number       // generation phase in nanoseconds
-  prompt_eval_count?: number   // tokens in the prompt (unused for tps)
-  prompt_eval_duration?: number
-  total_duration?: number
-  load_duration?: number
+/**
+ * What we SEND. Separate from the wire types in `./wire`, which describe what
+ * the server sends back: this payload is ours, so it gets a real shape rather
+ * than a `Record<string, any>` bag that would swallow a typo in a field name.
+ */
+export interface OllamaRequestOptions {
+  temperature?: number
+  top_p?: number
+  top_k?: number
+  num_predict?: number
+  num_ctx?: number
 }
+
+export interface OllamaRequestMessage {
+  role: string
+  content: string
+  /** base64 payloads only — Ollama takes the data, not our {data,mimeType}. */
+  images?: string[]
+  tool_calls?: ToolCall[]
+}
+
+export interface OllamaChatRequest {
+  model: string
+  messages: OllamaRequestMessage[]
+  stream: boolean
+  keep_alive: string
+  tools?: ToolDefinition[]
+  options?: OllamaRequestOptions
+  /** Tri-state; deleted again on the 400-retry, hence optional. */
+  think?: boolean
+}
+
+// Was auf dieser Route ZURUECKKOMMT, liegt als `OllamaChatChunk` in ./wire,
+// hinter `parseOllamaChatChunk`. Hier stand dieselbe Form ein zweites Mal —
+// als Typargument an `parseNDJSONStream`, also als BEHAUPTUNG ueber
+// `JSON.parse`, mit drei Feldern (`prompt_eval_duration`, `total_duration`,
+// `load_duration`), die diese Datei nie gelesen hat. Die sieben, die sie
+// liest, kommen jetzt geprueft aus dem Parser. Dass das ueberhaupt auffiel:
+// `tool_calls` wurde direkt `.map`-t, ein Server, der dort kein Array
+// schickt, riss die ganze Stream-Schleife mit einem TypeError auf.
 
 interface OllamaModelEntry {
   name: string
@@ -56,7 +84,13 @@ interface OllamaModelEntry {
 export class OllamaProvider implements ProviderClient {
   readonly id = 'ollama' as const
 
-  constructor(private config: ProviderConfig) {}
+  /**
+   * The config is accepted for a uniform provider constructor signature but
+   * deliberately not stored: every URL goes through `ollamaUrl()` (see
+   * `apiUrl()` below, Issue #31), so a stored `config.baseUrl` would only be
+   * a second, silently diverging source of truth.
+   */
+  constructor(_config: ProviderConfig) {}
 
   /**
    * Build a full Ollama API URL. Delegates to `ollamaUrl()` from backend.ts
@@ -88,12 +122,12 @@ export class OllamaProvider implements ProviderClient {
       toolRole: 'text',
       alternate: true,
     }).map(m => {
-      const msg: Record<string, any> = { role: m.role, content: m.content }
+      const msg: OllamaRequestMessage = { role: m.role, content: m.content }
       if (m.images?.length) msg.images = m.images.map(img => img.data)
       return msg
     })
 
-    const body: Record<string, any> = {
+    const body: OllamaChatRequest = {
       model,
       messages: ollamaMessages,
       stream: true,
@@ -109,7 +143,7 @@ export class OllamaProvider implements ProviderClient {
     // Laptop + gemma3:4b). Letting Ollama do its own VRAM-aware layer
     // placement restores CLI parity on tight cards and is a no-op on
     // cards with headroom.
-    const ollamaOptions: Record<string, any> = {}
+    const ollamaOptions: OllamaRequestOptions = {}
     if (options?.temperature !== undefined) ollamaOptions.temperature = options.temperature
     if (options?.topP !== undefined) ollamaOptions.top_p = options.topP
     if (options?.topK !== undefined) ollamaOptions.top_k = options.topK
@@ -134,57 +168,114 @@ export class OllamaProvider implements ProviderClient {
     if (options?.thinking === true) body.think = true
     else if (options?.thinking === false) body.think = false
 
-    let res = await localFetchStream(this.apiUrl('/chat'), {
-      method: 'POST',
-      body: JSON.stringify(body),
-      signal: options?.signal,
-    })
-
-    // Older Ollama builds / non-thinking models reject ANY `think` field
-    // with HTTP 400. Retry once without it so the user's request still
-    // succeeds — we just fall back to model-default behaviour.
-    if (!res.ok && res.status === 400 && 'think' in body) {
-      delete body.think
-      res = await localFetchStream(this.apiUrl('/chat'), {
+    // Zeitbombe 4 — the idle watchdog needs something to abort, and a provider
+    // only ever gets a signal, never the controller behind it. This chains one
+    // onto the caller's: Stop still propagates inward, and a stream that goes
+    // silent can now cancel its own request (which on the Tauri path is what
+    // fires cancel_proxy_stream, so Ollama actually stops generating).
+    const guard = idleAbortGuard(options?.signal)
+    try {
+      let res = await localFetchStream(this.apiUrl('/chat'), {
         method: 'POST',
         body: JSON.stringify(body),
-        signal: options?.signal,
+        signal: guard.signal,
       })
-    }
 
-    if (!res.ok) {
-      throw await this.buildError(res, 'Chat failed', model)
-    }
-
-    for await (const chunk of parseNDJSONStream<OllamaChatChunk>(res)) {
-      if (options?.signal?.aborted) break
-
-      // Mid-stream `{"error":"..."}` line (runner crash, OOM) inside an
-      // HTTP-200 stream — surface it instead of yielding a silent empty
-      // chat turn (rikki Discord 2026-06-10, Win11 proxy path).
-      const errLine = (chunk as { error?: unknown }).error
-      if (typeof errLine === 'string' && errLine) {
-        throw new Error(`Ollama: ${errLine}`)
+      // Older Ollama builds / non-thinking models reject ANY `think` field
+      // with HTTP 400. Retry once without it so the user's request still
+      // succeeds — we just fall back to model-default behaviour.
+      if (!res.ok && res.status === 400 && 'think' in body) {
+        delete body.think
+        res = await localFetchStream(this.apiUrl('/chat'), {
+          method: 'POST',
+          body: JSON.stringify(body),
+          signal: guard.signal,
+        })
       }
 
-      const toolCalls: ToolCall[] | undefined = chunk.message?.tool_calls?.map(tc => ({
-        function: { name: tc.function.name, arguments: tc.function.arguments },
-      }))
-
-      yield {
-        content: chunk.message?.content || '',
-        thinking: chunk.message?.thinking || undefined,
-        toolCalls: toolCalls?.length ? toolCalls : undefined,
-        done: chunk.done || false,
-        finishReason: chunk.done_reason || undefined,
-        // Bug M v2.4.7 — pass through server-side generation metrics so the
-        // benchmark can report Ollama's own measurement instead of trusting
-        // client-side TTFT, which WebView2 release-mode buffers into
-        // uselessness for fast small models.
-        evalCount: chunk.eval_count,
-        promptEvalCount: chunk.prompt_eval_count,
-        evalDurationMs: chunk.eval_duration !== undefined ? chunk.eval_duration / 1_000_000 : undefined,
+      if (!res.ok) {
+        throw await this.buildError(res, 'Chat failed', model)
       }
+
+      // Ollama marks the end of a turn with a `"done":true` line. Nothing
+      // guarantees it arrives: a runner OOM, VRAM eviction, `ollama stop`, a
+      // proxy or LAN cut all end the NDJSON mid-line. Without the guarantee
+      // below the generator simply returned and the chat layer, which only
+      // explains a turn it was given a finishReason for, left a permanently
+      // empty assistant bubble with no hint at all. openai-provider.ts has
+      // ended its stream with an explicit terminal chunk for several releases
+      // (see its end-of-stream 'disconnect' path); this is the same semantics.
+      let sawDone = false
+      const terminal = (reason: string): ChatStreamChunk => ({
+        content: '', done: true, finishReason: reason,
+      })
+
+      try {
+        for await (const raw of parseNDJSONStream<unknown>(res, {
+          idleMs: STREAM_IDLE_TIMEOUT_MS,
+          onIdle: guard.abort,
+        })) {
+          if (options?.signal?.aborted) break
+          const chunk = parseOllamaChatChunk(raw)
+
+          // Mid-stream `{"error":"..."}` line (runner crash, OOM) inside an
+          // HTTP-200 stream — surface it instead of yielding a silent empty
+          // chat turn (rikki Discord 2026-06-10, Win11 proxy path). `error`
+          // kommt als `string | undefined` aus dem Parser, der `typeof`-Test
+          // von frueher sass auf einem `unknown` aus einer Typzusicherung.
+          if (chunk.error) {
+            throw new Error(`Ollama: ${chunk.error}`)
+          }
+
+          // `arguments` arrives as `unknown` from the wire because Ollama is
+          // not the only thing that answers on this endpoint: llama.cpp-based
+          // and proxied servers send the field as a JSON *string*, and this
+          // path used to hand that string on as `Record<string, any>` — a lie
+          // `any` was covering for. repairToolCallArgs is the same
+          // normalization the non-streaming path below already performs; for a
+          // real object it returns the object untouched.
+          const toolCalls: ToolCall[] | undefined = chunk.message?.tool_calls?.map(tc => ({
+            function: {
+              name: tc.function?.name ?? '',
+              arguments: repairToolCallArgs(tc.function?.arguments),
+            },
+          }))
+
+          if (chunk.done) sawDone = true
+
+          yield {
+            content: chunk.message?.content || '',
+            thinking: chunk.message?.thinking || undefined,
+            toolCalls: toolCalls?.length ? toolCalls : undefined,
+            done: chunk.done || false,
+            finishReason: chunk.done_reason || undefined,
+            // Bug M v2.4.7 — pass through server-side generation metrics so the
+            // benchmark can report Ollama's own measurement instead of trusting
+            // client-side TTFT, which WebView2 release-mode buffers into
+            // uselessness for fast small models.
+            evalCount: chunk.eval_count,
+            promptEvalCount: chunk.prompt_eval_count,
+            evalDurationMs: chunk.eval_duration !== undefined ? chunk.eval_duration / 1_000_000 : undefined,
+          }
+        }
+      } catch (err) {
+        // The watchdog fired: the stream did not fail, it went quiet. That is
+        // a disconnect, not an error to throw at the user.
+        if (isStreamIdleTimeout(err)) {
+          yield terminal('disconnect')
+          return
+        }
+        throw err
+      }
+
+      // Truncated NDJSON — no done:true ever arrived. A user-pressed Stop is
+      // not a disconnect, so it gets no terminal chunk (the chat layer has
+      // already stopped reading by then anyway).
+      if (!sawDone && !options?.signal?.aborted) {
+        yield terminal('disconnect')
+      }
+    } finally {
+      guard.release()
     }
   }
 
@@ -193,7 +284,7 @@ export class OllamaProvider implements ProviderClient {
     messages: ChatMessage[],
     tools: ToolDefinition[],
     options?: ChatOptions,
-  ): Promise<{ content: string; toolCalls: ToolCall[] }> {
+  ): Promise<{ content: string; toolCalls: ToolCall[]; promptEvalCount?: number; evalCount?: number; thinking?: string }> {
     // Bug B3: same contract as chatStream. A turn that really carries a
     // `tools` payload keeps the native tool channel. The strategy resolution
     // only sends one after Ollama itself reported the `tools` capability for
@@ -202,13 +293,13 @@ export class OllamaProvider implements ProviderClient {
       toolRole: tools.length > 0 ? 'native' : 'text',
       alternate: tools.length === 0,
     }).map(m => {
-      const msg: Record<string, any> = { role: m.role, content: m.content }
+      const msg: OllamaRequestMessage = { role: m.role, content: m.content }
       if (m.tool_calls) msg.tool_calls = m.tool_calls
       if (m.images?.length) msg.images = m.images.map(img => img.data)
       return msg
     })
 
-    const body: Record<string, any> = {
+    const body: OllamaChatRequest = {
       model,
       messages: ollamaMessages,
       tools,
@@ -218,7 +309,7 @@ export class OllamaProvider implements ProviderClient {
     }
 
     // v2.4.6 Bug L: see chatStream() above — same num_gpu:99 removal.
-    const ollamaOptions: Record<string, any> = {}
+    const ollamaOptions: OllamaRequestOptions = {}
     if (options?.temperature !== undefined) ollamaOptions.temperature = options.temperature
     if (options?.topP !== undefined) ollamaOptions.top_p = options.topP
     if (options?.topK !== undefined) ollamaOptions.top_k = options.topK
@@ -236,8 +327,9 @@ export class OllamaProvider implements ProviderClient {
     if (options?.thinking === true) body.think = true
     else if (options?.thinking === false) body.think = false
 
-    const fetchOptions = (bodyObj: Record<string, any>): any => {
-      const opts: any = {
+    type LocalFetchInit = NonNullable<Parameters<typeof localFetch>[1]>
+    const fetchOptions = (bodyObj: OllamaChatRequest): LocalFetchInit => {
+      const opts: LocalFetchInit = {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(bodyObj),
@@ -256,23 +348,39 @@ export class OllamaProvider implements ProviderClient {
       throw await this.buildError(res, 'Tool calling failed', model)
     }
 
-    const data = await res.json()
-    let toolCalls: ToolCall[] = (data.message?.tool_calls || []).map((tc: any) => ({
-      function: { name: tc.function.name, arguments: repairToolCallArgs(tc.function.arguments) },
-    }))
+    // Boundary: everything below reads a body we did not produce, so each
+    // field is checked on the way out of `unknown` instead of being asserted
+    // into a shape.
+    const data: unknown = await res.json()
+    const message = prop(data, 'message')
+    const content = asString(prop(message, 'content')) || ''
+    let toolCalls: ToolCall[] = asRecordArray(prop(message, 'tool_calls')).map(tc => {
+      const fn = prop(tc, 'function')
+      return {
+        function: {
+          name: asString(prop(fn, 'name')) ?? '',
+          arguments: repairToolCallArgs(isRecord(fn) ? fn.arguments : undefined),
+        },
+      }
+    })
 
     // If no tool calls found but content looks like a tool call, try to extract
-    if (toolCalls.length === 0 && data.message?.content) {
-      const extracted = extractToolCallsFromContent(data.message.content)
+    if (toolCalls.length === 0 && content) {
+      const extracted = extractToolCallsFromContent(content)
       if (extracted.length > 0) {
         toolCalls = extracted.map(tc => ({ function: tc }))
       }
     }
 
     return {
-      content: data.message?.content || '',
-      thinking: data.message?.thinking || '',
+      content,
+      thinking: asString(prop(message, 'thinking')) || '',
       toolCalls,
+      // Real token usage from the non-streaming response, same fields
+      // chatStream() already forwards — without them the agent TokenCounter
+      // falls back to a char/4 estimate for every Ollama tool turn.
+      promptEvalCount: asNumber(prop(data, 'prompt_eval_count')),
+      evalCount: asNumber(prop(data, 'eval_count')),
     }
   }
 

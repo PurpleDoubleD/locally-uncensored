@@ -11,6 +11,8 @@
  * without touching the bridge.
  */
 
+import { prop, propPath } from '../../types/json-guards'
+
 export interface PrLocator {
   owner: string
   repo: string
@@ -51,24 +53,30 @@ export function parsePrUrl(url: string): PrLocator | null {
  * shape. The bridge returns a raw JSON blob; this normalises field names
  * + truncates long comment bodies so the system-prompt section fits.
  */
-export function normalisePrJson(raw: any, url: string): Omit<PrResumePayload, 'diff'> {
-  const comments: PrResumePayload['comments'] = Array.isArray(raw?.comments)
-    ? raw.comments
-        .slice(-12) // last 12 — older comments are usually stale
-        .map((c: any) => ({
-          author: String(c?.author?.login ?? c?.author ?? 'unknown'),
-          body: clip(String(c?.body ?? ''), 600),
-          createdAt: String(c?.createdAt ?? ''),
-        }))
-    : []
+export function normalisePrJson(raw: unknown, url: string): Omit<PrResumePayload, 'diff'> {
+  // `raw` is `gh`'s stdout, parsed. The caller (mcp/builtin-tools.ts) already
+  // holds it as `unknown`; the old `any` parameter was the one thing that let
+  // it in without a check. Every read below goes through prop/propPath, which
+  // answer `undefined` for a non-object instead of throwing.
+  const rawComments = prop(raw, 'comments')
+  const comments: PrResumePayload['comments'] = (
+    Array.isArray(rawComments) ? rawComments : []
+  )
+    .slice(-12) // last 12 — older comments are usually stale
+    .map((c: unknown) => ({
+      author: String(propPath(c, 'author', 'login') ?? prop(c, 'author') ?? 'unknown'),
+      body: clip(String(prop(c, 'body') ?? ''), 600),
+      createdAt: String(prop(c, 'createdAt') ?? ''),
+    }))
+  const authorLogin = propPath(raw, 'author', 'login')
   return {
     url,
-    title: String(raw?.title ?? ''),
-    body: clip(String(raw?.body ?? ''), 4000),
-    state: String(raw?.state ?? 'UNKNOWN'),
-    headRefName: String(raw?.headRefName ?? ''),
-    baseRefName: String(raw?.baseRefName ?? ''),
-    author: raw?.author?.login ? String(raw.author.login) : undefined,
+    title: String(prop(raw, 'title') ?? ''),
+    body: clip(String(prop(raw, 'body') ?? ''), 4000),
+    state: String(prop(raw, 'state') ?? 'UNKNOWN'),
+    headRefName: String(prop(raw, 'headRefName') ?? ''),
+    baseRefName: String(prop(raw, 'baseRefName') ?? ''),
+    author: authorLogin ? String(authorLogin) : undefined,
     comments,
   }
 }

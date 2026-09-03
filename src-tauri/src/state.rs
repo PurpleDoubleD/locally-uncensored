@@ -96,15 +96,16 @@ impl Default for InstallState {
     }
 }
 
-/// Read persisted ComfyUI port + host from %APPDATA%/locally-uncensored/config.json.
+/// Read persisted ComfyUI port + host from `os_paths::app_config_json()`
+/// (Windows: `%APPDATA%\\<APP_CONFIG_DIR>\\config.json`).
 /// Returns (port, host) with sensible defaults (8188, "localhost") on any error.
 /// Called at startup so user-configured values survive app restarts.
 pub(crate) fn load_comfy_config_values() -> (u16, String) {
     let mut port = 8188u16;
     let mut host = "localhost".to_string();
 
-    if let Some(config_dir) = dirs::config_dir() {
-        let config_file = config_dir.join("locally-uncensored").join("config.json");
+    {
+        let config_file = crate::os_paths::app_config_json();
         if let Ok(raw) = std::fs::read_to_string(&config_file) {
             if let Ok(v) = serde_json::from_str::<serde_json::Value>(&raw) {
                 if let Some(p) = v.get("comfyui_port").and_then(|x| x.as_u64()) {
@@ -146,8 +147,8 @@ pub(crate) fn load_ollama_base() -> String {
     };
 
     // Priority 1: config.json override (GUI takes precedence)
-    if let Some(config_dir) = dirs::config_dir() {
-        let config_file = config_dir.join("locally-uncensored").join("config.json");
+    {
+        let config_file = crate::os_paths::app_config_json();
         if let Ok(raw) = std::fs::read_to_string(&config_file) {
             if let Ok(v) = serde_json::from_str::<serde_json::Value>(&raw) {
                 if let Some(b) = v.get("ollama_base").and_then(|x| x.as_str()) {
@@ -178,11 +179,16 @@ pub struct AppState {
     /// Child handle for an Ollama daemon LU spawned itself (kj103x bug, Discord
     /// 2026-05-23 #help-chat). The Drop impl below kills the tree on shutdown
     /// so `ollama.exe` doesn't linger eating ~200 MB after the tray quit.
-    /// IMPORTANT: only populated when `start_ollama` / `auto_start_ollama`
-    /// actually spawned — if a user-managed `ollama serve` was already
-    /// running on the box (detected via tasklist before spawn), we leave it
-    /// alone, so closing LU never kills someone else's Ollama.
-    pub ollama_process: Mutex<Option<Child>>,
+    /// IMPORTANT: only populated when `start_ollama` / `auto_start_ollama` /
+    /// the Ollama installer actually spawned — if a user-managed
+    /// `ollama serve` was already running on the box (detected via tasklist
+    /// before spawn), we leave it alone, so closing LU never kills someone
+    /// else's Ollama.
+    ///
+    /// `Arc` because `install_ollama` spawns its serve from a worker thread
+    /// that outlives the command's `State` borrow, and the installer's Ollama
+    /// is just as much ours to reap as the one `start_ollama` spawns (OI-4).
+    pub ollama_process: Arc<Mutex<Option<Child>>>,
     /// Built-in inference engine (bundled llama-server, P1). `None` until the
     /// onboarding / provider layer starts it via `start_bundled_engine`. The
     /// managed lifecycle (start/stop/swap) lives in `commands::engine`; this
@@ -269,6 +275,11 @@ pub struct AppState {
     pub python_bin: Arc<Mutex<String>>,
     // Remote Access
     pub remote: Mutex<RemoteServer>,
+    /// Die lokale Modell-API (commands/local_api.rs). `None` heisst: laeuft
+    /// nicht — und das ist der Zustand nach dem Start, bis der Nutzer sie
+    /// einschaltet. Sie hat absichtlich einen eigenen Lauscher neben `remote`:
+    /// der bindet 0.0.0.0 fuers Handy, diese hier 127.0.0.1 ab Werk.
+    pub local_api: Mutex<Option<crate::commands::local_api::LocalApiServer>>,
     /// Per-chat workspace overrides — when present, agent file ops with
     /// a relative path resolve against this folder instead of the
     /// default `~/agent-workspace/<chat_id>/`. Set when the user picks
@@ -366,7 +377,7 @@ impl AppState {
 
         Self {
             comfy_process: Mutex::new(None),
-            ollama_process: Mutex::new(None),
+            ollama_process: Arc::new(Mutex::new(None)),
             bundled_engine: Mutex::new(None),
             bundled_embed: Mutex::new(None),
             comfy_path: Arc::new(Mutex::new(None)),
@@ -397,6 +408,7 @@ impl AppState {
             // Claude Code
             // Remote Access
             remote: Mutex::new(RemoteServer::new()),
+            local_api: Mutex::new(None),
             chat_workspace_overrides: Arc::new(Mutex::new(HashMap::new())),
             // Bug BB v2.5.0 — start in "auto" mode so existing installs are
             // unchanged until the user explicitly picks a GPU in Settings.
@@ -461,7 +473,8 @@ const CREATE_NO_WINDOW: u32 = 0x08000000;
 use std::os::windows::process::CommandExt;
 
 impl AppState {
-    /// Kill every subprocess we spawned (ComfyUI, Ollama, Claude Code, Whisper).
+    /// Kill every subprocess we spawned (the Cloudflare tunnel, ComfyUI,
+    /// Ollama, Claude Code, Whisper).
     ///
     /// Live testing on 2026-05-25 showed that Tauri v2's `app.exit(0)` returns
     /// from the run loop on Windows WITHOUT actually dropping the managed
@@ -472,6 +485,33 @@ impl AppState {
     /// from every quit path instead so kj103x's Ollama-orphan stays fixed even
     /// when Tauri's destructor chain skips us.
     pub fn shutdown_subprocesses(&self) {
+        // The Cloudflare quick tunnel — FIRST, and the position is an
+        // argument, not an accident. `the_tunnel_is_the_first_thing_the_quit_path_kills`
+        // (remote.rs) holds this line here; moving it turns that test red.
+        //
+        // Why it belongs in this method at all: the method exists because
+        // Tauri v2 may skip our destructors, and every other daemon was moved
+        // into it for that reason. The tunnel was left hanging on
+        // `Drop for RemoteServer` alone, i.e. on precisely the mechanism this
+        // method exists to work around. A survivor is not a resource leak like
+        // a stray Ollama — it keeps a public `*.trycloudflare.com` address
+        // pointed at 127.0.0.1:11435, and the next launch binds that same
+        // port, so the stranger's tunnel silently serves the new session while
+        // `tunnel_status` reports the tunnel as off (T-39).
+        //
+        // Why FIRST: while the tunnel is up, the internet still reaches the
+        // remote server on 11435, which proxies through to Ollama and ComfyUI
+        // — the daemons the rest of this method is in the middle of killing.
+        // Every branch below is a blocking call (the `taskkill … .output()`
+        // waits on Windows, the `lsof` shell-out for the MLX port on macOS, a
+        // process-table walk for the trainer and the installer trees), so
+        // "last" would hold that door open across all of them. Nothing below
+        // depends on the tunnel, so first costs nothing.
+        //
+        // The kill itself takes the slot and walks the tree; see
+        // `remote::shutdown_tunnel`.
+        crate::commands::remote::shutdown_tunnel(&self.remote);
+
         if let Ok(mut proc) = self.ollama_process.lock() {
             // take(), not a borrow: leaving the pid in the slot let the Drop
             // pass below fire a second taskkill at it.
@@ -552,7 +592,12 @@ impl AppState {
         // drops the Child handle — the sidecar outlives individual renders and
         // is addressed over loopback — so quitting used to orphan the venv
         // Python forever (observed live: LU gone, server.py still resident).
-        // Kill it by its listening port, same mechanism as the Stop button.
+        // Kill it by its listening port. This is the ONLY thing that stops the
+        // sidecar process; `mlx_unload` (the control the UI does have) frees the
+        // resident model and leaves the server up. The line used to say "same
+        // mechanism as the Stop button" — there was no Stop button, and the
+        // `mlx_stop` that described one had no bridge and no caller (KF-19,
+        // removed 01.09.2026).
         #[cfg(target_os = "macos")]
         {
             crate::process_util::kill_listeners_on_port(crate::commands::mlx::MLX_PORT);
@@ -569,6 +614,17 @@ impl AppState {
                 crate::commands::trainer::kill_trainer_tree(pid);
                 println!("[Trainer] Training stopped (explicit shutdown)");
             }
+        }
+
+        // Installer children (git clone, pip and everything pip forks). Unlike
+        // every slot above, these live in a registry inside `commands::install`
+        // rather than in AppState — the installers run on detached worker
+        // threads that outlive the command's State borrow. Quitting mid-install
+        // used to leave the whole pip tree resident with no UI left to stop it
+        // (OI-7).
+        let killed = crate::commands::install::kill_installer_children();
+        if killed > 0 {
+            println!("[Install] {killed} installer child tree(s) stopped (explicit shutdown)");
         }
 
         if let Ok(mut whisper) = self.whisper.lock() {
@@ -596,10 +652,15 @@ impl Drop for AppState {
 mod shutdown_tests {
     use super::*;
 
+    // `sleep 30` on Unix, `ping` on Windows, and "is this pid a live process"
+    // in the terms of whichever kernel is answering — see `test_support`. The
+    // Unix behaviour is unchanged; before, both were spelled out here in Unix
+    // terms only, which is what switched this test off on Windows.
+    use crate::test_support::{is_alive as alive, sleeper as sleeper_cmd};
+
     /// A live child that outlives the test unless something kills it.
     fn sleeper() -> std::process::Child {
-        std::process::Command::new("sleep")
-            .arg("30")
+        sleeper_cmd(30)
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
@@ -607,28 +668,11 @@ mod shutdown_tests {
             .expect("spawn sleeper")
     }
 
-    /// A killed-but-unreaped child is a ZOMBIE — `ps -p` still lists it, so the
-    /// process STATE has to be read. Z means the kill landed and only the exit
-    /// status is still pending; at quit the parent dies and init reaps it.
-    fn alive(pid: u32) -> bool {
-        let out = std::process::Command::new("ps")
-            .args(["-o", "state=", "-p", &pid.to_string()])
-            .output();
-        match out {
-            Ok(o) => {
-                let st = String::from_utf8_lossy(&o.stdout).trim().to_string();
-                !st.is_empty() && !st.starts_with('Z')
-            }
-            Err(_) => false,
-        }
-    }
-
     /// The quit path is normally only reachable through the Tauri exit (tray
     /// Quit / exit_app), which cannot be triggered from a test or from a shell.
     /// It is a plain method though, so it CAN be exercised with real children —
     /// which is the only runtime proof available for it on this machine.
     #[test]
-    #[cfg_attr(target_os = "windows", ignore = "uses sleep/ps")]
     fn shutdown_kills_the_tracked_children_and_empties_the_slots() {
         let state = AppState::new();
 
@@ -646,6 +690,19 @@ mod shutdown_tests {
         std::mem::forget(trainer); // only the pid is tracked, as in the real flow
         *state.trainer_process.lock().unwrap() = Some(trainer_pid);
 
+        // The three assertions below only mean something if all three children
+        // were actually running when the shutdown fired. A sleeper that had
+        // died on its own — or a pid that never belonged to the process the
+        // test thinks it does — would make every one of them pass while
+        // nothing was killed at all.
+        for (what, pid) in [
+            ("ollama", ollama_pid),
+            ("comfyui", comfy_pid),
+            ("trainer", trainer_pid),
+        ] {
+            assert!(alive(pid), "the {what} child was not running to begin with");
+        }
+
         state.shutdown_subprocesses();
         std::thread::sleep(std::time::Duration::from_millis(400));
 
@@ -658,6 +715,96 @@ mod shutdown_tests {
         assert!(state.ollama_process.lock().unwrap().is_none());
         assert!(state.comfy_process.lock().unwrap().is_none());
         assert!(state.trainer_process.lock().unwrap().is_none());
+    }
+
+    /// A pid can outlive the SIGTERM by a scheduler tick; polling is the
+    /// honest form of "it died", asserting straight away is a race.
+    fn dies_within(pid: u32, budget: std::time::Duration) -> bool {
+        let deadline = std::time::Instant::now() + budget;
+        while std::time::Instant::now() < deadline {
+            if !alive(pid) {
+                return true;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        !alive(pid)
+    }
+
+    /// A stand-in for the cloudflared quick tunnel, parked in the slot the
+    /// real one lives in.
+    fn park_a_tunnel(state: &AppState) -> u32 {
+        let child = sleeper();
+        let pid = child.id();
+        state.remote.lock().unwrap().tunnel_child = Some(child);
+        assert!(alive(pid), "the stand-in tunnel was not running to begin with");
+        pid
+    }
+
+    /// KF-1. Every other daemon is killed from this method because Tauri v2
+    /// may skip `Drop`; the tunnel was left hanging on `Drop for RemoteServer`
+    /// alone, i.e. on exactly the mechanism this method exists to replace. A
+    /// survivor keeps a public *.trycloudflare.com address pointed at
+    /// 127.0.0.1:11435, and the next launch binds that port (T-39).
+    #[test]
+    fn shutdown_takes_the_tunnel_with_it() {
+        let state = AppState::new();
+        let pid = park_a_tunnel(&state);
+
+        state.shutdown_subprocesses();
+
+        assert!(
+            dies_within(pid, std::time::Duration::from_secs(5)),
+            "the TUNNEL survived the explicit quit path (KF-1)",
+        );
+    }
+
+    /// Separate property, separate test: the slot has to be EMPTY afterwards.
+    /// `Drop for AppState` runs `shutdown_subprocesses` again and the managed
+    /// state's own `Drop for RemoteServer` may follow it — a second kill would
+    /// go through `kill_tree`, whose snapshot includes the root, at a pid the
+    /// kernel is free to have recycled by then.
+    #[test]
+    fn shutdown_empties_the_tunnel_slot_so_a_second_pass_finds_nothing() {
+        let state = AppState::new();
+        let pid = park_a_tunnel(&state);
+
+        state.shutdown_subprocesses();
+
+        assert!(
+            state.remote.lock().unwrap().tunnel_pid().is_none(),
+            "the tunnel slot still holds pid {pid} — the Drop pass will kill it a second time",
+        );
+    }
+
+    /// Third property: the kill is a TREE kill. `cloudflared` is spawned
+    /// through `spawn_piped` and may have children of its own; a plain
+    /// `Child::kill` would reap the root and leave them adopted by init, which
+    /// is the same orphan one level down.
+    #[test]
+    #[cfg(unix)]
+    fn shutdown_takes_the_tunnels_children_with_it() {
+        let state = AppState::new();
+
+        let mut cmd = std::process::Command::new(crate::test_support::posix_shell());
+        cmd.arg("-c").arg("sleep 30 & sleep 30");
+        let child = crate::process_util::spawn_piped(cmd).expect("spawn a tunnel stand-in");
+        let pid = child.id();
+        std::thread::sleep(std::time::Duration::from_millis(400));
+
+        let mut sys = sysinfo::System::new();
+        sys.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
+        let kids = crate::commands::shell::descendants(pid, &sys);
+        assert!(!kids.is_empty(), "the stand-in spawned nothing — test setup is wrong");
+
+        state.remote.lock().unwrap().tunnel_child = Some(child);
+        state.shutdown_subprocesses();
+
+        for p in kids.iter().copied().chain(std::iter::once(pid)) {
+            assert!(
+                dies_within(p, std::time::Duration::from_secs(5)),
+                "{p} survived the quit path — the tunnel was killed, not its tree",
+            );
+        }
     }
 
     /// Quitting with nothing running must not panic or block.

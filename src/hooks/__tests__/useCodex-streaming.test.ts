@@ -21,6 +21,8 @@ import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'fs'
 import { fileURLToPath } from 'url'
 import { dirname, join } from 'path'
+import { parseOllamaChatChunk } from '../../api/providers/wire'
+import { isRecord } from '../../types/json-guards'
 
 // ── Faithful copy of streamWithTools parsing logic ──────────────────────
 // This mirrors the NDJSON parsing from useCodex.ts without the HTTP/fetch parts.
@@ -43,20 +45,22 @@ function parseNDJSON(ndjsonLines: string[]): StreamResult {
     const trimmed = rawLine.trim()
     if (!trimmed) continue
     try {
-      const j = JSON.parse(trimmed)
-      if (j.message) {
-        if (j.message.content) {
-          content += j.message.content
-        }
-        if (j.message.thinking) {
-          thinking += j.message.thinking
-        }
-        // Ollama may split tool_calls across chunks — append, don't overwrite
-        if (j.message.tool_calls && Array.isArray(j.message.tool_calls)) {
-          toolCalls = [...toolCalls, ...j.message.tool_calls.map((tc: any) => ({
-            function: { name: tc.function.name, arguments: tc.function.arguments },
-          }))]
-        }
+      // Durch DENSELBEN Parser wie die Produktion (providers/wire.ts), statt
+      // durch ein `any`. Der Spiegel las `tc.function.name` ungeschuetzt —
+      // genau der TypeError, gegen den ollama-stream-tools.ts seit dem Fund
+      // `tc.function?.name` schreibt. Als `any` konnte diese Kopie von der
+      // Produktion wegdriften, ohne dass irgendetwas es merkte.
+      const chunk = parseOllamaChatChunk(JSON.parse(trimmed))
+      content += chunk.message?.content ?? ''
+      thinking += chunk.message?.thinking ?? ''
+      // Ollama may split tool_calls across chunks — append, don't overwrite
+      for (const tc of chunk.message?.tool_calls ?? []) {
+        const name = tc.function?.name
+        // Ein namenloser Aufruf ist nicht ausfuehrbar; die Produktion
+        // ueberspringt ihn ebenso, statt ihn als `undefined` weiterzureichen.
+        if (!name) continue
+        const args = tc.function?.arguments
+        toolCalls = [...toolCalls, { function: { name, arguments: isRecord(args) ? args : {} } }]
       }
     } catch { /* partial JSON — skip */ }
   }

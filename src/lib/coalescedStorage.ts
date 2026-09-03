@@ -30,11 +30,28 @@
  * The flush is best effort on the way out, and cannot be anything else: an
  * IndexedDB write is asynchronous and the window does not wait for it during
  * unload. That is why `waitMs` is short and why the call site flushes when a
- * turn ENDS rather than relying on the unload path — a finished answer is
- * already on disk by the time anyone can close the app. Only a stream killed
- * mid-sentence can lose its last `waitMs` of tokens, which the pre-existing
- * per-set() write could lose too (it was equally asynchronous, just with a
- * narrower window).
+ * turn ENDS rather than relying on the unload path.
+ *
+ * What that flush is worth, precisely — the old wording here said a finished
+ * answer is "already on disk by the time anyone can close the app", and that
+ * was not measured. It is now (stores/durability.ts carries the numbers, taken
+ * in a real Chromium against real IndexedDB):
+ *
+ *   - `flush()` resolves when the put has LANDED, so awaiting it is a real
+ *     guarantee, and the three chat hooks now await it before they report a
+ *     turn finished. Once the app says the turn is over, the turn is readable
+ *     out of the store. On an idle Mac that costs under 2 ms; with the CPU
+ *     throttled 20x on a 6.5 MB profile it cost 323-545 ms, and that is the
+ *     Stop button waiting, not the text — the answer is painted long before.
+ *   - It is NOT true that the answer is on disk as soon as it is on screen.
+ *     The paint comes first and always will. A reload fired inside that window
+ *     still loses the tail of the turn: six of six throttled runs, and four
+ *     runs in twelve unthrottled on a busy machine — the same four in twelve
+ *     with and without the awaited turn end, because the write starts at the
+ *     same instant either way.
+ *   - A stream killed mid-sentence still loses its last `waitMs` of tokens,
+ *     which the pre-existing per-set() write could lose too (it was equally
+ *     asynchronous, just with a narrower window).
  */
 import type { PersistStorage, StateStorage, StorageValue } from 'zustand/middleware'
 import { log } from './logger'

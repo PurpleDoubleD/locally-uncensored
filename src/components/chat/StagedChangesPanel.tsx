@@ -71,7 +71,13 @@ export function StagedChangesPanel({ chatId }: Props) {
   async function applyAll() {
     if (!chatId) return
     for (const change of [...changes]) {
-      // eslint-disable-next-line no-await-in-loop
+      // Sequential on purpose, not an oversight: two changes can touch the same
+      // file, and `applyOne` reads-modifies-writes. In parallel the later write
+      // would be based on a snapshot taken before the earlier one landed.
+      // (Hier stand eine Unterdrueckung der Regel `no-await-in-loop`. Die ist
+      //  in KEINER Config dieses Baums eingeschaltet — die Zeile hat nie etwas
+      //  unterdrueckt, sie hat nur behauptet, es gaebe ein Gate. Der Grund war
+      //  richtig, die Form war eine Luege; der Grund bleibt.)
       await applyOne(change)
     }
   }
@@ -100,7 +106,7 @@ export function StagedChangesPanel({ chatId }: Props) {
             <ChevronRight size={11} className="text-amber-700 dark:text-amber-400" />
           )}
           <FileText size={10} className="text-amber-700 dark:text-amber-400" />
-          <span className="text-[0.6rem] font-semibold text-amber-900 dark:text-amber-300">
+          <span className="t-micro font-semibold text-amber-900 dark:text-amber-300">
             Pending ({changes.length})
           </span>
         </span>

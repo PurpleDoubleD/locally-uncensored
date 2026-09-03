@@ -37,6 +37,7 @@ vi.mock('../../api/comfyui', () => ({
 
 import { useCreateStore, MODEL_TYPE_DEFAULTS } from '../createStore'
 import type { GalleryItem } from '../createStore'
+import { prop } from '../../types/json-guards'
 
 // ── Helpers ─────────────────────────────────────────────────────
 
@@ -179,37 +180,48 @@ describe('createStore', () => {
     // tests document the contract: the store does not throw, and its
     // CONSUMERS (which this mirrors) can always fall back to [].
     describe('activeList fallback contract (mirrors CreateTopControls)', () => {
-      const computeActiveList = (mode: string, iml: unknown, vml: unknown) => {
+      const computeActiveList = (mode: string, iml: unknown, vml: unknown): unknown[] => {
         const raw = mode === 'image' ? iml : vml
         return Array.isArray(raw) ? raw : []
       }
 
+      /**
+       * Write a value the store's own type forbids. That is the point of this
+       * block: `imageModelList` is declared as an array, and these tests exist
+       * because a rehydrated blob from an older build has arrived as
+       * undefined / null / an object / a string. The store type says what the
+       * app WRITES; the cast is confined to this one helper so no individual
+       * test claims a corrupt value is a model list.
+       */
+      const forceState = (patch: Record<string, unknown>) =>
+        useCreateStore.setState(patch as Partial<ReturnType<typeof useCreateStore.getState>>)
+
       it('falls back to [] when imageModelList is undefined', () => {
-        useCreateStore.setState({ imageModelList: undefined as any, mode: 'image' })
+        forceState({ imageModelList: undefined, mode: 'image' })
         const s = useCreateStore.getState()
         expect(computeActiveList(s.mode, s.imageModelList, s.videoModelList)).toEqual([])
       })
 
       it('falls back to [] when videoModelList is undefined in video mode', () => {
-        useCreateStore.setState({ videoModelList: undefined as any, mode: 'video' })
+        forceState({ videoModelList: undefined, mode: 'video' })
         const s = useCreateStore.getState()
         expect(computeActiveList(s.mode, s.imageModelList, s.videoModelList)).toEqual([])
       })
 
       it('falls back to [] when the list is null', () => {
-        useCreateStore.setState({ imageModelList: null as any, mode: 'image' })
+        forceState({ imageModelList: null, mode: 'image' })
         const s = useCreateStore.getState()
         expect(computeActiveList(s.mode, s.imageModelList, s.videoModelList)).toEqual([])
       })
 
       it('falls back to [] when the list is an object', () => {
-        useCreateStore.setState({ imageModelList: { foo: 'bar' } as any, mode: 'image' })
+        forceState({ imageModelList: { foo: 'bar' }, mode: 'image' })
         const s = useCreateStore.getState()
         expect(computeActiveList(s.mode, s.imageModelList, s.videoModelList)).toEqual([])
       })
 
       it('falls back to [] when the list is a string', () => {
-        useCreateStore.setState({ imageModelList: 'corrupted' as any, mode: 'image' })
+        forceState({ imageModelList: 'corrupted', mode: 'image' })
         const s = useCreateStore.getState()
         expect(computeActiveList(s.mode, s.imageModelList, s.videoModelList)).toEqual([])
       })
@@ -222,16 +234,16 @@ describe('createStore', () => {
       })
 
       it('.length and .map never throw on the fallback', () => {
-        useCreateStore.setState({ imageModelList: undefined as any, videoModelList: null as any })
+        forceState({ imageModelList: undefined, videoModelList: null })
         const s = useCreateStore.getState()
         const imgList = computeActiveList('image', s.imageModelList, s.videoModelList)
         const vidList = computeActiveList('video', s.imageModelList, s.videoModelList)
         // These are the exact two operations CreateTopControls performs
         // (line 175 `.length === 0` and line 180 `.map(...)`).
         expect(() => imgList.length === 0).not.toThrow()
-        expect(() => imgList.map((m: any) => m.name)).not.toThrow()
+        expect(() => imgList.map((m) => prop(m, 'name'))).not.toThrow()
         expect(() => vidList.length === 0).not.toThrow()
-        expect(() => vidList.map((m: any) => m.name)).not.toThrow()
+        expect(() => vidList.map((m) => prop(m, 'name'))).not.toThrow()
       })
     })
   })

@@ -12,6 +12,19 @@
 //
 // Why not pino: zero extra runtime dep, no transport setup, fits the
 // uselu-on-Vercel deploy where stdout IS the transport.
+//
+// Audit #01 — that last paragraph was written for a server. In the DESKTOP
+// build there is no stdout: the WebView's console only exists while DevTools
+// are open, which happens under `debug_assertions` and nowhere else. Every
+// line below was therefore written to nothing on a user's machine. Since the
+// Rust side gained a rolling log file, warn/error lines are additionally
+// mirrored into it through the `log_write` command, so a support log holds
+// both halves of the app in one chronological stream instead of only the
+// backend half of a bug whose visible symptom happened in React.
+//
+// Only warn and error are mirrored. debug/info are the high-frequency levels
+// (render loops, polling, token streams) and would drown the signal — and
+// every mirrored line costs an IPC round trip. The console keeps all four.
 
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error'
 
@@ -58,6 +71,78 @@ function serializeError(err: unknown): Record<string, unknown> | unknown {
   return err
 }
 
+/** Levels worth a round trip into the Rust log file. See the header. */
+const MIRRORED_LEVELS: ReadonlySet<LogLevel> = new Set<LogLevel>(['warn', 'error'])
+
+/**
+ * Same detection as `isTauri()` in ../api/backend, deliberately duplicated
+ * rather than imported: backend.ts imports THIS module, and importing it back
+ * would close a cycle whose evaluation order decides whether `log` exists when
+ * backend.ts's module body runs. Ten lines of duplication beat a TDZ crash on
+ * startup that only reproduces under some bundler settings.
+ */
+function isTauriRuntime(): boolean {
+  if (typeof window === 'undefined') return false
+  const w = window as unknown as Record<string, unknown>
+  return !!(w.__TAURI_INTERNALS__ || w.__TAURI__)
+}
+
+type InvokeFn = (cmd: string, args?: Record<string, unknown>) => Promise<unknown>
+
+/**
+ * The PROMISE is memoised, not the resolved function. Two warns in the same
+ * tick both arrive before any `await` has completed, so a `cachedInvoke`
+ * variable would still be null for the second one and it would start a second
+ * dynamic import of the same module — measurably losing the second line under
+ * some module runners. One promise, shared by every caller.
+ */
+let invokePromise: Promise<InvokeFn> | null = null
+
+function getInvoke(): Promise<InvokeFn> {
+  if (!invokePromise) {
+    invokePromise = import('@tauri-apps/api/core').then((m) => m.invoke as InvokeFn)
+  }
+  return invokePromise
+}
+
+/**
+ * Mirror one line into the Rust rolling log file.
+ *
+ * `cleaned` is the ALREADY-SCRUBBED context — the redaction has to happen
+ * before this, never inside it, or the secret that the console never shows
+ * would be written to a file the user is then asked to attach to a bug report.
+ * The single call site in `emit` passes the scrubbed value for that reason.
+ *
+ * Fire and forget, and it must never throw. Logging is called from catch
+ * blocks and from error boundaries; a logger that can fail turns a handled
+ * error into an unhandled one, and a failed mirror (no Tauri, command not
+ * registered, IPC busy) is not worth a single pixel of user attention. Every
+ * path is swallowed: the synchronous body, the dynamic import, the invoke.
+ */
+function mirrorToLogFile(level: LogLevel, msg: string, cleaned?: LogContext): void {
+  if (!MIRRORED_LEVELS.has(level)) return
+  if (!isTauriRuntime()) return
+  try {
+    let message = msg
+    if (cleaned && Object.keys(cleaned).length > 0) {
+      // scrub() caps its recursion rather than tracking visited nodes, so a
+      // cyclic object survives it and JSON.stringify would throw on the cycle.
+      try {
+        message = `${msg} ${JSON.stringify(cleaned)}`
+      } catch {
+        message = `${msg} [context not serialisable]`
+      }
+    }
+    void getInvoke()
+      .then((invoke) => invoke('log_write', { level, target: 'frontend', message }))
+      .catch(() => {
+        /* the log file is a best effort; never surface its failure */
+      })
+  } catch {
+    /* unreachable in practice — belt and braces, see the doc comment */
+  }
+}
+
 function emit(level: LogLevel, msg: string, ctx?: LogContext): void {
   if (level === 'debug' && isProd()) return
 
@@ -72,6 +157,13 @@ function emit(level: LogLevel, msg: string, ctx?: LogContext): void {
       )
     : undefined
   const cleaned = scrub(safeCtx) as LogContext | undefined
+
+  // After the scrub, before either console path: the file gets the redacted
+  // context and nothing else, and it gets the line whether the build is a
+  // production bundle or a dev server — the desktop app is a production
+  // bundle, and a `npm run tauri dev` session is the case where somebody is
+  // actually reading the file while it is written.
+  mirrorToLogFile(level, msg, cleaned)
 
   if (isProd()) {
     const line = JSON.stringify({

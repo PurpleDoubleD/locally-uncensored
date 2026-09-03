@@ -11,6 +11,8 @@
  */
 
 import type { AgentBlock, AgentToolCall } from '../../types/agent-mode'
+import type { ToolArgs } from '../mcp/types'
+import { isRecord } from '../../types/json-guards'
 
 /**
  * Uniform accessor: returns all tool calls on a block, regardless of shape.
@@ -58,17 +60,20 @@ export function hasToolCalls(block: AgentBlock): boolean {
  * Compute stable args-hash for cache/audit keying. Sorts object keys so
  * `{a:1,b:2}` and `{b:2,a:1}` hash identically. Non-cryptographic.
  */
-export function stableArgsHash(args: Record<string, any>): string {
+export function stableArgsHash(args: ToolArgs): string {
   const normalized = canonicalize(args)
   return djb2(normalized)
 }
 
-function canonicalize(value: any): string {
+function canonicalize(value: unknown): string {
   if (value === null || value === undefined) return 'null'
   if (typeof value === 'number' || typeof value === 'boolean') return JSON.stringify(value)
   if (typeof value === 'string') return JSON.stringify(value)
   if (Array.isArray(value)) return '[' + value.map(canonicalize).join(',') + ']'
-  if (typeof value === 'object') {
+  // null and arrays are already handled above, so this is the same test the
+  // old `typeof value === 'object'` ran — written as a guard so the index read
+  // below is checked rather than asserted.
+  if (isRecord(value)) {
     const keys = Object.keys(value).sort()
     return '{' + keys.map((k) => JSON.stringify(k) + ':' + canonicalize(value[k])).join(',') + '}'
   }

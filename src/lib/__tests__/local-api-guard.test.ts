@@ -70,13 +70,20 @@ describe('postContentTypeError', () => {
 
 describe('wiring (source guards)', () => {
   const lf = (p: string) => readFileSync(join(__dirname, p), 'utf8').replace(/\r\n/g, '\n')
-  const viteSrc = lf('../../../vite.config.ts')
+  // ZB-7: die Middleware stand bis dahin in vite.config.ts. Sie liegt jetzt in
+  // dev-server/guard.ts — derselbe Code, andere Datei. Ihr VERHALTEN (die
+  // Ausnahme greift genau auf /transcribe, JSON dort wird weiter abgelehnt)
+  // steht seither zusätzlich an echten Anfragen in
+  // dev-server/__tests__/waechter-und-port.test.ts; diese Zusicherung hier
+  // bleibt die Klammer „der Wächter fragt den geteilten Entscheider, statt
+  // application/json selbst hinzuschreiben".
+  const guardSrc = lf('../../../dev-server/guard.ts')
   const voiceSrc = lf('../../api/voice.ts')
 
   it('the middleware asks the shared guard instead of hard-coding JSON', () => {
-    expect(viteSrc).toContain("import { postContentTypeAllowed, postContentTypeError } from './src/lib/local-api-guard'")
-    expect(viteSrc).toContain('if (!postContentTypeAllowed(req.url, contentType))')
-    expect(viteSrc).toContain('res.end(postContentTypeError(req.url))')
+    expect(guardSrc).toContain("import { postContentTypeAllowed, postContentTypeError } from '../src/lib/local-api-guard'")
+    expect(guardSrc).toContain('if (!postContentTypeAllowed(req.url, contentType))')
+    expect(guardSrc).toContain('res.end(postContentTypeError(req.url))')
   })
 
   it('both voice fetches carry the CSRF header the middleware demands', () => {

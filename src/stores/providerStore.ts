@@ -7,10 +7,13 @@
 
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
+import { keepPersistedState } from '../lib/persist-version'
+import { safeJSONStorage } from '../lib/storage-quota'
 import type { ProviderId, ProviderConfig } from '../api/providers/types'
-import { clearProviderCache } from '../api/providers/registry'
+import { clearProviderCache } from '../api/providers/client-cache'
 import { onLocalSlotChanged } from '../lib/builtin-slot-eviction'
 import { LU_ENGINE_NAME, renameLegacyEngine } from '../lib/engine-name'
+import { announceDarkenedSlots } from '../lib/provider-slot-darkening'
 import { secretGet, secretSet, secretDelete } from '../api/backend'
 import { CLOUD_BASE } from '../api/cloud/config'
 
@@ -100,6 +103,46 @@ const DEFAULT_PROVIDERS: Record<ProviderId, ProviderConfig> = {
   },
 }
 
+/**
+ * The model/provider invariant, asked on EVERY path that can switch a slot off.
+ *
+ * A slot going dark makes the picked model unservable, and nothing used to
+ * notice: the pick is only re-validated against the next NON-EMPTY model list,
+ * so until a refresh lands the composer offers a model whose backend is off and
+ * every send fails with model-not-found.
+ *
+ * It hung off `setProviderConfig` alone, which is only the explicit toggle.
+ * `resetProvidersToDefaults` ("Reset AI Backends", a button in Settings) writes
+ * DEFAULT_PROVIDERS over the whole map, where Ollama and Anthropic default to
+ * `enabled: false`, so a user whose pick was an Ollama model reached exactly
+ * the same broken state through a supported, one-click, non-exotic path.
+ * `resetProvider` does the same for one slot.
+ *
+ * Audit W-T2: hier stand `void import('./modelStore')` mit der Begruendung
+ * "modelStore reaches back here through chatStore/remoteStore, and a static
+ * edge would close that circle at module-init time". Die Begruendung stimmte,
+ * die Aufloesung nicht: der dynamische Import hat den Kreis nicht geoeffnet,
+ * sondern nur unsichtbar gemacht (providerStore -> modelStore -> engine ->
+ * providerStore, und providerStore -> modelStore -> chatStore -> remoteStore
+ * -> providerStore).
+ *
+ * Dieser Store hat kein Geschaeft damit, den Modell-Store zu kennen. Er weiss
+ * nur, welche Slots gerade dunkel geworden sind, und sagt es an. Wer darauf
+ * reagieren will, meldet sich an; die Leitung dazwischen steht in
+ * lib/provider-slot-darkening.ts, gehoert keinem der beiden Stores und
+ * schliesst damit keinen Kreis.
+ */
+function dropPicksForDarkenedSlots(
+  before: Partial<Record<ProviderId, ProviderConfig>>,
+  after: Partial<Record<ProviderId, ProviderConfig>>,
+): void {
+  announceDarkenedSlots(
+    (Object.keys(after) as ProviderId[]).filter(
+      (id) => before[id]?.enabled === true && after[id]?.enabled === false,
+    ),
+  )
+}
+
 // ── Store Interface ────────────────────────────────────────────
 
 interface ProviderState {
@@ -146,6 +189,7 @@ export const useProviderStore = create<ProviderState>()(
           },
         }))
         clearProviderCache() // invalidate cached clients
+        dropPicksForDarkenedSlots({ [id]: before }, { [id]: get().providers[id] })
         // Every route that moves the shared local slot comes through here (Add
         // Provider, Enable on the standby card, Remove, Disable, onboarding), so
         // the memory question is asked here, once. R12/R13 measured the answer
@@ -203,10 +247,13 @@ export const useProviderStore = create<ProviderState>()(
           void secretDelete(id).catch(() => { /* vault delete best-effort */ })
         }
         clearProviderCache()
+        // A single-slot reset can switch that slot off too (ollama and
+        // anthropic both default to enabled: false).
+        dropPicksForDarkenedSlots({ [id]: before }, { [id]: get().providers[id] })
       },
 
       resetProvidersToDefaults: () => {
-        const before = get().providers.openai
+        const before = get().providers
         set((state) => {
           const next = {} as Record<ProviderId, ProviderConfig>
           for (const id of Object.keys(DEFAULT_PROVIDERS) as ProviderId[]) {
@@ -221,7 +268,10 @@ export const useProviderStore = create<ProviderState>()(
         clearProviderCache()
         // Reset hands the slot back to the app's own engine, which voids a
         // pending unload rather than causing one.
-        onLocalSlotChanged(before, get().providers.openai)
+        onLocalSlotChanged(before.openai, get().providers.openai)
+        // ...but it switches every OTHER slot the user had enabled back off,
+        // and a pick served by one of them is unservable from this moment on.
+        dropPicksForDarkenedSlots(before, get().providers)
       },
 
       hydrateProviderKeys: async () => {
@@ -276,7 +326,13 @@ export const useProviderStore = create<ProviderState>()(
     }),
     {
       name: 'lu-providers',
+      storage: safeJSONStorage(),
       version: 1,
+      // A version WITHOUT a migrate is the one combination that loses data:
+      // zustand logs "couldn't be migrated" and hydrates from defaults, i.e. it
+      // throws every configured backend away. Harmless today (no blob carries a
+      // numeric version yet), fatal the day this store goes to 2.
+      migrate: keepPersistedState,
       // Blobs persisted before the lu-cloud provider existed lack its entry —
       // backfill every missing provider from defaults so getProvider() can't
       // hit an undefined config after an update.

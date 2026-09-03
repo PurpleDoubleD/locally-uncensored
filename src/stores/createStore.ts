@@ -1,8 +1,20 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
+import { safeJSONStorage } from '../lib/storage-quota'
+import { isRecord } from '../types/json-guards'
+
+/**
+ * Fields a persisted blob must never put back into live state: they steer the
+ * backend axis or carry staged media (source image, mask, capability probe
+ * results, the in-flight flag). Everything else in the blob is a preference.
+ */
+const RUNTIME_ONLY_KEYS: readonly string[] = [
+  'backend', 'source', 'mask', 'caps', 'isGenerating', 'comfyCorsBlocked',
+]
 import type { ModelType, ClassifiedModel } from '../api/comfyui'
 import { classifyModel } from '../api/comfyui'
 import type { HiresUpscaleMethod } from '../api/hires-fix'
+import { releaseVideoBlobUrl } from '../api/mlx-video'
 // ModelType includes: flux, flux2, zimage, sdxl, sd15, wan, hunyuan, unknown
 
 export type ProgressPhase = 'idle' | 'queued' | 'loading-model' | 'loading-clip' | 'loading-vae' | 'sampling' | 'decoding' | 'complete'
@@ -399,6 +411,65 @@ interface CreateState {
   setComfyRunning: (running: boolean) => void
 }
 
+/** The gallery keeps the newest N renders. */
+const GALLERY_CAP = 200
+
+/**
+ * Hand a gallery item's in-memory media back to the renderer.
+ *
+ * `dataUrl` is a `blob:` URL for everything produced locally — MLX video via
+ * `readVideoAsBlobUrl`, images restored from disk via `galleryUrl.ts` — and a
+ * blob: URL pins its bytes for the lifetime of the document unless somebody
+ * revokes it. Nothing ever did, so a long Create session grew monotonically
+ * until the WebView ran out of memory. Every path that drops an item from the
+ * gallery goes through here.
+ *
+ * `releaseVideoBlobUrl` ignores anything that is not a `blob:` string, so
+ * cloud `https://` results and legacy `data:` previews pass through untouched.
+ */
+function releaseItemMedia(item: GalleryItem): void {
+  releaseVideoBlobUrl(item.dataUrl)
+}
+
+/**
+ * A staged input file that stops being reachable must give its `blob:` URL back.
+ *
+ * `mediaRefFrom` (`components/create/experimental/mediaRef.ts`) is the one place
+ * such a URL is minted; this is the one place it dies. Everything a MediaRef
+ * slot can do to a ref — replace it, clear it, drop it out of a set, refuse it
+ * as a duplicate, cut it off past a cap — is the same event seen from a
+ * different angle: it was in the slot before and it is not in the slot after.
+ * So there is ONE rule, stated once, and every setter that writes a MediaRef
+ * slot states its before and its after.
+ *
+ * The lifetime is closed HERE rather than at the call site because these
+ * setters are the only way a slot is ever written — a future caller cannot
+ * forget. That is what the previous, scalar-only version of this helper got
+ * right for `audioInput` / `videoInput` and could not express for the third
+ * slot, `trainImages`: an array whose members are dropped by a filter and by
+ * a silent `.slice(0, 30)`, neither of which anybody was giving back.
+ *
+ * Membership is by URL, not by name: re-picking the same filename mints a
+ * NEW URL, and the loser of that dedupe is exactly the one to revoke.
+ *
+ * Only the preview URL is dropped; every consumer (local + cloud upload) reads
+ * `MediaRef.blob`, which is unaffected by revoking the URL. Non-`blob:` URLs
+ * are left alone — they are not ours to revoke.
+ */
+function releaseDroppedMediaRefs(previous: readonly MediaRef[], next: readonly MediaRef[]): void {
+  if (previous.length === 0) return
+  const kept = new Set(next.map((r) => r.url))
+  for (const r of previous) {
+    if (kept.has(r.url)) continue
+    if (r.url.startsWith('blob:')) URL.revokeObjectURL(r.url)
+  }
+}
+
+/** The same rule for a slot that holds at most one ref. */
+function releaseReplacedMediaRef(previous: MediaRef | null, next: MediaRef | null): void {
+  releaseDroppedMediaRefs(previous ? [previous] : [], next ? [next] : [])
+}
+
 export const useCreateStore = create<CreateState>()(
   persist(
     // Explicit param/return types: LU compiles with `strict: true` (the web
@@ -650,21 +721,44 @@ export const useCreateStore = create<CreateState>()(
       setTargetResolution: (targetResolution) => set({ targetResolution }),
       setCharacterTab: (characterTab) => set({ characterTab }),
       // Cap at 30 (the server's image_paths limit) and de-dupe by filename so
-      // a re-drop of the same files doesn't double the set.
-      addTrainImages: (imgs) => set((s) => {
-        const have = new Set(s.trainImages.map((i) => i.name))
-        return { trainImages: [...s.trainImages, ...imgs.filter((i) => !have.has(i.name))].slice(0, 30) }
-      }),
-      removeTrainImage: (name) => set((s) => ({ trainImages: s.trainImages.filter((i) => i.name !== name) })),
-      clearTrainImages: () => set({ trainImages: [] }),
+      // a re-drop of the same files doesn't double the set. Both of those
+      // THROW REFS AWAY — the caller minted a blob: URL for every file it
+      // handed over, including the ones landing in the dedupe and the ones
+      // the cap cuts off, and neither is reachable from the store afterwards.
+      // So "before" is everything in play, not just what was already staged.
+      addTrainImages: (imgs) => {
+        const before = get().trainImages
+        const have = new Set(before.map((i) => i.name))
+        const trainImages = [...before, ...imgs.filter((i) => !have.has(i.name))].slice(0, 30)
+        releaseDroppedMediaRefs([...before, ...imgs], trainImages)
+        set({ trainImages })
+      },
+      removeTrainImage: (name) => {
+        const before = get().trainImages
+        const trainImages = before.filter((i) => i.name !== name)
+        releaseDroppedMediaRefs(before, trainImages)
+        set({ trainImages })
+      },
+      // Called after every submitted training run (useCloudCreate.ts), which
+      // is where the whole 30-photo set used to stay pinned for the session.
+      clearTrainImages: () => {
+        releaseDroppedMediaRefs(get().trainImages, [])
+        set({ trainImages: [] })
+      },
       setTriggerWord: (w) => set({ triggerWord: w.replace(/\s+/g, '').slice(0, 30) }),
       // Same clamp as the Rust command so the UI can never book a rejected run.
       setTrainSteps: (n) => set({ trainSteps: Math.max(100, Math.min(4000, Math.floor(n))) }),
       setSelectedCharacter: (selectedCharacter) => set({ selectedCharacter }),
       // Upload and voice-pick are mutually exclusive speech sources.
-      setAudioInput: (audioInput) => set({ audioInput, ...(audioInput ? { voiceFromJob: null } : {}) }),
+      setAudioInput: (audioInput) => {
+        releaseReplacedMediaRef(get().audioInput, audioInput)
+        set({ audioInput, ...(audioInput ? { voiceFromJob: null } : {}) })
+      },
       setVoiceFromJob: (voiceFromJob) => set({ voiceFromJob, ...(voiceFromJob ? { audioInput: null } : {}) }),
-      setVideoInput: (videoInput) => set({ videoInput }),
+      setVideoInput: (videoInput) => {
+        releaseReplacedMediaRef(get().videoInput, videoInput)
+        set({ videoInput })
+      },
       bumpCharactersVersion: () => set((s) => ({ charactersVersion: s.charactersVersion + 1 })),
       setCloudOpModel: (cloudOpModel) => set({ cloudOpModel }),
       // Picking a lane model adopts its architecture defaults (like
@@ -744,11 +838,29 @@ export const useCreateStore = create<CreateState>()(
       setVhsInstallPrompt: (resolver) => set({ vhsInstallPrompt: resolver }),
       setError: (error) => set({ error }),
       setLastGenTime: (time) => set({ lastGenTime: time }),
-      addToGallery: (item) => set((s) => ({ gallery: [item, ...s.gallery].slice(0, 200) })),
+      addToGallery: (item) => set((s) => {
+        const next = [item, ...s.gallery]
+        // The cap used to drop the oldest renders silently, taking the only
+        // reference to their blob: URLs with them — the bytes stayed pinned
+        // for the rest of the session with nothing left to revoke them by.
+        for (const dropped of next.slice(GALLERY_CAP)) releaseItemMedia(dropped)
+        return { gallery: next.slice(0, GALLERY_CAP) }
+      }),
       updateGalleryItem: (id, patch) =>
+        // NOT revoking a replaced dataUrl here on purpose: a patch lands while
+        // the tile is on screen (a lazy re-sign, a restore-from-disk), and
+        // revoking a URL an <img>/<video> may still be loading would break the
+        // very media this patch exists to fix.
         set((s) => ({ gallery: s.gallery.map((g) => (g.id === id ? { ...g, ...patch } : g)) })),
-      removeFromGallery: (id) => set((s) => ({ gallery: s.gallery.filter((g) => g.id !== id) })),
-      clearGallery: () => set({ gallery: [] }),
+      removeFromGallery: (id) => set((s) => {
+        const gone = s.gallery.find((g) => g.id === id)
+        if (gone) releaseItemMedia(gone)
+        return { gallery: s.gallery.filter((g) => g.id !== id) }
+      }),
+      clearGallery: () => set((s) => {
+        for (const g of s.gallery) releaseItemMedia(g)
+        return { gallery: [] }
+      }),
       addToPromptHistory: (prompt) => set((s) => {
         const filtered = s.promptHistory.filter(p => p !== prompt)
         return { promptHistory: [prompt, ...filtered].slice(0, 50) }
@@ -762,6 +874,7 @@ export const useCreateStore = create<CreateState>()(
     }),
     {
       name: 'create-store',
+      storage: safeJSONStorage(),
       partialize: (state) => ({
         mode: state.mode,
         videoBackend: state.videoBackend,
@@ -809,20 +922,30 @@ export const useCreateStore = create<CreateState>()(
       // when the stored blob carries a NUMERIC version that differs — legacy
       // pre-version blobs skip it entirely, so their fixups must live in merge.
       version: 1,
-      migrate: (persisted: any) => persisted,
-      merge: (persisted: any, current: any) => {
+      // Explicit annotations for the same reason the state creator carries
+      // them (see above): under `strict: true` zustand v5 loses contextual
+      // typing here and infers the store as Partial<CreateState>.
+      migrate: (persisted: unknown): CreateState => persisted as CreateState,
+      merge: (persisted: unknown, current: CreateState): CreateState => {
         // Never let runtime-only fields rehydrate (a foreign/corrupt blob must
         // not flip the backend axis or inject a stale source/mask), backfill
         // missing keys from defaults, and fix up legacy pre-version blobs
         // ('i2i' mode from the v2.3.0 refactor).
-        const { backend, source, mask, caps, isGenerating, comfyCorsBlocked, ...safe } =
-          persisted ?? {}
-        const merged = { ...current, ...safe }
-        if (merged.mode === 'i2i') {
-          merged.mode = 'image'
-          merged.imageSubMode = 'img2img'
+        const raw = isRecord(persisted) ? persisted : {}
+        const safe: Record<string, unknown> = {}
+        for (const [k, v] of Object.entries(raw)) if (!RUNTIME_ONLY_KEYS.includes(k)) safe[k] = v
+        // 'i2i' was a MODE of its own before v2.3.0; it is now mode 'image'
+        // plus imageSubMode 'img2img'. Fixed on the raw blob, because the
+        // value is not a member of the current union any more.
+        if (safe.mode === 'i2i') {
+          safe.mode = 'image'
+          safe.imageSubMode = 'img2img'
         }
-        return merged
+        // The persisted slice is ~30 independent scalar preferences (see
+        // partialize). They are adopted as written, which is what the store
+        // has always done; the fields that could actually do damage — the
+        // backend axis and the staged media — are the ones dropped above.
+        return { ...current, ...safe } as CreateState
       },
     }
   )

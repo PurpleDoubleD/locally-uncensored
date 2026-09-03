@@ -43,6 +43,10 @@ export const DEFAULT_SETTINGS: Settings = {
   // surfaces in finite wall-clock.
   agentMaxToolCalls: 400,
   agentMaxIterations: 200,
+  // Die heutigen festen Werte aus sub-agent.ts, unveraendert uebernommen:
+  // wer nichts einstellt, bekommt exakt das Verhalten von 2.6.7.
+  subAgentMaxToolCalls: 10,
+  subAgentMaxIterations: 5,
   // Unlimited by design — see the note on the type.
   loopMaxPasses: 0,
   hfDownloadPathOverride: '',
@@ -56,6 +60,14 @@ export const DEFAULT_SETTINGS: Settings = {
   // default; the switch is the support way back without a rollback release.
   contextDecay: true,
   codexSendWindowTokens: 64000,
+  // 2.6.8: auto-compact is OFF until someone sets a threshold. 0 is the
+  // switch, not a tuning value — see the field's comment in types/settings.ts.
+  // No STORE_VERSION bump for this key: settingsStore's migrate merges
+  // additively ({...DEFAULT_SETTINGS, ...stored}), and a profile already at
+  // the current version simply reads `undefined` here, which usableThreshold
+  // already answers with "off". A version bump that buys nothing costs a full
+  // state loss on downgrade (lib/persist-version.ts, DOWNGRADE-KONTRAKT).
+  autoCompactThreshold: 0,
   memoryCloudOptIn: false,
   codexDefaultMode: 'ask' as const,
   builtinEngine: {

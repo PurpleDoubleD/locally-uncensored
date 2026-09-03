@@ -1,7 +1,7 @@
 //! Which PyTorch wheels belong on THIS machine.
 //!
 //! Two environments in the app build a Python venv and put torch in it: the
-//! ComfyUI environment (`install.rs`) and the character trainer (`trainer.rs`).
+//! ComfyUI environment (`install/`) and the character trainer (`trainer.rs`).
 //! Both used to ask `nvidia-smi` and nothing else, so an AMD card was
 //! indistinguishable from a machine with no card at all and got the wheels a
 //! card-less box gets. On the ComfyUI side that is exactly what numbrain,
@@ -421,7 +421,7 @@ fn nvidia_plan(cap: Option<(u32, u32)>) -> WheelPlan {
 /// starts from.
 ///
 /// It lives here alone because two environments have to say it, and a fact that
-/// is written twice is a fact that gets updated once. `install.rs` puts the
+/// is written twice is a fact that gets updated once. `install/torch.rs` puts the
 /// ComfyUI consequence behind it, `trainer.rs` puts the trainer's behind it,
 /// and neither restates the measurement.
 ///

@@ -13,7 +13,7 @@ import {
   getSamplers,
   getSchedulers,
   detectVideoBackend,
-  cancelGeneration,
+  abandonPrompt,
   submitWorkflow,
   getHistory,
   isPromptQueued,
@@ -50,6 +50,7 @@ import {
 import { phaseForExecutingNode, phaseForProgressStep } from '../lib/render-phase-labels'
 import { buildDynamicWorkflow, buildLocalOpWorkflow, checkVideoOutputCapability } from '../api/dynamic-workflow'
 import { getAllNodeInfo, clearNodeCache } from '../api/comfyui-nodes'
+import { apiNodes, type ComfyApiGraph, type ComfyExecutionMessage, type ComfyHistoryEntry } from '../types/comfy-graph'
 import { restartComfyForNewNodes } from '../api/comfy-restart'
 import { installCustomNodes } from '../api/discover'
 import { checkPromptSafety, SAFETY_BLOCK_MESSAGE } from '../lib/render/safety'
@@ -70,6 +71,21 @@ import {
   getVideoStatus, listVideoModels, generateVideo, getVideoProgress, cancelVideo,
   buildMlxVideoModels, mlxVideoModelIdFor, readVideoAsBlobUrl,
 } from '../api/mlx-video'
+
+/**
+ * The `[event, payload]` pairs of a `/history` status entry.
+ *
+ * `ComfyHistoryEntry` DECLARES `messages` as those pairs, but `getHistory`
+ * only checks that the entry is an object — so the array-ness is a claim about
+ * ComfyUI's JSON, not a fact. Four call sites below used to run `.find` on it
+ * straight from a `[string, any][]` annotation; one non-array `messages` field
+ * would have thrown out of the render-polling loop and left the Create tab
+ * stuck on "Generating…" with no error.
+ */
+function historyMessages(entry: ComfyHistoryEntry | null): [string, ComfyExecutionMessage][] {
+  const raw = entry?.status?.messages
+  return Array.isArray(raw) ? raw : []
+}
 
 export function useCreate() {
   const [connected, setConnected] = useState<boolean | null>(null)
@@ -843,7 +859,7 @@ export function useCreate() {
         ...(clipSkip > 0 ? { clipSkip } : {}),
       }
 
-      let workflow: Record<string, any> = {}
+      let workflow: ComfyApiGraph = {}
       let builderUsed: 'dynamic' | 'legacy' | 'custom' = 'dynamic'
 
       // ── Specialized-lane graphs: stage the media inputs in ComfyUI's input
@@ -904,7 +920,7 @@ export function useCreate() {
       // Check for custom workflow assignment — but verify it's compatible with the model
       let customWf = localOp ? null : useWorkflowStore.getState().getWorkflowForModel(activeModel, imageModelType)
       if (customWf) {
-        const wfNodes = Object.values(customWf.workflow).map((n: any) => n.class_type)
+        const wfNodes = apiNodes(customWf.workflow).map(([, n]) => n.class_type)
         const needsUnet = imageModelType === 'flux' || imageModelType === 'flux2' || imageModelType === 'zimage' || imageModelType === 'wan' || imageModelType === 'hunyuan'
         const hasUnet = wfNodes.includes('UNETLoader')
         const hasCheckpoint = wfNodes.includes('CheckpointLoaderSimple')
@@ -1088,10 +1104,11 @@ export function useCreate() {
 
       // Build node ID → class_type map from workflow for phase detection
       const nodeClassMap = new Map<string, string>()
-      for (const [nodeId, node] of Object.entries(workflow)) {
-        if (node && typeof node === 'object' && 'class_type' in node) {
-          nodeClassMap.set(nodeId, (node as any).class_type)
-        }
+      // `apiNodes` IS the "is this an object with a class_type" test, and it
+      // hands back the class name already narrowed to a string — the old
+      // version wrote a non-string class_type into a Map<string, string>.
+      for (const [nodeId, node] of apiNodes(workflow)) {
+        nodeClassMap.set(nodeId, node.class_type)
       }
 
       // Ask which device ComfyUI is on while the render is still healthy: both
@@ -1167,9 +1184,9 @@ export function useCreate() {
                 cleanup()
                 useCreateStore.getState().setProgressPhase('complete')
                 setProgress(95, 'Fetching results...')
-                const messages: [string, any][] = history.status?.messages ?? []
-                const startMsg = messages.find(([t]: [string, any]) => t === 'execution_start')
-                const endMsg = messages.find(([t]: [string, any]) => t === 'execution_success')
+                const messages = historyMessages(history)
+                const startMsg = messages.find(([t]) => t === 'execution_start')
+                const endMsg = messages.find(([t]) => t === 'execution_success')
                 const comfyTime = startMsg?.[1]?.timestamp && endMsg?.[1]?.timestamp
                   ? ((endMsg[1].timestamp - startMsg[1].timestamp) / 1000).toFixed(1) : null
                 setProgress(100, 'Complete!')
@@ -1200,8 +1217,8 @@ export function useCreate() {
               } else if (statusStr === 'error') {
                 completionHandled = true
                 cleanup()
-                const msgs = history.status?.messages ?? []
-                const errEntry = msgs.find(([t]: [string, any]) => t === 'execution_error')?.[1]
+                const msgs = historyMessages(history)
+                const errEntry = msgs.find(([t]) => t === 'execution_error')?.[1]
                 const raw = errEntry?.exception_message || 'ComfyUI execution error'
                 const hint = comfyErrorHint(errEntry?.node_type, errEntry?.exception_type, String(raw))
                 reject(new Error(hint ? `${raw}\n\n${hint}` : raw))
@@ -1261,7 +1278,7 @@ export function useCreate() {
                 // Fetch history to get output files
                 getHistory(promptId).then(history => {
                   if (!history) { setError('No history found after completion.'); resolve(); return }
-                  const messages: [string, any][] = history.status?.messages ?? []
+                  const messages = historyMessages(history)
                   const startMsg = messages.find(([t]) => t === 'execution_start')
                   const endMsg = messages.find(([t]) => t === 'execution_success')
                   const comfyTime = startMsg?.[1]?.timestamp && endMsg?.[1]?.timestamp
@@ -1295,7 +1312,7 @@ export function useCreate() {
                 cleanup()
                 const msg = event.data.exception_message || 'Unknown ComfyUI error'
                 const nodeType = event.data.node_type ? ` (${event.data.node_type})` : ''
-                const hint = comfyErrorHint(event.data.node_type, (event.data as any).exception_type, msg)
+                const hint = comfyErrorHint(event.data.node_type, event.data.exception_type, msg)
                 reject(new Error(msg.trim() + nodeType + (hint ? `\n\n${hint}` : '')))
                 break
               }
@@ -1365,7 +1382,7 @@ export function useCreate() {
 
               if (history.status?.completed) {
                 if (pollRef.current) clearInterval(pollRef.current)
-                const messages: [string, any][] = history.status?.messages ?? []
+                const messages = historyMessages(history)
                 const startMsg = messages.find(([t]) => t === 'execution_start')
                 const endMsg = messages.find(([t]) => t === 'execution_success')
                 const comfyTime = startMsg?.[1]?.timestamp && endMsg?.[1]?.timestamp
@@ -1397,7 +1414,7 @@ export function useCreate() {
                 resolve()
               } else if (history.status?.status_str === 'error') {
                 if (pollRef.current) clearInterval(pollRef.current)
-                const messages: [string, any][] = history.status?.messages ?? []
+                const messages = historyMessages(history)
                 const errorEntry = messages.find(([t]) => t === 'execution_error')
                 const errMsg = errorEntry?.[1]?.exception_message
                   || errorEntry?.[1]?.message
@@ -1414,6 +1431,17 @@ export function useCreate() {
         })
       }
     } catch (err) {
+      // However this render ended — Stop, the stall watchdog, a dead ComfyUI,
+      // a node error — our prompt can still be sitting in ComfyUI's queue with
+      // nobody watching it. The watchdogs used to just stop polling and walk
+      // away, which is how a "stalled" job kept the GPU busy for another hour
+      // and delivered its file to nowhere. Remove exactly OURS; a blanket
+      // /interrupt here would kill the Create render or the external ComfyUI
+      // tab that is actually running.
+      const ownPromptId = useCreateStore.getState().currentPromptId
+      if (ownPromptId) {
+        try { await abandonPrompt(ownPromptId) } catch { /* best effort */ }
+      }
       if (err instanceof Error && err.message === 'Cancelled') {
         // User cancelled, not an error
       } else {
@@ -1433,7 +1461,12 @@ export function useCreate() {
       // the haul instead of waiting for it to load).
       if (renderEviction) void restoreChatBackendsAfterRender(renderEviction)
     }
-  }, [videoBackend, runCharacterTraining])
+    // `videoModelsList` ist State: seine Referenz wechselt nur, wenn
+    // setVideoModelsList wirklich eine neue Liste schreibt (fetchModels), und
+    // generateInner schreibt sie nicht. Der Callback wird also genau dann neu
+    // gebaut, wenn sich die Modellliste aendert — vorher las er sie aus einer
+    // veralteten Closure und leitete daraus den falschen `modelType` ab.
+  }, [videoBackend, runCharacterTraining, videoModelsList])
 
   // Double-click idempotence: isGenerating only flips after the first await,
   // so a second click racing the first must be blocked SYNCHRONOUSLY — two
@@ -1452,9 +1485,26 @@ export function useCreate() {
   const cancel = useCallback(async () => {
     abortRef.current?.abort()
     if (trainingActive.current) {
-      try { await cancelCharacterTraining() } catch {}
+      // Best effort, and deliberately not fatal: Stop's real job is the
+      // abandonPrompt below. A training cancel that fails must not stop us
+      // from taking the render out of the queue — that was the R32 defect
+      // (job left running, file on disk, nobody watching).
+      try { await cancelCharacterTraining() } catch { /* Stop continues regardless */ }
     }
-    try { await cancelGeneration() } catch {}
+    // Take OUR job out of the queue — do not blanket-/interrupt.
+    //
+    // /interrupt kills whatever ComfyUI is executing RIGHT NOW, which is only
+    // our render when ours happens to be at the front. Queued behind three
+    // others (R32 sat at position 4), Stop killed a stranger's job and left
+    // ours to start seconds later, unwatched: the GPU kept working, the file
+    // landed on disk, and nothing ever put it in the gallery because the poller
+    // was already gone. The same /interrupt also reaches an external ComfyUI
+    // tab on the same server. abandonPrompt deletes ours from pending and only
+    // interrupts when ours is the one running.
+    const ownPromptId = useCreateStore.getState().currentPromptId
+    if (ownPromptId) {
+      try { await abandonPrompt(ownPromptId) } catch { /* best effort */ }
+    }
     if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null }
     useCreateStore.getState().setIsGenerating(false)
     useCreateStore.getState().setProgress(0)

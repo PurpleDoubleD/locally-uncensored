@@ -9,6 +9,7 @@
  */
 
 import { log } from "../lib/logger";
+import { prop } from "../types/json-guards";
 import { shouldLogRepeat } from "../lib/probe-backoff";
 
 // Hosts whose proxy failure has already been logged, host -> timestamp. Keeps
@@ -28,8 +29,11 @@ export function isTauri(): boolean {
   // Check both so the app keeps working across both versions (and also
   // during the migration window when people might be on either).
   if (typeof window === "undefined") return false;
-  const w = window as any;
-  return !!(w.__TAURI_INTERNALS__ || w.__TAURI__);
+  // Neither global is in the DOM lib, so reading them off `window` needed an
+  // assertion. `prop` answers `undefined` for a missing key without claiming
+  // anything about the container — the same probe, checked.
+  const w: unknown = window;
+  return !!(prop(w, "__TAURI_INTERNALS__") || prop(w, "__TAURI__"));
 }
 
 /** True when the host OS is macOS. The frontend `dist` is shared across the
@@ -435,10 +439,10 @@ async function proxyStreamChunked(url: string, method: string, body?: string, he
 /**
  * Call a backend command. Routes to Tauri invoke() or Vite fetch() automatically.
  */
-export async function backendCall<T = any>(
+export async function backendCall<T = unknown>(
   command: string,
   args?: Record<string, unknown>,
-  options?: { method?: string; body?: any; headers?: Record<string, string> }
+  options?: { method?: string; body?: BodyInit; headers?: Record<string, string> }
 ): Promise<T> {
   if (isTauri()) {
     const invoke = await getInvoke();
@@ -472,8 +476,13 @@ export async function backendCall<T = any>(
     install_tts_status: { path: "/local-api/install-tts" },
     transcribe: { path: "/local-api/transcribe", method: "POST" },
     execute_code: { path: "/local-api/execute-code", method: "POST" },
-    file_read: { path: "/local-api/file-read", method: "POST" },
-    file_write: { path: "/local-api/file-write", method: "POST" },
+    // file_read / file_write: ABSICHTLICH NICHT HIER. Die beiden Dev-Endpunkte
+    // sind entfernt (siehe vite.config.ts), weil sie keinen Aufrufer mehr
+    // hatten und eine dritte, von Rust abweichende Pfadregel waren. Ein Eintrag
+    // ohne Endpunkt waere schlimmer als keiner: `backendCall('file_read', …)`
+    // liefe dann im Dev-Modus in einen nackten HTTP 404, statt mit
+    // "Unknown backend command: file_read" zu sagen, was los ist. Der Weg auf
+    // die Platte ist fs_read / fs_write.
     download_model: { path: "/local-api/download-model", method: "POST" },
     download_model_to_path: { path: "/local-api/download-model-to-path", method: "POST" },
     detect_model_path: { path: "/local-api/detect-model-path", method: "POST" },
@@ -786,7 +795,7 @@ export async function fetchExternalBytes(url: string): Promise<ArrayBuffer> {
  * Tauri the browser can't fetch localhost directly (CORS) so we route through
  * the Rust byte proxy; in dev a plain fetch works.
  */
-export async function fetchLocalhostBytes(url: string): Promise<Uint8Array> {
+export async function fetchLocalhostBytes(url: string): Promise<Uint8Array<ArrayBuffer>> {
   if (isTauri()) {
     const invoke = await getInvoke()
     const bytes = (await invoke('proxy_localhost_stream', { url, method: 'GET', body: null })) as number[]

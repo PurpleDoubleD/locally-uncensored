@@ -46,7 +46,7 @@ export function SlashStepsBlock({ command, stepCount, running, children }: Props
         className="flex items-center gap-1.5 w-full px-2 py-1 text-left hover:bg-gray-100/60 dark:hover:bg-white/[0.03] transition-colors"
       >
         <Terminal size={10} className="text-gray-500 shrink-0" />
-        <span className="text-[0.65rem] font-mono text-gray-600 dark:text-gray-300">/{command}</span>
+        <span className="t-micro font-mono text-gray-600 dark:text-gray-300">/{command}</span>
         <span className="text-[0.5rem] text-gray-400 dark:text-gray-600">
           {stepCount} {stepCount === 1 ? 'step' : 'steps'}
         </span>

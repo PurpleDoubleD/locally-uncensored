@@ -92,6 +92,38 @@ export interface Message {
   unbackedLinks?: string[]
 }
 
+/**
+ * One compaction of this conversation (2.6.8).
+ *
+ * WHY THE ANCHOR IS AN ID AND NOT AN INDEX. The cut has to survive everything
+ * that happens to the array afterwards: new turns appended, a message deleted,
+ * the payload builders filtering stored `role:'system'` notices out. An index
+ * survives none of those — it would silently start covering the wrong turns,
+ * and a summary standing in front of material it does not describe is worse
+ * than no summary. An id that is gone means the record is stale, which is a
+ * state the reader can detect and ignore.
+ *
+ * The summary itself is stored RENDERED, exactly as it goes into the payload,
+ * so what the transcript block shows and what the model receives cannot drift.
+ */
+export interface CompactionRecord {
+  id: string
+  /** The rendered summary, byte-identical to what the payload carries. */
+  summary: string
+  /** Id of the LAST message this summary stands in for — the cut point. */
+  upToMessageId: string
+  /** How many messages it stands in for. Display only. */
+  replaced: number
+  /** Messages in the conversation when it ran. The auto-compact cooldown anchor. */
+  atMessageCount: number
+  /** Estimated tokens of the replaced turns, and of the summary. */
+  tokensBefore: number
+  tokensAfter: number
+  /** Who asked: the user typing /compact, or the threshold firing. */
+  trigger: 'manual' | 'auto'
+  at: number
+}
+
 export interface Conversation {
   id: string
   title: string
@@ -107,6 +139,16 @@ export interface Conversation {
   /** Group chat v1: two to four models that answer in turn on every user
    *  message. Fewer than two entries means a normal single-model chat. */
   groupModels?: string[]
+  /**
+   * Compactions that have happened in this chat, oldest first. Only the NEWEST
+   * one shapes the payload — each summary already covers everything before its
+   * own cut, so applying two would send the older material twice. The earlier
+   * ones are kept because the transcript shows them where they happened.
+   *
+   * Absent on every chat from before 2.6.8, and on every chat that has never
+   * been compacted. Both read as "no compaction", which is what they are.
+   */
+  compactions?: CompactionRecord[]
   createdAt: number
   updatedAt: number
 }

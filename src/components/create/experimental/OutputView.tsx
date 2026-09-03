@@ -6,6 +6,7 @@ import { useCreateStore, type GalleryItem, type ProgressPhase } from '../../../s
 import { backendCall, downloadComfyFile, isTauri } from '../../../api/backend'
 import { isMlxImageHost } from '../../../api/mlx-image'
 import { refreshResultUrl } from '../../../api/cloud/jobs'
+import { ICON_LG, ICON_STROKE_MARK } from '../../ui/icon-size'
 import { markGalleryItemAvailable } from './galleryUrl'
 import { useComfyMedia } from './useComfyMedia'
 import { cn } from '../ui/cn'
@@ -221,7 +222,7 @@ export function ResultView({ item, onFullscreen, onSendToEditor }: ResultProps) 
       <div className="relative group max-w-full max-h-full">
         {isAudio ? (
           <div className="w-[420px] max-w-full flex flex-col items-center gap-3 p-6 rounded-[var(--radius-panel)] border border-white/[0.06] bg-white/[0.02]">
-            <AudioLines size={26} className="text-gray-400" strokeWidth={1.5} />
+            <AudioLines size={26} className="text-gray-400" strokeWidth={ICON_STROKE_MARK} />
             {item.prompt && (
               <p className="t-body text-gray-400 text-center line-clamp-2">{item.prompt}</p>
             )}
@@ -249,7 +250,7 @@ export function ResultView({ item, onFullscreen, onSendToEditor }: ResultProps) 
         )}
         {item.unavailable && (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 rounded-[var(--radius-panel)] bg-black/60 text-gray-400 p-6 text-center">
-            <MonitorOff size={20} strokeWidth={1.5} />
+            <MonitorOff size={ICON_LG} />
             <span className="t-body">This render lives on the local engine, which isn't reachable right now.</span>
           </div>
         )}

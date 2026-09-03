@@ -103,8 +103,8 @@ describe('tool-call-repair', () => {
       const messy = 'name="web_search", arguments are unknown'
       const result = repairJson(messy)
       expect(result).not.toBeNull()
-      expect(result.name).toBe('web_search')
-      expect(result.arguments).toEqual({})
+      expect(result?.name).toBe('web_search')
+      expect(result?.arguments).toEqual({})
     })
 
     it('handles whitespace-only input', () => {
@@ -148,17 +148,17 @@ describe('tool-call-repair', () => {
     })
 
     it('returns empty object for number input', () => {
-      expect(repairToolCallArgs(42 as any)).toEqual({})
+      expect(repairToolCallArgs(42)).toEqual({})
     })
 
     it('returns empty object for boolean input', () => {
-      expect(repairToolCallArgs(true as any)).toEqual({})
+      expect(repairToolCallArgs(true)).toEqual({})
     })
 
     it('returns array if args parse to array', () => {
       // Arrays are objects, so they pass the typeof check
       const arr = [1, 2, 3]
-      expect(repairToolCallArgs(arr as any)).toEqual(arr)
+      expect(repairToolCallArgs(arr)).toEqual(arr)
     })
 
     it('handles nested object args', () => {

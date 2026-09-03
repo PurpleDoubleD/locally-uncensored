@@ -1,6 +1,7 @@
 import { test, expect, type Page } from '@playwright/test'
 import { tauriMockInit, DEFAULT_ASSISTANT_REPLY, DEFAULT_MODEL_NAME, type TauriMockOptions } from './support/tauri-mock'
 import { routeCloud, seedOnboardingDone, cloudSwitch } from './support/cloud-mock'
+import { mlxCalls, comfyCalls, hfToken, requireCall } from './support/recorded'
 
 /**
  * macOS local Create — the MLX path (MAC-5).
@@ -30,11 +31,6 @@ async function bootLocalCreate(page: Page, opts: TauriMockOptions) {
   await page.goto('/')
   await expect(cloudSwitch(page)).toBeVisible({ timeout: 20_000 })
   await page.getByRole('button', { name: /^Create$/ }).click()
-}
-
-/** Everything the page recorded through the mocked MLX commands. */
-function mlxCalls(page: Page) {
-  return page.evaluate(() => (window as unknown as { __E2E_MLX_CALLS__?: unknown[] }).__E2E_MLX_CALLS__ ?? [])
 }
 
 test('mac local: MLX lanes run locally, cloud-only lanes stay visible as teasers', async ({ page }) => {
@@ -70,20 +66,17 @@ test('mac local: image generate dispatches to MLX, never to ComfyUI', async ({ p
   await page.getByRole('button', { name: /^Create$/ }).last().click()
 
   await expect
-    .poll(async () => (await mlxCalls(page)).filter((c: any) => c.cmd === 'mlx_generate').length, { timeout: 30_000 })
+    .poll(async () => (await mlxCalls(page)).filter((c) => c.cmd === 'mlx_generate').length, { timeout: 30_000 })
     .toBeGreaterThan(0)
 
-  const gen = (await mlxCalls(page)).find((c: any) => c.cmd === 'mlx_generate') as any
+  const gen = requireCall(await mlxCalls(page), 'mlx_generate')
   expect(gen.prompt).toContain('a red apple')
 
   // The render came back as a data: PNG and is on screen.
   await expect(page.locator('img[src^="data:image/png"]').first()).toBeVisible({ timeout: 30_000 })
 
   // The point of the whole platform split: no ComfyUI call was even attempted.
-  const comfy = await page.evaluate(
-    () => (window as unknown as { __E2E_COMFY_CALLS__?: unknown[] }).__E2E_COMFY_CALLS__ ?? [],
-  )
-  expect(comfy).toHaveLength(0)
+  expect(await comfyCalls(page)).toHaveLength(0)
 })
 
 test('mac local: video generate dispatches to the MLX video model', async ({ page }) => {
@@ -95,10 +88,10 @@ test('mac local: video generate dispatches to the MLX video model', async ({ pag
   await page.getByRole('button', { name: /^Create$/ }).last().click()
 
   await expect
-    .poll(async () => (await mlxCalls(page)).filter((c: any) => c.cmd === 'video_generate').length, { timeout: 40_000 })
+    .poll(async () => (await mlxCalls(page)).filter((c) => c.cmd === 'video_generate').length, { timeout: 40_000 })
     .toBeGreaterThan(0)
 
-  const gen = (await mlxCalls(page)).find((c: any) => c.cmd === 'video_generate') as any
+  const gen = requireCall(await mlxCalls(page), 'video_generate')
   expect(gen.id).toBe('wan21-t2v-1.3b')
   expect(gen.prompt).toContain('drifting clouds')
 })
@@ -134,7 +127,7 @@ test('fresh mac: the Local Media panel installs the engine and a model', async (
   await page.getByRole('button', { name: /^Install$/ }).first().click()
   await expect(page.getByRole('button', { name: /Remove/i }).first()).toBeVisible({ timeout: 20_000 })
 
-  const calls = (await mlxCalls(page)) as any[]
+  const calls = await mlxCalls(page)
   expect(calls.some((c) => c.cmd === 'mlx_image_install_model' && c.id === 'sd-turbo')).toBe(true)
 })
 
@@ -161,17 +154,14 @@ test('fresh mac: Create itself offers the setup, and it is the MLX one', async (
   // Engine first, then the SMALLEST model in the catalog — the setup path
   // must not pull the 4.4 GB one when a 2.6 GB one would do.
   await expect
-    .poll(async () => (await mlxCalls(page)).map((c: any) => c.cmd), { timeout: 30_000 })
+    .poll(async () => (await mlxCalls(page)).map((c) => c.cmd), { timeout: 30_000 })
     .toContain('mlx_image_install_model')
-  const calls = (await mlxCalls(page)) as any[]
+  const calls = await mlxCalls(page)
   expect(calls.some((c) => c.cmd === 'install_mlx_diffusion')).toBe(true)
-  expect(calls.find((c) => c.cmd === 'mlx_image_install_model').id).toBe('sd-turbo')
+  expect(requireCall(calls, 'mlx_image_install_model').id).toBe('sd-turbo')
 
   // The hard rule: nothing in this flow reaches for ComfyUI.
-  const comfy = await page.evaluate(
-    () => (window as unknown as { __E2E_COMFY_CALLS__?: unknown[] }).__E2E_COMFY_CALLS__ ?? [],
-  )
-  expect(comfy).toHaveLength(0)
+  expect(await comfyCalls(page)).toHaveLength(0)
 })
 
 test('mac: the Model Manager offers MLX media instead of hiding the rails', async ({ page }) => {
@@ -226,12 +216,14 @@ test('mac: saving the HuggingFace token in Settings pushes it to Rust', async ({
   await page.getByRole('button', { name: /^Save$/ }).click()
   await expect(page.getByRole('button', { name: /Saved/i })).toBeVisible({ timeout: 10_000 })
 
-  const token = await page.evaluate(() => (window as unknown as { __E2E_HF_TOKEN__?: string }).__E2E_HF_TOKEN__)
-  expect(token).toBe('hf_e2e_probe')
+  expect(await hfToken(page)).toBe('hf_e2e_probe')
 
-  const call = ((await mlxCalls(page)) as any[]).find((c) => c.cmd === 'set_hf_token')
-  expect(call).toMatchObject({ present: true })
-  expect(JSON.stringify(call)).not.toContain('hf_e2e_probe')
+  const call = requireCall(await mlxCalls(page), 'set_hf_token')
+  expect(call.present).toBe(true)
+  // Against the UNPARSED record: a leak in a field this file does not model
+  // would be invisible in the parsed projection, and the check would pass on
+  // nothing. `raw` is exactly what the page pushed.
+  expect(JSON.stringify(call.raw)).not.toContain('hf_e2e_probe')
 })
 
 test('mac: a stored token reaches Rust at boot, without opening Settings', async ({ page }) => {
@@ -250,9 +242,5 @@ test('mac: a stored token reaches Rust at boot, without opening Settings', async
   await page.goto('/')
   await expect(cloudSwitch(page)).toBeVisible({ timeout: 20_000 })
 
-  await expect
-    .poll(async () => page.evaluate(() => (window as unknown as { __E2E_HF_TOKEN__?: string }).__E2E_HF_TOKEN__), {
-      timeout: 15_000,
-    })
-    .toBe('hf_boot_probe')
+  await expect.poll(() => hfToken(page), { timeout: 15_000 }).toBe('hf_boot_probe')
 })

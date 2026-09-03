@@ -2,43 +2,15 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { v4 as uuid } from 'uuid'
 import { normalizeStagedPath } from '../lib/staged-overlay'
+import type { StagedChange } from '../types/staged-changes'
 import { idbStorage } from '../lib/idbStorage'
 import { coalescedJSONStorage } from '../lib/coalescedStorage'
 
-export interface StagedChange {
-  /** Stable id assigned at stage-time so the UI can key + remove safely. */
-  id: string
-  /** Path the model called `file_write` with (as the model wrote it — may be relative). */
-  path: string
-  /**
-   * Absolute path resolved against the run's workspace AT STAGE TIME. Apply
-   * happens after the run ends, when useCodex's finally has cleared the active
-   * chat/workspace context — so a relative `path` would route to
-   * agent-workspace/default/ instead of the project folder the agent wrote into.
-   * Writing this captured absolute path makes the approved diff land exactly
-   * where it should. Falls back to `path` (already absolute / no workspace set).
-   */
-  resolvedPath?: string
-  /**
-   * The run's workspace root, captured AT STAGE TIME. Apply runs after the loop
-   * ends, when the active chat/workspace context is cleared — so without this
-   * the write jails to agent-workspace/default and REJECTS the absolute project
-   * path ("escapes the allowed workspace"), silently failing every apply into a
-   * real folder. The apply path (a trusted, user-gated UI action) passes this
-   * as fs_write's working_directory so the jail root is the real project folder.
-   * Undefined for sandbox-mode runs (no real folder), where the per-chat
-   * sandbox is the correct root anyway.
-   */
-  workingDirectory?: string
-  /** Full file content before the write — empty string when the target didn't exist. */
-  oldContent: string
-  /** Full file content the model wants to write. */
-  newContent: string
-  /** Pre-computed unified diff for snappy rendering — caller decides format. */
-  diff: string
-  /** Wall-clock when the model staged this change. */
-  stagedAt: number
-}
+// Die Datenform lebt in types/staged-changes.ts, damit lib/staged-overlay.ts
+// sie lesen kann, ohne diesen Store zu importieren (der seinerseits
+// normalizeStagedPath aus dem Overlay zieht). Re-Export, damit bestehende
+// Importpfade unverändert bleiben.
+export type { StagedChange }
 
 interface StagedChangesState {
   /** Per-conversation queue. Cleared on apply-all / reject-all / chat reset. */

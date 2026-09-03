@@ -54,8 +54,13 @@ export function findBalancedObjects(text: string): string[] {
   return out
 }
 
-/** First balanced object in `text` that actually parses as JSON. */
-export function extractJsonObject(text: string): any | null {
+/**
+ * First balanced object in `text` that actually parses as JSON.
+ *
+ * The value is `unknown`: it came out of a language model, and the only thing
+ * the scan proves is that the braces matched. Callers check what they read.
+ */
+export function extractJsonObject(text: string): unknown {
   for (let i = 0; i < text.length; i++) {
     if (text[i] !== '{') continue
     const obj = balancedObjectAt(text, i)

@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
+import { safeJSONStorage } from '../lib/storage-quota'
 import { releaseNoteFor } from '../lib/release-notes'
 
 /**
@@ -21,7 +22,10 @@ export const useReleaseNotesStore = create<ReleaseNotesState>()(
       lastNotesVersion: null,
       markNotesSeen: (version) => set({ lastNotesVersion: version }),
     }),
-    { name: 'lu_release_notes' },
+    {
+      name: 'lu_release_notes',
+      storage: safeJSONStorage(),
+    },
   ),
 )
 

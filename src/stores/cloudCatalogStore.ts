@@ -6,6 +6,7 @@
 
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
+import { safeJSONStorage } from '../lib/storage-quota'
 import { CLOUD_MODEL_SEED, type CloudModel } from '../lib/render/cloud-models'
 import type { RenderKind, RenderOp } from '../lib/render/cloud-jobs'
 import { getCatalog, type CatalogOps, type CloudCatalog } from '../api/cloud/catalog'
@@ -39,7 +40,10 @@ export const useCloudCatalogStore = create<CloudCatalogState>()(
           mediaLive: c.media_live,
         }),
     }),
-    { name: 'lu-cloud-catalog' },
+    {
+      name: 'lu-cloud-catalog',
+      storage: safeJSONStorage(),
+    },
   ),
 )
 

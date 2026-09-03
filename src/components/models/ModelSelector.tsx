@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
+import { useDismissOnEscape } from '../../hooks/useDismissOnEscape'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Ban, ChevronDown, Loader2, Power, PlayCircle, Settings as SettingsIcon, Wrench, X, Cloud } from 'lucide-react'
 import { useModels } from '../../hooks/useModels'
@@ -14,6 +15,7 @@ import { canUseTools, resolveToolSupport, type ToolSupport } from '../../lib/too
 import { backendCall } from '../../api/backend'
 import { listLoadedLmStudioModels, loadLmStudioModel, unloadLmStudioModel } from '../../api/lmstudio'
 import { isLmStudioProvider } from '../../lib/hf-to-provider'
+import { detailOf } from '../../lib/error-text'
 import { lmStudioSlotUpdate, adoptionReplacesBuiltinEngine } from '../../lib/lmstudio-backend-adopt'
 import { nextProbeDelayMs } from '../../lib/probe-backoff'
 import { noChatBackendEnabled } from '../../lib/provider-visibility'
@@ -28,7 +30,9 @@ import {
 } from '../../api/lu-engine-switch'
 import { tryAcquireLuEngineSwap, releaseLuEngineSwap, luEngineSwapInFlight } from '../../api/lu-engine-swap-lock'
 import { useLuEngineSwitchStore } from '../../stores/luEngineSwitchStore'
+import { ModelPickerSkeleton } from '../layout/ViewSkeletons'
 import type { AIModel } from '../../types/models'
+import { MOTION_S } from '../ui/motion'
 
 // ── Local-mode cloud discovery (2.5.8): an "LU Cloud" section at the list's
 // tail. Signed-in accounts show their real hosted chat models (the appMode
@@ -81,10 +85,10 @@ function CloudTeaserSection({ onOpen }: { onOpen: () => void }) {
             title="Runs on LU Cloud, tap to see plans"
           >
             <Cloud size={10} className="text-violet-500 dark:text-violet-200 shrink-0" />
-            <span className="text-[0.68rem] text-gray-400 truncate">
+            <span className="t-micro text-gray-400 truncate">
               {('displayName' in m && m.displayName) || displayModelName(m.name)}
             </span>
-            <span className="ml-auto text-[8px] text-violet-500 dark:text-violet-200">Cloud</span>
+            <span className="ml-auto text-[0.5rem] text-violet-500 dark:text-violet-200">Cloud</span>
           </button>
       ))}
       {cloudChat.length > 0 && cloudMore > 0 && (
@@ -93,7 +97,7 @@ function CloudTeaserSection({ onOpen }: { onOpen: () => void }) {
           className="w-full flex items-center gap-2 px-2.5 py-1.5 text-left hover:bg-white/[0.04] transition-colors"
           title="See the whole hosted catalogue"
         >
-          <span className="text-[0.62rem] text-gray-500">
+          <span className="t-micro text-gray-500">
             {cloudMore} more cloud {cloudMore === 1 ? 'model' : 'models'}, see them all
           </span>
         </button>
@@ -105,10 +109,10 @@ function CloudTeaserSection({ onOpen }: { onOpen: () => void }) {
           title="Runs on LU Cloud, tap to see plans"
         >
           <Cloud size={10} className="text-violet-500 dark:text-violet-200 shrink-0" />
-          <span className="text-[0.68rem] text-gray-400">
+          <span className="t-micro text-gray-400">
             Frontier chat models, no GPU needed
           </span>
-          <span className="ml-auto text-[8px] text-violet-500 dark:text-violet-200">Cloud</span>
+          <span className="ml-auto text-[0.5rem] text-violet-500 dark:text-violet-200">Cloud</span>
         </button>
       )}
     </div>
@@ -144,7 +148,13 @@ function sameStringSet(prev: Set<string>, next: string[]): boolean {
 // re-fetches the model list so the LM Studio models appear without a
 // restart.
 
-interface LmStudioServerStatus {
+/**
+ * Antwort von `lmstudio_server_status`. Deckungsgleich mit der Rust-Seite
+ * (`src-tauri/src/commands/install.rs:3379` baut genau diese fuenf Schluessel,
+ * alle immer gesetzt). Exportiert, weil das Onboarding denselben Befehl ruft
+ * und dort ein `any` stand — eine Antwort, ein Typ.
+ */
+export interface LmStudioServerStatus {
   running: boolean
   port: number
   lms_present: boolean
@@ -213,8 +223,16 @@ function LmStudioServerHint({ onStarted }: { onStarted: () => void }) {
           }
         }
       }
-    } catch (e: any) {
-      setStartError(e?.message ? String(e.message).slice(0, 80) : 'Start failed')
+    } catch (e) {
+      // Hier stand `catch (e: any)` mit `e?.message`. Das las genau EINE Sorte
+      // Fehler: ein `Error`-Objekt. Tauris `invoke` lehnt aber mit einem STRING
+      // ab (die Rust-Seite gibt `Result<_, String>` zurueck) — im ausgelieferten
+      // Programm hatte `e.message` deshalb nie einen Wert, und der Grund des
+      // Fehlschlags wurde jedes Mal durch das pauschale „Start failed" ersetzt.
+      // `detailOf` ist die Stelle, an der dieses Projekt genau diese Frage schon
+      // beantwortet (lib/error-text.ts): String, Error oder sonst etwas.
+      const detail = detailOf(e)
+      setStartError(detail ? detail.slice(0, 80) : 'Start failed')
     } finally {
       setStarting(false)
     }
@@ -230,13 +248,13 @@ function LmStudioServerHint({ onStarted }: { onStarted: () => void }) {
       >
         <X size={10} />
       </button>
-      <p className="text-[0.6rem] text-gray-600 dark:text-gray-300 leading-snug mb-1.5 pr-5">
+      <p className="t-micro text-gray-600 dark:text-gray-300 leading-snug mb-1.5 pr-5">
         LM Studio is installed ({status.model_count} model{status.model_count === 1 ? '' : 's'} on disk) but its server isn't running. Start it to pick LM Studio models here.
       </p>
       <button
         onClick={handleStart}
         disabled={starting}
-        className="w-full flex items-center justify-center gap-1.5 px-2 py-1 rounded text-[0.62rem] bg-black/[0.06] dark:bg-white/[0.06] hover:bg-black/[0.1] dark:hover:bg-white/[0.12] text-gray-700 dark:text-gray-200 transition-colors disabled:opacity-50"
+        className="w-full flex items-center justify-center gap-1.5 px-2 py-1 rounded t-micro bg-black/[0.06] dark:bg-white/[0.06] hover:bg-black/[0.1] dark:hover:bg-white/[0.12] text-gray-700 dark:text-gray-200 transition-colors disabled:opacity-50"
       >
         {starting ? <Loader2 size={10} className="animate-spin" /> : <PlayCircle size={10} />}
         <span>{starting ? 'Starting LM Studio server…' : 'Start LM Studio Server'}</span>
@@ -389,9 +407,15 @@ function groupByFamily(models: AIModel[]): { family: string; models: AIModel[] }
  * displayModelName. (Found via live E2E 2026-06-01.)
  */
 export function lmsIdOf(model: AIModel): string {
-  const raw = ('lmsKey' in model && typeof (model as any).lmsKey === 'string'
-    ? (model as any).lmsKey
-    : model.name) as string
+  // `lmsKey` steht auf keinem der vier Glieder von `AIModel`. Seit TS 4.9
+  // verengt `'lmsKey' in model` trotzdem — auf `AIModel & Record<'lmsKey',
+  // unknown>` —, und die `typeof`-Pruefung dahinter macht daraus `string`.
+  // Beide Zusicherungen waren also nur die Handarbeit, die der Compiler seither
+  // selbst macht; die aeussere `as string` hat obendrein verdeckt, dass die
+  // innere Pruefung ueberhaupt etwas garantiert.
+  const raw = 'lmsKey' in model && typeof model.lmsKey === 'string'
+    ? model.lmsKey
+    : model.name
   return raw.replace(/^[^:]+::/, '')
 }
 
@@ -509,7 +533,7 @@ function LoadToggle({ loaded, busy, disabled, onClick }: {
       title={loaded
         ? 'Loaded in VRAM. Click to unload (Off)'
         : 'Not loaded. Click to load into VRAM (On)'}
-      className={`flex items-center gap-0.5 pl-1 pr-1.5 py-0.5 rounded text-[8px] font-semibold uppercase tracking-wide transition-colors disabled:opacity-40 ${
+      className={`flex items-center gap-0.5 pl-1 pr-1.5 py-0.5 rounded text-[0.5rem] font-semibold uppercase tracking-wide transition-colors disabled:opacity-40 ${
         loaded
           ? 'text-emerald-400 bg-emerald-500/[0.12] hover:bg-emerald-500/20'
           : 'text-gray-500 hover:text-gray-300 hover:bg-white/[0.06]'
@@ -552,6 +576,15 @@ export interface ModelSelectorProps {
 export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy = null }: ModelSelectorProps = {}) {
   const { models, activeModel, setActiveModel, fetchModels } = useModels()
   const isModelLoading = useModelStore((s) => s.isModelLoading)
+  // Welle 3, Listen-Ladezustand 3 von 4 — und der einzige, den es vorher gar
+  // nicht gab. `inventoryLoaded` ist die Frage „ist ueberhaupt schon einmal
+  // eine Modellliste hier gelandet"; sie steht seit dem Zaehler-Nachschlag
+  // (2026-08-29) im Store, aus genau demselben Grund: bis dahin darf man
+  // keine Zahl und keine Leermeldung zeigen, sondern nur eine Ladeanzeige.
+  // Ohne sie ging der Waehler direkt von leer auf Liste — und „leer" rendert
+  // hier als „No models available", also als Aussage ueber die Maschine
+  // statt ueber den Ladezustand.
+  const inventoryLoaded = useModelStore((s) => s.inventoryLoaded)
   // G20: useModels hides every local model while the app is in Cloud mode.
   // Deliberate, but the picker never SAID so, and the silence reads as "my
   // local models are gone" (it cost a whole repro round on 2026-08-07).
@@ -562,6 +595,7 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
   const noBackendEnabled = useProviderStore((s) => noChatBackendEnabled(s.providers, appMode))
   const openSettingsAt = useUIStore((s) => s.openSettingsAt)
   const [open, setOpen] = useState(false)
+  useDismissOnEscape(open, () => setOpen(false))
   // Read by the empty-state probe below, which runs before the render that
   // computes textModels. A ref keeps it out of the effect's dependency list.
   const textModelsEmptyRef = useRef(true)
@@ -619,8 +653,12 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
       // dropdown ever stalled on a down LM Studio (the Rust side is now async +
       // port-pre-checked too). Ollama's /api/ps is a cheap loopback call and
       // always runs.
+      // `providerName` steht auf ALLEN vier Gliedern von `AIModel` (auf dreien
+      // optional, auf `CloudModel` verpflichtend) — der `in`-Test und die
+      // Zusicherung waren beide ueberfluessig. `m.providerName` ist von sich aus
+      // `string | undefined`, also genau das, was `isLmStudioProvider` nimmt.
       const hasLmsRows = useModelStore.getState().models.some((m) =>
-        isLmStudioProvider(('providerName' in m && (m as any).providerName) as string | undefined),
+        isLmStudioProvider(m.providerName),
       )
       if (hasLmsRows) {
         void listLoadedLmStudioModels().then((list) => { if (!cancelled) setLmsLoaded((prev) => sameStringSet(prev, list) ? prev : new Set(list)) }).catch(() => {})
@@ -963,31 +1001,30 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
             : activeModel ? `Model: ${activeDisplayName}, click to switch` : 'Select a chat model'
         }
         aria-label="Select chat model"
-        className={`
-          group flex items-center gap-1.5 h-[26px] px-2 rounded-md
-          bg-transparent border transition-all text-[0.7rem]
-          hover:bg-white/[0.04]
-          ${isModelLoading
-            ? 'border-blue-500/40 shadow-[0_0_6px_rgba(59,130,246,0.2)]'
-            : 'border-white/[0.06] hover:border-white/[0.1]'
-          }
-        `}
+        aria-expanded={open}
+        // Laedt gerade ein Modell: `aria-busy` statt eines eigenen blauen
+        // Rezepts mit Leuchtschatten. Das Rezept faerbt die Kante mit dem
+        // Akzent, die Aussage steht damit im selben Vokabular wie der Rest
+        // der Leiste — und im Accessibility-Baum, wo sie hingehoert.
+        aria-busy={isModelLoading}
+        className="lu-control"
       >
         {/* Type indicator dot */}
         <span className={`w-1.5 h-1.5 rounded-full ${
           activeType === 'text' ? 'bg-blue-400' : activeType === 'image' ? 'bg-purple-400' : 'bg-emerald-400'
         } ${isModelLoading ? 'animate-pulse' : ''}`} />
 
-        {/* Model name */}
-        <span className="text-gray-300 max-w-[140px] truncate leading-none">
+        {/* Model name. Keine eigene Textfarbe mehr — sie wird vom Control
+            geerbt, sonst haette der Knopf zwei Graustufen in sich. */}
+        <span className="max-w-[140px] truncate leading-none">
           {activeDisplayName}
         </span>
 
         {/* Chevron / Spinner */}
         {isModelLoading ? (
-          <Loader2 size={10} className="animate-spin text-blue-400 ml-0.5" />
+          <Loader2 size={10} className="animate-spin" />
         ) : (
-          <ChevronDown size={10} className={`text-gray-500 transition-transform ml-0.5 ${open ? 'rotate-180' : ''}`} />
+          <ChevronDown size={10} className={`transition-transform ${open ? 'rotate-180' : ''}`} />
         )}
       </button>
 
@@ -1006,13 +1043,13 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
       <AnimatePresence>
         {open && (
           <motion.div
-            className={`absolute w-72 rounded-lg overflow-hidden z-50 bg-white dark:bg-[#363636] border border-black/10 dark:border-white/[0.08] shadow-2xl shadow-black/20 dark:shadow-black/50 ${
+            className={`absolute w-72 rounded-lg overflow-hidden z-50 lu-elevated ${
               openUpward ? 'bottom-full mb-1.5 right-0' : 'top-full mt-1.5 left-1/2 -translate-x-1/2'
             }`}
             initial={{ opacity: 0, y: openUpward ? 6 : -6, scale: 0.98 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: openUpward ? 6 : -6, scale: 0.98 }}
-            transition={{ duration: 0.12, ease: 'easeOut' }}
+            transition={{ duration: MOTION_S.fast, ease: 'easeOut' }}
           >
             {/* Bug Q v2.4.7 — surface "Start LM Studio Server" inline when
                 LM Studio is on disk but its server is off. wakeywakeynow's
@@ -1039,7 +1076,7 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
             {/* §18 — surfaced when an LM Studio auto-load (on select) failed,
                 so the user isn't left wondering why the model didn't switch. */}
             {selectError && (
-              <div className="mx-2 mt-2 px-2 py-1.5 rounded bg-red-500/10 border border-red-500/20 text-[0.6rem] text-red-600/90 dark:text-red-300/90 leading-snug">
+              <div className="mx-2 mt-2 px-2 py-1.5 rounded bg-red-500/10 border border-red-500/20 t-micro text-red-600/90 dark:text-red-300/90 leading-snug">
                 {selectError}
               </div>
             )}
@@ -1047,27 +1084,28 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
 
             {/* Scrollable model list */}
             <div className="py-1 max-h-[280px] overflow-y-auto scrollbar-thin">
-              {textModels.length === 0 && (
+              {!inventoryLoaded && textModels.length === 0 && <ModelPickerSkeleton />}
+              {inventoryLoaded && textModels.length === 0 && (
                 <div className="px-2.5 py-3 text-center">
-                  <p className="text-[0.65rem] text-gray-600">No models available</p>
+                  <p className="t-micro text-gray-600">No models available</p>
                   {/* An empty picker after the user switched the last backend
                       off in Settings used to say only that, which reads like a
                       machine with nothing installed (Nebenbefund 1, R9
                       re-measure). The reason and the way back belong here. */}
                   {noBackendEnabled ? (
                     <>
-                      <p className="mt-1 text-[0.6rem] text-amber-300/90 leading-snug text-left">
+                      <p className="mt-1 t-micro text-amber-300/90 leading-snug text-left">
                         No AI backend is enabled, so there is nothing to list. Open Settings, go to AI Backends, and press Enable on the backend you switched off, or Add Provider.
                       </p>
                       <button
                         onClick={() => { setOpen(false); openSettingsAt({ tab: 'backends' }) }}
-                        className="mt-2 inline-flex items-center gap-1 px-2 py-1 rounded bg-white/5 border border-white/10 text-[0.6rem] text-gray-300 hover:bg-white/10 transition-colors"
+                        className="mt-2 inline-flex items-center gap-1 px-2 py-1 rounded bg-white/5 border border-white/10 t-micro text-gray-300 hover:bg-white/10 transition-colors"
                       >
                         <SettingsIcon size={10} /> Open Settings
                       </button>
                     </>
                   ) : emptyReason && (
-                    <p className="mt-1 text-[0.6rem] text-amber-300/90 leading-snug text-left">{emptyReason}</p>
+                    <p className="mt-1 t-micro text-amber-300/90 leading-snug text-left">{emptyReason}</p>
                   )}
                 </div>
               )}
@@ -1161,12 +1199,12 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
 
                           {/* Subtle meta */}
                           {model.type !== 'text' && (
-                            <span className={`text-[8px] uppercase font-medium tracking-wide ${TYPE_COLOR[model.type] || 'text-gray-500'} opacity-60`}>
+                            <span className={`text-[0.5rem] uppercase font-medium tracking-wide ${TYPE_COLOR[model.type] || 'text-gray-500'} opacity-60`}>
                               {TYPE_LABEL[model.type] || model.type}
                             </span>
                           )}
                           {modelProvider !== 'ollama' && (
-                            <span className={`text-[8px] ${providerBadge.color}`}>
+                            <span className={`text-[0.5rem] ${providerBadge.color}`}>
                               {providerBadge.label}
                             </span>
                           )}
@@ -1219,7 +1257,7 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
                           {/* §18 — inline load state while we auto-load this
                               LM Studio model on the way to selecting it. */}
                           {isSelectingThis && (
-                            <span className="inline-flex items-center gap-0.5 text-[8px] text-blue-400">
+                            <span className="inline-flex items-center gap-0.5 text-[0.5rem] text-blue-400">
                               <Loader2 size={8} className="animate-spin" />
                               loading…
                             </span>
@@ -1228,9 +1266,14 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
 
                         {/* Details on right */}
                         <div className="flex items-center gap-1 shrink-0">
-                          {model.type === 'text' && 'details' in model && (model as any).details && (
-                            <span className="text-[8px] text-gray-600">
-                              {(model as any).details.parameter_size}
+                          {/* `type === 'text'` verengt auf OllamaModel | CloudModel,
+                              `'details' in model` von dort auf OllamaModel — und
+                              nur das hat `details`. Der Zugriff braucht deshalb
+                              keine Zusicherung; `parameter_size` ist dort als
+                              `string` deklariert (types/models.ts:15). */}
+                          {model.type === 'text' && 'details' in model && model.details && (
+                            <span className="text-[0.5rem] text-gray-600">
+                              {model.details.parameter_size}
                             </span>
                           )}
                           {/* On/Off VRAM load toggle for LOCAL models — LM Studio
@@ -1282,7 +1325,7 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
                     finally { setUnloading(false) }
                   }}
                   disabled={unloading}
-                  className="w-full flex items-center justify-center gap-1.5 px-2 py-[5px] rounded text-[0.6rem] text-red-600/70 dark:text-red-500/60 hover:text-red-500 dark:hover:text-red-400 hover:bg-red-500/[0.06] transition-colors disabled:opacity-40"
+                  className="w-full flex items-center justify-center gap-1.5 px-2 py-[5px] rounded t-micro text-red-600/70 dark:text-red-500/60 hover:text-red-500 dark:hover:text-red-400 hover:bg-red-500/[0.06] transition-colors disabled:opacity-40"
                 >
                   {unloading ? <Loader2 size={10} className="animate-spin" /> : <Power size={10} />}
                   <span>{unloadDone ? 'Unloaded' : unloading ? 'Unloading...' : 'Unload all models'}</span>

@@ -5,8 +5,23 @@
     "useDefineForClassFields": true,
     "lib": ["ES2023", "DOM", "DOM.Iterable"],
     "module": "ESNext",
-    "types": ["vite/client"],
+    "types": ["vite/client", "vitest/globals"],
     "skipLibCheck": true,
+
+    /* mobile-client/ is the phone's client: real .js files that src-tauri's
+       build script glues into one page. `allowJs` is what puts them into the
+       program at all — without it the tests below could not import them and
+       the whole extraction would be cosmetic. `checkJs` stays off: the client
+       is ES5-style browser code and turning it on would demand JSDoc types
+       inside files whose bytes are the shipped page (measured 01.09.2026:
+       61 errors, all of them DOM narrowing).
+
+       What tsc DOES enforce, and it is checked by a probe: an export the
+       TypeScript tests import has to exist. Take PERSONAS off personas.js's
+       list and tsc says TS2459 in two test files. The names only client.js
+       imports are outside that — a .js importer with checkJs off is not
+       checked — and eslint's `no-undef` covers those instead. */
+    "allowJs": true,
 
     /* Bundler mode */
     "moduleResolution": "bundler",
@@ -24,5 +39,5 @@
     "noFallthroughCasesInSwitch": true,
     "noUncheckedSideEffectImports": true
   },
-  "include": ["src"]
+  "include": ["src", "mobile-client"]
 }

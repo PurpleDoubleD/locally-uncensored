@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { selectRelevantToolsAsync, EMBEDDING_ROUTING_THRESHOLD } from '../tool-selection'
 import { clearEmbeddingCache } from '../../api/agents/embedding-router'
 import type { MCPToolDefinition, PermissionMap } from '../../api/mcp/types'
+import type { EmbeddingFn } from '../../api/agents/embedding-router'
 
 const fullPerms: PermissionMap = {
   filesystem: 'auto',
@@ -93,9 +94,9 @@ describe('tool-selection — selectRelevantToolsAsync', () => {
     const tools = Array.from({ length: 20 }, (_, i) =>
       mkTool(`t${i}`, `desc ${i}`, 'filesystem')
     )
-    const broken = vi.fn(async () => {
+    const broken: EmbeddingFn = vi.fn(async () => {
       throw new Error('Ollama down')
-    }) as any
+    })
     const out = await selectRelevantToolsAsync('any', tools, fullPerms, {
       embed: broken,
       embeddingThreshold: 5, // force embedding path

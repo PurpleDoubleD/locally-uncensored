@@ -13,6 +13,7 @@ import { useUIStore } from '../../stores/uiStore'
 import { useCloudAuthStore, deriveCloudAvailable } from '../../stores/cloudAuthStore'
 import { cloudSwitchClick, CLOUD_ARM_TIMEOUT_MS } from '../../lib/cloud-switch-guard'
 import { cn } from '../create/ui/cn'
+import { MONOGRAM, MONOGRAM_INVERT } from '../layout/brand'
 
 export function CloudSwitch() {
   const appMode = useSettingsStore((s) => s.settings.appMode)
@@ -25,18 +26,24 @@ export function CloudSwitch() {
   // model silently, and bill the next question (Nebenbefund 4, R5 re-measure
   // 2026-08-30). See lib/cloud-switch-guard for why it is two clicks on this
   // one control and not a dialog.
-  const [armed, setArmed] = useState(false)
+  const [armedRaw, setArmed] = useState(false)
+  // A mode change made anywhere else settles the switch too. That used to be
+  // an effect writing `false` back into state after the fact (React 19
+  // `set-state-in-effect`); "armed while already in cloud" is simply not a
+  // state this switch has, so it is ruled out by the derivation instead — and
+  // now on the same frame as the mode change rather than a paint later.
+  const armed = armedRaw && !on
 
   // An armed switch goes back to sleep on its own, so it is never lying in
   // wait minutes later for a click that means something else entirely.
+  // Keyed on the raw flag, not the derived one: the timer has to run down even
+  // while the derivation is already hiding the armed state, or a mode change
+  // made elsewhere would leave the flag standing indefinitely.
   useEffect(() => {
-    if (!armed) return
+    if (!armedRaw) return
     const t = setTimeout(() => setArmed(false), CLOUD_ARM_TIMEOUT_MS)
     return () => clearTimeout(t)
-  }, [armed])
-
-  // A mode change made anywhere else settles the switch too.
-  useEffect(() => { if (on) setArmed(false) }, [on])
+  }, [armedRaw])
 
   const toggle = () => {
     switch (cloudSwitchClick({ on, available, armed })) {
@@ -74,19 +81,19 @@ export function CloudSwitch() {
       className={cn(
         'flex items-center gap-1.5 pl-2 pr-1.5 py-[3px] rounded-full border transition-colors',
         on
-          ? 'border-[#7c3aed] bg-[#7c3aed]/10 text-[#7c3aed] dark:text-[#a78bfa]'
+          ? 'border-lu-cloud bg-lu-cloud/10 text-lu-cloud dark:text-lu-cloud-lift'
           : armed
-            ? 'border-[#7c3aed] bg-[#7c3aed]/10 text-[#7c3aed] dark:text-[#a78bfa] ring-1 ring-[#7c3aed]/40'
+            ? 'border-lu-cloud bg-lu-cloud/10 text-lu-cloud dark:text-lu-cloud-lift ring-1 ring-lu-cloud/40'
             : 'border-gray-200 dark:border-white/10 text-gray-500 hover:text-gray-800 dark:hover:text-gray-200 hover:border-gray-300 dark:hover:border-white/20',
       )}
     >
       <img
-        src="/LU-monogram-bw.png"
+        src={MONOGRAM}
         alt=""
         width={12}
         height={12}
         draggable={false}
-        className="shrink-0 select-none dark:invert-0 invert"
+        className={`shrink-0 select-none ${MONOGRAM_INVERT}`}
       />
       {/* The armed switch says what the next click will do, in the place the
           finger already is. No transition on this text on purpose: the label
@@ -105,7 +112,7 @@ export function CloudSwitch() {
         aria-hidden
         className={cn(
           'relative w-[22px] h-[12px] rounded-full transition-colors shrink-0',
-          on ? 'bg-[#7c3aed]' : armed ? 'bg-[#7c3aed]/50' : 'bg-gray-300 dark:bg-white/15',
+          on ? 'bg-lu-cloud' : armed ? 'bg-lu-cloud/50' : 'bg-gray-300 dark:bg-white/15',
         )}
       >
         <span

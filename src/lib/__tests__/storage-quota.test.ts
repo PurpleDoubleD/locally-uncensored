@@ -1,6 +1,21 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { createJSONStorage } from 'zustand/middleware'
 import { getStorageUsage, createSafeStorage } from '../storage-quota'
+import { prop, propPath, asString } from '../../types/json-guards'
+
+/**
+ * The ids of a pruned list, read back out of the JSON the adapter wrote. The
+ * blob is deliberately handled as foreign data here — that is exactly the
+ * position production is in when it reads it again.
+ */
+function idsOf(list: unknown): string[] {
+  return Array.isArray(list) ? list.map((e) => asString(prop(e, 'id')) ?? '') : []
+}
+
+/** Element `i` of a value that may or may not be an array. */
+function at(list: unknown, i: number): unknown {
+  return Array.isArray(list) ? list[i] : undefined
+}
 
 // Mock localStorage for tests
 function createMockStorage(items: Record<string, string> = {}): Storage {
@@ -264,7 +279,7 @@ describe('storage-quota', () => {
         const parsed = JSON.parse(writeCalls[0][1])
         expect(parsed.state.conversations.length).toBeLessThanOrEqual(100)
         // Newest conversations should be kept (highest updatedAt)
-        const ids = parsed.state.conversations.map((c: any) => c.id)
+        const ids = idsOf(parsed.state.conversations)
         expect(ids).toContain('c-119')
         expect(ids).toContain('c-119')
       }
@@ -356,7 +371,7 @@ describe('storage-quota', () => {
       const pruned = JSON.parse(memWrites[memWrites.length - 1][1])
       expect(pruned.state.entries.length).toBeLessThanOrEqual(500)
       // …keeping the newest entries (highest updatedAt) and dropping the oldest.
-      const ids: string[] = pruned.state.entries.map((e: any) => e.id)
+      const ids: string[] = idsOf(pruned.state.entries)
       expect(ids).toContain('m-599')
       expect(ids).not.toContain('m-0')
       // The target write eventually landed.
@@ -392,7 +407,7 @@ describe('storage-quota', () => {
       const memWrites = (mock.setItem as ReturnType<typeof vi.fn>).mock.calls
         .filter(([k]) => k === 'locally-uncensored-memory')
       const pruned = JSON.parse(memWrites[memWrites.length - 1][1])
-      const ids: string[] = pruned.state.entries.map((e: any) => e.id)
+      const ids: string[] = idsOf(pruned.state.entries)
       // The stale newest entry is the one dropped to get to 500.
       expect(pruned.state.entries.length).toBe(500)
       expect(ids).not.toContain('m-0')
@@ -412,7 +427,7 @@ describe('storage-quota', () => {
       })
       const wrapped = createJSONStorage(() => createSafeStorage())!
       const value = { state: { conversations: [{ id: 'c1', title: 'hi' }] }, version: 0 }
-      wrapped.setItem('chat-conversations', value as any)
+      wrapped.setItem('chat-conversations', value)
 
       const raw = globalThis.localStorage.getItem('chat-conversations')
       expect(raw).not.toBe('[object Object]')
@@ -420,8 +435,8 @@ describe('storage-quota', () => {
       const parsed = JSON.parse(raw as string)
       expect(parsed.state.conversations[0].id).toBe('c1')
       // And getItem hydrates back to the original object (what zustand needs).
-      const readBack = wrapped.getItem('chat-conversations') as any
-      expect(readBack?.state?.conversations?.[0]?.title).toBe('hi')
+      const readBack = wrapped.getItem('chat-conversations')
+      expect(at(propPath(readBack, 'state', 'conversations'), 0)).toMatchObject({ title: 'hi' })
     })
 
     it('dispatches lu:storage-quota-exceeded once when pruning cannot free space', () => {
@@ -430,13 +445,13 @@ describe('storage-quota', () => {
       // The vitest env is `node`, so there's no real `window`; install a
       // minimal stub that records dispatched events. The production guard
       // (`typeof window !== 'undefined'`) then takes the dispatch path.
-      const dispatched: any[] = []
+      const dispatched: Event[] = []
       const fakeWindow = {
-        dispatchEvent: vi.fn((e: any) => { dispatched.push(e); return true }),
+        dispatchEvent: vi.fn((e: Event) => { dispatched.push(e); return true }),
       }
       const hadWindow = 'window' in globalThis
-      const prevWindow = (globalThis as any).window
-      ;(globalThis as any).window = fakeWindow
+      const prevWindow: unknown = Reflect.get(globalThis, 'window')
+      Object.defineProperty(globalThis, 'window', { value: fakeWindow, writable: true, configurable: true })
 
       const quotaErr = new DOMException('full', 'QuotaExceededError')
       const store: Record<string, string> = {}
@@ -457,11 +472,11 @@ describe('storage-quota', () => {
         expect(fakeWindow.dispatchEvent).toHaveBeenCalledTimes(1)
         expect(dispatched).toHaveLength(1)
         expect(dispatched[0].type).toBe('lu:storage-quota-exceeded')
-        expect(dispatched[0].detail).toEqual({ key: 'doomed' })
+        expect(prop(dispatched[0], 'detail')).toEqual({ key: 'doomed' })
       } finally {
         warnSpy.mockRestore()
-        if (hadWindow) (globalThis as any).window = prevWindow
-        else delete (globalThis as any).window
+        if (hadWindow) Object.defineProperty(globalThis, 'window', { value: prevWindow, writable: true, configurable: true })
+        else Reflect.deleteProperty(globalThis, 'window')
       }
     })
   })

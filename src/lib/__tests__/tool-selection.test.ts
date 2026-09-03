@@ -45,7 +45,7 @@ const ALL_ALLOWED: PermissionMap = {
   web: 'auto',
   system: 'auto',
   image: 'auto',
-  video: 'auto' as any,
+  video: 'auto',
   workflow: 'auto',
 }
 
@@ -262,7 +262,7 @@ describe('tool-selection', () => {
         web: 'blocked',
         system: 'blocked',
         image: 'blocked',
-        video: 'blocked' as any,
+        video: 'blocked',
         workflow: 'blocked',
       }
       // Message that matches web tools (blocked) and filesystem (blocked)

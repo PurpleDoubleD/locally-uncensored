@@ -65,6 +65,28 @@ function opProgressVerb(op: string): string {
   }
 }
 
+// What a 429 from the render queue actually means.
+//
+// The queue answers 429 for three different things (lib/http-status states the
+// same policy for the chat path): the per-user burst guard, an upstream
+// provider throttle — both transient, both carrying retry-after — and an empty
+// wallet, which is the only one paying more fixes. Every one of them used to
+// read "Monthly credit budget exhausted, upgrade your plan", so a subscriber
+// who was merely clicking too fast, with credits left in the meter next to the
+// message, was told to buy a bigger plan. That is a sales pitch for a refusal
+// the money would not have prevented, so the wallet case has to be positively
+// identified — by the server's own `code`, or failing that by a message that
+// actually talks about credits — and everything else says what it is.
+export function throttleMessage(err: CloudJobError): string {
+  if (err.code === 'credits_exhausted' || /credit/i.test(err.message)) {
+    return 'Monthly credit budget exhausted, upgrade your plan or wait for the next period.'
+  }
+  const secs = err.retryAfterMs && err.retryAfterMs > 0 ? Math.ceil(err.retryAfterMs / 1000) : null
+  return secs
+    ? `Too many requests right now — the render queue is throttling, not your credit balance. Try again in ${secs}s.`
+    : 'Too many requests right now — the render queue is throttling, not your credit balance. Give it a moment and try again.'
+}
+
 // Decoded by hand instead of fetch(dataUrl): the webview CSP's connect-src
 // (rightly) has no data: entry, so fetching a data URL throws "Load failed"
 // and killed every source-needing op before the upload even started.
@@ -380,7 +402,7 @@ export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
     } catch (err) {
       const st = useCreateStore.getState()
       if (err instanceof CloudJobError && err.status === 429) {
-        st.setError('Monthly credit budget exhausted, upgrade your plan or wait for the next period.')
+        st.setError(throttleMessage(err))
       } else if (err instanceof CloudJobError && err.status === 401) {
         st.setError('Sign in to your LU Cloud account to render in the cloud.')
       } else if (err instanceof CloudJobError && err.message === 'render timed out') {
@@ -497,7 +519,7 @@ export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
       } catch (err) {
         const st = useCreateStore.getState()
         if (err instanceof CloudJobError && err.status === 429) {
-          st.setError('Monthly credit budget exhausted, upgrade your plan or wait for the next period.')
+          st.setError(throttleMessage(err))
         } else if (!(err instanceof CloudJobError && err.message === 'polling aborted')) {
           st.setError(err instanceof Error ? err.message : String(err))
         }
@@ -589,7 +611,7 @@ export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
       } catch (err) {
         const st = useCreateStore.getState()
         if (err instanceof CloudJobError && err.status === 429) {
-          st.setError('Monthly credit budget exhausted, upgrade your plan or wait for the next period.')
+          st.setError(throttleMessage(err))
         } else if (!(err instanceof CloudJobError && err.message === 'polling aborted')) {
           st.setError(err instanceof Error ? err.message : String(err))
         }

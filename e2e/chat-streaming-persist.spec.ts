@@ -33,22 +33,59 @@ async function boot(page: Page) {
   await page.goto('/')
 }
 
-async function send(page: Page, text: string) {
-  const composer = page.locator('textarea').first()
-  await expect(composer).toBeVisible({ timeout: 20_000 })
-  // The composer drops a send issued while the previous turn is still
-  // finishing, and the visible reply appears a few frames before the turn
-  // actually ends, so settle first.
-  await page.waitForTimeout(1500)
-  await composer.fill(text)
-  await page.getByRole('button', { name: /Send message/i }).click()
+/**
+ * Scoped to the TRANSCRIPT, and to paragraphs. Two different traps:
+ *
+ *  1. the sidebar shows the first message as the conversation title, so a bare
+ *     `getByText` matches it a second time — hence `getByRole('main')`;
+ *  2. Playwright's text engine reads a `<textarea>`'s VALUE as its text. While
+ *     a typed message still sits in the composer, `main.getByText('…MARKER')`
+ *     therefore matches the COMPOSER. That is not a detail: it is how the
+ *     previous version of this spec could assert "the second message is on
+ *     screen" about a send the app had silently dropped — the text it found
+ *     was the text still waiting in the input. Messages render as paragraphs;
+ *     the composer does not.
+ */
+function inChat(page: Page, text: string) {
+  return page.getByRole('main').locator('p').filter({ hasText: text })
 }
 
-/** Scoped to the transcript — the sidebar shows the first message as the
- *  conversation title, which would match every bare getByText twice. */
-function inChat(page: Page, text: string) {
-  return page.getByRole('main').getByText(text)
+async function send(page: Page, text: string) {
+  const composer = page.locator('textarea').first()
+  const sendButton = page.getByRole('button', { name: 'Send message' })
+  // The transcript bubble, NOT the composer — see inChat() below for why the
+  // difference decides whether this helper can tell a sent message from an
+  // unsent one at all.
+  const bubble = inChat(page, text)
+
+  await expect(composer).toBeVisible({ timeout: 20_000 })
+  // Send and Stop share ONE slot in this composer, so "Send is back" is the
+  // observable end of the previous turn — ChatInput refuses a send while
+  // `isGenerating`.
+  await expect(sendButton).toBeVisible({ timeout: 30_000 })
+
+  // That is necessary and NOT sufficient, which is what the flat 1.5 s sleep
+  // this replaces was covering by accident. ChatInput also holds a 700 ms
+  // double-fire lock (SEND_LOCK_MS, chat/ChatInput.tsx) measured from the last
+  // ACCEPTED send, not from the end of the turn. A message that lands inside
+  // that window is dropped in silence: no bubble, no error, the text simply
+  // stays in the composer. Measured here on 2026-09-01: with a 24-frame reply
+  // the turn is over ~300 ms after the send, so the second send landed at
+  // ~500 ms — inside the lock — and this spec failed 3 runs out of 4.
+  //
+  // So the send verifies its own effect and, when it was swallowed, does what
+  // a person does: press again. The retry is guarded by the bubble itself, so
+  // an accepted send is never sent a second time.
+  await expect(async () => {
+    if ((await bubble.count()) === 0) {
+      await composer.fill(text)
+      await expect(sendButton).toBeEnabled()
+      await sendButton.click()
+    }
+    await expect(bubble).toBeVisible({ timeout: 2_000 })
+  }).toPass({ timeout: 30_000 })
 }
+
 
 test('a streamed answer renders live, lands in full, and survives a reload', async ({ page }) => {
   await boot(page)
@@ -75,6 +112,16 @@ test('a streamed answer renders live, lands in full, and survives a reload', asy
 
   // The coalescing storage must still have written it. Reload with a cold
   // renderer and read it back out of real IndexedDB.
+  //
+  // Wait for the app to say the turn is OVER first, not just for the answer to
+  // be on screen. The two are not the same moment and the gap is the whole
+  // point: the answer paints while the write is still in flight, so a reload
+  // fired on the paint lands inside that window — measured at 3 to 4 runs in
+  // 12 on a loaded machine, before and after the write became awaited. Since
+  // stores/durability.ts, "Send is back in the slot Stop held" means the turn
+  // is in IndexedDB, so this is the first instant at which the assertions
+  // below are actually entitled to hold.
+  await expect(page.getByRole('button', { name: 'Send message' })).toBeVisible({ timeout: 30_000 })
   await page.reload()
 
   await expect(inChat(page, 'FIRST-TURN-MARKER')).toBeVisible({ timeout: 30_000 })

@@ -4,13 +4,16 @@ import { StaleModelsBanner } from './StaleModelsBanner'
 import { StorageQuotaToast } from './StorageQuotaToast'
 import { Sidebar } from './Sidebar'
 import { ChatView } from '../chat/ChatView'
-import { ModelManager } from '../models/ModelManager'
-import { SettingsPage } from '../settings/SettingsPage'
-import { CreateExperimental } from '../create/experimental/CreateExperimental'
-import { BenchmarkView } from '../models/BenchmarkView'
-import { Onboarding } from '../onboarding/Onboarding'
 import { BackendSelector } from '../onboarding/BackendSelector'
 import { ErrorBoundary } from '../ui/ErrorBoundary'
+import { LazyView } from './LazyView'
+import {
+  BenchmarkSkeleton,
+  CreateSkeleton,
+  ModelManagerSkeleton,
+  OnboardingSkeleton,
+  SettingsSkeleton,
+} from './ViewSkeletons'
 import { useUIStore } from '../../stores/uiStore'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { useCompareStore } from '../../stores/compareStore'
@@ -24,10 +27,13 @@ import { detectLocalBackends, type DetectedBackend } from '../../lib/backend-det
 import { whenRunsIdle } from '../../lib/run-idle'
 import { backendCall, isTauri } from '../../api/backend'
 import { idbStorage } from '../../lib/idbStorage'
-import { STORE_KEYS, IDB_STORE_KEYS, collectStoreSnapshot } from '../../lib/store-backup'
+import { STORE_KEYS, IDB_STORE_KEYS, backupStoresIfChanged, flushSyncStoreBackup } from '../../lib/store-backup'
 import { idbKeysToRestore, mayReloadForIdbRestore } from '../../lib/idb-restore'
 import { log } from '../../lib/logger'
+import { withDetail } from '../../lib/error-text'
 import { pickForMode } from '../../lib/active-model-mode'
+import type { TextChunk } from '../../types/rag'
+import type { Role } from '../../types/chat'
 import { useKeyboardShortcuts } from '../../hooks/useKeyboardShortcuts'
 import { useCloudAuth } from '../../hooks/useCloudAuth'
 import { useCloudAuthStore, deriveCloudAvailable } from '../../stores/cloudAuthStore'
@@ -36,8 +42,40 @@ import { CloudGateModal } from '../cloud/CloudGateModal'
 import { CloudTeaserModal } from '../cloud/CloudTeaserModal'
 import { ReleaseNotesModal } from '../release/ReleaseNotesModal'
 import { ShortcutsModal } from './ShortcutsModal'
+import { CommandPalette } from '../ui/CommandPalette'
 import { CreditsExhaustedModal } from './CreditsExhaustedModal'
 import { Titlebar } from './Titlebar'
+
+// Aus der Komponente herausgezogen: `new Set(STORE_KEYS)` entstand bei jedem
+// Render neu und war damit die instabile Referenz, wegen der der Restore-Effekt
+// seine eigene Abhaengigkeit nicht nennen konnte. STORE_KEYS ist ein
+// Modulkonstante, das Set also genauso konstant.
+const STORE_KEYS_SET = new Set(STORE_KEYS)
+
+/**
+ * Was das Ereignis `remote-chat-message` traegt (Nutzlast von
+ * `src-tauri/src/commands/remote.rs:950`, `ChatEventPayload`).
+ *
+ * `role` steht hier ENGER als `Role` (das vier Werte hat), und das ist keine
+ * Annahme, sondern die gemessene Zusicherung der Gegenseite: `remote.rs:976`
+ * weist jede Anfrage mit einer anderen Rolle mit HTTP 400 ab, BEVOR das
+ * Ereignis ueberhaupt ausgesendet wird — der Kommentar dort nennt es Bug #9,
+ * „role must be 'user' or 'assistant' (never 'system' or arbitrary text)".
+ * Der Empfaenger kann also gar nichts anderes sehen, und das frueher hier
+ * stehende `role as any` hat genau diese schon erledigte Pruefung verdeckt.
+ *
+ * Die vier optionalen Felder tragen drueben `#[serde(default)]`: sie sind auf
+ * dem Draht immer da, aber als leerer String. Der Code unten liest sie mit
+ * Wahrheitspruefungen, was fuer „fehlt" und fuer „leer" dasselbe tut.
+ */
+type RemoteChatMessage = {
+  role: Extract<Role, 'user' | 'assistant'>
+  content: string
+  model?: string
+  mode?: string
+  chat_id?: string
+  chat_title?: string
+}
 
 // The backup triad must never write %APPDATA%/store_backup.json before the
 // restore decision — on a post-NSIS boot the first doBackup would otherwise
@@ -47,14 +85,55 @@ import { Titlebar } from './Titlebar'
 let resolveRestoreDecided: () => void = () => {}
 const restoreDecided = new Promise<void>((resolve) => { resolveRestoreDecided = resolve })
 
+// M7 / Audit W-T2 — Lazy-Grenzen der Top-Level-Views.
+//
+// ChatView bleibt bewusst ein *statischer* Import: `currentView` wird nicht
+// persistiert (uiStore.partialize), jeder Start landet also auf 'chat'. Ihn
+// lazy zu laden hieße, Bundle-Größe gegen einen weißen Blitz beim Kaltstart zu
+// tauschen — genau der Handel, den dieses Audit verbietet.
+//
+// Die übrigen fünf Views sieht niemand, bevor er sie anklickt. Onboarding ist
+// der Grenzfall: es ist beim allerersten Start sofort sichtbar. Es liegt
+// trotzdem hinter der Grenze, weil (a) es genau *einmal* im Leben einer
+// Installation gezeigt wird, (b) der Rahmen davor ohnehin `restoring` abwartet,
+// und (c) sein Fallback den Vollbild-Hintergrund von index.html trägt, der
+// Übergang vom HTML-Splash also farblich nahtlos ist statt weiß.
+//
+// Die Loader stehen auf Modulebene, damit LazyView eine stabile Identität
+// bekommt — eine Factory, die pro Render neu entsteht, würde den View bei jedem
+// Repaint neu mounten.
+const loadModelManager = () => import('../models/ModelManager').then((m) => ({ default: m.ModelManager }))
+const loadBenchmarkView = () => import('../models/BenchmarkView').then((m) => ({ default: m.BenchmarkView }))
+const loadSettingsPage = () => import('../settings/SettingsPage').then((m) => ({ default: m.SettingsPage }))
+const loadCreateExperimental = () => import('../create/experimental/CreateExperimental').then((m) => ({ default: m.CreateExperimental }))
+const loadOnboarding = () => import('../onboarding/Onboarding').then((m) => ({ default: m.Onboarding }))
+
+/**
+ * Die optische Korrektur der Icon-Leiter (`LucideProvider`) stand bis zum
+ * eigenen Onboarding-Fenster HIER, um die beiden fruehen Rueckgaben unten
+ * herum. Seit `index.html` in zwei Fenstern laedt, gibt es zwei Wurzeln —
+ * `App` im Hauptfenster, `OnboardingWindow` im kleinen — und der Provider
+ * liegt in `main.tsx` ueber beiden, einmal. Die Begruendung (ein Rezept an
+ * der Wurzel statt an 668 Call-Sites) steht dort.
+ */
 export function AppShell() {
-  const { currentView } = useUIStore()
-  const { settings, updateSettings } = useSettingsStore()
+  // Targeted, NOT `useUIStore()`. A whole-store subscription here put the
+  // entire app tree behind every uiStore write — and the explorer's resize
+  // handle writes `explorerWidth` on every pointermove, so dragging the
+  // divider re-rendered Titlebar, Header, Sidebar and the whole active view at
+  // pointer-event frequency. Only `currentView` matters to this component.
+  const currentView = useUIStore((s) => s.currentView)
+  const settings = useSettingsStore((s) => s.settings)
+  const updateSettings = useSettingsStore((s) => s.updateSettings)
   // A/B Compare takes over the chat area; hide the left chat sidebar entirely
   // while comparing (David 2026-06-06) so the two model columns get full width.
   const isComparing = useCompareStore((s) => s.isComparing)
   const onboardingDone = useSettingsStore((s) => s.settings.onboardingDone)
   const [restoring, setRestoring] = useState(false)
+  // The one failure in this file the user has to be told about: a post-update
+  // store restore that threw. Shown as a dismissible line in the shell, next
+  // to the other shell-level notices.
+  const [restoreError, setRestoreError] = useState<string | null>(null)
 
   const [detectedBackends, setDetectedBackends] = useState<DetectedBackend[]>([])
   const [showSelector, setShowSelector] = useState(false)
@@ -155,6 +234,15 @@ export function AppShell() {
   // (switch OR launch-in-cloud); local mode is a no-op.
   useEffect(() => {
     if (!isTauri() || appMode !== 'cloud') return
+    // Level (a): silent on purpose, both of them. These free memory the user
+    // is no longer using; they are not the switch itself, which has already
+    // happened by the time they run. The LM Studio one in particular REJECTS
+    // by design on every machine without LM Studio installed
+    // ("lms CLI not found", install.rs:3511) — reporting that would put an
+    // error in front of the majority of users every time they go to Cloud,
+    // about a program they never installed. If a model really does stay
+    // resident, it shows up where the user can act on it: the backend panel
+    // in Settings.
     backendCall('offload_local_models').catch(() => {})
     backendCall('lmstudio_unload_model', { model: '--all' }).catch(() => {})
   }, [appMode])
@@ -165,6 +253,11 @@ export function AppShell() {
   // re-opened Settings. Desktop-only — the web build has no local ComfyUI.
   useEffect(() => {
     if (!isTauri()) return
+    // Level (a): silent on purpose. This mirrors a stored preference into the
+    // backend on every boot, with no user standing in front of it — and it
+    // runs on machines that have no ComfyUI at all. The setting itself is
+    // safe either way: it is persisted, this effect re-fires on the next
+    // launch, and Settings → ComfyUI shows the mode actually in force.
     backendCall('set_comfy_gpu_mode', { mode: settings.comfyGpuMode || 'auto' }).catch(() => {})
   }, [settings.comfyGpuMode])
 
@@ -172,7 +265,7 @@ export function AppShell() {
   // The key lists and the snapshot builder live in lib/store-backup so the
   // update path can ask for a backup too. It used to hand the process to the
   // installer with whatever the 5 s interval last wrote (Bug A1, 2.6.7).
-  const STORE_KEYS_SET = new Set(STORE_KEYS)
+  // (STORE_KEYS_SET steht jetzt auf Modulebene, siehe oben.)
 
   // Feature FF: reserved key under which memory embeddings ride inside the RAG
   // chunk backup file. Never collides with a real documentId (those are UUIDs).
@@ -260,7 +353,7 @@ export function AppShell() {
                 const live = await exportAllChunks()
                 // Only import entries the live store is missing — never clobber
                 // newer in-app activity with a stale backup.
-                const toImport: Record<string, any> = {}
+                const toImport: Record<string, TextChunk[]> = {}
                 for (const [docId, chunks] of Object.entries(parsed)) {
                   if (!live[docId] && Array.isArray(chunks) && chunks.length > 0) {
                     toImport[docId] = chunks
@@ -320,7 +413,13 @@ export function AppShell() {
                       // Feature FF: restore memory embeddings, then RAG chunks.
                       const ragOnly = await restoreMemoryVectorsFrom(parsedRag as Record<string, unknown>)
                       const { importAllChunks } = await import('../../lib/ragDB')
-                      await importAllChunks(ragOnly as Record<string, any>)
+                      // Der Wert kommt aus JSON.parse, ist also `unknown`. Die
+                      // Pruefung, die der Zweig oben (Zeile ~355) selbst macht,
+                      // steht hier in `importAllChunks` — `ragDB.ts:133`
+                      // ueberspringt jeden Eintrag, der kein nichtleeres Array
+                      // ist. Die Zusicherung ist deshalb nur ein Typ-Schritt,
+                      // kein Vertrauensvorschuss zur Laufzeit.
+                      await importAllChunks(ragOnly as Record<string, TextChunk[]>)
                     }
                   }
                 } catch { /* best-effort */ }
@@ -331,7 +430,24 @@ export function AppShell() {
               }
             }
           }
-        } catch {}
+        } catch (e) {
+          // Level (b): the user finds out, the app carries on. This is the
+          // post-update restore. Reaching here means the backup could not be
+          // read or was not valid JSON — NOT "there is no backup", which
+          // returns null and lands in step 3 below without throwing. So the
+          // app is about to come up looking empty after an update, and
+          // without this line that reads as "the update ate my chats".
+          //
+          // Not blocking: there is nothing to block. The restore is over, and
+          // holding the app hostage behind a dialog would only add a wall in
+          // front of the chats that DID survive.
+          setRestoreError(
+            withDetail(
+              'Your chats and settings could not be restored after the update. Nothing was deleted — the backup is still in the app data folder. Close LU and reopen it to try again; if it stays empty, keep that folder before reinstalling.',
+              e,
+            ),
+          )
+        }
 
         // 3. No backup available — at least recover onboarding from marker file
         if (markerExists) {
@@ -359,7 +475,10 @@ export function AppShell() {
       }
     }, 100)
     return () => clearInterval(waitForTauri)
-  }, [])
+    // Beide Deps sind konstant: STORE_KEYS_SET liegt jetzt auf Modulebene,
+    // `updateSettings` ist eine Zustand-Action mit fester Referenz. Der
+    // Restore-Effekt bleibt damit exakt der Mount-Einmal-Effekt, der er war.
+  }, [updateSettings])
 
   // Backup stores to %APPDATA% — three-pronged so chat history survives
   // NSIS updates + abrupt process kills:
@@ -387,23 +506,16 @@ export function AppShell() {
       if (disposed) return
 
       let backupInflight = false
-      // In-memory mirror of the IDB-backed values, refreshed by every doBackup
-      // run. beforeunload can't await IndexedDB (the page is tearing down), so
-      // the sync flush below reads from this cache instead — at most one
-      // debounce-cycle stale, same freshness the old sync handler had.
-      const idbCache: Record<string, string> = {}
       const doBackup = async () => {
         // Inflight guard: the 1 s debounce and the 5 s interval can overlap
         // now that the snapshot awaits IndexedDB reads.
         if (backupInflight) return
         backupInflight = true
-        try {
-          const snapshot = await collectStoreSnapshot(idbCache)
-          // Always fire — we want backup even if snapshot is mostly empty, and the
-          // sentinel tells the restore-flow this is a valid backup.
-          localStorage.setItem('lu-restore-complete', '1')
-          backendCall('backup_stores', { data: JSON.stringify(snapshot) }).catch(() => {})
-        } catch { /* best-effort */ }
+        // Writes only when a store actually changed. This used to serialise and
+        // re-write the whole history every five seconds no matter what, which is
+        // the SSD churn and the GC pressure coalescedStorage exists to prevent —
+        // and it ran on an idle app, on battery, for as long as it was open.
+        try { await backupStoresIfChanged() } catch { /* best-effort */ }
         backupInflight = false
       }
 
@@ -433,6 +545,11 @@ export function AppShell() {
           if (Object.keys(memVectors).length > 0) {
             ;(snapshot as Record<string, unknown>)[MEMORY_VECTORS_BACKUP_KEY] = memVectors
           }
+          // Level (a): silent on purpose. This is the 30 s background backup
+          // loop; a missed write is retried on the next tick and nothing the
+          // user did just failed. Swallowed HERE rather than in the outer
+          // catch so a failed write still stamps ragLastRun and keeps the
+          // 30 s spacing instead of hot-retrying.
           await backendCall('backup_rag_chunks', { data: JSON.stringify(snapshot) }).catch(() => {})
           ragLastRun = Date.now()
         } catch { /* best-effort */ }
@@ -445,6 +562,11 @@ export function AppShell() {
       // them onboardingDone is false, and the missing marker is intentional.
       backendCall<boolean>('is_onboarding_done').catch(() => false).then((markerExists) => {
         if (!markerExists && useSettingsStore.getState().settings.onboardingDone) {
+          // Level (a): silent on purpose. Nobody asked for this — it is a
+          // one-time migration that writes a recovery marker. It re-runs on
+          // every launch until it succeeds, and the thing it protects (not
+          // re-running onboarding after an NSIS update) is already covered by
+          // the persisted store on this machine.
           backendCall('set_onboarding_done').catch(() => {})
         }
       })
@@ -463,30 +585,12 @@ export function AppShell() {
       }
       const unsubChat = useChatStore.subscribe(scheduleBackup)
 
-      // Synchronous "last write" flush for beforeunload: doBackup awaits
-      // IndexedDB reads, and an await during page teardown means the trailing
-      // backup_stores invoke may never fire. Build the snapshot synchronously
-      // from localStorage + the idbCache mirror instead — no await before the
-      // invoke, restoring the pre-async guarantee.
-      const flushSyncBackup = () => {
-        try {
-          const snapshot: Record<string, string> = { __ts: new Date().toISOString() }
-          for (const key of STORE_KEYS) {
-            const val = IDB_STORE_KEYS.has(key)
-              ? (idbCache[key] ?? null)
-              : localStorage.getItem(key)
-            if (val) snapshot[key] = val
-          }
-          localStorage.setItem('lu-restore-complete', '1')
-          backendCall('backup_stores', { data: JSON.stringify(snapshot) }).catch(() => {})
-        } catch { /* best-effort */ }
-      }
-
       const onBeforeUnload = () => {
         // The 5 s / 30 s intervals cover the common case; this is the "last
         // write" insurance for changes since the previous interval. Must stay
-        // synchronous — see flushSyncBackup.
-        flushSyncBackup()
+        // synchronous: an await during page teardown means the trailing
+        // backup_stores invoke may never fire.
+        flushSyncStoreBackup()
         void doRagBackup()
       }
       window.addEventListener('beforeunload', onBeforeUnload)
@@ -564,6 +668,13 @@ export function AppShell() {
         const { setOllamaBase } = await import('../../api/backend')
         setOllamaBase(next)
         if (isTauri()) {
+          // Level (a): silent on purpose. setOllamaBase() on the line above has
+          // already applied the new host to everything the user can see; this
+          // only mirrors it into Rust's config.json. The providerStore is
+          // persisted and wins on the next boot anyway (see the comment on the
+          // hydration path below), and this subscription re-fires on the next
+          // edit. Reporting from inside a store subscription would also mean
+          // an error with no control anywhere near it.
           backendCall('set_ollama_host', { host: next }).catch(() => {})
         }
       })
@@ -598,7 +709,10 @@ export function AppShell() {
     const afterHydration = () => {
       // Either hydration already finished (so we run now) or we register a
       // one-shot callback for when it does.
-      const persist = (useProviderStore as any).persist
+      // `persist` steht am Store, weil er mit dem persist-Middleware gebaut ist
+      // (stores/providerStore.ts:175) — zustand haengt die API dort typisiert an.
+      // Das `as any` war ein Rest aus der Zeit davor.
+      const persist = useProviderStore.persist
       if (!persist || persist.hasHydrated?.()) {
         void pullAndArm()
       } else {
@@ -626,7 +740,6 @@ export function AppShell() {
       if (storeUnsub) storeUnsub()
       if (hydrationUnsub) hydrationUnsub()
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // ── Mirror remote mobile chat into the dispatched desktop conversation ──
@@ -635,10 +748,14 @@ export function AppShell() {
     let unlisten: (() => void) | undefined
     ;(async () => {
       const { listen } = await import('@tauri-apps/api/event')
-      unlisten = await listen<{ role: string; content: string; model?: string; mode?: string; chat_id?: string; chat_title?: string }>(
+      unlisten = await listen<RemoteChatMessage>(
         'remote-chat-message',
         (event) => {
-          const { role, content, mode, chat_id, chat_title, model } = event.payload || ({} as any)
+          // `Partial<…>` statt einer Zusicherung: der `?? {}`-Zweig existiert,
+          // WEIL die Nutzlast fehlen kann, und genau das sagt der Typ jetzt.
+          // Die Wahrheitspruefung in der naechsten Zeile ist die Verengung.
+          const { role, content, mode, chat_id, chat_title, model }: Partial<RemoteChatMessage> =
+            event.payload ?? {}
           if (!role || !content) return
           const chat = useChatStore.getState()
 
@@ -650,8 +767,17 @@ export function AppShell() {
           if (mode === 'codex') {
             const mobileChatId = chat_id || 'mobile-codex'
             const tagged = `[mobile:${mobileChatId}]`
-            let conv = chat.conversations.find((c) =>
-              c.mode === 'codex' && (c.title.includes(tagged) || (c as any).remoteChatId === mobileChatId),
+            const conv = chat.conversations.find((c) =>
+              // `remoteChatId` steht auf KEINEM Typ dieses Baums, und es wird
+              // auch nirgends geschrieben: die Zeile kam mit 55ceb072 herein und
+              // ist seither die einzige Fundstelle im ganzen Verzeichnisbaum
+              // (`git log -S remoteChatId --all` = ein Treffer, dieser Lesezugriff).
+              // Der Vergleich ist damit seit seiner Entstehung immer `false`;
+              // getragen hat den Treffer immer der Titel-Zweig davor. Das `as any`
+              // hat das verdeckt — die benannte Form sagt es.
+              c.mode === 'codex' &&
+              (c.title.includes(tagged) ||
+                (c as { remoteChatId?: string }).remoteChatId === mobileChatId),
             )
             let convId = conv?.id
             if (!convId) {
@@ -668,7 +794,7 @@ export function AppShell() {
             if (last && last.role === role && last.content === content) return
             useChatStore.getState().addMessage(convId, {
               id: `remote-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-              role: role as any,
+              role,
               content,
               timestamp: Date.now(),
             })
@@ -683,7 +809,7 @@ export function AppShell() {
           if (last && last.role === role && last.content === content) return
           chat.addMessage(dispatchedConversationId, {
             id: `remote-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-            role: role as any,
+            role,
             content,
             timestamp: Date.now(),
           })
@@ -820,24 +946,96 @@ export function AppShell() {
   if (restoring) return null
 
   if (!onboardingDone) {
-    return <Onboarding />
+    return <LazyView load={loadOnboarding} fallback={<OnboardingSkeleton />} />
   }
 
   return (
-    <div className="h-screen w-screen overflow-hidden bg-gray-100 dark:bg-[#141414] text-gray-900 dark:text-gray-100">
+    /* D-S42 — „Keine Ebenen: Sidebar, Chat-Pane und Composer sind alle weiss,
+       getrennt nur durch 1px gray-200, waehrend Dark drei Stufen hat."
+
+       Nachgemessen (WCAG 2.1, relative Luminanz), Leinwand gegen Pane:
+
+         dunkel  #141414 (L 0,00699) → #1e1e1e (L 0,01299)   = 1,105:1
+         hell    #f3f4f6 (L 0,90412) → #ffffff (L 1,00000)   = 1,100:1
+
+       Der Stufenabstand war also numerisch derselbe — die Ebenen fehlten
+       trotzdem, und zwar wegen der KANTE. Beide Panes tragen einen 1px-Ring:
+
+         dunkel  ring-white/[0.05] auf #1e1e1e ergibt #292929 (L 0,02239)
+                 gegen die Leinwand #141414                   = 1,270:1
+         hell    ring-black/[0.04] auf #ffffff ergibt #f5f5f5 (L 0,91141)
+                 gegen die Leinwand #f3f4f6                   = 1,008:1
+
+       1,008:1 ist keine Kante, das ist Rauschen — 34-mal weniger Abstand als
+       im Dunkeln. Im Hellmodus stand die Pane damit ohne Stufe UND ohne Rand
+       auf der Leinwand, also gar nicht auf ihr.
+
+       Geaendert ist genau EIN Wert: die Leinwand geht von gray-100 auf
+       gray-200 (#e5e7eb, L 0,79809). Damit
+
+         hell    #e5e7eb → #ffffff                            = 1,238:1
+
+       — die Stufe traegt jetzt allein, ohne auf die unsichtbare Kante
+       angewiesen zu sein, und sie ist staerker als die dunkle (1,105:1). Der
+       unveraenderte Ring gewinnt dabei mit: 1,008:1 → 1,134:1 gegen die
+       tiefere Leinwand. Alle Zahlen sind am laufenden Fenster nachgerechnet
+       (Canvas-Pixel + WCAG-2.1-Luminanz), nicht geschaetzt; die Rechnung
+       steht als Test in `__tests__/hellmodus-hat-ebenen.test.ts`.
+       Der Ring bleibt unangetastet: er sitzt auch auf der Sidebar
+       (`Sidebar.tsx:319`), und die Datei gehoert in diesem Durchgang einem
+       anderen Agenten — eine Kante nur an der Pane zu schaerfen haette zwei
+       Raender aus einer Familie auseinanderlaufen lassen.
+
+       NACHTRAG D-T06 (01.09.2026): hier stand, die Literale liessen sich
+       nicht durch ein Token ersetzen, weil es fuer die Leinwand keins gab.
+       Der zweite Halbsatz stimmte, der erste nicht. Es gibt jetzt eins —
+       `--color-lu-canvas` in index.css, mit genau dem Wert, der hier stand.
+       Ersetzt ist ausschliesslich die DUNKLE Seite; das helle
+       `bg-gray-200` bleibt Zeichen fuer Zeichen stehen. Der Tausch ist
+       damit im Browser folgenlos, in beiden Modi.
+
+       Was weiterhin NICHT passiert: eine `.light`-Spiegelung der Leiter.
+       Nachgezaehlt zerfaellt #141414 im Hellmodus in ZWEI Rollen —
+       Fensterrahmen (`bg-gray-200`: hier, Titlebar, Header) und Vollflaeche
+       (`bg-white`: ViewSkeletons, Kontextmenues, die Create-Wurzel). Eine
+       gespiegelte Leiter muesste eine der beiden falsch faerben. Die
+       Begruendung steht ausfuehrlich am Token selbst.
+
+       Und #1e1e1e (die Pane, eine Zeile tiefer) bleibt Literal: sie teilt
+       ihren Wert mit der Sidebar, und die gehoert in diesem Durchgang einem
+       anderen Agenten. Ein halb migriertes Paar waere schlechter als ein
+       ganzes Literal. */
+    <div className="h-screen w-screen overflow-hidden bg-gray-200 dark:bg-lu-canvas text-gray-900 dark:text-gray-100">
       <div className="h-full flex flex-col">
         <Titlebar />
         <Header />
         <StaleModelsBanner />
+        {restoreError && (
+          <div className="mx-2 mt-2 flex items-start gap-2 rounded-lg border border-red-500/20 bg-red-500/[0.06] px-3 py-2">
+            <p role="alert" className="flex-1 text-[0.65rem] leading-snug text-red-500 dark:text-red-400 whitespace-pre-line">
+              {restoreError}
+            </p>
+            <button
+              onClick={() => setRestoreError(null)}
+              className="shrink-0 text-[0.6rem] text-red-500/70 hover:text-red-400 transition-colors"
+            >
+              Dismiss
+            </button>
+          </div>
+        )}
         <StorageQuotaToast />
         <div className="flex-1 flex overflow-hidden gap-2 p-2">
           {!isComparing && <Sidebar />}
           <main className="flex-1 overflow-hidden rounded-xl bg-white dark:bg-[#1e1e1e] ring-1 ring-black/[0.04] dark:ring-white/[0.05]">
+            {/* Boot-View: statisch, damit der Kaltstart sofort etwas zeigt. */}
             {currentView === 'chat' && <ErrorBoundary><ChatView /></ErrorBoundary>}
-            {currentView === 'models' && <ErrorBoundary><ModelManager /></ErrorBoundary>}
-            {currentView === 'benchmark' && <ErrorBoundary><BenchmarkView /></ErrorBoundary>}
-            {currentView === 'settings' && <ErrorBoundary><SettingsPage /></ErrorBoundary>}
-            {currentView === 'create' && <ErrorBoundary><CreateExperimental /></ErrorBoundary>}
+            {/* LazyView bringt seine eigene ErrorBoundary *um* die Suspense-
+                Grenze mit — ein abgelehnter Chunk-Import wird dort gefangen,
+                statt bis zur Root-Boundary durchzuschlagen. */}
+            {currentView === 'models' && <LazyView load={loadModelManager} fallback={<ModelManagerSkeleton />} />}
+            {currentView === 'benchmark' && <LazyView load={loadBenchmarkView} fallback={<BenchmarkSkeleton />} />}
+            {currentView === 'settings' && <LazyView load={loadSettingsPage} fallback={<SettingsSkeleton />} />}
+            {currentView === 'create' && <LazyView load={loadCreateExperimental} fallback={<CreateSkeleton />} />}
           </main>
         </div>
       </div>
@@ -857,6 +1055,10 @@ export function AppShell() {
           it can never stack on top of the onboarding wizard. */}
       <ReleaseNotesModal />
       <ShortcutsModal />
+      {/* Cmd/Ctrl+K. Hoert auf `lu-command-palette`, genau wie die
+          Kuerzel-Uebersicht darueber auf `lu-show-shortcuts` hoert — kein
+          zweiter Tastatur-Handler. */}
+      <CommandPalette />
       {/* Out-of-credits purchase prompt: opens when LU Cloud answers
           code:'credits_exhausted' (monthly budget + top-up wallet empty). */}
       <CreditsExhaustedModal />

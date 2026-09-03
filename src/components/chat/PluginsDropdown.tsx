@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useDismissOnEscape } from '../../hooks/useDismissOnEscape'
 import { Plug, ChevronDown, Bone, User, Users, Wrench } from 'lucide-react'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { useChatStore } from '../../stores/chatStore'
@@ -28,6 +29,7 @@ export function PluginsDropdown({
   iconOnly = false,
 }: { openUpward?: boolean; iconOnly?: boolean } = {}) {
   const [open, setOpen] = useState(false)
+  useDismissOnEscape(open, () => setOpen(false))
   const [cavemanOpen, setCavemanOpen] = useState(false)
   const [personaOpen, setPersonaOpen] = useState(false)
   const [groupOpen, setGroupOpen] = useState(false)
@@ -82,16 +84,25 @@ export function PluginsDropdown({
           title={anyPluginActive ? 'Plugins (active)' : 'Plugins'}
           aria-label="Plugins"
           data-testid="plugins-trigger-icon"
-          className={`shrink-0 w-[22px] h-[22px] flex items-center justify-center rounded transition-colors hover:bg-gray-100 dark:hover:bg-white/5 ${
-            anyPluginActive ? 'text-blue-400' : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
-          }`}
+          // Nur `aria-expanded`, KEIN `aria-haspopup`: das Menue selbst
+          // traegt (noch) kein `role="menu"`, und eine Rolle zu behaupten,
+          // die drunter nicht steht, ist schlechter als sie wegzulassen.
+          aria-expanded={open}
+          // Aktiv war `text-blue-400` — dieselbe Farbe wie der Fokusring.
+          // Jetzt der Behaelter des neutralen Rezepts, gelesen aus
+          // `data-active`, weil „ein Plugin laeuft" kein Auf-/Zu-Zustand
+          // des Menues ist und deshalb nicht in `aria-expanded` gehoert.
+          data-active={anyPluginActive || undefined}
+          className="lu-control lu-control--icon"
         >
           <Plug size={11} />
         </button>
       ) : (
         <button
           onClick={() => setOpen(!open)}
-          className="flex items-center gap-1 px-2 py-0.5 rounded border border-gray-200 dark:border-white/[0.06] hover:border-gray-400 dark:hover:border-white/15 text-gray-500 transition-colors text-[0.55rem]"
+          aria-expanded={open}
+          data-active={anyPluginActive || undefined}
+          className="lu-control"
         >
           <Plug size={10} />
           <span>Plugins</span>
@@ -110,14 +121,14 @@ export function PluginsDropdown({
       {open && (
         <>
           <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-          <div className={`absolute right-0 z-50 w-56 rounded-lg bg-white dark:bg-[#262626] border border-gray-200 dark:border-white/10 shadow-xl py-1.5 ${openUpward ? 'bottom-full mb-1' : 'top-full mt-1'}`}>
+          <div className={`absolute right-0 z-50 w-56 rounded-lg lu-elevated py-1.5 ${openUpward ? 'bottom-full mb-1' : 'top-full mt-1'}`}>
 
             {/* ── Chat Tools toggle (v2.5.3) ──────────────── */}
             <div className="px-2.5">
               <div className="w-full flex items-center justify-between py-1.5 gap-2">
                 <div className="flex items-center gap-1.5 min-w-0">
                   <Wrench size={10} className={chatToolsEnabled ? 'text-blue-400' : 'text-gray-400'} />
-                  <span className="text-[0.6rem] font-medium text-gray-600 dark:text-gray-300">Chat Tools</span>
+                  <span className="t-micro font-medium text-gray-600 dark:text-gray-300">Chat Tools</span>
                   <span className="text-[0.5rem] text-gray-400 truncate">web · file · image · video</span>
                 </div>
                 <button
@@ -153,7 +164,7 @@ export function PluginsDropdown({
               >
                 <div className="flex items-center gap-1.5">
                   <Bone size={10} className={isCavemanActive ? 'text-amber-400' : 'text-gray-400'} />
-                  <span className="text-[0.6rem] font-medium text-gray-600 dark:text-gray-300">Caveman Mode</span>
+                  <span className="t-micro font-medium text-gray-600 dark:text-gray-300">Caveman Mode</span>
                 </div>
                 <div className="flex items-center gap-1">
                   <span className={`text-[0.55rem] ${isCavemanActive ? 'text-amber-400' : 'text-gray-500'}`}>
@@ -201,7 +212,7 @@ export function PluginsDropdown({
                   className="flex items-center gap-1.5 flex-1 min-w-0 text-left"
                 >
                   <User size={10} className={isPersonaActive ? 'text-green-400' : 'text-gray-400'} />
-                  <span className="text-[0.6rem] font-medium text-gray-600 dark:text-gray-300">Persona</span>
+                  <span className="t-micro font-medium text-gray-600 dark:text-gray-300">Persona</span>
                   <span className={`text-[0.55rem] truncate ${isPersonaActive ? 'text-green-400' : 'text-gray-500'}`}>
                     {activePersona?.name || 'Unrestricted'}
                   </span>
@@ -264,7 +275,7 @@ export function PluginsDropdown({
               >
                 <div className="flex items-center gap-1.5">
                   <Users size={10} className={isGroupActive ? 'text-purple-400' : 'text-gray-400'} />
-                  <span className="text-[0.6rem] font-medium text-gray-600 dark:text-gray-300">Group chat</span>
+                  <span className="t-micro font-medium text-gray-600 dark:text-gray-300">Group chat</span>
                   <span className={`text-[0.55rem] ${isGroupActive ? 'text-purple-400' : 'text-gray-500'}`}>
                     {isGroupActive ? `${groupModels.length} models` : 'Off'}
                   </span>

@@ -2,6 +2,9 @@ import { useChatStore } from '../../stores/chatStore'
 import { computeContextFill } from '../../lib/token-usage'
 import { useActiveContextWindow } from '../../hooks/useActiveContextWindow'
 import { useSendSizeStore } from '../../stores/sendSizeStore'
+import { useSettingsStore } from '../../stores/settingsStore'
+import { shouldAutoCompact, autoCompactHint } from '../../lib/compact-trigger'
+import { newestCompaction, isModelVisible } from '../../lib/run-compact-command'
 
 export function TokenCounter() {
   const activeConversationId = useChatStore((s) => s.activeConversationId)
@@ -15,6 +18,14 @@ export function TokenCounter() {
   // (David: "muss immer stimmen"). Ollama = the num_ctx we send; LM Studio =
   // loaded_context_length (what it actually loaded), NOT the model's max.
   const ctx = useActiveContextWindow()
+  // MUSS vor dem fruehen `return null` weiter unten stehen. Als dieser Hook
+  // dort unten bei seiner Verwendung stand, hatte die Komponente vier Hooks im
+  // leeren Chat und fuenf im gefuellten — React 19 wirft dann beim Uebergang
+  // „Rendered more hooks than during the previous render", und das ist ein
+  // Absturz, kein Warnhinweis. Der Weg dorthin ist alltaeglich: neuer Chat mit
+  // einem Cloud-Modell (ContextDropdown rendert die Kinder auch, wenn das
+  // Fenster nicht verstellbar ist), erste Nachricht — fertig.
+  const autoSchwelle = useSettingsStore((s) => s.settings.autoCompactThreshold)
 
   const conversation = conversations.find((c) => c.id === activeConversationId)
   const messages = conversation?.messages || []
@@ -79,17 +90,72 @@ export function TokenCounter() {
       ? `Context: ${usedTokens.toLocaleString()} / ${maxTokens.toLocaleString()} tokens (${source}), anchored on the model's last reported usage (includes system prompt + tools + RAG); reasoning tokens are not context and aren't counted${capNote}`
       : `Estimated: ${usedTokens.toLocaleString()} / ${maxTokens.toLocaleString()} tokens (${source}), estimate until the model reports real usage${capNote}`
 
+  // ── Wie weit ist es noch bis zur automatischen Kompaktierung ────────────
+  //
+  // WARUM UEBERHAUPT: bis hierher stand die Schwelle ausschliesslich in den
+  // Einstellungen. Wer sie eingeschaltet hatte, sah im Chat nur den Fuellstand
+  // und konnte nicht wissen, ob die naechste Nachricht noch durchgeht oder
+  // eine Zusammenfassung ausloest. Die Claude-Code-Desktop-App schreibt genau
+  // diesen Satz in ihre Statuszeile, und er ist der Grund, warum dort niemand
+  // von einer Kompaktierung ueberrascht wird.
+  //
+  // WARUM ueber `shouldAutoCompact` und nicht mit einer eigenen Rechnung: die
+  // wirksame Schwelle ist NICHT die eingestellte. `shouldAutoCompact` zieht
+  // einen Sicherheitsabschlag ab, solange der Fuellstand nur geschaetzt ist —
+  // eine hier selbst gerechnete Prozentzahl waere im haeufigsten Fall (kein
+  // echter Usage-Report) schlicht die falsche. Dieselbe Funktion zu fragen,
+  // die spaeter auch entscheidet, ist der einzige Weg, bei dem Anzeige und
+  // Verhalten nicht auseinanderlaufen koennen.
+  const sichtbareAnzahl = messages.filter(isModelVisible).length
+  const autoUrteil = autoSchwelle
+    ? shouldAutoCompact({
+        used: rawUsed,
+        window: maxTokens,
+        source: fill.source,
+        real: fill.real,
+        // `maxTokens > 0` war immer wahr — auch fuer den 16384er-Notnagel
+        // weiter oben, den es nur gibt, solange die Anbieter-Abfrage laeuft.
+        // Der Zaehler behauptete damit sekundenlang ein bekanntes Fenster:
+        // 14k belegt auf einem 128k-Modell las sich als "triggers on the next
+        // message", bis die Antwort kam. `window` ist die Zahl VOR dem
+        // Notnagel und damit die ehrliche Auskunft.
+        windowIsTrue: window > 0,
+        messageCount: sichtbareAnzahl,
+        threshold: autoSchwelle,
+        lastCompactAtMessageCount: newestCompaction(conversation?.compactions)?.atMessageCount,
+      })
+    : null
+  const autoHinweis = autoCompactHint(autoUrteil)
+
+  // `span`, nicht `div`, und ohne eigenes Padding: seit D-S06 ist dieser
+  // Fuellstand die Beschriftung INNERHALB des Kontextfenster-Knopfes
+  // (`ContextDropdown`). Ein `div` im `<button>` ist kein gueltiges
+  // Phrasing-Content, und das Padding kam sonst zweimal.
   return (
-    <div className={`flex items-center gap-1.5 px-2 py-1 ${color}`} title={title}>
-      <div className="w-12 h-1 rounded-full bg-gray-200 dark:bg-white/10 overflow-hidden">
-        <div
-          className={`h-full rounded-full transition-all duration-300 ${barColor}`}
+    <span className={`inline-flex items-center gap-1.5 ${color}`} title={autoHinweis ? `${title}. ${autoHinweis}` : title}>
+      <span className="relative block w-12 h-1 rounded-full bg-gray-200 dark:bg-white/10 overflow-hidden">
+        <span
+          className={`block h-full rounded-full transition-[width] duration-[var(--motion-slow)] ${barColor}`}
           style={{ width: `${Math.min(ratio * 100, 100)}%` }}
         />
-      </div>
-      <span className="text-[0.55rem] font-mono tabular-nums">
+        {/* Die Marke sitzt auf der WIRKSAMEN Schwelle, derselben, die
+            entscheidet. Nur gezeichnet, wenn sie ueberhaupt in den Balken
+            faellt — eine Marke am Rand behauptet eine Genauigkeit, die zwei
+            Pixel nicht tragen. */}
+        {autoUrteil && autoUrteil.effectiveThreshold > 0.02 && autoUrteil.effectiveThreshold < 0.98 && (
+          <span
+            aria-hidden
+            data-testid="auto-compact-mark"
+            className="absolute top-0 bottom-0 w-px bg-current opacity-50"
+            style={{ left: `${autoUrteil.effectiveThreshold * 100}%` }}
+          />
+        )}
+      </span>
+      {/* `font-mono tabular-nums` war dasselbe Rezept, nur an der Call-Site
+          buchstabiert. `.lu-hud-num` ist die eine Stelle, an der es steht. */}
+      <span className="text-[0.55rem] lu-hud-num">
         {formatK(usedTokens)}/{formatK(maxTokens)}
       </span>
-    </div>
+    </span>
   )
 }

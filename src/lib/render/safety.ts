@@ -48,6 +48,12 @@ function baseNormalize(text: string): string {
     .normalize('NFKD')
     .replace(/[\u0300-\u036f]/g, '')
     .toLowerCase()
+    // NUL is the LOWER BOUND of the ASCII range here, not a control character
+    // matched for its own sake: this line folds every NON-ASCII code point
+    // through HOMOGLYPHS. Narrowing the range to start at 0x20 to appease the
+    // rule would stop folding any homoglyph that maps onto a control char —
+    // exactly the evasion this normalizer exists to close.
+    // eslint-disable-next-line no-control-regex
     .replace(/[^\u0000-\u007F]/g, (ch) => HOMOGLYPHS[ch] ?? ch)
 }
 

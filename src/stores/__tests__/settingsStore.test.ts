@@ -104,7 +104,7 @@ describe('settingsStore', () => {
     })
 
     it('resets array/object-valued keys by default value (gpuIndices, defaultWorkspace)', () => {
-      useSettingsStore.getState().updateSettings({ gpuIndices: [1, 2], defaultWorkspace: { path: 'C:/tmp', label: 'tmp' } as any })
+      useSettingsStore.getState().updateSettings({ gpuIndices: [1, 2], defaultWorkspace: { kind: 'folder', path: 'C:/tmp' } })
       useSettingsStore.getState().resetSettingsKeys(['gpuIndices', 'defaultWorkspace'])
       const s = useSettingsStore.getState().settings
       expect(s.gpuIndices).toEqual(DEFAULT_SETTINGS.gpuIndices)

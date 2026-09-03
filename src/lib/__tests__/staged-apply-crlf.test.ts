@@ -40,10 +40,10 @@ const CHAT = 'chat-crlf'
 /** Route fs_read to the file on disk, fs_write to a recorder. */
 function onDisk(content: string) {
   const written: string[] = []
-  call.mockImplementation(async (cmd: string, args: any) => {
+  call.mockImplementation(async (cmd: string, args: Record<string, unknown>) => {
     if (cmd === 'fs_read') return { content }
     if (cmd === 'fs_write') {
-      written.push(args.content)
+      written.push(String(args.content))
       return { status: 'saved', path: args.path }
     }
     return null

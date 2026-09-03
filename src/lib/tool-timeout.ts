@@ -30,7 +30,7 @@ export interface ToolTimeoutSettings {
 /** The JS race ceiling for one tool call, in ms. */
 export function toolCallCapMs(
   name: string,
-  args: Record<string, any> | undefined,
+  args: Record<string, unknown> | undefined,
   settings: ToolTimeoutSettings,
 ): number {
   if (name === 'image_generate') {
@@ -55,7 +55,10 @@ export function raceWithToolTimeout(run: Promise<string>, name: string, capMs: n
   let timer: ReturnType<typeof setTimeout> | undefined
   const deadline = new Promise<string>((_, reject) => {
     timer = setTimeout(
-      () => reject(new Error(`Tool execution timed out (${Math.round(capMs / 1000)}s)`)),
+      // The tool name was passed in by both callers but never used, so every
+      // timeout reached the model as an anonymous "Tool execution timed out"
+      // — in a parallel batch it could not tell which tool had died.
+      () => reject(new Error(`Tool execution timed out: ${name} (${Math.round(capMs / 1000)}s)`)),
       capMs,
     )
   })

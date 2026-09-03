@@ -430,7 +430,9 @@ export function useModels() {
         ]
       }
       setModels([...allModels, ...comfyModels])
-      // eslint-disable-next-line @typescript-eslint/no-use-before-define
+      // (Die Unterdrueckung fuer no-use-before-define stand hier; die Regel
+      // ist in keiner der geerbten Configs an, sie hat nie etwas gemeldet.
+      // Function-Hoisting macht den Vorwaertsbezug ohnehin gueltig.)
       if (inventoryOwesRetry(comfyAnswered)) armComfyInventoryRetry(fetchModels)
     } catch (err) {
       log.warn('[useModels] Model list refresh failed', { err })

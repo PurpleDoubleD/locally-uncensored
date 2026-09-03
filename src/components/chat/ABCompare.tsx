@@ -74,18 +74,18 @@ export function ABCompare() {
           <select
             value={modelA}
             onChange={(e) => setModelA(e.target.value)}
-            className="px-2 py-1 rounded-lg bg-red-500/10 border border-red-500/30 text-[0.6rem] text-red-300 focus:outline-none"
+            className="px-2 py-1 rounded-lg bg-red-500/10 border border-red-500/30 t-micro text-red-300 focus:outline-none"
           >
             <option value="">Model A</option>
             {textModels.map(m => (
               <option key={m.name} value={m.name}>{m.name}</option>
             ))}
           </select>
-          <span className="text-[0.6rem] text-gray-500 font-bold">VS</span>
+          <span className="t-micro text-gray-500 font-bold">VS</span>
           <select
             value={modelB}
             onChange={(e) => setModelB(e.target.value)}
-            className="px-2 py-1 rounded-lg bg-blue-500/10 border border-blue-500/30 text-[0.6rem] text-blue-300 focus:outline-none"
+            className="px-2 py-1 rounded-lg bg-blue-500/10 border border-blue-500/30 t-micro text-blue-300 focus:outline-none"
           >
             <option value="">Model B</option>
             {textModels.map(m => (
@@ -101,9 +101,9 @@ export function ABCompare() {
         {/* Model A column */}
         <div className="flex-1 flex flex-col border-r border-white/5">
           <div className="px-3 py-1.5 border-b border-white/5 flex items-center justify-between">
-            <span className="text-[0.6rem] font-medium text-red-400">{modelA || 'Select Model A'}</span>
+            <span className="t-micro font-medium text-red-400">{modelA || 'Select Model A'}</span>
             {statsA && (
-              <div className="flex items-center gap-2 text-[0.5rem] text-gray-500">
+              <div className="flex items-center gap-2 text-[0.5rem] text-gray-500 lu-hud-num">
                 <span className="flex items-center gap-0.5"><Zap size={8} />{statsA.tokensPerSec.toFixed(1)} t/s</span>
                 <span className="flex items-center gap-0.5"><Clock size={8} />{(statsA.timeMs / 1000).toFixed(1)}s</span>
                 <span className="flex items-center gap-0.5"><Hash size={8} />{statsA.tokens}</span>
@@ -126,9 +126,9 @@ export function ABCompare() {
         {/* Model B column */}
         <div className="flex-1 flex flex-col">
           <div className="px-3 py-1.5 border-b border-white/5 flex items-center justify-between">
-            <span className="text-[0.6rem] font-medium text-blue-400">{modelB || 'Select Model B'}</span>
+            <span className="t-micro font-medium text-blue-400">{modelB || 'Select Model B'}</span>
             {statsB && (
-              <div className="flex items-center gap-2 text-[0.5rem] text-gray-500">
+              <div className="flex items-center gap-2 text-[0.5rem] text-gray-500 lu-hud-num">
                 <span className="flex items-center gap-0.5"><Zap size={8} />{statsB.tokensPerSec.toFixed(1)} t/s</span>
                 <span className="flex items-center gap-0.5"><Clock size={8} />{(statsB.timeMs / 1000).toFixed(1)}s</span>
                 <span className="flex items-center gap-0.5"><Hash size={8} />{statsB.tokens}</span>

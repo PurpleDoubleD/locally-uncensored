@@ -10,7 +10,7 @@
  * always sees its own pending work.
  */
 
-import type { StagedChange } from '../stores/stagedChangesStore'
+import type { StagedChange } from '../types/staged-changes'
 
 /** Normalize for comparison: forward slashes, no leading "./", no trailing "/". */
 export function normalizeStagedPath(p: string): string {

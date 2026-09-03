@@ -1,11 +1,14 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 
-// backend.ts reads (window as any).__TAURI__ at call time, so we need to
-// provide a `window` global in node environment and then import the module.
+// backend.ts probes `window.__TAURI_INTERNALS__` / `__TAURI__` at call time, so
+// we need to provide a `window` global in the node environment and then import
+// the module.
 
-// Set up window mock BEFORE importing backend.ts
-const windowMock: Record<string, any> = {}
-;(globalThis as any).window = windowMock
+// Set up window mock BEFORE importing backend.ts. Reflect rather than a cast:
+// the DOM lib types `globalThis.window` as a full `Window`, which is the only
+// reason an assertion was needed to put a bare object there.
+const windowMock: Record<string, unknown> = {}
+Reflect.set(globalThis, 'window', windowMock)
 
 // Now import the functions (they capture `window` reference at call time, not import time)
 import {

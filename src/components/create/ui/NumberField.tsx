@@ -60,7 +60,7 @@ export function NumberField({ label, value, min, max, step = 1, onChange, onRand
           <button
             onClick={onRandomize}
             title="Randomize"
-            className="h-[var(--control-h-md)] aspect-square inline-flex items-center justify-center rounded-[var(--radius-control)] bg-white/[0.06] text-gray-400 hover:text-white hover:bg-white/10 transition-colors lu-focus-ring"
+            className="h-[var(--control-h-md)] aspect-square inline-flex items-center justify-center rounded-[var(--radius-control)] bg-white/[0.06] text-gray-400 hover:text-white hover:bg-white/10 transition-colors"
           >
             <Dices size={14} />
           </button>

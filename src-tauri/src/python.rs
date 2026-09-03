@@ -131,14 +131,40 @@ pub fn resolve_comfyui_venv_python(comfyui_dir: &Path) -> Option<String> {
 /// "Python not installed". Falling back to the bare `"python"` string the way
 /// older versions did re-introduces the Store-stub trap on a fresh Windows
 /// box, which is exactly the bug P14 fixes.
-/// Non-Windows: prefer python3, then python.
+/// Non-Windows: walk `os_paths::unix_python_candidates()` and return the first
+/// interpreter that resolves on PATH *and* answers `--version`.
+///
+/// Two constraints decide the shape of this function.
+///
+/// 1. BUG-008. Grabbing a bare `python3` is wrong on any box whose `python3`
+///    is ahead of the ML wheels (3.14 today): ComfyUI, faster-whisper and
+///    Piper all die at the first `pip install` with "no matching distribution",
+///    and the user has no way to see why. The ordered candidate list that
+///    prefers 3.12/3.11 already existed in `os_paths` — it was simply never
+///    on the install path, because `find_python` (which uses it) is called by
+///    the media lanes and `get_python_bin` (which did not) is called by
+///    `AppState::new`, i.e. by everything that installs. This is the wiring.
+/// 2. The result must be an ABSOLUTE path. Everything downstream derives
+///    facts from it — `commands::process` reads the interpreter's prefix to
+///    find torch, error messages quote it — and a bare name has no prefix:
+///    `Path::new("python3").parent()` is `Some("")`, which silently turns
+///    every derived path into a relative one.
+///
+/// `which` resolves the name; the `--version` run stays because a dangling
+/// symlink or a shim that exits non-zero must be skipped, not cached.
+/// Returns the empty string when nothing usable exists — callers treat `""`
+/// as "no Python on this box" (see `is_real_python`).
 #[cfg(not(target_os = "windows"))]
 pub fn get_python_bin() -> String {
-    for bin in &["python3", "python"] {
-        if let Ok(output) = Command::new(bin).arg("--version").output() {
-            if output.status.success() {
-                return bin.to_string();
+    for name in crate::os_paths::unix_python_candidates() {
+        let Ok(path) = which::which(name) else { continue };
+        let mut cmd = Command::new(&path);
+        cmd.arg("--version");
+        match cmd.output() {
+            Ok(output) if output.status.success() => {
+                return path.to_string_lossy().to_string();
             }
+            _ => continue,
         }
     }
     String::new()
@@ -268,11 +294,11 @@ fn scan_python_subdirs(base: &Path, label: &str) -> Option<String> {
     let mut dirs: Vec<_> = entries
         .filter_map(|e| e.ok())
         .filter(|e| {
-            e.file_type().ok().map_or(false, |ft| ft.is_dir())
+            e.file_type().ok().is_some_and(|ft| ft.is_dir())
                 && e.file_name().to_string_lossy().to_lowercase().starts_with("python")
         })
         .collect();
-    dirs.sort_by(|a, b| b.file_name().cmp(&a.file_name()));
+    dirs.sort_by_key(|e| std::cmp::Reverse(e.file_name()));
     for dir in dirs {
         let exe = dir.path().join("python.exe");
         if exe.exists() {
@@ -426,21 +452,31 @@ mod tests {
 
     // ── resolve_comfyui_venv_python — existence gate ────────────────────────
 
+    /// ── Why these three no longer name their own directory ──
+    ///
+    /// They used the FIXED paths `<temp>/lu-venv-test-missing`,
+    /// `…-present` and `lu-dotvenv-test-present`, and each began by deleting
+    /// its own. Every concurrent copy of this test binary used the same three,
+    /// so one copy's `remove_dir_all` landed between another's `create_dir_all`
+    /// and its `resolve_comfyui_venv_python` — the stub python was gone and the
+    /// resolver correctly answered `None`. Measured on 01.09.2026 under six
+    /// concurrent copies of the suite, ten rounds:
+    /// `resolve_returns_some_when_venv_python_exists` and
+    /// `resolve_finds_dot_venv_layout` failed 1 of 60 runs each.
+    ///
+    /// `crate::os_paths::test_dir` puts the process id and the thread id in the
+    /// name and sweeps up on `Drop`, even when an assertion panics.
     #[test]
     fn resolve_returns_none_when_venv_missing() {
-        let tmp = std::env::temp_dir().join("lu-venv-test-missing");
-        let _ = fs::remove_dir_all(&tmp);
-        fs::create_dir_all(&tmp).unwrap();
+        let tmp = crate::os_paths::test_dir("venv-missing");
         assert!(resolve_comfyui_venv_python(&tmp).is_none());
-        let _ = fs::remove_dir_all(&tmp);
     }
 
     #[test]
     fn resolve_returns_some_when_venv_python_exists() {
         // Build the exact layout `python -m venv` would produce so the
         // resolver finds it without actually invoking Python.
-        let tmp = std::env::temp_dir().join("lu-venv-test-present");
-        let _ = fs::remove_dir_all(&tmp);
+        let tmp = crate::os_paths::test_dir("venv-present");
         let inner = if cfg!(target_os = "windows") {
             tmp.join("venv").join("Scripts")
         } else {
@@ -456,15 +492,13 @@ mod tests {
         let resolved = resolve_comfyui_venv_python(&tmp);
         assert!(resolved.is_some(), "expected resolver to find {}", py.display());
         assert!(resolved.unwrap().contains("venv"));
-        let _ = fs::remove_dir_all(&tmp);
     }
 
     #[test]
     fn resolve_finds_dot_venv_layout() {
         // Issue #51 (adhney): ComfyUI installed into `.venv` (uv / modern
         // `python -m venv .venv`) must also be picked up, not just `venv`.
-        let tmp = std::env::temp_dir().join("lu-dotvenv-test-present");
-        let _ = fs::remove_dir_all(&tmp);
+        let tmp = crate::os_paths::test_dir("dotvenv-present");
         let inner = if cfg!(target_os = "windows") {
             tmp.join(".venv").join("Scripts")
         } else {
@@ -480,7 +514,6 @@ mod tests {
         let resolved = resolve_comfyui_venv_python(&tmp);
         assert!(resolved.is_some(), "expected resolver to find {}", py.display());
         assert!(resolved.unwrap().contains(".venv"));
-        let _ = fs::remove_dir_all(&tmp);
     }
 
     // ── is_real_python (Bug P14 — Microsoft Store stub filter) ──────────────
@@ -499,6 +532,51 @@ mod tests {
     fn real_python_accepts_real_path() {
         assert!(is_real_python("/usr/bin/python3"));
         assert!(is_real_python("C:\\Python312\\python.exe"));
+    }
+
+    // ── get_python_bin wiring (OI-6: BUG-008 resolver was never called) ─────
+
+    /// The install path must never hand out a bare `python3`. Two things break
+    /// on it: BUG-008 (a 3.14 with no ML wheels wins over an installed 3.12),
+    /// and every consumer that derives a path from the interpreter, because
+    /// `Path::new("python3").parent()` is `Some("")` and not a real prefix.
+    #[cfg(not(target_os = "windows"))]
+    #[test]
+    fn get_python_bin_returns_an_absolute_interpreter_or_the_empty_sentinel() {
+        let bin = get_python_bin();
+        if bin.is_empty() {
+            // No Python on this box — the documented sentinel, not a failure.
+            return;
+        }
+        let p = Path::new(&bin);
+        assert!(p.is_absolute(), "get_python_bin returned a bare name: {bin}");
+        assert!(p.exists(), "get_python_bin returned a path that does not exist: {bin}");
+        // The regression in one line: a bare name has no usable parent.
+        let parent = p.parent().expect("an absolute interpreter has a parent");
+        assert!(
+            !parent.as_os_str().is_empty(),
+            "interpreter prefix is empty, derived paths would be relative: {bin}"
+        );
+    }
+
+    /// It has to come from the ordered list, not from a fresh probe of its
+    /// own — that list IS the BUG-008 fix.
+    #[cfg(not(target_os = "windows"))]
+    #[test]
+    fn get_python_bin_picks_a_candidate_from_the_bug_008_order() {
+        let bin = get_python_bin();
+        if bin.is_empty() {
+            return;
+        }
+        let resolved: Vec<String> = crate::os_paths::unix_python_candidates()
+            .iter()
+            .filter_map(|n| which::which(n).ok())
+            .map(|p| p.to_string_lossy().to_string())
+            .collect();
+        assert!(
+            resolved.contains(&bin),
+            "{bin} is not one of the BUG-008 candidates {resolved:?}"
+        );
     }
 
     // ── Windows resolver helpers (Bug B — aldrich "python not installed") ────

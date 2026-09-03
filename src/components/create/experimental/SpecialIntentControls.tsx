@@ -11,7 +11,7 @@ import { AnimatePresence, motion } from 'framer-motion'
 import {
   AudioLines, Download, Film, ImagePlus, Info, Mic, Music2, Trash2, Upload, Wand2, X,
 } from 'lucide-react'
-import { useCreateStore, type CreateIntent, type MediaRef, type GalleryItem } from '../../../stores/createStore'
+import { useCreateStore, type CreateIntent, type GalleryItem } from '../../../stores/createStore'
 import { useCloudCatalogStore, cloudModelById, modelForOp } from '../../../stores/cloudCatalogStore'
 import { listLoras, deleteLora, type CloudLora } from '../../../api/cloud/loras'
 import {
@@ -24,6 +24,7 @@ import { getLoraModels } from '../../../api/comfyui'
 import { musicTakesLyrics, musicHowtoLines } from '../../../lib/render/music-ui'
 import { useCreateExp } from './CreateContext'
 import { loadImageRef } from './loadImage'
+import { mediaRefFrom } from './mediaRef'
 import { fetchGalleryItemBlob } from './galleryUrl'
 import { Button } from '../ui/Button'
 import { Segmented } from '../ui/Segmented'
@@ -43,10 +44,13 @@ export function SpecialControls({ intent }: { intent: CreateIntent }) {
 }
 
 // ── shared chip: a small labeled file slot (audio/video/image) ──────────────
-
-function mediaRefFrom(file: File): MediaRef {
-  return { name: file.name, url: URL.createObjectURL(file), blob: file }
-}
+//
+// `mediaRefFrom` used to be defined right here, and the training board in
+// Stage.tsx had its own inline copy of the same two lines. Two mints, one
+// release — and it was the copy without a release. Both now come from
+// `./mediaRef`, whose counterpart in createStore is
+// `releaseDroppedMediaRefs`. Do NOT revoke in this file: the ref outlives the
+// component, it lives in the store.
 
 function FileChip({
   icon: Icon,

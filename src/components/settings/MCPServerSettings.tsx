@@ -4,9 +4,15 @@ import { Plus, Trash2, Power, PowerOff } from 'lucide-react'
 import { useMCPStore } from '../../stores/mcpStore'
 import { toolRegistry } from '../../api/mcp'
 import type { MCPServerConfig } from '../../api/mcp/types'
+// `import type` und nicht `import`: die Klasse wird unten bewusst dynamisch
+// geladen, damit der Tauri-Import im Dev-Modus nicht mitkommt. Ein Typ-Import
+// wird beim Uebersetzen geloescht und erzeugt keine Laufzeit-Abhaengigkeit —
+// er kostet also nichts und deckt dafuer `client.disconnect()` mit ab, das
+// unter `any` ungeprueft war.
+import type { MCPExternalClient } from '../../api/mcp/external-client'
 
 // Active client instances (lazy-loaded to avoid Tauri import in dev mode)
-const clients = new Map<string, any>()
+const clients = new Map<string, MCPExternalClient>()
 
 export function MCPServerSettings() {
   const { servers, connectedServers, serverTools, addServer, removeServer, setConnected, setServerTools, clearServerTools } = useMCPStore()
@@ -40,7 +46,18 @@ export function MCPServerSettings() {
     setError(null)
     try {
       const { MCPExternalClient } = await import('../../api/mcp/external-client')
-      const client = new MCPExternalClient(server)
+      // A server process can die on its own (crash, OOM kill, a bad config it
+      // quits on). Before this the panel stayed green and its tools stayed in
+      // the registry, so the model kept being offered a terminal that was not
+      // there and every call failed with "Not connected" until the app closed.
+      const client = new MCPExternalClient(server, {
+        onExit: (id) => {
+          toolRegistry.unregisterServer(id)
+          setConnected(id, false)
+          clearServerTools(id)
+          clients.delete(id)
+        },
+      })
       const tools = await client.connect()
       clients.set(server.id, client)
       setConnected(server.id, true)
@@ -210,7 +227,7 @@ export function MCPServerSettings() {
       ) : (
         <button
           onClick={() => setShowAddForm(true)}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[0.65rem] text-gray-500 hover:text-gray-300 bg-white/[0.03] hover:bg-white/5 border border-white/10 hover:border-white/20 transition-all w-full justify-center"
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[0.65rem] text-gray-500 hover:text-gray-300 bg-white/[0.03] hover:bg-white/5 border border-white/10 hover:border-white/20 transition-colors w-full justify-center"
         >
           <Plus size={12} />
           Add MCP Server

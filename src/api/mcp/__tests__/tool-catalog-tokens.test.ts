@@ -74,11 +74,45 @@ const fullWire = () => JSON.stringify(wireTools(codingCatalog()))
  *
  * The ceilings carry ~4 percent of headroom for a wording fix; a new paragraph
  * blows through them.
+ *
+ * ── 2.6.8: die Hintergrundagenten ──────────────────────────────────────────
+ * Zwei neue Werkzeuge (check_tasks, message_agent) haben BEIDE Deckel
+ * gerissen, und das Ergebnis war unterschiedlich, weil die Frage
+ * unterschiedlich ist:
+ *
+ *   codierender Zug   8.444 -> wieder 7.418 Zeichen, Deckel BLEIBT 7.600
+ *   voller Katalog   18.099 -> 17.711 Zeichen, Deckel STEIGT auf 17.750
+ *
+ * Der codierende Zug hat sich nicht durch Kuerzen erholt, sondern durch eine
+ * Korrektur: die beiden Werkzeuge sprechen UEBER eine Delegation, und
+ * delegate_task selbst faehrt auf einem gewoehnlichen Refactor laengst nicht
+ * mit (siehe den Test darueber). Sie stehen jetzt hinter demselben Tor
+ * (GATE_KEYWORDS in lib/tool-selection.ts), also kostet ein Zug ohne
+ * Delegation wieder genau so viel wie vorher. Dieser Deckel hat einen
+ * Entwurfsfehler gefunden, nicht nur eine Zahl.
+ *
+ * Der volle Katalog steigt wirklich: zwei Werkzeuge sind zwei Werkzeuge, und
+ * kein Tor der Welt macht sie im vollstaendigen Katalog unsichtbar. 388
+ * Zeichen davon sind durch Kuerzen der Beschreibungen zurueckgeholt; die
+ * uebrigen 711 sind der ehrliche Preis. Der Deckel steht auf dem GEMESSENEN
+ * Wert plus zwei Promille, nicht auf einem Wunsch.
+ *
+ * ── 2.6.8, zweiter Zug: delegate_task bekommt `model` ─────────────────────
+ * „glm 5.3 aktiv und der prompt sagt nutze 5 glm 5.2 agenten" — dafuer braucht
+ * das Werkzeug einen Modellparameter, den es nie hatte. Ein Schemafeld mit
+ * Beschreibung kostet:
+ *
+ *   voller Katalog   17.711 -> 17.843 Zeichen (+132, nach Kuerzung der
+ *                    Beschreibung von 151 auf 93 Zeichen)
+ *   codierender Zug  unveraendert — delegate_task faehrt dort nicht mit
+ *
+ * Der codierende Zug ist der, den jeder Refactor bezahlt, und er bleibt
+ * gleich. Das ist der Grund, warum das Tor existiert.
  */
 const CODING_CHAR_CEILING = 7600
 const CODING_TOKEN_CEILING = 1730
-const FULL_CHAR_CEILING = 17000
-const FULL_TOKEN_CEILING = 3880
+const FULL_CHAR_CEILING = 17880
+const FULL_TOKEN_CEILING = 4090
 
 describe('the coding step carries a catalog the diet actually shrank', () => {
   it('the gate really is what a plain coding turn gets', () => {
@@ -184,7 +218,9 @@ describe.runIf(LIVE)('the same catalog through a real tokenizer', () => {
   it('a plain coding step stays under the token ceiling', async () => {
     const wire = codingWire()
     const tokens = await countTokens(wire)
-    // eslint-disable-next-line no-console
+    // Absichtliche Messausgabe (Lauf nur unter LIVE). Kein Unterdruecken
+    // noetig: `no-console` ist in eslint.config.js gar nicht eingeschaltet —
+    // gemessen 01.09.2026, 38 console-Aufrufe in src/, alle in api/lib/hooks.
     console.log(`coding step: ${wire.length} chars, ${tokens} tokens (${TOKENIZER_MODEL})`)
     expect(tokens).toBeLessThanOrEqual(CODING_TOKEN_CEILING)
   }, 300000)
@@ -192,7 +228,7 @@ describe.runIf(LIVE)('the same catalog through a real tokenizer', () => {
   it('the ungated coding catalog stays under its token ceiling', async () => {
     const wire = fullWire()
     const tokens = await countTokens(wire)
-    // eslint-disable-next-line no-console
+    // Absichtliche Messausgabe, siehe oben.
     console.log(`full catalog: ${wire.length} chars, ${tokens} tokens (${TOKENIZER_MODEL})`)
     expect(tokens).toBeLessThanOrEqual(FULL_TOKEN_CEILING)
   }, 300000)

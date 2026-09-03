@@ -1,7 +1,13 @@
 //! Cross-platform path helpers — Python lookup, LM Studio CLI, common
 //! install destinations. Mirrors the path-resolution logic from the old
 //! Locally Uncensored Tauri binary.
+//!
+//! Jeder app-eigene Verzeichnisname kommt aus [`crate::app_identity`] und wird
+//! hier NICHT noch einmal als Literal geschrieben. Auf diesem Branch trägt er
+//! einen Suffix, damit der Experiment-Build die Daten der echten App weder
+//! liest noch überschreibt — die Begründung steht in `app_identity`.
 
+use crate::app_identity::{AGENT_WORKSPACE_DIR, APP_CONFIG_DIR, APP_DIR, APP_DISPLAY_DIR};
 use std::path::PathBuf;
 
 pub fn home() -> PathBuf {
@@ -12,13 +18,87 @@ pub fn data_dir() -> PathBuf {
     dirs::data_local_dir()
         .or_else(dirs::data_dir)
         .unwrap_or_else(|| PathBuf::from("."))
-        .join("lu-labs")
+        .join(APP_DIR)
 }
 
 pub fn cache_dir() -> PathBuf {
     dirs::cache_dir()
         .unwrap_or_else(|| PathBuf::from("."))
-        .join("lu-labs")
+        .join(APP_DIR)
+}
+
+/// `config_dir()`-Zweig desselben Verzeichnisses. Unter macOS/Windows fällt er
+/// mit [`data_dir`] zusammen, unter Linux ist es `~/.config/<APP_DIR>` — dort
+/// liegen die erzeugten Bilder (`commands::mlx`) und Videos
+/// (`commands::video`).
+pub fn config_root() -> PathBuf {
+    dirs::config_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(APP_DIR)
+}
+
+/// Ordner der `config.json` (ComfyUI-Pfad/-Port, Ollama-Basis, Trainer-Root).
+/// Historisch ein anderer Name als [`data_dir`] — deshalb eine eigene
+/// Konstante statt eines zweiten Literals.
+pub fn app_config_dir() -> PathBuf {
+    dirs::config_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(APP_CONFIG_DIR)
+}
+
+/// Die `config.json` selbst.
+pub fn app_config_json() -> PathBuf {
+    app_config_dir().join("config.json")
+}
+
+/// Ablage für Hilfsbinaries, die die App selbst herunterlädt (`cloudflared`).
+pub fn tools_bin_dir() -> PathBuf {
+    dirs::data_local_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(APP_CONFIG_DIR)
+        .join("bin")
+}
+
+/// Modellordner der eingebauten Engine. Bewusst `dirs::data_dir()` (unter
+/// Windows also `%APPDATA%`, nicht `%LOCALAPPDATA%`) — das ist der Pfad, den
+/// `detect_model_path("builtin")` seit jeher zurückgibt.
+pub fn builtin_models_dir() -> PathBuf {
+    dirs::data_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(APP_DISPLAY_DIR)
+        .join("models")
+}
+
+/// Sandkasten-Wurzel der Agenten. Pro Chat entsteht darin ein Unterordner;
+/// `commands::filesystem::contain_within` lässt nichts darüber hinaus.
+pub fn agent_workspace_root() -> PathBuf {
+    home().join(AGENT_WORKSPACE_DIR)
+}
+
+/// Where the rolling application log is written (`init_tracing` in main.rs,
+/// read back by the `log_file_path` command).
+///
+/// Deliberately NOT Tauri's `app_log_dir()`, for two reasons:
+///
+/// 1. Lifetime. `app_log_dir()` needs an `AppHandle`, which only exists once
+///    `tauri::Builder::build()` has run. Tracing is initialised before that —
+///    it has to be, or every line the app emits while starting up (the very
+///    window where the hard-to-reproduce failures live) would be written to a
+///    subscriber that does not exist yet. The `WorkerGuard` for the file
+///    writer has the same problem: it must be created before the first event.
+/// 2. Support. `crash.log` already lives in `data_dir()` (crash_report.rs).
+///    Putting the rolling log in a sibling folder means one directory holds
+///    every artefact a support request needs, instead of the panic record and
+///    the log being two unrelated places on three different operating systems.
+///
+/// macOS:   ~/Library/Application Support/<APP_DIR>/logs
+/// Windows: %LOCALAPPDATA%\<APP_DIR>\logs
+/// Linux:   ~/.local/share/<APP_DIR>/logs
+///
+/// `<APP_DIR>` ist `lu-labs` in der echten App und trägt auf diesem Branch
+/// einen Suffix — siehe [`crate::app_identity`].
+pub fn log_dir() -> PathBuf {
+    data_dir().join("logs")
 }
 
 /// Locate a usable Python interpreter. Returns the absolute path to the
@@ -156,7 +236,7 @@ fn scan_python_subdirs(base: &std::path::Path) -> Option<PathBuf> {
                 && e.file_name().to_string_lossy().to_lowercase().starts_with("python")
         })
         .collect();
-    dirs.sort_by(|a, b| b.file_name().cmp(&a.file_name()));
+    dirs.sort_by_key(|e| std::cmp::Reverse(e.file_name()));
     for dir in dirs {
         let exe = dir.path().join("python.exe");
         if exe.exists() && verify_python_path(&exe.to_string_lossy()) {
@@ -170,8 +250,14 @@ fn scan_python_subdirs(base: &std::path::Path) -> Option<PathBuf> {
 /// (3.12 / 3.11 — they have torch/mlx/diffusers wheels) beats a bare `python3`,
 /// which on some machines is 3.14, too new for ML wheels (BUG-008). Keeps the
 /// video + RAG path on the same interpreter the MLX image install picks.
+///
+/// `pub(crate)` because the ORDER is the fix, and until 2.6.8 it was reachable
+/// only through `find_python`, which returns a single hit. The installer's
+/// `python::get_python_bin` and the carcass probe in `commands::process` both
+/// need to walk the same list themselves — one to apply its own `--version`
+/// gate, the other to collect every interpreter, not just the first.
 #[cfg(not(target_os = "windows"))]
-fn unix_python_candidates() -> [&'static str; 5] {
+pub(crate) fn unix_python_candidates() -> [&'static str; 5] {
     ["python3.12", "python3.11", "python3.13", "python3", "python"]
 }
 
@@ -231,6 +317,9 @@ mod python_candidate_tests {
 /// 1. Post-bootstrap install (`~/.lmstudio/bin/lms`)
 /// 2. Pre-bootstrap (Windows package layout)
 /// 3. PATH
+// Its only caller (install/lmstudio.rs) delegates here on everything but
+// Windows; on Windows the function was dead and clippy -D warnings said so.
+#[cfg(not(target_os = "windows"))]
 pub fn find_lms_cli() -> Option<PathBuf> {
     let ext = if cfg!(target_os = "windows") { ".exe" } else { "" };
     let post = home().join(".lmstudio").join("bin").join(format!("lms{ext}"));
@@ -254,116 +343,143 @@ pub fn find_lms_cli() -> Option<PathBuf> {
     which::which("lms").ok()
 }
 
-/// macOS Spotlight lookup for an app bundle by its on-disk name (e.g.
-/// "LM Studio.app"). Finds installs buried in deep or hidden folders that PATH
-/// and the fixed /Applications check miss — people drop apps in the weirdest
-/// nested places. No-op (None) off macOS.
-fn spotlight_app(fs_name: &str) -> Option<PathBuf> {
-    #[cfg(target_os = "macos")]
-    {
-        let out = std::process::Command::new("mdfind")
-            .arg(format!("kMDItemFSName == '{fs_name}'"))
-            .output()
-            .ok()?;
-        String::from_utf8_lossy(&out.stdout)
-            .lines()
-            .map(|l| PathBuf::from(l.trim()))
-            .find(|p| p.exists())
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        let _ = fs_name;
-        None
-    }
-}
-
-/// Locate the LM Studio app bundle anywhere on disk: the standard install dirs
-/// first, then Spotlight for hidden / deeply-nested installs.
-pub fn find_lmstudio_app() -> Option<PathBuf> {
-    for p in [
-        PathBuf::from("/Applications/LM Studio.app"),
-        home().join("Applications").join("LM Studio.app"),
-    ] {
-        if p.exists() {
-            return Some(p);
-        }
-    }
-    spotlight_app("LM Studio.app")
-}
-
-/// Is LM Studio installed anywhere — the `lms` CLI or the app bundle?
-pub fn lmstudio_installed() -> bool {
-    find_lms_cli().is_some() || find_lmstudio_app().is_some()
-}
-
-/// Locate the Ollama app bundle anywhere on disk (fixed dirs, then Spotlight).
-pub fn find_ollama_app() -> Option<PathBuf> {
-    for p in [
-        PathBuf::from("/Applications/Ollama.app"),
-        home().join("Applications").join("Ollama.app"),
-    ] {
-        if p.exists() {
-            return Some(p);
-        }
-    }
-    spotlight_app("Ollama.app")
-}
-
-/// Locate the `ollama` CLI binary: PATH, common prefixes, then inside a
-/// discovered Ollama.app bundle.
-pub fn find_ollama_bin() -> Option<PathBuf> {
-    if let Ok(p) = which::which("ollama") {
-        return Some(p);
-    }
-    for c in [
-        "/opt/homebrew/bin/ollama",
-        "/usr/local/bin/ollama",
-        "/usr/bin/ollama",
-    ] {
-        let p = PathBuf::from(c);
-        if p.exists() {
-            return Some(p);
-        }
-    }
-    if let Some(app) = find_ollama_app() {
-        for rel in [
-            "Contents/Resources/ollama",
-            "Contents/MacOS/Ollama",
-            "Contents/MacOS/ollama",
-        ] {
-            let p = app.join(rel);
-            if p.exists() {
-                return Some(p);
-            }
-        }
-    }
-    None
-}
-
-/// Is Ollama installed anywhere — CLI binary or app bundle?
-pub fn ollama_installed() -> bool {
-    find_ollama_bin().is_some() || find_ollama_app().is_some()
-}
-
-/// Reasonable places to look for an existing ComfyUI install.
-pub fn comfyui_search_roots() -> Vec<PathBuf> {
-    let mut out = Vec::new();
-    let h = home();
-    out.push(h.clone());
-    out.push(h.join("Desktop"));
-    out.push(h.join("Documents"));
-    out.push(h.join("Downloads"));
-    if cfg!(target_os = "windows") {
-        if let Ok(user_profile) = std::env::var("USERPROFILE") {
-            out.push(PathBuf::from(user_profile.clone()).join("StabilityMatrix"));
-            out.push(PathBuf::from(user_profile).join("Packages"));
-        }
-    }
-    out
-}
+// ── REMOVED on 01.09.2026: the second engine-detection apparatus (KF-19) ──
+//
+// Gone from here: `lmstudio_installed`, `ollama_installed`,
+// `comfyui_search_roots`, and the three helpers that only they kept alive —
+// `find_lmstudio_app`, `find_ollama_app`, `find_ollama_bin` and
+// `spotlight_app` (the `mdfind` lookup, whose only two callers were the two
+// `find_*_app` functions).
+//
+// The three named ones were counted before removing: no Rust caller, no
+// `#[tauri::command]` wrapper, no line in `main.rs`, and no occurrence of the
+// NAME as a string anywhere under `src/`, `dev-server/`, `e2e/` or
+// `mobile-client/`. The three helpers had exactly one caller each, and that
+// caller was one of the three.
+//
+// They are not a gap: every question they answered is already answered on a
+// path that runs, and by different code — which is the whole point of the
+// finding.
+//
+//   * "Is Ollama there?" — the production paths call `Command::new("ollama")`
+//     straight off PATH (`process.rs::start_ollama` / `auto_start_ollama`), and
+//     the installer probes with `which ollama`
+//     (`commands/install/ollama.rs`). Neither ever consulted
+//     `find_ollama_bin`'s richer search (Homebrew prefixes, the app bundle's
+//     three internal layouts, Spotlight).
+//   * "Is LM Studio there?" — `commands/install/lmstudio.rs::lmstudio_lms_path`,
+//     which handles the Windows layouts itself and delegates to
+//     `find_lms_cli` (kept, and still called) everywhere else.
+//   * "Where might ComfyUI be?" — `process.rs::find_comfyui_path`, which keeps
+//     its own, longer and actually maintained list of roots: the env var, the
+//     config file, the fixed locations, a depth-7 home scan, then the drive
+//     roots. `comfyui_search_roots` listed four home folders plus
+//     `%USERPROFILE%\StabilityMatrix` and `…\Packages` — the wrong shape for
+//     Stability Matrix, which nests as `StabilityMatrix\Packages\ComfyUI`, and
+//     nobody noticed because nobody called it.
+//
+// Wiring them instead would have meant choosing WHICH of the two detections
+// each question gets — the very fork this finding is about — and the callers
+// that would have to change are in `src/`.
 
 /// Default ComfyUI install target — where install_comfyui will drop the
 /// portable bundle on Windows / clone the repo on macOS+Linux.
+///
+/// The `allow` here is NOT the standing "decide later" the block above just
+/// removed, and the difference is the whole point of KF-19: this function HAS a
+/// caller — `alle_abgeleiteten_pfade` in `app_identity.rs`, which asserts that
+/// no path this build derives points into the real app's directories. It is
+/// therefore alive in the `test` target and dead only in the `bin` one, and
+/// `dead_code` cannot see across the two. Remove the caller and this becomes a
+/// deletion like the others.
+#[allow(dead_code)]
 pub fn default_comfyui_dir() -> PathBuf {
     data_dir().join("ComfyUI")
+}
+
+// ── Testwurzeln ───────────────────────────────────────────────────────────
+
+/// Basis für die Wegwerf-Verzeichnisse der Tests.
+///
+/// Unter macOS/Linux ist das weiterhin `std::env::temp_dir()`: dort liegt temp
+/// bei `/var/folders/…` bzw. `/tmp`, also ausserhalb von `$HOME` — nichts
+/// ändert sich.
+///
+/// Unter WINDOWS darf es `std::env::temp_dir()` NICHT sein, und das ist der
+/// ganze Grund, warum diese Funktion existiert. Dort ist temp
+/// `%LOCALAPPDATA%\Temp` == `C:\Users\<user>\AppData\Local\Temp`, und `AppData`
+/// steht in `commands::filesystem::forbidden_root_prefixes()` als PRÄFIX auf
+/// der Sperrliste — darunter liegen Browserprofile, Token und Zugangsdaten,
+/// und genau die zu sperren ist der Zweck der Wurzel-Härtung. Damit ist jede
+/// Testwurzel unter `temp_dir()` "Not an allowed workspace folder", und
+/// `allow_root_for_test` paniert, bevor der Test überhaupt anfängt. Die Regel
+/// ist richtig, der ORT der Testverzeichnisse war es nicht — wer das hier auf
+/// `temp_dir()` zurückdreht, macht 15 Windows-Tests wieder rot.
+///
+/// Der Ersatz ist das `target`-Verzeichnis der Kiste: es liegt im Repo (also
+/// im Benutzerprofil, aber NICHT unter `AppData` — von der Regel ausdrücklich
+/// erlaubt, weil `forbidden_exact_roots()` `C:\Users` und `$HOME` nur EXAKT
+/// sperrt), ist beschreibbar, gitignoriert und gehört ohnehin zum Build.
+/// Echte Nutzerverzeichnisse (`Documents`, `Desktop`) kommen nicht in Frage:
+/// Tests schreiben nicht dorthin, wo der Nutzer arbeitet.
+#[cfg(test)]
+pub(crate) fn test_scratch_root() -> PathBuf {
+    #[cfg(windows)]
+    {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("target")
+            .join("lu-test-scratch")
+    }
+    #[cfg(not(windows))]
+    {
+        std::env::temp_dir()
+    }
+}
+
+/// Ein Wegwerf-Testverzeichnis, das sich beim Verlassen selbst wieder abräumt.
+///
+/// Der Aufräum-Schritt hängt am `Drop`, nicht an einer letzten Zeile im Test:
+/// ein `let _ = fs::remove_dir_all(…)` am Ende läuft bei einem gescheiterten
+/// `assert!` nie, und unter `target/` bliebe der Rest liegen.
+#[cfg(test)]
+#[derive(Debug)]
+pub(crate) struct TestDir(PathBuf);
+
+#[cfg(test)]
+impl std::ops::Deref for TestDir {
+    type Target = std::path::Path;
+    fn deref(&self) -> &std::path::Path {
+        &self.0
+    }
+}
+
+#[cfg(test)]
+impl AsRef<std::path::Path> for TestDir {
+    fn as_ref(&self) -> &std::path::Path {
+        &self.0
+    }
+}
+
+#[cfg(test)]
+impl Drop for TestDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+/// Legt ein frisches, leeres Testverzeichnis unter [`test_scratch_root`] an.
+///
+/// Der Name trägt Prozess-ID und ThreadId — dieselbe Machart wie die
+/// `lu-…-<pid>-<thread>`-Namen, die im Bestand schon so gebaut waren —, damit
+/// parallel laufende Tests sich nicht in dasselbe Verzeichnis setzen.
+#[cfg(test)]
+pub(crate) fn test_dir(tag: &str) -> TestDir {
+    let thread: String = format!("{:?}", std::thread::current().id())
+        .chars()
+        .filter(|c| c.is_ascii_digit())
+        .collect();
+    let path = test_scratch_root().join(format!("lu-{}-{}-{}", tag, std::process::id(), thread));
+    let _ = std::fs::remove_dir_all(&path);
+    std::fs::create_dir_all(&path).expect("Testverzeichnis anlegen");
+    TestDir(path)
 }

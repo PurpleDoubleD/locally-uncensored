@@ -1,0 +1,54 @@
+{
+  /* ── e2e/ war in keinem tsconfig ──────────────────────────────────────────
+     Gemessen am 01.09.2026 mit `tsc -p tsconfig.app.json --listFilesOnly`:
+     tsconfig.app.json nimmt `["src", "mobile-client"]`, tsconfig.node.json
+     nimmt `["vite.config.ts"]`. 17 Playwright-Dateien und playwright.config.ts
+     standen damit in KEINEM Projekt, und `npm run typecheck` (`tsc -b --force`)
+     hat sie nie gelesen.
+
+     Es ist derselbe Befund wie bei scripts/ in eslint.config.js: nicht ein
+     rotes Gate, sondern ein Gate, das eine ganze Zone stillschweigend nicht
+     abdeckt. Der Unterschied ist, wer sie nicht abdeckt — eslint prueft e2e/
+     sehr wohl (`--print-config e2e/cloud-gate.spec.ts` meldet 106 Regeln; der
+     Parser ist nicht typ-aware, `parserOptions.project` ist leer, deshalb
+     haengt dort nichts an der tsconfig-Zugehoerigkeit). Es war tsc.
+
+     Was das Schliessen kostet: NICHTS. 0 neue Fehler bei 18 zusaetzlich
+     gepruften Dateien. Die Zone war nicht kaputt, sie war nur unbeobachtet —
+     und das ist genau der Zustand, in dem sie es unbemerkt haette werden
+     koennen.
+
+     `types` traegt `vite/client` mit, weil die Spezifikationen ueber
+     e2e/support/ bis in src/api/cloud/config.ts hineinziehen, und das liest
+     `import.meta.env`. Ohne den Eintrag: 3 Fehler, alle TS2339 auf
+     ImportMeta.env. */
+  "compilerOptions": {
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.e2e.tsbuildinfo",
+    "target": "ES2023",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    /* `node` fuer process.env in playwright.config.ts, `vite/client` fuer die
+       src-Dateien, die die Spezifikationen mitziehen. */
+    "types": ["node", "vite/client"],
+    "skipLibCheck": true,
+
+    /* Bundler mode — identisch zu tsconfig.app.json, damit ein Import, der in
+       src/ typprueft, es auch tut, wenn e2e/ ihn zieht. */
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": true,
+    "moduleDetection": "force",
+    "noEmit": true,
+
+    /* Linting — dieselbe Strenge wie app und node. Eine e2e-Zone mit
+       schwaecheren Schaltern waere der zweite Pflegeweg, den dieses Projekt
+       ueberall als Grundfehler hat. */
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "erasableSyntaxOnly": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUncheckedSideEffectImports": true
+  },
+  "include": ["e2e", "playwright.config.ts"]
+}

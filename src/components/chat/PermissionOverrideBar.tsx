@@ -63,13 +63,13 @@ export function PermissionOverrideBar() {
             }`}
           >
             {isLocked ? (
-              <Lock size={7} className="text-gray-700" />
+              <Lock size={8} className="text-gray-700" />
             ) : (
               <Icon size={8} className={isOn ? 'text-green-400' : 'text-gray-600'} />
             )}
             <span className={`flex-1 text-left ${isLocked ? 'line-through' : ''}`}>{label}</span>
             {isLocked ? (
-              <span className="text-[0.4rem] text-gray-700">soon</span>
+              <span className="text-[0.45rem] text-gray-700">soon</span>
             ) : (
               <div className={`w-1 h-1 rounded-full ${isOn ? 'bg-green-400' : 'bg-gray-700'}`} />
             )}

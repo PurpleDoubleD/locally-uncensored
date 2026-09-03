@@ -1,16 +1,30 @@
 import { comfyuiUrl, localFetch } from './backend'
 import { log } from '../lib/logger'
 import { readComboOptions } from './comfyui-enum'
-// Type-only import — erased at runtime, so it cannot form a comfyui.ts ↔
-// comfyui-nodes.ts import cycle. classifyModel/MODEL_TYPE_DEFAULTS (runtime
-// values) are pulled via a DYNAMIC import inside getModelCapabilities() below.
+// Audit W-T2: classifyModel/MODEL_TYPE_DEFAULTS kamen hier per `await import()`
+// mitten in getModelCapabilities() herein, „so this module never forms a runtime
+// import cycle". Den Kreis gab es (comfyui → dynamic-workflow → comfyui-nodes →
+// comfyui), aber er lief über eine Kante, die comfyui.ts gar nicht haben durfte
+// — die ist weg (siehe comfyui-graph.ts). comfyui.ts importiert dieses Modul
+// nicht, also ist ein ganz normaler statischer Import hier die ehrliche Form.
+import { classifyModel, MODEL_TYPE_DEFAULTS } from './comfyui'
 import type { ModelType } from './comfyui'
+import type { ComfyInputValue } from '../types/comfy-graph'
 
 // ─── Types ───
 
+/**
+ * One node's declared inputs, straight from ComfyUI's `/object_info`.
+ *
+ * Each value is an input SPEC, not a value, and its shape depends on the node
+ * and on the ComfyUI version: `["INT", { default: 20 }]`, `[["euler","dpmpp_2m"]]`
+ * (legacy combo) or `["COMBO", { options: [...] }]` (current). Nothing here may
+ * assume which — `readComboOptions` (comfyui-enum.ts) is the one reader that
+ * knows all three shapes, and it takes `unknown` for exactly that reason.
+ */
 export interface NodeInputSpec {
-  required: Record<string, any>
-  optional?: Record<string, any>
+  required: Record<string, ComfyInputValue>
+  optional?: Record<string, ComfyInputValue>
 }
 
 export interface NodeMetadata {
@@ -281,9 +295,6 @@ export async function getModelCapabilities(model: string): Promise<ModelCapabili
     return null
   }
 
-  // classifyModel + MODEL_TYPE_DEFAULTS are runtime VALUES from comfyui.ts. Import
-  // them DYNAMICALLY so this module never forms a runtime import cycle.
-  const { classifyModel, MODEL_TYPE_DEFAULTS } = await import('./comfyui')
   const type = classifyModel(model)
   const caps: ModelCapabilities = { modelType: type, usesKSampler: true, discoveryErrors: [] }
 

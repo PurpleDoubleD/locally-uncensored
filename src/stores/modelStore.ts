@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
+import { safeJSONStorage } from '../lib/storage-quota'
 import type { AIModel, PullProgress, ModelCategory } from '../types/models'
 import { unloadModel } from '../api/ollama'
 import { unloadLmStudioModel } from '../api/lmstudio'
@@ -9,6 +10,16 @@ import { isTauri, backendCall } from '../api/backend'
 import { useChatStore } from './chatStore'
 import { log } from '../lib/logger'
 import { isLuEngineName } from '../lib/engine-name'
+// Which provider slot a model name routes to. There is exactly one answer to
+// that question in this app and it lives in api/providers/registry, the same
+// function getProviderForModel uses to pick the client that actually sends the
+// turn. A second implementation here disagreed with it on real names
+// ('sdxl::x.safetensors' → null vs 'sdxl', 'a::b::c' → null vs 'ollama'), which
+// is the worst possible place for two answers: the guard below would decline to
+// clear a pick that the send path would then route to a dead backend.
+import { getProviderIdFromModel } from '../api/providers/model-name'
+import { onProviderSlotsDarkened } from '../lib/provider-slot-darkening'
+import type { ProviderId } from '../api/providers/types'
 
 export interface PullState {
   progress: PullProgress
@@ -53,6 +64,13 @@ interface ModelState {
   dismissPull: (name: string) => void
   setIsModelLoading: (loading: boolean) => void
   setCategoryFilter: (category: ModelCategory) => void
+  /** Nothing across these two stores enforced that the picked model belongs to
+   *  a backend that is still switched on. `setModels` only re-checks the pick
+   *  against the next NON-EMPTY inventory, so between switching a provider off
+   *  and the next successful refresh the composer showed a model whose backend
+   *  was gone and every send failed with model-not-found. providerStore calls
+   *  this the moment a slot goes dark. */
+  dropActiveModelIfServedBy: (providerId: ProviderId) => void
 }
 
 export const useModelStore = create<ModelState>()(
@@ -165,13 +183,20 @@ export const useModelStore = create<ModelState>()(
           } else if (name) {
             // built-in → DIFFERENT built-in: llama-server serves exactly ONE
             // gguf and ignores the request's model field, and the send-path
-            // self-heal only revives a DEAD server — so without a swap right
+            // self-heal only revives a DEAD server, so without a swap right
             // here, a pick on the Models page would keep every chat silently
             // answering from the OLD model. The composer picker awaits this
-            // same call itself before setting the store; Rust's argv
-            // idempotence turns that double-swap into a no-op. (A cleared
-            // selection, name = null, has nothing to swap to; nextIsBuiltin
-            // is false then anyway, this branch just spells it out for tsc.)
+            // same call itself before setting the store, so every activation
+            // reaches the engine twice. Rust's argv idempotence swallows the
+            // second call only for a model that LOADS: a GGUF that fails to
+            // load leaves no running engine to compare argv against, and the
+            // second command runs the whole try-and-retry routine again (four
+            // llama-server spawns per click, measured 2026-09-03). The
+            // coalescing that makes the double call harmless therefore lives
+            // in api/engine.ts (activationsInFlight), at the one door both
+            // callers come through. (A cleared selection, name = null, has
+            // nothing to swap to; nextIsBuiltin is false then anyway, this
+            // branch just spells it out for tsc.)
             activateBuiltinModel(name).catch((e) =>
               log.warn('[modelStore] failed to swap the LU Engine to the picked model', { model: name, err: e }),
             )
@@ -260,10 +285,32 @@ export const useModelStore = create<ModelState>()(
 
       setIsModelLoading: (loading) => set({ isModelLoading: loading }),
       setCategoryFilter: (category) => set({ categoryFilter: category }),
+
+      dropActiveModelIfServedBy: (providerId) => {
+        const active = get().activeModel
+        if (!active || getProviderIdFromModel(active) !== providerId) return
+        log.warn('[modelStore] the picked model\'s backend was switched off, clearing the pick', {
+          model: active, provider: providerId,
+        })
+        // Through setActiveModel, not a bare set(): the model that is going
+        // away is also the one holding VRAM, and that release lives there.
+        get().setActiveModel(null)
+      },
     }),
     {
       name: 'chat-models',
+      storage: safeJSONStorage(),
       partialize: (state) => ({ activeModel: state.activeModel, categoryFilter: state.categoryFilter }),
     }
   )
 )
+
+// Audit W-T2: Der providerStore hat sich diesen Store frueher selbst geholt
+// (`void import('./modelStore')`), um bei abgeschalteten Slots die Modellwahl
+// zu raeumen, ein dynamischer Import, der den Kreis providerStore zu
+// modelStore und zurueck nur verdeckt hat. Jetzt wird dort angesagt und hier
+// zugehoert; die Anmeldung passiert beim Laden dieses Moduls, wie
+// registerBuiltinTools() sich beim Tool-Registry anmeldet.
+onProviderSlotsDarkened((darkened) => {
+  for (const id of darkened) useModelStore.getState().dropActiveModelIfServedBy(id)
+})

@@ -17,6 +17,9 @@
  * Run: npx vitest run src/api/__tests__/vram-handoff.test.ts
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { resolve, dirname } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 // ── Mocks (hoisted) ───────────────────────────────────────────────
 // Mirror the bg-tasks.test.ts pattern: top-level vi.fn()s referenced via the
@@ -34,6 +37,8 @@ const submitWorkflow = vi.fn()
 const getHistory = vi.fn()
 const cancelGeneration = vi.fn()
 const clearComfyQueue = vi.fn()
+const abandonPrompt = vi.fn()
+const checkComfyConnection = vi.fn()
 const freeMemory = vi.fn()
 const buildDynamicWorkflow = vi.fn()
 const buildTxt2VidWorkflow = vi.fn()
@@ -67,6 +72,8 @@ vi.mock('../comfyui', async () => {
     getHistory: (...a: unknown[]) => getHistory(...a),
     cancelGeneration: (...a: unknown[]) => cancelGeneration(...a),
     clearComfyQueue: (...a: unknown[]) => clearComfyQueue(...a),
+    abandonPrompt: (...a: unknown[]) => abandonPrompt(...a),
+    checkComfyConnection: (...a: unknown[]) => checkComfyConnection(...a),
     freeMemory: (...a: unknown[]) => freeMemory(...a),
     buildTxt2VidWorkflow: (...a: unknown[]) => buildTxt2VidWorkflow(...a),
     // classifyModel, snapToVideoGrid, extractComfyOutputFiles, getImageUrl,
@@ -95,6 +102,7 @@ vi.mock('../comfyui-ws', () => ({
 
 import { decideUnload, vramHandoffGenerate, pollGone, resolveClip, resolveModelName, resolveI2VResolution, comfyErrorHint, requestGenerationCancel, resolveTunables, __resetGenerationStateForTests } from '../vram-handoff'
 import { useSettingsStore } from '../../stores/settingsStore'
+import type { ModelCapabilities } from '../comfyui-nodes'
 
 const GB = 1024 * 1024 * 1024
 
@@ -113,6 +121,10 @@ beforeEach(() => {
   clearComfyQueue.mockReset()
   cancelGeneration.mockResolvedValue(undefined)
   clearComfyQueue.mockResolvedValue(undefined)
+  abandonPrompt.mockReset()
+  abandonPrompt.mockResolvedValue(undefined)
+  checkComfyConnection.mockReset()
+  checkComfyConnection.mockResolvedValue(true)
   freeMemory.mockReset()
   buildDynamicWorkflow.mockReset()
   buildTxt2VidWorkflow.mockReset()
@@ -595,6 +607,138 @@ describe('vramHandoffGenerate — ComfyUI lifecycle', () => {
   })
 })
 
+// ── Audit M1/M2 — cold start, Stop around the submit, dead ComfyUI ─────────
+
+describe('vramHandoffGenerate — the chat lane can cold-start ComfyUI', () => {
+  beforeEach(() => { __resetGenerationStateForTests() })
+
+  it('starts ComfyUI BEFORE asking it which models are installed', async () => {
+    // The regression: DECIDE queried the model list first, getCheckpoints throws
+    // while ComfyUI is down, and the run died on "Could not query ComfyUI
+    // models" — 250 lines above the cold start that would have fixed it. So
+    // image_generate / video_generate from the chat were dead for everyone whose
+    // ComfyUI was not already running, while the Create tab started it happily.
+    getActiveAgentModel.mockReturnValue({ name: 'gpt-4o', providerId: 'openai', remote: false })
+    let comfyRunning = false
+    backendCall.mockImplementation(async (cmd: string) => {
+      if (cmd === 'start_comfyui') { comfyRunning = true; return {} }
+      if (cmd === 'comfyui_status') return { running: comfyRunning }
+      return {}
+    })
+    // The honest failure mode of a down ComfyUI.
+    getImageModels.mockImplementation(async () => {
+      if (!comfyRunning) throw new Error('fetch failed')
+      return [{ name: 'sdxl.safetensors', type: 'sdxl', source: 'checkpoint' }]
+    })
+    buildDynamicWorkflow.mockResolvedValue({})
+    submitWorkflow.mockResolvedValue('pid-cold')
+    getHistory.mockResolvedValue(completedHistory())
+
+    const out = await vramHandoffGenerate('image', { prompt: 'a tree' })
+
+    expect(backendCall).toHaveBeenCalledWith('start_comfyui')
+    expect(out).toContain('Image generated: out.png')
+    expect(out).not.toMatch(/Could not query ComfyUI models/i)
+  })
+
+  it('the cold start sits BEFORE the model query and before any eviction', () => {
+    // Order is the whole fix, and a 90 s cold-start poll is not something a unit
+    // test can wait out — so the ordering itself is what is asserted, at the
+    // three points that matter: ComfyUI is up, THEN we ask it what it has, and
+    // only after that does anything get thrown out of VRAM.
+    const src = readFileSync(
+      resolve(dirname(fileURLToPath(import.meta.url)), '../vram-handoff.ts'),
+      'utf8',
+    )
+    const ensureAt = src.indexOf('const comfyUp = await ensureComfyRunning()')
+    const decideAt = src.indexOf('const models = await getImageModels()')
+    const evictAt = src.indexOf('await unloadModel(textModel)')
+    expect(ensureAt).toBeGreaterThan(0)
+    expect(ensureAt).toBeLessThan(decideAt)
+    expect(decideAt).toBeLessThan(evictAt)
+    // And the failure is reported without having touched anything.
+    expect(src).toContain("return 'Error: ComfyUI did not start within 90s.")
+  })
+})
+
+describe('vramHandoffGenerate — Stop around the submit', () => {
+  beforeEach(() => { __resetGenerationStateForTests() })
+
+  it('a Stop during the workflow build never reaches /prompt', async () => {
+    // buildDynamicWorkflow fetches /object_info and can hang for a long time
+    // behind a proxy. runHandoff raced only the OVERALL promise, so the
+    // abandoned one walked on and submitted the job the user just cancelled.
+    getActiveAgentModel.mockReturnValue({ name: 'gpt-4o', providerId: 'openai', remote: false })
+    getImageModels.mockResolvedValue([{ name: 'sdxl.safetensors', type: 'sdxl', source: 'checkpoint' }])
+    submitWorkflow.mockResolvedValue('pid-never')
+    let releaseBuild!: (v: unknown) => void
+    buildDynamicWorkflow.mockReturnValue(new Promise((res) => { releaseBuild = res }))
+
+    const genP = vramHandoffGenerate('image', { prompt: 'a cat' })
+    await vi.waitFor(() => expect(buildDynamicWorkflow).toHaveBeenCalled())
+    requestGenerationCancel()
+    const out = await genP
+    releaseBuild({})                       // the abandoned build finishes late
+    await new Promise((r) => setTimeout(r, 20))
+
+    expect(out).toMatch(/cancelled/i)
+    expect(submitWorkflow).not.toHaveBeenCalled()
+  })
+
+  it('a Stop that lands WHILE /prompt is in flight takes the job straight back out', async () => {
+    getActiveAgentModel.mockReturnValue({ name: 'gpt-4o', providerId: 'openai', remote: false })
+    getImageModels.mockResolvedValue([{ name: 'sdxl.safetensors', type: 'sdxl', source: 'checkpoint' }])
+    buildDynamicWorkflow.mockResolvedValue({})
+    let releaseSubmit!: (v: string) => void
+    submitWorkflow.mockReturnValue(new Promise<string>((res) => { releaseSubmit = res }))
+
+    const genP = vramHandoffGenerate('image', { prompt: 'a cat' })
+    await vi.waitFor(() => expect(submitWorkflow).toHaveBeenCalled())
+    requestGenerationCancel()
+    releaseSubmit('pid-raced')             // ComfyUI accepted it a moment later
+    const out = await genP
+    await vi.waitFor(() => expect(abandonPrompt).toHaveBeenCalledWith('pid-raced'))
+
+    expect(out).toMatch(/cancelled/i)
+    expect(getHistory).not.toHaveBeenCalled()
+  })
+})
+
+describe('pollAndExtract — a dead ComfyUI ends the wait, with the reason', () => {
+  beforeEach(() => { __resetGenerationStateForTests() })
+
+  it('stops on a ComfyUI that died mid-render instead of parking for the whole budget', async () => {
+    // getHistory swallows every transport error into `null`, which is also what
+    // a healthy queued render returns — so a crashed ComfyUI was invisible and
+    // the chat agent sat here for the full 5/10-minute budget with the text
+    // model evicted from VRAM, unable to answer anything.
+    getActiveAgentModel.mockReturnValue({ name: 'gpt-4o', providerId: 'openai', remote: false })
+    getImageModels.mockResolvedValue([{ name: 'sdxl.safetensors', type: 'sdxl', source: 'checkpoint' }])
+    buildDynamicWorkflow.mockResolvedValue({})
+    submitWorkflow.mockResolvedValue('pid-dead')
+    getHistory.mockResolvedValue(null)     // exactly what a dead server looks like
+    checkComfyConnection.mockResolvedValue(false)
+
+    const out = await vramHandoffGenerate('image', { prompt: 'a cat' })
+
+    expect(out).toMatch(/ComfyUI stopped responding/i)
+    expect(out).toMatch(/Create tab/)
+  }, 20_000)
+
+  it('NEGATIVE CONTROL: one flaky probe during a heavy sampler step kills nothing', async () => {
+    getActiveAgentModel.mockReturnValue({ name: 'gpt-4o', providerId: 'openai', remote: false })
+    getImageModels.mockResolvedValue([{ name: 'sdxl.safetensors', type: 'sdxl', source: 'checkpoint' }])
+    buildDynamicWorkflow.mockResolvedValue({})
+    submitWorkflow.mockResolvedValue('pid-flaky')
+    checkComfyConnection.mockResolvedValueOnce(false).mockResolvedValue(true)
+    getHistory.mockResolvedValueOnce(null).mockResolvedValue(completedHistory())
+
+    const out = await vramHandoffGenerate('image', { prompt: 'a cat' })
+
+    expect(out).toContain('Image generated: out.png')
+  }, 20_000)
+})
+
 describe('resolveModelName — fuzzy model match (David 2026-06-04: "FramePack" must be enough)', () => {
   const installed = [
     { name: 'FramePackI2V_HY_fp8_e4m3fn.safetensors' },
@@ -647,6 +791,7 @@ describe('vramHandoffGenerate — Stop / cancel gating', () => {
 
   it('plain-chat Stop with NO media generation in flight is a no-op against ComfyUI', () => {
     requestGenerationCancel()
+    expect(abandonPrompt).not.toHaveBeenCalled()
     expect(cancelGeneration).not.toHaveBeenCalled()
     expect(clearComfyQueue).not.toHaveBeenCalled()
   })
@@ -662,11 +807,18 @@ describe('vramHandoffGenerate — Stop / cancel gating', () => {
     expect(out).toMatch(/no image model installed/i)
 
     requestGenerationCancel()
+    expect(abandonPrompt).not.toHaveBeenCalled()
     expect(cancelGeneration).not.toHaveBeenCalled()
     expect(clearComfyQueue).not.toHaveBeenCalled()
   })
 
-  it('a Stop while a media gen IS in flight DOES /interrupt ComfyUI and clear the queue', async () => {
+  it('a Stop while a media gen IS in flight removes OUR job, and only ours', async () => {
+    // Audit M1: this used to assert /interrupt + a full `clear: true` on the
+    // queue. Both are indiscriminate — the interrupt kills whatever is
+    // executing (ours only when ours is at the front) and the clear drops the
+    // Create tab's render and every job an external ComfyUI tab on the same
+    // server has queued. A chat-lane Stop may remove exactly one thing: the
+    // prompt this lane submitted.
     getActiveAgentModel.mockReturnValue({ name: 'gpt-4o', providerId: 'openai', remote: false })
     getImageModels.mockResolvedValue([{ name: 'sdxl.safetensors', type: 'sdxl', source: 'checkpoint' }])
     buildDynamicWorkflow.mockResolvedValue({})
@@ -679,8 +831,9 @@ describe('vramHandoffGenerate — Stop / cancel gating', () => {
     requestGenerationCancel()
     const out = await genP
 
-    expect(cancelGeneration).toHaveBeenCalled()
-    expect(clearComfyQueue).toHaveBeenCalled()
+    expect(abandonPrompt).toHaveBeenCalledWith('pid-stop')
+    expect(clearComfyQueue).not.toHaveBeenCalled()
+    expect(cancelGeneration).not.toHaveBeenCalled()
     expect(out).toMatch(/cancelled/i)
   })
 
@@ -713,23 +866,28 @@ describe('vramHandoffGenerate — Stop / cancel gating', () => {
 //    and the chat-gen IMAGE path must use per-architecture defaults (Flux cfg 1,
 //    SDXL cfg 7 / dpmpp_2m) instead of one hardcoded cfg 7 for everything. ──
 describe('resolveTunables — honors the model default over the generic caps default', () => {
-  const caps = {
+  // Als ModelCapabilities deklariert, nicht als `any`: die Fixture hatte
+  // `modelType` gar nicht, und der Cast hat genau das verdeckt. `VramHandoffArgs`
+  // wiederum ist durchgehend optional plus Index-Signatur — die drei
+  // `as any` an den Argumenten unten waren nie noetig.
+  const caps: ModelCapabilities = {
+    modelType: 'wan',
     cfgRange: { default: 8.0, min: 0, max: 100 },
     stepsRange: { default: 20, min: 1, max: 200 },
     usesKSampler: true,
     availableSamplers: ['euler', 'dpmpp_2m'],
     availableSchedulers: ['normal', 'karras'],
-  } as any
+  }
 
   it('no user value + caps present → MODEL default (Wan 30/6.0), NOT the generic caps 20/8.0', () => {
-    const t = resolveTunables({ prompt: 'x' } as any, caps, { steps: 30, cfg: 6.0, sampler: 'euler', scheduler: 'normal' })
+    const t = resolveTunables({ prompt: 'x' }, caps, { steps: 30, cfg: 6.0, sampler: 'euler', scheduler: 'normal' })
     expect(t.cfg).toBe(6.0)
     expect(t.steps).toBe(30)
     expect(t.reject).toBeNull()
   })
 
   it('explicit in-range user value still applies', () => {
-    const t = resolveTunables({ prompt: 'x', cfg: 4, steps: 40 } as any, caps, { steps: 30, cfg: 6.0, sampler: 'euler', scheduler: 'normal' })
+    const t = resolveTunables({ prompt: 'x', cfg: 4, steps: 40 }, caps, { steps: 30, cfg: 6.0, sampler: 'euler', scheduler: 'normal' })
     expect(t.cfg).toBe(4)
     expect(t.steps).toBe(40)
     expect(t.reject).toBeNull()
@@ -737,7 +895,7 @@ describe('resolveTunables — honors the model default over the generic caps def
 
   it('explicit OUT-of-range user value is still rejected against the caps range', () => {
     const tight = { ...caps, stepsRange: { default: 20, min: 1, max: 30 } }
-    const t = resolveTunables({ prompt: 'x', steps: 999 } as any, tight, { steps: 30, cfg: 6.0, sampler: 'euler', scheduler: 'normal' })
+    const t = resolveTunables({ prompt: 'x', steps: 999 }, tight, { steps: 30, cfg: 6.0, sampler: 'euler', scheduler: 'normal' })
     expect(t.reject).toMatch(/steps/i)
   })
 })

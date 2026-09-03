@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { validateWorkflowJson, extractSearchTerms, autoDetectParameterMap, injectParameters, getBuiltinTemplates, parseImportedWorkflow, } from '../workflows'
-import type { ModelType } from '../comfyui'
+import type { ModelType, VideoParams } from '../comfyui'
 
 describe('workflows — pure functions', () => {
   // ─── validateWorkflowJson ───
@@ -112,16 +112,19 @@ it('injects LU dimensions into a legacy ImageResizeKJv2 workflow', async () => {
     'wan',
   )
 
-  expect(injected['16'].inputs.width).toBe(832)
-  expect(injected['16'].inputs.height).toBe(480)
+  expect(injected['16'].inputs?.width).toBe(832)
+  expect(injected['16'].inputs?.height).toBe(480)
 
   // WanImageToVideo must remain connected to the resize node.
-  expect(injected['9'].inputs.width).toEqual(['16', 1])
-  expect(injected['9'].inputs.height).toEqual(['16', 2])
+  expect(injected['9'].inputs?.width).toEqual(['16', 1])
+  expect(injected['9'].inputs?.height).toEqual(['16', 2])
 })
 
   describe('injectParameters — source image', () => {
-    const videoParams = {
+    // Als VideoParams deklariert statt am Aufruf gecastet: fehlte hier ein
+    // Pflichtfeld, hat der Cast es durchgelassen und die Injektion lief gegen
+    // eine unvollstaendige Eingabe.
+    const videoParams: VideoParams = {
       model: 'wan2.2_i2v.safetensors',
       prompt: 'gentle camera movement',
       negativePrompt: '',
@@ -153,16 +156,16 @@ it('injects LU dimensions into a legacy ImageResizeKJv2 workflow', async () => {
       const result = await injectParameters(
         workflow,
         parameterMap,
-        videoParams as any,
+        videoParams,
         'wan' as ModelType,
       )
 
-      expect(result['12'].inputs.image).toBe(
+      expect(result['12'].inputs?.image).toBe(
         'lu-selected-image.png',
       )
 
       // Injection works on a cloned workflow.
-      expect(workflow['12'].inputs.image).toBe(
+      expect(workflow['12'].inputs?.image).toBe(
         'placeholder.png',
       )
     })
@@ -180,11 +183,11 @@ it('injects LU dimensions into a legacy ImageResizeKJv2 workflow', async () => {
       const result = await injectParameters(
         workflow,
         {},
-        videoParams as any,
+        videoParams,
         'wan' as ModelType,
       )
 
-      expect(result['27'].inputs.image).toBe(
+      expect(result['27'].inputs?.image).toBe(
         'lu-selected-image.png',
       )
     })

@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
+import { safeJSONStorage } from '../lib/storage-quota'
 import { v4 as uuid } from 'uuid'
 import { isVideoModelType, type ModelType, } from '../api/comfyui'
 import type { WorkflowTag, WorkflowTemplate } from '../types/workflows'
@@ -511,6 +512,7 @@ export const useWorkflowStore = create<WorkflowState>()(
     }),
     {
       name: 'workflow-store',
+      storage: safeJSONStorage(),
       // The key is kept OUT of localStorage as soon as the OS vault has
       // proven itself and holds it. Until then, and on a host without one,
       // nothing changes: dropping it there would lose the key instead of

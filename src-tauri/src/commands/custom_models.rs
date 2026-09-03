@@ -119,7 +119,7 @@ pub(crate) fn yaml_path_line(key: &str, path: &Path) -> String {
 /// inside the user's ComfyUI folder.
 pub(crate) fn extra_model_paths_file() -> Result<PathBuf, String> {
     let base = dirs::data_dir().ok_or("Cannot resolve app data directory")?;
-    let dir = base.join("Locally Uncensored");
+    let dir = base.join(crate::app_identity::APP_DISPLAY_DIR);
     std::fs::create_dir_all(&dir)
         .map_err(|e| format!("Create app data dir: {}", crate::os_error::english(&e)))?;
     Ok(dir.join("lu_extra_model_paths.yaml"))
@@ -130,7 +130,7 @@ pub(crate) fn extra_model_paths_file() -> Result<PathBuf, String> {
 pub fn extra_model_paths_arg() -> Option<PathBuf> {
     let base = dirs::data_dir()?;
     let file = base
-        .join("Locally Uncensored")
+        .join(crate::app_identity::APP_DISPLAY_DIR)
         .join("lu_extra_model_paths.yaml");
     if file.is_file() {
         Some(file)

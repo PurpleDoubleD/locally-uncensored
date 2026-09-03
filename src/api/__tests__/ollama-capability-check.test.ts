@@ -19,9 +19,11 @@ import { checkModelCapability, scanInstalledModels } from '../ollama'
 const mockedFetch = localFetch as unknown as ReturnType<typeof vi.fn>
 
 /** Helper: match a request to the /api/generate probe for a specific model. */
-function respond(matcher: (url: string, body: any) => Response | null): void {
-  mockedFetch.mockImplementation(async (url: string, opts: any) => {
-    const body = opts?.body ? JSON.parse(opts.body) : {}
+type LocalFetchInit = Parameters<typeof localFetch>[1]
+
+function respond(matcher: (url: string, body: Record<string, unknown>) => Response | null): void {
+  mockedFetch.mockImplementation(async (url: string, opts?: LocalFetchInit) => {
+    const body: Record<string, unknown> = typeof opts?.body === 'string' ? JSON.parse(opts.body) : {}
     const res = matcher(url, body)
     if (res) return res
     return new Response(JSON.stringify({ error: 'no matcher' }), { status: 500 })

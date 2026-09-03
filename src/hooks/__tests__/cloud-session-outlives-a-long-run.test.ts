@@ -55,7 +55,22 @@ describe('the dead end says the true thing', () => {
   })
 
   it('plain chat prints the sentence instead of wrapping it in "Error:"', () => {
-    expect(chat).toContain("(err as any).code === 'auth' || (err as any).code === 'signed_out'")
+    // Auf die Eigenschaft gepinnt, nicht auf eine Schreibweise: der frühere
+    // Pin verlangte woertlich `(err as any).code`, also genau den Typ-Verzicht,
+    // durch den die drei Codes gelesen wurden. Was gelten muss, ist die
+    // Verzweigung — 'auth' und 'signed_out' landen in dem Zweig, der die
+    // Meldung UNVERAENDERT nimmt, und der steht vor dem "Error: …"-Zweig.
+    const authAt = chat.indexOf("=== 'auth'")
+    const wrapAt = chat.indexOf('`Error: ${')
+    expect(authAt).toBeGreaterThan(-1)
+    expect(wrapAt).toBeGreaterThan(-1)
+    expect(authAt).toBeLessThan(wrapAt)
+    const decision = chat.slice(authAt, wrapAt)
+    expect(decision).toContain("=== 'signed_out'")
+    // Der Zweig dazwischen darf die Meldung nicht einpacken.
+    expect(decision).not.toContain('Error: ')
+    // Und der Code wird an einem geprueften Typ gelesen, nicht an `any`.
+    expect(chat).toContain('err instanceof ProviderError ? err.code : undefined')
   })
 })
 

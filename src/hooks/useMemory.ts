@@ -6,7 +6,6 @@
  * failures must never disrupt the chat experience.
  */
 
-import { useCallback } from 'react'
 import { useMemoryStore } from '../stores/memoryStore'
 import { useModelStore } from '../stores/modelStore'
 import { useProviderStore } from '../stores/providerStore'
@@ -301,13 +300,25 @@ async function resolveAndSaveMemory(memory: ExtractedMemory, conversationId: str
   useMemoryStore.getState().applyWriteDecision(decision, { newId: newId || undefined })
 }
 
-export function useMemory() {
+/**
+ * The hook's surface, built once at module load.
+ *
+ * `extractMemoriesFromPair` is a module function — it closes over nothing from
+ * a render, so it is already as stable as a value gets and there was nothing
+ * for `useCallback` to memoise. Wrapping it also broke React 19's `use-memo`
+ * rule, which insists the memo hooks take an inline function so the compiler
+ * can see what it is memoising. Handing back a frozen object keeps the
+ * identity every consumer had.
+ */
+const MEMORY_API = Object.freeze({
   /**
    * Fire-and-forget extraction: asks the active LLM to analyze a conversation
    * exchange and save any extracted memories. Rate-limited to every 3rd turn
    * and skips short responses.
    */
-  const extractAndSave = useCallback(extractMemoriesFromPair, [])
+  extractAndSave: extractMemoriesFromPair,
+})
 
-  return { extractAndSave }
+export function useMemory() {
+  return MEMORY_API
 }

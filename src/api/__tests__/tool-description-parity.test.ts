@@ -1,24 +1,54 @@
 /**
  * Phase 3 (v2.4.0) — Tool-description parity test.
  *
- * The mobile web UI (rendered from src-tauri/src/commands/remote.rs::mobile_landing)
- * re-declares the AGENT_TOOLS array inline so the ReAct prompt on mobile lists
- * exactly the same capabilities. This test pins:
+ * The mobile web UI (mobile-client/) re-declares the AGENT_TOOLS array so the
+ * ReAct prompt on mobile lists exactly the same capabilities. This test pins:
  *   - tool NAMES on both sides are the same set
  *   - each tool description is Claude-Code-quality (length + contains at least
  *     one of the recommended hint markers PREFER/NEVER/DO NOT/USE FIRST/Zero)
  *   - required-parameter lists line up
  *
  * If this test fails after a description edit, update BOTH sides together.
+ *
+ * ── 01.09.2026 (T-75) ──
+ *
+ * The mobile half used to be recovered with two regexes over
+ * src-tauri/src/commands/remote.rs, because the client was a Rust string:
+ *
+ *     rs.match(/var AGENT_TOOLS = \[([\s\S]*?)\];/)
+ *     /\{name:'([^']+)',\s*description:'((?:\\.|[^'\\])*)',…/g
+ *
+ * followed by three hand-written unescape rules for \' \" and \\ . A tool
+ * whose description used a character that parser did not model simply did not
+ * appear in `mobileTools`, and the set comparison below would then have said
+ * "missing on mobile" for a tool that was there — or, if the outer match had
+ * failed differently, said nothing at all. The client is real source now, so
+ * the array is imported. No parser, no unescaping, no shape to drift.
  */
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
+import { AGENT_TOOLS } from '../../../mobile-client/agent-core.js'
+
+/** One entry of the mobile AGENT_TOOLS array. */
+interface MobileTool {
+  name: string
+  description: string
+  parameters: { name: string; required: boolean }[]
+}
 
 type BuiltinTool = {
   name: string
   description: string
-  inputSchema: { properties: Record<string, any>; required: string[] }
+  inputSchema: {
+    /**
+     * Nur die NAMEN werden gebraucht — der Quelltext-Scan unten setzt fuer
+     * jeden Namen ein leeres Objekt ein. `unknown` sagt genau das; `any` hat
+     * eine Schema-Form behauptet, die hier nie existiert hat.
+     */
+    properties: Record<string, unknown>
+    required: string[]
+  }
 }
 
 // Import the desktop source of truth. Kept as a `require` to avoid pulling the
@@ -63,10 +93,16 @@ function evaluateStringLiteralExpression(expr: string): string {
   while ((m = re.exec(expr)) !== null) {
     pieces.push(
       m[2]
+        // NUL is used as a private placeholder, not matched as input: an
+        // escaped backslash is parked on a byte that cannot occur in a
+        // TypeScript source literal, the other escapes are resolved, and the
+        // last .replace puts it back. Any printable sentinel would be
+        // ambiguous with real content — which is the whole point.
         .replace(/\\\\/g, '\x00') // placeholder so we do not re-process escaped backslashes
         .replace(/\\'/g, "'")
         .replace(/\\"/g, '"')
         .replace(/\\n/g, '\n')
+        // eslint-disable-next-line no-control-regex
         .replace(/\x00/g, '\\')
     )
   }
@@ -130,58 +166,42 @@ function extractPropertiesNames(schemaExpr: string): string[] {
   return names
 }
 
-// ─── Mobile extraction ───
-interface MobileTool {
-  name: string
-  description: string
-  parameters: { name: string; required: boolean }[]
-}
+// ─── The mobile side, imported rather than parsed ───
 
-function parseMobileTools(): MobileTool[] {
-  const rs = readFileSync(
-    resolve(__dirname, '..', '..', '..', 'src-tauri', 'src', 'commands', 'remote.rs'),
-    'utf8'
-  )
-  // Grab the AGENT_TOOLS JS array contents.
-  const arrMatch = rs.match(/var AGENT_TOOLS = \[([\s\S]*?)\];/)
-  if (!arrMatch) throw new Error('Could not locate mobile AGENT_TOOLS array in remote.rs')
-  const body = arrMatch[1]
-  // Split into tool object blocks by looking for top-level "{name:" anchors.
-  const tools: MobileTool[] = []
-  const toolRe = /\{name:'([^']+)',\s*description:'((?:\\.|[^'\\])*)',\s*\n?\s*parameters:\[([^\]]*)\]\}/g
-  let m: RegExpExecArray | null
-  while ((m = toolRe.exec(body)) !== null) {
-    const name = m[1]
-    const description = m[2]
-      .replace(/\\'/g, "'")
-      .replace(/\\"/g, '"')
-      .replace(/\\\\/g, '\\')
-    const params = parseMobileParams(m[3])
-    tools.push({ name, description, parameters: params })
-  }
-  return tools
-}
-
-function parseMobileParams(paramsExpr: string): { name: string; required: boolean }[] {
-  const out: { name: string; required: boolean }[] = []
-  const paramRe = /\{name:'([^']+)'[^}]*?required:\s*(true|false)[^}]*\}/g
-  let m: RegExpExecArray | null
-  while ((m = paramRe.exec(paramsExpr)) !== null) {
-    out.push({ name: m[1], required: m[2] === 'true' })
-  }
-  return out
-}
-
-const mobileTools = parseMobileTools()
+/** Exactly the array the phone runs. */
+const mobileTools = AGENT_TOOLS
 
 // ─── Tests ───
 
 describe('tool-description-parity — extraction sanity', () => {
   it('parses the desktop BUILTIN_TOOLS list', () => {
+    // Still a lower bound, and still earning its keep: this half IS a parser
+    // (the brace scan over builtin-tools.ts above), so the only thing it can
+    // honestly claim is "the scan found the catalogue rather than nothing".
     expect(builtinTools.length).toBeGreaterThanOrEqual(13)
   })
-  it('parses the mobile AGENT_TOOLS list', () => {
-    expect(mobileTools.length).toBeGreaterThanOrEqual(9)
+
+  /**
+   * KF-3 (6). This assertion read `toBeGreaterThanOrEqual(9)` while the array
+   * held TEN tools — todo_write, web_search, web_fetch, file_read, file_write,
+   * file_list, file_search, shell_execute, screenshot, image_generate. A lost
+   * tool would have slipped through the slack, and the number had no way of
+   * noticing that it had gone stale.
+   *
+   * It is not re-pinned to 10 either, because 10 goes stale the same way the
+   * 9 did. The count is DERIVED: the mobile catalogue is by definition the
+   * desktop catalogue minus MOBILE_SKIP, which is the same ledger the name-set
+   * test below reads. Add a desktop tool and wire it to mobile and this stays
+   * green; add one and forget mobile, or drop one from mobile, and it goes red
+   * with both numbers in the message.
+   *
+   * MOBILE_SKIP is declared below this block on purpose — the ledger belongs
+   * next to the set comparison it explains. `it` bodies run after the module
+   * has finished evaluating, so the reference is resolved by then.
+   */
+  it('the mobile AGENT_TOOLS list holds every desktop tool it is meant to', () => {
+    const erwartet = builtinTools.filter((t) => !MOBILE_SKIP.has(t.name)).length
+    expect(mobileTools).toHaveLength(erwartet)
   })
 })
 

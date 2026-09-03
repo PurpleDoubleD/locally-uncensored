@@ -200,8 +200,17 @@ fn note_for(vendor: &str) -> Option<String> {
     }
 }
 
-#[cfg(target_os = "linux")]
+/// `if cfg!` and not `#[cfg]`, for the same reason the parser below gives for
+/// itself: with a `#[cfg(target_os = "linux")]` here plus a stub for everyone
+/// else, `detect_other_via_lspci_from` and `lspci_device_name` have no caller
+/// at all in a macOS or Windows build — so they compile, they are tested, and
+/// rustc still reports them as dead code. Gating at run time on a constant
+/// keeps the chain intact everywhere (the early return folds away) and lets
+/// `-D warnings` stay on without an `allow` per parser.
 fn detect_other_via_lspci(have_rocm: bool) -> Vec<DetectedGpu> {
+    if !cfg!(target_os = "linux") {
+        return vec![];
+    }
     // Best-effort fallback for Intel iGPUs / Intel Arc / Apple-Silicon-in-VM
     // when neither nvidia-smi nor rocm-smi cover them. `lspci -nn | grep VGA`
     // gives "00:02.0 VGA compatible controller [0300]: Intel Corporation
@@ -236,7 +245,6 @@ fn detect_other_via_lspci(have_rocm: bool) -> Vec<DetectedGpu> {
 /// Geprueft wird gegen die Zahl in eckigen Klammern UND gegen den Klartext.
 /// Die Zahl ist die eigentliche Auskunft, der Klartext kommt aus der lokalen
 /// pci.ids und fehlt, sobald die Datei alt ist.
-#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 fn is_graphics_or_compute_class(lower: &str) -> bool {
     lower.contains("[0300]")      // VGA compatible controller
         || lower.contains("[0302]")   // 3D controller
@@ -371,7 +379,6 @@ fn lspci_device_name(line: &str) -> String {
 
 /// Die PCI-Herstellernummer von AMD, wie sie in /sys/.../vendor steht. lspci
 /// druckt dieselbe Zahl als [1002:....].
-#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 const PCI_VENDOR_AMD: u16 = 0x1002;
 
 /// Hoechstens so viele Bytes werden aus einer sysfs-Datei gelesen.
@@ -379,7 +386,6 @@ const PCI_VENDOR_AMD: u16 = 0x1002;
 /// Die Dateien hier tragen eine einzige kurze Zeile. Ein Pfad, der wider
 /// Erwarten auf etwas Grosses zeigt, soll den Hardware-Dialog nicht mit einem
 /// Dateiinhalt vollaufen lassen.
-#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 const SYSFS_READ_LIMIT: u64 = 256;
 
 /// Untergrenze fuer die Zahl aus dem Kernel.
@@ -392,7 +398,6 @@ const SYSFS_READ_LIMIT: u64 = 256;
 /// ungesetzt, also genau der Zustand, den dieselbe Karte auch heute schon hat.
 /// Wer im BIOS bewusst mehr abzweigt, bekommt seine Zahl gemeldet, denn dann
 /// ist der Speicher wirklich fuer die Grafik reserviert.
-#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 const SYSFS_MIN_TRUSTED_MIB: u64 = 1024;
 
 /// Obergrenze, aus demselben Grund von der anderen Seite. Die groessten
@@ -400,7 +405,6 @@ const SYSFS_MIN_TRUSTED_MIB: u64 = 1024;
 /// davon ist kein Speicher mehr, sondern ein missratener Registerwert, und ein
 /// zu grosses Versprechen laesst den Fit-Check eine Ladung zusagen, die nie
 /// passt.
-#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 const SYSFS_MAX_TRUSTED_MIB: u64 = 1024 * 1024;
 
 /// Ein Verzeichnis /sys/class/drm/card<N>/device, schon eingelesen.
@@ -410,7 +414,6 @@ const SYSFS_MAX_TRUSTED_MIB: u64 = 1024 * 1024;
 /// Beispieldaten einer Kundenmaschine im Test stehen koennen statt einer
 /// Nachbildung des Dateisystems.
 #[derive(Debug, Clone, PartialEq)]
-#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 struct SysfsDrmCard {
     /// Letzter Bestandteil des device-Verweises, also die PCI-Adresse.
     pci_address: String,
@@ -421,7 +424,6 @@ struct SysfsDrmCard {
 }
 
 /// Der Slot vorne in einer lspci-Zeile, also "03:00.0".
-#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 fn lspci_slot(line: &str) -> &str {
     line.split_whitespace().next().unwrap_or("")
 }
@@ -433,7 +435,6 @@ fn lspci_slot(line: &str) -> &str {
 /// Zuordnung auf jeder normalen Maschine mit einer einzigen Domain ins Leere.
 /// Was nicht wie eine Adresse aussieht, gibt None, damit nichts zusammenfaellt,
 /// das nur aehnlich aussieht.
-#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 fn normalised_pci_address(raw: &str) -> Option<String> {
     let text = raw.trim().to_ascii_lowercase();
     let (domain, rest) = match text.matches(':').count() {
@@ -462,7 +463,6 @@ fn normalised_pci_address(raw: &str) -> Option<String> {
 }
 
 /// "0x1002" als Zahl. Alles andere gibt None.
-#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 fn parse_sysfs_hex_id(raw: &str) -> Option<u16> {
     let text = raw.trim().to_ascii_lowercase();
     let digits = text.strip_prefix("0x")?;
@@ -478,7 +478,6 @@ fn parse_sysfs_hex_id(raw: &str) -> Option<u16> {
 /// kann, ist keine Groesse: eine leere Datei, eine Fehlerzeile eines Treibers,
 /// eine Zahl mit Einheit dahinter. Statt zu raten bleibt die Groesse dann
 /// unbekannt, denn der Fit-Check rechnet gegen diesen Wert.
-#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 fn parse_sysfs_vram_mib(raw: &str) -> Option<u64> {
     let text = raw.trim();
     if text.is_empty() || !text.bytes().all(|b| b.is_ascii_digit()) {
@@ -492,7 +491,6 @@ fn parse_sysfs_vram_mib(raw: &str) -> Option<u64> {
 }
 
 /// Die Speichergroesse zu einer PCI-Adresse, wenn sysfs sie hergibt.
-#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 fn sysfs_vram_mib_for(pci_address: &str, cards: &[SysfsDrmCard]) -> Option<u64> {
     let wanted = normalised_pci_address(pci_address)?;
     let card = cards
@@ -513,7 +511,6 @@ fn sysfs_vram_mib_for(pci_address: &str, cards: &[SysfsDrmCard]) -> Option<u64> 
 
 /// Nur "card0", "card1" und so weiter. "card0-DP-1" ist ein Anschluss und
 /// "renderD128" der Renderknoten; beide tragen keine eigene Karte.
-#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 fn is_drm_card_dir(name: &str) -> bool {
     name.strip_prefix("card")
         .is_some_and(|rest| !rest.is_empty() && rest.bytes().all(|b| b.is_ascii_digit()))
@@ -525,7 +522,6 @@ fn is_drm_card_dir(name: &str) -> bool {
 /// alles, und das ist der Normalfall, nicht die Ausnahme. Gelesen wird
 /// gedeckelt, genommen wird die erste Zeile, und was kein UTF-8 ist faellt
 /// still durch.
-#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 fn read_sysfs_value(path: &std::path::Path) -> Option<String> {
     use std::io::Read;
     let file = std::fs::File::open(path).ok()?;
@@ -545,7 +541,6 @@ fn read_sysfs_value(path: &std::path::Path) -> Option<String> {
 /// Der letzte Bestandteil ist die Adresse. read_link zuerst, weil es den
 /// Verweis nicht aufloesen muss; canonicalize als Rueckfall, falls dort kein
 /// Verweis liegt, sondern ein echtes Verzeichnis.
-#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 fn sysfs_pci_address(device_dir: &std::path::Path) -> Option<String> {
     let target = std::fs::read_link(device_dir)
         .or_else(|_| std::fs::canonicalize(device_dir))
@@ -561,7 +556,6 @@ fn sysfs_pci_address(device_dir: &std::path::Path) -> Option<String> {
 /// einen echten kleinen Baum anlegen und diesen Weg auch ohne AMD-Karte
 /// abgehen kann. Ein Verzeichnis, das es nicht gibt, gibt eine leere Liste:
 /// das ist jede Nicht-Linux-Maschine und jeder Rechner ohne DRM-Treiber.
-#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 fn read_sysfs_drm_cards_at(root: &std::path::Path) -> Vec<SysfsDrmCard> {
     let mut cards: Vec<SysfsDrmCard> = Vec::new();
     let Ok(entries) = std::fs::read_dir(root) else {
@@ -586,13 +580,15 @@ fn read_sysfs_drm_cards_at(root: &std::path::Path) -> Vec<SysfsDrmCard> {
 }
 
 /// Der Ort, an dem der Kernel die Karten auflistet.
-#[cfg(target_os = "linux")]
+///
+/// Ungegatet, aus demselben Grund, den `detect_other_via_lspci` fuer sich
+/// nennt: der einzige Aufruf steht hinter dessen Laufzeit-Weiche, und ein
+/// `#[cfg]` hier haette die ganze sysfs-Kette auf macOS und Windows ohne
+/// Aufrufer zurueckgelassen. Ausserhalb von Linux gibt es das Verzeichnis
+/// nicht, und dann kommt eine leere Liste zurueck.
 fn read_sysfs_drm_cards() -> Vec<SysfsDrmCard> {
     read_sysfs_drm_cards_at(std::path::Path::new("/sys/class/drm"))
 }
-
-#[cfg(not(target_os = "linux"))]
-fn detect_other_via_lspci(_have_rocm: bool) -> Vec<DetectedGpu> { vec![] }
 
 #[cfg(target_os = "macos")]
 fn detect_macos() -> Vec<DetectedGpu> {
@@ -731,8 +727,16 @@ fn windows_fallback_from(
     }
 }
 
-#[cfg(target_os = "windows")]
+/// `if cfg!` and not `#[cfg]`, same reason as `detect_other_via_lspci`: this is
+/// the only caller of `parse_reg_query`, `parse_reg_hex`, `adapter_subkey`,
+/// `windows_fallback_from`, `detect_other_via_registry_from` and
+/// `detect_other_via_wmic_from`, all of which are deliberately compiled and
+/// tested on every platform. Gating the caller with `#[cfg]` orphaned the lot
+/// of them in a macOS build.
 fn detect_other_on_windows(have_rocm: bool) -> Vec<DetectedGpu> {
+    if !cfg!(target_os = "windows") {
+        return vec![];
+    }
     // Microsoft disabled wmic.exe by default in Windows 11 23H2 and 24H2 and
     // removed it outright in the August 2026 servicing update, where it is no
     // longer even a Feature on Demand. It used to be this module's only way to
@@ -827,9 +831,6 @@ fn detect_other_via_wmic_from(
     }
     gpus
 }
-
-#[cfg(not(target_os = "windows"))]
-fn detect_other_on_windows(_have_rocm: bool) -> Vec<DetectedGpu> { vec![] }
 
 /// Class GUID of the display-adapter registry branch, lowercase, as
 /// `adapter_subkey` matches it. Microsoft lists it as the "Display Adapters"
@@ -1776,7 +1777,7 @@ GPU[0] : Memory: 16368 MiB
         use super::lspci_device_name;
         // NEGATIVE CONTROL: the old expression, which was fine while only
         // Intel reached this branch and is nonsense for anything else.
-        let old_rule = LSPCI_AMD.split(':').last().unwrap();
+        let old_rule = LSPCI_AMD.split(':').next_back().unwrap();
         assert_eq!(old_rule.trim(), "7550] (rev c0)");
 
         assert_eq!(

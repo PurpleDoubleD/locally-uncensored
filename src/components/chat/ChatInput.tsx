@@ -1,17 +1,18 @@
 import { useState, useRef, useEffect, useCallback, type ReactNode } from 'react'
-import { motion } from 'framer-motion'
 import { Send, Square, Paperclip, X, Brain, Gauge, Terminal } from 'lucide-react'
-import { matchAgentCommands, type AgentCommand } from '../../lib/agent-commands'
+import { matchAgentCommands, type AgentCommand, type CommandScope } from '../../lib/agent-commands'
 import { VoiceButton } from './VoiceButton'
 import { ApprovalDialog } from './ApprovalDialog'
 import { useVoiceStore } from '../../stores/voiceStore'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { useModelStore } from '../../stores/modelStore'
+import { useChatStore } from '../../stores/chatStore'
 import { isThinkingCompatible, isVisionCompatible, declaredVision } from '../../lib/model-compatibility'
 import { clampEffort, effortChoices, effortLabel, nextEffort, DEFAULT_EFFORT } from '../../lib/effort'
 import type { AgentToolCall } from '../../types/agent-mode'
 import type { ImageAttachment } from '../../types/chat'
 import { COMPOSER_MAX_W } from './composer-width'
+import { MONOGRAM, MONOGRAM_INVERT } from '../layout/brand'
 
 interface Props {
   onSend: (content: string, images?: ImageAttachment[]) => void
@@ -22,20 +23,22 @@ interface Props {
   onReject?: () => void
   disabled?: boolean
   /**
-   * Enable the "/command" typeahead. Only the Coding Agent (Code view) sets this
-   * — slash commands belong there, not in the normal chat (David 2026-06-12).
+   * Which commands this composer offers. Was a boolean meaning
+   * "Coding-Agent-only"; since 2.6.8 it is the SCOPE, because the answer
+   * stopped being all-or-nothing: plain chat offers /compact and nothing else,
+   * while Agent and Coding offer the whole set. Undefined = no menu at all.
    */
-  slashCommands?: boolean
+  slashCommands?: CommandScope
   /**
    * Open the Documents (RAG) panel. The clip button is images-only; this lets the
    * composer point a user who tried to attach a PDF/doc to the right place
-   * (GH #69 — a PDF was silently dropped and the model hallucinated it couldn't
+   * (GH #69: a PDF was silently dropped and the model hallucinated it couldn't
    * receive attachments).
    */
   onAttachDocs?: () => void
   /**
    * The model picker, rendered on the right of the action bar (before Send).
-   * The header no longer carries it — each surface passes an upward-opening
+   * The header no longer carries it. Each surface passes an upward-opening
    * ModelSelector so the prompt window owns the model choice (web parity).
    */
   composerModel?: ReactNode
@@ -46,6 +49,27 @@ interface Props {
    * bar between Think and the model picker. Chat and Code pass different sets.
    */
   composerActions?: ReactNode
+}
+
+/** How long the synchronous double-fire guard below stays shut. */
+const SEND_LOCK_MS = 700
+
+/**
+ * The double-fire guard's clock read, deliberately OUTSIDE the component.
+ *
+ * Reading `Date.now()` from a function declared in the component body puts an
+ * impure call in the render path as far as React 19 is concerned (`purity`),
+ * and the rule is right about where such a read belongs: not in a component,
+ * not in a hook. Moving the whole check out here keeps it exactly as
+ * synchronous as it was (the point of the guard is that it decides inside the
+ * same tick as the second keydown) and makes it a thing that can be reasoned
+ * about (and tested) on its own. Returns false when the send must be dropped.
+ */
+function passSendLock(lock: { current: number }): boolean {
+  const now = Date.now()
+  if (now - lock.current < SEND_LOCK_MS) return false
+  lock.current = now
+  return true
 }
 
 function fileToImageAttachment(file: File): Promise<ImageAttachment> {
@@ -73,6 +97,79 @@ export function ChatInput({ onSend, onStop, isGenerating, pendingApproval, onApp
   // the matching agent commands; ↑/↓ to move, Enter/Tab to pick, Esc to dismiss.
   const [cmdMenu, setCmdMenu] = useState<AgentCommand[]>([])
   const [cmdIndex, setCmdIndex] = useState(0)
+  /**
+   * Ein Entwurf gehoert dem Gespraech, in dem er getippt wurde.
+   *
+   * Der Composer wird beim Wechsel nicht neu gebaut, also stand der halbe Satz
+   * aus dem alten Chat im neuen wieder im Feld, einmal beobachtet am
+   * 03.09.2026, mit dem naheliegenden Ausgang: der Satz geht an den falschen
+   * Empfaenger. Ihn beim Wechsel einfach zu leeren waere die andere Haelfte
+   * desselben Fehlers, nur teurer (Arbeit weg), darum wird er beiseitegelegt
+   * und beim Zurueckkommen wieder hingelegt. Bilder reisen mit dem Text, sonst
+   * hinge die Anlage am falschen Satz.
+   *
+   * WIE der Wechsel bemerkt wird, ist nicht Geschmack, sondern die Stelle, an
+   * der dieser Block zweimal mit React aneinandergeriet. Er stand bis zum
+   * 03.09.2026 als Effekt hier, mit zwei Refs davor, und war der einzige rote
+   * Punkt von `npm run lint`. In Wahrheit zwei, denn eslint meldet pro
+   * Komponente nur den ersten:
+   *
+   *   1. `react-hooks/refs`, "Cannot access refs during render". Der Stand des
+   *      Feldes wurde blank im Renderkoerper in ein Ref geschrieben
+   *      (`standRef.current = { input, images }`), damit der Effekt beim
+   *      Wechsel noch an die Werte VOR dem Wechsel kam.
+   *   2. `react-hooks/set-state-in-effect`. Der Effekt rief `setInput` und
+   *      `setImages` direkt auf, also genau die Kaskade, vor der die Regel
+   *      warnt: erst ein Commit mit dem alten Entwurf, dann ein zweiter mit
+   *      dem neuen.
+   *
+   * Beide Regeln haben recht, und beide zeigen auf dieselbe Ursache: ein
+   * Effekt ist der falsche Ort. React nennt den richtigen selbst ("You Might
+   * Not Need an Effect" → Zustand anpassen, wenn sich etwas geaendert hat):
+   * der Vergleich mit dem vorigen Wert steht IM Render, und die Anpassung
+   * geschieht dort. React laeuft die Komponente sofort noch einmal, bevor es
+   * ueberhaupt etwas uebergibt.
+   *
+   * Damit fallen beide Fehler zusammen mit ihrer Ursache weg. Das Ref fuer den
+   * Stand braucht es nicht mehr: im Wechselrender fuehren `input` und `images`
+   * noch den alten Entwurf, denn geleert wird erst hier, eine Zeile weiter
+   * unten. Das ist derselbe Wert, den das Ref transportiert hat, nur ohne
+   * Umweg. Und die Kaskade entfaellt, weil der Wechsel keinen eigenen Commit
+   * mehr kostet: das Feld ist schon leer, wenn der neue Chat zum ersten Mal
+   * zu sehen ist, statt fuer einen Frame den fremden Satz zu zeigen.
+   *
+   * Die beiden Refs sind deshalb Zustand geworden. Ein Ref darf im Render
+   * nicht gelesen werden (Regel 1), und gelesen werden muessen hier beide.
+   */
+  const conversationId = useChatStore((s) => s.activeConversationId)
+  const [entwuerfe, setEntwuerfe] = useState<Record<string, { text: string; bilder: ImageAttachment[] }>>({})
+  const [letztesGespraech, setLetztesGespraech] = useState(conversationId)
+  if (letztesGespraech !== conversationId) {
+    const vorher = letztesGespraech
+    setLetztesGespraech(conversationId)
+    if (vorher) {
+      const text = input
+      const bilder = images
+      // Der Aktualisierer laeuft unter StrictMode zweimal und muss deshalb
+      // beim zweiten Mal dasselbe Ergebnis liefern wie beim ersten. Er
+      // rechnet nur aus `bisher`, haengt also an nichts, was er selbst
+      // veraendert.
+      setEntwuerfe((bisher) => {
+        if (text || bilder.length) return { ...bisher, [vorher]: { text, bilder } }
+        if (!(vorher in bisher)) return bisher
+        const ohne = { ...bisher }
+        delete ohne[vorher]
+        return ohne
+      })
+    }
+    // Gelesen wird der Stand VOR dieser Anpassung, und das ist richtig:
+    // geschrieben wurde gerade der Schluessel `vorher`, geholt wird
+    // `conversationId`, und die beiden sind hier nie dasselbe.
+    const zurueck = conversationId ? entwuerfe[conversationId] : undefined
+    setInput(zurueck?.text ?? '')
+    setImages(zurueck?.bilder ?? [])
+    setCmdMenu([])
+  }
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   // Text already in the box when dictation started. Interim + final transcripts
@@ -122,7 +219,7 @@ export function ChatInput({ onSend, onStop, isGenerating, pendingApproval, onApp
   const addFiles = useCallback(async (files: FileList | File[]) => {
     const all = Array.from(files)
     const imageFiles = all.filter(f => f.type.startsWith('image/'))
-    // A non-image file (PDF, Word, text, …) can't ride along as a chat image —
+    // A non-image file (PDF, Word, text, …) can't ride along as a chat image,
     // it belongs in the Documents panel (RAG) so the model can actually read it.
     // Silently dropping it made a user think their PDF attached when it didn't,
     // and the model then hallucinated that it "couldn't receive attachments"
@@ -145,7 +242,7 @@ export function ChatInput({ onSend, onStop, isGenerating, pendingApproval, onApp
   }
 
   // Write a dictation transcript (interim or final) into the input as
-  // base + transcript, then resize the textarea. NEVER sends — the user
+  // base + transcript, then resize the textarea. NEVER sends, because the user
   // reviews and presses Send (David 2026-06-06).
   const applyDictation = (text: string) => {
     const base = dictationBaseRef.current
@@ -168,9 +265,7 @@ export function ChatInput({ onSend, onStop, isGenerating, pendingApproval, onApp
   const handleSend = () => {
     const trimmed = input.trim()
     if ((!trimmed && images.length === 0) || isGenerating || disabled) return
-    const now = Date.now()
-    if (now - sendLockRef.current < 700) return
-    sendLockRef.current = now
+    if (!passSendLock(sendLockRef)) return
     onSend(trimmed || '(image)', images.length > 0 ? images : undefined)
     setInput('')
     setImages([])
@@ -178,12 +273,14 @@ export function ChatInput({ onSend, onStop, isGenerating, pendingApproval, onApp
     if (textareaRef.current) textareaRef.current.style.height = 'auto'
   }
 
-  // Update the input + the slash-command typeahead together. The typeahead is
-  // Coding-Agent-only — in the normal chat (slashCommands unset) "/foo" is just
-  // text and no menu appears.
+  // Update the input + the slash-command typeahead together. The menu shows
+  // what the SURFACE can actually carry out: everything in Agent and Coding,
+  // and in plain chat only the commands marked for it (today: /compact).
+  // Offering an agent command where there is no tool catalogue would be
+  // offering work the surface cannot do.
   const updateInput = (value: string) => {
     setInput(value)
-    const matches = slashCommands ? matchAgentCommands(value) : []
+    const matches = slashCommands ? matchAgentCommands(value, slashCommands) : []
     setCmdMenu(matches)
     setCmdIndex(0)
   }
@@ -280,16 +377,16 @@ export function ChatInput({ onSend, onStop, isGenerating, pendingApproval, onApp
           isDragOver
             ? 'bg-blue-500/5 border-blue-500/30'
             : cloudMode
-              ? 'bg-[#7c3aed]/[0.04] border-[#7c3aed]/40 focus-within:border-[#7c3aed]/70'
+              ? 'bg-lu-cloud/[0.04] border-lu-cloud/40 focus-within:border-lu-cloud/70'
               : 'bg-gray-50 dark:bg-white/[0.03] border-gray-200 dark:border-white/[0.06] focus-within:border-gray-400 dark:focus-within:border-white/15'
         }`}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
       >
-        {/* Slash-command autocomplete — floats above the composer */}
+        {/* Slash-command autocomplete, floats above the composer */}
         {cmdMenu.length > 0 && (
-          <div className="absolute bottom-full left-0 right-0 mb-1.5 z-50 max-h-64 overflow-y-auto scrollbar-thin rounded-lg border border-gray-200 dark:border-white/10 bg-white dark:bg-[#1f1f1f] shadow-xl py-1">
+          <div className="absolute bottom-full left-0 right-0 mb-1.5 z-50 max-h-64 overflow-y-auto scrollbar-thin rounded-lg lu-elevated py-1">
             <div className="px-2.5 py-1 flex items-center gap-1 text-[0.5rem] uppercase tracking-widest text-gray-400 dark:text-gray-600">
               <Terminal size={9} /> Agent commands
             </div>
@@ -303,8 +400,8 @@ export function ChatInput({ onSend, onStop, isGenerating, pendingApproval, onApp
                 }`}
               >
                 <span className="text-[0.72rem] font-medium text-gray-800 dark:text-gray-100 shrink-0">/{cmd.name}</span>
-                {cmd.argHint && <span className="text-[0.6rem] text-gray-400 dark:text-gray-500 shrink-0">{cmd.argHint}</span>}
-                <span className="text-[0.6rem] text-gray-500 dark:text-gray-400 truncate ml-auto">{cmd.summary}</span>
+                {cmd.argHint && <span className="t-micro text-gray-400 dark:text-gray-500 shrink-0">{cmd.argHint}</span>}
+                <span className="t-micro text-gray-500 dark:text-gray-400 truncate ml-auto">{cmd.summary}</span>
               </button>
             ))}
           </div>
@@ -325,13 +422,13 @@ export function ChatInput({ onSend, onStop, isGenerating, pendingApproval, onApp
           <ApprovalDialog toolCall={pendingApproval} onApprove={onApprove} onReject={onReject} />
         )}
 
-        {/* Prompt area — hints, image previews, then the textarea (buttons live
+        {/* Prompt area: hints, image previews, then the textarea (buttons live
             in the action bar below, web-parity two-row composer). */}
         <div className="px-3 pt-2.5">
-          {/* Non-image attach hint (GH #69) — the clip is images-only; PDFs, Word,
+          {/* Non-image attach hint (GH #69). The clip is images-only; PDFs, Word,
               and text files go through the Documents panel so the model can read them. */}
           {docHint && (
-            <div className="flex items-center gap-2 mb-1.5 px-2 py-1 rounded-md bg-amber-500/10 border border-amber-500/20 text-[0.62rem] text-amber-700 dark:text-amber-300">
+            <div className="flex items-center gap-2 mb-1.5 px-2 py-1 rounded-md bg-amber-500/10 border border-amber-500/20 t-micro text-amber-700 dark:text-amber-300">
               <span className="flex-1">The clip attaches images. To ask about a PDF, Word, or text file, add it in the Documents panel.</span>
               {onAttachDocs && (
                 <button
@@ -367,7 +464,7 @@ export function ChatInput({ onSend, onStop, isGenerating, pendingApproval, onApp
                   >
                     <X size={8} />
                   </button>
-                  <span className="absolute bottom-0 left-0 right-0 bg-black/60 text-[0.4rem] text-gray-300 text-center rounded-b-lg truncate px-0.5">
+                  <span className="absolute bottom-0 left-0 right-0 bg-black/60 text-[0.45rem] text-gray-300 text-center rounded-b-lg truncate px-0.5">
                     {img.name}
                   </span>
                 </div>
@@ -375,7 +472,7 @@ export function ChatInput({ onSend, onStop, isGenerating, pendingApproval, onApp
             </div>
           )}
 
-          {/* Vision hint — a text-only model can't read the attached image.
+          {/* Vision hint: a text-only model can't read the attached image.
               Non-blocking (send still works); the runtime error is also mapped
               to friendly copy. gthvidsten, GH Discussion #67. */}
           {images.length > 0 && activeModel && !canSeeImages && (
@@ -395,7 +492,7 @@ export function ChatInput({ onSend, onStop, isGenerating, pendingApproval, onApp
             placeholder={disabled ? "Unavailable" : isDragOver ? "Drop images here..." : isTranscribing ? "Transcribing..." : isVoiceRecording ? "Recording..." : "Message..."}
             disabled={disabled}
             rows={1}
-            className="w-full bg-transparent resize-none text-gray-800 dark:text-gray-200 placeholder-gray-400 dark:placeholder-gray-600 focus:outline-none text-[0.75rem] leading-relaxed max-h-[200px] disabled:opacity-50 scrollbar-thin"
+            className="w-full bg-transparent resize-none text-gray-800 dark:text-gray-200 placeholder-gray-400 dark:placeholder-gray-600 focus:outline-none text-[12px] leading-relaxed max-h-[200px] disabled:opacity-50 scrollbar-thin"
           />
         </div>
 
@@ -411,13 +508,15 @@ export function ChatInput({ onSend, onStop, isGenerating, pendingApproval, onApp
             still than it was working, which is what David saw as "der Stop
             Knopf oeffnet eine weitere Zeile, alles sieht asymmetrisch aus".
             No wrapping, a fixed-height row, and every control shrink-0 with
-            only the middle spacer giving way. */}
+            only the middle spacer giving way, das `flex: 0 0 auto` steckt
+            seit der Composer-Grammatik im Rezept `.lu-control` (index.css),
+            nicht mehr als `shrink-0` an jedem einzelnen Knopf. */}
         <div className="flex flex-nowrap items-center gap-1 px-2 py-1.5 min-h-[38px] border-t border-gray-200 dark:border-white/[0.05]">
           {/* Clip button */}
           <button
             onClick={() => fileInputRef.current?.click()}
             disabled={isGenerating}
-            className="p-1.5 rounded-md text-gray-500 hover:text-gray-300 hover:bg-white/5 disabled:opacity-20 transition-all shrink-0"
+            className="lu-control lu-control--icon"
             title="Attach images. For PDFs and documents use the Documents panel"
           >
             <Paperclip size={14} />
@@ -444,18 +543,19 @@ export function ChatInput({ onSend, onStop, isGenerating, pendingApproval, onApp
             disabled={isGenerating}
           />
 
-          {/* Think toggle ('always'-models render it locked on) */}
+          {/* Think toggle ('always'-models render it locked on).
+              Der Ein-Zustand kommt aus `aria-pressed`, nicht aus einer
+              zweiten Klassenkette: das neutrale Rezept liest ihn und setzt
+              den Behaelter. Vorher war Ein ein blaues Pill, dieselbe Farbe,
+              die auch der Fokusring traegt, also zwei Bedeutungen auf einer
+              Farbe (Audit §4, Chat mit Antwort). */}
           <button
             onClick={() => {
               if (canThink) updateSettings({ thinkingEnabled: !thinkingEnabled })
             }}
-            className={`flex items-center gap-1 px-1.5 py-1.5 rounded-md transition-all shrink-0 text-[0.6rem] font-medium ${
-              (thinkingEnabled && canThink) || thinkLockedOn
-                ? 'bg-blue-500/15 text-blue-400 border border-blue-500/30'
-                : !canThink
-                  ? 'text-gray-600 opacity-40 cursor-default'
-                  : 'text-gray-500 hover:text-gray-300 hover:bg-white/5'
-            }`}
+            disabled={!canThink && !thinkLockedOn}
+            aria-pressed={(thinkingEnabled && canThink) || thinkLockedOn}
+            className="lu-control"
             title={
               thinkLockedOn
                 ? 'Thinking is always on for this model'
@@ -495,15 +595,15 @@ export function ChatInput({ onSend, onStop, isGenerating, pendingApproval, onApp
             <span
               data-testid="composer-cloud-state"
               title="Cloud mode: this message runs on LU's hosted GPUs and is billed to your lu-labs.ai credits. The Cloud switch up in the header turns it off."
-              className="flex items-center gap-1 px-1.5 py-1.5 rounded-md shrink-0 text-[0.6rem] font-medium bg-[#7c3aed]/15 text-[#7c3aed] dark:text-[#a78bfa] border border-[#7c3aed]/30"
+              className="flex items-center gap-1 px-1.5 py-1.5 rounded-md shrink-0 t-micro font-medium bg-lu-cloud/15 text-lu-cloud dark:text-lu-cloud-lift border border-lu-cloud/30"
             >
               <img
-                src="/LU-monogram-bw.png"
+                src={MONOGRAM}
                 alt=""
                 width={10}
                 height={10}
                 draggable={false}
-                className="shrink-0 select-none dark:invert-0 invert"
+                className={`shrink-0 select-none ${MONOGRAM_INVERT}`}
               />
               <span>Cloud</span>
             </span>
@@ -519,26 +619,34 @@ export function ChatInput({ onSend, onStop, isGenerating, pendingApproval, onApp
               in place while a run is in flight, exactly as the Chat surface has
               always done, and because the box is sized rather than padded the
               row height cannot move between the two states. */}
-          <div className="shrink-0 w-[26px] h-[26px]" data-testid="composer-send-slot">
+          {/* Send und Stop hatten hier je ein `whileTap` aus framer-motion,
+              zwei von den sechs, die der Audit als „6 von 462" zaehlt. Der
+              Druck steht jetzt als eine Regel in index.css und laeuft ueber
+              die `transition` von `.lu-control` weich aus; die beiden
+              Knoepfe brauchen framer-motion dafuer nicht mehr. */}
+          <div className="shrink-0 w-[var(--control-h-sm)] h-[var(--control-h-sm)]" data-testid="composer-send-slot">
             {isGenerating ? (
-              <motion.button
+              <button
                 onClick={onStop}
-                className="w-full h-full flex items-center justify-center rounded-md bg-red-500/15 text-red-400 hover:bg-red-500/25 transition-all"
-                whileTap={{ scale: 0.9 }}
+                // Neutral, nicht rot: Stop ist der Normalabschluss und die
+                // haeufigste Aktion waehrend eines Streams. `data-active`
+                // gibt ihm den Behaelter des neutralen Rezepts, damit er
+                // auffindbar bleibt, ohne die Fehlerfarbe zu tragen.
+                data-active="true"
+                className="lu-control lu-control--icon w-full h-full"
                 aria-label="Stop generation"
               >
                 <Square size={13} />
-              </motion.button>
+              </button>
             ) : (
-              <motion.button
+              <button
                 onClick={handleSend}
                 disabled={(!input.trim() && images.length === 0) || isTranscribing}
-                className="w-full h-full flex items-center justify-center rounded-md bg-white/8 text-gray-300 hover:bg-white/12 disabled:opacity-20 disabled:cursor-not-allowed transition-all"
-                whileTap={{ scale: 0.9 }}
+                className="lu-control lu-control--icon lu-primary w-full h-full"
                 aria-label="Send message"
               >
                 <Send size={13} />
-              </motion.button>
+              </button>
             )}
           </div>
         </div>

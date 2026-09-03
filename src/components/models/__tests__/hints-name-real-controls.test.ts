@@ -46,6 +46,10 @@ const chatInput = read('src/components/chat/ChatInput.tsx')
 const effortTip =
   chatInput.match(/data-testid="effort-toggle"[\s\S]{0,600}?title=\{`([^`]*)`\}/)?.[1] ?? ''
 const remoteRs = read('src-tauri/src/commands/remote.rs')
+// 01.09.2026 (T-75): the mobile drawer moved out of the Rust string it used to
+// live in. The refusal text is still Rust; the controls it names are in the
+// client source now.
+const mobileClient = read('mobile-client/client.js')
 
 describe('THE FIX: the ComfyUI-is-down hint names the control that exists', () => {
   it('it sends the user to Settings, AI Backends, Start', () => {
@@ -108,9 +112,9 @@ describe('the two the sweep turned up', () => {
   })
 
   it('and the mobile drawer really spells it Menu, Settings, Remote Permissions', () => {
-    expect(remoteRs).toMatch(/window\._toggleDrawer\(\)" aria-label="Menu"/)
-    expect(remoteRs).toMatch(/window\._openSettingsSheet\(\)[\s\S]{0,200}svgIcon\('tune'\)\+'<\/span>Settings'/)
-    expect(remoteRs).toMatch(/settings-section-label">Remote Permissions</)
+    expect(mobileClient).toMatch(/window\._toggleDrawer\(\)" aria-label="Menu"/)
+    expect(mobileClient).toMatch(/window\._openSettingsSheet\(\)[\s\S]{0,200}svgIcon\('tune'\)\+'<\/span>Settings'/)
+    expect(mobileClient).toMatch(/settings-section-label">Remote Permissions</)
   })
 
   it('the LM Studio load error names the label the row shows, not an icon name', () => {

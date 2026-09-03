@@ -16,12 +16,14 @@ import {
 // gracefully no-ops without it, but we install a stub to exercise the cache.
 const installLocalStorageStub = () => {
   const store: Record<string, string> = {}
-  ;(globalThis as any).localStorage = {
+  // Reflect statt eines Casts: `globalThis.localStorage` ist in den DOM-Typen
+  // als vollstaendiges `Storage` deklariert, und nur daran hing das `as any`.
+  Reflect.set(globalThis, 'localStorage', {
     getItem: (k: string) => (k in store ? store[k] : null),
     setItem: (k: string, v: string) => { store[k] = v },
     removeItem: (k: string) => { delete store[k] },
     clear: () => { for (const k of Object.keys(store)) delete store[k] },
-  }
+  })
 }
 
 describe('tool-capability cache', () => {

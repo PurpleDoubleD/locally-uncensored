@@ -1,7 +1,9 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
+import { safeJSONStorage } from '../lib/storage-quota'
 import type { PermissionMap, PermissionLevel, ToolCategory } from '../api/mcp/types'
 import { DEFAULT_PERMISSIONS } from '../api/mcp/types'
+import { isRecord, prop, asString } from '../types/json-guards'
 
 /** Per-tool override: takes precedence over the tool's category default. */
 export type ToolOverrides = Record<string, PermissionLevel>
@@ -117,6 +119,7 @@ export const usePermissionStore = create<PermissionState>()(
     }),
     {
       name: 'locally-uncensored-permissions',
+      storage: safeJSONStorage(),
       version: 3,
       migrate: migratePermissionState,
     }
@@ -128,16 +131,21 @@ export const usePermissionStore = create<PermissionState>()(
  *  old default, never a user's choice (the toggle was disabled). Lift exactly
  *  that value to the new default; everything else persists. Exported for
  *  direct unit-testing (the persist internals aren't reachable in vitest). */
-export function migratePermissionState(persisted: any, version: number) {
-  if (version < 2 && persisted?.globalPermissions?.video === 'blocked') {
-    persisted.globalPermissions.video = DEFAULT_PERMISSIONS.video
+export function migratePermissionState(persisted: unknown, version: number): PermissionState {
+  // Foreign at read time — an older build wrote this. A read that throws in a
+  // migrate costs the whole store: zustand abandons hydration and the next
+  // write persists the empty default over the blob.
+  const globals = prop(persisted, 'globalPermissions')
+  if (version < 2 && isRecord(globals) && globals.video === 'blocked') {
+    globals.video = DEFAULT_PERMISSIONS.video
   }
   // v3 (2.6.6 tool merge): the typed shell wrappers are gone, their calls run
   // through shell_execute now. A per-tool override on a retired name would be
   // silently dead, so lift the overrides onto shell_execute. Most restrictive
   // wins: a user who forced confirmation on git_push keeps that protection on
   // the tool the push actually runs through.
-  if (version < 3 && persisted?.perToolOverrides) {
+  const overrides = prop(persisted, 'perToolOverrides')
+  if (version < 3 && isRecord(overrides)) {
     // Frozen copy of the names retired in 2.6.6, NOT imported from
     // builtin-tools: a migration describes the past and must not drift with
     // the live registry (and the import would drag the whole tool module
@@ -148,23 +156,24 @@ export function migratePermissionState(persisted: any, version: number) {
       'system_info', 'process_list', 'get_current_time',
       'shell_execute_background', 'shell_task_status', 'shell_task_kill', 'shell_task_list',
     ]
-    const overrides = persisted.perToolOverrides as Record<string, string>
     const RANK: Record<string, number> = { auto: 0, confirm: 1, blocked: 2 }
     let strictest: string | undefined
     for (const name of RETIRED_V3) {
-      const level = overrides[name]
+      const level = asString(overrides[name])
       if (!level) continue
       delete overrides[name]
       if (strictest === undefined || (RANK[level] ?? 0) > (RANK[strictest] ?? 0)) strictest = level
     }
     if (strictest !== undefined) {
-      const own = overrides['shell_execute']
+      const own = asString(overrides['shell_execute'])
       if (own === undefined || (RANK[strictest] ?? 0) > (RANK[own] ?? 0)) {
         overrides['shell_execute'] = strictest
       }
     }
   }
-  return persisted
+  // zustand types migrate as returning the FULL store, but a blob only ever
+  // carries the partialized slice and `merge` puts the actions back.
+  return persisted as PermissionState
 }
 
 /**

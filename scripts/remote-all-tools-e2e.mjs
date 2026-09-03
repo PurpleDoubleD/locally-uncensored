@@ -16,6 +16,9 @@
  */
 
 import { argv, exit } from 'node:process'
+// Siehe scripts/app-identity.mjs — der Sandkasten-Name trägt auf diesem Branch
+// einen Suffix, ein festes Literal würde hier nichts mehr fangen.
+import { REMOTE_FALLBACK_DIR } from './app-identity.mjs'
 
 function parseArgs() {
   const out = { base: null, code: null, chatId: 'all-tools-e2e' }
@@ -55,7 +58,7 @@ function check(label, ok, detail) {
   else { console.error(`  ✗ ${label}\n      ${detail}`); fail++ }
 }
 
-const NOT_REMOTE = (s) => !String(s || '').replaceAll('\\', '/').includes('agent-workspace/__remote__')
+const NOT_REMOTE = (s) => !String(s || '').replaceAll('\\', '/').includes(REMOTE_FALLBACK_DIR)
 
 async function step(label, fn) {
   console.log(`\n━━ ${label} ━━`)
@@ -86,7 +89,9 @@ async function main() {
   })
 
   // ── 3. file_write — index.html ──
-  let writePath
+  // (Hier stand `let writePath`, ausserhalb des Schritts gehoben, damit ein
+  // spaeterer Schritt den Pfad lesen kann. Den Schritt gibt es nicht; die
+  // Zusicherung ueber den Pfad steht schon in Schritt 3 selbst.)
   await step('3. file_write index.html — start the site build', async () => {
     const w = await tool(base, token, chatId, T('file_write'), {
       path: 'site/index.html',
@@ -96,7 +101,6 @@ async function main() {
     })
     check('file_write status=saved', w?.status === 'saved', JSON.stringify(w))
     check('file_write path NOT in __remote__', NOT_REMOTE(w?.path), w?.path)
-    writePath = w?.path
   })
 
   // ── 4. file_write — style.css ──
@@ -187,7 +191,7 @@ print('manifest written, file count =', len(files))
     const r = await tool(base, token, chatId, T('file_read'), { path: 'manifest.json' })
     check('manifest read', typeof r?.content === 'string', JSON.stringify(r))
     let parsed = null
-    try { parsed = JSON.parse(r.content) } catch (_) {}
+    try { parsed = JSON.parse(r.content) } catch { /* die naechste Zeile prueft genau das */ }
     check('manifest is valid JSON', !!parsed, r?.content?.slice?.(0, 200))
     check('manifest cwd is the override folder',
       parsed && typeof parsed.cwd === 'string' && NOT_REMOTE(parsed.cwd),

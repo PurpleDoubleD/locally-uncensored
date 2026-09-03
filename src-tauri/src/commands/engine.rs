@@ -443,11 +443,7 @@ pub(crate) fn scan_gguf_roots(roots: &[ScanRoot]) -> ScanOutcome {
             continue;
         }
         let mut out = Vec::new();
-        // (dir, base, total) → (part-numbers seen, path of part 1, byte sum).
-        // The directory is part of the key: two unrelated split sets that share
-        // a base name in different subfolders must never merge into one entry.
-        let mut sets: std::collections::HashMap<(PathBuf, String, u32), (Vec<u32>, Option<String>, u64)> =
-            std::collections::HashMap::new();
+        let mut sets = GgufSplitSets::new();
         let mut budget = ScanBudget::new();
         scan_gguf_dir(root.dir, 0, root.max_depth, &mut budget, &mut out, &mut sets);
         for ((_dir, base, total), (mut parts, first_path, size)) in sets {
@@ -499,13 +495,23 @@ pub(crate) const MAX_SCAN_DEPTH: usize = 2;
 /// screenshots), and two levels stop one folder short of exactly that.
 pub(crate) const MAX_CUSTOM_SCAN_DEPTH: usize = 4;
 
+/// Accumulator for multi-part GGUF sets: `(dir, base, total)` maps to
+/// `(part numbers seen, path of part 1, byte sum)`.
+///
+/// The directory is part of the key: two unrelated split sets that share a base
+/// name in different subfolders must never merge into one entry. Named because
+/// the bare type is what `clippy::type_complexity` fires on, and a name says
+/// what the tuples mean better than the tuples do.
+type GgufSplitSets =
+    std::collections::HashMap<(PathBuf, String, u32), (Vec<u32>, Option<String>, u64)>;
+
 fn scan_gguf_dir(
     dir: &Path,
     depth: usize,
     max_depth: usize,
     budget: &mut ScanBudget,
     out: &mut Vec<BundledModel>,
-    sets: &mut std::collections::HashMap<(PathBuf, String, u32), (Vec<u32>, Option<String>, u64)>,
+    sets: &mut GgufSplitSets,
 ) {
     let entries = match std::fs::read_dir(dir) {
         Ok(e) => e,
@@ -589,8 +595,8 @@ fn scan_gguf_dir(
 /// download / scan just works on a fresh box. This is the same path
 /// `detect_model_path("builtin")` returns.
 pub fn builtin_models_dir() -> Result<PathBuf, String> {
-    let base = dirs::data_dir().ok_or("Cannot resolve app data directory")?;
-    let dir = base.join("Locally Uncensored").join("models");
+    dirs::data_dir().ok_or("Cannot resolve app data directory")?;
+    let dir = crate::os_paths::builtin_models_dir();
     std::fs::create_dir_all(&dir)
         .map_err(|e| format!("Create LU Engine models folder: {}", os_error::english(&e)))?;
     Ok(dir)
@@ -1258,8 +1264,16 @@ fn start_bundled_engine_blocking(
     // cache for memory — llama-server with `-ngl 999` loses as a CUDA OOM
     // (RTX 5080 field report: ACE-Step → chat = crash until app restart). Ask
     // ComfyUI to drop its cache first; best-effort no-op when it isn't running.
-    if crate::commands::process::free_comfyui_memory() {
-        println!("[Engine] asked ComfyUI to free VRAM before engine start");
+    // T-65: the address comes from AppState (user-configured port/host), and a
+    // ComfyUI that is not this machine's is reported as such instead of
+    // reading like an idle one.
+    match crate::commands::process::free_comfyui_memory(state) {
+        r if r.released() => println!("[Engine] asked ComfyUI to free VRAM before engine start"),
+        r => {
+            if let Some((target, why)) = r.not_responsible() {
+                println!("[Engine] did not free ComfyUI VRAM ({target}) — {why}");
+            }
+        }
     }
 
     // Ollama fights for the same VRAM and, unlike ComfyUI, its freshly-used
@@ -1267,8 +1281,15 @@ fn start_bundled_engine_blocking(
     // just-active 14B loaded, this engine's own load crawled through paging and
     // blew the health budget (live repro 2026-07-31; an IDLE model gets evicted
     // fine). Evict via keep_alive:0 — Ollama reloads lazily on its next use.
-    if crate::commands::process::offload_ollama_loaded_models() {
-        println!("[Engine] asked Ollama to evict loaded models before engine start");
+    match crate::commands::process::offload_ollama_loaded_models(state) {
+        r if r.released() => {
+            println!("[Engine] asked Ollama to evict loaded models before engine start")
+        }
+        r => {
+            if let Some((target, why)) = r.not_responsible() {
+                println!("[Engine] did not evict Ollama models ({target}) — {why}");
+            }
+        }
     }
 
     let binary = resolve_engine_binary(app).ok_or_else(|| {
@@ -1451,7 +1472,7 @@ fn spawn_engine_attempt(
         args: args.to_vec(),
     });
 
-    let outcome = wait_for_health_or_exit(&**state, port, health_timeout_for(model_path));
+    let outcome = wait_for_health_or_exit(state, port, health_timeout_for(model_path));
     if matches!(outcome, HealthWait::Ready) {
         // Health said OK, but was it OUR child that answered? A spawn that
         // loses the port to an orphaned llama-server (left behind by a crashed
@@ -3020,15 +3041,18 @@ mod tests {
     }
 
     #[test]
-    #[cfg_attr(target_os = "windows", ignore = "uses sh")]
     fn a_child_that_dies_on_start_is_reported_at_once_and_not_after_the_budget() {
         // GH #118: the health wait watched only the port, so an engine that
         // exited in the first second (a missing runtime library, a GPU backend
         // that will not initialise) still burned the whole budget before the
         // user was told anything. The budget here is 30s; the answer has to
         // arrive in a fraction of that.
+        //
+        // The shell is resolved, not spelled `sh`: on Windows that name is not
+        // on PATH at all and a bare `bash` is the WSL alias stub. See
+        // `test_support::posix_shell`.
         let state = AppState::new();
-        let child = std::process::Command::new("sh")
+        let child = std::process::Command::new(crate::test_support::posix_shell())
             .args(["-c", "exit 3"])
             .stdin(Stdio::null())
             .stdout(Stdio::null())
@@ -3455,14 +3479,12 @@ mod tests {
     }
 
     #[test]
-    #[cfg_attr(target_os = "windows", ignore = "uses sleep")]
     fn a_child_that_is_still_loading_is_left_alone_until_the_budget_ends() {
         // Negative control for the check above: a LIVE child must still get
         // its full budget, or a big GGUF on a cold disk would be declared dead
         // while it is only slow (ENG-4).
         let state = AppState::new();
-        let child = std::process::Command::new("sleep")
-            .arg("30")
+        let child = crate::test_support::sleeper(30)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())

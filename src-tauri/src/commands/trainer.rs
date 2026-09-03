@@ -82,7 +82,7 @@ fn free_stem(dir: &Path, base: &str, ext: &str, bytes: &[u8]) -> String {
 }
 
 fn config_json_path() -> Option<PathBuf> {
-    dirs::config_dir().map(|d| d.join("locally-uncensored").join("config.json"))
+    dirs::config_dir().map(|_| crate::os_paths::app_config_json())
 }
 
 fn read_config_value(key: &str) -> Option<String> {
@@ -535,12 +535,12 @@ const PEP668_NEXT_STEP: &str = "This Python refuses installs outside a virtual e
 /// The old code offered exactly one, "check that you are online and that the
 /// drive has room", for every failure class there is.
 pub(crate) fn next_step_for_log(log: &str, fallback: &'static str, os: &str) -> &'static str {
-    use crate::commands::install::PipFailureKind as K;
+    use crate::commands::install::pip::PipFailureKind as K;
     let windows = os == "windows";
     if out_of_disk(log) {
         return DISK_NEXT_STEP;
     }
-    match crate::commands::install::pip_failure_kind(log) {
+    match crate::commands::install::pip::pip_failure_kind(log) {
         K::MissingRuntimeLibrary => {
             if windows { WINDOWS_REDIST_NEXT_STEP } else { UNIX_LIBRARY_NEXT_STEP }
         }
@@ -631,9 +631,7 @@ fn preflight_verdict(exit_ok: bool, stdout: &str, stderr: &str, gpu: Option<&str
     if !exit_ok || !stdout.contains("TORCH_OK") {
         let tail = stderr
             .lines()
-            .map(str::trim)
-            .filter(|l| !l.is_empty())
-            .next_back()
+            .map(str::trim).rfind(|l| !l.is_empty())
             .unwrap_or("no detail from python")
             .to_string();
         return Preflight::TorchBroken(tail);
@@ -1219,6 +1217,10 @@ pub fn start_character_training(
     let cancel = state.trainer_cancel.clone();
     let pid_slot = state.trainer_process.clone();
     let env_broken = state.trainer_env_broken.clone();
+    // T-65: the training thread outlives this `State` borrow, so resolve
+    // ComfyUI's ACTUAL address here (user-configured host/port from AppState,
+    // not a hardcoded localhost:8188) and move the verdict in.
+    let comfy_vram_target = crate::commands::process::comfy_vram_target(state.inner());
     cancel.store(false, Ordering::SeqCst);
 
     std::thread::spawn(move || {
@@ -1360,8 +1362,24 @@ pub fn start_character_training(
         // 3) the train itself — documented 12 GB combo: fp8 base + block swap
         // + gradient checkpointing + 8-bit optimizer. ComfyUI's model cache
         // would eat the same VRAM the trainer needs — ask it to let go first.
-        if crate::commands::process::free_comfyui_memory() {
-            push_log(&run, "Freed ComfyUI's cached models to make room for training.");
+        match &comfy_vram_target {
+            Ok(base) => {
+                let outcome = crate::commands::process::free_comfyui_memory_at(base);
+                if outcome.released() {
+                    push_log(&run, "Freed ComfyUI's cached models to make room for training.");
+                } else if let Some((target, why)) = outcome.not_responsible() {
+                    // Used to be a silent `false`. On a 12 GB card the user is
+                    // about to hit CUDA OOM, and "LU could not ask" is the one
+                    // sentence that explains it.
+                    push_log(
+                        &run,
+                        &format!("Did not free ComfyUI's VRAM ({target}): {why}"),
+                    );
+                }
+            }
+            Err((target, why)) => {
+                push_log(&run, &format!("Did not free ComfyUI's VRAM ({target}): {why}"));
+            }
         }
         set_status(&run, "running", &format!("Step 3/4: Training ({steps} steps). This runs for a while, live log below..."));
         let accelerate = {
@@ -2053,17 +2071,24 @@ mod shutdown_tests {
         assert_eq!(venv_create_args(VenvAction::Keep), ["-m", "venv"]);
     }
 
+    /// The probe directory is per-process now (`test_dir` puts the pid and the
+    /// thread id in the name and sweeps up on `Drop`). It used to be the FIXED
+    /// `<temp>/lu-trainer-venv-probe/python-not-an-interpreter`, deleted at the
+    /// end of the test — so a concurrent copy of this binary removed the file
+    /// between this copy's `write` and its `exists`. Measured on 01.09.2026
+    /// under six concurrent copies of the suite, ten rounds: 1 of 60 runs, and
+    /// the message it failed with — "the file is there, which is all the old
+    /// check asked" — pointed at the production code rather than at the
+    /// fixture.
     #[test]
     fn presence_alone_never_counts_as_a_working_interpreter() {
         use super::python_starts;
-        let dir = std::env::temp_dir().join("lu-trainer-venv-probe");
-        let _ = std::fs::create_dir_all(&dir);
+        let dir = crate::os_paths::test_dir("trainer-venv-probe");
         let fake = dir.join("python-not-an-interpreter");
         std::fs::write(&fake, b"pyvenv.cfg points at a home that is gone").unwrap();
         assert!(fake.exists(), "the file is there, which is all the old check asked");
         assert!(!python_starts(&fake), "but it does not run, which is the question");
         assert!(!python_starts(&dir.join("nothing-here")));
-        let _ = std::fs::remove_file(&fake);
     }
 
     #[test]

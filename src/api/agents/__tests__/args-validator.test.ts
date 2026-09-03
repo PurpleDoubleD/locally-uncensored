@@ -16,7 +16,8 @@ const strictStringSchema: JsonSchema = {
 
 describe('args-validator — validateToolArgs', () => {
   it('accepts empty schema as advisory (valid)', () => {
-    const r = validateToolArgs({ whatever: 1 }, undefined as any)
+    // Der Parameter ist `JsonSchema | undefined` — der Cast war nie noetig.
+    const r = validateToolArgs({ whatever: 1 }, undefined)
     expect(r.valid).toBe(true)
   })
 
@@ -93,7 +94,9 @@ describe('args-validator — validateToolArgs', () => {
   it('ignores unknown type keywords (advisory-only)', () => {
     const schema: JsonSchema = {
       type: 'object',
-      properties: { x: { type: 'weird-type' as any } },
+      // `type` ist `string | string[]`; auch dieser Cast war nur da, weil die
+      // Index-Signatur `[key: string]: any` den Typ der Deklaration verdeckt hat.
+      properties: { x: { type: 'weird-type' } },
       required: [],
     }
     expect(validateToolArgs({ x: 'anything' }, schema).valid).toBe(true)

@@ -4,9 +4,11 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { ArrowDownToLine, Pause, Play, X, CheckCircle, RotateCcw } from 'lucide-react'
 import { useModels } from '../../hooks/useModels'
 import { useDownloadStore } from '../../stores/downloadStore'
+import { isPermanentDownloadError } from '../../api/discover'
 import { useMlxInstallStore } from '../../stores/mlxInstallStore'
 import { isMlxImageHost } from '../../api/mlx-image'
 import { formatBytes } from '../../lib/formatters'
+import { trayAfterPulse, TRAY_CLOSED, NO_PULSE } from '../../lib/download-tray'
 
 function ProgressBar({ progress }: { progress: number }) {
   return (
@@ -20,7 +22,12 @@ export function DownloadBadge() {
   const { activePulls, pullModel, pausePull, dismissPull } = useModels()
   const comfyDownloads = useDownloadStore(s => s.downloads)
   const bundleMap = useDownloadStore(s => s.bundleMap)
-  const [open, setOpen] = useState(false)
+  // Whether the tray is open, and whether it was the TRAY that opened it —
+  // one value, because the two are only ever decided together. `auto` used
+  // to be a ref written from effects; see the transition block further down
+  // for why both moved out of effects.
+  const [tray, setTray] = useState(TRAY_CLOSED)
+  const open = tray.open
   const ref = useRef<HTMLDivElement>(null)
 
   // Text model entries
@@ -59,25 +66,26 @@ export function DownloadBadge() {
   // Click outside to close
   useEffect(() => {
     const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+      if (ref.current && !ref.current.contains(e.target as Node)) setTray((t) => ({ ...t, open: false }))
     }
     document.addEventListener('mousedown', handler)
     return () => document.removeEventListener('mousedown', handler)
   }, [])
 
-  // Auto-open when a new download starts
-  const autoOpened = useRef(false)
-  useEffect(() => {
-    if (totalActive > 0) { setOpen(true); autoOpened.current = true }
-  }, [totalActive])
-
-  // An auto-opened tray had no way back: cancel the download (or let the last
-  // one finish) and the panel kept hanging over the app reading "No active
-  // downloads" until you happened to click somewhere else. It only closes
-  // itself when it opened itself, so a tray the user opened by hand stays put.
-  useEffect(() => {
-    if (!hasAny && autoOpened.current) { setOpen(false); autoOpened.current = false }
-  }, [hasAny])
+  // The tray opens and closes itself with the downloads; trayAfterPulse
+  // (lib/download-tray) holds the rule and says why. Both halves used to be
+  // effects writing state back into React on every change of the download
+  // picture (React 19 `set-state-in-effect`), one paint too late. The same two
+  // transitions are applied here off the previous render's numbers, in React's
+  // documented "adjust state while rendering" shape: it re-runs this component
+  // and only this component, before anything paints.
+  const [seen, setSeen] = useState(NO_PULSE)
+  if (seen.active !== totalActive || seen.any !== hasAny) {
+    const now = { active: totalActive, any: hasAny }
+    setSeen(now)
+    const next = trayAfterPulse(tray, seen, now)
+    if (next !== tray) setTray(next)
+  }
 
   // Self-heal polling: comfy download progress comes from a polled Rust/bridge
   // endpoint, and polling was only ever kicked off from the Discover page. So a
@@ -97,7 +105,7 @@ export function DownloadBadge() {
     <div ref={ref} className="relative">
       {/* Icon trigger */}
       <button
-        onClick={() => { setOpen(!open); autoOpened.current = false }}
+        onClick={() => setTray({ open: !open, auto: false })}
         className={`relative p-1 rounded-md transition-colors ${
           hasAny
             ? 'text-blue-400 hover:bg-blue-500/10'
@@ -180,7 +188,7 @@ export function DownloadBadge() {
                         {state.progress.total && state.progress.completed !== undefined && (
                           <>
                             <ProgressBar progress={prog} />
-                            <p className="text-[0.55rem] text-gray-500 mt-0.5">
+                            <p className="text-[0.55rem] text-gray-500 mt-0.5 lu-hud-num">
                               {formatBytes(state.progress.completed || 0)} / {formatBytes(state.progress.total)}
                               {prog > 0 && <span className="ml-1.5 text-blue-400">{Math.round(prog)}%</span>}
                             </p>
@@ -200,11 +208,28 @@ export function DownloadBadge() {
                 const bundleProg = totalBytes > 0 ? (doneBytes / totalBytes) * 100 : 0
                 const bundleSpeed = files.reduce((s, f) => s + (f.d.status === 'downloading' ? (f.d.speed || 0) : 0), 0)
                 const isBundle = files.length > 1
-                // The reason a download stopped, in words. A refused transfer
-                // used to show a Retry button and nothing else, so the CivitAI
-                // 400 that only ever needed an API key looked like a dead link
-                // (goonerforporn, Discord #bug-reports 2026-08-28).
-                const failure = files.find(f => f.d.status === 'error')?.d.error
+                const failed = files.filter(f => f.d.status === 'error')
+                // Der Grund, aus dem ein Download stehen blieb, in Worten. Eine
+                // abgelehnte Uebertragung zeigte frueher nur einen Retry-Knopf,
+                // also sah die CivitAI-Absage, der bloss ein API-Key fehlte, wie
+                // ein toter Link aus (goonerforporn, Discord #bug-reports,
+                // 28.08.2026). Deshalb bekommt JEDE Absage mit Begruendung ihre
+                // Zeile, nicht nur die endgueltige. Gleiche Begruendungen in
+                // einem Bundle werden zu einer Zeile zusammengelegt.
+                const reasons = Array.from(new Set(failed.map(f => f.d.error).filter((e): e is string => !!e)))
+                // Ein umbenanntes, gesperrtes oder geloeschtes Repository
+                // antwortet jedes Mal gleich, Retry ist da kein Ausweg, sondern
+                // eine Schleife ohne Ausgang. Den Knopf bekommen nur die
+                // Fehlschlaege, die beim naechsten Mal anders ausgehen koennen,
+                // die uebrigen behalten die Begruendung, die sagt was stattdessen
+                // zu tun ist.
+                const retryable = failed.filter(f => !isPermanentDownloadError(f.d.error))
+                // Bytes auf der Platte, die auf den Rest warten: eine pausierte
+                // Uebertragung, oder ein Fragment, das diese Sitzung aus einem
+                // frueheren Lauf uebernommen hat. Ohne ein Resume an dieser
+                // Stelle kamen diese Dateien gar nicht mehr weiter.
+                const resumable = files.filter(f => f.d.status === 'paused')
+                const anyActive = files.some(f => f.d.status === 'downloading' || f.d.status === 'connecting' || f.d.status === 'pausing')
 
                 return (
                   <div key={bundleName} className="px-3 py-2 border-t border-gray-100 dark:border-white/[0.04] first:border-t-0">
@@ -212,8 +237,11 @@ export function DownloadBadge() {
                     <div className="flex items-center justify-between gap-2 mb-1">
                       <p className={`${isBundle ? 'text-[0.7rem] font-medium' : 'text-[0.7rem] font-mono'} text-gray-700 dark:text-gray-300 truncate`}>{bundleName}</p>
                       <div className="flex items-center gap-0.5 shrink-0">
-                        {files.some(f => f.d.status === 'error') && (
-                          <button onClick={() => files.filter(f => f.d.status === 'error').forEach(f => useDownloadStore.getState().retry(f.id))} className="p-0.5 rounded hover:bg-red-500/20 text-red-400 hover:text-red-300 transition-colors" title="Retry failed"><RotateCcw size={11} /></button>
+                        {resumable.length > 0 && !anyActive && (
+                          <button onClick={() => resumable.forEach(f => useDownloadStore.getState().resume(f.id))} className="p-0.5 rounded hover:bg-white/10 text-gray-500 hover:text-gray-300 transition-colors" title="Resume"><Play size={11} /></button>
+                        )}
+                        {retryable.length > 0 && (
+                          <button onClick={() => retryable.forEach(f => useDownloadStore.getState().retry(f.id))} className="p-0.5 rounded hover:bg-red-500/20 text-red-400 hover:text-red-300 transition-colors" title="Retry failed"><RotateCcw size={11} /></button>
                         )}
                         {allComplete ? (
                           <button onClick={() => files.forEach(f => useDownloadStore.getState().dismiss(f.id))} className="p-0.5 rounded hover:bg-white/10 text-gray-500 hover:text-gray-300 transition-colors" title="Dismiss"><X size={11} /></button>
@@ -229,15 +257,15 @@ export function DownloadBadge() {
                       <>
                         {totalBytes > 0 && <ProgressBar progress={bundleProg} />}
                         <div className="flex items-center justify-between mt-0.5">
-                          <p className="text-[0.55rem] text-gray-500">
+                          <p className="text-[0.55rem] text-gray-500 lu-hud-num">
                             {totalBytes > 0 ? `${formatBytes(doneBytes)} / ${formatBytes(totalBytes)}` : 'Starting...'}
                             {bundleProg > 0 && <span className="ml-1.5 text-blue-400">{Math.round(bundleProg)}%</span>}
                             {bundleSpeed > 0 && <span className="ml-1.5 text-gray-400">{formatBytes(bundleSpeed)}/s</span>}
                           </p>
                           {/* Retry all failed files in bundle */}
-                          {files.some(f => f.d.status === 'error') && (
+                          {retryable.length > 0 && (
                             <button
-                              onClick={() => files.filter(f => f.d.status === 'error').forEach(f => useDownloadStore.getState().retry(f.id))}
+                              onClick={() => retryable.forEach(f => useDownloadStore.getState().retry(f.id))}
                               className="flex items-center gap-1 text-[0.55rem] text-red-400 hover:text-red-300 transition-colors"
                               title="Retry failed downloads"
                             >
@@ -246,19 +274,27 @@ export function DownloadBadge() {
                             </button>
                           )}
                         </div>
-                        {failure && (
-                          <p className="mt-1 text-[0.55rem] text-red-400 leading-relaxed break-words whitespace-pre-line">
-                            {failure}
+                        {/* Eine tote Adresse hat keinen Knopf, also muss sie die
+                            Begruendung haben: was passiert ist und was
+                            stattdessen zu tun ist. Eine Absage, die man wirklich
+                            beheben kann, bekommt sie ebenso, sonst steht neben
+                            dem Retry-Knopf wieder nur eine nackte Zahl. */}
+                        {reasons.map(reason => (
+                          <p key={reason} className="mt-1 text-[0.55rem] text-red-400 leading-relaxed break-words whitespace-pre-line">
+                            {reason}
                           </p>
-                        )}
+                        ))}
                         {/* Individual file rows */}
                         {isBundle && (
                           <div className="mt-1.5 space-y-0.5">
                             {files.map(({ id, d }) => (
                               <div key={id} className="flex items-center justify-between text-[0.55rem] text-gray-500">
                                 <span className="truncate flex-1 font-mono">{d.filename || id}</span>
-                                <span className="shrink-0 ml-2 flex items-center gap-1">
+                                <span className="shrink-0 ml-2 flex items-center gap-1 lu-hud-num">
                                   {d.status === 'complete' ? <span className="text-green-400">Done</span>
+                                    : d.status === 'error' && isPermanentDownloadError(d.error) ? (
+                                      <span className="text-red-400" title={d.error}>Unavailable</span>
+                                    )
                                     : d.status === 'error' ? (
                                       <button
                                         onClick={() => useDownloadStore.getState().retry(id)}
@@ -269,7 +305,16 @@ export function DownloadBadge() {
                                         <span>Retry</span>
                                       </button>
                                     )
-                                    : d.status === 'paused' ? <span className="text-yellow-400">Paused</span>
+                                    : d.status === 'paused' ? (
+                                      <button
+                                        onClick={() => useDownloadStore.getState().resume(id)}
+                                        className="flex items-center gap-0.5 text-yellow-400 hover:text-yellow-300 transition-colors"
+                                        title="Resume this download"
+                                      >
+                                        <Play size={8} />
+                                        <span>Resume</span>
+                                      </button>
+                                    )
                                     : d.total > 0 ? <>{Math.round((d.progress / d.total) * 100)}%{d.speed > 0 && <span className="ml-1 text-gray-400">{formatBytes(d.speed)}/s</span>}</>
                                     : d.status === 'connecting' ? 'Connecting' : '...'}
                                 </span>
@@ -301,7 +346,7 @@ export function DownloadBadge() {
                     ) : e.total > 0 ? (
                       <>
                         <ProgressBar progress={prog} />
-                        <p className="text-[0.55rem] text-gray-500 mt-0.5">
+                        <p className="text-[0.55rem] text-gray-500 mt-0.5 lu-hud-num">
                           {formatBytes(e.progress)} / {formatBytes(e.total)}
                           {prog > 0 && <span className="ml-1.5 text-blue-400">{Math.round(prog)}%</span>}
                           {e.speed > 0 && <span className="ml-1.5 text-gray-400">{formatBytes(e.speed)}/s</span>}

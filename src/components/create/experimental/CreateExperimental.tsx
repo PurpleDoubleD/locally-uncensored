@@ -19,6 +19,7 @@ import { WorkflowsModal } from '../WorkflowsModal'
 import { MaskEditor } from './MaskEditor'
 import { VhsInstallModal } from './VhsInstallModal'
 import { INTENT_MAP, isIntentAvailable } from './intents'
+import { stageShowsSetupCard, laneModelCount } from './stageGate'
 import { isMlxImageHost } from '../../../api/mlx-image'
 import { fetchGalleryItemBlob } from './galleryUrl'
 import { loadImageRef } from './loadImage'
@@ -46,7 +47,12 @@ function CreateExperimentalInner() {
   const retentionNoticeSeen = useCloudNoticeStore((s) => s.retentionNoticeSeen)
   const setRetentionNoticeSeen = useCloudNoticeStore((s) => s.setRetentionNoticeSeen)
   const setManagerNoticeSeen = useWorkflowStore((s) => s.setManagerNoticeSeen)
-  const { modelLoadError, connected, comfyOnCpu, comfyCpuBanner } = useCreateExp()
+  const imageModelList = useCreateStore((s) => s.imageModelList)
+  const videoModelList = useCreateStore((s) => s.videoModelList)
+  const audioModelList = useCreateStore((s) => s.audioModelList)
+  const lipsyncModelList = useCreateStore((s) => s.lipsyncModelList)
+  const motionModelList = useCreateStore((s) => s.motionModelList)
+  const { modelLoadError, connected, modelsLoaded, mlxMissing, comfyOnCpu, comfyCpuBanner } = useCreateExp()
 
   const [shownId, setShownId] = useState<string | null>(null)
   const [advancedOpen, setAdvancedOpen] = useState(false)
@@ -150,7 +156,29 @@ function CreateExperimentalInner() {
   useEffect(() => { setShownId(null) }, [intent])
 
   const displayed = shownId ? gallery.find((g) => g.id === shownId) : undefined
-  const banner = error ?? modelLoadError
+
+  // Ein Zustand, eine Stimme. `modelLoadError` beschreibt genau die Lage, fuer
+  // die die Buehne darunter die Einrichtungskarte zeigt — mit demselben Satz
+  // (Mac) oder mit einem, der in die andere Richtung zeigt (Windows: „Start it
+  // from Settings or wait for auto-start" ueber einem Knopf, der es selbst
+  // erledigt). Solange die Karte da ist, schweigt der Balken. Die Begruendung
+  // mit beiden Wortlauten steht in ./stageGate.
+  //
+  // `error` ist davon ausgenommen: das sind Laufzeitfehler eines konkreten
+  // Laufs, die die Karte nicht erklaert — und nur sie tragen das
+  // Schliesskreuz.
+  const setupCardOwnsStage = stageShowsSetupCard({
+    backend,
+    requiresModels: INTENT_MAP[intent].requiresModels,
+    mlxMissing,
+    connected,
+    modelsLoaded,
+    laneModelCount: laneModelCount(intent, INTENT_MAP[intent].requiresModels, {
+      image: imageModelList, video: videoModelList, audio: audioModelList,
+      lipsync: lipsyncModelList, motion: motionModelList,
+    }),
+  })
+  const banner = error ?? (setupCardOwnsStage ? null : modelLoadError)
 
   // "Edit with mask" on a finished image force-sets the 'edit' intent. On the
   // MLX Mac that lane does not exist (no ComfyUI inpaint nodes, and MLX
@@ -193,7 +221,7 @@ function CreateExperimentalInner() {
   }, [intent])
 
   return (
-    <div className="relative h-full w-full flex flex-col bg-white dark:bg-[#141414] text-gray-200 overflow-hidden">
+    <div className="relative h-full w-full flex flex-col bg-white dark:bg-[#141414] text-gray-900 dark:text-gray-200 overflow-hidden">
       <IntentBar />
 
       <AnimatePresence>

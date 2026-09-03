@@ -8,7 +8,21 @@
 import { useModelStore } from '../stores/modelStore'
 import { useSettingsStore } from '../stores/settingsStore'
 import { useMemoryStore } from '../stores/memoryStore'
-import { getOllamaTools, executeAgentTool } from '../api/tool-registry'
+// Audit W-T2: hier stand `from '../api/tool-registry'` — der als @deprecated
+// markierte Kompatibilitäts-Shim. Der zieht das ganze MCP-Barrel herein
+// (api/mcp/index.ts, das registerBuiltinTools ausführt), und weil
+// builtin-tools.ts umgekehrt diese Engine für sein run_workflow-Tool braucht,
+// schloss sich der Kreis: mcp/index → builtin-tools → workflow-engine →
+// tool-registry → mcp/index.
+//
+// Die Engine ist kein Altlast-Aufrufer. Sie braucht die Registry selbst, nicht
+// den Kompositions-Einstiegspunkt, der die Builtins einhängt — also importiert
+// sie jetzt genau die: das Registry-Modul und die Berechtigungs-Voreinstellung.
+// Beides sind generische Module ohne Rückkante. Der Shim bleibt für seine
+// verbliebenen Aufrufer bestehen.
+import { toolRegistry } from '../api/mcp/tool-registry'
+import { DEFAULT_PERMISSIONS } from '../api/mcp/types'
+import type { ToolArgs } from '../api/mcp/types'
 import { streamProviderTurn } from './provider-stream'
 import { settleThinking } from './thinking-stripper'
 import { buildHermesToolPrompt, parseHermesToolCalls, stripToolCallTags, hasToolCallTags } from '../api/hermes-tool-calling'
@@ -240,7 +254,7 @@ export class WorkflowEngine {
       }
     } else {
       // With tools
-      const tools: ToolDefinition[] = getOllamaTools()
+      const tools: ToolDefinition[] = toolRegistry.toOllamaTools(DEFAULT_PERMISSIONS)
       const allowedTools = step.allowedTools
         ? tools.filter(t => step.allowedTools!.includes(t.function.name))
         : tools
@@ -256,13 +270,18 @@ export class WorkflowEngine {
 
         // Execute any tool calls
         for (const tc of turn.toolCalls) {
-          const result = await executeAgentTool(tc.function.name, tc.function.arguments)
+          const result = await toolRegistry.execute(tc.function.name, tc.function.arguments)
           output += `\n[Tool: ${tc.function.name}] ${result}`
         }
       } else {
         // Hermes XML
         const hermesSystem = buildHermesToolPrompt(
-          allowedTools.map(t => ({ name: t.function.name, description: t.function.description, parameters: t.function.parameters as any, permission: 'auto' as const }))
+          allowedTools.map(t => ({
+            name: t.function.name,
+            description: t.function.description,
+            parameters: t.function.parameters,
+            permission: 'auto' as const,
+          }))
         )
         const hermesMessages = [{ role: 'system' as const, content: hermesSystem }, ...messages]
         // G32b: through the provider, not Ollama's /api/chat. hermes_xml is
@@ -285,7 +304,7 @@ export class WorkflowEngine {
           const toolCalls = parseHermesToolCalls(rawContent)
           output = stripToolCallTags(rawContent)
           for (const tc of toolCalls) {
-            const result = await executeAgentTool(tc.name, tc.arguments)
+            const result = await toolRegistry.execute(tc.name, tc.arguments)
             output += `\n[Tool: ${tc.name}] ${result}`
           }
         } else {
@@ -317,14 +336,14 @@ export class WorkflowEngine {
     if (!step.toolName) throw new Error('Tool step missing toolName')
 
     // Build args from static + templates
-    const args: Record<string, any> = { ...(step.toolArgs || {}) }
+    const args: ToolArgs = { ...(step.toolArgs || {}) }
     if (step.toolArgTemplates) {
       for (const [key, template] of Object.entries(step.toolArgTemplates)) {
         args[key] = interpolate(template, this.variables)
       }
     }
 
-    const result = await executeAgentTool(step.toolName, args)
+    const result = await toolRegistry.execute(step.toolName, args)
     const isError = result.startsWith('Error:')
 
     return {

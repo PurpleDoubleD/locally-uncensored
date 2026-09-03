@@ -16,9 +16,17 @@
  * prompt and the original task, and the run answered "I'm ready to receive the
  * task" mid-loop. That is the documented mobile task-forgetting.
  *
- * These tests run the SHIPPED code: the helpers are cut out of remote.rs and
- * evaluated, so a change to the served page changes what runs here. Structural
- * assertions alone would have passed against a helper nobody called.
+ * ── 01.09.2026 (T-75): these helpers are now imported, not cut out ──
+ *
+ * Until today this file read src-tauri/src/commands/remote.rs, found the
+ * 2 964-line Rust string the mobile page used to live in, sliced the helper
+ * block out of it with two indexOf calls and ran it through `new Function`.
+ * It did run the shipped code, which is why it was worth keeping — but it
+ * depended on two comment lines inside a Rust literal keeping their exact
+ * wording, and nothing said so.
+ *
+ * The client is real source now (mobile-client/), so the import below is the
+ * shipped file. Delete an export from agent-core.js and this stops compiling.
  *
  * Run: npx vitest run src/api/__tests__/mobile-context-decay.test.ts
  */
@@ -26,54 +34,35 @@ import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { DECAY_RESULT_CHARS, RESTORE_RESULT_CHARS, DECAY_AFTER_ITERATIONS } from '../../lib/context-decay'
-
-const REMOTE_RS = readFileSync(
-  resolve(__dirname, '..', '..', '..', 'src-tauri', 'src', 'commands', 'remote.rs'),
-  'utf8',
-)
-
-/**
- * ONLY the page a phone receives: the raw string inside mobile_landing.
- *
- * Searching the whole file is a trap, and it caught this test first: the Rust
- * guards at the bottom of remote.rs quote the very lines asserted below, so
- * deleting `iter:iter` from the real push left the assertion matching the Rust
- * test's copy of it and everything stayed green.
- */
-const PAGE = (() => {
-  const start = REMOTE_RS.indexOf('async fn mobile_landing')
-  expect(start, 'mobile_landing not found').toBeGreaterThan(-1)
-  const end = REMOTE_RS.indexOf('"#', start)
-  expect(end, 'the page literal never ends').toBeGreaterThan(start)
-  return REMOTE_RS.slice(start, end)
-})()
+import {
+  DECAY_AFTER_ITERATIONS as MOBILE_DECAY_AFTER_ITERATIONS,
+  DECAY_RESULT_CHARS as MOBILE_DECAY_RESULT_CHARS,
+  RESTORE_RESULT_CHARS as MOBILE_RESTORE_RESULT_CHARS,
+  capToolResult,
+  compactApiMessages,
+  decayToolResults,
+  dropOldImages,
+  isDecayedAt,
+  msgChars,
+} from '../../../mobile-client/agent-core.js'
 
 interface Msg { role: string; content?: string; images?: string[]; iter?: number }
-interface MobileHelpers {
-  DECAY_RESULT_CHARS: number
-  RESTORE_RESULT_CHARS: number
-  DECAY_AFTER_ITERATIONS: number
-  IMAGE_KEEP_RECENT: number
-  capToolResult: (text: unknown, maxChars: number) => string
-  isDecayedAt: (text: unknown, budget: number) => boolean
-  decayToolResults: (messages: Msg[], currentIter: number) => Msg[]
-  msgChars: (m: Msg) => number
-  dropOldImages: (messages: Msg[], keepRecent: number) => Msg[]
-  compactApiMessages: (messages: Msg[], budget?: number) => Msg[]
-}
 
-/** Cut the shipped block out of the page and evaluate it. */
-const mobile: MobileHelpers = (() => {
-  const from = PAGE.indexOf('  // ── A1 mobile: age decay for tool results')
-  const to = PAGE.indexOf('  // Convert the flat AGENT_TOOLS array')
-  expect(from, 'A1 mobile block not found in remote.rs').toBeGreaterThan(-1)
-  expect(to, 'end of the compaction block not found').toBeGreaterThan(from)
-  const source = PAGE.slice(from, to)
-  const factory = new Function(`${source}
-    return { DECAY_RESULT_CHARS, RESTORE_RESULT_CHARS, DECAY_AFTER_ITERATIONS, IMAGE_KEEP_RECENT,
-             capToolResult, isDecayedAt, decayToolResults, msgChars, dropOldImages, compactApiMessages };`)
-  return factory() as MobileHelpers
-})()
+/** A file out of mobile-client/, i.e. a file the phone really receives. */
+const clientSource = (name: string) =>
+  readFileSync(resolve(__dirname, '..', '..', '..', 'mobile-client', name), 'utf8')
+
+/**
+ * The agent loop, which is what has to CALL all of this.
+ *
+ * A helper nobody calls proves nothing, and the whole bug was a compaction
+ * that could not reach the message that mattered. Reading client.js rather
+ * than the whole repository is the same precaution as before: the Rust guards
+ * in remote.rs quote these lines, and searching everything let a deleted call
+ * match the guard's copy of itself.
+ */
+const LOOP = clientSource('client.js')
+const CORE = clientSource('agent-core.js')
 
 const big = (n: number, fill = 'x') => fill.repeat(n)
 const hist = (...msgs: Msg[]) => msgs.map((m) => ({ ...m }))
@@ -82,13 +71,13 @@ describe('the relay and the desktop cap by the same numbers', () => {
   it('carries the desktop constants verbatim', () => {
     // Two catalogs of numbers is two behaviours. The desktop module is the
     // source; if it moves, this fails and the relay moves with it.
-    expect(mobile.DECAY_RESULT_CHARS).toBe(DECAY_RESULT_CHARS)
-    expect(mobile.RESTORE_RESULT_CHARS).toBe(RESTORE_RESULT_CHARS)
-    expect(mobile.DECAY_AFTER_ITERATIONS).toBe(DECAY_AFTER_ITERATIONS)
+    expect(MOBILE_DECAY_RESULT_CHARS).toBe(DECAY_RESULT_CHARS)
+    expect(MOBILE_RESTORE_RESULT_CHARS).toBe(RESTORE_RESULT_CHARS)
+    expect(MOBILE_DECAY_AFTER_ITERATIONS).toBe(DECAY_AFTER_ITERATIONS)
   })
 
   it('cuts head-heavy and says how much it dropped', () => {
-    const out = mobile.capToolResult('A'.repeat(3000) + 'B'.repeat(3000), 4000)
+    const out = capToolResult('A'.repeat(3000) + 'B'.repeat(3000), 4000)
     expect(out.length).toBeLessThan(4200)
     expect(out.startsWith('A'.repeat(2640))).toBe(true)
     expect(out.endsWith('B'.repeat(1360))).toBe(true)
@@ -97,15 +86,15 @@ describe('the relay and the desktop cap by the same numbers', () => {
 
   it('leaves a result that already fits completely alone', () => {
     const short = 'exit 0'
-    expect(mobile.capToolResult(short, 4000)).toBe(short)
+    expect(capToolResult(short, 4000)).toBe(short)
   })
 
   it('is idempotent, which is what keeps the prompt prefix still', () => {
-    const once = mobile.capToolResult(big(200000), 4000)
-    const twice = mobile.capToolResult(once, 4000)
+    const once = capToolResult(big(200000), 4000)
+    const twice = capToolResult(once, 4000)
     expect(twice).toBe(once)
-    expect(mobile.isDecayedAt(once, 4000)).toBe(true)
-    expect(mobile.isDecayedAt('plain text', 4000)).toBe(false)
+    expect(isDecayedAt(once, 4000)).toBe(true)
+    expect(isDecayedAt('plain text', 4000)).toBe(false)
   })
 })
 
@@ -123,14 +112,14 @@ describe('a big read stops riding along after two iterations', () => {
     // The binding rule: the model must never edit against content it can no
     // longer see, and what it is working on is what it just fetched.
     const msgs = run()
-    mobile.decayToolResults(msgs, 2)
+    decayToolResults(msgs, 2)
     expect(msgs[3].content!.length).toBe(200000)
     expect(msgs[5].content!.length).toBe(5000)
   })
 
   it('one step later the older result is capped and the newer one is not', () => {
     const msgs = run()
-    mobile.decayToolResults(msgs, 3)
+    decayToolResults(msgs, 3)
     expect(msgs[3].content!.length).toBeLessThan(4200)
     expect(msgs[3].content).toContain('[truncated')
     expect(msgs[5].content!.length).toBe(5000)
@@ -138,15 +127,15 @@ describe('a big read stops riding along after two iterations', () => {
 
   it('a second pass changes nothing, so only one place in the prompt moves per step', () => {
     const msgs = run()
-    mobile.decayToolResults(msgs, 3)
+    decayToolResults(msgs, 3)
     const after = msgs.map((m) => m.content)
-    mobile.decayToolResults(msgs, 3)
+    decayToolResults(msgs, 3)
     expect(msgs.map((m) => m.content)).toEqual(after)
   })
 
   it('restored history with no iteration counts as oldest', () => {
     const msgs = hist({ role: 'tool', content: big(50000) })
-    mobile.decayToolResults(msgs, 1)
+    decayToolResults(msgs, 1)
     expect(msgs[0].content!.length).toBeLessThan(4200)
   })
 
@@ -154,7 +143,7 @@ describe('a big read stops riding along after two iterations', () => {
     const msgs = run()
     // The old behaviour, spelled out: nothing capped it, at any iteration.
     expect(msgs[3].content!.length).toBe(200000)
-    mobile.decayToolResults(msgs, 99)
+    decayToolResults(msgs, 99)
     expect(msgs[3].content!.length).toBeLessThan(4200)
   })
 
@@ -163,7 +152,7 @@ describe('a big read stops riding along after two iterations', () => {
       { role: 'user', content: big(50000), iter: 1 },
       { role: 'assistant', content: big(50000), iter: 1 },
     )
-    mobile.decayToolResults(msgs, 9)
+    decayToolResults(msgs, 9)
     expect(msgs[0].content!.length).toBe(50000)
     expect(msgs[1].content!.length).toBe(50000)
   })
@@ -171,8 +160,8 @@ describe('a big read stops riding along after two iterations', () => {
 
 describe('image bytes are part of the budget now', () => {
   it('msgChars counts the base64, which is the whole payload', () => {
-    expect(mobile.msgChars({ role: 'user', content: 'hi', images: [big(1000), big(500)] })).toBe(1502)
-    expect(mobile.msgChars({ role: 'user', content: 'hi' })).toBe(2)
+    expect(msgChars({ role: 'user', content: 'hi', images: [big(1000), big(500)] })).toBe(1502)
+    expect(msgChars({ role: 'user', content: 'hi' })).toBe(2)
   })
 
   it('only the newest two messages send their pictures again', () => {
@@ -182,7 +171,7 @@ describe('image bytes are part of the budget now', () => {
       { role: 'user', content: 'three', images: [big(100)] },
       { role: 'user', content: 'four', images: [big(100)] },
     )
-    mobile.dropOldImages(msgs, 2)
+    dropOldImages(msgs, 2)
     expect(msgs[0].images).toBeUndefined()
     expect(msgs[1].images).toBeUndefined()
     expect(msgs[2].images).toHaveLength(1)
@@ -205,8 +194,8 @@ describe('image bytes are part of the budget now', () => {
     // error next to the pictures, so the old total said 40 characters.
     const contentOnly = msgs.reduce((a, m) => a + String(m.content || '').length, 0)
     expect(contentOnly).toBeLessThan(100)
-    const out = mobile.compactApiMessages(msgs, 24000)
-    const kept = out.reduce((a, m) => a + mobile.msgChars(m), 0)
+    const out: Msg[] = compactApiMessages(msgs, 24000)
+    const kept = out.reduce((a: number, m: Msg) => a + msgChars(m), 0)
     expect(kept).toBeLessThan(90000)
     expect(out[0].role).toBe('system')
   })
@@ -223,15 +212,15 @@ describe('compaction survives a single result bigger than the whole budget', () 
   )
 
   it('the payload gets under budget instead of being handed over oversized', () => {
-    const out = mobile.compactApiMessages(runaway(), 24000)
-    const total = out.reduce((a, m) => a + mobile.msgChars(m), 0)
+    const out: Msg[] = compactApiMessages(runaway(), 24000)
+    const total = out.reduce((a: number, m: Msg) => a + msgChars(m), 0)
     expect(total).toBeLessThanOrEqual(24000)
   })
 
   it('the system prompt and the task are what survive', () => {
     // The old code returned the four huge messages untouched and Ollama cut
     // the front off, which is exactly these two.
-    const out = mobile.compactApiMessages(runaway(), 24000)
+    const out = compactApiMessages(runaway(), 24000)
     expect(out[0].content).toBe('SYSTEM PROMPT')
     expect(out[1].content).toBe('the task')
   })
@@ -254,7 +243,7 @@ describe('compaction survives a single result bigger than the whole budget', () 
       { role: 'assistant', content: 'done' },
       { role: 'user', content: 'thanks' },
     )
-    expect(mobile.compactApiMessages(msgs, 24000)).toEqual(msgs)
+    expect(compactApiMessages(msgs, 24000)).toEqual(msgs)
   })
 })
 
@@ -262,33 +251,33 @@ describe('the loop actually calls all of it', () => {
   // A helper nobody calls is a helper that proves nothing, and the whole bug
   // was a compaction that could not reach the message that mattered.
   it('the observation push carries its iteration', () => {
-    expect(PAGE).toMatch(/apiMessages\.push\(\{role:'tool', content:obs, iter:iter\}\)/)
-    expect(PAGE).toMatch(/apiMessages\.push\(\{role:'tool', content:'Error: '\+errMsg, iter:iter\}\)/)
+    expect(LOOP).toMatch(/apiMessages\.push\(\{role:'tool', content:obs, iter:iter\}\)/)
+    expect(LOOP).toMatch(/apiMessages\.push\(\{role:'tool', content:'Error: '\+errMsg, iter:iter\}\)/)
   })
 
   it('decay runs before compaction, on every step', () => {
     // Anchored at the start of a line so a commented-out call cannot pass.
     // The first version of this test matched the substring and stayed green
     // with the call disabled, which is the failure mode a guard is for.
-    const decayAt = PAGE.search(/\n[ \t]*decayToolResults\(apiMessages, iter\);/)
-    const compactAt = PAGE.search(/\n[ \t]*apiMessages = compactApiMessages\(apiMessages, 24000\);/)
+    const decayAt = LOOP.search(/\n[ \t]*decayToolResults\(apiMessages, iter\);/)
+    const compactAt = LOOP.search(/\n[ \t]*apiMessages = compactApiMessages\(apiMessages, 24000\);/)
     expect(decayAt).toBeGreaterThan(-1)
     expect(compactAt).toBeGreaterThan(decayAt)
   })
 
   it('the compaction really drops the old images, it does not just define how', () => {
-    expect(PAGE).toMatch(/\n[ \t]*dropOldImages\(messages, IMAGE_KEEP_RECENT\);/)
-    expect(PAGE).toMatch(/\n[ \t]*if\(totalChars\(messages\) <= budget\) return messages;/)
+    expect(CORE).toMatch(/\n[ \t]*dropOldImages\(messages, IMAGE_KEEP_RECENT\);/)
+    expect(CORE).toMatch(/\n[ \t]*if\(totalChars\(messages\) <= budget\) return messages;/)
   })
 
   it('a result bigger than the budget is capped rather than handed over whole', () => {
     // The rungs are the last line of defence, and they are easy to delete by
     // accident because nothing in the ordinary path reaches them.
-    expect(PAGE).toMatch(/var rungs = \[DECAY_RESULT_CHARS, RESTORE_RESULT_CHARS\];/)
+    expect(CORE).toMatch(/var rungs = \[DECAY_RESULT_CHARS, RESTORE_RESULT_CHARS\];/)
   })
 
   it('restored tool history is capped at the tighter budget when it was never capped', () => {
-    expect(PAGE).toMatch(
+    expect(LOOP).toMatch(
       /if\(m\.role === 'tool' && !isDecayedAt\(content, DECAY_RESULT_CHARS\)\)\{\s*\n\s*content = capToolResult\(content, RESTORE_RESULT_CHARS\);/,
     )
   })

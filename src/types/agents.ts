@@ -1,3 +1,5 @@
+import type { ToolArgs } from '../api/mcp/types';
+
 export type AgentStatus =
   | "idle"
   | "planning"
@@ -37,7 +39,10 @@ export interface Tool {
 export interface ToolCall {
   id: string;
   tool: ToolName;
-  args: Record<string, any>;
+  /* Was `Record<string, any>` — same story as agent-mode.ts: this is ToolArgs,
+     and the guards were already doing the narrowing the `any` pretended to
+     make unnecessary. */
+  args: ToolArgs;
   result?: string;
   error?: string;
   status:

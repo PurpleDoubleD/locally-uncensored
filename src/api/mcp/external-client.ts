@@ -5,22 +5,157 @@
  * and communicate via stdin/stdout JSON-RPC 2.0.
  */
 
-import type { MCPToolDefinition, MCPServerConfig } from './types'
+import type { Child } from '@tauri-apps/plugin-shell'
+import type { MCPToolDefinition, MCPServerConfig, ToolArgs } from './types'
 import { log } from '../../lib/logger'
+import { isTauri } from '../backend'
+import { isRecord, prop, asString, asNumber, asRecordArray, errorText } from '../../types/json-guards'
 
-// JSON-RPC message types
+// ── JSON-RPC message types ──────────────────────────────────────
+//
+// Everything arriving on stdout was written by a THIRD-PARTY process. The
+// request side we build ourselves and can type exactly; the response side is
+// `unknown` until `parseJsonRpcResponse` below has looked at it.
+
 interface JsonRpcRequest {
   jsonrpc: '2.0'
   id: number
   method: string
-  params?: any
+  params?: unknown
 }
 
 interface JsonRpcResponse {
   jsonrpc: '2.0'
-  id: number
-  result?: any
-  error?: { code: number; message: string; data?: any }
+  /** Absent on a notification — the server may talk without being asked. */
+  id?: number
+  result?: unknown
+  error?: { code: number; message: string; data?: unknown }
+}
+
+/**
+ * Human-readable text for whatever a server put in `error`.
+ *
+ * The spec says an object with a `message`; real servers also send a bare
+ * string, and one sends a number. Since this text is the ONLY thing the user
+ * ever learns about the failure, a non-conforming value is rendered rather
+ * than discarded — that is strictly better than the `Error: undefined` the
+ * pre-typing code produced for exactly these lines.
+ */
+function jsonRpcErrorMessage(raw: unknown): string {
+  if (isRecord(raw)) {
+    const msg = asString(raw.message)
+    if (msg) return msg
+  }
+  return errorText(raw) || 'MCP server reported an error'
+}
+
+/**
+ * Narrow one parsed stdout line to a JSON-RPC response, or give up.
+ *
+ * Only the fields this client actually reads are required to be well-formed:
+ * an `id` that can address a pending request, and an `error` — which is
+ * honoured whenever it is PRESENT, whatever its shape. That is the load-bearing
+ * rule here: a server that answers `"error": "boom"` has failed, and treating
+ * the line as anything but a rejection would resolve the pending request with
+ * `undefined` and tell the model the tool ran. Only `undefined`/`null` — i.e.
+ * no error at all — is a success.
+ *
+ * Anything that is not a record, or carries no usable `id`, is a notification
+ * or noise and is ignored.
+ */
+function parseJsonRpcResponse(v: unknown): JsonRpcResponse | null {
+  if (!isRecord(v)) return null
+  const id = asNumber(v.id)
+  const rawError = v.error
+  let error: JsonRpcResponse['error']
+  if (rawError != null) {
+    error = {
+      code: (isRecord(rawError) ? asNumber(rawError.code) : undefined) ?? 0,
+      message: jsonRpcErrorMessage(rawError),
+      data: isRecord(rawError) ? rawError.data : rawError,
+    }
+  }
+  return { jsonrpc: '2.0', id, result: v.result, error }
+}
+
+/**
+ * Does this look like the JSON-Schema object a tool's `inputSchema` must be?
+ *
+ * Checked at the boundary: it is an object, its `type` says `'object'`, its
+ * `properties` is an object, and `required` — when present — is an array of
+ * strings. The property schemas INSIDE are deliberately not re-validated:
+ * `inputSchema` is forwarded verbatim to the model as the tool's `parameters`,
+ * and a real MCP server may legitimately use `anyOf` / `oneOf` / `$ref`, which
+ * `JSONSchemaProp` does not model. Rewriting those would change what the model
+ * is told the tool takes; dropping them would be worse.
+ *
+ * A server that sends a string, an array or a `properties: []` there gets the
+ * empty schema below instead — previously that value went straight into the
+ * prompt.
+ */
+function isToolInputSchema(v: unknown): v is MCPToolDefinition['inputSchema'] {
+  if (!isRecord(v)) return false
+  if (v.type !== 'object') return false
+  if (!isRecord(v.properties)) return false
+  if (v.required !== undefined
+      && !(Array.isArray(v.required) && v.required.every((r) => typeof r === 'string'))) return false
+  return true
+}
+
+/** The schema a tool gets when the server did not send a usable one. */
+const EMPTY_INPUT_SCHEMA: MCPToolDefinition['inputSchema'] = {
+  type: 'object',
+  properties: {},
+  required: [],
+}
+
+/**
+ * Every client that currently owns a live server process (T-53).
+ *
+ * The only other place a connected client was ever held is a `Map` private to
+ * `components/settings/MCPServerSettings.tsx:9`. That map dies with the module
+ * — a webview reload empties it — and nothing outside that component could
+ * ever reach it, so "disconnect everything" was not expressible anywhere in
+ * the app. The set lives HERE, next to the spawn, on purpose: a client that
+ * starts a process registers itself in the same method that starts it, so a
+ * future second caller of `connect()` cannot forget to enrol. That is the
+ * difference between one path and two.
+ *
+ * Membership is exactly "has a child process": added when `connect()` has a
+ * spawned child, removed by `disconnect()`, by the process's own `close`
+ * event, and on a failed handshake.
+ */
+const liveClients = new Set<MCPExternalClient>()
+
+/** How many external MCP server processes this app currently owns. */
+export function liveExternalServerCount(): number {
+  return liveClients.size
+}
+
+/**
+ * Disconnect every connected external MCP server. The ONE cleanup path —
+ * `api/mcp/shutdown.ts` decides when it runs, this decides what it does.
+ *
+ * Resolves to the number of clients it took down. Never rejects: one server
+ * that will not die must not stop the next one, and the caller is usually a
+ * page-unload handler where a rejection is an unhandled one.
+ *
+ * The catch below is a guarantee, not a currently reachable branch —
+ * `disconnect()` swallows its own `kill()` failure ("Process may already be
+ * dead") and today has no other way to throw. It is here so that the contract
+ * survives a future `disconnect()` that does, and no test claims to exercise
+ * it.
+ */
+export async function disconnectAllExternalServers(): Promise<number> {
+  const clients = [...liveClients]
+  await Promise.all(clients.map(async (c) => {
+    try {
+      await c.disconnect()
+    } catch (err) {
+      log.warn('[MCP] a server did not disconnect cleanly', { err: String(err) })
+    }
+  }))
+  return clients.length
 }
 
 export class MCPExternalClient {
@@ -32,17 +167,41 @@ export class MCPExternalClient {
    * server failed to connect with "Cannot read properties of undefined
    * (reading 'write')".
    */
-  private child: any = null
+  private child: Child | null = null
   private requestId = 0
   private pendingRequests = new Map<number, {
-    resolve: (value: any) => void
+    resolve: (value: unknown) => void
     reject: (error: Error) => void
     timer: ReturnType<typeof setTimeout>
   }>()
   private outputBuffer = ''
   private connected = false
+  /** True while OUR disconnect() is taking the process down, so the close
+   *  handler can tell a deliberate shutdown from a server that died. */
+  private closingOnPurpose = false
+  /** True once connect() has HANDED BACK tools, i.e. once somebody registered
+   *  them. A process that dies during the handshake is already reported by the
+   *  connect() rejection; announcing it twice would have the panel undo a
+   *  registration that never happened. */
+  private registered = false
 
-  constructor(private config: MCPServerConfig) {}
+  /**
+   * Called once when the server process exits WITHOUT us asking it to.
+   *
+   * Until now that event only flipped a private boolean: the server's tools
+   * stayed registered, the settings panel stayed green, and the model kept
+   * being offered tools whose process was gone — every call failing with
+   * "Not connected" for as long as the app stayed open. The owner of the
+   * registration is the only one who can undo it, so it gets told.
+   */
+  private onExit?: (serverId: string) => void
+
+  private readonly config: MCPServerConfig
+
+  constructor(config: MCPServerConfig, opts?: { onExit?: (serverId: string) => void }) {
+    this.config = config
+    this.onExit = opts?.onExit
+  }
 
   async connect(): Promise<MCPToolDefinition[]> {
     try {
@@ -76,9 +235,19 @@ export class MCPExternalClient {
         })
 
         command.on('close', () => {
+          const wasConnected = this.connected
           this.connected = false
           this.child = null
+          // The process is gone: nothing left for a shutdown sweep to kill.
+          liveClients.delete(this)
           this.rejectAllPending('Server process exited')
+          // A crash, an OOM kill, a server that quits on a bad config: the
+          // tools it registered are dead weight from this moment on, and the
+          // only honest UI is one that says so.
+          if (wasConnected && this.registered && !this.closingOnPurpose) {
+            log.warn(`[MCP:${this.config.name}] server process exited unexpectedly`, { id: this.config.id })
+            this.onExit?.(this.config.id)
+          }
         })
 
         try {
@@ -91,6 +260,11 @@ export class MCPExternalClient {
       }
       if (!this.child) throw spawnError
       this.connected = true
+      // Enrolled the moment a process exists, not once the handshake is
+      // through: a server that spawns and then hangs in `initialize` is
+      // exactly the one a shutdown has to be able to kill. The catch below
+      // removes it again if the handshake fails outright.
+      liveClients.add(this)
 
       // Initialize the MCP connection
       await this.sendRequest('initialize', {
@@ -101,40 +275,51 @@ export class MCPExternalClient {
 
       // Discover tools
       const toolsResult = await this.sendRequest('tools/list', {})
-      const tools: MCPToolDefinition[] = (toolsResult.tools || []).map((t: any) => ({
-        name: t.name,
-        description: t.description || '',
-        inputSchema: t.inputSchema || { type: 'object', properties: {}, required: [] },
-        category: 'workflow' as const, // External tools default to workflow category
-        source: 'external' as const,
-        serverId: this.config.id,
-      }))
+      const tools: MCPToolDefinition[] = []
+      for (const t of asRecordArray(prop(toolsResult, 'tools'))) {
+        const toolName = asString(t.name)
+        // A tool with no name cannot be looked up, called or unregistered — it
+        // used to land in the registry under the key `undefined`.
+        if (!toolName) {
+          log.warn(`[MCP:${this.config.name}] ignoring a tool with no name in tools/list`)
+          continue
+        }
+        tools.push({
+          name: toolName,
+          description: asString(t.description) || '',
+          inputSchema: isToolInputSchema(t.inputSchema) ? t.inputSchema : EMPTY_INPUT_SCHEMA,
+          category: 'workflow', // External tools default to workflow category
+          source: 'external',
+          serverId: this.config.id,
+        })
+      }
 
+      this.registered = true
       return tools
     } catch (err) {
       this.connected = false
       // A failure after spawn (handshake refused, tools/list timed out) leaves
       // the server process running with nobody holding a handle to it — the
       // caller never gets a client it could disconnect. Take it down here.
-      if (this.child) {
-        try { await this.child.kill() } catch { /* already gone */ }
-        this.child = null
-      }
+      await this.killServerProcess()
+      liveClients.delete(this)
       throw new Error(`Failed to connect to MCP server "${this.config.name}": ${err instanceof Error ? err.message : String(err)}`)
     }
   }
 
-  async callTool(name: string, args: Record<string, any>): Promise<string> {
+  async callTool(name: string, args: ToolArgs): Promise<string> {
     if (!this.connected) throw new Error('Not connected')
 
     const result = await this.sendRequest('tools/call', { name, arguments: args })
 
-    // MCP returns content array
-    if (Array.isArray(result.content)) {
-      return result.content
-        .map((c: any) => {
-          if (c.type === 'text') return c.text
-          if (c.type === 'image') return `[Image: ${c.mimeType}]`
+    // MCP returns a content array of `{ type, ... }` blocks.
+    const content = prop(result, 'content')
+    if (Array.isArray(content)) {
+      return content
+        .map((c: unknown) => {
+          const type = prop(c, 'type')
+          if (type === 'text') return asString(prop(c, 'text')) ?? ''
+          if (type === 'image') return `[Image: ${String(prop(c, 'mimeType'))}]`
           return JSON.stringify(c)
         })
         .join('\n')
@@ -143,15 +328,90 @@ export class MCPExternalClient {
   }
 
   async disconnect() {
+    this.closingOnPurpose = true
     this.connected = false
+    // Out of the shutdown sweep first: a disconnect that is itself running
+    // inside the sweep must not be reachable a second time.
+    liveClients.delete(this)
     this.rejectAllPending('Disconnecting')
-    if (this.child) {
+    await this.killServerProcess()
+  }
+
+  /**
+   * Take the server process down — the whole tree, not just the shim (T-68).
+   *
+   * The one place this client kills anything. Both callers (a failed handshake
+   * in `connect()`, and `disconnect()`) used to run `this.child.kill()`
+   * themselves, and that call is NOT a tree kill:
+   * `tauri-plugin-shell`'s `CommandChild::kill` is one signal to the DIRECT
+   * child (`src/process/mod.rs:78`). An MCP server started as `npx -y <pkg>`
+   * — or `npx.cmd` through cmd.exe on Windows — has the launcher as that
+   * direct child and the real `node` server as a GRANDCHILD. Killing the shim
+   * reaped the launcher and left the server running for the rest of the
+   * session, unreachable: the JS handle was gone with it.
+   *
+   * ── The ordering is the whole point ─────────────────────────────────────
+   *
+   * `kill_process_tree` is called INSTEAD of `child.kill()`, never after it.
+   * The Rust guard (`may_kill_pid`) only allows pids inside this app's own
+   * subtree, and that is exactly what the direct child's death destroys: the
+   * moment the launcher exits, its children are reparented to init, stop being
+   * our descendants, and the guard refuses — correctly, and too late. Kill the
+   * shim first and the tree kill can no longer reach anything.
+   *
+   * The tree kill covers the direct child too (`kill_pid_tree`'s snapshot
+   * includes the root), so nothing is left for a follow-up kill to do. Not
+   * calling the plugin's own `kill` command also does not strand the pid in
+   * its child map: the plugin removes an entry when it sees `Terminated`
+   * (`src/commands.rs:259`), which is what the tree kill causes.
+   *
+   * ── When the command is not there or says no ────────────────────────────
+   *
+   * Two ways to land in the fallback, both real: a Rust side older than
+   * `c5773322` has no such command, and the guard refuses a pid that is not
+   * ours — which happens when the process already exited on its own, so its
+   * pid is not in this app's subtree any more. In both the alternative to
+   * `child.kill()` is leaving a server process running, i.e. exactly the
+   * pre-T-53 bug; so we fall back and say so in the log. What the fallback
+   * can lose is grandchildren — the leak this method exists to close — and
+   * nothing beyond that.
+   *
+   * Outside Tauri there is no IPC to ask, and no MCP server either: the spawn
+   * goes through the shell plugin, which needs the same IPC. The check is
+   * synchronous on purpose, so the no-Tauri case does not pay for a dynamic
+   * import (a page-unload sweep is counted in ticks) and does not log a
+   * warning about a tree kill nobody could have wanted.
+   *
+   * Best-effort throughout: `disconnect()` is reached from a page-unload sweep
+   * where a rejection is an unhandled one.
+   */
+  private async killServerProcess(): Promise<void> {
+    const child = this.child
+    if (!child) return
+    // Dropped before the awaits: a second disconnect (the sweep racing a
+    // panel click) must not issue a second kill for the same pid — by then it
+    // may belong to somebody else.
+    this.child = null
+    const pid = child.pid
+
+    if (isTauri()) {
       try {
-        await this.child.kill()
-      } catch {
-        // Process may already be dead
+        const { invoke } = await import('@tauri-apps/api/core')
+        await invoke('kill_process_tree', { pid })
+        return
+      } catch (err) {
+        log.warn(
+          `[MCP:${this.config.name}] no process-tree kill available — killing only the direct `
+          + 'child, so a server that spawned its own processes may leave them running',
+          { pid, err: errorText(err) },
+        )
       }
-      this.child = null
+    }
+
+    try {
+      await child.kill()
+    } catch {
+      // Process may already be dead
     }
   }
 
@@ -161,7 +421,7 @@ export class MCPExternalClient {
 
   // ── Private ─────────────────────────────────────────────────
 
-  private sendRequest(method: string, params?: any): Promise<any> {
+  private sendRequest(method: string, params?: unknown): Promise<unknown> {
     return new Promise((resolve, reject) => {
       if (!this.child) {
         reject(new Error('Not connected'))
@@ -202,20 +462,24 @@ export class MCPExternalClient {
     for (const line of lines) {
       const trimmed = line.trim()
       if (!trimmed) continue
+      let parsed: unknown
       try {
-        const response: JsonRpcResponse = JSON.parse(trimmed)
-        const pending = this.pendingRequests.get(response.id)
-        if (pending) {
-          this.pendingRequests.delete(response.id)
-          clearTimeout(pending.timer)
-          if (response.error) {
-            pending.reject(new Error(response.error.message))
-          } else {
-            pending.resolve(response.result)
-          }
-        }
+        parsed = JSON.parse(trimmed)
       } catch {
-        // Not JSON — might be a notification, ignore
+        // Not JSON — a server that logs to stdout, ignore.
+        continue
+      }
+      const response = parseJsonRpcResponse(parsed)
+      if (!response || response.id === undefined) continue // notification or noise
+      const pending = this.pendingRequests.get(response.id)
+      if (pending) {
+        this.pendingRequests.delete(response.id)
+        clearTimeout(pending.timer)
+        if (response.error) {
+          pending.reject(new Error(response.error.message))
+        } else {
+          pending.resolve(response.result)
+        }
       }
     }
   }

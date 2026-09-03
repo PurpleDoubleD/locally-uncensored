@@ -21,9 +21,9 @@ import { exit } from 'node:process'
 function isSystemPromptEcho(content) {
   if (!content) return false
   const head = String(content).trim().slice(0, 240)
-  if (/^(hello[!,\.]?\s+|hi[!,\.]?\s+|hey[!,\.]?\s+)?(i['’]?m|i am|you are)\s+(codex|an autonomous|the agent|an? ai)/i.test(head)) return true
+  if (/^(hello[!,.]?\s+|hi[!,.]?\s+|hey[!,.]?\s+)?(i['’]?m|i am|you are)\s+(codex|an autonomous|the agent|an? ai)/i.test(head)) return true
   if (/^(i am|i['’]m)\s+ready\s+to\s+(receive|assist|help)/i.test(head)) return true
-  if (/^(hello|hi|hey)[!,\.]?\s+i['’]?m\s+ready/i.test(head)) return true
+  if (/^(hello|hi|hey)[!,.]?\s+i['’]?m\s+ready/i.test(head)) return true
   return false
 }
 
@@ -164,7 +164,10 @@ console.log('     log:', scenarioA.log.join(' | '))
 
 // ── 3. 5 tool errors in a row: should bail with the new guard ──
 console.log('\n— scenario B: 5 consecutive tool errors (Bug 2 reproducer) —')
-const errCall = (i) => ({
+// Der Index dient nur den Aufrufstellen (`errCall(1) … errCall(5)` liest sich
+// als "fuenf Fehler hintereinander"); im Rumpf hat er nichts zu suchen, alle
+// fuenf Fehlschlaege sind absichtlich identisch.
+const errCall = (_i) => ({
   content: '',
   toolCalls: [{
     function: { name: 'shell_execute', arguments: { command: 'mkdir client public' } },

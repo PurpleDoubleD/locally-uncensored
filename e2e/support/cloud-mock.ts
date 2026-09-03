@@ -1,4 +1,7 @@
 import type { Page } from '@playwright/test'
+import { readFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 /**
  * Network mock for the LU Cloud e2e specs: intercepts the Supabase auth host
@@ -212,22 +215,77 @@ export async function routeCloud(page: Page, scenario: CloudScenario): Promise<v
 }
 
 /**
- * Pre-seed the persisted settings so the app boots straight into chat (no
+ * The version this build IS. `ReleaseNotesModal` imports package.json directly
+ * and compares against that string, so anything else here would rot at the
+ * next version bump — and rot silently, because the symptom is a modal, not an
+ * error. Read the same way tts-csp.spec.ts reads tauri.conf.json.
+ */
+const APP_VERSION: string = (
+  JSON.parse(
+    readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'package.json'), 'utf8'),
+  ) as { version: string }
+).version
+
+/**
+ * Pre-seed the persisted state so the app boots straight into chat (no
  * onboarding walk) in LOCAL mode. The settingsStore merge() backfills every
  * missing field from defaults, so the minimal shape is enough.
+ *
+ * TWO markers, not one, and the second is the one that used to be missing:
+ *
+ * `onboardingDone: true` with NO release-notes stamp is not "a user who has
+ * finished onboarding" — it is exactly the fingerprint of an UPGRADER, and
+ * that is a state the app deliberately reacts to. `shouldShowReleaseNotes`
+ * (stores/releaseNotesStore.ts) reads `lastNotesVersion === null` together
+ * with `onboardingDone === true` as "has not seen this version's notes yet"
+ * and opens the "What is new" sheet, which is a `fixed inset-0 z-[90]`
+ * backdrop over the whole app. Every click a spec then issues lands on the
+ * backdrop, so the specs did not fail on what they assert — they never got to
+ * assert it. The specs that walk the real onboarding wizard were unaffected,
+ * because finishing it stamps the version; only the ones that took this
+ * shortcut were hit. That is the whole difference between the green and the
+ * red half of this suite.
+ *
+ * So the stamp belongs here: it is not a workaround for the sheet, it is the
+ * rest of the state "onboarded on this build" actually consists of. A spec
+ * that wants to see the sheet simply does not call this helper.
  */
 export async function seedOnboardingDone(page: Page): Promise<void> {
-  await page.addInitScript(() => {
+  await page.addInitScript((version: string) => {
     window.localStorage.setItem(
       'chat-settings',
       JSON.stringify({ state: { settings: { onboardingDone: true, appMode: 'local' }, _version: 10 }, version: 10 }),
     )
-  })
+    // Same key and shape zustand's persist writes for useReleaseNotesStore
+    // (no `version` option there, so the envelope version is 0).
+    window.localStorage.setItem(
+      'lu_release_notes',
+      JSON.stringify({ state: { lastNotesVersion: version }, version: 0 }),
+    )
+  }, APP_VERSION)
 }
 
 /** The purple Cloud light-switch in the header (right cluster). */
 export function cloudSwitch(page: Page) {
   return page.getByRole('switch', { name: /^Cloud$/i })
+}
+
+/**
+ * The same switch, reachable WHILE a modal is open.
+ *
+ * `ui/Modal` puts `inert` + `aria-hidden="true"` on the rest of the page for
+ * as long as a dialog is up (Modal.tsx, "(2) Hintergrund inert"), which is
+ * exactly what a dialog is supposed to do. The consequence for a spec is that
+ * every role-based query — `cloudSwitch()` included — finds NOTHING behind an
+ * open gate, and an assertion like "the switch stayed off" then fails with
+ * `element(s) not found` instead of telling you about the switch.
+ *
+ * This reads the SAME `aria-checked` attribute through a locator the dialog
+ * does not filter. It is not a weaker assertion, it is the same one asked in a
+ * way the dialog cannot swallow. Use `cloudSwitch()` whenever no modal is up.
+ */
+export function cloudSwitchBehindModal(page: Page) {
+  return page.locator('button[role="switch"][aria-label="Cloud"]')
 }
 
 /** Sign in through the CloudGateModal that the header switch opens. The

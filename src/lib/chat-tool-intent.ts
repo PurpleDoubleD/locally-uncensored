@@ -30,16 +30,18 @@ export type ChatToolCapability = 'image' | 'video' | 'web' | 'file'
 
 /**
  * Umlaute und Eszett auf ihre Ersatzschreibung bringen, BEVOR irgendein Muster
- * greift (Persona-Lauf 03.09.2026).
+ * greift (Persona-Lauf B3, 03.09.2026).
  *
  * Zwei Gruende. Erstens tippen viele Leute deutsch ohne Umlaute, aus Gewohnheit
- * oder auf fremder Tastatur; ein Muster, das auf "oeffne" in Umlautschreibung
- * besteht, verfehlt die dann jedes Mal. Zweitens, und schlimmer: eine
- * Wortgrenze vor einem Umlaut greift in JavaScript nie, weil Umlaute keine
- * Wortzeichen sind. Das alte Muster fuer "oeffne" stand mit Wortgrenze davor
- * und war damit toter Buchstabe, auch bei korrekter Schreibung. Deshalb wird
- * EINMAL zentral normalisiert und jedes Muster unten in der Ersatzschreibung
- * gefuehrt.
+ * oder auf einer Tastatur ohne sie; die Persona tippte "woertlich" und
+ * "Ueberschrift", und wer so tippt, tippt ueberall so. Ein Muster, das auf
+ * "oeffne" oder "gemaelde" in Umlautschreibung besteht, verfehlt dann jede
+ * einzelne Stelle. Zweitens, und schlimmer: eine Wortgrenze vor einem Umlaut
+ * greift in JavaScript nie, weil Umlaute keine Wortzeichen sind. Das alte
+ * Muster fuer "oeffne" stand mit Wortgrenze davor und war damit toter
+ * Buchstabe, auch bei korrekter Schreibung. Deshalb wird EINMAL zentral
+ * normalisiert und jedes Muster unten in der Ersatzschreibung gefuehrt;
+ * "oeffne" in beiden Schreibweisen laeuft danach durch dieselbe Zeile.
  */
 export function entumlauten(s: string): string {
   return s
@@ -59,7 +61,8 @@ const URL_RE = /\bhttps?:\/\/\S+|\bwww\.\S+|\b[a-z0-9-]+\.(com|org|net|io|dev|ai
 // tippte am 03.09.2026 zweimal "Hol bitte die Seite ..." und bekam beide Male
 // gar kein tools-Feld im Payload, waehrend derselbe Satz auf Englisch sauber
 // lief. Das Verb, das man am ehesten tippt, fehlte schlicht in beiden Listen.
-// Der Wortstamm steht deshalb jetzt an genau einer Stelle.
+// Der Wortstamm steht deshalb jetzt an genau einer Stelle und wird unten
+// zweimal verwendet, sonst waechst die eine Liste und die andere nicht mit.
 const WEB_ZUGRIFF_VERBEN =
   'open|read|fetch|scrape|summari[sz]e|get|visit|check|' +
   // Trennbare Verben: im Deutschen steht die Vorsilbe am Satzende ("Ruf die
@@ -100,10 +103,10 @@ const LOOKUP_TOPIC_RE = /\b(weather|temperature|forecast|price\s+of|stock\s+pric
 // Verbs that inherently mean "make an image" even without a media noun
 // ("draw a cat", "zeichne eine Blume").
 // "mal" ohne Endung ist im Deutschen meistens gar kein Verb, sondern die
-// Partikel: "erklaer mir mal", "sag mal", "warte mal". Als Malen-Befehl zaehlt
-// es deshalb nur am SATZANFANG, wo es wirklich Befehlsform ist ("Mal eine
-// Blume"). Vorher kaperte jede beilaeufige deutsche Frage die Bildgenerierung,
-// und ein Fehlalarm ist teuer: der Zug laeuft dann durch den
+// Partikel: "erklaer mir mal", "sag mal", "schau mal", "warte mal". Als
+// Malen-Befehl zaehlt es deshalb nur am SATZANFANG, wo es wirklich Befehlsform
+// ist ("Mal eine Blume"). Vorher kaperte jede beilaeufige deutsche Frage die
+// Bildgenerierung, und ein Fehlalarm ist teuer: der Zug laeuft dann durch den
 // Werkzeug-Ausfuehrer, woran sich kleine Modelle nachweislich verschlucken.
 // "Mal mir ein Bild" bleibt auch mitten im Satz erkannt, das faengt die
 // Verb-plus-Substantiv-Regel darunter.
@@ -111,7 +114,7 @@ const INHERENT_IMAGE_VERB_RE = /\b(draw|sketch|paint|illustrate|mal(e|en)|zeichn
 
 // Image / video creation: a creation verb co-occurring with a media noun.
 const CREATE_VERB_RE = /\b(draw|sketch|paint|generate|create|make|render|design|give\s+me|show\s+me|produce|turn|convert|mal(e|en)?|zeichne|erstell(e|en)?|generier(e|en)?|mach(e|en)?|gib\s+mir|zeig(e|en)?\s+mir|entwirf|produzier(e|en)?|verwandle|wandle)\b/i
-const IMAGE_NOUN_RE = /\b(image|picture|pic|photo(graph)?|drawing|art(work)?|illustration|portrait|wallpaper|logo|icon|render|painting|bild(er)?|foto(s)?|grafik(en)?|zeichnung(en)?|gem[äa]lde|portr[äa]t|illustration(en)?)\b/i
+const IMAGE_NOUN_RE = /\b(image|picture|pic|photo(graph)?|drawing|art(work)?|illustration|portrait|wallpaper|logo|icon|render|painting|bild(er)?|foto(s)?|grafik(en)?|zeichnung(en)?|gemaelde|portraet|illustration(en)?)\b/i
 const VIDEO_NOUN_RE = /\b(video|clip|animation|movie|gif|film|animier\w*|animate)\b/i
 const ANIMATE_RE = /\banimate\b[^.?!]*\b(image|picture|photo|it|this|that)\b|\banimier\w*\b[^.?!]*\b(bild|foto|es|das)\b/i
 
@@ -185,11 +188,11 @@ export function detectChatToolIntent(text: string, hasImages = false): boolean {
 
 // Praise / thanks / explicit stop — these END a media exchange and must NEVER
 // be treated as "do it again".
-const CONT_EXIT_RE = /\b(thanks|thank\s*you|danke|thx|bye|tsch[üu]ss|cool|nice|great|super|perfekt|perfect|stop|stopp|cancel|abbrechen|nevermind|egal|vergiss\s+es)\b/i
+const CONT_EXIT_RE = /\b(thanks|thank\s*you|danke|thx|bye|tschuess|cool|nice|great|super|perfekt|perfect|stop|stopp|cancel|abbrechen|nevermind|egal|vergiss\s+es)\b/i
 
 // STRONG signals push a media task forward at ANY length (redo / motion / a bare
 // create verb without a noun).
-const STRONG_CONT_RE = /\b(re-?generate|regenerier\w*|nochmal|noch\s*mal|neu|erneut|redo|again|zoom|spin|rotate|\bpan\b|animate|animier\w*|longer|shorter|faster|slower|l[äa]nger|k[üu]rzer|schneller|langsamer|generier\w*|generate)\b/i
+const STRONG_CONT_RE = /\b(re-?generate|regenerier\w*|nochmal|noch\s*mal|neu|erneut|redo|again|zoom|spin|rotate|\bpan\b|animate|animier\w*|longer|shorter|faster|slower|laenger|kuerzer|schneller|langsamer|generier\w*|generate)\b/i
 // WEAK signals (confirmations / "now") only count in a SHORT message, so "now"
 // inside "now tell me about cats" never hijacks the media tool.
 const WEAK_CONT_RE = /\b(go|do\s*it|yes|yep|yeah|sure|ok(ay)?|los|mach(\s*(es|mal|schon))?|tu\s*es|proceed|continue|weiter|jetzt|now|please|bitte|create|erstell\w*|render|produce|produzier\w*)\b/i

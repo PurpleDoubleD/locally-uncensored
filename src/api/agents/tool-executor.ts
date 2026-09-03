@@ -17,10 +17,12 @@
  */
 
 import type { AgentToolCall } from '../../types/agent-mode'
+import { toolResultIsFailure } from '../../lib/tool-result-failure'
 import type { AgentRunContext } from '../agent-context'
 import { deriveSideEffectKey } from './side-effect-key'
 import { validateToolArgs, formatValidationErrors, type JsonSchema } from './args-validator'
 import { stableArgsHash } from './block-helpers'
+import type { ToolArgs } from '../mcp/types'
 
 export interface ExecutorToolDef {
   name: string
@@ -33,7 +35,7 @@ export interface ExecutionRequest {
   /** Tool name — must be registered in the executor's runtime. */
   toolName: string
   /** Raw args from the LLM. */
-  args: Record<string, any>
+  args: ToolArgs
   /** Optional parent id for sub-agent lineage. */
   parentToolCallId?: string
   /**
@@ -56,7 +58,7 @@ export interface ExecutionResult {
   /** Human-readable retry hint (filled by Phase 7 error-hints module). */
   errorHint?: string
   /** Validated + coerced args that were actually dispatched. */
-  dispatchedArgs: Record<string, any>
+  dispatchedArgs: ToolArgs
   argsHash: string
   sideEffectKey?: string
   startedAt: number
@@ -71,29 +73,63 @@ export interface ExecutionResult {
 
 /**
  * Dispatch one registered tool. The third argument is the run the call belongs
- * to (see ExecutionRequest.run); a runtime that does not care simply declares
- * two parameters.
+ * to (see ExecutionRequest.run); the fourth is the run's Stop.
+ *
+ * The signal used to stop at this boundary: executeParallel checked it before
+ * DISPATCHING a call and never again, so Stop only kept the not-yet-started
+ * calls of a batch from firing. A shell command that was already running kept
+ * mutating the repository for up to its full timeout (615 s) after the user
+ * pressed the one brake the product offers for an unattended agent with full
+ * shell access. A tool that can be cancelled needs the signal in its own hands;
+ * a runtime that does not care simply declares fewer parameters.
  */
 export type ExecutorFn = (
   name: string,
-  args: Record<string, any>,
+  args: ToolArgs,
   run?: AgentRunContext,
+  signal?: AbortSignal,
 ) => Promise<string>
+
+/**
+ * Pre-dispatch approval gate. Resolves true to let the call run, false to
+ * mark it 'rejected' without ever reaching the executor.
+ */
+export type ApprovalGate = (req: ExecutionRequest, tool: ExecutorToolDef) => Promise<boolean>
+
+/** Audit sink (Phase 2). Called once at dispatch and once at completion. */
+export type AuditRecorder = (entry: AuditHook) => void
+
+/**
+ * The one gate that is NOT optional: every caller must say, in writing, what
+ * happens before a tool runs.
+ *
+ * It used to be optional, and the omission was invisible — a runtime that
+ * simply left the field out ran shell_execute / file_write / file_edit
+ * unattended even though all three default to 'confirm'. That is exactly how
+ * the sub-agent's nested ReAct loop ended up with no approval prompt at all
+ * (audit AGT-1): nobody wrote `awaitApproval`, so nobody saw it missing.
+ * Making it required turns that silent hole into a compile error. A surface
+ * that genuinely runs unattended passes APPROVE_ALL and thereby says so.
+ */
+export const APPROVE_ALL: ApprovalGate = async () => true
 
 export interface ExecutorRuntime {
   /** Resolve a tool by name — returns undefined for unknown tools. */
   getTool: (name: string) => ExecutorToolDef | undefined
   /** Execute a registered tool against args; returns string result. */
   execute: ExecutorFn
-  /** Optional — called before dispatch to gate on user approval. */
-  awaitApproval?: (req: ExecutionRequest, tool: ExecutorToolDef) => Promise<boolean>
+  /**
+   * REQUIRED — called before dispatch to gate on user approval. Pass
+   * APPROVE_ALL to opt out explicitly; there is no implicit opt-out.
+   */
+  awaitApproval: ApprovalGate
   /** Optional — cache lookup pre-dispatch (Phase 6). Returns a cached result or undefined. */
   lookupCache?: (
     req: ExecutionRequest,
     argsHash: string
   ) => string | undefined
   /** Optional — audit recorder (Phase 2). Called at dispatch + completion. */
-  recordAudit?: (entry: AuditHook) => void
+  recordAudit?: AuditRecorder
   /** Optional — error hint mapper (Phase 7). */
   explainError?: (toolName: string, error: string) => string | undefined
 }
@@ -103,7 +139,7 @@ export type AuditHook =
       kind: 'start'
       id: string
       toolName: string
-      args: Record<string, any>
+      args: ToolArgs
       argsHash: string
       parentToolCallId?: string
       startedAt: number
@@ -266,7 +302,7 @@ async function runSingle(
       const schemaStr = required.length
         ? required
             .map((k) => {
-              const s = (props as Record<string, any>)[k]
+              const s = props[k]
               const typ = s && typeof s === 'object' ? (s.type || 'any') : 'any'
               return `${k}: ${typ}`
             })
@@ -310,15 +346,65 @@ async function runSingle(
     })
   }
 
-  // User approval (desktop only; mobile runtime has no approval gate).
-  if (runtime.awaitApproval) {
-    const approved = await runtime.awaitApproval(req, tool)
-    if (!approved) {
+  // User approval. Unconditional: a runtime that does not want a prompt says
+  // so with APPROVE_ALL, it does not get there by forgetting the field.
+  const approved = await runtime.awaitApproval(req, tool)
+  if (!approved) {
+    return finalize({
+      id: req.id,
+      toolName: req.toolName,
+      status: 'rejected',
+      error: 'User rejected tool call',
+      dispatchedArgs,
+      argsHash,
+      sideEffectKey,
+      startedAt,
+      cacheHit: false,
+      schemaValidated,
+    })
+  }
+
+  // The run's Stop. `opts.abortSignal` is what the hook passes; `req.run` is
+  // what a nested loop (delegate_task's sub-agent) carries — take whichever
+  // exists so no surface silently runs uncancellable.
+  const signal = opts.abortSignal ?? req.run?.abortSignal
+
+  // Approval can sit open for minutes. The abort check at schedule time is long
+  // stale by the time the user finally answers, so ask again here: a call the
+  // user approved before pressing Stop must not still be dispatched afterwards.
+  if (signal?.aborted) {
+    return finalize({
+      id: req.id,
+      toolName: req.toolName,
+      status: 'rejected',
+      error: 'Aborted before dispatch',
+      dispatchedArgs,
+      argsHash,
+      sideEffectKey,
+      startedAt,
+      cacheHit: false,
+      schemaValidated,
+    })
+  }
+
+  // Dispatch.
+  try {
+    const result = await raceAbort(
+      runtime.execute(req.toolName, dispatchedArgs, req.run, signal),
+      signal,
+    )
+    if (result === ABORTED) {
+      // The tool got the signal and is expected to wind itself down; what this
+      // guarantees is that the RUN stops waiting. Without it, Stop was still a
+      // lie for the user even when the tool cooperated: the loop sat on the
+      // pending promise for the rest of the tool's own timeout, the typing dots
+      // stayed on, and nothing downstream (VRAM restore, staged-change review)
+      // could proceed.
       return finalize({
         id: req.id,
         toolName: req.toolName,
         status: 'rejected',
-        error: 'User rejected tool call',
+        error: 'Aborted while running',
         dispatchedArgs,
         argsHash,
         sideEffectKey,
@@ -327,11 +413,6 @@ async function runSingle(
         schemaValidated,
       })
     }
-  }
-
-  // Dispatch.
-  try {
-    const result = await runtime.execute(req.toolName, dispatchedArgs, req.run)
     return finalize({
       id: req.id,
       toolName: req.toolName,
@@ -361,6 +442,38 @@ async function runSingle(
       schemaValidated,
     })
   }
+}
+
+/** Sentinel for "the run was stopped while this tool was still in flight". */
+const ABORTED = Symbol('aborted')
+
+/**
+ * Resolve as soon as EITHER the tool finishes or the run is stopped.
+ *
+ * The abandoned tool promise is swallowed, not left dangling: a rejection with
+ * no handler takes the whole webview down in Tauri, and the tool result of a
+ * stopped run is worthless anyway.
+ */
+function raceAbort<T>(p: Promise<T>, signal?: AbortSignal): Promise<T | typeof ABORTED> {
+  if (!signal) return p
+  if (signal.aborted) {
+    p.catch(() => {})
+    return Promise.resolve(ABORTED)
+  }
+  return new Promise<T | typeof ABORTED>((resolve, reject) => {
+    const onAbort = () => resolve(ABORTED)
+    signal.addEventListener('abort', onAbort, { once: true })
+    p.then(
+      (v) => {
+        signal.removeEventListener('abort', onAbort)
+        resolve(v)
+      },
+      (e) => {
+        signal.removeEventListener('abort', onAbort)
+        reject(e)
+      },
+    )
+  })
 }
 
 function abortedResult(tagged: { req: ExecutionRequest; key?: string }): ExecutionResult {
@@ -393,6 +506,16 @@ export function applyResultToToolCall(call: AgentToolCall, result: ExecutionResu
           ? 'rejected'
           : 'failed'
   if (result.result !== undefined) call.result = result.result
+  // Ein Werkzeug, das seinen Fehler als Text zurueckgibt, wirft nicht — und
+  // galt damit als erledigt. Ein gruener Haken ueber „Web search failed" ist
+  // die eine Auskunft, die der Kunde nicht nachpruefen kann (Testlauf
+  // 03.09.2026: drei Haken, dreimal nichts gefunden, und eine erfundene
+  // Tabelle als Ergebnis). Siehe `lib/tool-result-failure.ts`, warum das nur
+  // am Anfang der Antwort greift.
+  if (call.status === 'completed' && toolResultIsFailure(result.result)) {
+    call.status = 'failed'
+    if (call.error === undefined) call.error = String(result.result).split('\n')[0].slice(0, 300)
+  }
   if (result.error !== undefined) call.error = result.error
   if (result.errorHint !== undefined) call.errorHint = result.errorHint
   call.duration = result.durationMs

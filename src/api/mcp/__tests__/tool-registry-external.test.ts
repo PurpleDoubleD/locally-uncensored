@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import { ToolRegistry } from '../tool-registry'
 import { commandCandidatesForPlatform } from '../external-client'
-import type { MCPToolDefinition, PermissionMap } from '../types'
+import type { MCPToolDefinition, PermissionMap, ToolArgs } from '../types'
 
 const fullPerms: PermissionMap = {
   filesystem: 'auto',
@@ -26,7 +26,7 @@ const mkTool = (name: string, extra: Partial<MCPToolDefinition> = {}): MCPToolDe
 describe('ToolRegistry — registerExternal name binding', () => {
   it('routes each tool call to the right tool name via the two-arg executor', async () => {
     const registry = new ToolRegistry()
-    const calls: { name: string; args: any }[] = []
+    const calls: { name: string; args: ToolArgs }[] = []
     registry.registerExternal(
       'srv1',
       [mkTool('search'), mkTool('read'), mkTool('write')],
@@ -43,7 +43,7 @@ describe('ToolRegistry — registerExternal name binding', () => {
 
   it('supports legacy single-arg executor (backcompat)', async () => {
     const registry = new ToolRegistry()
-    const legacy = vi.fn(async (_args: Record<string, any>) => 'legacy-ok')
+    const legacy = vi.fn(async (_args: ToolArgs) => 'legacy-ok')
     registry.registerExternal('srv2', [mkTool('only')], legacy)
     expect(await registry.execute('only', {})).toBe('legacy-ok')
     expect(legacy).toHaveBeenCalledOnce()

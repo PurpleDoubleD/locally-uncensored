@@ -25,7 +25,10 @@
  */
 
 import { argv, exit } from 'node:process'
-import { join } from 'node:path'
+// Der Sandkasten-Name kommt aus app-identity. Dieser Branch hängt einen Suffix
+// an; eine fest verdrahtete Zusicherung wäre danach immer erfüllt und würde
+// eine echte Regression nicht mehr fangen.
+import { REMOTE_FALLBACK_DIR } from './app-identity.mjs'
 
 function parseArgs() {
   const out = { base: null, code: null, chatId: 'remote-smoke' }
@@ -73,7 +76,9 @@ async function agentTool(base, token, chatId, tool, args) {
   })
   const text = await r.text()
   let data = null
-  try { data = JSON.parse(text) } catch (_) {}
+  // Nicht-JSON ist erlaubt: die naechste Zeile entscheidet anhand von
+  // `data === null` UND dem Status, ob das ein Fehler ist.
+  try { data = JSON.parse(text) } catch { /* data bleibt null */ }
   if (!r.ok && !data) throw new Error(`HTTP ${r.status}: ${text}`)
   return data ?? text
 }
@@ -109,7 +114,7 @@ async function main() {
   const writePath = writeRes?.path || ''
   console.log(`     wrote to: ${writePath}`)
   check('file_write path is NOT ~/agent-workspace/__remote__/',
-    !writePath.replaceAll('\\', '/').includes('agent-workspace/__remote__/'),
+    !writePath.replaceAll('\\', '/').includes(REMOTE_FALLBACK_DIR + '/'),
     `path was ${writePath} — bug 1 still present`)
 
   // 2) file_list — same relative folder. Should return one entry (hello.txt).
@@ -156,7 +161,7 @@ async function main() {
   if (typeof shellRes?.stdout === 'string') {
     console.log(`     cwd seen by shell: ${shellRes.stdout.trim()}`)
     check('shell_execute cwd is NOT ~/agent-workspace/__remote__/',
-      !shellRes.stdout.replaceAll('\\', '/').includes('agent-workspace/__remote__'),
+      !shellRes.stdout.replaceAll('\\', '/').includes(REMOTE_FALLBACK_DIR),
       `stdout was ${shellRes.stdout}`)
   }
 
@@ -170,7 +175,7 @@ async function main() {
     console.log(`     cwd: ${shellRel.stdout.trim()}`)
     check('shell_execute resolved relative cwd into override folder',
       shellRel.stdout.includes('remote-smoke') &&
-      !shellRel.stdout.replaceAll('\\', '/').includes('agent-workspace/__remote__'),
+      !shellRel.stdout.replaceAll('\\', '/').includes(REMOTE_FALLBACK_DIR),
       `stdout was ${shellRel.stdout}`)
   } else {
     check('shell_execute (relative cwd) returned stdout', false, JSON.stringify(shellRel))
@@ -194,7 +199,7 @@ async function main() {
   check('file_search found the marker we just wrote', !!hit,
     JSON.stringify(searchRes?.results))
   check('file_search hit file path is NOT under agent-workspace/__remote__/',
-    hit ? !String(hit.file).replaceAll('\\', '/').includes('agent-workspace/__remote__') : false,
+    hit ? !String(hit.file).replaceAll('\\', '/').includes(REMOTE_FALLBACK_DIR) : false,
     `hit was ${JSON.stringify(hit)}`)
 
   // 8) file_list with recursive=true → should include both files we wrote
@@ -228,7 +233,7 @@ async function main() {
   if (typeof pyRes?.stdout === 'string') {
     console.log(`     python cwd: ${pyRes.stdout.trim()}`)
     check('code_execute cwd is NOT ~/agent-workspace/__remote__/',
-      !pyRes.stdout.replaceAll('\\', '/').includes('agent-workspace/__remote__'),
+      !pyRes.stdout.replaceAll('\\', '/').includes(REMOTE_FALLBACK_DIR),
       `stdout was ${pyRes.stdout}`)
   }
   // Confirm via file_read that python's relative write landed in the override
@@ -281,7 +286,7 @@ async function main() {
     JSON.stringify(deep))
   check('deep file_write path is NOT under agent-workspace/__remote__/',
     typeof deep?.path === 'string' &&
-    !deep.path.replaceAll('\\', '/').includes('agent-workspace/__remote__'),
+    !deep.path.replaceAll('\\', '/').includes(REMOTE_FALLBACK_DIR),
     `path was ${deep?.path}`)
 
   // 14) Wrong-arg shape → should come back as a clean {error} (graceful 200),

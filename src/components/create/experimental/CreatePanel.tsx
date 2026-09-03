@@ -1,5 +1,5 @@
 import { motion, AnimatePresence } from 'framer-motion'
-import { Images, Play, PanelRightClose, PanelRightOpen, Trash2, Download, MonitorOff, AudioLines } from 'lucide-react'
+import { Images, Play, PanelRightClose, Trash2, Download, MonitorOff, AudioLines } from 'lucide-react'
 import { downloadMediaUrl } from '../../../lib/download-media'
 import { useCreateStore, type GalleryItem } from '../../../stores/createStore'
 import { galleryItemUrl } from './galleryUrl'
@@ -30,31 +30,46 @@ export function CreatePanel({ open, onOpenChange, activeId, onSelect }: Props) {
   return (
     <AnimatePresence mode="wait" initial={false}>
       {!open ? (
-        /* Collapsed: slim icon rail (default). */
+        /* Eingeklappt: EIN beschrifteter Knopf.
+           Bis 2.6.7 standen hier zwei — PanelRightOpen („Expand gallery") und
+           Images („Gallery"), getrennt durch einen Strich, der eine Gruppierung
+           andeutete, die es nicht gab: beide riefen dasselbe
+           `onOpenChange(true)` auf. Gemessen am 01.09.2026 (Chromium 149,
+           1280x800): eine 59,8 x 273,9 px hohe Saeule, auf der zwei
+           Piktogramme fuer denselben einen Befehl standen und der Name des
+           Befehls nur im Hover-`title` stand.
+           Der Strich und der zweite Knopf sind weg; der verbleibende traegt
+           den Zaehler (dafuer war er da) und schreibt seinen Namen hin.
+           „Gallery" misst in `t-label` 58,5 gerenderte px, deshalb 60 statt
+           52 CSS-px Breite — die Buehne daneben gibt 9,2 px ab.
+           Warum das ueberhaupt eine eigene Leiste bleibt: sie IST das Panel,
+           nur zugeklappt. Beide Zustaende teilen `bubble` und liegen in
+           derselben Layoutzeile wie die Buehne (siehe CreateExperimental), so
+           dass Auf- und Zuklappen nur die Breite bewegt und nichts springt. */
         <motion.aside
           key="rail"
-          className={cn(bubble, 'items-center py-2 gap-1')}
+          className={cn(bubble, 'items-center py-2')}
           initial={{ width: 0, opacity: 0 }}
-          animate={{ width: 52, opacity: 1 }}
+          animate={{ width: 60, opacity: 1 }}
           exit={{ width: 0, opacity: 0 }}
           transition={{ duration: 0.15 }}
-          style={{ width: 52 }}
+          style={{ width: 60 }}
         >
-          <button onClick={() => onOpenChange(true)} title="Expand gallery" aria-label="Expand gallery" className="flex items-center justify-center w-9 h-9 rounded-md text-gray-500 hover:text-gray-800 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/5 transition-all">
-            <PanelRightOpen size={16} />
-          </button>
-          <div className="w-6 h-px bg-gray-200 dark:bg-white/10 my-1" />
           <button
             onClick={() => onOpenChange(true)}
-            title="Gallery" aria-label="Gallery"
-            className="relative flex items-center justify-center w-9 h-9 rounded-md text-gray-500 hover:text-gray-800 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/5 transition-all"
+            title="Open the gallery" aria-label="Open the gallery"
+            aria-expanded={false}
+            className="relative flex flex-col items-center justify-center gap-1 w-full px-1 py-1.5 rounded-md text-gray-500 hover:text-gray-800 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/5 transition-all"
           >
-            <Images size={16} />
-            {count > 0 && (
-              <span className="absolute -top-0.5 -right-0.5 min-w-[14px] h-[14px] px-0.5 flex items-center justify-center rounded-full text-[0.5rem] font-bold bg-gray-300 dark:bg-white/20 text-gray-700 dark:text-gray-200">
-                {count}
-              </span>
-            )}
+            <span className="relative">
+              <Images size={16} />
+              {count > 0 && (
+                <span className="absolute -top-1.5 -right-2 min-w-[14px] h-[14px] px-0.5 flex items-center justify-center rounded-full text-[0.5rem] font-bold bg-gray-300 dark:bg-white/20 text-gray-700 dark:text-gray-200">
+                  {count}
+                </span>
+              )}
+            </span>
+            <span className="t-label">Gallery</span>
           </button>
         </motion.aside>
       ) : (

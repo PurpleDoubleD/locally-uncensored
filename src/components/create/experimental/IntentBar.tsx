@@ -4,12 +4,50 @@ import { useUIStore, type CloudTeaserTarget } from '../../../stores/uiStore'
 import { isIntentLocked, visibleIntents } from './intents'
 import { isMlxImageHost } from '../../../api/mlx-image'
 import { cn } from '../ui/cn'
+import { ICON_SM } from '../../ui/icon-size'
 
-// Pure-CSS expand: no Framer layout projection anywhere, so nothing can snap or
-// jitter on settle. The label opens via a `max-width` transition (collapses
-// reliably to 0 — unlike grid `0fr`, which keeps its min-content floor — and
-// interpolates as a plain length, so it's always smooth). The active pill
-// cross-fades via colour/shadow; neighbours slide on natural flex reflow.
+// Jede Pille traegt ihre Beschriftung, immer. Bis 2.6.7 stand hier ein
+// `max-width`-Aufklappen: nur die AKTIVE Pille zeigte ihren Namen, die
+// uebrigen elf standen auf einer Maximalbreite von null, Deckkraft null und
+// ohne waagerechtes Polster — die Hauptnavigation des ganzen Create-Bereichs
+// war eine Reihe unbeschrifteter Icons, deren Namen nur der Hover-Tooltip
+// verriet. Die kurzen Namen lagen dabei fertig im Datenmodell (`short` in
+// intents.ts) und wurden von niemandem gelesen.
+//
+// (Die drei Utilities stehen hier bewusst ausgeschrieben statt als
+// Klassennamen: Tailwind scannt diese Datei als Text und haette aus der
+// Erklaerung wieder Regeln im ausgelieferten Bundle gemacht — siehe
+// keine-klasse-aus-prosa.test.ts, der genau das gefangen hat.)
+//
+// Gemessen am 01.09.2026 im laufenden Fenster (Chromium 149, 1280x800,
+// --ui-scale 1.15, also gerenderte Pixel), alle zwoelf Pillen der
+// Cloud-/Windows-Leiste beschriftet:
+//
+//   nur Icons (Ist bis 2.6.7)     476 px
+//   `short`  (Image … Motion)    1068 px   <- passt, 184 px Luft
+//   `label`  (Edit / Image to Image, Remove Background, …)  1704 px
+//   verfuegbar bei 1280px Fenster 1252 px
+//
+// Deshalb `short` und nicht `label`: die vollen Namen sprengen schon das
+// Standardfenster um 452 px. `short` traegt bis hinunter zu ~1096 px
+// Fensterbreite in einer Zeile.
+//
+// Darunter reicht der Platz nicht mehr. Nachgemessen bei 700 px Fenster, mit
+// `flex-wrap` versuchsweise abgeschaltet: die Leiste laeuft 50 px ueber ihren
+// Container hinaus — die Pillen stauchen NICHT, weil ein Flex-Item mit
+// `whitespace-nowrap`-Inhalt und ohne `min-w-0` seine Mindestbreite behaelt.
+// Der Ausgang waere also die abgeschnittene letzte Pille am rechten Rand,
+// nicht ein zerschnittenes Wort.
+// Deshalb `flex-wrap`: dieselbe Leiste bricht in eine zweite Zeile um
+// (gemessen 35,6 -> 71,3 px Hoehe; die Buehne darunter ist `flex-1` und gibt
+// die 35,7 px her). Kein Ueberlauf, kein abgeschnittener Text, nichts
+// verschwindet.
+//
+// Der volle Name bleibt in `title`/`aria-label` — „Edit" auf der Pille,
+// „Edit / Image to Image" fuer Hover und Screenreader.
+//
+// Die aktive Pille hebt sich weiter ueber Flaeche, Rand und Schriftfarbe ab
+// (kein Framer-Layout, nichts kann auf dem Weg springen).
 const EASE = 'ease-[cubic-bezier(0.22,1,0.36,1)]'
 
 type TeaserIntent = Extract<CloudTeaserTarget, { surface: 'intent' }>['intent']
@@ -36,10 +74,16 @@ export function IntentBar() {
     <div
       role="radiogroup"
       aria-label="Create mode"
-      className="flex items-center justify-center gap-1 px-4 py-0.5"
-      // Sized to sit just 9% larger than the LaneControls ratio bar below
-      // (which runs at scale 0.7): 0.7 × 1.09 ≈ 0.763.
-      style={{ transform: 'scale(0.763)', transformOrigin: 'center' }}
+      // Bis 2.6.7 stand hier `transform: scale(0.763)` — eine dritte
+      // Skalierungsschicht neben dem 18,4px-Wurzelmass und dem `zoom: 1.25`
+      // der Sidebar. `transform` skaliert nur das BILD: die Leiste belegte
+      // weiter ihre ungeschrumpfte Layoutbreite (gemessen 1084,7px fuer eine
+      // sichtbar 827px breite Zeile) und jede Haarlinie darin wurde auf
+      // 0,763px gemalt. Die 0,763 stehen jetzt in den Groessen selbst:
+      // jede rem-Laenge dieser Leiste ist ihr altes Mass mal 0,763, in
+      // ganzen Pixeln des 16px-Rasters (36px Pille -> 28px, 16px Icon ->
+      // 12px = ICON_SM, 12px Label -> 9px).
+      className="flex flex-wrap items-center justify-center gap-x-[3px] gap-y-[3px] px-3 py-[1.5px] [--text-control:9px]"
     >
       {intents.map((meta) => {
         const locked = isIntentLocked(meta, backend, mlxHost)
@@ -58,7 +102,7 @@ export function IntentBar() {
                 : setIntent(meta.id)
             }
             className={cn(
-              'relative flex items-center h-9 rounded-full border lu-focus-ring transition-[background-color,border-color,box-shadow,color] duration-200',
+              'relative flex items-center h-7 rounded-full border transition-[background-color,border-color,box-shadow,color] duration-200',
               EASE,
               selected
                 ? 'bg-white/[0.11] border-white/20 shadow-sm text-white'
@@ -67,27 +111,20 @@ export function IntentBar() {
                   : 'border-transparent text-gray-500 hover:text-gray-200 hover:bg-white/[0.05]',
             )}
           >
-            <span className="grid place-items-center w-9 h-9 shrink-0">
-              <Icon size={16} strokeWidth={selected ? 2 : 1.75} />
+            <span className="grid place-items-center w-7 h-7 shrink-0">
+              <Icon size={ICON_SM} />
             </span>
             {locked && (
               // Brighter, theme-aware cloud tag: violet-300/80 was near
               // invisible on light backgrounds and easy to miss on dark.
               <Cloud
-                size={11}
-                className="absolute top-0.5 right-0.5 text-violet-500 dark:text-violet-200"
-                strokeWidth={2.4}
+                size={8}
+                className="absolute top-[1.5px] right-[1.5px] text-violet-500 dark:text-violet-200"
                 aria-hidden
               />
             )}
-            <span
-              className={cn(
-                'overflow-hidden whitespace-nowrap min-w-0 t-control transition-[max-width,opacity,padding] duration-200',
-                EASE,
-                selected ? 'max-w-[150px] opacity-100 pl-1 pr-3.5' : 'max-w-0 opacity-0 px-0',
-              )}
-            >
-              {meta.label}
+            <span className="whitespace-nowrap t-control pl-[3px] pr-[10.5px]">
+              {meta.short}
             </span>
           </button>
         )

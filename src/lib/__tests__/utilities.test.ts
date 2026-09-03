@@ -198,10 +198,14 @@ describe('getRecommendations', () => {
     const high = getRecommendations('high')
 
     const lowNames = low.map((r) => r.name)
+    const mediumNames = medium.map((r) => r.name)
     const highNames = high.map((r) => r.name)
 
-    // Low and high should have at least some different models
+    // Every tier recommends a different set — medium was fetched but never
+    // asserted on before, so a medium list identical to low/high slipped through.
     expect(lowNames).not.toEqual(highNames)
+    expect(mediumNames).not.toEqual(lowNames)
+    expect(mediumNames).not.toEqual(highNames)
   })
 
   it('low tier recommends smaller models', () => {

@@ -2,7 +2,6 @@ import { describe, it, expect, beforeEach } from 'vitest'
 import { useAgentWorkflowStore } from '../../stores/agentWorkflowStore'
 import { BUILT_IN_WORKFLOWS } from '../built-in-workflows'
 import { useMemoryStore } from '../../stores/memoryStore'
-import type { AgentWorkflow, WorkflowStep } from '../../types/agent-workflows'
 
 // ── Helpers ───────────────────────────────────────────────────
 

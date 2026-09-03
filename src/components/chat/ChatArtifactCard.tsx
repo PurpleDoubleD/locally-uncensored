@@ -81,14 +81,14 @@ export function ChatArtifactCard({ artifact }: { artifact: ChatArtifact }) {
           onClick={handleDownload}
           disabled={saveState === 'saving'}
           title="Download / Save as…"
-          className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[0.6rem] font-medium bg-blue-500/15 text-blue-500 hover:bg-blue-500/25 border border-blue-500/30 transition-colors disabled:opacity-50 shrink-0"
+          className="flex items-center gap-1 px-1.5 py-0.5 rounded t-micro font-medium bg-blue-500/15 text-blue-500 hover:bg-blue-500/25 border border-blue-500/30 transition-colors disabled:opacity-50 shrink-0"
         >
           {saveState === 'done' ? <Check size={11} /> : <Download size={11} />}
           <span>{saveState === 'done' ? 'Saved' : saveState === 'saving' ? '…' : 'Download'}</span>
         </button>
       </div>
       {/* Scrollable preview */}
-      <pre className="px-2.5 py-1.5 text-[0.65rem] leading-snug text-gray-700 dark:text-gray-300 font-mono overflow-auto max-h-64 scrollbar-thin whitespace-pre">
+      <pre className="px-2.5 py-1.5 t-micro leading-snug text-gray-700 dark:text-gray-300 font-mono overflow-auto max-h-64 scrollbar-thin whitespace-pre">
         {preview}
         {hiddenLines > 0 ? `\n\n… ${hiddenLines} more line${hiddenLines === 1 ? '' : 's'}. Download for the full file` : ''}
       </pre>

@@ -7,11 +7,14 @@
  * gate on screen. partialize therefore has to hold EXACTLY the fields that
  * are a stated preference, and this test is the guard on that word "exactly".
  *
- * Widened in the web-parity round (2.6.8): sidebarOpen joined the written set.
- * It is the user saying "rail" or "list", the same class of choice as
- * explorerCollapsed, and forgetting it on every restart is the bug David
- * reported. currentView / cloudGateOpen / cloudTeaser stay forbidden, because
- * those steer where the app STARTS rather than how it looks.
+ * Widened twice for 2.6.8. The web-parity round put sidebarOpen into the
+ * written set: it is the user saying "rail" or "list", the same class of
+ * choice as explorerCollapsed, and forgetting it on every restart is the bug
+ * David reported. The design round added the agent panel's two geometry
+ * fields and sidebarWidth, the dragged width of the left chat column (D1).
+ * Six fields in total. currentView / cloudGateOpen / cloudTeaser stay
+ * forbidden, because those steer where the app STARTS rather than how it
+ * looks.
  *
  * Run: npx vitest run src/stores/__tests__/uiStore-explorer.test.ts
  */
@@ -48,11 +51,34 @@ import {
 } from '../uiStore'
 
 describe('what the ui store writes to disk', () => {
-  it('persists exactly explorerWidth, explorerCollapsed and sidebarOpen', () => {
+  it('persists exactly the six preference fields of the three panels', () => {
+    // Die Liste bleibt ausgeschrieben und wird nicht aus dem Zustand
+    // abgeleitet, sie ist eine ERLAUBNIS und keine Beschreibung. Jedes weitere
+    // Feld hier muss jemand hinschreiben und dabei begruenden, warum es einen
+    // Neustart ueberleben soll; das ist der ganze Zweck dieser Zeile.
+    //
+    // Was ausdruecklich NICHT dazugehoert: die Aufgaben selbst. Die liegen in
+    // agentTaskStore und werden gar nicht persistiert, weil eine
+    // wiederhergestellte Zeile mit "laeuft" ueber den Zustand der Maschine
+    // luegen wuerde, samt einem Abbrechen-Knopf, der nichts mehr abbricht.
+    //
+    // 2.6.8 bringt das Agenten-Panel seine zwei Felder mit, dazu kommt
+    // `sidebarWidth`: die gezogene Breite der Chatspalte links (D1, David:
+    // "bzw dynamisch mit vergroesserung anpassend"). Sie gehoert in dieselbe
+    // Klasse wie die Geometrie der anderen Flaechen, eine VORLIEBE, die
+    // niemand nach jedem Start neu einstellen will.
+    //
+    // `sidebarOpen` steht seit der Web-Paritaetsrunde ebenfalls hier und nicht
+    // mehr im Gegentest unten: OB die Spalte offen ist, ist "Schiene" oder
+    // "Liste" und damit dieselbe Klasse Vorliebe wie explorerCollapsed. Das
+    // Vergessen bei jedem Start war der Fehler, den David gemeldet hat.
     const partialize = useUIStore.persist.getOptions().partialize
     expect(partialize).toBeTypeOf('function')
     const written = partialize!(useUIStore.getState()) as Record<string, unknown>
-    expect(Object.keys(written).sort()).toEqual(['explorerCollapsed', 'explorerWidth', 'sidebarOpen'])
+    expect(Object.keys(written).sort()).toEqual([
+      'agentPanelCollapsed', 'agentPanelWidth', 'explorerCollapsed', 'explorerWidth',
+      'sidebarOpen', 'sidebarWidth',
+    ])
   })
 
   it('counter-test: nothing that steers the app start comes along', () => {
@@ -66,20 +92,36 @@ describe('what the ui store writes to disk', () => {
     expect(Object.values(written).every((v) => typeof v !== 'function')).toBe(true)
   })
 
-  it('keeps writing only those three after the state moved', () => {
-    useUIStore.setState({ currentView: 'settings', cloudGateOpen: true, explorerCollapsed: true, explorerWidth: 333, sidebarOpen: true })
+  it('keeps writing only those six after the state moved', () => {
+    useUIStore.setState({
+      currentView: 'settings', cloudGateOpen: true,
+      explorerCollapsed: true, explorerWidth: 333,
+      agentPanelCollapsed: false, agentPanelWidth: 222,
+      sidebarWidth: 310, sidebarOpen: true,
+    })
     const written = useUIStore.persist.getOptions().partialize!(useUIStore.getState()) as Record<string, unknown>
-    expect(written).toEqual({ explorerWidth: 333, explorerCollapsed: true, sidebarOpen: true })
+    expect(written).toEqual({
+      explorerWidth: 333, explorerCollapsed: true,
+      agentPanelWidth: 222, agentPanelCollapsed: false,
+      sidebarWidth: 310, sidebarOpen: true,
+    })
   })
 
   it('and that is what actually lands in storage', () => {
     useUIStore.setState({ currentView: 'benchmark', cloudGateOpen: true, sidebarOpen: false })
     useUIStore.getState().setExplorerWidth(420, 1600)
     useUIStore.getState().setExplorerCollapsed(true)
+    useUIStore.getState().setAgentPanelWidth(260, 1600)
+    useUIStore.getState().setAgentPanelCollapsed(false)
+    useUIStore.getState().setSidebarWidth(310, 1600)
     const raw = memory.getItem('locally-uncensored-ui')
     expect(raw).toBeTruthy()
     const parsed = JSON.parse(raw!)
-    expect(parsed.state).toEqual({ explorerWidth: 420, explorerCollapsed: true, sidebarOpen: false })
+    expect(parsed.state).toEqual({
+      explorerWidth: 420, explorerCollapsed: true,
+      agentPanelWidth: 260, agentPanelCollapsed: false,
+      sidebarWidth: 310, sidebarOpen: false,
+    })
   })
 })
 

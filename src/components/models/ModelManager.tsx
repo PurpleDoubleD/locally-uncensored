@@ -71,7 +71,14 @@ export function ModelManager() {
   const [usingModel, setUsingModel] = useState<string | null>(null)
   const [pullOpen, setPullOpen] = useState(false)
   const [infoOpen, setInfoOpen] = useState(false)
-  const [modelInfo, setModelInfo] = useState<any>(null)
+  // Gesetzt wird das aus `{ name, ...await showModel(name) }` (unten in
+  // `handleInfo`), und `showModel` gibt `Record<string, unknown>` zurueck
+  // (api/ollama.ts:61) — es reicht die Antwort von Ollamas /api/show
+  // unveraendert durch, deren Felder je nach Modell wechseln. Genau dafuer ist
+  // der Typ hier gebaut: `name` kennen wir, weil wir es selbst danebenschreiben,
+  // der Rest ist `unknown`. Gelesen wird ohnehin nur `name` (Modal-Titel) und
+  // das Ganze als JSON.stringify.
+  const [modelInfo, setModelInfo] = useState<({ name: string } & Record<string, unknown>) | null>(null)
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
   // Open on Discover by default — most opens are to find and install
   // something new. Installed is one click away in the segment control.
@@ -205,7 +212,7 @@ export function ModelManager() {
               }`}
             >
               <Icon size={15} className={active ? 'text-gray-800 dark:text-gray-100' : 'text-gray-400 dark:text-gray-500'} />
-              <span className={`hidden lg:block text-[0.68rem] font-medium ${active ? 'text-gray-900 dark:text-white' : 'text-gray-500 dark:text-gray-400'}`}>
+              <span className={`hidden lg:block t-micro font-medium ${active ? 'text-gray-900 dark:text-white' : 'text-gray-500 dark:text-gray-400'}`}>
                 {label}
               </span>
               {badge.kind === 'loading' ? (
@@ -245,7 +252,7 @@ export function ModelManager() {
               <button
                 onClick={() => setTab('discover')}
                 aria-pressed={tab === 'discover'}
-                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[0.62rem] font-semibold transition-colors ${
+                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md t-micro font-semibold transition-colors ${
                   tab === 'discover'
                     ? 'bg-white dark:bg-white/10 text-gray-900 dark:text-white shadow-sm'
                     : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
@@ -256,7 +263,7 @@ export function ModelManager() {
               <button
                 onClick={() => setTab('installed')}
                 aria-pressed={tab === 'installed'}
-                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[0.62rem] font-semibold transition-colors ${
+                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md t-micro font-semibold transition-colors ${
                   tab === 'installed'
                     ? 'bg-white dark:bg-white/10 text-gray-900 dark:text-white shadow-sm'
                     : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
@@ -288,7 +295,7 @@ export function ModelManager() {
                   else if (e.key === 'Escape') setSearchQuery('')
                 }}
                 placeholder="Search models…"
-                className="w-full pl-7 pr-6 py-1.5 rounded-lg bg-gray-100 dark:bg-white/5 border border-gray-200 dark:border-white/10 text-[0.65rem] text-gray-900 dark:text-white placeholder-gray-500 focus:outline-none focus:border-gray-400 dark:focus:border-white/20"
+                className="w-full pl-7 pr-6 py-1.5 rounded-lg bg-gray-100 dark:bg-white/5 border border-gray-200 dark:border-white/10 t-micro text-gray-900 dark:text-white placeholder-gray-500 focus:outline-none focus:border-gray-400 dark:focus:border-white/20"
               />
               {searchQuery && (
                 <button
@@ -308,7 +315,7 @@ export function ModelManager() {
             {ollamaEnabled && (
               <button
                 onClick={() => setPullOpen(true)}
-                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-gray-100 dark:bg-white/5 border border-gray-200 dark:border-white/10 text-[0.62rem] text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-white/10 transition-colors"
+                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-gray-100 dark:bg-white/5 border border-gray-200 dark:border-white/10 t-micro text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-white/10 transition-colors"
                 title="Pull any Ollama model by name"
               >
                 <Download size={11} /> Pull
@@ -345,11 +352,11 @@ export function ModelManager() {
                 ) : (
                 <div className="flex flex-col items-center justify-center text-center py-16 px-6 gap-3">
                   <div className="w-14 h-14 rounded-full bg-gray-100 dark:bg-white/[0.04] border border-gray-200 dark:border-white/[0.06] flex items-center justify-center">
-                    {mode === 'video' ? <VideoIcon size={22} className="text-gray-400 dark:text-gray-500" /> : <ImageIcon size={22} className="text-gray-400 dark:text-gray-500" />}
+                    {mode === 'video' ? <VideoIcon size={28} className="text-gray-400 dark:text-gray-500" /> : <ImageIcon size={28} className="text-gray-400 dark:text-gray-500" />}
                   </div>
                   <div className="space-y-1">
-                    <p className="text-[0.75rem] font-medium text-gray-800 dark:text-gray-200">Start ComfyUI to see your {mode} models</p>
-                    <p className="text-[0.6rem] text-gray-500 max-w-[300px] leading-relaxed">
+                    <p className="text-[12px] font-medium text-gray-800 dark:text-gray-200">Start ComfyUI to see your {mode} models</p>
+                    <p className="t-micro text-gray-500 max-w-[300px] leading-relaxed">
                       {mode === 'image' ? 'Image' : 'Video'} models are served by ComfyUI, which isn't running right now, so the ones you've downloaded can't be listed yet. Open Settings, go to AI Backends, and press Start under ComfyUI (Image &amp; Video), then come back.
                     </p>
                   </div>
@@ -360,7 +367,7 @@ export function ModelManager() {
                       Backends tab, the ComfyUI section open. */}
                   <button
                     onClick={() => openSettingsAt({ tab: 'backends', section: 'comfyui' })}
-                    className="flex items-center gap-1.5 mt-1 px-3 py-1.5 rounded-md bg-gray-900 dark:bg-white/10 hover:bg-gray-800 dark:hover:bg-white/15 text-white text-[0.65rem] font-medium transition-colors"
+                    className="flex items-center gap-1.5 mt-1 px-3 py-1.5 rounded-md bg-gray-900 dark:bg-white/10 hover:bg-gray-800 dark:hover:bg-white/15 text-white t-micro font-medium transition-colors"
                   >
                     <SettingsIcon size={11} /> Open Settings
                   </button>
@@ -369,17 +376,17 @@ export function ModelManager() {
               ) : models.length === 0 ? (
                 <div className="flex flex-col items-center justify-center text-center py-16 px-6 gap-3">
                   <div className="w-14 h-14 rounded-full bg-gray-100 dark:bg-white/[0.04] border border-gray-200 dark:border-white/[0.06] flex items-center justify-center">
-                    <PackageOpen size={22} className="text-gray-400 dark:text-gray-500" />
+                    <PackageOpen size={28} className="text-gray-400 dark:text-gray-500" />
                   </div>
                   <div className="space-y-1">
-                    <p className="text-[0.75rem] font-medium text-gray-800 dark:text-gray-200">No models installed yet</p>
-                    <p className="text-[0.6rem] text-gray-500 max-w-[280px] leading-relaxed">
+                    <p className="text-[12px] font-medium text-gray-800 dark:text-gray-200">No models installed yet</p>
+                    <p className="t-micro text-gray-500 max-w-[280px] leading-relaxed">
                       Browse curated chat, image and video models and install them with one click.
                     </p>
                   </div>
                   <button
                     onClick={() => setTab('discover')}
-                    className="flex items-center gap-1.5 mt-1 px-3 py-1.5 rounded-md bg-gray-900 dark:bg-white/10 hover:bg-gray-800 dark:hover:bg-white/15 text-white text-[0.65rem] font-medium transition-colors"
+                    className="flex items-center gap-1.5 mt-1 px-3 py-1.5 rounded-md bg-gray-900 dark:bg-white/10 hover:bg-gray-800 dark:hover:bg-white/15 text-white t-micro font-medium transition-colors"
                   >
                     <Sparkles size={11} /> Discover models
                   </button>
@@ -391,7 +398,7 @@ export function ModelManager() {
                   </p>
                   <button
                     onClick={() => setTab('discover')}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-gray-100 dark:bg-white/5 border border-gray-200 dark:border-white/10 text-[0.65rem] text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-white/10 transition-colors"
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-gray-100 dark:bg-white/5 border border-gray-200 dark:border-white/10 t-micro text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-white/10 transition-colors"
                   >
                     <Sparkles size={11} /> Discover {modeMeta.label.toLowerCase()} models
                   </button>
@@ -406,7 +413,7 @@ export function ModelManager() {
                     <section className="space-y-1.5">
                       <div className="flex items-center gap-2 px-1">
                         <SectionIcon size={11} />
-                        <h2 className="text-[0.62rem] font-semibold uppercase tracking-[0.12em] text-gray-700 dark:text-gray-300">
+                        <h2 className="t-micro font-semibold uppercase tracking-[0.12em] text-gray-700 dark:text-gray-300">
                           {modeMeta.label}
                         </h2>
                         <span className="text-[0.55rem] text-gray-400 dark:text-gray-500 tabular-nums">{shown.length}</span>
@@ -480,7 +487,7 @@ export function ModelManager() {
                           ))
                         })()}
                         {shown.length === 0 && (
-                          <p className="text-center text-[0.65rem] text-gray-500 py-6">No installed {modeMeta.label.toLowerCase()} models match "{searchQuery}"</p>
+                          <p className="text-center t-micro text-gray-500 py-6">No installed {modeMeta.label.toLowerCase()} models match "{searchQuery}"</p>
                         )}
                       </div>
                     </section>
@@ -526,7 +533,7 @@ export function ModelManager() {
 
       <Modal open={infoOpen} onClose={() => setInfoOpen(false)} title={modelInfo?.name || 'Model Info'}>
         {modelInfo && (
-          <pre className="text-[0.6rem] text-gray-600 dark:text-gray-300 bg-gray-100 dark:bg-black/30 rounded-lg p-3 overflow-auto max-h-80 scrollbar-thin font-mono">
+          <pre className="t-micro text-gray-600 dark:text-gray-300 bg-gray-100 dark:bg-black/30 rounded-lg p-3 overflow-auto max-h-80 scrollbar-thin font-mono">
             {JSON.stringify(modelInfo, null, 2)}
           </pre>
         )}

@@ -27,6 +27,67 @@ export function codexNeedsConfirm(toolName: string, confirmEnabled: boolean): bo
 }
 
 /**
+ * Per-field cap for the approval preview. Generous on purpose: this is the ONE
+ * human checkpoint between a prompt-injected model and arbitrary local code, so
+ * it errs toward showing too much. The dialog's `<pre>` scrolls, so length
+ * costs the reader nothing but a scrollbar.
+ */
+const PREVIEW_FIELD_MAX = 8000
+
+/** Fields worth showing, in the order a reader needs them. Everything that
+ *  decides WHAT runs comes before everything that decides WHERE. */
+const PREVIEW_FIELDS = ['command', 'stdin', 'code', 'script', 'args', 'shell', 'cwd', 'timeout', 'background'] as const
+
+function renderValue(v: unknown): string {
+  if (typeof v === 'string') return v
+  return JSON.stringify(v)
+}
+
+/**
+ * What the user is actually approving, as text.
+ *
+ * The dialog used to show `args.command` and nothing else, while the
+ * shell_execute description points the model at `stdin` for anything
+ * multi-line: "Feed a script through `stdin` instead of quoting it: set command
+ * to `python3 -`". So the approval card read `python3 -` — the starter — and
+ * the payload, the part that is the arbitrary code execution, was invisible.
+ * A model steered by a poisoned web page or a poisoned file could get its
+ * script past the only human in the loop by putting it where the human was not
+ * looking.
+ *
+ * Every field that shapes the process is rendered, labelled, in full.
+ */
+export function renderApprovalPreview(
+  toolName: string,
+  args: Record<string, unknown> | undefined,
+  fieldMax = PREVIEW_FIELD_MAX,
+): string {
+  const a = args ?? {}
+  const parts: string[] = []
+  for (const key of PREVIEW_FIELDS) {
+    const raw = a[key]
+    if (raw === undefined || raw === null || raw === '') continue
+    const text = renderValue(raw)
+    if (!text) continue
+    const shown = text.length > fieldMax
+      ? `${text.slice(0, fieldMax)}\n… (${text.length - fieldMax} more characters)`
+      : text
+    // A single-line value reads better inline; a script needs its own block or
+    // the indentation of the label corrupts what the user is reading.
+    parts.push(shown.includes('\n') ? `${key}:\n${shown}` : `${key}: ${shown}`)
+  }
+  // Never render an empty card: a tool call whose args we cannot describe is
+  // the LAST thing to wave through silently.
+  if (parts.length === 0) {
+    const keys = Object.keys(a)
+    return keys.length === 0
+      ? `${toolName} (no arguments)`
+      : `${toolName}\n${JSON.stringify(a, null, 2).slice(0, fieldMax)}`
+  }
+  return parts.join('\n\n')
+}
+
+/**
  * Is the confirm gate active for THIS run?
  *
  * David 2026-08-22, replacing G15a (2026-08-07) and the 2.5.9 default:

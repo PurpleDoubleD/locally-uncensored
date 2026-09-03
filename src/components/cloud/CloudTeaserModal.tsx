@@ -6,6 +6,7 @@
 // footer link turns the whole discovery layer off (Settings can re-enable).
 
 import { AnimatePresence, motion } from 'framer-motion'
+import { useDismissOnEscape } from '../../hooks/useDismissOnEscape'
 import { X, Cloud, Sparkles, MonitorDown } from 'lucide-react'
 import { useUIStore, type CloudTeaserTarget } from '../../stores/uiStore'
 import { useSettingsStore } from '../../stores/settingsStore'
@@ -91,6 +92,8 @@ export function CloudTeaserModal() {
           }
         : null
 
+
+  useDismissOnEscape(!!target && !!copy, close)
   return (
     <AnimatePresence>
       {target && copy && (

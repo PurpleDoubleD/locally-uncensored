@@ -84,7 +84,7 @@ export function PersonaPanel() {
         ))}
         <button
           onClick={() => { setShowEditor(!showEditor); setEditingId(null) }}
-          className="flex flex-col items-center gap-2 p-4 rounded-xl bg-gray-50 dark:bg-white/[0.02] border border-gray-300 dark:border-white/10 hover:border-gray-400 dark:hover:border-white/15 transition-all cursor-pointer"
+          className="flex flex-col items-center gap-2 p-4 rounded-xl bg-gray-50 dark:bg-white/[0.02] border border-gray-300 dark:border-white/10 hover:border-gray-400 dark:hover:border-white/15 transition-colors cursor-pointer"
         >
           <div className="w-10 h-10 rounded-lg flex items-center justify-center bg-gray-100 dark:bg-white/5">
             <Plus size={20} className="text-gray-500" />

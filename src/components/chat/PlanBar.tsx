@@ -20,16 +20,43 @@
 // Expanded state is per session, not persisted, because a plan is short-lived.
 
 import { useState } from 'react'
-import { CheckCircle2, Circle, ChevronDown, ChevronRight, Loader2, ListTodo, X } from 'lucide-react'
+import { AlertCircle, CheckCircle2, Circle, ChevronDown, ChevronRight, Loader2, ListTodo, X } from 'lucide-react'
 import { useTodoStore } from '../../stores/todoStore'
 import { useChatStore } from '../../stores/chatStore'
+import { useCodexStore } from '../../stores/codexStore'
+import { useGenerationStore } from '../../stores/generationStore'
 import { useStagedChangesStore } from '../../stores/stagedChangesStore'
+import { runStatusFrom } from '../../lib/run-idle'
+import { isRunQueued } from '../../lib/run-lanes'
+import { isRunStopped } from '../../lib/run-stop'
+import { isActiveCodexStatus } from '../../types/codex'
 
 /** What the collapsed bar says once the model ticked off every step. Ticking
  *  off a step is not the same as the change being on disk. */
 export function planDoneLabel(pendingChanges: number): string {
   if (pendingChanges <= 0) return 'every step done'
   return `every step done, ${pendingChanges} change${pendingChanges === 1 ? '' : 's'} still waiting for your approval`
+}
+
+/**
+ * Was die Leiste sagt, wenn der Lauf vorbei ist und der Plan offen blieb.
+ *
+ * Gemessen am 03.09.2026 im laufenden Build: ein Lauf endete mit vier
+ * Schritten, von denen drei abgehakt waren, und die Leiste stand danach
+ * unveraendert auf "PLAN 3/4", mit dem vierten Punkt als Ueberschrift und,
+ * aufgeklappt, einem Kreisel, der weiterdrehte. Kein Wort davon, dass nichts
+ * mehr laeuft. Genau so hat eine Persona es gemeldet ("blieb stehen").
+ *
+ * Die Zahl war dabei richtig: der Aufraeum-Steer in `plan-reconcile.ts` hat
+ * ein Budget von zwei, und danach endet der Lauf mit offenem Plan. Die
+ * Schlusszeile aus `turn-summary.ts` sagt das auch, aber NUR wenn das Modell
+ * selbst nichts geschrieben hat. Schreibt es "fertig, alles erledigt", faellt
+ * der Hinweis weg, und genau dann ist er am noetigsten. Die Leiste ist die
+ * zweite Stelle, an der es stehen kann, und sie steht immer da.
+ */
+export function planStoppedLabel(done: number, total: number): string {
+  const open = total - done
+  return `the run ended here, ${done} of ${total} steps done, ${open} still open`
 }
 
 export type PlanBarVariant = 'header' | 'panel'
@@ -51,6 +78,20 @@ export function PlanBar({ variant = 'header' }: Props) {
     activeConversationId ? (s.byChat[activeConversationId]?.length ?? 0) : 0,
   )
   const clearTodos = useTodoStore((s) => s.clearTodos)
+  // Laeuft ueberhaupt noch etwas auf dieser Konversation. Beide Quellen einzeln
+  // abonniert, damit die Leiste neu zeichnet, wenn der Lauf endet; das Urteil
+  // selbst kommt aus `run-idle.ts`, der einen Stelle, die die zwei Quellen
+  // versoehnt (AS-08). `generating` allein ist die Haelfte, die der Stop des
+  // Coding-Agenten zuerst loescht.
+  const generating = useGenerationStore((s) =>
+    activeConversationId ? s.generating[activeConversationId] === true : false,
+  )
+  const threadStatus = useCodexStore((s) =>
+    activeConversationId ? s.threads[activeConversationId]?.status : undefined,
+  )
+  const runActive = isActiveCodexStatus(
+    runStatusFrom(generating, threadStatus, isRunStopped(activeConversationId), isRunQueued(activeConversationId)),
+  )
   const [expanded, setExpanded] = useState(panel)
 
   if (!activeConversationId || !todos || todos.length === 0) return null
@@ -58,6 +99,9 @@ export function PlanBar({ variant = 'header' }: Props) {
   const done = todos.filter((t) => t.status === 'completed').length
   const current = todos.find((t) => t.status === 'in_progress')
   const allDone = done === todos.length
+  // Der Lauf ist vorbei und der Plan ist es nicht. Das ist die Aussage, die
+  // vorher nirgends stand.
+  const stoppedShort = !allDone && !runActive
   // Collapsed, the one line that matters is what is happening NOW. With nothing
   // in progress (plan written but not started, or everything finished) fall back
   // to the first item that is still open, and only then to the last one.
@@ -65,7 +109,12 @@ export function PlanBar({ variant = 'header' }: Props) {
 
   return (
     <div
-      className={panel ? 'w-full p-1.5' : 'w-full px-2 pt-1'}
+      // 'header' sits directly above the transcript, so it rides the SAME
+      // measure column and the same px-3 gutter the bubbles use — a band that
+      // ran the full window width while the answers below it stopped at 760px
+      // read as a second, wider layout stacked on the first. 'panel' is the
+      // Code Explorer column and owns its own width, so it keeps out of this.
+      className={panel ? 'w-full p-1.5' : 'mx-auto w-full max-w-[var(--lu-measure)] px-3 pt-1'}
       data-testid={panel ? 'plan-panel' : 'plan-header'}
     >
       <div className="w-full rounded-md border border-blue-500/20 bg-blue-500/[0.04]">
@@ -86,7 +135,7 @@ export function PlanBar({ variant = 'header' }: Props) {
             </span>
             {!expanded && (
               <span
-                className="flex-1 min-w-0 truncate text-[0.6rem] text-gray-700 dark:text-gray-300"
+                className="flex-1 min-w-0 truncate t-micro text-gray-700 dark:text-gray-300"
                 title={headline.content}
               >
                 {headline.content}
@@ -112,12 +161,20 @@ export function PlanBar({ variant = 'header' }: Props) {
                 {t.status === 'completed' ? (
                   <CheckCircle2 size={10} className="text-emerald-400 shrink-0 mt-[1px]" />
                 ) : t.status === 'in_progress' ? (
-                  <Loader2 size={10} className="text-blue-400 shrink-0 mt-[1px] animate-spin" />
+                  // Ein Kreisel, der sich dreht, behauptet Arbeit. Nach dem Ende
+                  // des Laufs ist das eine Behauptung ueber nichts: gemessen
+                  // drehte er nach dem letzten Wort des Modells unbegrenzt
+                  // weiter. Ohne Lauf steht er still und wird bernsteinfarben,
+                  // wie die Zeile unten, die dasselbe in Worten sagt.
+                  <Loader2
+                    size={10}
+                    className={`shrink-0 mt-[1px] ${runActive ? 'text-blue-400 animate-spin' : 'text-amber-400'}`}
+                  />
                 ) : (
                   <Circle size={10} className="text-gray-600 shrink-0 mt-[1px]" />
                 )}
                 <span
-                  className={`text-[0.6rem] leading-snug ${
+                  className={`t-micro leading-snug ${
                     t.status === 'completed'
                       ? 'text-gray-500 line-through'
                       : t.status === 'in_progress'
@@ -137,19 +194,60 @@ export function PlanBar({ variant = 'header' }: Props) {
           // the list is open by default, so the line has to stay: "every step done"
           // while six writes sit refused in the queue is exactly the sentence
           // Morgan believed.
-          <div className="px-2 pb-1 flex items-center gap-1.5" data-testid="plan-all-done">
-            <CheckCircle2
-              size={9}
-              className={`${pending > 0 ? 'text-amber-400' : 'text-emerald-400'} shrink-0`}
-            />
-            <span
-              className={`text-[0.55rem] leading-snug ${pending > 0 ? 'text-amber-400/90' : 'text-emerald-400/80'}`}
-            >
-              {planDoneLabel(pending)}
-            </span>
-          </div>
+          <Schlusszeile
+            testid="plan-all-done"
+            Symbol={CheckCircle2}
+            ton={pending > 0 ? 'warnung' : 'gut'}
+            text={planDoneLabel(pending)}
+          />
+        )}
+
+        {stoppedShort && (
+          // Das Gegenstueck zur Zeile darueber, und aus demselben Grund an
+          // derselben Stelle: sie steht IMMER, aufgeklappt wie zugeklappt.
+          // Zugeklappt las die Leiste sonst "PLAN 3/4" mit dem vierten Punkt
+          // daneben und sah aus wie ein Lauf, der gleich weitermacht.
+          <Schlusszeile
+            testid="plan-run-stopped"
+            Symbol={AlertCircle}
+            ton="warnung"
+            text={planStoppedLabel(done, todos.length)}
+          />
         )}
       </div>
+    </div>
+  )
+}
+
+/**
+ * Die eine Zeile unter der Liste, in zwei Toenen.
+ *
+ * Zusammengelegt, weil es jetzt ZWEI davon gibt (fertiger Plan, abgebrochener
+ * Lauf) und zwei Abschriften derselben Zeile genau so auseinanderlaufen, wie
+ * es die Typo-Sperrklinke beschreibt: die zweite entsteht durch Abschreiben
+ * der ersten und bringt frische Umgehungen mit. Eine Groessenangabe, ein
+ * Abstand, zwei Toene.
+ */
+function Schlusszeile({
+  testid,
+  Symbol,
+  ton,
+  text,
+}: {
+  testid: string
+  Symbol: typeof CheckCircle2
+  ton: 'gut' | 'warnung'
+  text: string
+}) {
+  const warnung = ton === 'warnung'
+  return (
+    <div className="px-2 pb-1 flex items-center gap-1.5" data-testid={testid}>
+      <Symbol size={9} className={`${warnung ? 'text-amber-400' : 'text-emerald-400'} shrink-0`} />
+      <span
+        className={`text-[0.55rem] leading-snug ${warnung ? 'text-amber-400/90' : 'text-emerald-400/80'}`}
+      >
+        {text}
+      </span>
     </div>
   )
 }

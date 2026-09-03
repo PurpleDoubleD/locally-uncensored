@@ -1,5 +1,6 @@
 import { getImageModels, getVideoModels, isI2VModel, isT2VCapable } from './comfyui'
 import type { ModelPickKind } from '../stores/modelPickStore'
+import type { ToolArgs } from './mcp/types'
 
 /**
  * Model-Picker gate (v2.5.3). Runs inside executeImageGenerate /
@@ -53,7 +54,7 @@ export function chooseFromUserSelection(
 
 export async function pickModelForGeneration(
   kind: 'image' | 'video',
-  args: Record<string, any>,
+  args: ToolArgs,
 ): Promise<string | null> {
   if (typeof args.model === 'string' && args.model) return null
 

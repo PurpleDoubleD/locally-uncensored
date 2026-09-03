@@ -34,13 +34,13 @@ export function CodexConfirmDialog() {
   return (
     <div className="px-1 py-0.5" data-codex-confirm>
       <div className="rounded-lg border border-purple-500/20 bg-purple-500/[0.04] px-2 py-1.5">
-        <div className="flex items-center gap-1.5 text-[0.65rem] text-gray-700 dark:text-gray-300">
+        <div className="flex items-center gap-1.5 t-micro text-gray-700 dark:text-gray-300">
           <Terminal size={10} className="text-purple-400 shrink-0" />
           <span className="font-mono">{pending.toolName}</span>
           <span className="text-gray-500">needs your ok</span>
         </div>
 
-        <pre className="mt-1 max-h-20 overflow-auto rounded bg-black/5 dark:bg-black/30 px-1.5 py-1 text-[0.63rem] font-mono text-gray-800 dark:text-gray-200 whitespace-pre-wrap break-all">
+        <pre className="mt-1 max-h-20 overflow-auto rounded bg-black/5 dark:bg-black/30 px-1.5 py-1 t-micro font-mono text-gray-800 dark:text-gray-200 whitespace-pre-wrap break-all">
           {pending.command || '(no command preview)'}
         </pre>
 
@@ -48,13 +48,13 @@ export function CodexConfirmDialog() {
           <button
             onClick={() => answer(true)}
             autoFocus
-            className="px-2 py-0.5 rounded text-[0.62rem] font-medium bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-500/25 transition-colors"
+            className="px-2 py-0.5 rounded t-micro font-medium bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-500/25 transition-colors"
           >
             Run
           </button>
           <button
             onClick={() => answer(false)}
-            className="px-2 py-0.5 rounded text-[0.62rem] text-gray-600 dark:text-gray-400 hover:bg-gray-200/60 dark:hover:bg-white/5 transition-colors"
+            className="px-2 py-0.5 rounded t-micro text-gray-600 dark:text-gray-400 hover:bg-gray-200/60 dark:hover:bg-white/5 transition-colors"
           >
             No
           </button>
@@ -65,7 +65,7 @@ export function CodexConfirmDialog() {
           <button
             onClick={stopAsking}
             title="Run this and every later command in this session without asking"
-            className="text-[0.58rem] text-gray-500 hover:text-gray-800 dark:hover:text-gray-200 transition-colors"
+            className="t-micro text-gray-500 hover:text-gray-800 dark:hover:text-gray-200 transition-colors"
           >
             Accept without asking
           </button>

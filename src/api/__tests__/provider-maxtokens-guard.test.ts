@@ -14,9 +14,13 @@ import { describe, it, expect, vi, afterEach } from 'vitest'
 const localFetchStream = vi.fn()
 vi.mock('../backend', () => ({
   localFetch: vi.fn(),
-  localFetchStream: (...a: any[]) => localFetchStream(...(a as [])),
+  localFetchStream: (...a: unknown[]) => localFetchStream(...(a as [])),
   ollamaUrl: (path: string) => `http://localhost:11434/api${path}`,
-  isPrivateOrLanHost: () => true,
+  // Honest transport answers: api.anthropic.com is a public host the CSP
+  // allows, so the Anthropic provider takes its direct fetch and the stubbed
+  // global fetch below is what it hits. Blanket-true `isPrivateOrLanHost` used
+  // to be harmless because the provider never asked; now it does.
+  isPrivateOrLanHost: () => false,
   isDirectFetchAllowed: () => true,
   hostnameOf: (u: string) => { try { return new URL(u).hostname } catch { return '' } },
   ensureProxyAllowsHost: async () => {},
@@ -26,6 +30,9 @@ vi.mock('../backend', () => ({
 import { AnthropicProvider } from '../providers/anthropic-provider'
 import { OllamaProvider } from '../providers/ollama-provider'
 import type { ProviderConfig } from '../providers/types'
+import type { MessagesBody } from '../providers/anthropic-provider'
+import type { OllamaChatRequest } from '../providers/ollama-provider'
+import { sentJson } from './provider-test-support'
 
 function anthropicConfig(): ProviderConfig {
   return {
@@ -45,11 +52,6 @@ function sse(events: string[]): Response {
   })
 }
 
-function bodyOf(mock: ReturnType<typeof vi.fn>): any {
-  const init = mock.mock.calls[0]?.[1]
-  return JSON.parse(String(init?.body ?? '{}'))
-}
-
 afterEach(() => {
   vi.restoreAllMocks()
   localFetchStream.mockReset()
@@ -63,7 +65,10 @@ describe('max_tokens guard', () => {
     for await (const _ of provider.chatStream('claude-x', [{ role: 'user', content: 'hi' }], { maxTokens: -500 })) {
       // drain
     }
-    expect(bodyOf(fetchMock).max_tokens).toBe(4096)
+    // Als MessagesBody gelesen: heisst das Feld im Provider eines Tages
+    // anders, hoert diese Zeile auf zu kompilieren, statt gegen `undefined`
+    // gruen zu bleiben.
+    expect(sentJson<MessagesBody>(fetchMock.mock.calls).max_tokens).toBe(4096)
   })
 
   it('anthropic still honours a real budget', async () => {
@@ -73,7 +78,7 @@ describe('max_tokens guard', () => {
     for await (const _ of provider.chatStream('claude-x', [{ role: 'user', content: 'hi' }], { maxTokens: 1234 })) {
       // drain
     }
-    expect(bodyOf(fetchMock).max_tokens).toBe(1234)
+    expect(sentJson<MessagesBody>(fetchMock.mock.calls).max_tokens).toBe(1234)
   })
 
   it('ollama leaves num_predict unset for a negative budget', async () => {
@@ -87,7 +92,7 @@ describe('max_tokens guard', () => {
     for await (const _ of provider.chatStream('llama3', [{ role: 'user', content: 'hi' }], { maxTokens: -500 })) {
       // drain
     }
-    const sent = JSON.parse(String(localFetchStream.mock.calls[0][1].body))
+    const sent = sentJson<OllamaChatRequest>(localFetchStream.mock.calls)
     expect(sent.options?.num_predict).toBeUndefined()
   })
 
@@ -102,7 +107,7 @@ describe('max_tokens guard', () => {
     for await (const _ of provider.chatStream('llama3', [{ role: 'user', content: 'hi' }], { maxTokens: 256 })) {
       // drain
     }
-    const sent = JSON.parse(String(localFetchStream.mock.calls[0][1].body))
-    expect(sent.options.num_predict).toBe(256)
+    const sent = sentJson<OllamaChatRequest>(localFetchStream.mock.calls)
+    expect(sent.options?.num_predict).toBe(256)
   })
 })

@@ -43,8 +43,37 @@ export interface AgentCommand {
    * through the read tools.
    */
   readOnly?: boolean
+  /**
+   * Where this command may be offered and parsed. Default `'agent'`.
+   *
+   * Every command in this file except one expands to an instruction for an
+   * agent WITH TOOLS: /fix edits files, /test runs them, /review reads them.
+   * In plain chat there is no tool catalogue, so offering them there would be
+   * offering twenty ways to have the model narrate work it cannot do — which
+   * is exactly why the menu was gated to Agent and Coding in the first place
+   * (ChatView.tsx passes `isAgentActive`).
+   *
+   * `/compact` is the exception, and it is an exception of kind, not of
+   * degree: it does not ask the model to DO anything in the workspace. It is
+   * about the conversation, and every surface has one of those. So the gate
+   * stops being "is the agent on?" and becomes "does this command need the
+   * agent?" — which is the question it was always standing in for.
+   */
+  scope?: CommandScope
   /** Expand to the full agent instruction. `args` is the trimmed text after the command. */
   build: (args: string) => string
+}
+
+/**
+ * Which surface is asking. `'agent'` covers Agent and Coding mode — both carry
+ * the tool catalogue and both accept every command. `'chat'` is plain chat,
+ * which only sees commands explicitly marked for it.
+ */
+export type CommandScope = 'agent' | 'chat'
+
+/** May this command be offered on that surface? */
+export function commandInScope(command: AgentCommand, scope: CommandScope): boolean {
+  return scope === 'agent' || (command.scope ?? 'agent') === 'chat'
 }
 
 /** Shared closing line so every command nudges the agent to act, not narrate. */
@@ -143,6 +172,29 @@ export function formatDuration(ms: number): string {
 const LOOK = 'Read the real code with file_read / file_list / file_search first — never answer from memory. You have no write or shell tools on this turn, so do not plan to use them.'
 
 export const AGENT_COMMANDS: AgentCommand[] = [
+  // ── Context ───────────────────────────────────────────────────────────
+  {
+    name: 'compact',
+    summary: 'Summarise the older turns so the conversation keeps going',
+    argHint: '[what to focus on]',
+    scope: 'chat',
+    // Handled by the hook, like /goal — but unlike /goal this one DOES spend a
+    // round trip, because writing the summary is the work. `handledLocally`
+    // means "the hook decides what happens", not "no model is involved": the
+    // flag's job is to keep this text out of the model as an INSTRUCTION. If
+    // it were expanded and sent like /fix, the model would be asked to
+    // summarise inside the very turn whose context is the problem, and the
+    // answer would land in the transcript as a reply rather than replacing
+    // anything.
+    //
+    // build() is therefore the line the USER reads, same as /goal.
+    handledLocally: true,
+    build: (a) => {
+      const focus = a.trim()
+      return focus ? `compact: focus on ${focus}` : 'compact'
+    },
+  },
+
   // ── Steer ─────────────────────────────────────────────────────────────
   {
     name: 'goal',
@@ -394,11 +446,17 @@ export function getAgentCommand(name: string): AgentCommand | undefined {
  */
 export function parseAgentCommand(
   input: string,
+  scope: CommandScope = 'agent',
 ): { command: AgentCommand; args: string; expanded: string } | null {
   const m = /^\/([a-z][a-z0-9_-]*)(?:\s+([\s\S]*))?$/i.exec(input.trim())
   if (!m) return null
   const command = BY_NAME.get(m[1].toLowerCase())
   if (!command) return null
+  // Out of scope is the same answer as unknown: null, so the text falls
+  // through to normal chat unchanged. Anything else would mean a plain-chat
+  // "/fix the login" silently becoming an agent instruction on a surface with
+  // no tools to carry it out.
+  if (!commandInScope(command, scope)) return null
   const args = (m[2] ?? '').trim()
   return { command, args, expanded: command.build(args) }
 }
@@ -415,9 +473,12 @@ export function parseAgentCommand(
  * someone hit space first. A TRAILING space still closes the menu, because that
  * is the user moving on to type arguments.
  */
-export function matchAgentCommands(input: string): AgentCommand[] {
+export function matchAgentCommands(
+  input: string,
+  scope: CommandScope = 'agent',
+): AgentCommand[] {
   const m = /^\/([a-z0-9_-]*)$/i.exec(input.replace(/^\s+/, ''))
   if (!m) return []
   const prefix = m[1].toLowerCase()
-  return AGENT_COMMANDS.filter((c) => c.name.startsWith(prefix))
+  return AGENT_COMMANDS.filter((c) => c.name.startsWith(prefix) && commandInScope(c, scope))
 }

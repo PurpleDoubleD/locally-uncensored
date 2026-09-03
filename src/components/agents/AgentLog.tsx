@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { ScrollText } from 'lucide-react'
 import { ToolCallCard } from './ToolCallCard'
 import type { AgentLogEntry } from '../../types/agents'
+import { MOTION_S } from '../ui/motion'
 
 const typeStyles: Record<AgentLogEntry['type'], { badge: string; bg: string; text: string }> = {
   thought:     { badge: 'bg-indigo-500/20 text-indigo-300', bg: 'border-l-indigo-500/40', text: 'text-indigo-200' },
@@ -41,7 +42,7 @@ export function AgentLog({ entries, onApprove, onReject }: Props) {
 
   return (
     <div className="flex flex-col h-full min-h-0">
-      <div className="flex items-center gap-1.5 text-[0.75rem] text-gray-400 mb-2 font-medium flex-shrink-0">
+      <div className="flex items-center gap-1.5 text-[12px] text-gray-400 mb-2 font-medium flex-shrink-0">
         <ScrollText size={13} />
         Agent Log ({entries.length})
       </div>
@@ -54,20 +55,20 @@ export function AgentLog({ entries, onApprove, onReject }: Props) {
                 key={entry.id}
                 initial={{ opacity: 0, y: 8 }}
                 animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.15 }}
+                transition={{ duration: MOTION_S.base }}
                 className={`border-l-2 ${style.bg} pl-3 py-1.5`}
               >
                 <div className="flex items-center gap-2 mb-0.5">
-                  <span className={`text-[0.6rem] px-1.5 py-0.5 rounded-full font-medium ${style.badge}`}>
+                  <span className={`t-micro px-1.5 py-0.5 rounded-full font-medium ${style.badge}`}>
                     {typeLabels[entry.type]}
                   </span>
-                  <span className="text-[0.6rem] text-gray-500">
+                  <span className="t-micro text-gray-500">
                     {formatTimestamp(entry.timestamp)}
                   </span>
                 </div>
                 <div
                   className={`text-[0.8rem] leading-relaxed whitespace-pre-wrap break-words ${
-                    entry.type === 'observation' ? 'font-mono text-[0.75rem]' : ''
+                    entry.type === 'observation' ? 'font-mono text-[12px]' : ''
                   } ${style.text}`}
                 >
                   {entry.content}

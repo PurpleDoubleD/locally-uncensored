@@ -130,7 +130,7 @@ export function AgentWorkspaceDialog({
   const phase: 'pick' | 'extras' = draft ? 'extras' : 'pick'
 
   return (
-    <Modal open={open} onClose={onClose} title="">
+    <Modal open={open} onClose={onClose} title="" ariaLabel="Agent workspace">
       <div className="space-y-4">
         <div className="text-center space-y-1">
           <h3 className="text-base font-semibold text-gray-900 dark:text-white">
@@ -220,7 +220,7 @@ export function AgentWorkspaceDialog({
                 className="w-3 h-3"
                 data-testid="agent-workspace-remember-default"
               />
-              <span className="text-[0.65rem] text-gray-600 dark:text-gray-400">
+              <span className="t-micro text-gray-600 dark:text-gray-400">
                 Remember as default. Future chats open here without asking.
               </span>
             </label>
@@ -228,7 +228,7 @@ export function AgentWorkspaceDialog({
         )}
 
         {error && (
-          <p className="text-[0.65rem] text-red-500 text-center">{error}</p>
+          <p className="t-micro text-red-500 text-center">{error}</p>
         )}
 
         <div className="flex items-center justify-end gap-2 pt-1">
@@ -272,11 +272,11 @@ function WorkspaceOption({ icon, title, body, monoBody, onClick, disabled }: Opt
     >
       <span className="mt-0.5 shrink-0">{icon}</span>
       <span className="flex-1 min-w-0">
-        <span className="block text-[0.75rem] font-medium text-gray-900 dark:text-white">
+        <span className="block text-[12px] font-medium text-gray-900 dark:text-white">
           {title}
         </span>
         <span
-          className={`block text-[0.65rem] text-gray-500 truncate ${
+          className={`block t-micro text-gray-500 truncate ${
             monoBody ? 'font-mono' : ''
           }`}
         >

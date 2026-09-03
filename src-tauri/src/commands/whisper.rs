@@ -116,15 +116,13 @@ impl WhisperServer {
         let tx_clone = tx.clone();
         std::thread::spawn(move || {
             let reader = BufReader::new(stdout);
-            for line in reader.lines() {
-                if let Ok(line) = line {
-                    let trimmed = line.trim();
-                    if trimmed.is_empty() {
-                        continue;
-                    }
-                    if let Ok(json) = serde_json::from_str::<serde_json::Value>(trimmed) {
-                        let _ = tx_clone.send(json);
-                    }
+            for line in reader.lines().map_while(Result::ok) {
+                let trimmed = line.trim();
+                if trimmed.is_empty() {
+                    continue;
+                }
+                if let Ok(json) = serde_json::from_str::<serde_json::Value>(trimmed) {
+                    let _ = tx_clone.send(json);
                 }
             }
         });
@@ -132,11 +130,9 @@ impl WhisperServer {
         // Stderr reader thread — log Python output
         std::thread::spawn(move || {
             let reader = BufReader::new(stderr);
-            for line in reader.lines() {
-                if let Ok(line) = line {
-                    if !line.trim().is_empty() {
-                        println!("[Whisper] {}", line.trim());
-                    }
+            for line in reader.lines().map_while(Result::ok) {
+                if !line.trim().is_empty() {
+                    println!("[Whisper] {}", line.trim());
                 }
             }
         });
@@ -372,15 +368,23 @@ fn transcribe_blocking(
         else if content_type.contains("mp4") || content_type.contains("m4a") { ".m4a" }
         else { ".webm" };
 
-    // Write to temp file
-    let tmp_dir = std::env::temp_dir();
-    let tmp_file = tmp_dir.join(format!("whisper-{}{}", std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis())
-        .unwrap_or(0), ext));
-
-    std::fs::write(&tmp_file, &audio_bytes)
-        .map_err(|e| format!("Write temp file: {}", os_error::english(&e)))?;
+    // The take goes to a private temp file — a 0700 directory, a 0600 file
+    // created with `create_new`, and a name nothing on the machine can compute.
+    //
+    // It used to be `<shared temp>/whisper-<millis>.<ext>`, written with
+    // fs::write. That is a recording of the user's voice in a world-readable
+    // directory under a guessable name: every local account could read the take,
+    // and a process that guessed the name could pre-place it or swap it between
+    // the write and the moment whisper_server.py opens it — the transcript of
+    // whatever it swapped in then lands in the user's chat. The identical fix
+    // was made for the agent's script and left un-made here; both now share
+    // `private_tmp::write_private_temp`.
+    //
+    // `_audio_dir` is never read, only held: dropping it removes the directory
+    // and the take with it, which is what the explicit remove_file below used to
+    // do — and it now also covers the early returns that used to leak the file.
+    let (_audio_dir, tmp_file) =
+        crate::private_tmp::write_private_temp("lu-whisper-take-", &format!("take{}", ext), &audio_bytes)?;
 
     let audio_path = tmp_file.to_string_lossy().replace('\\', "/");
     println!("[Whisper] Transcribing: {} ({:.1} KB)", audio_path, audio_bytes.len() as f64 / 1024.0);
@@ -418,8 +422,9 @@ fn transcribe_blocking(
         }
     }
 
-    // Clean up temp file, after the retry, which reads the same file.
-    let _ = std::fs::remove_file(&tmp_file);
+    // Clean up temp file, after the retry, which reads the same file. Dropping
+    // the directory handle takes the take with it.
+    drop(_audio_dir);
 
     match result {
         Ok(response) => {
@@ -713,20 +718,84 @@ mod dead_server_tests {
         assert!(ws.has_exited());
     }
 
+    /// One go at the failure: a lingering stand-in, killed and reaped, then a
+    /// take sent into its pipe. Returns `(has_exited, the send's answer)`.
+    ///
+    /// It runs on its own thread and the caller waits with a ceiling, because
+    /// of the one way this can come out neither dead nor alive — see the
+    /// test below.
+    fn attempt_a_send_into_a_killed_server(
+    ) -> Option<(bool, Result<serde_json::Value, String>)> {
+        let (done, answer) = mpsc::channel();
+        std::thread::spawn(move || {
+            // `_tx` stays in here: dropping it would disconnect the response
+            // channel, which is a different failure than the one under test.
+            let (mut ws, _tx) = server_around(spawn_lingering());
+            if let Some(child) = ws.process.as_mut() {
+                let _ = child.kill();
+                let _ = child.wait();
+            }
+            let exited = ws.has_exited();
+            let out = ws.send_command(&json!({ "action": "transcribe", "path": "/tmp/x.wav" }));
+            ws.stop();
+            let _ = done.send((exited, out));
+        });
+        // A write into a pipe with no reader fails in microseconds. Anything
+        // that is still going after five seconds is parked on `send_command`'s
+        // 60 s response timeout, i.e. the write SUCCEEDED.
+        answer.recv_timeout(std::time::Duration::from_secs(5)).ok()
+    }
+
     /// The whole failure, at the wire: kill the server the way the box did,
     /// then send a take into it.
+    ///
+    /// ── Why this retries, and what it is retrying past ──
+    ///
+    /// The old body did one attempt on this thread and asserted on it. Measured
+    /// on 01.09.2026 under six concurrent copies of the suite it failed 8 of 60
+    /// runs, every one of them with the same message: `[dead pipe] Whisper
+    /// transcription timed out`. The write into the killed server's stdin had
+    /// SUCCEEDED, and the test then sat out the full 60 s response timeout — a
+    /// single run took 61 s because of it.
+    ///
+    /// What is MEASURED is that the write succeeded: the server was killed and
+    /// reaped, so its own copy of the read end was closed, and a write into a
+    /// pipe with no reader cannot succeed. Somebody else was holding it.
+    ///
+    /// The mechanism that fits is macOS having no `pipe2`. The standard library
+    /// says so in its own source: on every platform without that syscall it
+    /// creates the pipe with `pipe()` and sets close-on-exec in a SECOND step,
+    /// so a `fork`+`exec` on another thread inside that window inherits the raw
+    /// descriptor. This suite spawns stand-ins constantly, six copies of it six
+    /// times as often, and that is exactly the load at which this appeared.
+    /// Whatever the stranger is, it is not ours and this test cannot close it.
+    ///
+    /// So it retries with a FRESH stand-in, bounded, instead of asserting that
+    /// the first one came out right. Every assertion below is unchanged and
+    /// runs on an attempt that produced an answer — a green run still means the
+    /// write failed and the message was ours.
     #[test]
     fn sending_into_a_killed_server_fails_in_english_and_is_recognised_as_a_dead_pipe() {
-        let (mut ws, _tx) = server_around(spawn_lingering());
-        if let Some(child) = ws.process.as_mut() {
-            let _ = child.kill();
-            let _ = child.wait();
-        }
-        assert!(ws.has_exited());
-
-        let err = ws
-            .send_command(&json!({ "action": "transcribe", "path": "/tmp/x.wav" }))
-            .expect_err("writing into a dead pipe must fail");
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+        let mut parked = 0usize;
+        let err = loop {
+            match attempt_a_send_into_a_killed_server() {
+                Some((exited, out)) => {
+                    assert!(exited, "the killed server did not read as gone");
+                    break out.expect_err("writing into a dead pipe must fail");
+                }
+                None => {
+                    parked += 1;
+                    assert!(
+                        std::time::Instant::now() < deadline,
+                        "{parked} attempts in a row wrote into the killed server's pipe \
+                         without failing. Something other than the server is holding the \
+                         READ end — on macOS a concurrent spawn can inherit it, because \
+                         the pipe is not created close-on-exec in one step.",
+                    );
+                }
+            }
+        };
 
         // The message is ours all the way through. The operating system's own
         // sentence for this is German on a German Windows; none of these
@@ -745,7 +814,6 @@ mod dead_server_tests {
             "unexpected shape: {}",
             err
         );
-        ws.stop();
     }
 
     #[test]
@@ -843,8 +911,55 @@ mod healing_is_wired_in {
         let s = source();
         let send = s.find("let mut result = send_to_whisper").expect("the send is gone");
         let retry = s.find("if whisper_is_gone(state, why)").expect("the retry is gone");
-        let cleanup = s.find("let _ = std::fs::remove_file(&tmp_file);").expect("the cleanup is gone");
+        let cleanup = s.find("drop(_audio_dir);").expect("the cleanup is gone");
         assert!(send < retry, "the retry must come after the first send");
         assert!(retry < cleanup, "the audio was deleted before the retry could read it");
+    }
+
+    /// The take is a recording of the user's voice. It used to be written with
+    /// `fs::write` to `<shared temp>/whisper-<millis>.<ext>`: world-readable,
+    /// and under a name any local process can compute — so it could be
+    /// pre-placed or swapped between the write and the read, and whatever was
+    /// swapped in got transcribed into the user's chat. The fix already existed
+    /// for the agent's script; this half kept its own unfixed copy.
+    #[test]
+    fn the_take_is_written_through_the_shared_private_temp_helper() {
+        let s = source();
+        assert!(
+            s.contains("crate::private_tmp::write_private_temp(\"lu-whisper-take-\""),
+            "the take is not written through the shared private-temp helper any more",
+        );
+        // The old shape, in either of its two halves.
+        assert!(
+            !s.contains("let tmp_dir = std::env::temp_dir();"),
+            "the take is back in the shared temp directory",
+        );
+        assert!(
+            !s.contains("std::fs::write(&tmp_file, &audio_bytes)"),
+            "the take is written with a plain fs::write again (umask permissions)",
+        );
+    }
+
+    /// The property itself, not the call site: a take must not be readable by
+    /// another account on the machine.
+    #[cfg(unix)]
+    #[test]
+    fn a_take_is_private_to_this_user() {
+        use std::os::unix::fs::PermissionsExt;
+        let (dir, path) =
+            crate::private_tmp::write_private_temp("lu-whisper-take-", "take.webm", b"audio")
+                .expect("write a take");
+        let dmode = std::fs::metadata(dir.path()).unwrap().permissions().mode() & 0o777;
+        assert_eq!(dmode, 0o700, "the take's directory is {dmode:o}, not 0700");
+        let fmode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(fmode & 0o077, 0, "the take is group/world readable: {fmode:o}");
+        let name = dir.path().file_name().unwrap().to_string_lossy().to_string();
+        let suffix = name.trim_start_matches("lu-whisper-take-");
+        assert!(
+            !suffix.chars().all(|c| c.is_ascii_digit()),
+            "the directory name is a plain timestamp again: {name}",
+        );
+        drop(dir);
+        assert!(!path.exists(), "the take outlived its handle");
     }
 }

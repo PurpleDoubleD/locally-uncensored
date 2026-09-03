@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useDismissOnEscape } from '../../hooks/useDismissOnEscape'
 import { ChevronDown, ShieldCheck, Zap, ClipboardList } from 'lucide-react'
 import { useChatStore } from '../../stores/chatStore'
 import { useCodexStore } from '../../stores/codexStore'
@@ -43,6 +44,7 @@ const MODE_ACTIVE_ROW: Record<CodexMode, string> = {
 
 export function CodexModeDropdown({ openUpward = false }: { openUpward?: boolean } = {}) {
   const [open, setOpen] = useState(false)
+  useDismissOnEscape(open, () => setOpen(false))
   const activeConvId = useChatStore((s) => s.activeConversationId)
   const defaultMode = useSettingsStore((s) => s.settings.codexDefaultMode)
   const modeByConversation = useCodexStore((s) => s.modeByConversation)
@@ -101,7 +103,7 @@ export function CodexModeDropdown({ openUpward = false }: { openUpward?: boolean
       {open && (
         <>
           <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-          <div className={`absolute right-0 z-50 w-60 rounded-lg bg-white dark:bg-[#262626] border border-gray-200 dark:border-white/10 shadow-xl py-1.5 ${openUpward ? 'bottom-full mb-1' : 'top-full mt-1'}`}>
+          <div className={`absolute right-0 z-50 w-60 rounded-lg lu-elevated py-1.5 ${openUpward ? 'bottom-full mb-1' : 'top-full mt-1'}`}>
             {!activeConvId ? (
               <p className="px-3 py-1.5 text-[0.5rem] text-gray-400">
                 Open a coding chat first, the mode lives on the conversation.

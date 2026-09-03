@@ -13,6 +13,7 @@
 
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
+import { safeJSONStorage } from '../lib/storage-quota'
 
 export interface AgentGoal {
   text: string
@@ -55,7 +56,10 @@ export const useAgentGoalStore = create<AgentGoalState>()(
           return { goals: next }
         }),
     }),
-    { name: 'locally-uncensored-agent-goal' },
+    {
+      name: 'locally-uncensored-agent-goal',
+      storage: safeJSONStorage(),
+    },
   ),
 )
 

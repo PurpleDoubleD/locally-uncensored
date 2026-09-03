@@ -20,10 +20,10 @@ const saved: { title: string; content: string }[] = []
 
 beforeEach(() => {
   saved.length = 0
-  vi.spyOn(useMemoryStore.getState(), 'addMemory').mockImplementation(((m: any) => {
+  vi.spyOn(useMemoryStore.getState(), 'addMemory').mockImplementation((m) => {
     saved.push({ title: m.title, content: m.content })
     return 'mem-id'
-  }) as any)
+  })
 })
 
 function noteStep(id: string, content = '{{last_output}}'): WorkflowStep {

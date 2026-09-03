@@ -6,11 +6,11 @@
   "build": {
     "beforeBuildCommand": "npm run build",
     "beforeDevCommand": "npm run dev",
-    "devUrl": "http://localhost:5173",
+    "devUrl": "http://localhost:5273",
     "frontendDist": "../dist"
   },
   "app": {
-    "withGlobalTauri": true,
+    "withGlobalTauri": false,
     "windows": [
       {
         "title": "LU",
@@ -21,7 +21,7 @@
         "visible": false,
         "decorations": false,
         "transparent": true,
-      "dragDropEnabled": false
+        "dragDropEnabled": false
       }
     ],
     "security": {
@@ -30,14 +30,11 @@
   },
   "plugins": {
     "updater": {
-      "endpoints": [
-        "https://github.com/purpledoubled/locally-uncensored/releases/latest/download/latest.json"
-      ],
+      "endpoints": [],
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDZDNkRFNzJFRjhFNkIxNDcKUldSSHNlYjRMdWR0YklwQlJhTUR4TXBTTE1xKzFUcWVVTEpTL0hZMi9ldmlOcW5BWFZWeUdzRGMK"
     }
   },
   "bundle": {
-    "createUpdaterArtifacts": "v1Compatible",
     "active": true,
     "targets": "all",
     "publisher": "PurpleDoubleD",

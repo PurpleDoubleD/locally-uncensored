@@ -2,6 +2,7 @@ import { useCodex } from '../../hooks/useCodex'
 import { useAutoScroll } from '../../hooks/useAutoScroll'
 import { useCodexStore } from '../../stores/codexStore'
 import { useChatStore } from '../../stores/chatStore'
+import { useBackgroundAgentWake } from '../../hooks/useBackgroundAgentWake'
 import { useGenerationStore } from '../../stores/generationStore'
 import { ChatInput } from './ChatInput'
 import { ToolCallBlock } from './ToolCallBlock'
@@ -17,6 +18,8 @@ import { useCodexConfirmStore } from '../../stores/codexConfirmStore'
 import { PluginsDropdown } from './PluginsDropdown'
 import { CodexModeDropdown } from './CodexModeDropdown'
 import { ModelSelector } from '../models/ModelSelector'
+import { MONOGRAM, MONOGRAM_INVERT } from '../layout/brand'
+import { AVATAR_SLOT } from './avatar-slot'
 import { GoalBar } from './GoalBar'
 import { LuEngineSwitchBar } from './LuEngineSwitchBar'
 import { LoopBar } from './LoopBar'
@@ -32,8 +35,10 @@ import {
 import { resolveWorkspacePath } from '../../api/agents/workspace-resolve'
 import { StagedChangesPanel } from './StagedChangesPanel'
 import { SlashStepsBlock } from './SlashStepsBlock'
+import { CompactBlock } from './CompactBlock'
+import { compactionAnchors } from '../../lib/compact-summary'
 import { User, Code, Eye, GitBranch, Download, RefreshCw, RotateCcw, Folder, FolderX, Check, AlertTriangle } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { Fragment, useEffect, useState } from 'react'
 import { checkGitInstalled, openExternal, type GitStatus } from '../../api/backend'
 import { CodexConfirmDialog } from './CodexConfirmDialog'
 import { stripModelNoise } from '../../lib/strip-model-noise'
@@ -49,6 +54,10 @@ const stripChannelTags = (text: string) => stripModelNoise(text, { aggressive: t
 
 export function CodexView() {
   const { sendInstruction, stopCodex, isRunning } = useCodex()
+  // Derselbe Weckhaken wie im Agentenweg: eine Hintergrundaufgabe endet fast
+  // immer NACH dem Zug, der sie startete, und ohne diesen Haken erfuehre das
+  // Modell davon erst bei der naechsten Eingabe des Menschen.
+  useBackgroundAgentWake(useChatStore((s) => s.activeConversationId), sendInstruction)
   const activeConversationId = useChatStore((s) => s.activeConversationId)
   const conversations = useChatStore((s) => s.conversations)
   const thread = useCodexStore((s) => activeConversationId ? s.threads[activeConversationId] : undefined)
@@ -56,9 +65,18 @@ export function CodexView() {
   const conversation = conversations.find(c => c.id === activeConversationId)
   const messages = conversation?.messages || []
 
+  // Verdichtungslinien fuer den Code-Verlauf. Codex blendet nur `hidden` aus
+  // (Systemhinweise bleiben stehen), aber die Rechnung laeuft trotzdem ueber
+  // die volle Liste, denn der Schnittpunkt darf auf eine ausgeblendete zeigen.
+  const compactAt = compactionAnchors(
+    messages,
+    messages.filter((m) => !m.hidden).map((m) => m.id),
+    conversation?.compactions,
+  )
+
   // Per-conversation generating flag (David 2026-06-12): the typing indicator
   // + realtime counter + a message's live-stream state must follow the coding
-  // chat that's ACTUALLY running — not every chat the user switches to. The
+  // chat that's ACTUALLY running, not every chat the user switches to. The
   // hook's `isRunning` is global (kept for the input, which guards shared stream
   // refs); the visual bits below read this conversation-scoped flag instead.
   const generatingMap = useGenerationStore((s) => s.generating)
@@ -114,10 +132,12 @@ export function CodexView() {
   // git_status/diff/commit/log; if git is missing those tools fail. Probe on
   // open and surface a minimal install banner when it's not on PATH.
   const [gitStatus, setGitStatus] = useState<GitStatus | null>(null)
-  const [gitChecking, setGitChecking] = useState(false)
+  // Starts as `true` because the probe below starts with the component: the
+  // effect used to flip it on synchronously, which is a cascading render for a
+  // value that was already knowable at mount (React 19 `set-state-in-effect`).
+  const [gitChecking, setGitChecking] = useState(true)
   useEffect(() => {
     let cancelled = false
-    setGitChecking(true)
     checkGitInstalled()
       .then((s) => { if (!cancelled) setGitStatus(s) })
       .catch(() => {})
@@ -149,7 +169,7 @@ export function CodexView() {
         >
           <Code size={9} className="text-gray-500" />
           <span className="text-[0.55rem] text-gray-600 dark:text-gray-400 font-medium">Coding Agent</span>
-          {/* Code-Review Mode badge (B13) — makes it impossible to miss
+          {/* Code-Review Mode badge (B13), makes it impossible to miss
               that the agent is read-only. The toggle itself lives in
               Settings → Codex Agent; clicking the badge jumps you there
               isn't worth a routing change in v2.5.0. */}
@@ -162,7 +182,7 @@ export function CodexView() {
               <span>Review</span>
             </span>
           )}
-          {/* Working directory indicator — so the user always sees WHERE the
+          {/* Working directory indicator, so the user always sees WHERE the
               agent operates (David 2026-06-04: "ich hab den Ordner angegeben …
               er ist eigentlich in Dokumenten"). Empty = per-chat sandbox under
               ~/agent-workspace, which is also where shell output now lands. */}
@@ -190,7 +210,7 @@ export function CodexView() {
             </button>
           )}
           <div className="flex-1" />
-          {/* New coding session — aborts any running loop and starts a fresh
+          {/* New coding session: aborts any running loop and starts a fresh
               chat/thread (keeps the working directory). David 2026-06-04:
               "start neu" must actually start new. */}
           <button
@@ -208,24 +228,25 @@ export function CodexView() {
               ueberfuellt"). The dropdown itself is untouched, only the place
               and the trigger changed. */}
           <PluginsDropdown iconOnly />
-          <TokenCounter />
-          <ContextDropdown />
+          {/* EIN Kontextelement (D-S06): der Fuellstand ist die Beschriftung
+              des Fensterwaehlers, nicht dieselbe Zahl ein zweites Mal daneben. */}
+          <ContextDropdown><TokenCounter /></ContextDropdown>
           <SmallModelModeToggle />
         </div>
 
         {/* Git-missing banner (v2.5.0). Codex shells out to git for
-            status/diff/commit/log — without it those tools fail. Minimal,
+            status/diff/commit/log, and without it those tools fail. Minimal,
             dismiss-by-installing: an Install button (opens the platform git
             download page) + a Recheck button for after the install. */}
         {gitStatus && !gitStatus.installed && (
           <div className="flex items-center gap-2 px-3 py-1.5 border-b border-amber-500/20 bg-amber-500/[0.06]">
             <GitBranch size={12} className="text-amber-500 shrink-0" />
-            <span className="text-[0.6rem] text-amber-600 dark:text-amber-400/90 flex-1 leading-tight">
+            <span className="t-micro text-amber-600 dark:text-amber-400/90 flex-1 leading-tight">
               Git isn't installed. The coding agent needs it for diffs, commits and history.
             </span>
             <button
               onClick={() => openExternal(gitStatus.download_url)}
-              className="flex items-center gap-1 px-2 py-0.5 rounded text-[0.6rem] font-medium bg-amber-500/15 text-amber-600 dark:text-amber-300 hover:bg-amber-500/25 border border-amber-500/30 transition-colors"
+              className="flex items-center gap-1 px-2 py-0.5 rounded t-micro font-medium bg-amber-500/15 text-amber-600 dark:text-amber-300 hover:bg-amber-500/25 border border-amber-500/30 transition-colors"
             >
               <Download size={11} /> Install Git
             </button>
@@ -233,7 +254,7 @@ export function CodexView() {
               onClick={recheckGit}
               disabled={gitChecking}
               title="Re-check after installing Git"
-              className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[0.6rem] text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-white/5 transition-colors disabled:opacity-50"
+              className="flex items-center gap-1 px-1.5 py-0.5 rounded t-micro text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-white/5 transition-colors disabled:opacity-50"
             >
               <RefreshCw size={11} className={gitChecking ? 'animate-spin' : ''} />
             </button>
@@ -249,7 +270,7 @@ export function CodexView() {
         <div ref={scrollRef} className="flex-1 overflow-y-auto scrollbar-thin">
           {messages.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-full text-center">
-              <Code size={24} className="text-gray-300 dark:text-gray-700 mb-2" />
+              <Code size={28} className="text-gray-300 dark:text-gray-700 mb-2" />
               <p className="text-[0.7rem] text-gray-500 font-medium">Coding Agent</p>
               <p className="text-[0.55rem] text-gray-400 dark:text-gray-600 mt-0.5 max-w-[300px]">
                 Send a coding instruction. The coding agent will read your codebase, write code, and run commands.
@@ -264,6 +285,14 @@ export function CodexView() {
           ) : (
             <div ref={contentRef} className="py-1">
               {messages.filter(msg => !msg.hidden).map((msg) => {
+                // Der Rumpf hat mehrere Ausgaenge (Hinweiszeile, Werkzeugblock,
+                // normale Blase). Statt jeden einzeln anzufassen, wandert er
+                // unveraendert in eine IIFE, seine `return`s werden ihre. Die
+                // Verdichtungslinie haengt danach EINMAL an, fuer alle Ausgaenge
+                // gleich. Der Alternativentwurf, jeden Ausgang zu umhuellen,
+                // waere dieselbe Zeile an fuenf Stellen gewesen, und die
+                // sechste, die jemand spaeter dazuschreibt, haette gefehlt.
+                const gerendert = (() => {
                 // App notices (a staged change that landed on disk) are not
                 // model turns. They used to be written hidden, so the one line
                 // that says "the file on disk is not the diff you approved"
@@ -273,7 +302,7 @@ export function CodexView() {
                   const warn = msg.notice === 'warn'
                   return (
                     <div key={msg.id} className="px-3 py-1" data-testid="codex-notice">
-                      <div className={`flex items-start gap-1.5 px-2 py-1 rounded border text-[0.6rem] leading-snug ${
+                      <div className={`flex items-start gap-1.5 px-2 py-1 rounded border t-micro leading-snug ${
                         warn
                           ? 'border-amber-300/70 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/10 text-amber-900 dark:text-amber-200'
                           : 'border-gray-200 dark:border-white/10 bg-gray-50/60 dark:bg-white/[0.02] text-gray-500 dark:text-gray-400'
@@ -295,16 +324,14 @@ export function CodexView() {
                     key={msg.id}
                     className={`flex gap-2 px-3 py-1 ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}
                   >
-                    <div className={`w-5 h-5 rounded overflow-hidden flex items-center justify-center shrink-0 ${
-                      msg.role === 'user'
-                        ? 'bg-gray-100 dark:bg-white/8'
-                        : ''
-                    }`}>
+                    {/* Derselbe Chip wie im Chat (avatar-slot.ts). Hier stand
+                        die dritte Fassung: 20px, ohne Rahmen, Monogramm nackt. */}
+                    <div className={AVATAR_SLOT}>
                       {msg.role === 'user'
                         ? (userAvatarDataUrl
                             ? <img src={userAvatarDataUrl} alt="" className="w-full h-full object-cover" />
-                            : <User size={9} className="text-gray-400" />)
-                        : <img src="/LU-monogram-bw.png" alt="" className="w-full h-full object-contain dark:invert-0 invert opacity-80" />
+                            : <User size={11} className="text-gray-400" />)
+                        : <img src={MONOGRAM} alt="" className={`w-[70%] h-[70%] object-contain opacity-80 ${MONOGRAM_INVERT}`} />
                       }
                     </div>
                     <div className="max-w-[85%] space-y-0.5">
@@ -412,7 +439,7 @@ export function CodexView() {
                                         if (!answer || skippedAnswers.has(block.id)) return null
                                         return (
                                           <div key={block.id} className="px-1 py-0.5">
-                                            <div className="text-[0.75rem] leading-relaxed">
+                                            <div className="text-[12px] leading-relaxed">
                                               <MarkdownRenderer content={answer} />
                                             </div>
                                           </div>
@@ -444,7 +471,7 @@ export function CodexView() {
                               ? 'rounded-lg px-2.5 py-1.5 bg-gray-100 dark:bg-white/[0.06] border border-gray-200 dark:border-white/[0.08]'
                               : 'px-1 py-0.5'
                           }>
-                            <div className="text-[0.75rem] leading-relaxed">
+                            <div className="text-[12px] leading-relaxed">
                               {msg.role === 'user' ? (
                                 <p className="text-gray-800 dark:text-gray-200 whitespace-pre-wrap">{cleanContent}</p>
                               ) : (
@@ -500,7 +527,7 @@ export function CodexView() {
                                         if (prev && stripChannelTags(prev.content) === answer) return null
                                         return (
                                           <div key={block.id} className="px-1 py-0.5">
-                                            <div className="text-[0.75rem] leading-relaxed">
+                                            <div className="text-[12px] leading-relaxed">
                                               <MarkdownRenderer content={answer} />
                                             </div>
                                           </div>
@@ -512,7 +539,7 @@ export function CodexView() {
                               )}
                               {finalAnswerText && (
                                 <div className="px-1 py-0.5">
-                                  <div className="text-[0.75rem] leading-relaxed">
+                                  <div className="text-[12px] leading-relaxed">
                                     <MarkdownRenderer content={finalAnswerText} />
                                   </div>
                                 </div>
@@ -532,10 +559,21 @@ export function CodexView() {
                     </div>
                   </div>
                 )
+                })()
+                const linien = compactAt.get(msg.id)
+                if (!linien?.length) return gerendert
+                return (
+                  <Fragment key={msg.id}>
+                    {gerendert}
+                    {linien.map((record) => (
+                      <CompactBlock key={record.id} record={record} />
+                    ))}
+                  </Fragment>
+                )
               })}
               {/* 3-dot indicator while THIS coding chat is mid-loop. Bound to
                   the per-conversation flag so switching to another (idle) chat
-                  doesn't show its dots — David 2026-06-12 ("die drei ladepunkte
+                  doesn't show its dots. David 2026-06-12 ("die drei ladepunkte
                   kommen in vorherigen chats auch"). */}
               {/* Shell/code approval, inline in the stream so it reads as the
                   next step of the run instead of covering it (David 2026-07-24:
@@ -561,11 +599,11 @@ export function CodexView() {
           onStop={stopCodex}
           // Store flag, not the hook's local isRunning (audit A2): the view
           // remounts on every tab switch and a fresh hook says "idle" while
-          // the old instance's loop is still running — which offered a second
+          // the old instance's loop is still running, which offered a second
           // parallel send and no Stop button. The generating flag follows the
           // conversation, not the hook instance.
           isGenerating={isRunning || codexGenerating}
-          slashCommands
+          slashCommands="agent"
           composerModel={<ModelSelector openUpward surface="code" />}
           // No plan lives here. The prompt window is the prompt window
           // (David, 2026-08-22): the plan and its Approve-and-run card sit

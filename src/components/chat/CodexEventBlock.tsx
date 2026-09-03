@@ -49,7 +49,7 @@ function CodexEventBlockImpl({ event }: Props) {
         className="flex items-center gap-1.5 py-0.5 text-left hover:opacity-80 transition-opacity w-full"
       >
         <Icon size={10} className={color} />
-        <span className={`text-[0.6rem] ${color}`}>{label}</span>
+        <span className={`t-micro ${color}`}>{label}</span>
         <ChevronDown size={8} className={`text-gray-600 ml-auto transition-transform ${open ? 'rotate-180' : ''}`} />
       </button>
 
@@ -58,7 +58,7 @@ function CodexEventBlockImpl({ event }: Props) {
           {hasDiff ? (
             <DiffView diff={event.diff!} />
           ) : (
-            <pre className={`text-[0.58rem] leading-relaxed rounded px-2 py-1 overflow-auto scrollbar-thin max-h-[250px] ${
+            <pre className={`t-micro leading-relaxed rounded px-2 py-1 overflow-auto scrollbar-thin max-h-[250px] ${
               event.type === 'terminal_output'
                 ? 'bg-black/20 text-green-300/70'
                 : event.type === 'error'

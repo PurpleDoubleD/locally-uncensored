@@ -47,13 +47,10 @@ const INPUT =
  *  dialog over the Create surface (David 2026-08-02: a window, not a page),
  *  on the same house Modal the VHS install prompt uses. */
 export function WorkflowsModal({ open, onClose }: { open: boolean; onClose: () => void }) {
-  useEffect(() => {
-    if (!open) return
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [open, onClose])
-
+  // Der eigene Escape-Listener ist entfallen: Modal schließt seit Welle 2 selbst
+  // auf Escape, und zwar nur den OBERSTEN Dialog. Der Listener hier hing an
+  // `window` und lief damit an jedem stopPropagation vorbei — er hätte beim
+  // Abbrechen einer Tag-Umbenennung zusätzlich den ganzen Dialog geschlossen.
   return (
     <Modal open={open} onClose={onClose} title="Workflows & tags" hideHeader maxWidth="max-w-2xl" panelPad="p-0">
       <WorkflowsModalInner />
@@ -196,7 +193,7 @@ function WorkflowsModalInner() {
         <div className="px-5 pt-4 pb-3 border-b border-gray-200 dark:border-white/[0.06]">
           <button
             onClick={() => setHelpOpen(false)}
-            className="flex items-center gap-2 text-gray-400 hover:text-gray-200 transition-colors lu-focus-ring rounded-md"
+            className="flex items-center gap-2 text-gray-400 hover:text-gray-200 transition-colors rounded-md"
           >
             <ArrowLeft size={14} />
             <span className="t-title text-gray-900 dark:text-gray-200">How it works</span>
@@ -487,7 +484,15 @@ function WorkflowsModalInner() {
                             onChange={(e) => setEditingTagName(e.target.value)}
                             onKeyDown={(e) => {
                               if (e.key === 'Enter') finishRenameTag()
-                              if (e.key === 'Escape') setEditingTagId(null)
+                              if (e.key === 'Escape') {
+                                // Escape bricht ERST das Umbenennen ab, nicht
+                                // gleich den ganzen Dialog mit. Modal hört auf
+                                // `document`; stopPropagation hält das Ereignis
+                                // hier fest, sonst verlöre man zwei Ebenen auf
+                                // einen Tastendruck.
+                                e.stopPropagation()
+                                setEditingTagId(null)
+                              }
                             }}
                             autoFocus
                             className={INPUT}

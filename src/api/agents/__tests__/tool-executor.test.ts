@@ -5,14 +5,17 @@ import {
   type ExecutionRequest,
   type AuditHook,
   applyResultToToolCall,
+  APPROVE_ALL,
 } from '../tool-executor'
 import type { AgentToolCall } from '../../../types/agent-mode'
+import type { JsonSchema } from '../args-validator'
+import type { ToolArgs } from '../../mcp/types'
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
 
 const makeRuntime = (
   overrides: Partial<ExecutorRuntime> & {
-    tools?: Record<string, { inputSchema?: any; executor: (args: any) => Promise<string> }>
+    tools?: Record<string, { inputSchema?: JsonSchema; executor: (args: ToolArgs) => Promise<string> }>
   } = {}
 ): ExecutorRuntime => {
   const tools = overrides.tools ?? {}
@@ -20,18 +23,20 @@ const makeRuntime = (
     getTool: overrides.getTool ?? ((name: string) => (name in tools ? { name, inputSchema: tools[name].inputSchema } : undefined)),
     execute:
       overrides.execute ??
-      (async (name: string, args: Record<string, any>) => {
+      (async (name: string, args: ToolArgs) => {
         if (!(name in tools)) throw new Error(`no executor for ${name}`)
         return tools[name].executor(args)
       }),
-    awaitApproval: overrides.awaitApproval,
+    // Required field now (audit AGT-1) — a runtime cannot get an unattended
+    // dispatch by leaving it out, so the default has to be explicit.
+    awaitApproval: overrides.awaitApproval ?? APPROVE_ALL,
     lookupCache: overrides.lookupCache,
     recordAudit: overrides.recordAudit,
     explainError: overrides.explainError,
   }
 }
 
-const req = (id: string, toolName: string, args: Record<string, any> = {}): ExecutionRequest => ({
+const req = (id: string, toolName: string, args: ToolArgs = {}): ExecutionRequest => ({
   id,
   toolName,
   args,
@@ -99,11 +104,11 @@ describe('tool-executor — parallelism', () => {
     const runtime = makeRuntime({
       tools: {
         shell_execute: {
-          executor: async (args: any) => {
-            order.push(`start:${args.tag}`)
+          executor: async (args) => {
+            order.push(`start:${String(args.tag)}`)
             await sleep(30)
-            order.push(`end:${args.tag}`)
-            return `done:${args.tag}`
+            order.push(`end:${String(args.tag)}`)
+            return `done:${String(args.tag)}`
           },
         },
       },
@@ -125,10 +130,10 @@ describe('tool-executor — parallelism', () => {
     const runtime = makeRuntime({
       tools: {
         file_write: {
-          executor: async (args: any) => {
-            order.push(`start:${args.path}`)
+          executor: async (args) => {
+            order.push(`start:${String(args.path)}`)
             await sleep(30)
-            order.push(`end:${args.path}`)
+            order.push(`end:${String(args.path)}`)
             return 'ok'
           },
         },
@@ -224,6 +229,34 @@ describe('tool-executor — cache + approval', () => {
     expect(out[0].result).toBe('from-cache')
     expect(out[0].cacheHit).toBe(true)
     expect(exec).not.toHaveBeenCalled()
+  })
+
+  // AGT-1: the gate used to be optional, so a runtime that simply omitted it
+  // dispatched everything unattended — which is how the sub-agent ended up
+  // running shell_execute with no prompt. It is consulted on every call now,
+  // and a caller that wants no prompt has to say APPROVE_ALL out loud.
+  it('consults the gate for every call, including pure reads', async () => {
+    const seen: string[] = []
+    const runtime = makeRuntime({
+      tools: { a: { executor: async () => 'ra' }, b: { executor: async () => 'rb' } },
+      awaitApproval: async (r) => {
+        seen.push(r.toolName)
+        return true
+      },
+    })
+    const out = await executeParallel([req('1', 'a'), req('2', 'b')], runtime)
+    expect(out.map((r) => r.status)).toEqual(['completed', 'completed'])
+    expect(seen.sort()).toEqual(['a', 'b'])
+  })
+
+  it('APPROVE_ALL is a real gate that lets everything through', async () => {
+    const exec = vi.fn(async () => 'ran')
+    const out = await executeParallel([req('1', 't')], makeRuntime({
+      tools: { t: { executor: exec } },
+      awaitApproval: APPROVE_ALL,
+    }))
+    expect(out[0].status).toBe('completed')
+    expect(exec).toHaveBeenCalledOnce()
   })
 
   it('rejected approval marks call rejected, skips dispatch', async () => {

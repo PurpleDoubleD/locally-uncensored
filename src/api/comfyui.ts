@@ -3,6 +3,19 @@ import { log } from "../lib/logger"
 import { LU_CLIENT_PREFIX } from "./comfyui-ws"
 import { nodeComboOptions } from "./comfyui-enum"
 import { resolveRunSeed } from '../lib/run-seed'
+// Audit W-T2: videoDecodeNode/promptFilenamePrefix kamen hier bis eben per
+// `await import('./dynamic-workflow')` mitten in den Buildern herein — ein
+// dynamischer Import, der nur den Zyklus comfyui ↔ dynamic-workflow
+// verdeckt hat. Beide sind reine Graph-Bausteine und wohnen jetzt in
+// comfyui-graph.ts, das nichts importiert.
+import { videoDecodeNode, promptFilenamePrefix } from './comfyui-graph'
+import type { ComfyApiGraph, ComfyApiNode, ComfyHistoryEntry } from '../types/comfy-graph'
+import { isRecord, asString, asRecordArray } from '../types/json-guards'
+// Audit W-T2: der Katalog kam bis eben per `await import('./discover')` in
+// getKnownFileSizes() herein, „to break the cycle at runtime". Die
+// Bundle-Daten gehören weder hierher noch nach discover.ts — sie liegen
+// jetzt in model-bundles.ts, das beide Seiten statisch lesen.
+import { getImageBundles, getVideoBundles } from './model-bundles'
 
 // ─── Control-plane fetch timeouts ───
 //
@@ -828,19 +841,15 @@ export async function getAnimateDiffModels(): Promise<string[]> {
 
 // ─── Partial Download Filter ───
 // Filters out files that exist on disk but are incomplete (< 90% of expected size).
-// Uses known bundle file sizes from discover.ts. Unknown files pass through.
+// Uses known bundle file sizes from model-bundles.ts. Unknown files pass through.
 
 let _knownFileSizes: Map<string, { subfolder: string; expectedBytes: number }> | null = null
 
 async function getKnownFileSizes(): Promise<Map<string, { subfolder: string; expectedBytes: number }>> {
   if (_knownFileSizes) return _knownFileSizes
-  // Dynamic import (not CommonJS require) — discover.ts imports back into
-  // comfyui.ts for classification helpers, so we defer the import to break
-  // the cycle at runtime instead of at module init.
-  const { getImageBundles, getVideoBundles } = await import('./discover')
   _knownFileSizes = new Map()
   for (const bundle of [...getImageBundles(), ...getVideoBundles()]) {
-    for (const f of (bundle as any).files) {
+    for (const f of bundle.files) {
       if (f.filename && f.sizeGB && f.subfolder) {
         _knownFileSizes.set(f.filename, {
           subfolder: f.subfolder,
@@ -1578,8 +1587,8 @@ async function findAnimateDiffModel(): Promise<string> {
 
 // ─── Workflow Submission ───
 
-export async function submitWorkflow(workflow: Record<string, any>, clientId?: string): Promise<string> {
-  const payload: Record<string, any> = { prompt: workflow }
+export async function submitWorkflow(workflow: ComfyApiGraph, clientId?: string): Promise<string> {
+  const payload: Record<string, unknown> = { prompt: workflow }
   if (clientId) payload.client_id = clientId
   // Use localFetch (Rust proxy in Tauri, direct fetch in dev). The previous
   // direct-only fetch broke for any ComfyUI not started by LU itself —
@@ -1602,14 +1611,23 @@ export async function submitWorkflow(workflow: Record<string, any>, clientId?: s
     const rawText = await res.text().catch(() => '')
     let errMsg = `HTTP ${res.status}`
     try {
-      const errData = JSON.parse(rawText)
+      // ComfyUI's rejection body. Foreign JSON: `error` is a string on some
+      // versions and an `{ message }` on others, and `node_errors` is only
+      // present for a validation failure — so every read is narrowed.
+      const errData: unknown = JSON.parse(rawText)
       const parts: string[] = []
-      if (typeof errData.error === 'string') parts.push(errData.error)
-      else if (errData.error?.message) parts.push(errData.error.message)
-      if (errData.node_errors) {
-        for (const [nodeId, data] of Object.entries(errData.node_errors) as [string, any][]) {
-          const errs = data.errors?.map((e: any) => e.message || e.details).join(', ') || 'unknown'
-          parts.push(`Node ${nodeId} (${data.class_type || '?'}): ${errs}`)
+      const rawErr = isRecord(errData) ? errData.error : undefined
+      const topLevel = asString(rawErr) ?? (isRecord(rawErr) ? asString(rawErr.message) : undefined)
+      if (topLevel) parts.push(topLevel)
+      const nodeErrors = isRecord(errData) ? errData.node_errors : undefined
+      if (isRecord(nodeErrors)) {
+        for (const [nodeId, data] of Object.entries(nodeErrors)) {
+          const errs = asRecordArray(isRecord(data) ? data.errors : undefined)
+            .map((e) => asString(e.message) ?? asString(e.details) ?? '')
+            .filter(Boolean)
+            .join(', ') || 'unknown'
+          const cls = (isRecord(data) ? asString(data.class_type) : undefined) ?? '?'
+          parts.push(`Node ${nodeId} (${cls}): ${errs}`)
         }
       }
       if (parts.length > 0) errMsg = parts.join(' | ')
@@ -1619,8 +1637,10 @@ export async function submitWorkflow(workflow: Record<string, any>, clientId?: s
     log.error('comfyui.workflow_rejected', { errMsg, workflow: JSON.stringify(workflow).slice(0, 2000) })
     throw new Error(`ComfyUI rejected workflow: ${errMsg}`)
   }
-  const data = await res.json()
-  return data.prompt_id
+  const data: unknown = await res.json()
+  const promptId = isRecord(data) ? asString(data.prompt_id) : undefined
+  if (!promptId) throw new Error('ComfyUI accepted the workflow but returned no prompt_id.')
+  return promptId
 }
 
 export async function cancelGeneration(): Promise<void> {
@@ -1730,7 +1750,7 @@ export async function freeMemory(): Promise<void> {
   } catch { /* best effort */ }
 }
 
-export async function getHistory(promptId: string): Promise<any> {
+export async function getHistory(promptId: string): Promise<ComfyHistoryEntry | null> {
   try {
     // localFetch routes through Rust proxy in Tauri to dodge CORS — same
     // reason as submitWorkflow above. Without this, a user-run ComfyUI
@@ -1738,8 +1758,9 @@ export async function getHistory(promptId: string): Promise<any> {
     // would silently 0-out and the UI hangs in "generating…" forever.
     const res = await localFetch(comfyuiUrl(`/history/${promptId}`), { timeoutMs: COMFY_POLL_TIMEOUT_MS })
     if (!res.ok) return null
-    const data = await res.json()
-    return data[promptId] ?? null
+    const data: unknown = await res.json()
+    const entry = isRecord(data) ? data[promptId] : undefined
+    return isRecord(entry) ? entry : null
   } catch {
     return null
   }
@@ -1970,7 +1991,7 @@ export function snapToVideoGrid(width: number, height: number): { width: number;
 
 // ─── Image Workflow: SDXL/SD (CheckpointLoaderSimple) ───
 
-export function buildSDXLImgWorkflow(params: GenerateParams): Record<string, any> {
+export function buildSDXLImgWorkflow(params: GenerateParams): ComfyApiGraph {
   validateParams(params)
   const seed = getSeed(params.seed)
   return {
@@ -1999,7 +2020,7 @@ export function buildSDXLImgWorkflow(params: GenerateParams): Record<string, any
  *  as GGUF). The city96 pack's `UnetLoaderGGUF` reads them. Same rule as the
  *  dynamic builder's addUnetLoader; this legacy path still carries the VRAM
  *  handoff and the agent's video tool. */
-async function unetLoaderNode(model: string): Promise<Record<string, any>> {
+async function unetLoaderNode(model: string): Promise<ComfyApiNode> {
   if (!model.toLowerCase().endsWith('.gguf')) {
     return { class_type: 'UNETLoader', inputs: { unet_name: model, weight_dtype: 'default' } }
   }
@@ -2011,7 +2032,7 @@ async function unetLoaderNode(model: string): Promise<Record<string, any>> {
   return { class_type: 'UnetLoaderGGUF', inputs: { unet_name: model } }
 }
 
-export async function buildFluxImgWorkflow(params: GenerateParams): Promise<Record<string, any>> {
+export async function buildFluxImgWorkflow(params: GenerateParams): Promise<ComfyApiGraph> {
   validateParams(params)
   const seed = getSeed(params.seed)
   const modelType = classifyModel(params.model)
@@ -2043,14 +2064,14 @@ export async function buildFluxImgWorkflow(params: GenerateParams): Promise<Reco
 
 // ─── Auto-select Image Workflow ───
 
-export async function buildTxt2ImgWorkflow(params: GenerateParams, modelType: ModelType): Promise<Record<string, any>> {
+export async function buildTxt2ImgWorkflow(params: GenerateParams, modelType: ModelType): Promise<ComfyApiGraph> {
   if (modelType === 'flux' || modelType === 'flux2') return buildFluxImgWorkflow(params)
   return buildSDXLImgWorkflow(params)
 }
 
 // ─── Video Workflow: Wan 2.1/2.2 (Hunyuan latent space) ───
 
-export async function buildWanVideoWorkflow(params: VideoParams): Promise<Record<string, any>> {
+export async function buildWanVideoWorkflow(params: VideoParams): Promise<ComfyApiGraph> {
   validateVideoParams(params)
   const seed = getSeed(params.seed)
 
@@ -2061,10 +2082,9 @@ export async function buildWanVideoWorkflow(params: VideoParams): Promise<Record
 
   const vae = await findMatchingVAE('wan')
   const clip = await findMatchingCLIP('wan')
-  const { videoDecodeNode } = await import('./dynamic-workflow')
   const hasTiledDecode = await nodeExists('VAEDecodeTiled')
 
-  const workflow: Record<string, any> = {
+  const workflow: ComfyApiGraph = {
     '1': { class_type: 'CLIPLoader', inputs: { clip_name: clip, type: 'wan', device: 'default' } },
     '2': await unetLoaderNode(params.model),
     '3': { class_type: 'VAELoader', inputs: { vae_name: vae } },
@@ -2085,7 +2105,6 @@ export async function buildWanVideoWorkflow(params: VideoParams): Promise<Record
   // Use SaveAnimatedWEBP if available, otherwise fall back to SaveImage (frame
   // sequence). Prompt-based prefix (David 2026-06-11) — the dynamic builder got
   // this in c40d13f, this legacy T2V path still wrote locally_uncensored_vid.
-  const { promptFilenamePrefix } = await import('./dynamic-workflow')
   const vidPrefix = promptFilenamePrefix(params.prompt, true)
   if (hasSaveWEBP) {
     workflow['9'] = {
@@ -2104,17 +2123,16 @@ export async function buildWanVideoWorkflow(params: VideoParams): Promise<Record
 
 // ─── Video Workflow: AnimateDiff ───
 
-export async function buildAnimateDiffWorkflow(params: VideoParams): Promise<Record<string, any>> {
+export async function buildAnimateDiffWorkflow(params: VideoParams): Promise<ComfyApiGraph> {
   validateVideoParams(params)
   const seed = getSeed(params.seed)
   const motionModel = await findAnimateDiffModel()
 
   // AnimateDiff: batch_size=1, motion model handles temporal dimension
   const hasVHS = await nodeExists('VHS_VideoCombine')
-  const { videoDecodeNode } = await import('./dynamic-workflow')
   const hasTiledDecode = await nodeExists('VAEDecodeTiled')
 
-  const workflow: Record<string, any> = {
+  const workflow: ComfyApiGraph = {
     '1': { class_type: 'CheckpointLoaderSimple', inputs: { ckpt_name: params.model } },
     '2': { class_type: 'ADE_LoadAnimateDiffModel', inputs: { model_name: motionModel } },
     '3': { class_type: 'ADE_ApplyAnimateDiffModelSimple', inputs: { motion_model: ['2', 0] } },
@@ -2159,7 +2177,7 @@ export async function buildAnimateDiffWorkflow(params: VideoParams): Promise<Rec
 
 // ─── Auto-select Video Workflow ───
 
-export async function buildTxt2VidWorkflow(params: VideoParams, backend: VideoBackend): Promise<Record<string, any>> {
+export async function buildTxt2VidWorkflow(params: VideoParams, backend: VideoBackend): Promise<ComfyApiGraph> {
   switch (backend) {
     case 'wan': return buildWanVideoWorkflow(params)
     case 'animatediff': return buildAnimateDiffWorkflow(params)

@@ -16,6 +16,7 @@ export const SETTINGS_TAB_RESET_KEYS: Record<SettingsTab, (keyof Settings)[]> = 
   general: [
     'theme', 'userAvatarDataUrl',
     'temperature', 'topP', 'topK', 'maxTokens', 'contextWindowOverride',
+    'autoCompactThreshold',
     'gpuVendor', 'gpuIndices',
     'imageGenTimeoutMinutes', 'videoGenTimeoutMinutes',
   ],

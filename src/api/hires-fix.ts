@@ -1,3 +1,13 @@
+import {
+  apiNodes,
+  isComfyApiNode,
+  isComfyLinkRef,
+  nodeInput,
+  type ComfyApiGraph,
+  type ComfyApiNode,
+} from '../types/comfy-graph'
+import { propPath } from '../types/json-guards'
+
 export type HiresUpscaleMethod =
   | 'nearest-exact'
   | 'bilinear'
@@ -14,8 +24,18 @@ export interface NativeHiresFixOptions {
   upscaleMethod: HiresUpscaleMethod
 }
 
+/**
+ * A node this transform WRITES: ComfyUI's own `_meta.title` plus LU's re-entry
+ * marker. The marker is declared here and not in types/comfy-graph.ts because
+ * nothing outside this file writes or reads `luNativeHiresFix`; a HiresNode is
+ * still a ComfyApiNode everywhere else.
+ */
+interface HiresNode extends Omit<ComfyApiNode, '_meta'> {
+  _meta?: { title?: string; luNativeHiresFix?: boolean }
+}
+
 export interface NativeHiresFixResult {
-  workflow: Record<string, any>
+  workflow: ComfyApiGraph
   width: number
   height: number
   upscaleNodeId: string
@@ -39,19 +59,22 @@ const UPSCALE_METHODS: ReadonlySet<HiresUpscaleMethod> = new Set([
   'bislerp',
 ])
 
-function isNodeRef(value: unknown): value is [string, number] {
-  return Array.isArray(value)
-    && value.length >= 2
-    && (typeof value[0] === 'string' || typeof value[0] === 'number')
-    && typeof value[1] === 'number'
-}
-
-function cloneWorkflow(workflow: Record<string, any>): Record<string, any> {
+function cloneWorkflow(workflow: ComfyApiGraph): ComfyApiGraph {
   if (typeof structuredClone === 'function') return structuredClone(workflow)
-  return JSON.parse(JSON.stringify(workflow)) as Record<string, any>
+  // Fallback for a runtime without structuredClone. The round-trip preserves
+  // the shape that just type-checked on the way in, so this re-states the
+  // input's type rather than claiming a new one — it narrows JSON.parse's
+  // `any` back to what was handed in, it does not widen anything.
+  return JSON.parse(JSON.stringify(workflow)) as ComfyApiGraph
 }
 
-function nextNodeId(workflow: Record<string, any>): string {
+/** One node of the graph, or undefined when that key holds something else. */
+function nodeAt(workflow: ComfyApiGraph, id: string): ComfyApiNode | undefined {
+  const node: unknown = workflow[id]
+  return isComfyApiNode(node) ? node : undefined
+}
+
+function nextNodeId(workflow: ComfyApiGraph): string {
   let candidate = Object.keys(workflow).reduce((max, id) => {
     const parsed = Number(id)
     return Number.isInteger(parsed) && parsed >= 0 ? Math.max(max, parsed) : max
@@ -101,9 +124,12 @@ export function nativeHiresFinalSize(
  * silently changed incorrectly.
  */
 export function applyNativeHiresFix(
-  sourceWorkflow: Record<string, any>,
+  sourceWorkflow: ComfyApiGraph,
   options: NativeHiresFixOptions,
 ): NativeHiresFixResult {
+  // ComfyApiGraph is a claim about a file the user may have downloaded, not a
+  // guarantee (see its doc comment), so the runtime check stays and every walk
+  // below goes through the comfy-graph guards.
   if (!sourceWorkflow || typeof sourceWorkflow !== 'object') {
     throw new NativeHiresFixError('Native HiRes received an invalid ComfyUI workflow.')
   }
@@ -124,17 +150,19 @@ export function applyNativeHiresFix(
   )
   const workflow = cloneWorkflow(sourceWorkflow)
 
-  if (Object.values(workflow).some((node: any) => node?._meta?.luNativeHiresFix === true)) {
+  // Scans every VALUE, not just the valid nodes: the marker check has to see a
+  // half-written LU node too, or a second pass would append to the first.
+  if (Object.values(workflow).some((node) => propPath(node, '_meta', 'luNativeHiresFix') === true)) {
     throw new NativeHiresFixError('This workflow already contains LU Native HiRes nodes.')
   }
 
   const terminalDecodeIds = new Set<string>()
-  for (const node of Object.values(workflow)) {
-    if (!node || !IMAGE_OUTPUT_NODES.has(node.class_type)) continue
-    const imageRef = node.inputs?.images
-    if (!isNodeRef(imageRef)) continue
+  for (const [, node] of apiNodes(workflow)) {
+    if (!IMAGE_OUTPUT_NODES.has(node.class_type)) continue
+    const imageRef = nodeInput(node, 'images')
+    if (!isComfyLinkRef(imageRef)) continue
     const decodeId = String(imageRef[0])
-    const decode = workflow[decodeId]
+    const decode = nodeAt(workflow, decodeId)
     if (decode && IMAGE_DECODE_NODES.has(decode.class_type)) terminalDecodeIds.add(decodeId)
   }
 
@@ -147,14 +175,16 @@ export function applyNativeHiresFix(
   }
 
   const decodeId = [...terminalDecodeIds][0]
-  const decode = workflow[decodeId]
-  const samplesRef = decode?.inputs?.samples
-  if (!isNodeRef(samplesRef)) {
+  // Guaranteed by the scan above — it only records ids that resolved to a
+  // decode node — but read back through the guard so nothing here asserts it.
+  const decode = nodeAt(workflow, decodeId)
+  const samplesRef = nodeInput(decode, 'samples')
+  if (!isComfyLinkRef(samplesRef) || !decode) {
     throw new NativeHiresFixError('Native HiRes could not find the sampler feeding the final image decode.')
   }
 
   const firstSamplerId = String(samplesRef[0])
-  const firstSampler = workflow[firstSamplerId]
+  const firstSampler = nodeAt(workflow, firstSamplerId)
   if (!firstSampler || firstSampler.class_type !== 'KSampler') {
     throw new NativeHiresFixError(
       `Native HiRes currently requires a core KSampler before the final decode; this workflow uses ${firstSampler?.class_type ?? 'an unknown node'}.`,
@@ -162,13 +192,13 @@ export function applyNativeHiresFix(
   }
 
   const requiredInputs = ['model', 'positive', 'negative', 'latent_image']
-  const missing = requiredInputs.filter((key) => firstSampler.inputs?.[key] === undefined)
+  const missing = requiredInputs.filter((key) => nodeInput(firstSampler, key) === undefined)
   if (missing.length > 0) {
     throw new NativeHiresFixError(`The final KSampler is missing required inputs: ${missing.join(', ')}.`)
   }
 
   const upscaleNodeId = nextNodeId(workflow)
-  workflow[upscaleNodeId] = {
+  const upscaleNode: HiresNode = {
     class_type: 'LatentUpscale',
     inputs: {
       samples: [firstSamplerId, samplesRef[1]],
@@ -182,9 +212,10 @@ export function applyNativeHiresFix(
       luNativeHiresFix: true,
     },
   }
+  workflow[upscaleNodeId] = upscaleNode
 
   const samplerNodeId = nextNodeId(workflow)
-  workflow[samplerNodeId] = {
+  const refinementNode: HiresNode = {
     class_type: 'KSampler',
     inputs: {
       ...firstSampler.inputs,
@@ -197,6 +228,7 @@ export function applyNativeHiresFix(
       luNativeHiresFix: true,
     },
   }
+  workflow[samplerNodeId] = refinementNode
 
   decode.inputs = {
     ...decode.inputs,

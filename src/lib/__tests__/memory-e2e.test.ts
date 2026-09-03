@@ -78,7 +78,7 @@ describe('Memory CRUD E2E', () => {
     const id1 = addMem('user', 'Speaks German', 'User primarily communicates in German')
     const id2 = addMem('feedback', 'No emojis', 'User wants no emojis in UI')
     const id3 = addMem('project', 'v2.0 launch', 'Currently working on v2.0 launch')
-    const id4 = addMem('reference', 'GitHub repo', 'Main repo at github.com/test/app')
+    addMem('reference', 'GitHub repo', 'Main repo at github.com/test/app')
 
     expect(useMemoryStore.getState().entries).toHaveLength(4)
     expect(id1).toBeTruthy()
@@ -623,5 +623,53 @@ describe('v2 → v3 migration', () => {
     expect(e.content).toBe('A legacy fact about TypeScript')
     const prompt = useMemoryStore.getState().getMemoriesForPrompt('legacy TypeScript fact', 16000)
     expect(prompt).toContain('Legacy')
+  })
+})
+
+// ── Der echte Fall vom 03.09.2026: fremdes Gespraech im Prompt ──
+
+describe('eine fremde Recherche darf nicht in den naechsten Prompt lecken', () => {
+  /**
+   * Ein Persona-Lauf recherchierte deutsche Transparenzgesetze und bekam im
+   * Fazit „Für Ihren Dairy Farm Case…" — zwei Eintraege aus einem voellig
+   * anderen, aelteren Gespraech, die still in jedem Prompt UND jedem
+   * Unterauftrag mitfuhren.
+   *
+   * Die Kette hat zwei Tore, und beide muessen halten. Die eigentliche
+   * Schwelle auf dem Rohsignal steckt in scoreMemoriesBlended und wird in
+   * memory-retrieval.test.ts geprueft — im node-Lauf gibt es keine
+   * IndexedDB, also faellt getMemoriesForPromptAsync hier auf den
+   * Stichwortpfad zurueck. GENAU DAS wird hier geprueft: dass auch das
+   * zweite Tor den fremden Eintrag nicht durchlaesst. Ohne diese Prüfung
+   * koennte der Rueckfall die neue Schwelle lautlos wieder aufheben.
+   *
+   * Ehrlich dazu: dieser Block war schon vor dem Fix gruen (der
+   * Stichwortpfad filtert seit je `score > 0`). Er ist kein Beweis fuer
+   * den Fix, sondern ein Riegel dagegen, dass ein spaeterer Umbau des
+   * Rueckfalls das zweite Tor oeffnet. Rot war der Beweis in
+   * memory-retrieval.test.ts.
+   */
+  beforeEach(() => {
+    resetStore()
+    addMem('project', 'Dairy Farm Financials', 'Dairy farm with 90 cows on organic soil, land as collateral.')
+    addMem('project', 'Preferred Structure Variant', 'Variant 1 is the preferred structure for the deal.')
+  })
+  afterEach(() => __setMemoryEmbedFn())
+
+  it('liefert gar nichts, wenn keine Erinnerung zur Frage gehoert', async () => {
+    __setMemoryEmbedFn(async (texts) => texts.map(() => [1, 0, 0]))
+    const frage = 'Transparenzgesetz Hamburg Antragsfristen und Gebuehren'
+
+    expect(await useMemoryStore.getState().getMemoriesForPromptAsync(frage, 16000)).toBe('')
+    expect(useMemoryStore.getState().getMemoriesForPrompt(frage, 16000)).toBe('')
+  })
+
+  it('eine passende Erinnerung kommt weiterhin durch', async () => {
+    addMem('user', 'Transparenzgesetz', 'Der Nutzer recherchiert Antragsfristen nach dem Transparenzgesetz.')
+    __setMemoryEmbedFn(async (texts) => texts.map(() => [1, 0, 0]))
+
+    const block = await useMemoryStore.getState().getMemoriesForPromptAsync('Transparenzgesetz Antragsfristen', 16000)
+    expect(block).toContain('Transparenzgesetz')
+    expect(block).not.toContain('Dairy Farm')
   })
 })

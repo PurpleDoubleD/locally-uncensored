@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { useDismissOnEscape } from '../../hooks/useDismissOnEscape'
 import { createPortal } from 'react-dom'
 import { Brain, X, Plus, Trash2, ChevronDown, Archive } from 'lucide-react'
 import { useMemoryStore } from '../../stores/memoryStore'
@@ -21,7 +22,7 @@ export function MemoryDebugToggle() {
         onClick={() => setOpen(!open)}
         title="Memory: view, add or delete the context injected into prompts"
         className={
-          'relative flex items-center justify-center h-[26px] w-[26px] rounded-md border transition-colors ' +
+          'relative flex items-center justify-center h-[var(--control-h-sm)] w-[var(--control-h-sm)] rounded-md border transition-colors ' +
           (open
             ? 'border-purple-400/50 text-purple-500 dark:text-purple-300 bg-purple-500/[0.08]'
             : 'border-gray-300 dark:border-white/[0.08] text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:border-gray-400 dark:hover:border-white/15')
@@ -43,6 +44,7 @@ export function MemoryDebugToggle() {
 }
 
 function MemoryPopover({ onClose }: { onClose: () => void }) {
+  useDismissOnEscape(true, onClose)
   const entries = useMemoryStore((s) => s.entries)
   const addMemory = useMemoryStore((s) => s.addMemory)
   const removeMemory = useMemoryStore((s) => s.removeMemory)
@@ -102,14 +104,14 @@ function MemoryPopover({ onClose }: { onClose: () => void }) {
       onClick={onClose}
     >
       <div
-        className="w-[420px] max-h-[68vh] bg-white dark:bg-[#262626] border border-gray-200 dark:border-white/10 rounded-xl shadow-2xl overflow-hidden flex flex-col"
+        className="w-[420px] max-h-[68vh] lu-elevated rounded-xl overflow-hidden flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
         <div className="flex items-center justify-between px-3 py-2 border-b border-gray-100 dark:border-white/[0.06] shrink-0">
           <div className="flex items-center gap-2">
             <Brain size={12} className="text-purple-400" />
-            <span className="text-[0.65rem] font-semibold text-gray-700 dark:text-gray-300">Memory ({entries.length})</span>
+            <span className="t-micro font-semibold text-gray-700 dark:text-gray-300">Memory ({entries.length})</span>
           </div>
           <div className="flex items-center gap-1">
             <button
@@ -130,18 +132,18 @@ function MemoryPopover({ onClose }: { onClose: () => void }) {
               value={newTitle}
               onChange={(e) => setNewTitle(e.target.value)}
               placeholder="Title (optional)"
-              className="w-full px-2 py-1 rounded bg-black/20 border border-white/10 text-[0.62rem] text-gray-200 placeholder-gray-600 focus:outline-none focus:border-purple-500/40"
+              className="w-full px-2 py-1 rounded bg-black/20 border border-white/10 t-micro text-gray-200 placeholder-gray-600 focus:outline-none focus:border-purple-500/40"
             />
             <textarea
               value={newContent}
               onChange={(e) => setNewContent(e.target.value)}
               placeholder="What should the model always remember? (injected into every prompt)"
               rows={3}
-              className="w-full px-2 py-1 rounded bg-black/20 border border-white/10 text-[0.62rem] text-gray-200 placeholder-gray-600 focus:outline-none focus:border-purple-500/40 resize-none"
+              className="w-full px-2 py-1 rounded bg-black/20 border border-white/10 t-micro text-gray-200 placeholder-gray-600 focus:outline-none focus:border-purple-500/40 resize-none"
             />
             <div className="flex justify-end gap-1.5">
-              <button onClick={() => { setAdding(false); setNewTitle(''); setNewContent('') }} className="px-2 py-1 rounded text-[0.58rem] text-gray-400 hover:text-gray-200 hover:bg-white/10">Cancel</button>
-              <button onClick={handleAdd} disabled={!newContent.trim()} className="flex items-center gap-1 px-2.5 py-1 rounded text-[0.58rem] font-medium bg-purple-500/20 border border-purple-500/30 text-purple-200 hover:bg-purple-500/30 disabled:opacity-40">
+              <button onClick={() => { setAdding(false); setNewTitle(''); setNewContent('') }} className="px-2 py-1 rounded t-micro text-gray-400 hover:text-gray-200 hover:bg-white/10">Cancel</button>
+              <button onClick={handleAdd} disabled={!newContent.trim()} className="flex items-center gap-1 px-2.5 py-1 rounded t-micro font-medium bg-purple-500/20 border border-purple-500/30 text-purple-200 hover:bg-purple-500/30 disabled:opacity-40">
                 <Plus size={10} /> Save memory
               </button>
             </div>
@@ -151,7 +153,7 @@ function MemoryPopover({ onClose }: { onClose: () => void }) {
         {/* Memory list — each row deletable on hover */}
         <div className="overflow-y-auto flex-1 scrollbar-thin">
           {entries.length === 0 ? (
-            <p className="text-[0.6rem] text-gray-600 px-3 py-5 text-center">No memories yet, click <span className="text-purple-400">Add</span> to write one.</p>
+            <p className="t-micro text-gray-600 px-3 py-5 text-center">No memories yet, click <span className="text-purple-400">Add</span> to write one.</p>
           ) : (
             entries.slice(0, 50).map((entry) => {
               const stale = entry.stale === true || typeof entry.supersededBy === 'string'
@@ -159,14 +161,14 @@ function MemoryPopover({ onClose }: { onClose: () => void }) {
                 <div key={entry.id} className={`group px-3 py-1.5 border-b border-white/[0.03] hover:bg-white/[0.02] ${stale ? 'opacity-50' : ''}`}>
                   <div className="flex items-center gap-1.5">
                     <span className={`text-[0.5rem] uppercase font-bold tracking-wider ${typeColors[entry.type] || 'text-gray-500'}`}>{entry.type}</span>
-                    <span className="text-[0.6rem] text-gray-300 font-medium truncate flex-1">{entry.title}</span>
+                    <span className="t-micro text-gray-300 font-medium truncate flex-1">{entry.title}</span>
                     {stale && (
                       <span className="flex items-center gap-0.5 text-[0.45rem] uppercase tracking-wider text-gray-500 shrink-0" title="Outdated, not injected"><Archive size={8} /> outdated</span>
                     )}
                     <button
                       onClick={() => removeMemory(entry.id)}
                       title="Delete this memory"
-                      className="shrink-0 p-0.5 rounded text-gray-600 opacity-0 group-hover:opacity-100 hover:text-red-400 hover:bg-red-500/10 transition-all"
+                      className="shrink-0 p-0.5 rounded text-gray-600 opacity-0 group-hover:opacity-100 hover:text-red-400 hover:bg-red-500/10 transition"
                     >
                       <Trash2 size={11} />
                     </button>

@@ -25,16 +25,24 @@ const offeredDefNames = AGENT_TOOL_DEFS
 // ── AGENT_TOOL_DEFS ─────────────────────────────────────────────
 
 describe('AGENT_TOOL_DEFS', () => {
-  it('contains exactly 15 tool definitions', () => {
+  it('contains exactly 17 tool definitions', () => {
     // 2.6.6 tool merge (plan section E): the twelve typed shell wrappers,
     // system_info, process_list and get_current_time folded into
     // shell_execute plus the environment block in the system prompt, so the
     // catalog went from 31 definitions to 15. The old names still execute
     // via the retired-name redirect in mcp/builtin-tools.ts.
-    expect(AGENT_TOOL_DEFS).toHaveLength(15)
+    //
+    // 2.6.8: +2 fuer die Hintergrundagenten (check_tasks, message_agent).
+    // Diese Zahl steigt absichtlich schwer — jedes weitere Werkzeug ist
+    // Katalogtext in JEDEM Prompt und eine Wahl mehr, die ein kleines Modell
+    // treffen muss. Wer hier hochzaehlt, soll begruenden, warum sein Fall
+    // nicht in ein vorhandenes Werkzeug passt.
+    expect(AGENT_TOOL_DEFS).toHaveLength(17)
   })
 
   const expectedTools = [
+    'check_tasks',
+    'message_agent',
     'todo_write',
     'web_search',
     'web_fetch',
@@ -75,7 +83,14 @@ describe('AGENT_TOOL_DEFS', () => {
     // todo_write is category 'system' (auto) because it only writes the plan
     // shown in the UI. Prompting for approval to write a to-do list would make
     // the feature useless on a long unattended run.
-    expect(autoNames).toEqual(['todo_write', 'web_fetch', 'web_search'])
+    // 2.6.8: check_tasks und message_agent aus demselben Grund wie todo_write.
+    // Beide bewegen nur App-Zustand, den der Agent selbst erzeugt hat; das
+    // Werkzeug, das wirklich etwas STARTET, ist delegate_task, und das bleibt
+    // unter 'confirm'. Eine Rueckfrage fuer "zaehl deine eigenen Aufgaben auf"
+    // waere Zeremonie, und Zeremonie stumpft die echten Rueckfragen ab.
+    expect(autoNames).toEqual([
+      'check_tasks', 'message_agent', 'todo_write', 'web_fetch', 'web_search',
+    ])
   })
 
   it('confirm-permission tools include file ops, code, shell, image, workflow, screenshot, delegate_task, sprint A/B/C tools', () => {
@@ -138,9 +153,12 @@ describe('getOllamaTools', () => {
   it('does not include permission field (Ollama format excludes it)', () => {
     const ollamaTools = getOllamaTools()
     for (const tool of ollamaTools) {
-      // The permission field should not leak into the Ollama format
-      expect((tool as any).permission).toBeUndefined()
-      expect((tool.function as any).permission).toBeUndefined()
+      // The permission field should not leak into the Ollama format.
+      // `in` statt `(tool as any).permission === undefined`: der Cast hat die
+      // Frage "gibt es den Schluessel" in "ist der Wert undefined" verwandelt,
+      // und ein durchgereichtes `permission: undefined` waere gruen gewesen.
+      expect('permission' in tool).toBe(false)
+      expect('permission' in tool.function).toBe(false)
     }
   })
 })

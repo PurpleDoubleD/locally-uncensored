@@ -2,6 +2,7 @@ import { test, expect, type Page } from '@playwright/test'
 import { tauriMockInit, DEFAULT_MODEL_NAME } from './support/tauri-mock'
 import { seedOnboardingDone } from './support/cloud-mock'
 import { openNewChat } from './support/ui'
+import { toolCalls } from './support/recorded'
 
 /**
  * End-to-end cover for the 2.6.3 agent audit, driven through the real React
@@ -46,14 +47,34 @@ async function boot(page: Page, agentTurns: Turn[]) {
 
 async function instruct(page: Page, text: string) {
   const composer = page.locator('textarea').first()
-  await expect(composer).toBeVisible({ timeout: 20_000 })
-  await page.waitForTimeout(800)
-  await composer.fill(text)
-  await composer.press('Enter')
-}
+  // The transcript echo of the instruction. Scoped to paragraphs on purpose:
+  // Playwright's text engine reads a <textarea>'s VALUE as its text, so a bare
+  // getByText would match the COMPOSER and report an unsent message as sent.
+  const echoed = page.getByRole('main').locator('p').filter({ hasText: text })
 
-const toolCalls = (page: Page) =>
-  page.evaluate(() => (window as any).__E2E_TOOL_CALLS__ || [])
+  await expect(composer).toBeVisible({ timeout: 20_000 })
+  // What the 800 ms sleep here was actually waiting for: the composer becomes
+  // usable only once the view has a model (ChatInput renders `disabled` until
+  // then and drops the keystroke), and it refuses a send while a previous turn
+  // is still running. Both are visible states — a disabled textarea, and the
+  // Send/Stop slot showing Send — so wait for those instead of for a clock.
+  await expect(composer).toBeEnabled({ timeout: 20_000 })
+  await expect(page.getByRole('button', { name: 'Send message' })).toBeVisible({ timeout: 20_000 })
+
+  // And then verify the instruction actually went in. ChatInput drops a send
+  // in silence in more than one situation (a 700 ms double-fire lock, a view
+  // that has not finished wiring its model), leaving the text sitting in the
+  // composer with no error anywhere. Without this check the drop surfaces
+  // twenty seconds later as "the answer never appeared", which points at the
+  // wrong half of the app.
+  await expect(async () => {
+    if ((await echoed.count()) === 0) {
+      await composer.fill(text)
+      await composer.press('Enter')
+    }
+    await expect(echoed).toBeVisible({ timeout: 2_000 })
+  }).toPass({ timeout: 30_000 })
+}
 
 test('the Code tab streams on the built-in engine instead of painting in one tick', async ({ page }) => {
   // One long prose turn, no tools: the whole point is WHEN the text appears.
@@ -89,7 +110,10 @@ test('a run survives a tab switch and is still stoppable afterwards', async ({ p
   // they would prove something else.)
   const header = page.getByRole('banner')
   await header.getByRole('button', { name: 'Models' }).click()
-  await page.waitForTimeout(800)
+  // The point of this move is that CodexView really UNMOUNTS, so wait for
+  // proof that the other view took the slot — the Model Manager is a LazyView,
+  // and its chunk load is exactly the part a fixed 800 ms could lose.
+  await expect(page.getByRole('button', { name: /Back to chat/i })).toBeVisible({ timeout: 20_000 })
   await header.getByRole('button', { name: 'Chat' }).click()
 
   // The remounted view must still show the run as active — before the fix the
@@ -98,11 +122,24 @@ test('a run survives a tab switch and is still stoppable afterwards', async ({ p
   await expect(stop).toBeVisible({ timeout: 20_000 })
 
   await stop.click()
-  // And Stop actually reaches the controller the OLD hook instance created:
-  // the tool calls stop climbing.
-  await page.waitForTimeout(1500)
+  // Stop actually reached the controller the OLD hook instance created. The
+  // observable proof is the composer: Stop gives its slot back to Send only
+  // when the run is really over, so this waits for the stop instead of
+  // sleeping through it.
+  await expect(page.getByRole('button', { name: 'Send message' })).toBeVisible({ timeout: 20_000 })
+
+  // A tool call that was already in flight when Stop landed still reports back
+  // through the bridge, so give it one short settle before taking the
+  // reference count …
+  await page.waitForTimeout(1_000)
   const settled = (await toolCalls(page)).length
-  await page.waitForTimeout(2500)
+  // … and after that nothing more may arrive at all. This is the falsifiable
+  // half and it is the one the audit cares about: an orphaned loop would keep
+  // pushing calls into this window. There is no event for "no event", so this
+  // half needs a window — but it is now ONLY the observation, not also the
+  // wait for the stop to take effect, which is what the old 1.5 s + 2.5 s pair
+  // was doing in one lump.
+  await page.waitForTimeout(2_500)
   expect((await toolCalls(page)).length).toBe(settled)
 })
 
@@ -143,10 +180,18 @@ async function bootAgentMode(page: Page, agentTurns: Turn[]) {
   await openNewChat(page)
   const agentToggle = page.getByRole('main').getByRole('button', { name: 'Agent', exact: true })
   await agentToggle.click()
+  // Activation opens the "Where should the agent work?" dialog FIRST, and
+  // `ui/Modal` marks the rest of the page `inert` + `aria-hidden` while a
+  // dialog is up. So the toggle behind it is out of the accessibility tree,
+  // and asserting on it before answering the dialog is a race the spec loses
+  // whenever the dialog wins the frame. Answer the dialog, then look at the
+  // toggle. The sandbox is the right answer for a spec — it touches nothing
+  // outside ~/agent-workspace.
+  const sandbox = page.getByRole('button', { name: /^Sandbox/ })
+  await expect(sandbox).toBeVisible({ timeout: 15_000 })
+  await sandbox.click()
+  await expect(page.getByRole('dialog', { name: /Agent workspace/i })).toHaveCount(0, { timeout: 10_000 })
   await expect(agentToggle).toHaveAttribute('title', /Agent Mode is on/i, { timeout: 10_000 })
-  // Activation offers a workspace; the sandbox is the right answer for a spec.
-  const sandbox = page.getByRole('button', { name: /Sandbox/i })
-  if (await sandbox.isVisible().catch(() => false)) await sandbox.click()
 }
 
 test('agent mode: edit, test, edit, test — the second identical command really re-runs', async ({ page }) => {
@@ -162,7 +207,7 @@ test('agent mode: edit, test, edit, test — the second identical command really
   await expect(page.getByRole('main').getByText('Done: the suite is green.')).toBeVisible({ timeout: 30_000 })
 
   const calls = await toolCalls(page)
-  const shellRuns = calls.filter((c: any) => c.cmd === 'shell_execute' && c.command === RUN)
+  const shellRuns = calls.filter((c) => c.cmd === 'shell_execute' && c.command === RUN)
   // Two real executions. The over-loop guard used to drop the second one and
   // tell the model nothing had changed — with a file_write in between, which
   // is exactly when it HAS changed (audit B1).
@@ -227,19 +272,37 @@ test('the plan the model writes shows up above the composer and tracks progress'
   await instruct(page, 'fix the parser and prove it')
   await expect(page.getByRole('main').getByText('PLAN_RUN_DONE')).toBeVisible({ timeout: 30_000 })
 
-  // Collapsed by default, so what must be on screen is the counter and the step
-  // that is running right now — not the whole list pushing the composer away.
-  await expect(page.getByText('plan 1/3')).toBeVisible({ timeout: 10_000 })
-  await expect(page.getByText('patch the parser').first()).toBeVisible()
+  // PlanBar has TWO homes and they disagree about the default state ON PURPOSE
+  // (chat/PlanBar.tsx): 'header' starts collapsed so it costs one line above
+  // the transcript, 'panel' — the Code tab's Explorer column — starts expanded.
+  // The old version assumed "collapsed" and clicked a bare text node, so on the
+  // surface that renders the panel the click COLLAPSED the plan and the step
+  // list it then looked for was the one it had just closed. That is what made
+  // this spec pass or fail with whichever home the run happened to render.
+  //
+  // Which home is showing is not what this spec is about, so it drives the
+  // strip through BOTH states and asserts each one. The toggle names the state
+  // it is in, so nothing here is assumed.
+  const strip = page.getByTestId('plan-header').or(page.getByTestId('plan-panel')).first()
+  const planToggle = strip.getByRole('button', { name: /^plan 1\/3/ })
+  await expect(planToggle).toBeVisible({ timeout: 15_000 })
+  if ((await planToggle.getAttribute('title')) === 'Collapse the plan') await planToggle.click()
 
-  // Expanding shows every step, with the finished one struck through.
-  await page.getByText('plan 1/3').click()
-  await expect(page.getByText('read the config')).toBeVisible()
-  await expect(page.getByText('run the suite')).toBeVisible()
+  // Collapsed: the counter and the step that is running right now — and NOT
+  // the whole list, which is the part that would push the composer away.
+  await expect(planToggle).toHaveAttribute('title', 'Show every step')
+  await expect(planToggle).toContainText('patch the parser')
+  await expect(strip.getByText('read the config')).toHaveCount(0)
+
+  // Expanded: every step, and the strip follows the model's second update.
+  await planToggle.click()
+  await expect(planToggle).toHaveAttribute('title', 'Collapse the plan')
+  await expect(strip.getByText('read the config')).toBeVisible()
+  await expect(strip.getByText('run the suite')).toBeVisible()
 
   // `todo_write` must never have gone near the Rust bridge: it is pure
   // conversation state, and a backend round trip would mean a permission gate
   // on writing a to-do list.
   const calls = await toolCalls(page)
-  expect(calls.filter((c: any) => c.cmd === 'todo_write')).toEqual([])
+  expect(calls.filter((c) => c.cmd === 'todo_write')).toEqual([])
 })

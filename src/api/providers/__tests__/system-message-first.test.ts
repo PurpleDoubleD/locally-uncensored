@@ -30,6 +30,19 @@ import { describe, it, expect, vi, afterEach } from 'vitest'
 import { normalizeSystemMessages } from '../normalize-system'
 import { groupHistory } from '../../../lib/group-chat'
 import type { Message } from '../../../types/chat'
+import type { ChatMessage } from '../types'
+import type { OpenAIChatRequest } from '../openai-provider'
+import type { OllamaChatRequest } from '../ollama-provider'
+
+/** The init shape both backend helpers are called with in this file. */
+type CapturedInit = { method?: string; headers?: Record<string, string>; body?: string }
+
+/** Read a captured body as the request type the provider builds, so a renamed
+ *  field breaks these assertions instead of turning them into undefined. */
+function captured<T>(init: CapturedInit): T {
+  if (typeof init.body !== 'string') throw new Error('capture had no JSON body')
+  return JSON.parse(init.body) as T
+}
 
 // ── The guard the shipped chat templates actually contain ──────
 
@@ -43,7 +56,7 @@ function jinjaGate(messages: { role: string }[]): void {
 
 // The history the reporter had: an agent turn with tools, and a second system
 // block injected behind the first user message. This is what dies today.
-const CRASHING_HISTORY = [
+const CRASHING_HISTORY: ChatMessage[] = [
   { role: 'system', content: 'You are a helpful agent.' },
   { role: 'user', content: 'List the files in my project.' },
   { role: 'system', content: 'Available tools: file_list, file_read.' },
@@ -140,10 +153,10 @@ describe('normalizeSystemMessages', () => {
 
 // ── The wire: what the local engines actually receive ──────────
 
-const backendMock = (capture: (url: string, init: any) => Response) => ({
+const backendMock = (capture: (url: string, init: CapturedInit) => Response) => ({
   isTauri: () => false,
-  localFetch: vi.fn(async (url: string, init: any) => capture(url, init)),
-  localFetchStream: vi.fn(async (url: string, init: any) => capture(url, init)),
+  localFetch: vi.fn(async (url: string, init: CapturedInit) => capture(url, init)),
+  localFetchStream: vi.fn(async (url: string, init: CapturedInit) => capture(url, init)),
   ollamaUrl: (path: string) => `http://localhost:11434/api${path}`,
   backendCall: vi.fn(),
   isPrivateOrLanHost: () => true,
@@ -161,10 +174,12 @@ afterEach(() => {
 describe('the body that leaves for a local engine', () => {
   it('Ollama chatStream sends one system message, first', async () => {
     vi.resetModules()
-    let sent: any = null
+    // An array, not a `let`: a push keeps the captured body's real type
+    // instead of letting control-flow analysis collapse it to `never`.
+    const captures: OllamaChatRequest[] = []
     vi.doMock('../../backend', () =>
       backendMock((_url, init) => {
-        sent = JSON.parse(init.body)
+        captures.push(captured<OllamaChatRequest>(init))
         return new Response('{"message":{"content":"ok"},"done":true}\n')
       }),
     )
@@ -173,18 +188,20 @@ describe('the body that leaves for a local engine', () => {
       id: 'ollama', name: 'Ollama', enabled: true,
       baseUrl: 'http://localhost:11434', apiKey: '', isLocal: true,
     })
-    for await (const chunk of p.chatStream('qwen3:8b', CRASHING_HISTORY as any)) { void chunk }
-    expect(sent.messages.filter((m: any) => m.role === 'system')).toHaveLength(1)
+    for await (const chunk of p.chatStream('qwen3:8b', CRASHING_HISTORY)) { void chunk }
+    expect(captures).toHaveLength(1)
+    const sent = captures[0]
+    expect(sent.messages.filter(m => m.role === 'system')).toHaveLength(1)
     expect(sent.messages[0].role).toBe('system')
     expect(() => jinjaGate(sent.messages)).not.toThrow()
   })
 
   it('Ollama chatWithTools sends one system message, first', async () => {
     vi.resetModules()
-    let sent: any = null
+    const captures: OllamaChatRequest[] = []
     vi.doMock('../../backend', () =>
       backendMock((_url, init) => {
-        sent = JSON.parse(init.body)
+        captures.push(captured<OllamaChatRequest>(init))
         return new Response(JSON.stringify({ message: { content: 'ok' } }), {
           headers: { 'Content-Type': 'application/json' },
         })
@@ -195,18 +212,20 @@ describe('the body that leaves for a local engine', () => {
       id: 'ollama', name: 'Ollama', enabled: true,
       baseUrl: 'http://localhost:11434', apiKey: '', isLocal: true,
     })
-    await p.chatWithTools('qwen3:8b', CRASHING_HISTORY as any, [])
+    await p.chatWithTools('qwen3:8b', CRASHING_HISTORY, [])
+    expect(captures).toHaveLength(1)
+    const sent = captures[0]
     expect(() => jinjaGate(sent.messages)).not.toThrow()
     expect(sent.messages[0].content).toContain('Available tools: file_list, file_read.')
   })
 
   it('the built-in engine (OpenAI-compatible) gets one system message, first', async () => {
     vi.resetModules()
-    let sent: any = null
+    const captures: OpenAIChatRequest[] = []
     vi.doMock('../../backend', () =>
       backendMock((url, init) => {
         if (url.includes('/chat/completions')) {
-          sent = JSON.parse(init.body)
+          captures.push(captured<OpenAIChatRequest>(init))
           return new Response(
             JSON.stringify({ choices: [{ message: { content: 'ok' } }] }),
             { headers: { 'Content-Type': 'application/json' } },
@@ -225,8 +244,10 @@ describe('the body that leaves for a local engine', () => {
       id: 'openai', name: 'Built-in Engine', enabled: true,
       baseUrl: 'http://127.0.0.1:8127/v1', apiKey: '', isLocal: true, managed: true,
     })
-    await p.chatWithTools('qwen3-8b', CRASHING_HISTORY as any, [])
-    expect(sent.messages.filter((m: any) => m.role === 'system')).toHaveLength(1)
+    await p.chatWithTools('qwen3-8b', CRASHING_HISTORY, [])
+    expect(captures).toHaveLength(1)
+    const sent = captures[0]
+    expect(sent.messages.filter(m => m.role === 'system')).toHaveLength(1)
     expect(sent.messages[0].role).toBe('system')
     expect(() => jinjaGate(sent.messages)).not.toThrow()
   })

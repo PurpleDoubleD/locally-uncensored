@@ -45,13 +45,35 @@ import { getModelMaxTokens } from './context-compaction'
  * read, the trim notice told it to re-read them, and the coding agent looped
  * on the same file_read for minutes (Morgan, 2026-07-26).
  */
-export async function resolveAgentNumCtx(
+/**
+ * Das Fenster UND die Auskunft, ob es gemessen oder geraten ist.
+ *
+ * ── WARUM DAS EINE EIGENE AUSKUNFT SEIN MUSS ───────────────────────────────
+ *
+ * Bei jedem Fehlschlag faellt diese Funktion auf den flachen Boden 8192
+ * zurueck. Der Auto-Ausloeser braucht aber die Unterscheidung "gemessen" vs.
+ * "geraten", weil er im zweiten Fall eine Sicherheitsmarge abzieht — und er
+ * hatte sie sich bis 2026-09-02 aus der ZAHL erschlossen: `window !== 8192`.
+ *
+ * Das war in beide Richtungen falsch. 8192 ist Ollamas Voreinstellung und ein
+ * voellig legitimer Override; ein Modell, das wirklich mit 8192 laeuft, galt
+ * damit dauerhaft als unsicher und wurde acht Prozentpunkte zu frueh
+ * zusammengefasst. Und `Math.max(real, 8192)` macht aus jedem echten
+ * 8192er-Fenster ebenfalls eine 8192 — dieselbe Fehldeutung.
+ *
+ * Eine Zahl kann nicht sagen, woher sie kommt. Also sagt es die Funktion.
+ */
+export async function resolveAgentNumCtxWithConfidence(
   modelId: string,
   providerId: string,
   override: number | undefined,
   fullModelName?: string,
-): Promise<number> {
+): Promise<{ ctx: number; gemessen: boolean }> {
   let ctx: number = override || 8192
+  // Hat ueberhaupt jemand geantwortet? Ein Override ist eine Angabe des
+  // Nutzers und zaehlt als Antwort; alles andere erst, wenn die Abfrage
+  // wirklich eine Zahl geliefert hat.
+  let gemessen = !!override
   if (!override) {
     if (providerId === 'ollama') {
       try {
@@ -59,12 +81,14 @@ export async function resolveAgentNumCtx(
           effectiveContextWindow(await getModelContextCached(modelId), 0, AGENT_CONTEXT_CAP),
           8192,
         )
+        gemessen = true
       } catch { /* keep the 8192 floor on failure */ }
     } else {
       try {
         const real = await getModelMaxTokens(fullModelName ?? modelId)
         if (typeof real === 'number' && Number.isFinite(real) && real > 0) {
           ctx = Math.max(real, 8192)
+          gemessen = true
         }
         // R19 (LM Studio, twice the cause of a run death): the KV cache is
         // allocated at JIT-load time and a prompt beyond it is hard-truncated
@@ -75,10 +99,29 @@ export async function resolveAgentNumCtx(
         if (providerId === 'openai') {
           const { provider, modelId: rawId } = getProviderForModel(fullModelName ?? modelId)
           const loaded = await provider.loadedContextLength?.(rawId)
-          if (typeof loaded === 'number' && loaded > 0 && loaded < ctx) ctx = loaded
+          if (typeof loaded === 'number' && loaded > 0 && loaded < ctx) {
+            ctx = loaded
+            gemessen = true
+          }
         }
       } catch { /* keep the 8192 floor on failure */ }
     }
   }
-  return ctx
+  return { ctx, gemessen }
+}
+
+/**
+ * Dasselbe Fenster, nur als blosse Zahl — der Weg, den fast alle gehen.
+ *
+ * Die Vertrauensfrage interessiert genau einen Aufrufer: den Auto-Ausloeser,
+ * der eine Sicherheitsmarge abzieht, solange der Nenner geraten ist. Alle
+ * anderen wollen eine Budgetzahl und sonst nichts.
+ */
+export async function resolveAgentNumCtx(
+  modelId: string,
+  providerId: string,
+  override: number | undefined,
+  fullModelName?: string,
+): Promise<number> {
+  return (await resolveAgentNumCtxWithConfidence(modelId, providerId, override, fullModelName)).ctx
 }

@@ -1,6 +1,6 @@
 // Dynamic Tool Registry — MCP-shaped, replaces hardcoded AGENT_TOOL_DEFS
 
-import type { MCPToolDefinition, PermissionMap, PermissionLevel } from './types'
+import type { MCPToolDefinition, PermissionMap, PermissionLevel, ToolArgs } from './types'
 import type { OllamaTool } from '../../types/agent-mode'
 import type { ToolDefinition } from '../providers/types'
 import { MUTATING_TOOLS } from '../../lib/mutating-tools'
@@ -14,15 +14,31 @@ import type { AgentRunContext } from '../agent-context'
  * the process-wide singleton, so a second interleaving run cannot move their
  * goalposts mid-call. Tools that do not care simply ignore it.
  */
-type ToolExecutor = (args: Record<string, any>, run?: AgentRunContext) => Promise<string>
+type ToolExecutor = (
+  args: ToolArgs,
+  run?: AgentRunContext,
+  signal?: AbortSignal,
+) => Promise<string>
 /** The pre-2.6.6 shape, still accepted from external servers and tests. */
-type LegacyToolExecutor = (args: Record<string, any>) => Promise<string>
+type LegacyToolExecutor = (args: ToolArgs) => Promise<string>
 /**
  * External-tool executor gets the tool name too, because one MCP server
  * owns many tools and routes by name. The registry wraps it into a
  * per-tool ToolExecutor closure so the Map lookup stays {name → executor}.
  */
-type ExternalToolExecutor = (toolName: string, args: Record<string, any>) => Promise<string>
+type ExternalToolExecutor = (toolName: string, args: ToolArgs) => Promise<string>
+
+/**
+ * The flat shape the Hermes/XML tool prompt wants: the definition's own
+ * JSON-Schema under `parameters`, no wrapper. `any` here meant the prompt
+ * builder could be handed anything at all — including `undefined` — and the
+ * `<tools>` block would have silently advertised a tool with no parameters.
+ */
+export interface HermesToolDef {
+  name: string
+  description: string
+  parameters: MCPToolDefinition['inputSchema']
+}
 
 interface RegisteredTool {
   definition: MCPToolDefinition
@@ -31,11 +47,66 @@ interface RegisteredTool {
 
 export class ToolRegistry {
   private tools = new Map<string, RegisteredTool>()
+  /**
+   * Names the app itself owns. A third-party MCP server — the settings panel
+   * advertises those as "community tools" — could register under `file_write`
+   * or `shell_execute` and the Map.set simply replaced the builtin: every later
+   * call went to the foreign server, transparently, with the builtin's own
+   * description still selling it to the model. Disconnecting the server then
+   * ran unregisterServer, which deleted the entry by serverId and took the
+   * BUILTIN with it — permanently, for the rest of the session.
+   *
+   * Builtins are therefore untouchable: a colliding external name is refused,
+   * not merged, not suffixed. Suffixing would be worse than refusing, because
+   * the model would then see two tools that both claim to be the terminal.
+   */
+  private builtinNames = new Set<string>()
+  /** Collisions refused since startup, for the MCP settings panel / report. */
+  private rejectedExternal: { serverId: string; toolName: string }[] = []
+  /**
+   * Fallback für zurückgezogene Tool-Namen (2.6.6 tool merge), gesetzt von
+   * registerBuiltinTools.
+   *
+   * M7 / Audit W-T2: hier stand vorher `await import('./builtin-tools')`
+   * mitten in execute(). Der Kommentar daneben nannte den echten Grund —
+   * „keeps the module graph acyclic" —, aber gesplittet hat dieser import()
+   * nie: mcp/index.ts zieht builtin-tools ohnehin statisch herein, also lag das
+   * Modul immer schon im selben Chunk. Rolldown hat das als
+   * INEFFECTIVE_DYNAMIC_IMPORT gemeldet, und zu Recht.
+   *
+   * Ein statischer Import wäre die falsche Auflösung gewesen: die generische
+   * Registry darf die konkreten Builtins nicht kennen (dieselbe Regel, wegen
+   * der RETIRED_MUTATING_NAMES schon in lib/retired-tools.ts ausgelagert ist).
+   * Also wird die Abhängigkeit umgedreht — builtin-tools *meldet* seinen
+   * Redirect an, statt dass die Registry ihn sich holt. Kante weg, Zyklus weg,
+   * Warnung weg.
+   */
+  private retiredRunner:
+    | ((name: string, args: ToolArgs, run?: AgentRunContext) => Promise<string | null>)
+    | null = null
 
   // ── Registration ──────────────────────────────────────────────
 
+  /** Siehe `retiredRunner`. Wird von registerBuiltinTools() verdrahtet. */
+  setRetiredRunner(
+    run: (name: string, args: ToolArgs, run?: AgentRunContext) => Promise<string | null>,
+  ) {
+    this.retiredRunner = run
+  }
+
   registerBuiltin(tool: MCPToolDefinition, executor: ToolExecutor) {
+    this.builtinNames.add(tool.name)
     this.tools.set(tool.name, { definition: tool, executor })
+  }
+
+  /** Is this name owned by the app (and thus off-limits to MCP servers)? */
+  isBuiltinName(name: string): boolean {
+    return this.builtinNames.has(name)
+  }
+
+  /** External registrations refused because they collided with a builtin. */
+  getRejectedExternalTools(): readonly { serverId: string; toolName: string }[] {
+    return this.rejectedExternal
   }
 
   /**
@@ -56,8 +127,20 @@ export class ToolRegistry {
     const isTwoArg = executor.length >= 2
     for (const tool of tools) {
       const name = tool.name
+      // Name collision with an app tool: refuse the registration and say so.
+      // The alternative (overwrite) hands the app's own file and terminal tools
+      // to a third-party process without a word to the user, and the eventual
+      // disconnect deletes the builtin for good. See `builtinNames`.
+      if (this.builtinNames.has(name)) {
+        this.rejectedExternal.push({ serverId, toolName: name })
+        console.warn(
+          `[ToolRegistry] MCP server "${serverId}" tried to register "${name}", `
+          + 'which is a built-in tool. Registration refused; the built-in stays in place.',
+        )
+        continue
+      }
       const bound: ToolExecutor = isTwoArg
-        ? (args: Record<string, any>) =>
+        ? (args: ToolArgs) =>
             (executor as ExternalToolExecutor)(name, args)
         : (executor as LegacyToolExecutor)
       this.tools.set(name, {
@@ -69,10 +152,13 @@ export class ToolRegistry {
 
   unregisterServer(serverId: string) {
     for (const [name, entry] of this.tools) {
-      if (entry.definition.serverId === serverId) {
+      // `source === 'external'` as well as the serverId: a builtin can never be
+      // collateral of a disconnect, whatever a definition claims to carry.
+      if (entry.definition.serverId === serverId && !this.builtinNames.has(name)) {
         this.tools.delete(name)
       }
     }
+    this.rejectedExternal = this.rejectedExternal.filter((r) => r.serverId !== serverId)
   }
 
   // ── Query ─────────────────────────────────────────────────────
@@ -135,17 +221,25 @@ export class ToolRegistry {
 
   async execute(
     name: string,
-    args: Record<string, any>,
+    args: ToolArgs,
     maxRetries = 1,
     run?: AgentRunContext,
+    signal?: AbortSignal,
   ): Promise<string> {
+    // The run's Stop, in the tool's own hands. Callers that predate the fourth
+    // argument still reach it through the run they already thread.
+    const abort = signal ?? run?.abortSignal
+    // Stop is not "finish the batch quietly": a call that has not started yet
+    // must not start. The executor checks this too, but the registry is also
+    // reached directly (sub-agents, retired-name redirects).
+    if (abort?.aborted) return `Error: cancelled by the user before "${name}" started.`
     const entry = this.tools.get(name)
     if (!entry) {
       // Retired names (2.6.6 tool merge) still run: a restored session or a
       // model that knows git_status from its context must not burn the step
-      // on "Unknown tool". Dynamic import keeps the module graph acyclic.
-      const { runRetiredTool } = await import('./builtin-tools')
-      const redirected = await runRetiredTool(name, args, run)
+      // on "Unknown tool". Der Redirect kommt über setRetiredRunner herein
+      // (siehe `retiredRunner`) statt über einen Rück-Import auf builtin-tools.
+      const redirected = this.retiredRunner ? await this.retiredRunner(name, args, run) : null
       if (redirected !== null) return redirected
       return `Error: Unknown tool "${name}"`
     }
@@ -159,11 +253,12 @@ export class ToolRegistry {
 
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       try {
-        const result = await entry.executor(args, run)
+        const result = await entry.executor(args, run, abort)
         // If result is an error and we have retries left, retry
         if (result.startsWith('Error:') && attempt < maxRetries) {
-          // Only retry on transient errors (timeout, network)
-          if (retriable && isTransientText(result)) continue
+          // A retry after Stop would run the command the user just cancelled a
+          // second time — the one case where "transient" is the wrong read.
+          if (retriable && isTransientText(result) && !abort?.aborted) continue
         }
         return result
       } catch (err) {
@@ -172,7 +267,10 @@ export class ToolRegistry {
         // git_commit whose invoke threw after the commit landed, and aborted
         // calls. Same rule as the string path: transient + non-mutating only,
         // and an abort is the user speaking, not a network hiccup.
-        const aborted = (err as { name?: string })?.name === 'AbortError' || /abort/i.test(message)
+        const aborted =
+          (err as { name?: string })?.name === 'AbortError'
+          || /abort/i.test(message)
+          || abort?.aborted === true
         if (attempt < maxRetries && retriable && !aborted && isTransientText(message)) continue
         return `Error: ${message}`
       }
@@ -204,7 +302,7 @@ export class ToolRegistry {
     }))
   }
 
-  toHermesToolDefs(permissions: PermissionMap): { name: string; description: string; parameters: any }[] {
+  toHermesToolDefs(permissions: PermissionMap): HermesToolDef[] {
     return this.getAvailableTools(permissions).map(t => ({
       name: t.name,
       description: t.description,

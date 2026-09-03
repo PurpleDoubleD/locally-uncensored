@@ -1,50 +1,33 @@
 import { useState, useEffect, useRef, type ReactNode, type ChangeEvent } from 'react'
-import { withInstallerOutput } from '../../lib/error-text'
-import { ArrowLeft, RotateCcw, Sun, Moon, Volume2, Check, X, Loader2, Shield, ChevronRight, GraduationCap, Lock, Sliders, Plug, Bot, Phone, User, Download, Mic } from 'lucide-react'
+import { withDetail } from '../../lib/error-text'
+// `X` steht hier weiterhin, obwohl der Sprachabschnitt mit seinen Symbolen
+// nach ./SpeechSettings.tsx gezogen ist: der Dismiss-Knopf der ComfyUI-Notiz
+// traegt ihn neben dem Wort.
+import { ArrowLeft, RotateCcw, Sun, Moon, Check, X, Loader2, Shield, ChevronRight, GraduationCap, Lock, Sliders, Plug, Bot, Phone, User, Download, AlertTriangle } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { SETTINGS_TAB_RESET_KEYS, type SettingsTab } from '../../lib/settings-reset'
+import { armedScopeFor, type ResetArm, type ResetArmScope } from '../../lib/reset-arming'
+import { sectionAnchorId, sectionsFor, type SettingsSectionFlags } from './settings-nav'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { usePermissionStore } from '../../stores/permissionStore'
 import { useUIStore } from '../../stores/uiStore'
 import { SliderControl } from './SliderControl'
+import { InlineToggle } from './InlineToggle'
+import { SpeechSettings } from './SpeechSettings'
+import { LogFileSettings } from './LogFileSettings'
 import { PersonaPanel } from '../personas/PersonaPanel'
 import { AccountPanel } from '../auth/AccountPanel'
 import { useVoiceStore } from '../../stores/voiceStore'
-import { checkWhisperAvailable, checkTtsAvailable, downloadPiperVoice, listInstalledPiperVoices } from '../../api/voice'
 import { downloadSuffix } from '../../lib/formatters'
 
-// Curated local neural (Piper) voices the user can pick. Selecting one not yet
-// on disk downloads it (~63 MB). Ids match rhasspy/piper-voices.
-const PIPER_VOICES: { id: string; label: string }[] = [
-  { id: 'en_US-lessac-medium', label: 'Lessac, US, neutral' },
-  { id: 'en_US-amy-medium', label: 'Amy, US, female' },
-  { id: 'en_US-ryan-high', label: 'Ryan, US, male (high)' },
-  { id: 'en_US-hfc_female-medium', label: 'HFC, US, female' },
-  { id: 'en_GB-alba-medium', label: 'Alba, UK, female' },
-  { id: 'en_GB-northern_english_male-medium', label: 'Northern, UK, male' },
-]
-
-// MiniMax Speech-02 system voices for the hosted cloud TTS. The server route
-// (/api/voice/tts) forwards the id verbatim as voice_id and only validates the
-// character set; default is Wise_Woman.
-const CLOUD_TTS_VOICES: { id: string; label: string }[] = [
-  { id: 'Wise_Woman', label: 'Wise Woman, default' },
-  { id: 'Calm_Woman', label: 'Calm Woman' },
-  { id: 'Lively_Girl', label: 'Lively Girl' },
-  { id: 'Lovely_Girl', label: 'Lovely Girl' },
-  { id: 'Sweet_Girl_2', label: 'Sweet Girl' },
-  { id: 'Friendly_Person', label: 'Friendly Person' },
-  { id: 'Deep_Voice_Man', label: 'Deep Voice Man' },
-  { id: 'Casual_Guy', label: 'Casual Guy' },
-  { id: 'Patient_Man', label: 'Patient Man' },
-  { id: 'Determined_Man', label: 'Determined Man' },
-  { id: 'Elegant_Man', label: 'Elegant Man' },
-  { id: 'Young_Knight', label: 'Young Knight' },
-]
+// AS-09: PIPER_VOICES und CLOUD_TTS_VOICES sind mit dem Abschnitt, der sie
+// benutzt, nach ./SpeechSettings.tsx gezogen.
 import { useAgentModeStore } from '../../stores/agentModeStore'
 import { FEATURE_FLAGS } from '../../lib/constants'
 import { MemorySettings } from './MemorySettings'
 import { ChatBackupSettings } from './ChatBackupSettings'
+import { ImportScanSkeleton } from '../layout/ViewSkeletons'
+import { LocalApiSettings } from './LocalApiSettings'
 import { RemoteAccessSettings } from './RemoteAccessSettings'
 import { RemoteAccessDocs } from './RemoteAccessDocs'
 import { HardwareSettings } from './HardwareSettings'
@@ -60,6 +43,7 @@ import { WorkflowList } from '../agents/WorkflowList'
 import { WorkflowBuilder } from '../agents/WorkflowBuilder'
 import { useUpdateStore, isNewerVersion } from '../../stores/updateStore'
 import { backendCall, isTauri, isMacOS, openExternal } from '../../api/backend'
+import { troubleshootHinweis, type TroubleshootHinweis } from './troubleshoot-message'
 import { isMlxImageHost } from '../../api/mlx-image'
 import { ArrowUpCircle, KeyRound, RefreshCw } from 'lucide-react'
 import { CLOUD_BASE } from '../../api/cloud/config'
@@ -153,12 +137,26 @@ function Section({ title, children, defaultOpen = false }: { title: string; chil
   const [open, setOpen] = useState(defaultOpen)
   const [animating, setAnimating] = useState(false)
   return (
-    <div className="border-b border-gray-100 dark:border-white/[0.04]">
+    // D-S27: `id` + `scroll-mt` machen die Sektion zum Sprungziel der Rail.
+    // Der Abstand nach oben haelt den Kopf unter dem klebenden Seitenkopf.
+    <div id={sectionAnchorId(title)} className="scroll-mt-16 border-b border-gray-100 dark:border-white/[0.04]">
       <button
         onClick={() => { setOpen(!open); setAnimating(true) }}
+        // Ein Aufklapp-Knopf, der seinen Zustand nicht meldet, ist fuer eine
+        // Vorlesehilfe ein Knopf ohne Wirkung: sie sagt „Local API, Schalter"
+        // und nie, ob der Abschnitt offen ist. Das Kind traegt die Kennung,
+        // die der Knopf hier steuert.
+        aria-expanded={open}
+        aria-controls={`${sectionAnchorId(title)}-body`}
         className="w-full flex items-center justify-between py-2.5 group"
       >
-        <span className="text-[0.65rem] font-semibold uppercase tracking-[0.15em] text-gray-600 dark:text-gray-500 group-hover:text-gray-800 dark:group-hover:text-gray-300 transition-colors">
+        {/* D-S28: zwoelfmal 11,96px/600 uppercase gray-500 war kein Rang,
+            sondern zwoelfmal dieselbe Betonung — und im Dunkelmodus mit
+            3.37:1 (gray-500 #6b7280 auf #202020) unter WCAG AA. Der Kopf ist
+            jetzt eine echte Ueberschrift auf der Stufe darunter: 0.82rem =
+            15,1px bei 18,4px Wurzelmass, Satzstellung statt Versalien,
+            17.74:1 hell / 13.16:1 dunkel. Den Rang traegt die Rail. */}
+        <span className="text-[0.82rem] font-semibold text-gray-900 dark:text-gray-200 group-hover:text-black dark:group-hover:text-white transition-colors">
           {title}
         </span>
         <ChevronRight size={12} className={`text-gray-400 transition-transform duration-200 ${open ? 'rotate-90' : ''}`} />
@@ -166,6 +164,7 @@ function Section({ title, children, defaultOpen = false }: { title: string; chil
       <AnimatePresence>
         {open && (
           <motion.div
+            id={`${sectionAnchorId(title)}-body`}
             initial={{ height: 0, opacity: 0 }}
             animate={{ height: 'auto', opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
@@ -218,25 +217,6 @@ function Disclosure({ label, children, defaultOpen = false }: { label: string; c
   )
 }
 
-// ── Inline Toggle ───────────────────────────────────────────────
-
-function InlineToggle({ label, enabled, onChange, icon }: { label: string; enabled: boolean; onChange: () => void; icon?: ReactNode }) {
-  return (
-    <div className="flex items-center justify-between py-0.5">
-      <div className="flex items-center gap-1.5">
-        {icon}
-        <span className="text-[0.7rem] text-gray-700 dark:text-gray-400">{label}</span>
-      </div>
-      <button
-        onClick={onChange}
-        className={`relative w-7 h-3.5 rounded-full transition-colors ${enabled ? 'bg-green-500' : 'bg-gray-300 dark:bg-gray-700'}`}
-      >
-        <span className={`absolute top-0.5 left-0.5 w-2.5 h-2.5 rounded-full bg-white transition-transform ${enabled ? 'translate-x-3.5' : ''}`} />
-      </button>
-    </div>
-  )
-}
-
 // ── Workflow Section (inline, manages list/builder view) ────────
 
 function WorkflowSection() {
@@ -273,6 +253,10 @@ function WorkflowSection() {
 export function HfDownloadPathSetting() {
   const override = useSettingsStore(s => s.settings.hfDownloadPathOverride)
   const [draft, setDraft] = useState(override)
+  // Der Ordnerwaehler hat nicht aufgemacht: Stufe (c), der Klick sollte etwas
+  // aendern und hat es nicht. Ein Abbruch im Dialog liefert null und ist kein
+  // Fehler, hier landet also nur ein echter Fehlschlag.
+  const [pickError, setPickError] = useState<string | null>(null)
   const [comfy, setComfy] = useState<CustomModelDirResult | null>(null)
   const [scan, setScan] = useState<ScannedDir | null>(null)
   // The folder LU reads while the field is empty. Row 0 of the listing is the
@@ -392,10 +376,15 @@ export function HfDownloadPathSetting() {
   }, [])
 
   async function pickFolder() {
+    setPickError(null)
     try {
       const chosen = await backendCall<string | null>('pick_folder')
+      // Ueber `apply`, nicht am Feld vorbei: das ist der eine Weg, der die
+      // offene Tippschuld loescht und die Modellliste anstoesst.
       if (chosen) apply(chosen)
-    } catch {}
+    } catch (e) {
+      setPickError(withDetail('The folder picker did not open. Type or paste the path into the field instead.', e))
+    }
   }
 
   return (
@@ -447,6 +436,11 @@ export function HfDownloadPathSetting() {
         </div>
       )}
       {override && comfy !== null && !scanHidesHandoff && <CustomModelDirNote result={comfy} />}
+      {pickError && (
+        <p role="alert" className="text-[0.55rem] text-red-500 dark:text-red-400 leading-snug whitespace-pre-line">
+          {pickError}
+        </p>
+      )}
     </div>
   )
 }
@@ -614,7 +608,12 @@ export function ImportLocalModels() {
         {scanning ? 'Scanning…' : 'Scan for local models'}
       </button>
       {errors.scan && <div className="text-[0.6rem] text-red-400">{errors.scan}</div>}
-      {candidates !== null && !errors.scan && (
+      {/* Welle 3, Listen-Ladezustand 4 von 4: waehrend des Scans stand hier
+          nichts — der Knopf sagte „Scanning…" und darunter blieb es leer, bis
+          die Liste da war und den Rest der Sektion nach unten schob. Das
+          Skelett haelt den Platz, den die Kandidatenzeilen einnehmen. */}
+      {scanning && <ImportScanSkeleton />}
+      {candidates !== null && !errors.scan && !scanning && (
         candidates.length === 0 ? (
           <div className="text-[0.6rem] text-gray-500">No importable models found. Looked in the Ollama store and the LM Studio models folder.</div>
         ) : (
@@ -649,8 +648,51 @@ export function ImportLocalModels() {
 
 // ── ComfyUI Settings ────────────────────────────────────────────
 
+/**
+ * Antwort von `comfyui_status` (`src-tauri/src/commands/process.rs:1989`).
+ *
+ * Der Typ stand als Ganzes schon da — als der inline notierte Zustandstyp von
+ * `useState` eine Zeile weiter unten. Nur der Weg dorthin trug `any`, und der
+ * hat zwei Abweichungen zugedeckt, die beide nachgemessen sind:
+ *
+ *  1. `path` ist auf der Rust-Seite `Option<String>`, kommt also als `null`
+ *     an — nicht als `undefined`. Der Zustandstyp sagte `path?: string`; ein
+ *     `null` haette dort nie hineingedurft, und `any` hat es hineingelassen.
+ *     Beide Lesestellen (`status?.path || ''`) vertragen `null` ohnehin.
+ *  2. Der Dev-Server, den der Browser-Modus statt Tauri anspricht, sendet von
+ *     den zehn Schluesseln nur sechs (`dev-server/comfy.ts:461`): `stalled`,
+ *     `complete`, `port`, `host` und `isLocal` fehlen dort. Deshalb sind sie
+ *     hier optional — im Browser sind sie wirklich nicht da.
+ */
+interface ComfyStatusResponse {
+  running: boolean
+  found: boolean
+  /** Tauri sendet immer; der Dev-Server nur `running`/`starting`/`found`/`path`. */
+  starting?: boolean
+  stalled?: boolean
+  complete?: boolean
+  /** `null`, solange kein Pfad gespeichert ist — auch bei `found: true`. */
+  path?: string | null
+  port?: number
+  host?: string
+  isLocal?: boolean
+}
+
+/** Antwort von `comfyui_last_output` (`process.rs`). Alle vier Schluessel
+ *  immer gesetzt; `lines` ist `[]` statt `null`, wenn nichts anliegt. Im
+ *  Browser-Modus existiert die Route nicht, der Aufruf wirft dann. */
+interface ComfyLastOutput {
+  lines: string[]
+  exited: boolean
+  envBroken: boolean
+  /** Der Befund des Installers zu genau diesem Absturz, leer wenn er keinen
+   *  hat (Ticket 007). Er sticht den allgemeinen Reparatursatz, siehe
+   *  `comfyCrashAdvice`. */
+  hint: string
+}
+
 export function ComfyUISettings() {
-  const [status, setStatus] = useState<{ running: boolean; found: boolean; complete?: boolean; path?: string; port?: number; host?: string; isLocal?: boolean; starting?: boolean; stalled?: boolean } | null>(null)
+  const [status, setStatus] = useState<ComfyStatusResponse | null>(null)
   // Why the last start attempt did not stick. The button used to swallow this
   // whole (E16): on a box with no ComfyUI python environment, Start answered
   // "started", the panel went back to `Stopped`, and six minutes later there
@@ -663,6 +705,7 @@ export function ComfyUISettings() {
   const [pathSuccess, setPathSuccess] = useState(false)
   const [customPort, setCustomPort] = useState('')
   const [portSuccess, setPortSuccess] = useState(false)
+  const [portError, setPortError] = useState('')
   const [customHost, setCustomHost] = useState('')
   const [hostError, setHostError] = useState('')
   const [hostSuccess, setHostSuccess] = useState(false)
@@ -693,7 +736,7 @@ export function ComfyUISettings() {
     const check = async () => {
       try {
         const { backendCall, setComfyPort, setComfyHost } = await import('../../api/backend')
-        const s: any = await backendCall('comfyui_status')
+        const s = await backendCall<ComfyStatusResponse>('comfyui_status')
         if (!cancelled) {
           setStatus(s)
           // Mirror backend truth into the frontend URL builder so subsequent
@@ -701,7 +744,13 @@ export function ComfyUISettings() {
           if (typeof s?.port === 'number' && s.port > 0) setComfyPort(s.port)
           if (typeof s?.host === 'string' && s.host.trim()) setComfyHost(s.host)
         }
-      } catch {}
+      } catch {
+        // Level (a): silent on purpose. This is the 5 s status poll below, and
+        // a failed probe simply means the panel keeps showing the last known
+        // state until the next tick. Every USER action in this panel (start,
+        // stop, install, set port) reports its own failure; a poll that missed
+        // one beat is not something to interrupt anyone about.
+      }
       if (!cancelled) setLoading(false)
     }
     check()
@@ -720,7 +769,7 @@ export function ComfyUISettings() {
       // does nothing". Look once, a few seconds in, and say what happened.
       setTimeout(async () => {
         try {
-          const out = await backendCall<{ exited?: boolean; lines?: string[]; envBroken?: boolean; hint?: string }>('comfyui_last_output')
+          const out = await backendCall<ComfyLastOutput>('comfyui_last_output')
           if (out?.exited && Array.isArray(out?.lines) && out.lines.length > 1) {
             // Ticket 007: welcher Satz unter die Ausgabe gehoert, entscheidet
             // comfyCrashAdvice fuer beide Oberflaechen. Vorher stand der
@@ -752,11 +801,17 @@ export function ComfyUISettings() {
   }
 
   const handleStop = async () => {
+    setStartError('')
     try {
       const { backendCall } = await import('../../api/backend')
       await backendCall('stop_comfyui')
       setStatus(prev => prev ? { ...prev, running: false } : null)
-    } catch {}
+    } catch (e) {
+      // Level (c): a stop that failed leaves the panel showing "running", which
+      // is the truth — but without this line the button reads as a dud. Same
+      // channel as the start failure, right under the same pair of buttons.
+      setStartError(withDetail('ComfyUI did not stop. It may still be running — try again, or close it in its own window.', e))
+    }
   }
 
   const handleSetPath = async () => {
@@ -795,7 +850,7 @@ export function ComfyUISettings() {
       </div>
 
       {startError && (
-        <pre className="whitespace-pre-wrap break-words text-[0.55rem] leading-relaxed text-red-400 bg-red-500/[0.06] border border-red-500/20 rounded p-2 max-h-40 overflow-y-auto">
+        <pre role="alert" className="whitespace-pre-wrap break-words text-[0.55rem] leading-relaxed text-red-400 bg-red-500/[0.06] border border-red-500/20 rounded p-2 max-h-40 overflow-y-auto">
           {startError}
         </pre>
       )}
@@ -876,6 +931,7 @@ export function ComfyUISettings() {
         <span className="text-[0.7rem] text-gray-700 dark:text-gray-400">Port</span>
         <div className="flex gap-1.5">
           <input
+                aria-label="Port"
             type="number"
             value={customPort || status?.port || 8188}
             onChange={e => { setCustomPort(e.target.value); setPortSuccess(false) }}
@@ -886,13 +942,19 @@ export function ComfyUISettings() {
             onClick={async () => {
               const port = parseInt(customPort)
               if (!port || port < 1 || port > 65535) return
+              setPortError('')
               try {
                 const { backendCall, setComfyPort } = await import('../../api/backend')
                 await backendCall('set_comfyui_port', { port })
                 setComfyPort(port)
                 setPortSuccess(true)
                 setTimeout(() => setPortSuccess(false), 3000)
-              } catch {}
+              } catch (e) {
+                // Level (c): the port was NOT saved. Without this the button
+                // just fails to produce the green "Port saved" line, which is
+                // indistinguishable from a slow save.
+                setPortError(withDetail('The port was not saved. Pick a free port and try again.', e))
+              }
             }}
             disabled={!customPort || parseInt(customPort) === (status?.port || 8188)}
             className="px-2 py-1 rounded text-[0.6rem] bg-purple-500/10 text-purple-400 hover:bg-purple-500/20 transition-colors disabled:opacity-30"
@@ -901,6 +963,11 @@ export function ComfyUISettings() {
           </button>
         </div>
         {portSuccess && <p className="text-[0.55rem] text-green-400">Port saved. Restart ComfyUI to apply.</p>}
+        {portError && (
+          <p role="alert" className="text-[0.55rem] text-red-500 dark:text-red-400 leading-snug whitespace-pre-line">
+            {portError}
+          </p>
+        )}
       </div>
 
       {/* Controls, local host only (can't manage a remote process) */}
@@ -1116,6 +1183,7 @@ function CodexAgentSettings() {
           </div>
         </div>
         <input
+                aria-label="Maximum /loop passes"
           type="number"
           min={0}
           value={settings.loopMaxPasses}
@@ -1202,16 +1270,21 @@ function ResetSection({ tab }: { tab: SettingsTab }) {
   const resetSettings = useSettingsStore((s) => s.resetSettings)
   const resetVoiceDefaults = useVoiceStore((s) => s.resetVoiceDefaults)
   const resetPermissions = usePermissionStore((s) => s.resetToDefaults)
-  const [armed, setArmed] = useState<'section' | 'all' | null>(null)
+  // The arm records the tab it was made on, so "still armed?" is a question
+  // that can be answered while rendering. Switching tabs while armed must
+  // disarm — otherwise a click armed on General would confirm-fire on Agent —
+  // and armedScopeFor() is that rule (src/lib/reset-arming.ts). It replaces a
+  // `useEffect(..., [tab])` that disarmed one render too late.
+  const [arm, setArm] = useState<ResetArm<SettingsTab>>(null)
+  const armed = armedScopeFor(arm, tab)
+  const setArmed = (which: ResetArmScope | null) =>
+    setArm(which === null ? null : { scope: which, tab })
   const [done, setDone] = useState<string | null>(null)
   const armTimer = useRef<number | null>(null)
   const doneTimer = useRef<number | null>(null)
 
   const tabLabel = SETTINGS_TABS.find((t) => t.id === tab)?.label ?? 'section'
 
-  // Switching tabs while armed must disarm — otherwise a click armed on
-  // General would confirm-fire on Agent.
-  useEffect(() => { setArmed(null) }, [tab])
   useEffect(() => () => {
     if (armTimer.current) window.clearTimeout(armTimer.current)
     if (doneTimer.current) window.clearTimeout(doneTimer.current)
@@ -1247,25 +1320,75 @@ function ResetSection({ tab }: { tab: SettingsTab }) {
   }
 
   return (
-    <div className="pt-3 pb-6 space-y-1.5">
-      <div className="flex items-center gap-3">
-        <button
-          onClick={() => handleClick('section')}
-          className={`flex items-center gap-1.5 text-[0.65rem] transition-colors ${
-            armed === 'section' ? 'text-red-400 font-medium' : 'text-gray-500 hover:text-red-400'
-          }`}
-        >
-          <RotateCcw size={11} />
-          {armed === 'section' ? `Click again to reset ${tabLabel}` : `Reset ${tabLabel} to defaults`}
-        </button>
+    <div className="pt-3 pb-6 space-y-2.5">
+      {/* D-S29: die beiden Reset-Aktionen sahen gleich aus — zwei graue
+          Textlinks nebeneinander, von denen einer sehr viel mehr loescht.
+          Die gefaehrlichere traegt jetzt eine eigene Form (umrandete
+          Gefahrfarbe statt Textlink), eine eigene Zeile und einen Satz, der
+          den Unterschied benennt — Text UND Kante durch WCAG, also auch
+          1.4.11 (3:1) fuer die Umrandung. Vorher stand "Reset all settings"
+          im Dunkelmodus auf gray-600, war also ausgerechnet die unlesbarere
+          der beiden.
+
+          ZWEITER DURCHGANG (01.09.2026), und er hat den Rest des Befundes
+          umgedreht. Die Matrix fuehrte hier eine offene Luecke: „der
+          tab-weite Reset-Link steht im Dunkelmodus weiter auf 3.37:1". Diese
+          Zahl war aus KLASSENNAMEN gerechnet — gray-500 #6b7280 auf einem
+          angenommenen #202020. Im laufenden Fenster (Chromium, Farben aus
+          getComputedStyle, oklch ueber eine 1x1-Canvas aufgeloest) steht
+          nichts davon:
+
+            Grund unter dem Link  #1e1e1e (die Settings-Pane), nicht #202020
+            Ruhe dunkel  gray-500 -> #9ca3af    6.57:1   ✓ AA
+            Ruhe hell    gray-500 -> #374151   10.31:1   ✓ AA
+
+          Der Rescue-Layer (index.css:867/873) hebt `.dark .text-gray-500`
+          auf gray-400 und `.light .text-gray-500` auf gray-700 — die Luecke
+          war zu, bevor dieser Durchgang begann.
+
+          Was NICHT zu war und in keiner Zeile stand: der SCHARFE Zustand
+          desselben Knopfs. `text-red-400` ohne hellen Gegenpart, und
+          red-400 heisst in Tailwind 4 #ff6467, nicht das #f87171 der
+          Rechnungen von damals:
+
+            scharf dunkel #ff6467 auf #1e1e1e   5.77:1   ✓ AA
+            scharf hell   #ff6467 auf #ffffff   2.89:1   ✗ unter 4.5:1
+
+          Also genau die Umkehrung des Ausgangsbefundes: gefaehrlich wird der
+          Knopf erst mit dem ersten Klick, und ab da war er im Hellmodus der
+          unlesbarere. Er traegt jetzt dasselbe Rotpaar wie der Gefahrknopf
+          darunter (red-600 hell / red-400 dunkel), kein drittes Rezept;
+          dasselbe gilt fuer den Hover, der vorher denselben Fehler machte.
+
+          Die Klassen dieses Knopfs sind woertlich gepinnt, und zwar in einer
+          FREMDEN Datei: src/lib/__tests__/reset-arming-is-visible.test.ts.
+          Deren Farbzeile ist mitgezogen worden — bewusst, im Bericht
+          benannt, und mit demselben Biss wie vorher (voller Literalvergleich
+          beider Zweige). */}
+      <button
+        onClick={() => handleClick('section')}
+        className={`flex items-center gap-1.5 text-[0.65rem] transition-colors ${
+          armed === 'section' ? 'text-red-600 dark:text-red-400 font-medium' : 'text-gray-500 hover:text-red-600 dark:hover:text-red-400'
+        }`}
+      >
+        <RotateCcw size={11} />
+        {armed === 'section' ? `Click again to reset ${tabLabel}` : `Reset ${tabLabel} to defaults`}
+      </button>
+      <div className="flex items-start gap-2.5">
         <button
           onClick={() => handleClick('all')}
-          className={`flex items-center gap-1.5 text-[0.6rem] transition-colors ${
-            armed === 'all' ? 'text-red-400 font-medium' : 'text-gray-600 dark:text-gray-600 hover:text-red-400'
+          className={`shrink-0 inline-flex items-center gap-1.5 px-2 py-1 rounded-md border text-[0.6rem] transition-colors ${
+            armed === 'all'
+              ? 'bg-red-600 border-red-600 text-white font-medium'
+              : 'border-red-600 text-red-600 hover:bg-red-600/10 dark:border-red-400 dark:text-red-400 dark:hover:bg-red-400/10'
           }`}
         >
+          <AlertTriangle size={11} />
           {armed === 'all' ? 'Click again to reset everything' : 'Reset all settings'}
         </button>
+        <p className="text-[0.55rem] text-gray-500 dark:text-gray-400 leading-snug pt-1">
+          Every tab, not just {tabLabel}.
+        </p>
       </div>
       {done && (
         <div className="flex items-center gap-1.5 text-[0.6rem] text-emerald-500">
@@ -1285,22 +1408,6 @@ export function SettingsPage() {
   // app-managed built-in engine (same gate as the send-path self-heal).
   const builtinManaged = useProviderStore((s) => !!s.providers.openai?.enabled && s.providers.openai?.managed === true)
   const { setView } = useUIStore()
-  const voiceSettings = useVoiceStore()
-  const [whisperStatus, setWhisperStatus] = useState<{ available: boolean; backend: string | null; error?: string } | null>(null)
-  const [whisperLoading, setWhisperLoading] = useState(true)
-  // §24.9 — in-app faster-whisper install. `installing` drives the spinner;
-  // `whisperInstallError` shows the last failure under the badge.
-  const [whisperInstalling, setWhisperInstalling] = useState(false)
-  const [whisperInstallError, setWhisperInstallError] = useState<string | null>(null)
-  // Neural TTS (Piper) install state — mirrors the whisper installer.
-  const [ttsStatus, setTtsStatus] = useState<{ available: boolean } | null>(null)
-  const [ttsLoading, setTtsLoading] = useState(true)
-  const [ttsInstalling, setTtsInstalling] = useState(false)
-  const [ttsInstallError, setTtsInstallError] = useState<string | null>(null)
-  // Piper voice picker state.
-  const [installedVoices, setInstalledVoices] = useState<string[]>([])
-  const [voiceBusy, setVoiceBusy] = useState(false)
-  const [voiceError, setVoiceError] = useState<string | null>(null)
   // Where the navigation that opened this page wanted to land. Read ONCE, at
   // mount, and held for this mount's whole life: `defaultOpen` below is an
   // initial value, so a focus that vanished from the store on the next render
@@ -1317,158 +1424,140 @@ export function SettingsPage() {
   })
   useEffect(() => {
     if (typeof window !== 'undefined') {
-      try { window.localStorage.setItem(SETTINGS_TAB_KEY, tab) } catch {}
+      // Level (a): silent on purpose. This only remembers which tab was open
+      // for the next visit. If storage is full or blocked (private window),
+      // Settings opens on General next time — a convenience lost, not an
+      // action failed, and nothing the user could act on.
+      try { window.localStorage.setItem(SETTINGS_TAB_KEY, tab) } catch { /* see above */ }
     }
   }, [tab])
 
 
-  const refreshWhisper = () => {
-    setWhisperLoading(true)
-    return checkWhisperAvailable()
-      .then((s) => {
-        setWhisperStatus(s)
-        // Drive the mic button's availability from the same probe so it lights
-        // up immediately after the in-app install — no restart needed.
-        voiceSettings.setSttAvailable(!!s.available)
-      })
-      .finally(() => setWhisperLoading(false))
-  }
-
-  const refreshTts = () => {
-    setTtsLoading(true)
-    return checkTtsAvailable(voiceSettings.piperVoice)
-      .then((s) => {
-        setTtsStatus(s)
-        // Same as STT: drive the read-aloud button availability from this probe
-        // so it lights up right after the in-app install.
-        voiceSettings.setTtsAvailable(!!s.available)
-      })
-      .finally(() => setTtsLoading(false))
-  }
-
-  const refreshVoices = () => listInstalledPiperVoices().then(setInstalledVoices).catch(() => {})
-
-  useEffect(() => {
-    void refreshWhisper()
-    void refreshTts()
-    void refreshVoices()
-  }, [])
-
-  // §24.9 — kick off the faster-whisper install, poll its status, then
-  // re-check availability so the badge flips ✗ → ✓ without a restart.
-  const handleInstallWhisper = async () => {
-    if (whisperInstalling) return
-    setWhisperInstallError(null)
-    setWhisperInstalling(true)
-    try {
-      await backendCall('install_whisper')
-      // Poll install status until it leaves "installing" (cap ~10 min — a
-      // model download on a slow link can be lengthy; pip itself is quick).
-      const start = Date.now()
-      // eslint-disable-next-line no-constant-condition
-      while (true) {
-        await new Promise((r) => setTimeout(r, 2000))
-        let s: { status?: string; error?: string } = {}
-        try {
-          s = await backendCall<{ status?: string; error?: string }>('install_whisper_status')
-        } catch { /* transient — keep polling */ }
-        if (s.status === 'complete') break
-        if (s.status === 'error') {
-          setWhisperInstallError(withInstallerOutput('Installing speech to text did not finish.', s.error))
-          break
-        }
-        if (Date.now() - start > 600_000) {
-          setWhisperInstallError('Install is taking unusually long, check the logs / try again.')
-          break
-        }
-      }
-    } catch (e) {
-      setWhisperInstallError(e instanceof Error ? e.message : String(e))
-    } finally {
-      setWhisperInstalling(false)
-      await refreshWhisper()
-    }
-  }
-
-  // Install Piper neural TTS (pip + voice download) the same end-user way as
-  // whisper, polling install_tts_status until done, then re-checking the badge.
-  const handleInstallTts = async () => {
-    if (ttsInstalling) return
-    setTtsInstallError(null)
-    setTtsInstalling(true)
-    try {
-      await backendCall('install_tts')
-      const start = Date.now()
-      // eslint-disable-next-line no-constant-condition
-      while (true) {
-        await new Promise((r) => setTimeout(r, 2000))
-        let s: { status?: string; error?: string } = {}
-        try {
-          s = await backendCall<{ status?: string; error?: string }>('install_tts_status')
-        } catch { /* transient — keep polling */ }
-        if (s.status === 'complete') break
-        if (s.status === 'error') {
-          setTtsInstallError(withInstallerOutput('Installing read aloud did not finish.', s.error))
-          break
-        }
-        if (Date.now() - start > 600_000) {
-          setTtsInstallError('Install is taking unusually long, check the logs / try again.')
-          break
-        }
-      }
-    } catch (e) {
-      setTtsInstallError(e instanceof Error ? e.message : String(e))
-    } finally {
-      setTtsInstalling(false)
-      await refreshTts()
-    }
-  }
-
-  // Pick a Piper voice. If it isn't on disk yet, download it (~63 MB), then
-  // re-check the installed list + TTS availability. The selection is applied
-  // optimistically (so the dropdown reflects the pick) but REVERTED if the
-  // download fails — otherwise piperVoice pointed at a missing model and every
-  // read fell back to the Windows SAPI voice (#77, ElBiggus).
-  const handlePickVoice = async (id: string) => {
-    setVoiceError(null)
-    const prev = voiceSettings.piperVoice
-    voiceSettings.setPiperVoice(id)
-    if (installedVoices.includes(id)) return
-    setVoiceBusy(true)
-    try {
-      await downloadPiperVoice(id)
-      await refreshVoices()
-      await refreshTts()
-    } catch (e) {
-      voiceSettings.setPiperVoice(prev)
-      setVoiceError(e instanceof Error ? e.message : String(e))
-    } finally {
-      setVoiceBusy(false)
-    }
+  // D-S27: die Bedingungen, unter denen einzelne Sektionen ueberhaupt
+  // erscheinen, stehen ab hier EINMAL — die Rail liest sie ueber
+  // sectionsFor(), das JSX weiter unten benutzt dieselben Ausdruecke.
+  const sectionFlags: SettingsSectionFlags = {
+    gpuPicker: !isMlxImageHost(),
+    builtinExpert: builtinManaged,
+    comfyui: !isMlxImageHost(),
+    agentMode: FEATURE_FLAGS.AGENT_MODE,
+    agentWorkflows: FEATURE_FLAGS.AGENT_WORKFLOWS,
+    mediaTimeouts: settings.appMode !== 'cloud' && !isMlxImageHost(),
   }
 
   return (
     <div className="h-full overflow-y-auto scrollbar-thin">
-      <div className="max-w-lg mx-auto px-4 py-4">
-        {/* Header */}
-        <div className="flex items-center gap-2 mb-4">
+      {/* D-S27 / D-S48: vorher `max-w-lg mx-auto` — eine 552px-Spalte, die in
+          der Fenstermitte schwebte und bei 1600px links und rechts je ~524px
+          Leere stehen liess. Die Zeilenlaenge war richtig, die Aufhaengung
+          nicht. Jetzt: 200px-Rail links, Inhalt linksbuendig daneben, gedeckelt
+          auf 640px (Soll des Audits). Die Rail erscheint ab `lg` (1024px
+          Fensterbreite); darunter bleibt die waagerechte Tab-Leiste, weil
+          200 + 640 in einem 900px-Fenster mit Sidebar nicht nebeneinander
+          passen — und bei 900px sah der Screen laut Audit ohnehin besser aus
+          als bei 1600px.
+
+          D-S48, zweiter Durchgang: `justify-center`. Die Spaltenbreite bleibt
+          unangetastet — die Zeilenlaenge war laut Audit richtig, und ein
+          Inhalt, der mit dem Fenster mitwaechst, waere ein anderer, nicht
+          behobener Befund. Falsch war nur die VERTEILUNG des Rests: er stand
+          vollstaendig rechts. Gemessen im laufenden Fenster (Chromium,
+          Dev-Server auf 5273, Sidebar zu, --ui-scale 1.15, gerenderte px,
+          Leerraum zwischen Pane-Rand und erster/letzter Spalte):
+
+            Fenster   vorher links / rechts     nachher links / rechts
+             1280 px      36,8 / 231,2            134,0 / 134,0
+             1440 px      36,8 / 391,2            214,0 / 214,0
+             1920 px      36,8 / 871,2            454,0 / 454,0
+
+          Zentriert wird das PAAR aus Rail und Inhalt, nicht der Inhalt
+          allein — sonst haenge die Spalte wieder frei in der Mitte, und
+          genau das war D-S27. Sie haengt weiterhin an der Rail, das Paar
+          steht jetzt nur mittig im verfuegbaren Raum. Ueberlaufsicher: unter
+          `lg` faellt die Rail auf `display:none` und der Inhalt hat
+          `min-w-0` — es bleibt kein freier Raum uebrig, den `justify-center`
+          verteilen koennte, und die Zeile bricht nicht nach links aus. */}
+      <div className="flex justify-center gap-6 px-4 py-4 lg:px-8">
+        <nav
+          aria-label="Settings sections"
+          className="hidden lg:flex w-[200px] shrink-0 flex-col gap-4 sticky top-4 self-start max-h-[calc(100vh-6rem)] overflow-y-auto scrollbar-thin"
+        >
+          <div className="flex items-center gap-2">
+            <button onClick={() => setView('chat')} className="p-1 rounded hover:bg-gray-200 dark:hover:bg-white/5 text-gray-500 hover:text-gray-900 dark:hover:text-white transition-colors" aria-label="Back to chat">
+              <ArrowLeft size={16} />
+            </button>
+            {/* D-S28: die Spitze der Leiter. 1.15rem = 21,2px bei 18,4px
+                Wurzelmass — eine Stufe der 12/13/15/17/21/28-Skala des
+                Audits, und endlich groesser als ein Sektionskopf. */}
+            <h1 className="text-[1.15rem] font-semibold leading-tight text-gray-900 dark:text-gray-100">Settings</h1>
+          </div>
+
+          <div className="flex flex-col gap-0.5">
+            {SETTINGS_TABS.map(t => (
+              <div key={t.id}>
+                {/* D-S30: Zustand und Aktion trugen dieselbe Flaeche
+                    (`bg-gray-200 dark:bg-white/10` hier wie am Upload-Knopf).
+                    Der ausgewaehlte Tab spricht jetzt die Zustandssprache:
+                    Akzentflaeche + Akzentkante links. Aktionen behalten die
+                    neutrale graue Flaeche. Gerechnet: die Kante
+                    #8b7cf0 auf Weiss 3.37:1 und #a094f8 auf #202020 6.27:1 —
+                    beide ueber den 3:1 aus WCAG 1.4.11 fuer Nicht-Text. */}
+                <button
+                  onClick={() => setTab(t.id)}
+                  aria-current={tab === t.id ? 'page' : undefined}
+                  className={`w-full inline-flex items-center gap-1.5 pl-2 pr-2.5 py-1.5 rounded-md text-[0.7rem] font-medium border-l-2 transition-colors ${
+                    tab === t.id
+                      ? 'bg-lu-accent-soft border-l-lu-accent-edge dark:border-l-lu-accent text-gray-900 dark:text-white'
+                      : 'border-l-transparent text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/[0.04]'
+                  }`}
+                >
+                  {t.icon}
+                  {t.label}
+                </button>
+                {tab === t.id && (
+                  <ul className="mt-1 mb-1 ml-[0.6rem] border-l border-gray-200 dark:border-white/[0.08]">
+                    {sectionsFor(t.id, sectionFlags).map(title => (
+                      <li key={title}>
+                        <a
+                          href={`#${sectionAnchorId(title)}`}
+                          className="block pl-3 pr-1 py-[3px] text-[0.62rem] leading-snug text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 transition-colors"
+                        >
+                          {title}
+                        </a>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            ))}
+          </div>
+        </nav>
+
+        <div className="min-w-0 w-full max-w-[640px]">
+        {/* Header — nur unterhalb von `lg`; ab da traegt die Rail Titel und
+            Zurueck-Knopf. */}
+        <div className="lg:hidden flex items-center gap-2 mb-4">
           <button onClick={() => setView('chat')} className="p-1 rounded hover:bg-gray-200 dark:hover:bg-white/5 text-gray-500 hover:text-gray-900 dark:hover:text-white transition-colors">
             <ArrowLeft size={16} />
           </button>
-          <h1 className="text-[0.8rem] font-semibold text-gray-800 dark:text-gray-200">Settings</h1>
+          <h1 className="text-[1.15rem] font-semibold leading-tight text-gray-900 dark:text-gray-100">Settings</h1>
         </div>
 
         {/* P5: top-level tabs. Sticky so the user can switch tabs from
-            anywhere in a long Section without scrolling back up. */}
-        <div className="sticky top-0 z-10 -mx-4 px-4 pb-2 mb-2 bg-white/80 dark:bg-[#202020]/80 backdrop-blur supports-[backdrop-filter]:bg-white/60 dark:supports-[backdrop-filter]:bg-[#202020]/60 border-b border-gray-100 dark:border-white/[0.06]">
+            anywhere in a long Section without scrolling back up. Ab `lg`
+            uebernimmt die Rail diese Aufgabe — zwei gleichzeitig sichtbare
+            Navigationen fuer dieselbe Sache waeren genau der Befund, den
+            D-S27 beschreibt. */}
+        <div className="lg:hidden sticky top-0 z-10 -mx-4 px-4 pb-2 mb-2 bg-white/80 dark:bg-[#202020]/80 backdrop-blur supports-[backdrop-filter]:bg-white/60 dark:supports-[backdrop-filter]:bg-[#202020]/60 border-b border-gray-100 dark:border-white/[0.06]">
           <div className="flex items-center gap-1 overflow-x-auto scrollbar-thin">
             {SETTINGS_TABS.map(t => (
               <button
                 key={t.id}
                 onClick={() => setTab(t.id)}
+                aria-current={tab === t.id ? 'page' : undefined}
                 className={`shrink-0 inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-[0.65rem] font-medium transition-colors ${
                   tab === t.id
-                    ? 'bg-gray-200 dark:bg-white/10 text-gray-900 dark:text-white'
+                    ? 'bg-lu-accent-soft ring-1 ring-lu-accent-edge dark:ring-lu-accent text-gray-900 dark:text-white'
                     : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-white/[0.04]'
                 }`}
               >
@@ -1526,13 +1615,19 @@ export function SettingsPage() {
             </button>
           </Section>
           <Section title="Appearance">
+            {/* D-S30, zweite Haelfte des Befundes: „Dark" (ein ZUSTAND) und
+                „Upload" in AvatarSetting (eine AKTION) trugen beide
+                `bg-gray-200 dark:bg-white/10`. Zustand spricht ab hier
+                ueberall dieselbe Sprache wie der aktive Tab — Akzentflaeche
+                mit Akzentkante — und die neutrale graue Flaeche bleibt den
+                Aktionen. */}
             <div className="flex items-center justify-between">
               <span className="text-[0.7rem] text-gray-700 dark:text-gray-400">Theme</span>
               <div className="flex gap-1">
                 <button
                   onClick={() => updateSettings({ theme: 'light' })}
                   className={`flex items-center gap-1 px-2 py-1 rounded text-[0.65rem] transition-colors ${
-                    settings.theme === 'light' ? 'bg-gray-200 dark:bg-white/10 text-gray-900 dark:text-white' : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
+                    settings.theme === 'light' ? 'bg-lu-accent-soft ring-1 ring-lu-accent-edge dark:ring-lu-accent text-gray-900 dark:text-white' : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
                   }`}
                 >
                   <Sun size={11} /> Light
@@ -1540,7 +1635,7 @@ export function SettingsPage() {
                 <button
                   onClick={() => updateSettings({ theme: 'dark' })}
                   className={`flex items-center gap-1 px-2 py-1 rounded text-[0.65rem] transition-colors ${
-                    settings.theme === 'dark' ? 'bg-gray-200 dark:bg-white/10 text-gray-900 dark:text-white' : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
+                    settings.theme === 'dark' ? 'bg-lu-accent-soft ring-1 ring-lu-accent-edge dark:ring-lu-accent text-gray-900 dark:text-white' : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
                   }`}
                 >
                   <Moon size={11} /> Dark
@@ -1554,15 +1649,23 @@ export function SettingsPage() {
             <SliderControl label="Temperature" value={settings.temperature} min={0} max={2} step={0.1} onChange={(v) => updateSettings({ temperature: v })} />
             <SliderControl label="Top P" value={settings.topP} min={0} max={1} step={0.05} onChange={(v) => updateSettings({ topP: v })} />
             <SliderControl label="Top K" value={settings.topK} min={1} max={100} step={1} onChange={(v) => updateSettings({ topK: v })} />
+            {/* Die drei Zahlenzeilen dieser Sektion stehen auf der Leiter statt
+                in eckigen Klammern (D-T04). Sie taten es nicht, und als 2.6.8
+                eine vierte dazukam, hat die Sperrklinke das gefangen — der
+                Ausweg war nicht, den Deckel zu heben, sondern die Zeilen zu
+                stellen. `.t-micro` ist der schlichte Kleintext der Leiter,
+                `.t-mono` ihr Rezept fuer eine Zahl (Ziffernbreite fest, damit
+                die Werte untereinander nicht wandern). */}
             <div className="flex items-center justify-between">
-              <span className="text-[0.7rem] text-gray-700 dark:text-gray-400">Max Tokens</span>
+              <span className="t-micro text-gray-700 dark:text-gray-400">Max Tokens</span>
               <input
+                aria-label="Max Tokens"
                 type="number"
                 value={settings.maxTokens}
                 onChange={(e) => updateSettings({ maxTokens: Math.max(0, parseInt(e.target.value) || 0) })}
                 min={0}
                 placeholder="0"
-                className="w-20 px-1.5 py-0.5 rounded bg-transparent border border-white/8 text-[0.65rem] text-right text-gray-300 font-mono focus:outline-none focus:border-white/20"
+                className="w-20 px-1.5 py-0.5 rounded bg-transparent border border-white/8 t-mono text-right text-gray-300 focus:outline-none focus:border-white/20"
               />
             </div>
             {/* Bug AA v2.5.0 — Ollama num_ctx override. 0 = use the provider
@@ -1570,19 +1673,52 @@ export function SettingsPage() {
                 clips RAG / long chats). Bump up to use the model's full
                 context window. Ignored by Anthropic / OpenAI providers. */}
             <div className="flex items-center justify-between">
-              <span className="text-[0.7rem] text-gray-700 dark:text-gray-400" title="Forwarded as Ollama num_ctx. 0 = provider default (Ollama defaults to 2048, which clips RAG and long chats). Bump up to use the model's full context. Ignored by cloud providers.">Context window (Ollama)</span>
+              <span className="t-micro text-gray-700 dark:text-gray-400" title="Forwarded as Ollama num_ctx. 0 = provider default (Ollama defaults to 2048, which clips RAG and long chats). Bump up to use the model's full context. Ignored by cloud providers.">Context window (Ollama)</span>
               <input
+                aria-label="Context window (Ollama)"
                 type="number"
                 value={settings.contextWindowOverride ?? 0}
                 onChange={(e) => updateSettings({ contextWindowOverride: Math.max(0, parseInt(e.target.value) || 0) })}
                 min={0}
                 placeholder="0"
-                className="w-20 px-1.5 py-0.5 rounded bg-transparent border border-white/8 text-[0.65rem] text-right text-gray-300 font-mono focus:outline-none focus:border-white/20"
+                className="w-20 px-1.5 py-0.5 rounded bg-transparent border border-white/8 t-mono text-right text-gray-300 focus:outline-none focus:border-white/20"
               />
             </div>
-            <div className="text-[0.6rem] text-gray-500 dark:text-gray-500 leading-relaxed pt-0.5">
+            <div className="t-micro text-gray-500 dark:text-gray-500 leading-relaxed pt-0.5">
               0 = let Ollama decide (defaults to 2048). Set to e.g. 8192 or 16384 if RAG / long chats get clipped. Cloud providers ignore this.
             </div>
+            {/* 2.6.8 auto-compact. Shown as a percentage and stored as a
+                fraction, because the threshold is compared against a ratio
+                (compact-trigger.ts). Same shape as the row above — a number
+                input whose 0 is the off state — rather than a slider, because
+                a slider has no way to express "off" at all. */}
+            <div className="flex items-center justify-between">
+              <span
+                className="t-micro text-gray-700 dark:text-gray-400"
+                title="When the conversation fills this much of the window, the model writes a summary of the older turns and those turns stop being sent. 0 = off. The full history stays in the chat either way; only what is sent changes."
+              >Auto-compact at</span>
+              <div className="flex items-center gap-1">
+                <input
+                aria-label="Auto-compact at"
+                  type="number"
+                  value={Math.round((settings.autoCompactThreshold || 0) * 100)}
+                  onChange={(e) => {
+                    const pct = Math.max(0, Math.min(100, parseInt(e.target.value) || 0))
+                    updateSettings({ autoCompactThreshold: pct === 0 ? 0 : pct / 100 })
+                  }}
+                  min={0}
+                  max={100}
+                  step={5}
+                  placeholder="0"
+                  className="w-20 px-1.5 py-0.5 rounded bg-transparent border border-white/8 t-mono text-right text-gray-300 focus:outline-none focus:border-white/20"
+                />
+                <span className="t-mono text-gray-500 w-3">%</span>
+              </div>
+            </div>
+            <div className="t-micro text-gray-500 dark:text-gray-500 leading-relaxed pt-0.5">
+              0 = off. Set 80 to have older turns summarised once the context is 80% full, instead of being dropped without a word. Values under 30 or over 95 count as off. Costs one extra model call each time it fires. You can always run it yourself with <span className="font-mono">/compact</span>.
+            </div>
+
           </Section>
 
           {/* Bug BB v2.5.0 — BobbyT GPU picker. Lazy-loads the GPU list when
@@ -1621,6 +1757,7 @@ export function SettingsPage() {
             <div className="flex items-center justify-between">
               <span className="text-[0.7rem] text-gray-700 dark:text-gray-400">Image timeout (min)</span>
               <input
+                aria-label="Image timeout (min)"
                 type="number"
                 value={settings.imageGenTimeoutMinutes ?? 20}
                 onChange={(e) => updateSettings({ imageGenTimeoutMinutes: Math.min(480, Math.max(1, parseInt(e.target.value) || 20)) })}
@@ -1633,6 +1770,7 @@ export function SettingsPage() {
             <div className="flex items-center justify-between">
               <span className="text-[0.7rem] text-gray-700 dark:text-gray-400">Video timeout (min)</span>
               <input
+                aria-label="Video timeout (min)"
                 type="number"
                 value={settings.videoGenTimeoutMinutes ?? 60}
                 onChange={(e) => updateSettings({ videoGenTimeoutMinutes: Math.min(480, Math.max(1, parseInt(e.target.value) || 60)) })}
@@ -1695,8 +1833,19 @@ export function SettingsPage() {
               </div>
               <button
                 onClick={async () => {
+                  // The line above is what actually re-runs the wizard: AppShell
+                  // gates it on settings.onboardingDone, and that store is
+                  // persisted, so it survives the reload below. The backend call
+                  // only clears the marker FILE, which is read in one place —
+                  // the NSIS-update recovery in AppShell, and only when the
+                  // store itself was lost.
+                  //
+                  // Level (a): silent on purpose. The visible action succeeds
+                  // either way, and the reload on the next line would wipe any
+                  // message before it could be read. A stale marker costs
+                  // nothing until a store-loss recovery, which re-writes it.
                   useSettingsStore.getState().updateSettings({ onboardingDone: false })
-                  try { await backendCall('set_onboarding_done', { done: false }) } catch {}
+                  try { await backendCall('set_onboarding_done', { done: false }) } catch { /* see above */ }
                   window.location.reload()
                 }}
                 className="ml-3 shrink-0 px-2.5 py-1 rounded-md text-[0.6rem] font-medium bg-white dark:bg-white/10 text-gray-800 dark:text-white hover:bg-gray-100 dark:hover:bg-white/15 border border-gray-200 dark:border-white/15 transition-colors"
@@ -1798,6 +1947,58 @@ export function SettingsPage() {
             </Section>
           )}
 
+
+          {FEATURE_FLAGS.AGENT_MODE && (
+            <Section title="Sub-agents">
+            {/* Die Kappen fuer einen delegierten Agenten. Sie standen bis zum
+                03.09.2026 unter General → Generation, neben Temperatur und
+                Auto-Compact; eine Persona suchte sie beim Agenten und fand sie
+                dort nicht. Der Gegenstand ist auch ein anderer: beim Hauptlauf
+                sitzt der Nutzer davor und kann Stop druecken, ein Sub-Agent
+                laeuft ohne Zuschauer. Darum sind diese Zahlen klein und darum
+                heisst 0 hier "Vorgabe" und nicht "unbegrenzt" —
+                Unbegrenztheit soll man an einer unbeaufsichtigten Schleife
+                nicht aus Versehen einstellen. */}
+            <div className="flex items-center justify-between">
+              <span
+                className="t-micro text-gray-700 dark:text-gray-400"
+                title="How many tool calls one delegated sub-agent may make."
+              >
+                Sub-agent tool calls
+              </span>
+              <input
+                aria-label="Sub-agent tool calls"
+                type="number"
+                value={settings.subAgentMaxToolCalls ?? 0}
+                onChange={(e) => updateSettings({ subAgentMaxToolCalls: Math.max(0, parseInt(e.target.value) || 0) })}
+                min={0}
+                placeholder="10"
+                className="w-20 px-1.5 py-0.5 rounded bg-transparent border border-white/8 t-mono text-right text-gray-300 focus:outline-none focus:border-white/20"
+              />
+            </div>
+            <div className="flex items-center justify-between">
+              <span
+                className="t-micro text-gray-700 dark:text-gray-400"
+                title="How many think-act rounds one delegated sub-agent may run."
+              >
+                Sub-agent steps
+              </span>
+              <input
+                aria-label="Sub-agent steps"
+                type="number"
+                value={settings.subAgentMaxIterations ?? 0}
+                onChange={(e) => updateSettings({ subAgentMaxIterations: Math.max(0, parseInt(e.target.value) || 0) })}
+                min={0}
+                placeholder="5"
+                className="w-20 px-1.5 py-0.5 rounded bg-transparent border border-white/8 t-mono text-right text-gray-300 focus:outline-none focus:border-white/20"
+              />
+            </div>
+            <div className="t-micro text-gray-500 dark:text-gray-500 leading-relaxed pt-0.5">
+              0 = use the defaults (10 calls, 5 steps). A sub-agent runs unattended, so these stay deliberately tight — raise them only for a task you know is long.
+            </div>
+            </Section>
+          )}
+
           {FEATURE_FLAGS.AGENT_WORKFLOWS && (
             <Section title="Agent Workflows">
               <WorkflowSection />
@@ -1867,178 +2068,7 @@ export function SettingsPage() {
         {/* ── Voice & Remote tab ────────────────────────── */}
         {tab === 'voice-remote' && (<>
           <Section title="Speech" defaultOpen>
-            {settings.appMode === 'cloud' ? (<>
-              {/* Cloud mode: dictation + read-aloud are hosted on lu-labs.ai —
-                  honest copy (audio leaves the machine, metered), no local
-                  install buttons, and a picker for the hosted MiniMax voice. */}
-              <p className="text-[0.55rem] text-gray-500 leading-snug">
-                Cloud mode: dictation and read-aloud run on lu-labs.ai (hosted Whisper speech-to-text + MiniMax text-to-speech) and are metered against your credits. No local installs needed.
-              </p>
-              <InlineToggle label="Enable read-aloud" enabled={voiceSettings.ttsEnabled} onChange={() => voiceSettings.updateVoiceSettings({ ttsEnabled: !voiceSettings.ttsEnabled })} icon={<Volume2 size={11} className="text-gray-500" />} />
-              {voiceSettings.ttsEnabled && (
-                <InlineToggle label="Auto-read new responses" enabled={voiceSettings.autoReadAloud} onChange={() => voiceSettings.updateVoiceSettings({ autoReadAloud: !voiceSettings.autoReadAloud })} icon={<Volume2 size={11} className="text-gray-500" />} />
-              )}
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-[0.7rem] text-gray-500">Voice</span>
-                <select
-                  value={voiceSettings.cloudTtsVoice}
-                  onChange={(e) => voiceSettings.updateVoiceSettings({ cloudTtsVoice: e.target.value })}
-                  className="max-w-[210px] px-1.5 py-0.5 rounded bg-transparent border border-white/8 text-[0.65rem] text-gray-300 focus:outline-none"
-                >
-                  {CLOUD_TTS_VOICES.map((v) => (
-                    <option key={v.id} value={v.id}>{v.label}</option>
-                  ))}
-                </select>
-              </div>
-            </>) : (<>
-            <p className="text-[0.55rem] text-gray-500 leading-snug">
-              Voice runs 100% locally, no cloud. Each engine is a one-time local install.
-            </p>
-
-            {/* Speech-to-Text — faster-whisper (powers the microphone / dictation) */}
-            <div className="flex items-center gap-2 text-[0.65rem]">
-              <span className="flex items-center gap-1.5">
-                {whisperLoading
-                  ? <Loader2 size={11} className="animate-spin text-gray-500" />
-                  : whisperStatus?.available ? <Check size={11} className="text-green-500" /> : <X size={11} className="text-red-500" />}
-                <Mic size={11} className="text-gray-400" />
-                <span className="text-gray-700 dark:text-gray-200 font-medium">Speech-to-Text</span>
-                <span className="text-gray-500">faster-whisper</span>
-              </span>
-              {!whisperLoading && whisperStatus && !whisperStatus.available && (
-                <button
-                  onClick={() => void handleInstallWhisper()}
-                  disabled={whisperInstalling}
-                  className="ml-auto inline-flex items-center gap-1 px-2 py-0.5 rounded text-[0.6rem] font-medium bg-blue-500/15 text-blue-400 border border-blue-500/30 hover:bg-blue-500/25 transition-colors disabled:opacity-50"
-                  title="Download + install faster-whisper so the microphone works"
-                >
-                  {whisperInstalling ? <Loader2 size={9} className="animate-spin" /> : <Download size={9} />}
-                  {whisperInstalling ? 'Installing…' : 'Download & Install'}
-                </button>
-              )}
-            </div>
-            {whisperInstallError && (
-              <p className="text-[0.55rem] text-red-400/90 leading-snug">{whisperInstallError}</p>
-            )}
-            {!whisperLoading && whisperStatus && !whisperStatus.available && !whisperInstalling && !whisperInstallError && (
-              <p className="text-[0.55rem] text-gray-500 leading-snug">
-                Required for the microphone. Installs faster-whisper into LU's Python; first run also downloads a small model.
-              </p>
-            )}
-
-            {/* Text-to-Speech, Piper neural (read responses aloud) */}
-            <div className="flex items-center gap-2 text-[0.65rem] pt-1">
-              <span className="flex items-center gap-1.5">
-                {ttsLoading
-                  ? <Loader2 size={11} className="animate-spin text-gray-500" />
-                  : ttsStatus?.available ? <Check size={11} className="text-green-500" /> : <X size={11} className="text-red-500" />}
-                <Volume2 size={11} className="text-gray-400" />
-                <span className="text-gray-700 dark:text-gray-200 font-medium">Text-to-Speech</span>
-                <span className="text-gray-500">Piper neural</span>
-              </span>
-              {!ttsLoading && ttsStatus && !ttsStatus.available && (
-                <button
-                  onClick={() => void handleInstallTts()}
-                  disabled={ttsInstalling}
-                  className="ml-auto inline-flex items-center gap-1 px-2 py-0.5 rounded text-[0.6rem] font-medium bg-blue-500/15 text-blue-400 border border-blue-500/30 hover:bg-blue-500/25 transition-colors disabled:opacity-50"
-                  title="Download + install Piper neural TTS + a voice (~63 MB)"
-                >
-                  {ttsInstalling ? <Loader2 size={9} className="animate-spin" /> : <Download size={9} />}
-                  {ttsInstalling ? 'Installing…' : 'Download & Install'}
-                </button>
-              )}
-            </div>
-            {ttsInstallError && (
-              <p className="text-[0.55rem] text-red-400/90 leading-snug">{ttsInstallError}</p>
-            )}
-            {/* #77: read-aloud silently fell back to the system voice while this
-                row showed a healthy green check — surface the recorded reason. */}
-            {voiceSettings.ttsMode === 'piper' && voiceSettings.ttsFallbackReason && (
-              <p className="text-[0.55rem] text-amber-400/90 leading-snug">
-                {voiceSettings.ttsFallbackReason} If an antivirus quarantined Piper, whitelist it or reinstall the voice below.
-              </p>
-            )}
-            {!ttsLoading && ttsStatus && !ttsStatus.available && !ttsInstalling && !ttsInstallError && (
-              <p className="text-[0.55rem] text-gray-500 leading-snug">
-                Required for read-aloud. Installs Piper + a neural voice locally (~63 MB).
-              </p>
-            )}
-
-            <InlineToggle label="Enable read-aloud" enabled={voiceSettings.ttsEnabled} onChange={() => voiceSettings.updateVoiceSettings({ ttsEnabled: !voiceSettings.ttsEnabled })} icon={<Volume2 size={11} className="text-gray-500" />} />
-            {/* Auto-read is a SEPARATE opt-in (default OFF). The toggle above only
-                surfaces the per-message Speaker button; this one also reads each
-                finished response aloud (#77, ElBiggus, the old single toggle was
-                labelled "Read responses aloud" but never auto-read). */}
-            {voiceSettings.ttsEnabled && (
-              <InlineToggle label="Auto-read new responses" enabled={voiceSettings.autoReadAloud} onChange={() => voiceSettings.updateVoiceSettings({ autoReadAloud: !voiceSettings.autoReadAloud })} icon={<Volume2 size={11} className="text-gray-500" />} />
-            )}
-            {/* Neural voice picker (Piper), replaces the old Microsoft/browser
-                voices (David 2026-06-06). Picking one not yet on disk downloads
-                it (~63 MB). Browser-only rate/pitch knobs dropped, they didn't
-                apply to Piper. */}
-            <div className="flex items-center justify-between gap-2">
-              <span className="text-[0.7rem] text-gray-500 flex items-center gap-1">
-                Voice {voiceBusy && <Loader2 size={10} className="animate-spin text-gray-500" />}
-              </span>
-              <select
-                value={voiceSettings.piperVoice}
-                onChange={(e) => void handlePickVoice(e.target.value)}
-                disabled={voiceBusy}
-                className="max-w-[210px] px-1.5 py-0.5 rounded bg-transparent border border-white/8 text-[0.65rem] text-gray-300 focus:outline-none disabled:opacity-50"
-              >
-                {PIPER_VOICES.map((v) => (
-                  <option key={v.id} value={v.id}>
-                    {v.label}{installedVoices.includes(v.id) ? '' : ', download'}
-                  </option>
-                ))}
-              </select>
-            </div>
-            {voiceBusy && <p className="text-[0.55rem] text-gray-500 leading-snug">Downloading voice (~63 MB)…</p>}
-            {voiceError && <p className="text-[0.55rem] text-red-400/90 leading-snug">{voiceError}</p>}
-
-            {/* TTS engine — bundled Piper, or an external OpenAI-compatible HTTP
-                endpoint like Kokoro-FastAPI (GitHub #58). */}
-            <div className="flex items-center justify-between gap-2 pt-1">
-              <span className="text-[0.7rem] text-gray-500">Engine</span>
-              <div className="flex items-center gap-1 text-[0.6rem]">
-                {(['piper', 'external'] as const).map((m) => (
-                  <button
-                    key={m}
-                    onClick={() => voiceSettings.updateVoiceSettings({ ttsMode: m })}
-                    className={
-                      'px-2 py-0.5 rounded border transition-colors ' +
-                      (voiceSettings.ttsMode === m
-                        ? 'bg-gray-200 dark:bg-white/15 text-gray-900 dark:text-white border-gray-300 dark:border-white/20'
-                        : 'text-gray-500 border-white/8 hover:text-gray-300')
-                    }
-                  >
-                    {m === 'piper' ? 'Piper neural' : 'External HTTP'}
-                  </button>
-                ))}
-              </div>
-            </div>
-            {voiceSettings.ttsMode === 'external' && (
-              <div className="space-y-1.5">
-                <input
-                  value={voiceSettings.externalTtsUrl}
-                  onChange={(e) => voiceSettings.updateVoiceSettings({ externalTtsUrl: e.target.value })}
-                  placeholder="http://localhost:8880/v1/audio/speech"
-                  spellCheck={false}
-                  className="w-full px-2 py-1 rounded bg-transparent border border-white/8 text-[0.65rem] text-gray-300 placeholder-gray-600 focus:outline-none focus:border-white/20"
-                />
-                <input
-                  value={voiceSettings.externalTtsVoice}
-                  onChange={(e) => voiceSettings.updateVoiceSettings({ externalTtsVoice: e.target.value })}
-                  placeholder="voice name (e.g. af_bella, alloy)"
-                  spellCheck={false}
-                  className="w-full px-2 py-1 rounded bg-transparent border border-white/8 text-[0.65rem] text-gray-300 placeholder-gray-600 focus:outline-none focus:border-white/20"
-                />
-                <p className="text-[0.55rem] text-gray-500 leading-snug">
-                  Any OpenAI-compatible TTS endpoint (e.g. Kokoro-FastAPI). Used for read-aloud instead of Piper. Stays on your machine when the endpoint is local.
-                </p>
-              </div>
-            )}
-            </>)}
+            <SpeechSettings />
           </Section>
 
           <Section title="Remote Access">
@@ -2049,10 +2079,15 @@ export function SettingsPage() {
               <RemoteAccessDocs />
             </Disclosure>
           </Section>
+
+          <Section title="Local API">
+            <LocalApiSettings />
+          </Section>
         </>)}
 
         {/* ── Reset (GitHub #59: per-tab scope + confirm + feedback) ── */}
         <ResetSection tab={tab} />
+        </div>
       </div>
     </div>
   )
@@ -2266,16 +2301,16 @@ function ProbeBadge({ probe }: { probe: BackendProbe }) {
 function TroubleshootSection() {
   const [report, setReport] = useState<SystemHealthReport | null>(null)
   const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [hinweis, setHinweis] = useState<TroubleshootHinweis | null>(null)
 
   const run = async () => {
     setLoading(true)
-    setError(null)
+    setHinweis(null)
     try {
       const r = await backendCall<SystemHealthReport>('system_health', {})
       setReport(r)
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
+      setHinweis(troubleshootHinweis(e, isTauri()))
     } finally {
       setLoading(false)
     }
@@ -2293,11 +2328,24 @@ function TroubleshootSection() {
         the app behaves oddly. Most "model not found" / {isMlxImageHost() ? '"backend doesn\'t respond"' : '"ComfyUI doesn\'t respond"'} issues become obvious here.
       </p>
 
-      {error && (
-        <div className="rounded-lg bg-red-500/[0.08] border border-red-500/20 p-2.5 text-[0.65rem] text-red-400">
-          system_health failed: {error}
+      {hinweis && (
+        <div
+          className={`rounded-lg p-2.5 text-[0.65rem] ${
+            hinweis.art === 'grenze'
+              ? 'bg-white/[0.03] border border-white/[0.08] text-gray-400'
+              : 'bg-red-500/[0.08] border border-red-500/20 text-red-400'
+          }`}
+        >
+          <p className="leading-relaxed">{hinweis.titel}</p>
+          {hinweis.detail && (
+            <p className="mt-1 font-mono t-micro opacity-70 break-all">{hinweis.detail}</p>
+          )}
         </div>
       )}
+
+      {/* Audit #01 — where the log file is. Above the probe result because
+          "send us the log" is the most common outcome of opening this panel. */}
+      <LogFileSettings />
 
       {report && (
         <div className="space-y-2">

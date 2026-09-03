@@ -1,4 +1,5 @@
 import { backendCall, isTauri } from "./backend";
+import { asString, prop } from "../types/json-guards";
 import { cloudFetch, jsonOrError, CloudJobError } from "./cloud/client";
 
 /**
@@ -261,14 +262,18 @@ export async function transcribeAudio(audioBlob: Blob): Promise<string> {
     // camelCase invoke keys — passing snake_case silently fails the command
     // ("missing required key audioBase64") → every transcription returned
     // nothing. THIS was the "mic records but no text" bug.
-    const data = await backendCall("transcribe", {
+    // The bridge hands back whatever whisper_server.py wrote, so this is
+    // sidecar output, not our own Rust struct — same reason the fetch branch
+    // below reads it field by field instead of trusting a shape.
+    const data: unknown = await backendCall("transcribe", {
       audioBase64,
       contentType: audioBlob.type || "audio/wav",
     });
     // The Rust side writes these for the user ("Speech-to-text needs
     // faster-whisper, which is not installed"), so keep them readable.
-    if (data.error) throw new LocalSttError(String(data.error));
-    return data.transcript || "";
+    const failed = prop(data, "error");
+    if (failed) throw new LocalSttError(String(failed));
+    return asString(prop(data, "transcript")) ?? "";
   }
 
   const res = await fetch("/local-api/transcribe", {
@@ -510,7 +515,10 @@ let webAudioPlayback: { source: AudioBufferSourceNode; done: () => void } | null
  *  playNeuralAudio). Returns null for anything that isn't such a wav. */
 export function parseWavPcm(
   bytes: ArrayBuffer,
-): { sampleRate: number; channels: Float32Array[] } | null {
+  // `Float32Array<ArrayBuffer>`, not the default `ArrayBufferLike`: the
+  // channels are allocated here, so they are never SharedArrayBuffer-backed,
+  // and only this precise form may be handed to AudioBuffer.copyToChannel.
+): { sampleRate: number; channels: Float32Array<ArrayBuffer>[] } | null {
   const view = new DataView(bytes);
   if (bytes.byteLength < 44) return null;
   if (view.getUint32(0, false) !== 0x52494646) return null; // 'RIFF'

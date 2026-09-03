@@ -22,13 +22,15 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 // logs one warning per write. Irrelevant here: every assertion reads the live
 // store, and the state is reset in beforeEach.
 
-const backendCalls: { cmd: string; body: any }[] = []
+// `body` traegt genau das, was backendCall als zweites Argument annimmt.
+type BridgeArgs = Record<string, unknown> | undefined
+const backendCalls: { cmd: string; body: BridgeArgs }[] = []
 
 vi.mock('../backend', () => ({
-  backendCall: vi.fn(async (cmd: string, body: any) => {
+  backendCall: vi.fn(async (cmd: string, body: BridgeArgs) => {
     backendCalls.push({ cmd, body })
     if (cmd === 'shell_execute') return { stdout: 'ok', stderr: '', exitCode: 0 }
-    if (cmd === 'fs_write') return { status: 'saved', path: `${body.workingDirectory ?? 'default'}/${body.path}` }
+    if (cmd === 'fs_write') return { status: 'saved', path: `${String(body?.workingDirectory ?? 'default')}/${String(body?.path)}` }
     if (cmd === 'fs_read') return { content: 'file bytes' }
     if (cmd === 'fs_list') return { entries: [], count: 0 }
     return { ok: true }
@@ -165,8 +167,11 @@ describe("B's cleanup does not strip A's workspace", () => {
     backendCalls.length = 0
     await registry.execute('file_read', { path: 'src/main.ts' }, 1, a)
     const call = backendCalls.find((c) => c.cmd === 'fs_read')
-    expect(call?.body.workingDirectory).toBe('/repo-a')
-    expect(call?.body.chatId).toBe('plan-a')
+    // Erst nachweisen, dass der Aufruf ueberhaupt kam — sonst waeren die
+    // beiden Zeilen darunter `undefined` gegen `undefined`.
+    expect(call).toBeDefined()
+    expect(call?.body?.workingDirectory).toBe('/repo-a')
+    expect(call?.body?.chatId).toBe('plan-a')
 
     endAgentRun(a)
   })
@@ -181,8 +186,9 @@ describe("B's cleanup does not strip A's workspace", () => {
     const call = backendCalls.find((c) => c.cmd === 'fs_read')
     // Nulled by B on its way out, so the bridge falls back to
     // agent-workspace/default and the write lands nowhere near the project.
-    expect(call?.body.workingDirectory).toBeUndefined()
-    expect(call?.body.chatId).toBeUndefined()
+    expect(call).toBeDefined()
+    expect(call?.body?.workingDirectory).toBeUndefined()
+    expect(call?.body?.chatId).toBeUndefined()
 
     endAgentRun(a)
   })
@@ -200,7 +206,7 @@ describe("a chat-artifact run does not capture the coding run's writes", () => {
 
     const aOut = await registry.execute('file_write', { path: 'out.txt', content: 'hello' }, 1, a)
     expect(aOut).toContain('File saved')
-    expect(backendCalls.some((c) => c.cmd === 'fs_write' && c.body.workingDirectory === '/repo-a')).toBe(true)
+    expect(backendCalls.some((c) => c.cmd === 'fs_write' && c.body?.workingDirectory === '/repo-a')).toBe(true)
 
     const bOut = await registry.execute('file_write', { path: 'note.md', content: 'hi' }, 1, b)
     expect(bOut).toContain('nothing was written to disk')
@@ -259,8 +265,11 @@ describe('closing a run only clears the shared mirror when it owns it', () => {
     backendCalls.length = 0
     await registry.execute('file_read', { path: 'src/main.ts' })
     const call = backendCalls.find((c) => c.cmd === 'fs_read')
-    expect(call?.body.workingDirectory).toBe('/repo-a')
-    expect(call?.body.chatId).toBe('plan-a')
+    // Erst nachweisen, dass der Aufruf ueberhaupt kam — sonst waeren die
+    // beiden Zeilen darunter `undefined` gegen `undefined`.
+    expect(call).toBeDefined()
+    expect(call?.body?.workingDirectory).toBe('/repo-a')
+    expect(call?.body?.chatId).toBe('plan-a')
     expect(await registry.execute('shell_execute', { command: MUTATING })).toContain('Refused')
 
     endAgentRun(a)
