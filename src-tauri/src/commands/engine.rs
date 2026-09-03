@@ -958,26 +958,47 @@ pub(crate) fn missing_library_hint(lib: &str, on_linux: bool) -> String {
     }
 }
 
-/// Markers in llama-server's stderr that point at the GPU rather than at the
-/// model file or the app. Lower-cased input. Read only after
-/// `stderr_names_a_missing_system_library`: "libvulkan.so.1" contains
-/// "vulkan" and is a packaging problem, not a graphics-card problem.
+/// Words that only NAME a graphics backend. On their own they are worthless as
+/// evidence: every start on an NVIDIA box prints `ggml_cuda_init: found 1 CUDA
+/// devices` before it does anything at all, so on such a box a list like this
+/// matches every log there is, healthy or not.
+const GPU_BACKENDS: &[&str] = &["cuda", "hip", "rocm", "vulkan", "cublas"];
+
+/// Words that name a graphics FAULT. One of these has to be in the log before
+/// the app may send anyone to the GPU Layers slider.
+///
+/// `device memory` used to stand in the list above and is deliberately NOT
+/// here: llama.cpp answers EVERY load error through its auto-fit path, and
+/// that path prints `common_fit_params: encountered an error while trying to
+/// fit params to free device memory`. A phrase that appears on every failure
+/// cannot tell one failure from another. It is what made the app blame the
+/// graphics card for two different broken files on 03.09.2026.
+const GPU_FAULTS: &[&str] = &[
+    "out of memory",
+    "failed to allocate",
+    "no kernel image",
+    "compute capability",
+    "no devices found",
+    "cuda error",
+    "hip error",
+    "cudamalloc",
+    "ggml_backend_alloc",
+    "device-side assert",
+];
+
+/// Did the child die of the graphics card. Lower-cased internally.
+///
+/// A backend name AND a fault, never one alone. The name without a fault is
+/// the routine banner of a working card. The fault without a name can be the
+/// system's own memory, where sending the weights from the card into RAM makes
+/// things worse, not better.
+///
+/// Read only after `stderr_names_a_missing_system_library`: "libvulkan.so.1"
+/// carries "vulkan" and is a packaging problem, not a graphics-card problem.
 fn stderr_blames_the_gpu(stderr: &str) -> bool {
-    const MARKERS: &[&str] = &[
-        "cuda",
-        "no kernel image",
-        "hip",
-        "rocm",
-        "vulkan",
-        "out of memory",
-        "cublas",
-        "device memory",
-        "ggml_backend_alloc",
-        "failed to allocate",
-        "compute capability",
-    ];
     let lower = stderr.to_ascii_lowercase();
-    MARKERS.iter().any(|m| lower.contains(m))
+    GPU_BACKENDS.iter().any(|m| lower.contains(m))
+        && GPU_FAULTS.iter().any(|m| lower.contains(m))
 }
 
 /// Markers that say the child never got the socket, whatever else is in the
@@ -3629,7 +3650,11 @@ mod tests {
         // graphics branch must not adopt a failure that names the socket. This
         // is the bundled binary's own wording, measured 2026-09-02.
         let stderr = "ggml_cuda_init: found 1 CUDA devices\nsrv start: couldn't bind HTTP server socket, hostname: 127.0.0.1, port: 8127";
-        assert!(stderr_blames_the_gpu(stderr), "the cuda line is really there");
+        // The banner is there and says nothing: naming the card is not the
+        // same as failing on it. Until 03.09.2026 the bare word "cuda" was
+        // enough, and the branch order was the only thing keeping this case
+        // out of the graphics-card answer.
+        assert!(!stderr_blames_the_gpu(stderr), "a banner is not a defect");
         let failure = StartFailure { died: true, port_taken: false, stderr: stderr.into() };
         let msg = start_failure_message(&failure, 8127, Duration::from_secs(60));
         assert!(msg.contains("could not open port 8127"), "{msg}");
@@ -3963,8 +3988,18 @@ srv    llama_server: exiting due to model loading error";
 
     #[test]
     fn gpu_blame_needs_actual_gpu_words() {
+        // A name and a fault together.
         assert!(stderr_blames_the_gpu("CUDA error: out of memory"));
         assert!(stderr_blames_the_gpu("ggml_vulkan: no devices found"));
+        // A name alone is the banner of a card that works.
+        assert!(!stderr_blames_the_gpu("ggml_cuda_init: found 1 CUDA devices"));
+        // A fault alone can be the system's own memory, and there sending the
+        // weights off the card into RAM makes it worse.
+        assert!(!stderr_blames_the_gpu("std::bad_alloc: out of memory"));
+        // The line llama.cpp prints on EVERY load error, whatever the cause.
+        assert!(!stderr_blames_the_gpu(
+            "common_fit_params: encountered an error while trying to fit params to free device memory"
+        ));
         // Negative control: a plain port collision is not a GPU problem, and
         // sending that user into the GPU Layers setting would waste their time.
         assert!(!stderr_blames_the_gpu("error: bind(): Address already in use"));
