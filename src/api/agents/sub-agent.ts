@@ -12,6 +12,7 @@
  */
 
 import { settleThinking } from '../../lib/thinking-stripper'
+import { toolResultIsFailure } from '../../lib/tool-result-failure'
 // M7 / Audit W-T2: hier stand zweimal `await import('../mcp')`. Gesplittet hat
 // das nie — die Tonne mcp/index.ts hängt über useAgentChat, useCodex und
 // api/tool-registry.ts ohnehin statisch im Graph, also meldete Rolldown
@@ -86,6 +87,50 @@ export const SUB_AGENT_BUDGET = { maxToolCalls: 10, maxIterations: 5 } as const
  * Zuschauer. Unbegrenztheit soll man dort nicht aus Versehen einstellen
  * koennen, indem man ein Feld leert.
  */
+/** Hoechstlaenge des Rohmaterials, das ein Abbruch zurueckgibt. Es landet als
+ *  WERKZEUGERGEBNIS im Fenster des Hauptagenten — grosszuegig waere hier
+ *  teuer, und der Zweck ist ein Anhaltspunkt, keine Akte. */
+const MATERIAL_KAPPE = 3000
+const MATERIAL_JE_ERGEBNIS = 700
+
+/**
+ * Was dieser Lauf per Werkzeug gefunden hat, als Rohmaterial.
+ *
+ * `finalContent` sammelt nur die PROSA-Zuege. Ein Unteragent, der alle seine
+ * Schritte in Werkzeuge steckt — also genau der, der die Kappe reisst —, hat
+ * am Ende viel gefunden und nichts gesagt, und bis zum 03.09.2026 ging das
+ * alles verloren: „(no partial answer)" nach 78 Sekunden Recherche. Bei einem
+ * lokalen Modell ist das die teuerste Sekunde im ganzen Ablauf.
+ *
+ * Fehlgeschlagene Aufrufe werden GEZAEHLT, nicht ausgegeben: „Web search
+ * failed" ist kein Fund, und als Material waere es Rauschen. Als Zahl ist es
+ * die wichtigste Auskunft, die es hier gibt — es wurde nichts gefunden, und
+ * der Hauptagent soll nicht anfangen zu raten.
+ *
+ * Ausdruecklich als Material benannt und nie als Antwort: der Hauptagent soll
+ * damit weiterarbeiten, nicht sie abschreiben.
+ */
+export function gesammeltesMaterial(messages: Array<{ role: string; content?: string }>): string {
+  const ergebnisse = messages
+    .filter((m) => m.role === 'tool' && typeof m.content === 'string' && m.content.trim())
+    .map((m) => (m.content as string).trim())
+  const gescheitert = ergebnisse.filter((t) => toolResultIsFailure(t)).length
+  const brauchbar = ergebnisse.filter((t) => !toolResultIsFailure(t))
+
+  const teile: string[] = []
+  let laenge = 0
+  for (const t of brauchbar) {
+    const stueck = t.length > MATERIAL_JE_ERGEBNIS ? `${t.slice(0, MATERIAL_JE_ERGEBNIS)}…` : t
+    if (laenge + stueck.length > MATERIAL_KAPPE) break
+    teile.push(stueck)
+    laenge += stueck.length
+  }
+
+  const notiz = gescheitert > 0 ? ` ${gescheitert} tool call${gescheitert === 1 ? '' : 's'} failed and produced nothing.` : ''
+  if (teile.length === 0) return notiz.trim()
+  return `Raw material gathered before the stop (not an answer — verify before using):${notiz}\n\n${teile.join('\n\n---\n\n')}`
+}
+
 export function resolveSubAgentBudget(s?: {
   subAgentMaxToolCalls?: number
   subAgentMaxIterations?: number
@@ -437,6 +482,8 @@ export async function defaultSubAgentRunner(
     ? (await import('../../stores/agentTaskStore')).useAgentTaskStore
     : null
 
+
+
   let finalContent = ''
   // Die Schleifengrenze kommt aus DEMSELBEN Budget, das auch zaehlt. Vorher
   // stand hier die Konstante, waehrend `options.budget` die eingestellte Kappe
@@ -464,7 +511,9 @@ export async function defaultSubAgentRunner(
     }
     const ex = options.budget.exceeded()
     if (ex.kind !== 'none') {
-      return `${options.budget.haltMessage()} ${finalContent || '(no partial answer)'}`
+      // Nicht mehr wegwerfen, was schon gefunden wurde (Testlauf 03.09.2026).
+      const material = finalContent || gesammeltesMaterial(messages)
+      return `${options.budget.haltMessage()} ${material || '(no partial answer)'}`
     }
     const turn = await provider.chatWithTools(modelId, messages, llmTools, {})
     // What a sub-agent returns becomes a TOOL RESULT in the parent's context,
