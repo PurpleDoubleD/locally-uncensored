@@ -952,6 +952,15 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
         // weg. 7,4 s ohne Engine, zwei Prozessstarts, und 75 s lang keine
         // einzige neue Textzeile auf der Seite.
         setSelectError(announceLuEngineStartFailure(model.name, e, switched))
+        // Und das Menue geht zu, damit die Zeile ueber dem Eingabefeld frei
+        // liegt. Gegenprobe G1, 04.09.2026, nachgemessen: das offene Menue
+        // verdeckte 331 von 763 Pixeln seines eigenen Banners, also 43
+        // Prozent, und der Text im Menue war zu 69 Prozent abgeschnitten
+        // (scrollHeight 576 gegen clientHeight 176). Zwei Schriftstuecke,
+        // beide halb, keines ganz. Die Zeile ueber dem Eingabefeld ist die
+        // dauerhafte: sie hat keine Uhr, sie hat ein X, und der Waehler kann
+        // sie nicht mehr verdecken, wenn er zu ist.
+        setOpen(false)
       } finally {
         setSelectingLms(null)
         releaseLuEngineSwap()
