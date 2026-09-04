@@ -101,14 +101,26 @@ async function openInstalled() {
   })
 }
 
-/** The Use button on the row for `name`, or null when the row has none.
+/** Die Namenszeile der Kachel fuer `name`.
  *
  *  Gesucht wird nach dem Namen, den der Nutzer SIEHT. Die Kachel zeigt seit
  *  dem 04.09.2026 den Anzeigenamen ohne `openai::`, denn das ist unser
  *  Steckplatzname und kein Name, den ein Kunde je gewaehlt hat (Persona P5).
- *  Der volle Name lebt weiter im title. */
+ *  Der volle Name lebt weiter im title.
+ *
+ *  Und seit der Gegenprobe G1 steht er in ZWEI Feldern, Kopf und Quant, damit
+ *  die Kuerzung in der Mitte greift und `@q4_k_m` und `@q8_0` nicht gleich
+ *  aussehen. Deshalb wird ueber das title-Feld gesucht, das den ganzen Namen
+ *  traegt, statt ueber einen Text, den kein einzelnes Feld mehr ganz hat. */
+function nameRow(name: string): HTMLElement {
+  const el = document.querySelector(`span[title="${name}"]`)
+  if (!el) throw new Error(`keine Namenszeile fuer ${name}`)
+  return el as HTMLElement
+}
+
+/** The Use button on the row for `name`, or null when the row has none. */
 function useButtonFor(name: string): HTMLElement | null {
-  const row = screen.getByText(displayModelName(name)).closest('div[class*="rounded-lg"]')
+  const row = nameRow(name).closest('div[class*="rounded-lg"]')
   return row?.querySelector('[data-testid="model-card-use"]') as HTMLElement | null
 }
 
@@ -198,8 +210,7 @@ describe('the Use button the 2.6.8 notes promise on the Installed tile', () => {
     // Gegenprobe zur Gegenprobe: der Name ist wirklich da, nur ohne Praefix.
     expect(document.body.textContent).toContain('Phi-4-mini-instruct-Q4_K_M')
     // Und der volle Name bleibt fuer einen Fehlerbericht erreichbar.
-    const zeile = screen.getByText(displayModelName(ACTIVE))
-    expect(zeile.getAttribute('title')).toBe(ACTIVE)
+    expect(nameRow(ACTIVE).textContent).toBe(displayModelName(ACTIVE))
   })
 
   // NEGATIVE CONTROL: the button is a door into the same house, so it obeys

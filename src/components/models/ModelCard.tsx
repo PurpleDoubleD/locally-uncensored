@@ -5,6 +5,7 @@ import { BenchmarkButton } from './ModelBenchmark'
 import { ContextMenu } from '../ui/ContextMenu'
 import { buildModelCardMenu, type ModelMenuHandlers } from '../ui/menu-actions'
 import { displayModelName } from '../../api/providers/model-name'
+import { splitForMiddleEllipsis } from '../../lib/model-label'
 import type { AIModel } from '../../types/models'
 
 interface Props {
@@ -57,6 +58,10 @@ export function ModelCard({ model, isActive, onSelect, onDelete, onInfo, canDele
   // diesem Objekt, das Kontextmenue bekommt dasselbe Objekt gereicht — es gibt
   // also keinen zweiten Aufrufweg, der irgendwann anders werden koennte.
   const actions: ModelMenuHandlers = { select: onSelect, info: onInfo, remove: onDelete }
+  // Fremde Kennungen tragen Pfadteile und Dateiendungen mit sich, die kein
+  // Kunde gewaehlt hat. Der Name selbst bleibt unangetastet (lib/model-label),
+  // der volle bleibt im title, denn ein Fehlerbericht braucht ihn.
+  const { head: nameKopf, tail: nameEnde } = splitForMiddleEllipsis(displayModelName(model.name))
 
   return (
     <>
@@ -83,9 +88,14 @@ export function ModelCard({ model, isActive, onSelect, onDelete, onInfo, canDele
           Fehlerbericht braucht ihn. */}
       <span
         title={model.name}
-        className="flex-1 min-w-0 text-[0.7rem] text-gray-800 dark:text-gray-200 font-medium truncate"
+        className="flex-1 min-w-0 flex text-[0.7rem] text-gray-800 dark:text-gray-200 font-medium"
       >
-        {displayModelName(model.name)}
+        {/* Gekuerzt wird in der MITTE. Gegenprobe G1, 04.09.2026: am Ende
+            gekuerzt sahen `qwen2.5-0.5b-instruct@q4_k_m` und
+            `qwen2.5-0.5b-instruct@q8_0` gleich aus, obwohl es zwei
+            verschiedene Modelle sind. */}
+        <span className="truncate">{nameKopf}</span>
+        {nameEnde && <span className="shrink-0">{nameEnde}</span>}
       </span>
 
       {isActive && <span className="shrink-0 text-[0.5rem] text-blue-400 font-medium uppercase">Active</span>}

@@ -9,6 +9,7 @@ import { useSettingsStore } from '../../stores/settingsStore'
 import { useUIStore } from '../../stores/uiStore'
 import { unloadAllModels, loadModel, unloadModel, listRunningModels } from '../../api/ollama'
 import { displayModelName, getProviderIdFromModel } from '../../api/providers'
+import { splitForMiddleEllipsis, shortModelLabel } from '../../lib/model-label'
 import { activateBuiltinModel, isManagedBuiltinActive } from '../../api/engine'
 import { diagnoseBuiltinEngine } from '../../api/builtin-ensure'
 import { canUseTools, resolveToolSupport, type ToolSupport } from '../../lib/tool-support'
@@ -1067,7 +1068,7 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
   const gezeigtesObj = models.find((m) => m.name === gezeigtesModell)
   const activeDisplayName = gezeigtesModell
     ? (gezeigtesObj && 'displayName' in gezeigtesObj && gezeigtesObj.displayName) ||
-      displayModelName(gezeigtesModell).split(':')[0]
+      shortModelLabel(displayModelName(gezeigtesModell).split(':')[0])
     : 'Select Model'
   const activeType = activeModelObj?.type || 'text'
   // Chat dropdown shows TEXT models only — image/video live in the
@@ -1286,6 +1287,10 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
                   {groupModels.map((model: AIModel) => {
                     const modelDisplayName =
                       ('displayName' in model && model.displayName) || displayModelName(model.name)
+                    // Fremde Kennungen tragen Pfadteile und Dateiendungen mit
+                    // sich, die kein Kunde gewaehlt hat. Der Name selbst bleibt
+                    // unangetastet (lib/model-label).
+                    const { head: nameKopf, tail: nameEnde } = splitForMiddleEllipsis(modelDisplayName)
                     const modelProvider = ('provider' in model && model.provider) || 'ollama'
                     const providerBadge = getProviderBadge(model)
                     const isActive = model.name === activeModel
@@ -1352,8 +1357,20 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
 
                         {/* Model info */}
                         <div className="flex-1 min-w-0 flex items-center gap-1.5">
-                          <span className={`text-[0.7rem] truncate ${isActive ? 'text-gray-900 dark:text-white' : ''}`}>
-                            {modelDisplayName}
+                          {/* Gekuerzt wird in der MITTE, nicht am Ende.
+                              Gegenprobe G1, 04.09.2026: am Ende gekuerzt
+                              standen `qwen2.5-0.5b-instruct@...` und
+                              `qwen2.5-0.5b-instruct...` untereinander und
+                              sahen gleich aus, obwohl das eine q4_k_m und das
+                              andere q8_0 ist. Genau das Zeichen, das die
+                              beiden unterscheidet, war das erste, das
+                              weggeschnitten wurde. */}
+                          <span
+                            className={`text-[0.7rem] flex min-w-0 ${isActive ? 'text-gray-900 dark:text-white' : ''}`}
+                            title={modelDisplayName}
+                          >
+                            <span className="truncate">{nameKopf}</span>
+                            {nameEnde && <span className="shrink-0">{nameEnde}</span>}
                           </span>
 
                           {/* Subtle meta */}
