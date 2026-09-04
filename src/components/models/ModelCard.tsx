@@ -98,7 +98,25 @@ export function ModelCard({ model, isActive, onSelect, onDelete, onInfo, canDele
         {nameEnde && <span className="shrink-0">{nameEnde}</span>}
       </span>
 
-      {isActive && <span className="shrink-0 text-[0.5rem] text-blue-400 font-medium uppercase">Active</span>}
+      {/* Gegenprobe G2, 04.09.2026: nach dem Tod der Engine trug die Kachel
+          weiter ACTIVE und sah ansonsten aus wie jede gesunde Kachel. "Es gibt
+          keinen Zustand gestoppt, abgestuerzt oder aehnliches, keinen
+          Fehlertext, keine eigene Farbe, keinen eigenen Knopf." Auf derselben
+          Maschine meldete Settings binnen einer Sekunde "Engine not running".
+          Das Abzeichen sagt jetzt dasselbe, und in derselben Sprache. */}
+      {isActive && (
+        engineStopped ? (
+          <span
+            data-testid="model-card-stopped"
+            title="This is your pick, but the LU Engine is not running. Use starts it."
+            className="shrink-0 text-[0.5rem] text-gray-500 dark:text-gray-400 font-medium uppercase"
+          >
+            Not running
+          </span>
+        ) : (
+          <span className="shrink-0 text-[0.5rem] text-blue-400 font-medium uppercase">Active</span>
+        )
+      )}
 
       {/* Compact meta — size · params · quant, dot-separated, mono figures */}
       <span className="hidden md:flex items-center gap-1.5 shrink-0 t-micro text-gray-500 lu-hud-num">

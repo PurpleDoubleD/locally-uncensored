@@ -73,3 +73,28 @@ export function reachVerdict(reachable: boolean, models: number | null): SlotSta
   if (models === 0) return 'no-models'
   return 'connected'
 }
+
+/**
+ * Derselbe Schluss, aber aus der LAUFENDEN Schleife statt aus einer Sonde, die
+ * einmal beim Aufbauen lief.
+ *
+ * Gegenprobe G2, 04.09.2026, im echten Build gemessen: der Punkt neben
+ * "LU Engine DEFAULT LOCAL" blieb 150 Sekunden lang gruen, nachdem der
+ * Engine-Prozess von aussen getoetet worden war, waehrend derselbe Bildschirm
+ * zwei Zentimeter tiefer binnen einer Sekunde "Engine not running" meldete.
+ * Der Punkt hat weder `title` noch `aria-label`, es gab also auch keinen Text,
+ * der die Farbe erklaert haette.
+ *
+ * Null heisst hier immer "diese Zeile weiss es von hier aus nicht", und dann
+ * bleibt der Sondenwert stehen: fuer jede fremde Zeile, fuer eine Engine, die
+ * laeuft und noch nicht antwortet, und solange noch gar keine Antwort da war.
+ */
+export function liveSlotStatus(
+  id: string,
+  config: { managed?: boolean } | null | undefined,
+  engine: { status: EngineHealth | null; geantwortet: boolean },
+): SlotStatus | null {
+  if (id !== 'openai' || config?.managed !== true) return null
+  if (!engine.geantwortet) return null
+  return builtinSlotStatus(engine.status)
+}

@@ -18,7 +18,8 @@ import { PROVIDER_PRESETS } from '../../api/providers/types'
 import { Modal } from '../ui/Modal'
 import { backendCall } from '../../api/backend'
 import { diagnoseBuiltinEngine, readBuiltinSlotStatus } from '../../api/builtin-ensure'
-import { reachVerdict, type SlotStatus } from '../../lib/builtin-slot-status'
+import { useBuiltinEngineStatus } from '../../hooks/useBuiltinEngineStatus'
+import { reachVerdict, liveSlotStatus, type SlotStatus } from '../../lib/builtin-slot-status'
 import type { ProviderId, ProviderConfig } from '../../api/providers/types'
 
 const isTauri = typeof window !== 'undefined' && !!window.__TAURI_INTERNALS__
@@ -107,6 +108,11 @@ export function ProviderSettings() {
   const [dropdownOpen, setDropdownOpen] = useState(false)
   const [testing, setTesting] = useState<ProviderId | null>(null)
   const [statuses, setStatuses] = useState<Record<string, SlotStatus>>({})
+  // Der laufende Zustand unserer eigenen Engine, dieselbe Schleife, die der
+  // Abschnitt LU Engine (expert) weiter unten liest. Gegenprobe G2: ohne sie
+  // blieb der Punkt in dieser Liste 150 Sekunden gruen, waehrend derselbe
+  // Bildschirm "Engine not running" meldete.
+  const engineAnswer = useBuiltinEngineStatus()
   // Per-slot English explanation for a failed Test (GH #118).
   const [testDetail, setTestDetail] = useState<Record<string, string>>({})
   const [showKey, setShowKey] = useState<Record<string, boolean>>({})
@@ -454,7 +460,10 @@ export function ProviderSettings() {
         }
         const needsKey = view.needsKey
         const currentKey = getProviderApiKey(id)
-        const status = statuses[id] || 'idle'
+        // Unsere eigene Engine kennt ihren Zustand besser als eine Sonde, die
+        // einmal beim Aufbauen lief: fuer sie entscheidet die laufende
+        // Schleife, sonst der Sondenwert.
+        const status = liveSlotStatus(id, config, engineAnswer) ?? statuses[id] ?? 'idle'
         const isExpanded = expandedProvider === id
         const isTesting = testing === id
         const isKeyVisible = showKey[id] || false
@@ -475,6 +484,13 @@ export function ProviderSettings() {
                 className="flex-1 flex items-center justify-between min-w-0"
               >
                 <div className="flex items-center gap-2 min-w-0">
+                  {/* Gegenprobe G2, 04.09.2026: dieser Punkt blieb 150 Sekunden
+                      lang gruen, waehrend derselbe Bildschirm zwei Zentimeter
+                      tiefer "Engine not running" meldete. Der Grund war die
+                      Uhr: der Zustand wurde EINMAL beim Aufbauen geholt und nie
+                      wieder. Fuer unsere eigene Engine liest der Punkt jetzt
+                      dieselbe laufende Schleife wie der Abschnitt darunter, und
+                      die beiden koennen nicht mehr zwei Dinge behaupten. */}
                   <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${
                     status === 'connected' ? 'bg-green-500' :
                     status === 'failed' ? 'bg-red-500' :
