@@ -73,7 +73,7 @@ import { useAgentLoopStore } from '../stores/agentLoopStore'
 import { beginRun, isRunStopped, stopRun } from '../lib/run-stop'
 import { buildLoopRecheck, loopPassSaysDone } from '../lib/agent-commands'
 import { applyStoredCompaction } from '../lib/compact-summary'
-import { newestCompaction, maybeAutoCompact } from '../lib/run-compact-command'
+import { maybeAutoCompact } from '../lib/run-compact-command'
 import { generateEmbeddings } from '../api/rag'
 import { truncateToolResult } from '../lib/truncate-tool-result'
 import { toolFailureNote } from '../lib/tool-failure-note'
@@ -662,7 +662,7 @@ export function useAgentChat() {
         // Ergebnis stuende ohne seinen Aufruf da — genau der 422-Fall, den der
         // Waisenschnitt beim Ablegen schon vermeidet. useCodex filtert seit je so.
         convForPayload.messages.filter((m) => m.role !== 'system' && (m.content.trim() !== '' || m.hidden)),
-        newestCompaction(convForPayload.compactions),
+        convForPayload.compactions,
       ).messages
         .map((m) => ({
           role: m.role as 'user' | 'assistant' | 'tool',

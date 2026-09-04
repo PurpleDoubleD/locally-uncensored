@@ -574,28 +574,55 @@ export interface IdentifiedMessage {
 }
 
 /**
- * Apply a compaction that already happened.
+ * Apply the compactions that already happened.
  *
- * Takes the RENDERED summary from the record rather than re-rendering, so what
- * the transcript block shows and what the model receives are the same bytes by
- * construction rather than by two code paths agreeing.
+ * Takes the RENDERED summaries from the records rather than re-rendering, so
+ * what the transcript block shows and what the model receives are the same
+ * bytes by construction rather than by two code paths agreeing.
  *
- * A record whose anchor message is gone — deleted, or filtered out before this
- * call — returns the array untouched. That is deliberate and it is the reason
- * the anchor is an id: a stale record is detectable, and the honest answer to
- * "I no longer know where this summary ends" is to send the real history.
+ * Takes the WHOLE chain, not just the newest one, and that is the point.
+ * Each run only summarises what the previous run did not cover
+ * (`run-compact-command.ts`, `visible.slice(prevIdx + 1, cutAt)`), which is
+ * right on its own: it avoids the summary-of-a-summary decay. But the cut here
+ * drops everything before the last anchor. Passing only the newest record
+ * therefore deleted the first section twice over: not as messages, because the
+ * cut removes them, and not as a summary, because it was never sent. A user
+ * who compacted twice lost the beginning of the conversation without being
+ * told. Every summary up to the cut goes out, in order.
+ *
+ * A record whose anchor message is gone (deleted, or filtered out before this
+ * call) cannot place a cut. The last record whose anchor still exists decides
+ * where the cut falls; records after it are stale and ignored. A stale record
+ * is detectable, and the honest answer to "I no longer know where this summary
+ * ends" is to send the real history.
  */
 export function applyStoredCompaction<T extends IdentifiedMessage>(
   messages: T[],
-  record: StoredCompaction | null | undefined,
+  records: readonly (StoredCompaction | null | undefined)[] | null | undefined,
 ): ApplyCompactResult<T> {
-  if (!record?.summary || !record.upToMessageId) {
-    return { messages, replaced: 0, rendered: '' }
-  }
+  const kette = (records ?? []).filter(
+    (r): r is StoredCompaction => Boolean(r?.summary && r?.upToMessageId),
+  )
+  if (kette.length === 0) return { messages, replaced: 0, rendered: '' }
+
   const body = messages[0]?.role === 'system' ? messages.slice(1) : messages
-  const cut = body.findIndex((m) => m.id === record.upToMessageId)
-  if (cut < 0) return { messages, replaced: 0, rendered: '' }
-  return spliceSummary(messages as unknown as Array<T & { role: string }>, cut + 1, record.summary) as ApplyCompactResult<T>
+
+  // Der letzte Datensatz, dessen Anker noch dasteht, bestimmt den Schnitt.
+  // Alles danach ist veraltet und wird uebergangen.
+  let letzter = -1
+  let schnitt = -1
+  for (let i = kette.length - 1; i >= 0; i--) {
+    const treffer = body.findIndex((m) => m.id === kette[i].upToMessageId)
+    if (treffer >= 0) { letzter = i; schnitt = treffer; break }
+  }
+  if (letzter < 0) return { messages, replaced: 0, rendered: '' }
+
+  const rendered = kette.slice(0, letzter + 1).map((r) => r.summary).join('\n\n')
+  return spliceSummary(
+    messages as unknown as Array<T & { role: string }>,
+    schnitt + 1,
+    rendered,
+  ) as ApplyCompactResult<T>
 }
 
 // ───────────────────────────────────────────────────────────────────────────

@@ -20,7 +20,7 @@ import { requestGenerationCancel } from "../api/vram-handoff"
 import { effectiveContextWindow } from "../lib/context-window"
 import { useAgentChat } from "./useAgentChat"
 import { parseAgentCommand, parseLoopSpec } from '../lib/agent-commands'
-import { runCompactForConversation, compactOutcomeMessage, newestCompaction, maybeAutoCompact } from '../lib/run-compact-command'
+import { runCompactForConversation, compactOutcomeMessage, maybeAutoCompact } from '../lib/run-compact-command'
 import { applyStoredCompaction } from '../lib/compact-summary'
 import { planResend } from '../lib/resend-plan'
 import { isOrphanRun } from '../lib/orphan-run'
@@ -728,7 +728,7 @@ export function useChat() {
         // history goes out, which is the honest answer to a stale record.
         ...applyStoredCompaction(
           convNow.messages.filter((m) => m.role !== 'system' && m.content.trim() !== ''),
-          newestCompaction(convNow.compactions),
+          convNow.compactions,
         ).messages
           .map((m) => ({
             role: m.role as 'user' | 'assistant' | 'tool',

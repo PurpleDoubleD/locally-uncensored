@@ -3,7 +3,7 @@ import { markCannotThink } from '../lib/model-compatibility'
 import { v4 as uuid } from 'uuid'
 import { useCodexStore } from '../stores/codexStore'
 import { useModelStore } from '../stores/modelStore'
-import { runCompactForConversation, compactOutcomeMessage, newestCompaction, maybeAutoCompact } from '../lib/run-compact-command'
+import { runCompactForConversation, compactOutcomeMessage, maybeAutoCompact } from '../lib/run-compact-command'
 import { applyStoredCompaction } from '../lib/compact-summary'
 import { useSettingsStore } from '../stores/settingsStore'
 import { useChatStore, flushChatPersist } from '../stores/chatStore'
@@ -744,7 +744,7 @@ export function useCodex() {
       // this call sits inside each builder rather than in a shared wrapper.
       ...applyStoredCompaction(
         convForPayload.messages.filter(m => m.role !== 'system' && (m.content.trim() || m.hidden)),
-        newestCompaction(convForPayload.compactions),
+        convForPayload.compactions,
       ).messages
         .map(m => {
           const msg: ChatMessage = {
