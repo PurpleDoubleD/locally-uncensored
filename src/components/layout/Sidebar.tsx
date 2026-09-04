@@ -8,6 +8,7 @@ import { useModelStore } from '../../stores/modelStore'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { useCodexStore } from '../../stores/codexStore'
 import { useRemoteStore, REMOTE_DEV_MODE_ERROR } from '../../stores/remoteStore'
+import { workspaceRejectedMessage } from '../../lib/workspace-rejected'
 import { backendCall, isTauri } from '../../api/backend'
 import { useDismissOnEscape } from '../../hooks/useDismissOnEscape'
 import {
@@ -191,8 +192,34 @@ export function Sidebar() {
           chatId: '__remote__',
           path: pickedFolder,
         })
-      } catch {
-        // Override is a nice-to-have — fall through and dispatch anyway.
+      } catch (e) {
+        // Hier stand bis zum 04.09.2026 ein LEERES catch mit dem Kommentar
+        // "Override is a nice-to-have", und der Auftrag fuhr trotzdem los.
+        //
+        // Seit 2.6.8 lehnt die Rust-Seite verbotene Wurzeln ab ($HOME genau,
+        // /, /etc, ~/.ssh, C:\Windows). Das Verschlucken hatte zwei Folgen,
+        // und die zweite ist die ernstere: der else-Zweig darunter, der eine
+        // alte Bindung raeumt, lief in diesem Fall NICHT. Stand in
+        // chat_workspace_overrides noch der Ordner eines frueheren Dispatchs
+        // derselben App-Sitzung, arbeitete der Agent WEITER IM ALTEN ORDNER,
+        // waehrend der Nutzer glaubte, gerade einen anderen gewaehlt zu haben.
+        //
+        // Also erst raeumen, dann reden, dann abbrechen. Abbrechen und nicht
+        // durchlaufen, weil der Nutzer einen Ordner gewaehlt hat: ihn
+        // stattdessen still in der Sandbox arbeiten zu lassen waere wieder
+        // eine stille Abweichung, nur eine andere. Der Abbruch ist derselbe
+        // wie beim Abbrechen des Dialogs weiter oben.
+        try {
+          await backendCall('set_chat_workspace_override', {
+            chatId: '__remote__',
+            path: null,
+          })
+        } catch {
+          // Das Raeumen selbst darf die Meldung nicht verschlucken. Schlaegt
+          // auch das fehl, ist der Abbruch erst recht richtig.
+        }
+        useRemoteStore.setState({ error: workspaceRejectedMessage(pickedFolder, e) })
+        return
       }
     } else {
       // No folder picked → ensure no stale override from a previous
