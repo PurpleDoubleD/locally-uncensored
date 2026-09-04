@@ -431,7 +431,7 @@ fn check_workspace_root(root: &Path) -> Result<(), String> {
     if !picked {
         return Err(format!(
             "Not an allowed workspace folder (only a folder you chose in LU's folder picker \
-             can be a workspace — pick it again to allow it): {}",
+             can be a workspace, pick it again to allow it): {}",
             root.display()
         ));
     }
