@@ -85,6 +85,20 @@ describe('ein fremder lokaler Server, der nicht laeuft', () => {
   })
 })
 
+describe('der Agentenweg redet dieselbe Sprache', () => {
+  it('nennt Ollama beim Namen, statt HTTP 503 mit Rust-Zeile zu werfen', async () => {
+    stream.mockResolvedValue(abgelehnt('http://127.0.0.1:11434/api/chat'))
+    const { streamOllamaChatWithTools } = await import('../../lib/ollama-stream-tools')
+    const e = await streamOllamaChatWithTools(
+      'llama3', [], [], {}, () => {}, () => {},
+    ).then(() => null, (x: unknown) => x as Error)
+    expect(e).toBeInstanceOf(Error)
+    expect(e!.message).toContain('Ollama')
+    expect(e!.message).toContain('127.0.0.1:11434')
+    expect(e!.message).not.toContain('proxy_localhost_stream_chunked')
+  })
+})
+
 describe('was NICHT uebersetzt werden darf', () => {
   it('ein echter Serverfehler behaelt die Worte des Servers', async () => {
     stream.mockResolvedValue(new Response(

@@ -1,5 +1,6 @@
 import type { ChatMessage, ToolCall, ToolDefinition } from '../api/providers/types'
 import { ollamaUrl, localFetchStream } from '../api/backend'
+import { isLocalTransportFailure, localBackendUnreachableMessage } from './local-backend-transport'
 import { repairToolCallArgs } from './tool-call-repair'
 import { applyTemplateContract } from '../api/providers/normalize-system'
 import { parseOllamaChatChunk, type OllamaWireToolCall } from '../api/providers/wire'
@@ -119,7 +120,13 @@ export async function streamOllamaChatWithTools(
 
   if (!response.ok) {
     const text = await response.text()
-    const err: HttpStatusError = Object.assign(new Error(`HTTP ${response.status}: ${text}`), {
+    // Ollama laeuft nicht: der Proxy gibt seine eigene Zeile zurueck, mit dem
+    // Rust-Befehlsnamen darin. Die gehoert in kein Fenster, auch nicht in das
+    // eines Agentenlaufs (04.09.2026, dieselbe Runde wie proxy.rs).
+    const nachricht = isLocalTransportFailure(text, url)
+      ? localBackendUnreachableMessage('Ollama', url)
+      : `HTTP ${response.status}: ${text}`
+    const err: HttpStatusError = Object.assign(new Error(nachricht), {
       statusCode: response.status,
     })
     throw err
