@@ -26,6 +26,7 @@ import {
   type HandoverSlot, type SlotOccupant,
 } from '../lib/openai-slot-handover'
 import { isRowOfBackend, type InstalledModelLike } from '../lib/lmstudio-match'
+import { onChatPickLostItsEngine } from '../lib/builtin-slot-handover'
 import { OpenAIProvider } from './providers/openai-provider'
 import type { ProviderModel } from './providers/types'
 import { PROVIDER_PRESETS } from './providers/types'
@@ -241,8 +242,9 @@ function chatModelLostItsEngineNote(gone: string, taker: string): string {
 /**
  * Die dritte Tuer, und die einzige, die keinen Ersatz zu nennen hat.
  *
- * Nach der Uebergabe an ein fremdes Backend raeumt `dropDisplacedEnginePick`
- * (lib/builtin-slot-eviction) die Wahl, weil auf 8127 nichts mehr liegt. Damit
+ * Nach der Uebergabe an ein fremdes Backend raeumt
+ * `dropPickServedByTheBuiltinEngine` (stores/modelStore) die Wahl, weil auf
+ * 8127 nichts mehr liegt. Damit
  * ist `activeModel` null, und `replacedBehindTheUsersBack` verlangt einen
  * vorherigen Namen, den es nach dem Raeumen nicht mehr gibt: die Regel liefert
  * false, und die Zeile fiel aus. Der Nutzer sah seinen Chip wechseln und
@@ -522,3 +524,32 @@ export async function listStandbyBackendModels(occupant: SlotOccupant): Promise<
     if (timer) clearTimeout(timer)
   }
 }
+
+// ── Die Wahl ist mit dem Steckplatz gefallen ───────────────────
+//
+// Angesagt wird das im Modell-Store, unmittelbar nachdem er geraeumt hat: nur
+// er hat den alten Namen dann noch. Sagen darf es aber nur diese Datei, denn
+// hier stehen der Satz, die Frist auf den Leser und die Frage, aus wessen Hand
+// der Wechsel kam. Der Weg dazwischen laeuft ueber lib/builtin-slot-handover,
+// nicht ueber einen Import: `stores/modelStore -> api/lu-engine-switch` ist ein
+// direkter Zweierkreis, gemessen, weil Zeile 22 hier den Modell-Store zieht.
+//
+// LADEREIHENFOLGE, und sie ist hier anders als beim Modell-Store. Dieses Modul
+// haengt NICHT in jedem Fenster. Im Hauptfenster traegt es AppShell.tsx
+// (announceChatModelReplaced), dazu ModelSelector, DiscoverModels und
+// hooks/useModels, alle lange vor dem ersten Steckplatzwechsel. Im eigenen
+// Onboarding-Fenster gibt es das Modul gar nicht: main.tsx gibt
+// `hostWindow === 'onboarding'` den kleinen Baum ohne App und ohne AppShell.
+// Dort bleibt diese Ansage stumm, und das ist genau der heutige Stand: die
+// Zeile zeichnet LuEngineSwitchBar, die es im kleinen Fenster nicht gibt, und
+// useLuEngineSwitchStore ist nicht persistiert, traegt also auch nichts
+// hinueber. Was dort verloren geht, ist ein Satz, den niemand liest.
+// Der Anker im Hauptfenster ist bewacht, siehe
+// src/lib/__tests__/die-leitung-oeffnet-den-kreis.test.ts.
+onChatPickLostItsEngine((gone, taker) => {
+  // Wer im Waehler selbst eine Zeile des wartenden Backends angeklickt hat,
+  // liest die Wechselzeile ueber genau diesen Vorgang schon; ein zweiter Satz
+  // wuerde sie loeschen statt ergaenzen.
+  if (handbackAwaitsTheUsersPick()) return
+  announceChatModelLostItsEngine(gone, taker)
+})

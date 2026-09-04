@@ -19,6 +19,13 @@ import { isLuEngineName } from '../lib/engine-name'
 // clear a pick that the send path would then route to a dead backend.
 import { getProviderIdFromModel } from '../api/providers/model-name'
 import { onProviderSlotsDarkened } from '../lib/provider-slot-darkening'
+import {
+  announceChatPickLostItsEngine,
+  onBuiltinSlotLostToForeignBackend,
+  onBuiltinSlotRegained,
+} from '../lib/builtin-slot-handover'
+import { ensureBuiltinEngineAlive, builtinSlotSwitchedOff } from '../api/builtin-ensure'
+import { isBuiltinEngineEntry, type InstalledModelLike } from '../lib/lmstudio-match'
 import type { ProviderId } from '../api/providers/types'
 
 export interface PullState {
@@ -92,6 +99,34 @@ interface ModelState {
    *  was gone and every send failed with model-not-found. providerStore calls
    *  this the moment a slot goes dark. */
   dropActiveModelIfServedBy: (providerId: ProviderId) => void
+  /** Der geteilte lokale Steckplatz ist an ein eingeschaltetes fremdes Backend
+   *  gegangen. Der Chip im Chat nennt danach weiter das GGUF, das auf 8127 lag,
+   *  auf dem Port liegt nichts mehr, und die Selbstheilung des Absendewegs
+   *  haengt hinter `config.managed === true`, das jetzt false ist. Bleibt die
+   *  Wahl stehen, ist die einzige Antwort auf ein Absenden eine Fremdmeldung
+   *  ueber eine unbekannte Modell-Kennung.
+   *
+   *  Entschieden wird nach der ZEILE, nicht nach dem Steckplatz, und gelesen
+   *  wird sie erst bei der Zustellung, eine Mikrotask nach dem Wechsel. Das
+   *  deckt genau EINEN der beiden Klickwege ab: `useModels.activateModel` gibt
+   *  den Steckplatz ab und setzt die Zeile des uebernehmenden Backends ohne
+   *  `await` unmittelbar danach, dort steht dann eine fremde Zeile, die diese
+   *  Aktion nichts angeht. Der zweite Weg, die Auto-Ladung im Waehler, laedt
+   *  erst in LM Studio und setzt die Wahl erst hinterher, auf der Box 12,4 s
+   *  spaeter; dort faellt sie wirklich, und bis zum Ende der Ladung bedient
+   *  auch niemand das GGUF.
+   *
+   *  `taker` ist nur fuer die Zeile da, die der Nutzer danach liest, und ist
+   *  eine Momentaufnahme vom Steckplatzwechsel selbst. Angesagt wird der Wechsel
+   *  von lib/builtin-slot-eviction ueber lib/builtin-slot-handover. */
+  dropPickServedByTheBuiltinEngine: (taker: string | undefined) => void
+  /** Der Steckplatz gehoert wieder der eigenen Engine, nachdem sie ihr Modell
+   *  schon losgelassen hatte (Gegenprobe G2: nach Enable und Remove lief auf
+   *  8127 nichts mehr und startete auch nach dreimaligem Ansichtswechsel nicht
+   *  nach). `ensureBuiltinEngineAlive` ist genau der Weg, den auch das Absenden
+   *  einer Nachricht geht: Zustand fragen, Datei suchen, mit der Feineinstellung
+   *  des Nutzers starten. */
+  reviveBuiltinEngineForActivePick: () => Promise<void>
 }
 
 export const useModelStore = create<ModelState>()(
@@ -327,6 +362,53 @@ export const useModelStore = create<ModelState>()(
         // away is also the one holding VRAM, and that release lives there.
         get().setActiveModel(null)
       },
+
+      dropPickServedByTheBuiltinEngine: (taker) => {
+        const gewaehlt = get().activeModel
+        if (!gewaehlt) return
+        const zeile = get().models.find((m) => m.name === gewaehlt)
+        if (!isBuiltinEngineEntry(zeile as unknown as InstalledModelLike | undefined)) return
+        // Geraeumt wird mit set(), NICHT ueber `setActiveModel`: an dessen Weg
+        // weg von einer Engine-Zeile haengt ein sofortiges
+        // `stop_bundled_engine`, und das wuerde die 30 Sekunden Nachsicht
+        // ueberholen, die lib/builtin-slot-eviction verwaltet.
+        set({ activeModel: null })
+        log.info('[modelStore] the local slot went to another backend, dropped the pick it served')
+        // Zuerst raeumen, dann reden. Die Zeile darf das Raeumen weder
+        // verzoegern noch mit sich reissen, wenn niemand sie annimmt.
+        //
+        // Das eigene catch ist kein Zierrat. `zustellen` in
+        // lib/builtin-slot-handover schluckt stumm, damit ein Zuhoerer den
+        // Steckplatzwechsel nicht mitreisst, und der Rueckweg gleich darunter
+        // hat sein log.warn. Ohne dieses hier haette ein Wurf auf DIESEM Weg
+        // gar keine Zeile hinterlassen, und das war er vor dem Umbau am
+        // 04.09.2026 nicht: lib/builtin-slot-eviction hat an derselben Stelle
+        // '[builtin-slot] could not drop the pick of the displaced engine'
+        // geschrieben. Eine Faehigkeit, die beim Umbau leise verschwindet,
+        // faellt erst beim Kunden auf, und dann ohne Spur.
+        try {
+          announceChatPickLostItsEngine(gewaehlt, taker)
+        } catch (e) {
+          log.warn('[modelStore] could not say that the pick lost its engine', { err: e })
+        }
+      },
+
+      reviveBuiltinEngineForActivePick: async () => {
+        try {
+          const gewaehlt = get().activeModel
+          if (!gewaehlt) return
+          // Der Nutzer hat die Engine in den Einstellungen ausgeschaltet. Der
+          // Steckplatz gehoert ihr wieder, aber niemand hat sie zurueckgebeten.
+          // Gefragt wird zum Zustellzeitpunkt, nicht bei der Ansage.
+          if (builtinSlotSwitchedOff()) return
+          await ensureBuiltinEngineAlive(gewaehlt)
+          log.info('[modelStore] the engine has the local slot again, brought its model back')
+        } catch (e) {
+          // Kein Grund, den Steckplatzwechsel scheitern zu lassen. Der
+          // Absendeweg versucht dasselbe noch einmal, sobald jemand schreibt.
+          log.warn('[modelStore] could not bring the engine back', { err: e })
+        }
+      },
     }),
     {
       name: 'chat-models',
@@ -344,4 +426,23 @@ export const useModelStore = create<ModelState>()(
 // registerBuiltinTools() sich beim Tool-Registry anmeldet.
 onProviderSlotsDarkened((darkened) => {
   for (const id of darkened) useModelStore.getState().dropActiveModelIfServedBy(id)
+})
+
+// Audit W-T2, zweite Runde: lib/builtin-slot-eviction hat sich diesen Store mit
+// `await import('../stores/modelStore')` selbst geholt, und diese eine Kante
+// trug drei der fuenf Kreise, die `npm run cycles` gemeldet hat. Dieselbe
+// Umkehr wie oben, dieselbe Stelle: die Regel kennt den Steckplatz, dieser
+// Store kennt die Wahl, und die Leitung dazwischen (lib/builtin-slot-handover)
+// gehoert keinem von beiden.
+//
+// Die Ladereihenfolge traegt das. Beide Webviews haben diesen Store eager im
+// Baum, bevor sich ein Steckplatz bewegen kann (main.tsx laedt AppShell im
+// Hauptfenster, OnboardingWindow im kleinen Fenster, und beide ziehen ihn),
+// und der Rumpf hier laeuft garantiert NACH dem der Eviction, weil diese Datei
+// ueber api/engine auf sie zeigt und nicht umgekehrt.
+onBuiltinSlotLostToForeignBackend((taker) => {
+  useModelStore.getState().dropPickServedByTheBuiltinEngine(taker)
+})
+onBuiltinSlotRegained(() => {
+  void useModelStore.getState().reviveBuiltinEngineForActivePick()
 })

@@ -133,10 +133,15 @@ describe('THE FIX: the engine that loses the slot lets go of its model', () => {
     await vi.advanceTimersByTimeAsync(0)
     expect(backendCall).toHaveBeenCalledWith('stop_bundled_engine')
     // Enable auf der Standby-Karte, spaeter Remove: der Steckplatz ist wieder
-    // unserer, und die Engine wird geholt statt liegen gelassen.
+    // unserer, und die Engine wird geholt statt liegen gelassen. Getan wird das
+    // seit dem Aufloesen der Ladekreise im Modell-Store, angesagt wird es hier
+    // (lib/builtin-slot-handover); der Rueckweg selbst haengt an
+    // die-leitung-oeffnet-den-kreis.test.ts, das ensureBuiltinEngineAlive mit
+    // der stehenden Wahl misst statt den Quelltext zu lesen.
     const evict = read('src/lib/builtin-slot-eviction.ts')
-    expect(evict).toContain('void bringEngineBack()')
-    expect(evict).toContain('ensureBuiltinEngineAlive(gewaehlt)')
+    expect(evict).toContain('announceBuiltinSlotRegained()')
+    const store = read('src/stores/modelStore.ts')
+    expect(store).toContain('await ensureBuiltinEngineAlive(gewaehlt)')
   })
 
   it('der Rueckweg wird nur nach einer WIRKLICH gelaufenen Freigabe gegangen', () => {

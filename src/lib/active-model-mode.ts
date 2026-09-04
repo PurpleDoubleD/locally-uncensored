@@ -100,9 +100,9 @@ export function pickForMode(
  * Grenze dieser Regel: der Satz nennt beide Namen, und ohne den alten gibt es
  * keinen Satz. Der Fall, in dem die Wahl vorher schon geraeumt wurde, weil ein
  * fremdes Backend den lokalen Steckplatz uebernommen hat, wird deshalb dort
- * angesagt, wo der alte Name noch dasteht: in `dropDisplacedEnginePick`
- * (lib/builtin-slot-eviction), im selben Zug wie das Raeumen. Wer ihn hier
- * einzufangen versucht, kommt immer zu spaet.
+ * angesagt, wo der alte Name noch dasteht: in
+ * `dropPickServedByTheBuiltinEngine` (stores/modelStore), im selben Zug wie das
+ * Raeumen. Wer ihn hier einzufangen versucht, kommt immer zu spaet.
  */
 export function replacedBehindTheUsersBack(
   activeModel: string | null,
