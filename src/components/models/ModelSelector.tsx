@@ -31,7 +31,7 @@ import {
   LM_STUDIO_LOAD_BUSY_NOTE, announceLmStudioLoadBusy,
   handBackChatProviderForRow, announceChatProviderSwitch, standbyBackendOf,
 } from '../../api/lu-engine-switch'
-import { tryAcquireLuEngineSwap, releaseLuEngineSwap, luEngineSwapInFlight } from '../../api/lu-engine-swap-lock'
+import { tryAcquireLuEngineSwap, releaseLuEngineSwap, luEngineSwapInFlight, useLuEngineSwapRunning } from '../../api/lu-engine-swap-lock'
 import { ModelPickerSkeleton } from '../layout/ViewSkeletons'
 import type { AIModel } from '../../types/models'
 import { MOTION_S } from '../ui/motion'
@@ -1067,8 +1067,17 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
   // Ein Wechsel laeuft, solange der Waehler einen fuehrt oder das Backend
   // eines meldet. Beides faerbt den Punkt und dreht den Ring, damit der Name
   // im Knopf nie ohne Vorbehalt dasteht, wenn er noch nicht bedient.
-  const wechselLaeuft = isModelLoading || imWechselZu !== null
+  // Der Riegel kommt dazu, weil `imWechselZu` nur Kliks in DIESEM Menue kennt
+  // und mit dem Bauteil stirbt. Nachpruefung G3, 04.09.2026: der Knopf nennt
+  // das angeklickte Modell nach 15 bis 29 ms, die Engine haelt es erst nach
+  // 16,7 bis 19,3 s. Das ist Absicht, der Knopf nennt die Wahl. Nur muss dann
+  // auch dranstehen, dass sie noch nicht bedient, und zwar auch dann, wenn der
+  // Klick von der Models-Kachel kam oder der Nutzer zwischendurch den Reiter
+  // gewechselt hat.
   const gezeigtesModell = imWechselZu ?? activeModel
+  const swapLaeuft = useLuEngineSwapRunning()
+  const wechselLaeuft = isModelLoading || imWechselZu !== null
+    || (swapLaeuft && getProviderIdFromModel(gezeigtesModell ?? '') === 'openai')
   const gezeigtesObj = models.find((m) => m.name === gezeigtesModell)
   const activeDisplayName = gezeigtesModell
     ? (gezeigtesObj && 'displayName' in gezeigtesObj && gezeigtesObj.displayName) ||

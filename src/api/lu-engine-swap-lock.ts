@@ -35,6 +35,8 @@
  * but that wait covers a cold GGUF load, while this only has to cover the UI
  * call handing the work over.
  */
+import { useEffect, useState } from 'react'
+
 export const LU_ENGINE_SWAP_LOCK_MS = 60_000
 
 const KEY = '__lu_engine_swap_lock__'
@@ -53,6 +55,33 @@ function bolt(): Bolt {
 /** Test-only: open the bolt and forget any deadline. */
 export function __resetLuEngineSwapLockForTests(): void {
   delete (globalThis as unknown as Record<string, unknown>)[KEY]
+}
+
+/** Wie oft die Oberflaeche nachsieht, ob der Riegel noch steht. */
+export const SWAP_WATCH_MS = 500
+
+/**
+ * Derselbe Riegel, aber als Zustand, auf den eine Ansicht reagieren kann.
+ *
+ * Der Riegel ist gewoehnlicher Modulzustand, niemand kann ihn abonnieren, also
+ * wird er abgetastet. Ein halbe Sekunde reicht: was er anzeigt, dauert
+ * sechzehn bis zwanzig.
+ *
+ * Gebraucht wird das, weil die Ladeanzeige am Waehlerknopf bis zur
+ * Nachpruefung G3 an seinem EIGENEN Zustand hing. Der kennt nur Kliks in
+ * diesem Menue und stirbt mit dem Bauteil. Wer die Kachel auf der
+ * Models-Seite benutzt oder waehrend des Ladens den Reiter wechselt, sah einen
+ * blanken Namen ueber einem Port, hinter dem noch nichts das genannte Modell
+ * haelt. Der Riegel dagegen wird genommen, bevor der Swap beginnt, gilt fuer
+ * jede Tuer und ueberlebt jedes Neuzeichnen.
+ */
+export function useLuEngineSwapRunning(): boolean {
+  const [laeuft, setLaeuft] = useState(luEngineSwapInFlight)
+  useEffect(() => {
+    const id = setInterval(() => setLaeuft(luEngineSwapInFlight()), SWAP_WATCH_MS)
+    return () => clearInterval(id)
+  }, [])
+  return laeuft
 }
 
 /** True while a swap started anywhere in the app is still running. */
