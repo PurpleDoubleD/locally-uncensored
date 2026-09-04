@@ -72,3 +72,36 @@ describe('die Zeile, die stehen bleibt', () => {
     expect(BAR).toContain('dismiss()')
   })
 })
+
+/**
+ * Zweiter Teil, aus der Nachpruefung G3 am 04.09.2026.
+ *
+ * Das Schliessen beim Fehlschlag sitzt. Was blieb: wer das Menue WIEDER
+ * aufmacht, um ein anderes Modell zu suchen, legt es ueber die Zeile, die ihm
+ * gerade erklaert hat, was schiefging. Gemessen 45,8 Prozent der Bannerflaeche
+ * unter dem Menue, also nicht besser als die 43 Prozent von vorher.
+ *
+ * Die Zeile liegt jetzt oben. Sie deckt dabei ihre eigenen 47 Pixel vom
+ * unteren Rand des Menues ab, und das ist der guenstigere Tausch: das Menue
+ * laesst sich rollen, die Zeile war nicht zu retten.
+ */
+describe('die stehende Zeile liegt ueber dem offenen Menue', () => {
+  const BAR = readFileSync(resolve(__dirname, '..', '..', 'chat', 'LuEngineSwitchBar.tsx'), 'utf8')
+
+  it('traegt eine hoehere Ebene als der Waehler', () => {
+    // Der Waehler klappt mit z-50 auf.
+    expect(SRC).toContain('z-50')
+    // Am ELEMENT, nicht irgendwo im Text: ein Kommentar, der die Regel
+    // erklaert, hat den ersten Anlauf dieses Tests gruen gehalten, nachdem
+    // ich die Regel selbst herausgenommen hatte.
+    const wurzel = BAR.slice(BAR.indexOf('<div role="status"'), BAR.indexOf('>', BAR.indexOf('<div role="status"')) + 1)
+    expect(wurzel).toContain('relative z-[60]')
+  })
+
+  it('ist dicht, sonst scheint die Modelliste durch den Text', () => {
+    expect(BAR).toContain('lu-elevated')
+    // Die alte, halbdurchsichtige Flaeche steht nicht mehr da.
+    expect(BAR).not.toContain('bg-red-500/10')
+    expect(BAR).not.toContain('bg-white/5')
+  })
+})

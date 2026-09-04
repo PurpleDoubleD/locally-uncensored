@@ -100,3 +100,42 @@ describe('verdrahtet', () => {
     expect(String(ENGINE_DEFAULT_CTX)).toBe('8192')
   })
 })
+
+/**
+ * Nachpruefung G3, 04.09.2026: der Wert 8192 stand noch an sieben Stellen in
+ * DREI Schreibweisen. `8k` klein war weg, aber im Chat las der Kunde `82/8K`
+ * auf dem Schirm und bekam beim Verweilen mit der Maus auf genau derselben
+ * Zahl `Context: 82 / 8,192 tokens`. Zwei Schreibweisen fuer einen Wert, auf
+ * einem Bildschirm, eine unter dem Mauszeiger der anderen.
+ *
+ * Die drei Stellen in den Einstellungen bleiben rohe Zahlen, und das ist kein
+ * Versehen: daneben steht ein Eingabefeld, in das man 8192 tippt und nicht
+ * 8K. Ein Bildschirm, eine Sprache. Der Chat spricht kurz, die Expertenseite
+ * spricht in Zahlen.
+ */
+describe('der Chat spricht auf beiden Wegen dieselbe Sprache', () => {
+  it('die Kurzform ist es, die in den Tooltip gehoert', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const { fileURLToPath } = await import('node:url')
+    const { dirname, resolve } = await import('node:path')
+    const quelle = await readFile(
+      resolve(dirname(fileURLToPath(import.meta.url)), '../../components/chat/TokenCounter.tsx'),
+      'utf8',
+    )
+    // Der Tooltip und die sichtbare Zeile fassen dieselben zwei Zahlen an.
+    const tooltip = quelle.slice(quelle.indexOf('const title ='), quelle.indexOf('const title =') + 900)
+    expect(tooltip).not.toContain('formatCount(')
+    expect(tooltip).toContain('formatK(usedTokens)')
+    expect(tooltip).toContain('formatK(maxTokens)')
+    // Und die sichtbare Zeile nimmt dieselbe Funktion.
+    expect(quelle).toContain('{formatK(usedTokens)}/{formatK(maxTokens)}')
+  })
+
+  it('formatContextWindow und die sichtbare Zeile liefern denselben Text', () => {
+    for (const n of [512, 4096, 8192, 16384, 32768, 131072]) {
+      const kurz = formatContextWindow(n)
+      expect(kurz).not.toContain(',')
+      expect(kurz.toUpperCase()).toBe(kurz)
+    }
+  })
+})

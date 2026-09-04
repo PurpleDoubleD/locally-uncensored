@@ -111,9 +111,14 @@ async function openInstalled() {
  *  Und seit der Gegenprobe G1 steht er in ZWEI Feldern, Kopf und Quant, damit
  *  die Kuerzung in der Mitte greift und `@q4_k_m` und `@q8_0` nicht gleich
  *  aussehen. Deshalb wird ueber das title-Feld gesucht, das den ganzen Namen
- *  traegt, statt ueber einen Text, den kein einzelnes Feld mehr ganz hat. */
+ *  traegt, statt ueber einen Text, den kein einzelnes Feld mehr ganz hat.
+ *
+ *  Seit der Nachpruefung G3 am 04.09.2026 traegt auch das title-Feld den
+ *  ANZEIGENAMEN. Der Tester hat `openai::` dort an neun Kacheln unter dem
+ *  Mauszeiger gefunden, und die Zusage sagt nirgends. Also wird hier mit
+ *  demselben Namen gesucht, den der Kunde sieht. */
 function nameRow(name: string): HTMLElement {
-  const el = document.querySelector(`span[title="${name}"]`)
+  const el = document.querySelector(`span[title="${displayModelName(name)}"]`)
   if (!el) throw new Error(`keine Namenszeile fuer ${name}`)
   return el as HTMLElement
 }
@@ -209,8 +214,12 @@ describe('the Use button the 2.6.8 notes promise on the Installed tile', () => {
     expect(document.body.textContent).not.toContain('openai::')
     // Gegenprobe zur Gegenprobe: der Name ist wirklich da, nur ohne Praefix.
     expect(document.body.textContent).toContain('Phi-4-mini-instruct-Q4_K_M')
-    // Und der volle Name bleibt fuer einen Fehlerbericht erreichbar.
+    // Auch nicht unter dem Mauszeiger: das title-Feld traegt denselben Namen
+    // wie der sichtbare Text (Nachpruefung G3, 04.09.2026).
     expect(nameRow(ACTIVE).textContent).toBe(displayModelName(ACTIVE))
+    const titel = Array.from(document.querySelectorAll('[title]'))
+      .map((e) => e.getAttribute('title') ?? '')
+    expect(titel.filter((t) => t.includes('openai::'))).toEqual([])
   })
 
   // NEGATIVE CONTROL: the button is a door into the same house, so it obeys

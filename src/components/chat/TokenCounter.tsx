@@ -5,7 +5,7 @@ import { useSendSizeStore } from '../../stores/sendSizeStore'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { shouldAutoCompact, autoCompactHint } from '../../lib/compact-trigger'
 import { newestCompaction, isModelVisible } from '../../lib/run-compact-command'
-import { formatCount, formatContextWindow } from '../../lib/formatters'
+import { formatContextWindow } from '../../lib/formatters'
 
 export function TokenCounter() {
   const activeConversationId = useChatStore((s) => s.activeConversationId)
@@ -85,14 +85,19 @@ export function TokenCounter() {
         ? 'LU Engine loaded context'
         : 'model context'
   const capped = ctx.sendWindow > 0 && ctx.contextWindow > ctx.sendWindow
+  // Dieselbe Schreibweise wie die sichtbare Zeile darunter. Bis zur
+  // Nachpruefung G3 am 04.09.2026 stand hier `formatCount`, also las der Kunde
+  // `82/8K` auf dem Schirm und bekam beim Verweilen mit der Maus auf DERSELBEN
+  // Zahl `82 / 8,192 tokens`. Zwei Schreibweisen fuer denselben Wert, auf
+  // einem Bildschirm, eine davon unter dem Mauszeiger der anderen.
   const capNote = capped
-    ? `. Capped: a step sends at most ${formatCount(maxTokens)} of this model's ${formatCount(ctx.contextWindow)} tokens (Settings, send window), and tool results older than the newest step go out shortened`
+    ? `. Capped: a step sends at most ${formatK(maxTokens)} of this model's ${formatK(ctx.contextWindow)} tokens (Settings, send window), and tool results older than the newest step go out shortened`
     : ''
   const title = fill.source === 'built'
-    ? `Last request: ${formatCount(usedTokens)} / ${formatCount(maxTokens)} tokens, the size of the payload actually built for the last step, tool catalog, decay and compaction included${capNote}`
+    ? `Last request: ${formatK(usedTokens)} / ${formatK(maxTokens)} tokens, the size of the payload actually built for the last step, tool catalog, decay and compaction included${capNote}`
     : isReal
-      ? `Context: ${formatCount(usedTokens)} / ${formatCount(maxTokens)} tokens (${source}), anchored on the model's last reported usage (includes system prompt + tools + RAG); reasoning tokens are not context and aren't counted${capNote}`
-      : `Estimated: ${formatCount(usedTokens)} / ${formatCount(maxTokens)} tokens (${source}), estimate until the model reports real usage${capNote}`
+      ? `Context: ${formatK(usedTokens)} / ${formatK(maxTokens)} tokens (${source}), anchored on the model's last reported usage (includes system prompt + tools + RAG); reasoning tokens are not context and aren't counted${capNote}`
+      : `Estimated: ${formatK(usedTokens)} / ${formatK(maxTokens)} tokens (${source}), estimate until the model reports real usage${capNote}`
 
   // ── Wie weit ist es noch bis zur automatischen Kompaktierung ────────────
   //

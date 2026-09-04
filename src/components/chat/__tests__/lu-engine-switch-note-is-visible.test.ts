@@ -250,9 +250,15 @@ describe('the bar is wired into every surface that can trigger it', () => {
   // NEGATIVE CONTROL: the sentence must not be written into the dropdown any
   // more. Leaving a second copy there is how the two versions drift apart, and
   // the dropdown copy is the one that is never read.
+  // Geaendert am 04.09.2026 nach der Nachpruefung G3: der blanke Aufruf hatte
+  // keinen Halt und lief auf der Zwoelf-Sekunden-Uhr ab, waehrend der Wechsel
+  // 16,4 s brauchte. Die Ansage steckt jetzt in `announceLuEngineSwitch`, das
+  // die Zeile am Riegel festhaelt, solange der Swap laeuft. Der Test pruefen
+  // weiter dasselbe: die Zeile wird nicht mehr in das Menue gemalt, das sich
+  // beim Klick schliesst, sondern in die stehende Leiste.
   it('is no longer drawn inside the dropdown that closes on the pick', async () => {
     const src = await read('../../models/ModelSelector.tsx')
     expect(src).not.toContain('setSwitchNote')
-    expect(src).toContain('useLuEngineSwitchStore.getState().announce(LU_ENGINE_SWITCH_NOTE)')
+    expect(src).toContain('announceLuEngineSwitch()')
   })
 })

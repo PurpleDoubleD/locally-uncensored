@@ -1,6 +1,7 @@
 import { useBenchmarkStore, getLatestSpeed, getLeaderboard } from '../../stores/benchmarkStore'
 import { useBenchmark } from '../../hooks/useBenchmark'
 import { Zap, Play, Square, Trophy } from 'lucide-react'
+import { displayModelName } from '../../api/providers/registry'
 
 interface Props {
   modelName: string
@@ -77,7 +78,7 @@ export function BenchmarkLeaderboard() {
               <span className="t-micro text-gray-500 w-4 text-right font-mono">{i + 1}.</span>
               <div className="flex-1 min-w-0">
                 <div className="flex items-center justify-between mb-0.5">
-                  <span className="t-micro text-gray-300 truncate">{entry.model}</span>
+                  <span className="t-micro text-gray-300 truncate" title={displayModelName(entry.model)}>{displayModelName(entry.model)}</span>
                   <span className="text-[0.55rem] text-gray-400 lu-hud-num shrink-0 ml-2">{entry.avgTps} t/s</span>
                 </div>
                 <div className="w-full h-1 rounded-full bg-white/5 overflow-hidden">

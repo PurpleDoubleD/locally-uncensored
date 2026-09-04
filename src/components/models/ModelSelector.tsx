@@ -25,13 +25,13 @@ import { splitBackendSwitchRows, needsBackendSwitchHeading, foldedRowsSentence }
 import { isBuiltinEngineEntry, type InstalledModelLike } from '../../lib/lmstudio-match'
 import type { HandoverSlot } from '../../lib/openai-slot-handover'
 import {
-  ensureLuEngineIsChatProvider, LU_ENGINE_SWITCH_NOTE, LU_ENGINE_SWAP_BUSY_NOTE,
+  ensureLuEngineIsChatProvider, announceLuEngineSwitch, LU_ENGINE_SWAP_BUSY_NOTE,
+  clearEngineErrorAfterSuccess,
   announceLuEngineSwapBusy, announceLuEngineStartFailure,
   LM_STUDIO_LOAD_BUSY_NOTE, announceLmStudioLoadBusy,
   handBackChatProviderForRow, announceChatProviderSwitch, standbyBackendOf,
 } from '../../api/lu-engine-switch'
 import { tryAcquireLuEngineSwap, releaseLuEngineSwap, luEngineSwapInFlight } from '../../api/lu-engine-swap-lock'
-import { useLuEngineSwitchStore } from '../../stores/luEngineSwitchStore'
 import { ModelPickerSkeleton } from '../layout/ViewSkeletons'
 import type { AIModel } from '../../types/models'
 import { MOTION_S } from '../ui/motion'
@@ -913,7 +913,7 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
         // close on success and the error banner on failure (A14 review 2).
         switched = ensureLuEngineIsChatProvider()
         if (switched) {
-          useLuEngineSwitchStore.getState().announce(LU_ENGINE_SWITCH_NOTE)
+          announceLuEngineSwitch()
         }
         // Die Wahl steht SOFORT, nicht erst wenn die Engine bedient. Die
         // Kachel macht das laengst so, der Waehler schrieb sie erst hinter
@@ -935,6 +935,7 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
         // Keine unserer GGUFs: die gewoehnliche Aktivierung ueber den Wrapper
         // holt nach, was dieser Weg nicht kann.
         if (!swapped) setActiveModel(model.name)
+        clearEngineErrorAfterSuccess()
         setOpen(false)
       } catch (e) {
         // Und zurueck, wenn nichts daraus wurde. Ohne das stuende die Wahl

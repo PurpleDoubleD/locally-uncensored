@@ -22,6 +22,9 @@ import { create } from 'zustand'
  *  message. An error line is not on this clock, see announce(). */
 export const LU_ENGINE_SWITCH_NOTE_MS = 12_000
 
+/** Wie oft nachgesehen wird, ob eine gehaltene Zeile inzwischen stimmt. */
+export const HOLD_CHECK_MS = 1_000
+
 /**
  * How the line is drawn. 'info' is the switch itself, which is not an alarm:
  * the user asked for it by picking the model. 'error' is a start that failed
@@ -81,15 +84,33 @@ export const useLuEngineSwitchStore = create<LuEngineSwitchState>((set, get) => 
     // back to look found the same nothing that made him click twice in the
     // first place. `holdWhile` keeps such a line standing for as long as its
     // condition holds, and it then clears on the normal clock afterwards.
-    const arm = () => {
+    //
+    // Der Halt lief frueher auf derselben Zwoelf-Sekunden-Uhr weiter: er sah
+    // erst beim naechsten Schlag nach, ob die Zeile inzwischen stimmt. Damit
+    // frass er die Lesezeit auf. Ein Halt, der bei 16,4 s endete, wurde erst
+    // bei 24 s wieder angesehen, die Zeile stand also nur 7,6 s nach ihrer
+    // eigenen Wahrheit, und ein Halt, der kurz vor einem Schlag endet, haette
+    // fast keine uebrig gelassen. Das ist derselbe Fehler, gegen den der Halt
+    // gebaut wurde, eine Nummer kleiner (Nachpruefung G3, 04.09.2026). Jetzt
+    // wird in kurzen Schritten nachgesehen, und die Lesezeit beginnt bei null,
+    // wenn die Zeile wahr geworden ist.
+    const wartenAufWahrheit = () => {
       pending = setTimeout(() => {
         pending = null
         if (get().generation !== generation) return
-        if (holdWhile?.()) { arm(); return }
+        if (holdWhile?.()) { wartenAufWahrheit(); return }
+        lesenLassen()
+      }, HOLD_CHECK_MS)
+    }
+    const lesenLassen = () => {
+      pending = setTimeout(() => {
+        pending = null
+        if (get().generation !== generation) return
         set({ note: null, tone: 'info' })
       }, LU_ENGINE_SWITCH_NOTE_MS)
     }
-    arm()
+    if (holdWhile?.()) wartenAufWahrheit()
+    else lesenLassen()
   },
   dismiss: () => {
     cancelPending()

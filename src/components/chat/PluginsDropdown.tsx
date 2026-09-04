@@ -7,6 +7,7 @@ import { useModelStore } from '../../stores/modelStore'
 import { useToolSupport } from '../../hooks/useToolSupport'
 import { GROUP_CHAT_MAX, isGroupChat, groupChatCandidates } from '../../lib/group-chat'
 import type { CavemanMode } from '../../types/settings'
+import { displayModelName } from '../../api/providers/registry'
 
 const CAVEMAN_MODES: { value: CavemanMode; label: string; desc: string }[] = [
   { value: 'off', label: 'Off', desc: 'Normal responses' },
@@ -310,7 +311,7 @@ export function PluginsDropdown({
                         }`}
                       >
                         {on && <div className="w-1 h-1 rounded-full bg-purple-400 shrink-0" />}
-                        <span className="text-[0.55rem] font-medium truncate">{m.name}</span>
+                        <span className="text-[0.55rem] font-medium truncate" title={displayModelName(m.name)}>{displayModelName(m.name)}</span>
                       </button>
                     )
                   })}

@@ -64,7 +64,7 @@ vi.mock('../../api/engine', async () => {
 const { useModels } = await import('../useModels')
 const { useModelStore } = await import('../../stores/modelStore')
 const { useProviderStore } = await import('../../stores/providerStore')
-const { useLuEngineSwitchStore, LU_ENGINE_SWITCH_NOTE_MS } = await import('../../stores/luEngineSwitchStore')
+const { useLuEngineSwitchStore, LU_ENGINE_SWITCH_NOTE_MS, HOLD_CHECK_MS } = await import('../../stores/luEngineSwitchStore')
 const { LU_ENGINE_SWAP_BUSY_NOTE } = await import('../../api/lu-engine-switch')
 const { __resetLuEngineSwapLockForTests } = await import('../../api/lu-engine-swap-lock')
 
@@ -141,8 +141,15 @@ describe('two LU Engine tiles clicked 150 ms apart', () => {
 
     // NEGATIVE CONTROL in the same frame: it is a hold, not a line that never
     // goes away. Once the swap is done it clears on the normal clock.
+    //
+    // Geaendert 04.09.2026: die Uhr laeuft jetzt AB dem Ende des Halts, nicht
+    // im Zwoelf-Sekunden-Raster darueber hinweg. Der Nutzer bekommt seine
+    // volle Lesezeit, nachdem die Zeile wahr geworden ist, also dauert das
+    // Raeumen hier eine Nachsehrunde laenger. Genau darum geht der Fix.
     await act(async () => { release(true); await Promise.resolve(); await Promise.resolve() })
-    await act(async () => { await vi.advanceTimersByTimeAsync(LU_ENGINE_SWITCH_NOTE_MS + 100) })
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(HOLD_CHECK_MS + LU_ENGINE_SWITCH_NOTE_MS + 100)
+    })
     expect(useLuEngineSwitchStore.getState().note, 'the line never left').toBeNull()
   })
 

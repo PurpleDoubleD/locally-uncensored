@@ -5,6 +5,7 @@ import { useABCompare } from '../../hooks/useABCompare'
 import { MarkdownRenderer } from './MarkdownRenderer'
 import { stripModelNoise } from '../../lib/strip-model-noise'
 import { ArrowLeft, Send, Square, Zap, Clock, Hash } from 'lucide-react'
+import { displayModelName } from '../../api/providers/registry'
 
 export function ABCompare() {
   const {
@@ -78,7 +79,7 @@ export function ABCompare() {
           >
             <option value="">Model A</option>
             {textModels.map(m => (
-              <option key={m.name} value={m.name}>{m.name}</option>
+              <option key={m.name} value={m.name}>{displayModelName(m.name)}</option>
             ))}
           </select>
           <span className="t-micro text-gray-500 font-bold">VS</span>
@@ -89,7 +90,7 @@ export function ABCompare() {
           >
             <option value="">Model B</option>
             {textModels.map(m => (
-              <option key={m.name} value={m.name}>{m.name}</option>
+              <option key={m.name} value={m.name}>{displayModelName(m.name)}</option>
             ))}
           </select>
         </div>

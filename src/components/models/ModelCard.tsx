@@ -84,10 +84,15 @@ export function ModelCard({ model, isActive, onSelect, onDelete, onInfo, canDele
           Ohne das `openai::` davor: das ist unser Steckplatzname, kein Name,
           den ein Kunde je gewaehlt hat. Persona P5, 03./04.09.2026: "Fuer
           einen Kunden, der LU Engine benutzt und mit OpenAI nichts zu tun
-          hat, ist das verwirrend." Der volle Name bleibt im title, denn ein
-          Fehlerbericht braucht ihn. */}
+          hat, ist das verwirrend."
+
+          Auch nicht im title. Da stand er bis zur Nachpruefung G3 am
+          04.09.2026, mit der Begruendung, ein Fehlerbericht brauche ihn. Der
+          Tester hat ihn dort an neun Kacheln gefunden, und die Zusage sagt
+          nirgends. Fuer den Fehlerbericht steht der volle Name im Log, wo er
+          hingehoert, und nicht unter dem Mauszeiger eines Kunden. */}
       <span
-        title={model.name}
+        title={displayModelName(model.name)}
         className="flex-1 min-w-0 flex text-[0.7rem] text-gray-800 dark:text-gray-200 font-medium"
       >
         {/* Gekuerzt wird in der MITTE. Gegenprobe G1, 04.09.2026: am Ende

@@ -6,6 +6,7 @@ import {
   useBenchmarkStore, getLatestSpeed, getLeaderboard,
   toMarkdownReport, unbenchmarked, staleModels,
 } from '../../stores/benchmarkStore'
+import { displayModelName } from '../../api/providers/registry'
 import { useBenchmark } from '../../hooks/useBenchmark'
 
 export function BenchmarkView() {
@@ -154,7 +155,7 @@ export function BenchmarkView() {
                     </span>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center justify-between mb-1">
-                        <span className="text-[0.7rem] text-gray-800 dark:text-gray-200 truncate font-medium">{entry.model}</span>
+                        <span className="text-[0.7rem] text-gray-800 dark:text-gray-200 truncate font-medium" title={displayModelName(entry.model)}>{displayModelName(entry.model)}</span>
                         <span className="t-micro text-gray-600 dark:text-gray-400 font-mono shrink-0 ml-2 flex items-center gap-1">
                           <Zap size={10} className="text-amber-400" />
                           <span title="Useful throughput: the average rate multiplied by how often the answer was right. This is what the board is ordered by.">
@@ -233,7 +234,7 @@ export function BenchmarkView() {
                 className="flex items-center justify-between px-3 py-2 rounded-lg hover:bg-gray-100 dark:hover:bg-white/[0.03] border border-transparent hover:border-gray-200 dark:hover:border-white/5 transition-colors"
               >
                 <div className="flex items-center gap-2 min-w-0">
-                  <span className="text-[0.7rem] text-gray-800 dark:text-gray-200 truncate">{model.name}</span>
+                  <span className="text-[0.7rem] text-gray-800 dark:text-gray-200 truncate" title={displayModelName(model.name)}>{displayModelName(model.name)}</span>
                   {latestSpeed !== null && (
                     <span className="text-[0.55rem] text-gray-500 font-mono flex items-center gap-0.5 shrink-0" title="Most recent benchmark run">
                       <Zap size={9} className="text-amber-400" />

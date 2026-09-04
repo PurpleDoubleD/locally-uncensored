@@ -28,8 +28,7 @@ import { diagnoseBuiltinEngine } from '../../api/builtin-ensure'
 import type { InstalledModelLike } from '../../lib/lmstudio-match'
 import { findInstalledForDiscoverModel } from '../../lib/discover-installed'
 import { isBuiltinEngineEntry } from '../../lib/lmstudio-match'
-import { ensureLuEngineIsChatProvider, LU_ENGINE_SWITCH_NOTE } from '../../api/lu-engine-switch'
-import { useLuEngineSwitchStore } from '../../stores/luEngineSwitchStore'
+import { ensureLuEngineIsChatProvider, announceLuEngineSwitch } from '../../api/lu-engine-switch'
 import { LuEngineSwitchBar } from '../chat/LuEngineSwitchBar'
 import { resolveTextDownloadTarget } from '../../lib/text-download-target'
 import { hfUrlToOllamaRef, hfUrlToLmStudioSubdir, parseHfUrl, extractGgufQuant, isShardedOrIncompatibleGguf } from '../../lib/hf-to-provider'
@@ -417,7 +416,7 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
         // is not ours, so the old order would repair nothing and then activate
         // a model no request routes to.
         if (ensureLuEngineIsChatProvider()) {
-          useLuEngineSwitchStore.getState().announce(LU_ENGINE_SWITCH_NOTE)
+          announceLuEngineSwitch()
         }
         const diagnosis = await diagnoseBuiltinEngine({ repair: true, preferModel: name })
         if (!diagnosis.ok && diagnosis.reason) setInstallError(diagnosis.reason)

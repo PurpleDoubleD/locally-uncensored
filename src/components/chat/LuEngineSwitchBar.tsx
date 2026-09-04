@@ -19,21 +19,35 @@ export function LuEngineSwitchBar() {
   // A failed start after the slot has already been handed over is the one
   // thing here the user has to act on, so it does not get the quiet grey the
   // switch itself gets.
+  // Nur noch Kante und Schrift. Die Flaeche kommt aus `lu-elevated`, damit die
+  // Zeile in beiden Modi dicht ist und nichts durchscheint.
   const skin = tone === 'error'
-    ? 'bg-red-500/10 border-red-500/30 text-red-700 dark:text-red-300'
-    : 'bg-white/5 border-white/10 text-gray-600 dark:text-gray-300'
+    ? 'border-red-500/40 text-red-700 dark:text-red-300'
+    : 'text-gray-600 dark:text-gray-300'
   // The live region stays MOUNTED and its text changes, which is the only
   // shape a screen reader actually announces: a region that appears at the
   // same moment as its content is usually read as page furniture and skipped.
   // Polite, not assertive, because nothing went wrong and the user is in the
   // middle of picking a model.
+  // `relative z-[60]` und die eigene volle Flaeche darunter, weil der offene
+  // Modellwaehler `z-50` traegt und nach oben aufklappt. Nachpruefung G3,
+  // 04.09.2026: das Menue lag ueber 45,8 Prozent dieser Zeile, gemessen mit
+  // getBoundingClientRect. Der Klick, der den Fehler ausloest, schliesst das
+  // Menue laengst von selbst (das war der Fix davor), aber wer es wieder
+  // aufmacht, um ein anderes Modell zu suchen, hat den Grund unter dem Menue
+  // liegen. Jetzt liegt die Zeile oben, und sie deckt vom Menue nur ihre
+  // eigenen 47 Pixel ab, die sich wegrollen lassen.
+  //
+  // Die Flaeche muss dicht sein. Mit der alten, zu zehn Prozent gedeckten
+  // Tinte schien die Modelliste durch den Text hindurch, und lesbar waere die
+  // Zeile dann auch im Vordergrund nicht.
   return (
-    <div role="status" aria-live="polite">
+    <div role="status" aria-live="polite" className="relative z-[60]">
       {note && (
         <div
           data-testid="lu-engine-switch-note"
           data-tone={tone}
-          className={`mx-3 mb-1.5 flex items-start gap-2 px-2 py-1 rounded-md border t-micro ${skin}`}
+          className={`lu-elevated mx-3 mb-1.5 flex items-start gap-2 px-2 py-1 rounded-md t-micro ${skin}`}
         >
           <span className="flex-1 leading-snug">{note}</span>
           <button

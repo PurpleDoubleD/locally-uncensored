@@ -21,6 +21,7 @@ import { diagnoseBuiltinEngine, readBuiltinSlotStatus } from '../../api/builtin-
 import { useBuiltinEngineStatus } from '../../hooks/useBuiltinEngineStatus'
 import { reachVerdict, liveSlotStatus, type SlotStatus } from '../../lib/builtin-slot-status'
 import type { ProviderId, ProviderConfig } from '../../api/providers/types'
+import { disabledSlotNote } from '../../lib/disabled-slot-note'
 
 const isTauri = typeof window !== 'undefined' && !!window.__TAURI_INTERNALS__
 
@@ -453,7 +454,7 @@ export function ProviderSettings() {
                 </button>
               </div>
               <p className="px-2 pb-1.5 text-[0.55rem] text-gray-600 leading-snug">
-                Switched off, so its models are not offered in the chat model picker. Press Enable to use it again.
+                {disabledSlotNote(config?.managed === true)}
               </p>
             </div>
           )

@@ -223,11 +223,56 @@ export const CHAT_PROVIDER_SWITCH_HOLD_MS = 45_000
  * sodass der Nutzer sie liest, wenn sie zutrifft.
  */
 export function announceChatProviderSwitch(name: string, modelName: string): void {
-  const frist = Date.now() + CHAT_PROVIDER_SWITCH_HOLD_MS
   useLuEngineSwitchStore.getState().announce(
     chatProviderSwitchNote(name), 'info',
-    () => Date.now() < frist && useModelStore.getState().activeModel !== modelName,
+    haltenBis(() => useModelStore.getState().activeModel !== modelName),
   )
+}
+
+/**
+ * Eine Zeile halten, solange sie noch nicht stimmt, aber nicht ewig.
+ *
+ * Die Frist wird beim Ansagen festgelegt, nicht bei jeder Abfrage, sonst
+ * verschiebt sie sich mit jedem Blick und die Zeile bliebe fuer immer stehen.
+ */
+function haltenBis(pruefung: () => boolean): () => boolean {
+  const frist = Date.now() + CHAT_PROVIDER_SWITCH_HOLD_MS
+  return () => Date.now() < frist && pruefung()
+}
+
+/**
+ * Den Wechsel auf die LU Engine ansagen, und zwar so lange, bis er stimmt.
+ *
+ * Nachpruefung G3, 04.09.2026, zweimal am echten Build gemessen: der Satz kam
+ * nach 15 bzw. 18 ms, ging nach 12,3 s, und wahr wurde er erst nach 16,4 bzw.
+ * 16,8 s. Also verschwand er rund vier Sekunden BEVOR er zutraf. Der Grund war
+ * dieselbe Zwoelf-Sekunden-Uhr, die `announceChatProviderSwitch` schon einmal
+ * zu frueh eingeholt hat, nur auf dem anderen Weg.
+ *
+ * Was hier die Wahrheit sagt, ist der Riegel: er wird genommen, bevor der Swap
+ * beginnt, und erst freigegeben, wenn `activateBuiltinModel` zurueck ist. Die
+ * Wahl im Store taugt dafuer NICHT, die steht schon nach Millisekunden.
+ */
+export function announceLuEngineSwitch(): void {
+  useLuEngineSwitchStore.getState().announce(
+    LU_ENGINE_SWITCH_NOTE, 'info', haltenBis(luEngineSwapInFlight),
+  )
+}
+
+/**
+ * Eine stehende Fehlerzeile raeumen, weil der Nutzer sich daraus befreit hat.
+ *
+ * Eine Fehlerzeile hat absichtlich keine Uhr: sie verlangt eine Handlung, und
+ * eine Zeile, die vor der Handlung weggeht, hat ihre Aufgabe verfehlt. Nur
+ * hatte sie danach auch keinen Ausgang ausser dem x. Die Nachpruefung G3 hat
+ * am 04.09.2026 ein Banner ueber zwoelf Minuten stehen sehen, ueber jeden
+ * Ansichtswechsel hinweg, lange nachdem der Nutzer laengst ein gesundes Modell
+ * gewaehlt hatte. Ein geglueckter Start IST die verlangte Handlung, also
+ * raeumt er sie weg. Eine Info-Zeile bleibt unberuehrt, die hat ihre eigene Uhr.
+ */
+export function clearEngineErrorAfterSuccess(): void {
+  const zustand = useLuEngineSwitchStore.getState()
+  if (zustand.tone === 'error' && zustand.note) zustand.dismiss()
 }
 
 /**

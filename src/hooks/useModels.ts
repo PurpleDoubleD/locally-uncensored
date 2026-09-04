@@ -20,13 +20,13 @@ import { dropDuplicateLuEngineRows, dropStandbyRowsServedByLuEngine, LU_ENGINE_G
 import { isLmStudioEntry } from '../lib/lmstudio-match'
 import { isBuiltinEngineEntry, type InstalledModelLike } from '../lib/lmstudio-match'
 import {
-  ensureLuEngineIsChatProvider, LU_ENGINE_SWITCH_NOTE, LU_ENGINE_FILE_GONE,
+  ensureLuEngineIsChatProvider, announceLuEngineSwitch, LU_ENGINE_FILE_GONE,
+  clearEngineErrorAfterSuccess,
   announceLuEngineSwapBusy, announceLuEngineStartFailure,
   standbyChatBackend, listStandbyBackendModels, handBackChatProviderForRow,
   announceChatProviderSwitch,
 } from '../api/lu-engine-switch'
 import { tryAcquireLuEngineSwap, releaseLuEngineSwap } from '../api/lu-engine-swap-lock'
-import { useLuEngineSwitchStore } from '../stores/luEngineSwitchStore'
 import { useModelStore } from '../stores/modelStore'
 import { errorText } from '../types/json-guards'
 import { useProviderStore } from '../stores/providerStore'
@@ -640,7 +640,7 @@ export function useModels() {
         return Promise.resolve()
       }
       switched = ensureLuEngineIsChatProvider()
-      if (switched) useLuEngineSwitchStore.getState().announce(LU_ENGINE_SWITCH_NOTE)
+      if (switched) announceLuEngineSwitch()
     }
     // Was vorher bediente. Die Auswahl wird gesetzt, BEVOR die Engine laeuft,
     // damit die Kachel sofort reagiert; scheitert der Start, muss sie wieder
@@ -666,7 +666,10 @@ export function useModels() {
       return activateBuiltinModel(name)
         // False is not a shrug: the path could not be resolved even after a
         // refresh, so the row stands for a file that is no longer there.
-        .then((swapped) => { if (!swapped && isLuRow) sayItFailed(LU_ENGINE_FILE_GONE) })
+        .then((swapped) => {
+          if (!swapped && isLuRow) sayItFailed(LU_ENGINE_FILE_GONE)
+          else clearEngineErrorAfterSuccess()
+        })
         // Not an LU row: some other model in the openai slot, and the engine
         // has nothing to say about it. Unchanged, non-critical.
         .catch((e) => { if (isLuRow) sayItFailed(e) })
