@@ -1,7 +1,5 @@
 import type { OllamaModel, PullProgress } from "../types/models"
-import type { ToolCall, ToolDefinition } from "./providers/types"
 import { ollamaUrl, localFetch, localFetchStream, isTauri } from "./backend"
-import type { OllamaWireToolCall } from "./providers/wire"
 import { isRecord, prop, asString, asStringArray, asRecordArray } from "./providers/wire"
 import { log } from "../lib/logger"
 
@@ -129,96 +127,6 @@ export async function warmupOllamaContext(model: string, numCtx: number): Promis
       body: JSON.stringify({ model, prompt: "", stream: false, keep_alive: "30m", options: { num_ctx: numCtx } }),
     })
   } catch { /* best-effort warmup — non-fatal */ }
-}
-
-export async function chatStream(
-  model: string,
-  messages: { role: string; content: string }[],
-  options: { temperature?: number; top_p?: number; top_k?: number; num_predict?: number } = {},
-  signal?: AbortSignal
-): Promise<Response> {
-  // v2.4.6 Bug L: dropped hardcoded `num_gpu: 99`. Old code forced ALL layers
-  // onto the GPU regardless of free VRAM, which on 8 GB laptop cards (e.g.
-  // 4070 laptop + gemma3:4b) pushed the KV cache out into system RAM and
-  // dropped chat throughput from 30 tok/s (ollama CLI auto-detect) to 6.9
-  // tok/s in LU (nightmare13740 Discord 2026-05-18). Letting Ollama do its
-  // own layer/VRAM decision restores parity with the CLI on tight cards
-  // and is a no-op on cards with headroom (Ollama already maxes layers
-  // when it can fit them).
-  const opts = { ...options }
-  // The caller's AbortSignal used to stop at this function: it was accepted
-  // and then never handed to the transport, so Stop left the HTTP request
-  // (and Ollama's generation behind it) running to completion.
-  const res = await localFetchStream(ollamaUrl("/chat"), {
-    method: "POST",
-    body: JSON.stringify({ model, messages, options: opts, stream: true }),
-    signal,
-  })
-  if (!res.ok) throw new Error("Failed to start chat")
-  return res
-}
-
-// Agent Mode: chat with tool calling support
-export async function chatStreamWithTools(
-  model: string,
-  messages: { role: string; content: string; tool_calls?: ToolCall[] }[],
-  tools: ToolDefinition[],
-  options: { temperature?: number; top_p?: number; top_k?: number; num_predict?: number } = {},
-  signal?: AbortSignal
-): Promise<Response> {
-  // v2.4.6 Bug L: see chatStream() above — same num_gpu:99 removal.
-  const opts = { ...options }
-  // Same dropped AbortSignal as chatStream() above.
-  const res = await localFetchStream(ollamaUrl("/chat"), {
-    method: "POST",
-    body: JSON.stringify({ model, messages, tools, options: opts, stream: true }),
-    signal,
-  })
-  if (!res.ok) {
-    // Try to extract Ollama's error message
-    try {
-      const errorData = await res.json()
-      throw new Error(errorData.error || "Failed to start agent chat")
-    } catch (e) {
-      if (e instanceof Error && e.message !== "Failed to start agent chat") throw e
-      throw new Error("Failed to start agent chat")
-    }
-  }
-  return res
-}
-
-// Agent Mode: non-streaming tool call (more reliable for detecting tool calls)
-export async function chatWithTools(
-  model: string,
-  messages: { role: string; content: string; tool_calls?: ToolCall[] }[],
-  tools: ToolDefinition[],
-  options: { temperature?: number; top_p?: number; top_k?: number; num_predict?: number } = {},
-): Promise<{ content: string; tool_calls?: OllamaWireToolCall[] }> {
-  // v2.4.6 Bug L: see chatStream() above — same num_gpu:99 removal.
-  const res = await localFetch(ollamaUrl("/chat"), {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ model, messages, tools, options: { ...options }, stream: false }),
-  })
-  if (!res.ok) {
-    try {
-      const errorData = await res.json()
-      throw new Error(errorData.error || "Failed to start agent chat")
-    } catch (e) {
-      if (e instanceof Error && e.message !== "Failed to start agent chat") throw e
-      throw new Error("Failed to start agent chat")
-    }
-  }
-  const data: unknown = await res.json()
-  // Foreign body: read `message.content` / `message.tool_calls` through the
-  // boundary helpers rather than trusting the optional-chain to have found
-  // the shape it was written for.
-  const message = prop(data, 'message')
-  const toolCalls = prop(message, 'tool_calls')
-  return {
-    content: asString(prop(message, 'content')) || '',
-    tool_calls: Array.isArray(toolCalls) ? (toolCalls as OllamaWireToolCall[]) : undefined,
-  }
 }
 
 export async function pullModel(name: string, signal?: AbortSignal): Promise<Response> {
