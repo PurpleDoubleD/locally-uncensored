@@ -7,7 +7,7 @@ import { useDownloadStore } from '../../stores/downloadStore'
 import { isPermanentDownloadError } from '../../api/discover'
 import { useMlxInstallStore } from '../../stores/mlxInstallStore'
 import { isMlxImageHost } from '../../api/mlx-image'
-import { formatBytes } from '../../lib/formatters'
+import { formatBytes, countLabel } from '../../lib/formatters'
 import { trayAfterPulse, TRAY_CLOSED, NO_PULSE } from '../../lib/download-tray'
 
 function ProgressBar({ progress }: { progress: number }) {
@@ -244,15 +244,15 @@ export function DownloadBadge() {
                           <button onClick={() => retryable.forEach(f => useDownloadStore.getState().retry(f.id))} className="p-0.5 rounded hover:bg-red-500/20 text-red-400 hover:text-red-300 transition-colors" title="Retry failed"><RotateCcw size={11} /></button>
                         )}
                         {allComplete ? (
-                          <button onClick={() => files.forEach(f => useDownloadStore.getState().dismiss(f.id))} className="p-0.5 rounded hover:bg-white/10 text-gray-500 hover:text-gray-300 transition-colors" title="Dismiss"><X size={11} /></button>
+                          <button onClick={() => files.forEach(f => useDownloadStore.getState().dismiss(f.id))} className="p-0.5 rounded hover:bg-white/10 text-gray-500 hover:text-gray-300 transition-colors" title={files.length === 1 ? 'Dismiss' : 'Dismiss all'}><X size={11} /></button>
                         ) : (
-                          <button onClick={() => files.forEach(f => useDownloadStore.getState().cancel(f.id))} className="p-0.5 rounded hover:bg-white/10 text-gray-500 hover:text-gray-300 transition-colors" title="Cancel all"><X size={11} /></button>
+                          <button onClick={() => files.forEach(f => useDownloadStore.getState().cancel(f.id))} className="p-0.5 rounded hover:bg-white/10 text-gray-500 hover:text-gray-300 transition-colors" title={files.length === 1 ? 'Cancel' : 'Cancel all'}><X size={11} /></button>
                         )}
                       </div>
                     </div>
 
                     {allComplete ? (
-                      <div className="flex items-center gap-1.5 text-green-400"><CheckCircle size={11} /><span className="text-[0.65rem]">Complete ({files.length} files)</span></div>
+                      <div className="flex items-center gap-1.5 text-green-400"><CheckCircle size={11} /><span className="text-[0.65rem]">Complete ({countLabel(files.length, 'file')})</span></div>
                     ) : (
                       <>
                         {totalBytes > 0 && <ProgressBar progress={bundleProg} />}

@@ -85,3 +85,15 @@ export function formatContextWindow(n: number): string {
   if (n < 1024) return String(n)
   return `${(n / 1024).toFixed(1)}K`
 }
+
+/**
+ * "1 files" ist kein Satz.
+ *
+ * Gegenprobe G2, 04.09.2026: die Bildmodell-Kacheln auf der Models-Seite
+ * zeigten "1 files", auch bei genau einer Datei, und das X ueber einem
+ * einzelnen Download hiess "Cancel all". Beides sind Stellen, an denen die
+ * Anzahl VOR dem Wort steht und niemand hingesehen hat.
+ */
+export function countLabel(n: number, one: string, many = `${one}s`): string {
+  return `${formatCount(n)} ${n === 1 ? one : many}`
+}

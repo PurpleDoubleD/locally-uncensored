@@ -10,7 +10,7 @@ import {
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import type { DiscoverModel, DownloadProgress, ModelBundle } from '../../api/discover'
-import { formatBytes } from '../../lib/formatters'
+import { formatBytes, countLabel } from '../../lib/formatters'
 import { bundleVramNeedGb } from '../../lib/hardware'
 import { modelTileAction } from '../../lib/model-tile-action'
 import { ICON_SM } from '../ui/icon-size'
@@ -571,7 +571,7 @@ export function BundleTile({ bundle, vramGb, complete, downloading, hasErrors, o
 
       <div className="flex items-center gap-2 mt-2.5 min-h-[var(--control-h-sm)]">
         <SizePill sizeGB={bundle.totalSizeGB} />
-        <span className="text-[0.55rem] text-gray-400 dark:text-gray-500">{bundle.files.length} files</span>
+        <span className="text-[0.55rem] text-gray-400 dark:text-gray-500">{countLabel(bundle.files.length, 'file')}</span>
         <FitHint fit={fit} />
 
         <div className="flex items-center gap-1 shrink-0 ml-auto">
@@ -608,7 +608,7 @@ export function BundleTile({ bundle, vramGb, complete, downloading, hasErrors, o
             <button
               onClick={onInstall}
               className={TILE_ACTION}
-              title={`Install all ${bundle.files.length} files (${bundle.totalSizeGB} GB)`}
+              title={`Install ${countLabel(bundle.files.length, 'file')} (${bundle.totalSizeGB} GB)`}
             >
               <Download size={ICON_SM} /> Get · {bundle.totalSizeGB} GB
             </button>

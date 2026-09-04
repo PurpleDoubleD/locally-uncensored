@@ -37,7 +37,7 @@ import { GlassCard } from '../ui/GlassCard'
 import { GlowButton } from '../ui/GlowButton'
 import { ProgressBar } from '../ui/ProgressBar'
 import { Modal } from '../ui/Modal'
-import { formatBytes } from '../../lib/formatters'
+import { formatBytes, countLabel } from '../../lib/formatters'
 import type { ModelCategory } from '../../types/models'
 import { proxyImageUrl } from '../../lib/privacy'
 import { log } from '../../lib/logger'
@@ -808,9 +808,9 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
           // Abbruch) oder das Ende der Ansicht. Keiner davon ist ein Fehler,
           // und keiner darf spaeter noch eine Engine hochfahren.
           if (outcome === 'paused') {
-            setInstallNotice(`Download paused. The LU Engine keeps the model it is running. Resume ${f.filename} to finish the switch.`)
+            setInstallNotice(`Download paused, so the chat model was not switched. Resume ${f.filename} to finish it.`)
           } else if (outcome === 'cancelled') {
-            setInstallNotice('Download cancelled. The LU Engine keeps the model it is running.')
+            setInstallNotice('Download cancelled, so the chat model was not switched.')
           }
           return
         }
@@ -1259,7 +1259,7 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
           <div className="space-y-3">
             <p className="text-[12px] text-gray-700 dark:text-gray-200">
               <span className="font-semibold text-gray-900 dark:text-white">{confirmDownload.name}</span> is split into{' '}
-              <span className="font-semibold text-gray-900 dark:text-white">{confirmDownload.files.length} files</span>{' '}
+              <span className="font-semibold text-gray-900 dark:text-white">{countLabel(confirmDownload.files.length, 'file')}</span>{' '}
               totalling <span className="font-semibold text-gray-900 dark:text-white">{confirmDownload.totalGB} GB</span>.
             </p>
             <p className="text-[0.7rem] text-gray-500">
