@@ -172,6 +172,70 @@ describe('beide Einsatzorte sind wirklich verdrahtet', () => {
   })
 })
 
+describe('die Mitte des Rades ist die Mitte der Leiste', () => {
+  // David, 04.09.2026: „der ist viel zu weit links ... das ausgewaehlte im
+  // drehrad ist immer hardstuck mittig. keine ausnahme."
+  //
+  // Das Rad zentriert seinen aktiven Eintrag in SEINER SPUR. Ob diese Spur in
+  // der Leiste mittig sitzt, ist eine Frage des Aufrufers, und genau dort war
+  // der Fehler: die Kopfzeile war ein Raster `auto | 1fr | auto`, und die
+  // Mitte der mittleren Spalte liegt nur dann auf der Mitte der Leiste, wenn
+  // die beiden Aussenspalten gleich breit sind. Sie waren es nie (links rund
+  // 62px, rechts rund 150px), also stand das Rad rund 44px zu weit links.
+  //
+  // Geprueft wird die Bauweise, nicht die Pixel: vitest laeuft hier ohne
+  // Fenster, jede Pixelzahl waere eine Behauptung. Die Zahlen stehen in den
+  // Kommentaren der beiden Dateien.
+  const lies = (p: string) => readFileSync(resolve(__dirname, '..', '..', p), 'utf8')
+  const ohneKommentare = (src: string) =>
+    src.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/^[ \t]*\/\/.*$/gm, ' ')
+
+  it('die Kopfzeile ist kein Raster mit ungleichen Aussenspalten mehr', () => {
+    const src = ohneKommentare(lies('layout/Header.tsx'))
+    expect(src).not.toContain('grid-cols-[auto_1fr_auto]')
+  })
+
+  it('die Navigation haengt an der echten Mitte der Leiste', () => {
+    const src = ohneKommentare(lies('layout/Header.tsx'))
+    // Der Anker muss auch da sein, sonst haengt die absolute Position am
+    // naechsten positionierten Vorfahren irgendwo weiter oben.
+    expect(src).toMatch(/<header className="relative /)
+    const nav = src.slice(src.indexOf('<nav'), src.indexOf('</nav>'))
+    expect(nav).toContain('absolute')
+    expect(nav).toContain('left-1/2')
+    expect(nav).toContain('-translate-x-1/2')
+  })
+
+  it('die leere Flaeche neben dem Rad schluckt keine Klicks', () => {
+    // Unterhalb von `lg` ist die Huelle breiter als das Kebab darin und liegt
+    // ueber dem Hell-Dunkel-Schalter. Ohne diese Zeile waere die harte Mitte
+    // mit einem toten Schalter bezahlt.
+    const src = ohneKommentare(lies('layout/Header.tsx'))
+    const nav = src.slice(src.indexOf('<nav'), src.indexOf('</nav>'))
+    expect(nav).toContain('pointer-events-none')
+    expect(nav).toContain('[&>*]:pointer-events-auto')
+  })
+
+  it('nichts anderes teilt sich die Mitte mit dem Rad', () => {
+    // Der Stale-Hinweis stand in dieser Gruppe und schob das Rad zur Seite,
+    // sobald er auftauchte. „Keine Ausnahme" heisst auch: keine Ausnahme,
+    // wenn ein Modell kaputt ist.
+    const src = ohneKommentare(lies('layout/Header.tsx'))
+    const nav = src.slice(src.indexOf('<nav'), src.indexOf('</nav>'))
+    expect(nav).not.toContain('staleError')
+  })
+
+  it('die Create-Leiste zentriert ihr Rad ebenso hart', () => {
+    // Dort steht nichts neben dem Rad, deshalb reicht der zentrierte
+    // Blockkasten. Ein Deckel muss trotzdem sein, sonst stuenden alle zwoelf
+    // Werkzeuge nebeneinander und der Klick bewegte nichts.
+    const src = ohneKommentare(lies('create/experimental/IntentBar.tsx'))
+    const ruf = src.slice(src.indexOf('<WheelNav'), src.indexOf('>', src.indexOf('reihenClass')))
+    expect(ruf).toContain('mx-auto')
+    expect(ruf).toMatch(/max-w-\[\d+rem\]/)
+  })
+})
+
 describe('wann die Fahrt weich ist und wann nicht', () => {
   // jsdom hat kein Layout: `clientWidth` ist ueberall null, also bliebe das
   // Polster null und der Effekt stiege sofort wieder aus. Eine gestellte

@@ -90,10 +90,23 @@ export function IntentBar() {
       // 12px = ICON_SM, 12px Label -> 9px).
       className="px-3 py-[1.5px] [--text-control:9px]"
     >
+      {/* David, 04.09.2026: „das selbe bei create tab ... hard in der mitte."
+          `mx-auto` auf einem Blockkasten setzt seine Mitte auf die Mitte des
+          umgebenden Kastens, und zwar unabhaengig davon, was sonst in der
+          Leiste steht. Die Kopfzeile braucht dafuer eine absolute Position,
+          weil dort links und rechts etwas NEBEN dem Rad steht; hier steht
+          nichts daneben, und dann ist der zentrierte Blockkasten die
+          einfachere Fassung derselben Zusage.
+
+          62rem und nicht die volle Breite: fuenf Nachbarn je Seite sind elf
+          Pillen, gemessen rund 979px. Ohne Deckel stuenden im breiten Fenster
+          alle zwoelf nebeneinander, ein Klick bewegte nichts, und der Verlauf
+          waere Dekoration statt Orientierung. */}
       <WheelNav
         activeIndex={intents.findIndex((m) => m.id === intent)}
         radius={5}
         reihenClass="gap-x-[3px]"
+        className="mx-auto w-full max-w-[62rem]"
       >
       {intents.map((meta) => {
         const locked = isIntentLocked(meta, backend, mlxHost)
