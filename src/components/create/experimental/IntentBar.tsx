@@ -10,14 +10,14 @@ import { WheelNav } from '../../ui/WheelNav'
 // Jede Pille traegt ihre Beschriftung, immer. Bis 2.6.7 stand hier ein
 // `max-width`-Aufklappen: nur die AKTIVE Pille zeigte ihren Namen, die
 // uebrigen elf standen auf einer Maximalbreite von null, Deckkraft null und
-// ohne waagerechtes Polster — die Hauptnavigation des ganzen Create-Bereichs
+// ohne waagerechtes Polster, die Hauptnavigation des ganzen Create-Bereichs
 // war eine Reihe unbeschrifteter Icons, deren Namen nur der Hover-Tooltip
 // verriet. Die kurzen Namen lagen dabei fertig im Datenmodell (`short` in
 // intents.ts) und wurden von niemandem gelesen.
 //
 // (Die drei Utilities stehen hier bewusst ausgeschrieben statt als
 // Klassennamen: Tailwind scannt diese Datei als Text und haette aus der
-// Erklaerung wieder Regeln im ausgelieferten Bundle gemacht — siehe
+// Erklaerung wieder Regeln im ausgelieferten Bundle gemacht, siehe
 // keine-klasse-aus-prosa.test.ts, der genau das gefangen hat.)
 //
 // Gemessen am 01.09.2026 im laufenden Fenster (Chromium 149, 1280x800,
@@ -48,7 +48,7 @@ import { WheelNav } from '../../ui/WheelNav'
 // dorthin. Kein Ueberlauf, kein abgeschnittener Text, keine springende
 // Hoehe.
 //
-// Der volle Name bleibt in `title`/`aria-label` — „Edit" auf der Pille,
+// Der volle Name bleibt in `title` und `aria-label`. „Edit" auf der Pille,
 // „Edit / Image to Image" fuer Hover und Screenreader.
 //
 // Die aktive Pille hebt sich weiter ueber Flaeche, Rand und Schriftfarbe ab
@@ -63,7 +63,7 @@ export function IntentBar() {
   const backend = useCreateStore((s) => s.backend)
   const setCloudTeaser = useUIStore((s) => s.setCloudTeaser)
   // Every tool is always in the bar. The 2.5.8 lanes with hasLocalLane
-  // (lipsync / music / extend / motion) are REAL local tabs — plain selectable
+  // (lipsync / music / extend / motion) are REAL local tabs, plain selectable
   // pills with NO cloud glyph (David 2026-07-19: the top row only carries a
   // cloud badge for the genuinely hosted-only tools). Only upscale, eraser and
   // character training (cloudOnly, no local backend) render as locked,
@@ -79,7 +79,7 @@ export function IntentBar() {
     <div
       role="radiogroup"
       aria-label="Create mode"
-      // Bis 2.6.7 stand hier `transform: scale(0.763)` — eine dritte
+      // Bis 2.6.7 stand hier `transform: scale(0.763)`, eine dritte
       // Skalierungsschicht neben dem 18,4px-Wurzelmass und dem `zoom: 1.25`
       // der Sidebar. `transform` skaliert nur das BILD: die Leiste belegte
       // weiter ihre ungeschrumpfte Layoutbreite (gemessen 1084,7px fuer eine
@@ -98,15 +98,18 @@ export function IntentBar() {
           nichts daneben, und dann ist der zentrierte Blockkasten die
           einfachere Fassung derselben Zusage.
 
-          62rem und nicht die volle Breite: fuenf Nachbarn je Seite sind elf
-          Pillen, gemessen rund 979px. Ohne Deckel stuenden im breiten Fenster
-          alle zwoelf nebeneinander, ein Klick bewegte nichts, und der Verlauf
-          waere Dekoration statt Orientierung. */}
+          52rem und nicht die volle Breite, und die Zahl ist in LAYOUT-Pixeln
+          gerechnet, nicht in gerenderten. Genau daran ist der Deckel vorher
+          gescheitert: die 1068px im Kopf dieser Datei sind bei --ui-scale 1,15
+          gemessen, in Layout-Pixeln sind es 928,7. Der alte Deckel von 62rem
+          (992px) lag also UEBER der Breite aller zwoelf Pillen und tat das
+          Gegenteil dessen, was der Kommentar versprach. 52rem sind 832px und
+          damit ein echter Ausschnitt: rund elf der zwoelf Pillen. */}
       <WheelNav
         activeIndex={intents.findIndex((m) => m.id === intent)}
         radius={5}
         reihenClass="gap-x-[3px]"
-        className="mx-auto w-full max-w-[62rem]"
+        className="mx-auto w-full max-w-[52rem]"
       >
       {intents.map((meta) => {
         const locked = isIntentLocked(meta, backend, mlxHost)

@@ -629,24 +629,28 @@ button:not(:disabled) {
    das Rad zeigen soll, und dahinter faengt die geschlossene Reihe an, sich zu
    wiederholen. Ohne den Verlauf stuende dort ein zweites Mal dasselbe Wort.
 
-   12 Prozent je Seite: bei einer 416px breiten Kopfleiste sind das rund 50px,
-   also knapp ein Reiter. Genug, um den Nachbarn dahinter verschwinden zu
-   lassen, zu wenig, um den aeussersten sichtbaren Eintrag unlesbar zu machen.
+   64px je Seite und ausdruecklich KEIN Prozentwert. Dieselbe Regel bedient
+   zwei verschieden breite Spuren: 416px in der Kopfzeile, 832px in der
+   Create-Leiste. Ein Prozentwert waere dort doppelt so breit wie hier,
+   obwohl die Pillen dieselbe Groesse haben, und der Verlauf haette in der
+   einen Leiste eine andere Bedeutung als in der anderen. 64px decken in
+   beiden ungefaehr einen Eintrag: genug, damit die Stelle, an der die Walze
+   sich wiederholt, angeschnitten und nicht als Fehler gelesen wird.
    Der Verlauf liegt UEBER der Deckkraft aus dem Bauteil, beide multiplizieren
    sich. */
 .lu-wheel-maske {
   -webkit-mask-image: linear-gradient(
     to right,
     transparent 0,
-    #000 12%,
-    #000 88%,
+    #000 64px,
+    #000 calc(100% - 64px),
     transparent 100%
   );
   mask-image: linear-gradient(
     to right,
     transparent 0,
-    #000 12%,
-    #000 88%,
+    #000 64px,
+    #000 calc(100% - 64px),
     transparent 100%
   );
 }
