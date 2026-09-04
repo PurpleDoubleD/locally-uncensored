@@ -621,6 +621,36 @@ button:not(:disabled) {
   height: 0;
 }
 
+/* Die Kante des Drehrads loest sich auf, statt abgeschnitten zu werden.
+   (David, 04.09.2026: "links und rechts sollen immer gleich viele optionen
+   sein ... hard in der mitte mit nettem effekt minimalstic.")
+
+   Das ist nicht nur Schmuck. Die Spur ist breiter als die 2r+1 Felder, die
+   das Rad zeigen soll, und dahinter faengt die geschlossene Reihe an, sich zu
+   wiederholen. Ohne den Verlauf stuende dort ein zweites Mal dasselbe Wort.
+
+   12 Prozent je Seite: bei einer 416px breiten Kopfleiste sind das rund 50px,
+   also knapp ein Reiter. Genug, um den Nachbarn dahinter verschwinden zu
+   lassen, zu wenig, um den aeussersten sichtbaren Eintrag unlesbar zu machen.
+   Der Verlauf liegt UEBER der Deckkraft aus dem Bauteil, beide multiplizieren
+   sich. */
+.lu-wheel-maske {
+  -webkit-mask-image: linear-gradient(
+    to right,
+    transparent 0,
+    #000 12%,
+    #000 88%,
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    to right,
+    transparent 0,
+    #000 12%,
+    #000 88%,
+    transparent 100%
+  );
+}
+
 /* Global scrollbar (David 2026-06-02): every scrollable surface — not only
    .scrollbar-thin containers — gets the themed scrollbar so the bare white
    Windows/WebView2 default never shows (it was visible on the coding file-tree

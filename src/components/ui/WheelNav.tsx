@@ -1,15 +1,42 @@
-import { Children, useEffect, useLayoutEffect, useRef, useState } from 'react'
-import type { ReactNode } from 'react'
+import { Children, cloneElement, isValidElement, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import type { ReactElement, ReactNode } from 'react'
 import { MOTION_MS } from './motion'
 
 /**
- * Das Scrollrad: eine Reihe, deren aktiver Eintrag IMMER in der Mitte steht
- * und deren Nachbarn nach aussen blasser werden.
+ * Das Drehrad: eine RUNDE Reihe, deren aktiver Eintrag IMMER in der Mitte
+ * steht und die zu beiden Seiten immer gleich viele Nachbarn zeigt.
  *
  * David, 03.09.2026: „3 Optionen zur linken und 3 zur rechten sollen immer
  * blasser werden und bei Anklicken drauf scrollen mit smooth Effekt und dann
- * klar deutlich zu lesen sein." Fuer Chat/Create/Benchmark im Kopf mit drei
- * Nachbarn je Seite, fuer die zwoelf Create-Werkzeuge mit fuenf.
+ * klar deutlich zu lesen sein." Fuer Chat/Create/Benchmark im Kopf, fuer die
+ * zwoelf Create-Werkzeuge mit fuenf je Seite.
+ *
+ * David, 04.09.2026: „links und rechts sollen immer gleich viele optionen sein
+ * nicht alles nach links und alles nach rechts wenn man durch klickt."
+ *
+ * ## Warum die erste Fassung das nicht konnte
+ *
+ * Sie war eine GERADE Liste. Beim ersten Eintrag stand links nichts und rechts
+ * alles, beim letzten umgekehrt. Ein Rad, das an zwei Stellen anschlaegt, ist
+ * kein Rad, sondern ein Schieberegler mit Verlauf. Die Symmetrie war nur in
+ * der Mitte der Liste zufaellig da.
+ *
+ * Jetzt wird die Liste geschlossen: vor den ersten Eintrag kommen die LETZTEN
+ * `radius`, hinter den letzten die ERSTEN `radius`. Damit hat jeder Eintrag zu
+ * beiden Seiten mindestens `radius` Nachbarn, ohne Ausnahme, auch der erste und
+ * der letzte. Die angehaengten Kopien sind dieselben Kinder und tragen deshalb
+ * denselben Klick: wer links neben „Chat" auf „Settings" klickt, landet auf
+ * Settings.
+ *
+ * ## Warum der Radius gedeckelt wird
+ *
+ * Ein Rad kann hoechstens so viele Nachbarn je Seite zeigen, wie es hat, ohne
+ * dasselbe Wort zweimal zu zeigen. Bei sechs Eintraegen sind das zwei je Seite:
+ * bei dreien waeren der dritte links und der dritte rechts derselbe Eintrag.
+ * Deshalb `min(radius, floor((n - 1) / 2))`. Die zwoelf Create-Werkzeuge
+ * behalten damit ihre fuenf, die sechs Kopfziele bekommen zwei statt der
+ * gewuenschten drei. Zwei echte Nachbarn sind besser als drei, von denen einer
+ * doppelt dasteht.
  *
  * ## Warum eine Scrollflaeche und keine Verschiebung
  *
@@ -55,6 +82,19 @@ export function deckkraft(d: number, radius: number): number {
   return Math.max(WHEEL_BODEN, 1 - (d * (1 - WHEEL_BODEN)) / radius)
 }
 
+/**
+ * Wie viele Nachbarn je Seite ein Rad mit `n` Eintraegen wirklich zeigen kann.
+ *
+ * Hoechstens so viele, dass der aeusserste links und der aeusserste rechts
+ * nicht derselbe Eintrag sind. Bei sechs Eintraegen sind das zwei: bei dreien
+ * waere der dritte links der dritte rechts. Ein Rad mit weniger als drei
+ * Eintraegen hat keine Nachbarn zu zeigen.
+ */
+export function sichtbarerRadius(gewuenscht: number, n: number): number {
+  if (n < 3) return 0
+  return Math.max(0, Math.min(gewuenscht, Math.floor((n - 1) / 2)))
+}
+
 /** Ob das Betriebssystem um weniger Bewegung gebeten hat. */
 function wenigerBewegung(): boolean {
   return (
@@ -82,6 +122,28 @@ export function WheelNav({ activeIndex, radius, reihenClass, className, children
   const [polster, setPolster] = useState(0)
 
   const kinder = Children.toArray(children)
+  const n = kinder.length
+  const r = sichtbarerRadius(radius, n)
+
+  // Die geschlossene Reihe: die letzten `r` vorn, die ersten `r` hinten. Der
+  // aktive Eintrag sitzt damit immer bei `r + activeIndex`, und links wie
+  // rechts von ihm stehen mindestens `r` Nachbarn.
+  //
+  // `activeIndex` kann -1 sein (in der Kopfzeile, solange kein Ziel aktiv ist).
+  // Dann gibt es keine Mitte, und die Reihe steht am Anfang, statt eine zu
+  // erfinden.
+  const hatMitte = activeIndex >= 0 && activeIndex < n
+  const zielIndex = hatMitte ? r + activeIndex : 0
+
+  type Feld = { kind: ReactNode; key: string; kopie: boolean }
+  const felder: Feld[] = []
+  if (r > 0) {
+    for (let i = n - r; i < n; i++) felder.push({ kind: kinder[i], key: `vor-${i}`, kopie: true })
+  }
+  for (let i = 0; i < n; i++) felder.push({ kind: kinder[i], key: `echt-${i}`, kopie: false })
+  if (r > 0) {
+    for (let i = 0; i < r; i++) felder.push({ kind: kinder[i], key: `nach-${i}`, kopie: true })
+  }
 
   // Halbe Spurbreite als Polster, und bei jeder Groessenaenderung neu.
   useLayoutEffect(() => {
@@ -110,7 +172,7 @@ export function WheelNav({ activeIndex, radius, reihenClass, className, children
   // hat.
   useEffect(() => {
     const spur = spurRef.current
-    const ziel = feldRefs.current[activeIndex]
+    const ziel = feldRefs.current[zielIndex]
     if (!spur || !ziel || polster === 0) return
     const links = ziel.offsetLeft - (spur.clientWidth - ziel.clientWidth) / 2
     spur.scrollTo({
@@ -118,28 +180,44 @@ export function WheelNav({ activeIndex, radius, reihenClass, className, children
       behavior: schonPlatziert.current && !wenigerBewegung() ? 'smooth' : 'auto',
     })
     schonPlatziert.current = true
-  }, [activeIndex, polster, kinder.length])
+  }, [zielIndex, polster, felder.length])
 
   return (
     <div
       ref={spurRef}
       data-testid="wheel-nav"
-      className={`relative overflow-x-auto lu-wheel-track min-w-0 ${className ?? ''}`}
+      data-wheel-radius={r}
+      // Die Kante loest sich auf, statt abgeschnitten zu werden. Das ist nicht
+      // nur Schmuck: die Spur ist meist breiter als die `2r+1` Felder, die das
+      // Rad zeigen soll, und dahinter faengt die geschlossene Reihe an sich zu
+      // wiederholen. Ohne den Verlauf blitzte dort ein zweites Mal dasselbe
+      // Wort auf.
+      className={`relative overflow-x-auto lu-wheel-track lu-wheel-maske min-w-0 ${className ?? ''}`}
     >
       <div
         className={`flex items-center w-max ${reihenClass ?? ''}`}
         style={{ paddingLeft: polster, paddingRight: polster }}
       >
-        {kinder.map((kind, i) => {
-          const d = Math.abs(i - activeIndex)
+        {felder.map((feld, i) => {
+          const d = hatMitte ? Math.abs(i - zielIndex) : r
+          // Eine Kopie ist fuer die Maus dasselbe Ziel wie das Original, fuer
+          // Tastatur und Screenreader aber nicht: sonst haette jedes Ziel
+          // mehrere Tab-Stationen und wuerde mehrfach vorgelesen.
+          const kind = feld.kopie && isValidElement(feld.kind)
+            ? cloneElement(feld.kind as ReactElement<{ tabIndex?: number; 'aria-hidden'?: boolean }>, {
+                tabIndex: -1,
+                'aria-hidden': true,
+              })
+            : feld.kind
           return (
             <div
-              key={i}
+              key={feld.key}
               ref={(el) => { feldRefs.current[i] = el }}
               data-wheel-distance={d}
+              data-wheel-kopie={feld.kopie ? '1' : undefined}
               className="shrink-0"
               style={{
-                opacity: deckkraft(d, radius),
+                opacity: deckkraft(d, r),
                 transition: `opacity ${MOTION_MS.base}ms var(--motion-ease)`,
               }}
             >

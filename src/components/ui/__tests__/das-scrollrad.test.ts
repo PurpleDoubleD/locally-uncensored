@@ -24,7 +24,7 @@ import { resolve } from 'node:path'
 import { createElement } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { act } from 'react'
-import { deckkraft, WHEEL_BODEN, WheelNav } from '../WheelNav'
+import { deckkraft, sichtbarerRadius, WHEEL_BODEN, WheelNav } from '../WheelNav'
 
 describe('die Rechnung hinter dem Verlauf', () => {
   it('der aktive Eintrag steht auf genau 1', () => {
@@ -74,6 +74,36 @@ describe('die Rechnung hinter dem Verlauf', () => {
   })
 })
 
+describe('der Deckel auf dem Radius', () => {
+  it('ein Rad zeigt nie denselben Eintrag links und rechts', () => {
+    // Bei n Eintraegen und r Nachbarn je Seite sind 2r+1 Felder im Fenster.
+    // Sobald 2r+1 groesser als n ist, muss sich etwas wiederholen.
+    for (let n = 3; n <= 20; n++) {
+      for (const gewuenscht of [1, 3, 5, 99]) {
+        const r = sichtbarerRadius(gewuenscht, n)
+        expect(2 * r + 1, `n=${n}, gewuenscht=${gewuenscht}`).toBeLessThanOrEqual(n)
+        expect(r).toBeLessThanOrEqual(gewuenscht)
+      }
+    }
+  })
+
+  it('die beiden echten Einsatzorte bekommen, was sie brauchen', () => {
+    // Zwoelf Create-Werkzeuge tragen die fuenf je Seite, die David wollte.
+    expect(sichtbarerRadius(5, 12)).toBe(5)
+    // Sechs Kopfziele tragen zwei statt drei.
+    expect(sichtbarerRadius(3, 6)).toBe(2)
+    // Im Cloud-Modus fallen Benchmark und Models weg, dann bleibt einer.
+    expect(sichtbarerRadius(3, 4)).toBe(1)
+  })
+
+  it('zu kurze Listen bekommen gar keinen Verlauf', () => {
+    // Negativkontrolle gegen einen Deckel, der bei kleinem n negativ wird.
+    expect(sichtbarerRadius(3, 2)).toBe(0)
+    expect(sichtbarerRadius(3, 1)).toBe(0)
+    expect(sichtbarerRadius(3, 0)).toBe(0)
+  })
+})
+
 describe('was das Bauteil wirklich rendert', () => {
   let host: HTMLDivElement
   let root: Root
@@ -101,28 +131,95 @@ describe('was das Bauteil wirklich rendert', () => {
       ),
     })
 
-  it('jeder Eintrag traegt seinen Abstand zur Mitte', () => {
-    act(() => root.render(rad(2, 3, 6)))
-    const felder = [...host.querySelectorAll('[data-wheel-distance]')]
-    expect(felder.map((f) => f.getAttribute('data-wheel-distance'))).toEqual(
-      ['2', '1', '0', '1', '2', '3'],
+  /** Die Abstaende in der Reihenfolge, in der sie gerendert werden. */
+  const abstaende = () =>
+    [...host.querySelectorAll('[data-wheel-distance]')].map((f) =>
+      Number(f.getAttribute('data-wheel-distance')),
     )
+
+  /** Der Text jedes Feldes, in der Reihenfolge der Reihe. */
+  const texte = () =>
+    [...host.querySelectorAll('[data-wheel-distance]')].map((f) => f.textContent ?? '')
+
+  it('jeder Eintrag traegt seinen Abstand zur Mitte', () => {
+    // Sechs Ziele, gewuenschter Radius drei, also gedeckelt auf zwei. Die
+    // geschlossene Reihe ist [4,5, 0,1,2,3,4,5, 0,1], zehn Felder, und der
+    // aktive (Index 2) sitzt bei 2 + 2 = 4.
+    act(() => root.render(rad(2, 3, 6)))
+    expect(abstaende()).toEqual([4, 3, 2, 1, 0, 1, 2, 3, 4, 5])
   })
 
   it('und die Deckkraft, die zu diesem Abstand gehoert', () => {
+    // Vier Ziele, Radius gedeckelt auf eins. Reihe [3, 0,1,2,3, 0], aktiv bei 1.
     act(() => root.render(rad(0, 3, 4)))
     const felder = [...host.querySelectorAll<HTMLElement>('[data-wheel-distance]')]
     expect(felder.map((f) => f.style.opacity)).toEqual(
-      [0, 1, 2, 3].map((d) => String(deckkraft(d, 3))),
+      [1, 0, 1, 2, 3, 4].map((d) => String(deckkraft(d, 1))),
     )
   })
 
   it('die Kinder bleiben Kinder, das Rad schiebt sich nicht dazwischen', () => {
     // Ein Rad, das die Knoepfe durch eigene ersetzt, verloere jeden Handler
-    // und jede ARIA-Auszeichnung der Aufrufstelle.
+    // und jede ARIA-Auszeichnung der Aufrufstelle. Es sind jetzt drei echte
+    // und zwei Kopien, also fuenf Knoepfe, und der erste ist die Kopie des
+    // letzten Ziels.
     act(() => root.render(rad(1, 3, 3)))
-    expect(host.querySelectorAll('button')).toHaveLength(3)
-    expect(host.querySelector('button')?.textContent).toBe('Ziel 0')
+    expect(host.querySelectorAll('button')).toHaveLength(5)
+    expect(host.querySelector('button')?.textContent).toBe('Ziel 2')
+    expect(texte()).toEqual(['Ziel 2', 'Ziel 0', 'Ziel 1', 'Ziel 2', 'Ziel 0'])
+  })
+
+  it('links und rechts stehen IMMER gleich viele Nachbarn', () => {
+    // David, 04.09.2026: „links und rechts sollen immer gleich viele optionen
+    // sein nicht alles nach links und alles nach rechts wenn man durch
+    // klickt." Das ist die Zusage, und sie gilt fuer JEDEN aktiven Eintrag,
+    // auch fuer den ersten und den letzten. Genau dort war die gerade Liste
+    // vorher einseitig.
+    for (const n of [3, 4, 6, 12]) {
+      const r = sichtbarerRadius(5, n)
+      for (let a = 0; a < n; a++) {
+        act(() => root.render(rad(a, 5, n)))
+        const d = abstaende()
+        const mitte = d.indexOf(0)
+        expect(mitte, `n=${n} a=${a}: keine Mitte`).toBeGreaterThan(-1)
+        expect(mitte, `n=${n} a=${a}: links zu wenig`).toBeGreaterThanOrEqual(r)
+        expect(d.length - 1 - mitte, `n=${n} a=${a}: rechts zu wenig`).toBeGreaterThanOrEqual(r)
+      }
+    }
+  })
+
+  it('und im sichtbaren Fenster steht kein Wort zweimal', () => {
+    // Der Grund fuer den Deckel. Zeigte das Rad drei Nachbarn je Seite bei
+    // sechs Eintraegen, waere der dritte links derselbe wie der dritte rechts.
+    for (const n of [3, 4, 6, 12]) {
+      const r = sichtbarerRadius(5, n)
+      for (let a = 0; a < n; a++) {
+        act(() => root.render(rad(a, 5, n)))
+        const t = texte()
+        const mitte = abstaende().indexOf(0)
+        const fenster = t.slice(mitte - r, mitte + r + 1)
+        expect(new Set(fenster).size, `n=${n} a=${a}: ${fenster.join(', ')}`).toBe(fenster.length)
+      }
+    }
+  })
+
+  it('die Kopien sind fuer die Maus da, nicht fuer die Tastatur', () => {
+    // Sonst haette jedes Ziel mehrere Tab-Stationen und wuerde vom
+    // Screenreader mehrfach vorgelesen. Der Klick bleibt: wer links neben dem
+    // ersten Eintrag auf den letzten klickt, landet auf dem letzten.
+    act(() => root.render(rad(0, 3, 6)))
+    const kopien = [...host.querySelectorAll('[data-wheel-kopie="1"] button')]
+    const echte = [...host.querySelectorAll('[data-wheel-distance]:not([data-wheel-kopie]) button')]
+    expect(kopien.length).toBe(4)
+    expect(echte.length).toBe(6)
+    for (const k of kopien) {
+      expect(k.getAttribute('tabindex')).toBe('-1')
+      expect(k.getAttribute('aria-hidden')).toBe('true')
+    }
+    for (const e of echte) {
+      expect(e.getAttribute('tabindex')).toBeNull()
+      expect(e.getAttribute('aria-hidden')).toBeNull()
+    }
   })
 
   it('die Spur ist eine echte Scrollflaeche ohne Balken', () => {
@@ -149,11 +246,15 @@ describe('was das Bauteil wirklich rendert', () => {
 describe('beide Einsatzorte sind wirklich verdrahtet', () => {
   const lies = (p: string) => readFileSync(resolve(__dirname, '..', '..', p), 'utf8')
 
-  it('die Kopfnavigation faehrt mit drei Nachbarn je Seite', () => {
+  it('die Kopfnavigation bittet um drei Nachbarn je Seite', () => {
+    // Sie bekommt zwei: sechs Ziele lassen nicht mehr zu, ohne dass derselbe
+    // Reiter links und rechts steht. Der Wunsch bleibt trotzdem im Aufruf
+    // stehen, denn er gilt, sobald ein siebtes Ziel dazukommt.
     const src = lies('layout/Header.tsx')
     expect(src).toContain('<WheelNav')
     expect(src).toMatch(/radius=\{3\}/)
     expect(src).toContain('activeIndex={navTargets.findIndex(isNavActive)}')
+    expect(sichtbarerRadius(3, 6)).toBe(2)
   })
 
   it('die Create-Werkzeuge mit fuenf', () => {
