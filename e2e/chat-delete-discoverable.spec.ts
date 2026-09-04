@@ -1,6 +1,6 @@
 import { test, expect, type Page } from '@playwright/test'
 import { tauriMockInit, DEFAULT_ASSISTANT_REPLY, DEFAULT_MODEL_NAME } from './support/tauri-mock'
-import { openNewChat } from './support/ui'
+import { openNewChat, oeffneSeitenleiste } from './support/ui'
 
 /**
  * Deleting a chat has to be findable (sweenscapehub, Discord 2026-07-30):
@@ -70,6 +70,12 @@ async function bootWithTwoChats(page: Page) {
   await expect(page.getByRole('button', { name: /Skip for now/i })).toBeVisible({ timeout: 30_000 })
   await page.getByRole('button', { name: /Skip for now/i }).click()
   await page.getByRole('button', { name: /Get Started/i }).click()
+
+  // Seit 2.6.8 startet die Leiste zugeklappt (uiStore.ts:158), und die
+  // Gespraechsliste lebt in ihr. Ohne diesen Klick zaehlt `rowCount` null
+  // Zeilen und der ganze Aufbau laeuft in eine Frist. Gemessen am 04.09.2026:
+  // vorher 0 Loeschknoepfe, nach dem Klick 1, Leiste 288 px.
+  await oeffneSeitenleiste(page)
 
   // Two conversations so a delete shows up as a count change. The first one
   // carries a real exchange, the second is the empty chat you get from the

@@ -1,7 +1,7 @@
 import { test, expect, type Page } from '@playwright/test'
 import { tauriMockInit, DEFAULT_ASSISTANT_REPLY, DEFAULT_MODEL_NAME } from './support/tauri-mock'
 import { seedOnboardingDone } from './support/cloud-mock'
-import { openNewChat } from './support/ui'
+import { openNewChat, oeffneSeitenleiste } from './support/ui'
 
 /**
  * The composer's keyboard contract, which nothing anywhere asserted.
@@ -82,7 +82,10 @@ test('a draft comes back when you return to the chat you wrote it in', async ({ 
   await expect(page.locator('textarea').first()).toHaveValue('')
 
   // Zurueck in den ersten Chat: die Seitenleistenzeile, die gerade NICHT
-  // ausgewaehlt ist.
+  // ausgewaehlt ist. Seit 2.6.8 startet die Leiste zugeklappt
+  // (uiStore.ts:158), und die `option`-Rollen leben in ihr; ohne diesen Klick
+  // gibt es null Zeilen zum Anklicken.
+  await oeffneSeitenleiste(page)
   await page.getByRole('option', { selected: false }).first().click()
   await expect(page.locator('textarea').first()).toHaveValue('Satz fuer Chat eins')
 })
