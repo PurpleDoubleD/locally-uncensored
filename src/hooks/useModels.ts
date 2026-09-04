@@ -23,7 +23,7 @@ import {
   ensureLuEngineIsChatProvider, LU_ENGINE_SWITCH_NOTE, LU_ENGINE_FILE_GONE,
   announceLuEngineSwapBusy, announceLuEngineStartFailure,
   standbyChatBackend, listStandbyBackendModels, handBackChatProviderForRow,
-  chatProviderSwitchNote,
+  announceChatProviderSwitch,
 } from '../api/lu-engine-switch'
 import { tryAcquireLuEngineSwap, releaseLuEngineSwap } from '../api/lu-engine-swap-lock'
 import { useLuEngineSwitchStore } from '../stores/luEngineSwitchStore'
@@ -620,9 +620,7 @@ export function useModels() {
     // so the engine branch sees a slot that is no longer ours and keeps its
     // hands off a model it does not serve.
     const handedBackTo = handBackChatProviderForRow(row as unknown as InstalledModelLike | undefined)
-    if (handedBackTo) {
-      useLuEngineSwitchStore.getState().announce(chatProviderSwitchNote(handedBackTo))
-    }
+    if (handedBackTo) announceChatProviderSwitch(handedBackTo, name)
     if (isLuRow) {
       // The bolt against two swap_bundled_model calls at one engine, where the
       // second lands on a process the first is still restarting. It is taken

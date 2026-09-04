@@ -27,7 +27,7 @@ import {
   ensureLuEngineIsChatProvider, LU_ENGINE_SWITCH_NOTE, LU_ENGINE_SWAP_BUSY_NOTE,
   announceLuEngineSwapBusy, announceLuEngineStartFailure,
   LM_STUDIO_LOAD_BUSY_NOTE, announceLmStudioLoadBusy,
-  handBackChatProviderForRow, chatProviderSwitchNote, standbyBackendOf,
+  handBackChatProviderForRow, announceChatProviderSwitch, standbyBackendOf,
 } from '../../api/lu-engine-switch'
 import { tryAcquireLuEngineSwap, releaseLuEngineSwap, luEngineSwapInFlight } from '../../api/lu-engine-swap-lock'
 import { useLuEngineSwitchStore } from '../../stores/luEngineSwitchStore'
@@ -797,9 +797,7 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
     // in LM Studio and then route the chat at 8127, and the LU Engine branch
     // would try to load an LM Studio id as a GGUF.
     const handedBackTo = handBackChatProviderForRow(model as unknown as InstalledModelLike)
-    if (handedBackTo) {
-      useLuEngineSwitchStore.getState().announce(chatProviderSwitchNote(handedBackTo))
-    }
+    if (handedBackTo) announceChatProviderSwitch(handedBackTo, model.name)
 
     if (shouldAutoLoadForSelect(model, lmsLoaded)) {
       if (selectingLms || togglingLms) return // a load is already in flight

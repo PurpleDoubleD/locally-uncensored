@@ -19,6 +19,7 @@
 import { useLuEngineSwitchStore } from '../stores/luEngineSwitchStore'
 import { luEngineSwapInFlight } from './lu-engine-swap-lock'
 import { useProviderStore } from '../stores/providerStore'
+import { useModelStore } from '../stores/modelStore'
 import {
   slotHandbackUpdate, standbyOccupant,
   type HandoverSlot, type SlotOccupant,
@@ -194,6 +195,39 @@ export function announceChatModelReplaced(gone: string, now: string): void {
 /** What the pick says when it moved the chat backend to `name`. */
 export function chatProviderSwitchNote(name: string): string {
   return `Switched your chat provider to ${name} for this model.`
+}
+
+/**
+ * Wie lange die Zeile hoechstens auf ihre eigene Wahrheit wartet.
+ *
+ * Der Halt endet normalerweise damit, dass die Wahl ankommt. Kommt sie nie an,
+ * weil das Laden im fremden Backend gescheitert ist, darf die Zeile trotzdem
+ * nicht ewig stehen bleiben. Grosszuegig gegenueber jedem echten Ladevorgang,
+ * gemessen wurden 12,4 s auf der Box, und weit unter einer Sitzung.
+ */
+export const CHAT_PROVIDER_SWITCH_HOLD_MS = 45_000
+
+/**
+ * Den Providerwechsel ansagen, und zwar so lange, bis er auch stimmt.
+ *
+ * Gegenprobe G1, 04.09.2026, gemessen im echten Windows-Build: Klick auf eine
+ * LM-Studio-Zeile, waehrend die LU Engine bedient. Der Satz erscheint nach
+ * 0,17 s, ist bis 12,04 s zu sehen und ist bei 12,44 s weg. Bei 12,44 s
+ * springt der Waehlerknopf auf das neue Modell und Port 8127 schliesst. Der
+ * Satz stand also genau so lange auf dem Schirm, wie er noch nicht stimmte,
+ * und verschwand in der Sekunde, in der er wahr wurde.
+ *
+ * Der Grund war die gewoehnliche Zwoelf-Sekunden-Uhr auf einem Vorgang, der
+ * laenger dauert als sie. `holdWhile` haelt die Zeile stehen, solange die
+ * Wahl noch nicht angekommen ist, und laesst danach die normale Uhr laufen,
+ * sodass der Nutzer sie liest, wenn sie zutrifft.
+ */
+export function announceChatProviderSwitch(name: string, modelName: string): void {
+  const frist = Date.now() + CHAT_PROVIDER_SWITCH_HOLD_MS
+  useLuEngineSwitchStore.getState().announce(
+    chatProviderSwitchNote(name), 'info',
+    () => Date.now() < frist && useModelStore.getState().activeModel !== modelName,
+  )
 }
 
 /**
