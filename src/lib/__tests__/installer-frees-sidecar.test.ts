@@ -39,10 +39,13 @@ const conf = JSON.parse(read('src-tauri/tauri.conf.json')) as {
 }
 
 // Only the unlock macro. The dormant product-rename macro below it kills the
-// app itself and is a different question.
+// app itself and is a different question, and so is the frontend sweep that
+// now sits between them: this slice used to run to NSIS_HOOK_PREINSTALL and
+// swallowed everything in between, so the cases below would have started
+// making claims about code they were never written for.
 const unlock = hooks.slice(
   hooks.indexOf('!macro LU_FREE_SIDECAR'),
-  hooks.indexOf('!macro NSIS_HOOK_PREINSTALL'),
+  hooks.indexOf('!macro LU_SWEEP_OLD_FRONTEND'),
 )
 
 describe('the installer frees the bundled engine', () => {
@@ -147,5 +150,62 @@ describe('an update from before the rename does not leave the old engine behind'
     for (const owned of ['llama-server', 'llama-cli', 'llama-bench', 'llama-quantize']) {
       expect(names).not.toContain(owned)
     }
+  })
+})
+
+/**
+ * Was der Installer hinlegt, muss er auch wieder wegnehmen koennen.
+ *
+ * Gemessen am 04.09.2026 auf der Windows-Box, in einem Ordner, der seit April
+ * jede Aktualisierung mitgenommen hat:
+ *
+ *     _up_\dist\assets                        1170 Dateien   131,9 MB
+ *     davon aus dem an dem Morgen installierten Build    266
+ *     aelteste Datei                              15.04.2026
+ *
+ * Rund 900 tote Dateien und gut 110 MB, die jeder Nutzer mitschleppt. Der
+ * Grund sind zwei Gewohnheiten, die einzeln richtig sind: Vite haengt an jeden
+ * Brocken einen Hash, ein neuer Build ueberschreibt den alten also nie sondern
+ * legt sich daneben, und NSIS kopiert nur, es raeumt nie weg.
+ */
+describe('der Installer laesst den alten Frontend-Stapel nicht liegen', () => {
+  const preinstall = hooks.slice(hooks.indexOf('!macro NSIS_HOOK_PREINSTALL'))
+  const sweep = hooks.slice(
+    hooks.indexOf('!macro LU_SWEEP_OLD_FRONTEND'),
+    hooks.indexOf('!macro NSIS_HOOK_PREINSTALL'),
+  )
+
+  it('raeumt vor jedem Kopieren auf, in jedem Build', () => {
+    expect(preinstall).toContain('!insertmacro LU_SWEEP_OLD_FRONTEND')
+    // Vor dem Umbenennungsschalter, sonst waere es wieder toter Code, genau
+    // wie die Entsperrung es einmal war.
+    expect(preinstall.indexOf('!insertmacro LU_SWEEP_OLD_FRONTEND'))
+      .toBeLessThan(preinstall.indexOf('!if "${PRODUCTNAME}"'))
+  })
+
+  it('nimmt den ganzen Ordner, nicht einzelne Dateien', () => {
+    // Eine Liste von Namen waere sinnlos: die Namen sind Hashes und heissen bei
+    // jedem Build anders. Genau daran ist das Aufraeumen bisher gescheitert.
+    expect(sweep).toContain('RMDir /r "$INSTDIR\\_up_\\dist"')
+  })
+
+  it('nur dort, wo unser Frontend wirklich liegt', () => {
+    // Das rekursive Loeschen ist die einzige Anweisung in dieser Datei, die
+    // sich nicht zuruecknehmen laesst. Sie darf bei einem falschen $INSTDIR
+    // nicht losgehen.
+    expect(sweep).toContain('${FileExists} "$INSTDIR\\_up_\\dist\\index.html"')
+    expect(sweep.indexOf('FileExists')).toBeLessThan(sweep.indexOf('RMDir'))
+  })
+
+  it('faesst nichts an, worin Nutzerdaten liegen koennten', () => {
+    // Negativkontrolle. Chats, Einstellungen, Modelle und Ergebnisse liegen
+    // unter den App-Data-Ordnern, nie im Installationsordner. Ein RMDir auf
+    // $APPDATA oder auf $INSTDIR selbst waere ein Datenverlust, kein Aufraeumen.
+    expect(sweep).not.toContain('RMDir /r "$INSTDIR"')
+    expect(sweep).not.toContain('$APPDATA')
+    expect(sweep).not.toContain('$LOCALAPPDATA')
+    expect(sweep).not.toContain('$DOCUMENTS')
+    // Und der Ordner mit den Modellen der Engine schon gar nicht.
+    expect(sweep).not.toContain('resources')
   })
 })
