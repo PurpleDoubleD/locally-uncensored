@@ -720,6 +720,11 @@ fn run_streamed(
         handles.push(std::thread::spawn(move || {
             let reader = BufReader::new(stream);
             for line in reader.lines().map_while(Result::ok) {
+                // Der Schwanz dieses Protokolls steht in der Oberflaeche, also
+                // gilt hier dieselbe Regel wie beim Installer: was das
+                // Betriebssystem geschrieben hat, steht englisch da, was der
+                // Trainer selbst schreibt, bleibt unangetastet.
+                let line = os_error::english_child_text(&line).into_owned();
                 let trimmed = line.trim();
                 if trimmed.is_empty() {
                     continue;

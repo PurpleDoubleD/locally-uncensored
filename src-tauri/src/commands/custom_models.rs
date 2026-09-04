@@ -10,9 +10,10 @@
 //! So the honest way in is ComfyUI's own mechanism: an extra-model-paths config.
 //! We write our own file and pass it with `--extra-model-paths-config`, so a
 //! hand written `extra_model_paths.yaml` in the ComfyUI folder is never touched
-//! and nothing changes for a user who set none. Two limits are real and the
-//! Settings text says both: it reaches a ComfyUI that LU starts, and it takes
-//! effect the next time ComfyUI starts.
+//! and nothing changes for a user who set none. One limit is real and the
+//! Settings text says it: only a ComfyUI that LU starts is handed the folder.
+//! The subfolders are scanned again on every one of those starts, so a folder
+//! created after the setting was made arrives with the next start.
 //!
 //! Only subfolders NAMED like ComfyUI's model folders are mapped. A flat dump
 //! of mixed files is left alone on purpose: mapping it into every key would
@@ -95,7 +96,8 @@ pub(crate) fn build_extra_model_paths_yaml(root: &Path) -> Option<String> {
     }
     let mut s = String::from(
         "# Written by Locally Uncensored from Settings -> Model Storage.\n\
-         # Edit the folder in the app, not this file: it is rewritten on every change.\n\
+         # Edit the folder in the app, not this file: LU rewrites it every time it\n\
+         # starts ComfyUI.\n\
          lu_custom_models:\n",
     );
     for (key, path) in found {
@@ -125,15 +127,113 @@ pub(crate) fn extra_model_paths_file() -> Result<PathBuf, String> {
     Ok(dir.join("lu_extra_model_paths.yaml"))
 }
 
-/// The file to pass to ComfyUI, or `None` when there is nothing to pass.
-/// Called from the ComfyUI start path, so it never creates anything.
-pub fn extra_model_paths_arg() -> Option<PathBuf> {
-    let base = dirs::data_dir()?;
-    let file = base
-        .join(crate::app_identity::APP_DISPLAY_DIR)
-        .join("lu_extra_model_paths.yaml");
+/// What `config.json` knows about the folder under Model Storage.
+///
+/// Three states, not two, and the difference between the first two is the one
+/// that costs a boot if it is dropped. `Missing` is a build that never wrote
+/// the key: the app data dir may still hold a good file from before, and the
+/// boot auto-start runs on its own thread (`main.rs`) before the frontend has
+/// pushed anything down. Rewriting from nothing there would take the folder
+/// away on exactly the first start after the update. `Cleared` is the user
+/// having emptied the field, and that one has to take the file away.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum RememberedRoot {
+    Missing,
+    Cleared,
+    Folder(String),
+}
+
+/// The `config.json` key. Rust needs its own copy of the folder because the
+/// ComfyUI start path has nobody to ask: the setting lives in the frontend
+/// store (`hfDownloadPathOverride`) and reaches Rust only as a call argument.
+/// A field on `AppState` would not do, because the boot auto-start runs on its
+/// own thread and can be past the arguments before the frontend has pushed
+/// anything down. The persisted value is the last session's, and that is the
+/// right one as long as nobody moved the folder while the app was closed.
+pub(crate) const REMEMBERED_ROOT_KEY: &str = "custom_model_dir";
+
+/// Read-modify-write on the shared file, in the shape `set_comfyui_port` uses
+/// (`process.rs`): `comfyui_port` and `comfyui_host` live in the same JSON and
+/// must survive this write.
+pub(crate) fn remember_root_in(config: &Path, dir: &str) {
+    if let Some(parent) = config.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let mut json: serde_json::Value = std::fs::read_to_string(config)
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_else(|| serde_json::json!({}));
+    json[REMEMBERED_ROOT_KEY] = serde_json::json!(dir);
+    let _ = std::fs::write(config, serde_json::to_string_pretty(&json).unwrap_or_default());
+}
+
+/// An empty value reads as `Cleared`, never as a folder named "": a folder the
+/// user switched off must stay off over a restart.
+pub(crate) fn remembered_root_in(config: &Path) -> RememberedRoot {
+    let root = std::fs::read_to_string(config)
+        .ok()
+        .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
+        .and_then(|json| {
+            json.get(REMEMBERED_ROOT_KEY)
+                .and_then(|v| v.as_str())
+                .map(|s| s.trim().to_string())
+        });
+    match root {
+        None => RememberedRoot::Missing,
+        Some(dir) if dir.is_empty() => RememberedRoot::Cleared,
+        Some(dir) => RememberedRoot::Folder(dir),
+    }
+}
+
+fn remember_root(dir: &str) {
+    remember_root_in(&crate::os_paths::app_config_json(), dir);
+}
+
+fn remembered_root() -> RememberedRoot {
+    remembered_root_in(&crate::os_paths::app_config_json())
+}
+
+/// The file to pass to ComfyUI, written fresh right before the start.
+///
+/// P3: the function this replaced only asked whether the file was there, and
+/// the file was written at exactly one moment, namely when the setting
+/// changed. A subfolder created afterwards could not reach ComfyUI, no matter
+/// how often ComfyUI was restarted, while the Settings line promised the next
+/// start would pick it up.
+///
+/// What the old function could say and this one cannot: it created nothing.
+/// `extra_model_paths_file` runs `create_dir_all` on the app data dir, so
+/// every ComfyUI start now creates that folder, and a failure there costs the
+/// handover even when the file itself is already lying in place.
+pub fn refresh_extra_model_paths_arg() -> Option<PathBuf> {
+    let file = extra_model_paths_file().ok()?;
+    refresh_extra_model_paths_to(&file, &remembered_root())
+}
+
+/// The same work against a named file and a known folder, so a test can walk
+/// the start path without touching the installed app's config.
+///
+/// A write error is logged and swallowed: ComfyUI running without the extra
+/// folders is better for everyone than ComfyUI not running.
+pub(crate) fn refresh_extra_model_paths_to(
+    file: &Path,
+    root: &RememberedRoot,
+) -> Option<PathBuf> {
+    let rewrite = |dir: Option<&str>| {
+        if let Err(e) = sync_custom_model_paths_to(file, dir) {
+            eprintln!("[ComfyUI] Extra model paths not rewritten: {e}");
+        }
+    };
+    match root {
+        // Nothing is known, so nothing is decided here. A file an older build
+        // left behind is the best answer there is until the frontend pushes
+        // the folder down (`App.tsx` does that on every launch).
+        RememberedRoot::Missing => {}
+        RememberedRoot::Cleared => rewrite(None),
+        RememberedRoot::Folder(dir) => rewrite(Some(dir)),
+    }
     if file.is_file() {
-        Some(file)
+        Some(file.to_path_buf())
     } else {
         None
     }
@@ -149,21 +249,34 @@ pub(crate) fn is_usable_root(root: &Path) -> bool {
 }
 
 /// One syscall that answers "is the folder there and readable" before the
-/// per-key stats run. On a dead network drive every stat blocks for the SMB
-/// timeout, so asking twenty times what one call already answered is twenty
-/// times the wait.
-pub(crate) fn root_reachable(root: &Path) -> bool {
-    std::fs::read_dir(root).is_ok()
+/// per-key stats run, and WHY when the answer is no. `None` means reachable.
+///
+/// On a dead network drive every stat blocks for the SMB timeout, so asking
+/// twenty times what one call already answered is twenty times the wait.
+///
+/// The kind rather than the message, for the reason `mobile_page.rs` gives:
+/// `ErrorKind` is language neutral and free, while the text is whatever
+/// FormatMessageW felt like saying. P3 pointed a folder LU may not read at
+/// Model Storage and was told the drive was disconnected or the path was
+/// missing. Both were false, and the true answer was one `ErrorKind` away.
+pub(crate) fn root_probe(root: &Path) -> Option<std::io::ErrorKind> {
+    std::fs::read_dir(root).err().map(|e| e.kind())
 }
 
 /// What the folder is currently worth to ComfyUI.
+///
+/// `denied` is its own answer and not a flavour of `unreachable`: the drive is
+/// there, the path is there, and telling someone to check the cable sends them
+/// looking for a fault that does not exist.
 pub(crate) fn folder_status(root: &Path) -> &'static str {
     if !is_usable_root(root) {
         "unusable"
-    } else if !root_reachable(root) {
-        "unreachable"
     } else {
-        "ok"
+        match root_probe(root) {
+            None => "ok",
+            Some(std::io::ErrorKind::PermissionDenied) => "denied",
+            Some(_) => "unreachable",
+        }
     }
 }
 
@@ -187,6 +300,11 @@ pub async fn sync_custom_model_paths(dir: Option<String>) -> Result<serde_json::
 pub(crate) fn sync_custom_model_paths_blocking(
     dir: Option<&str>,
 ) -> Result<serde_json::Value, String> {
+    // Vor dem Mac-Zweig, und bewusst nicht in sync_custom_model_paths_to: das
+    // ist die getestete Schicht mit frei waehlbarer Zieldatei und darf nichts
+    // Globales anfassen. Ohne diese Zeile kennt der ComfyUI-Start den Ordner
+    // nicht, denn er lebt sonst nur im Frontend-Store.
+    remember_root(dir.unwrap_or("").trim());
     let file = extra_model_paths_file()?;
     // The Mac runs local media on MLX and never starts ComfyUI
     // (process::comfy_supported_here), so there is nobody to hand the folder
@@ -422,7 +540,7 @@ mod tests {
     fn a_real_absolute_folder_passes_both_guards() {
         let root = tmp("guards");
         assert!(is_usable_root(&root));
-        assert!(root_reachable(&root));
+        assert_eq!(root_probe(&root), None);
         assert_eq!(folder_status(&root), "ok");
     }
 
@@ -431,8 +549,42 @@ mod tests {
         let root = tmp("vanished");
         std::fs::remove_dir_all(&root).unwrap();
         assert!(is_usable_root(&root));
-        assert!(!root_reachable(&root));
+        assert_eq!(root_probe(&root), Some(std::io::ErrorKind::NotFound));
         assert_eq!(folder_status(&root), "unreachable");
+    }
+
+    /// P3, 7.4: er zeigte auf einen Ordner, den LU nicht lesen darf, und bekam
+    /// "drive disconnected or path missing". Das Laufwerk war verbunden und der
+    /// Pfad war da. Der ErrorKind wusste es die ganze Zeit.
+    ///
+    /// Unter Unix ueber chmod herstellbar und damit auf der Entwicklermaschine
+    /// echt pruefbar. Unter Windows braucht eine ACL ohne Leserecht fuer den
+    /// eigenen Benutzer eine zweite Identitaet, also wird der Fall dort
+    /// ausgelassen statt vorgetaeuscht; der Beweis dafuer gehoert auf die Box.
+    #[test]
+    #[cfg(unix)]
+    fn ein_ordner_ohne_leserecht_heisst_denied_und_nicht_unreachable() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = tmp("denied");
+        std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o000)).unwrap();
+        // Als root liest read_dir auch das, dann sagt dieser Lauf nichts aus.
+        if std::fs::read_dir(&root).is_ok() {
+            let _ = std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o700));
+            return;
+        }
+        assert!(is_usable_root(&root));
+        assert_eq!(root_probe(&root), Some(std::io::ErrorKind::PermissionDenied));
+        assert_eq!(folder_status(&root), "denied");
+
+        // Der Gegenpol, im selben Test: ein geloeschter Ordner bleibt
+        // unreachable. Sonst haette man beide Faelle auf einen neuen Wert
+        // gelegt und nichts unterschieden.
+        let weg = tmp("denied-gegenpol");
+        std::fs::remove_dir_all(&weg).unwrap();
+        assert_eq!(folder_status(&weg), "unreachable");
+
+        let _ = std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o700));
+        std::fs::remove_dir_all(&root).ok();
     }
 
     // ── What the Settings panel is told ───────────────────────────────────
@@ -491,6 +643,178 @@ mod tests {
         let res = sync_custom_model_paths_to(&file, Some("   ")).unwrap();
         assert_eq!(res["status"], "off");
         assert_eq!(res["written"], false);
+    }
+
+    // ── The ComfyUI start path ───────────────────────────────────────
+
+    /// P3, the tester's run rebuilt one to one: folder set, ComfyUI started,
+    /// `vae` created afterwards, ComfyUI restarted from the UI only. Every
+    /// other test in this file goes through `sync_custom_model_paths_to`, so
+    /// every other test asks about the moment the SETTING changes. This one
+    /// asks about the moment ComfyUI STARTS, which is where the fault was.
+    #[test]
+    fn a_subfolder_created_after_the_setting_reaches_the_next_start() {
+        let root = tmp("late-vae");
+        std::fs::create_dir_all(root.join("loras")).unwrap();
+        let file = tmp("late-vae-out").join("lu_extra_model_paths.yaml");
+        sync_custom_model_paths_to(&file, Some(root.to_str().unwrap())).unwrap();
+        let before = std::fs::read_to_string(&file).unwrap();
+        assert!(!before.contains("vae:"), "precondition: no vae folder yet");
+
+        // Der Nutzer legt den Ordner jetzt an und fasst die Einstellung nicht an.
+        std::fs::create_dir_all(root.join("vae")).unwrap();
+
+        // Was der Startpfad bis 2.6.8 tat, woertlich nachgebaut: nur fragen, ob
+        // die Datei da ist. Sie ist da, sie wird uebergeben, und sie kennt vae
+        // nicht. Ohne diese vier Zeilen prueft der Rest nur den Schreiber.
+        let old_arg = if file.is_file() { Some(file.clone()) } else { None };
+        assert_eq!(old_arg, Some(file.clone()), "the file was there all along");
+        assert!(
+            !std::fs::read_to_string(&file).unwrap().contains("vae:"),
+            "and it still had no vae in it: that is the finding",
+        );
+
+        let got = refresh_extra_model_paths_to(
+            &file,
+            &RememberedRoot::Folder(root.to_string_lossy().to_string()),
+        );
+        assert_eq!(got, Some(file.clone()));
+        let after = std::fs::read_to_string(&file).unwrap();
+        assert_ne!(after, before, "the start path did not rewrite the file");
+        let parsed: serde_yaml::Value = serde_yaml::from_str(&after).expect("must parse");
+        let block = &parsed["lu_custom_models"];
+        assert_eq!(
+            block["vae"].as_str().unwrap(),
+            root.join("vae").to_string_lossy(),
+        );
+        // Und der alte Eintrag bleibt, statt vom neuen verdraengt zu werden.
+        assert_eq!(
+            block["loras"].as_str().unwrap(),
+            root.join("loras").to_string_lossy(),
+        );
+        assert!(block.get("checkpoints").is_none(), "invented a folder");
+    }
+
+    /// The other direction, so a fix that only ever adds cannot pass: a folder
+    /// that lost its ComfyUI-shaped subfolders stops feeding ComfyUI at the
+    /// next start, instead of handing over paths that are gone.
+    #[test]
+    fn a_folder_that_lost_its_subfolders_stops_feeding_comfyui_at_the_next_start() {
+        let root = tmp("lost-vae");
+        std::fs::create_dir_all(root.join("vae")).unwrap();
+        let file = tmp("lost-vae-out").join("lu_extra_model_paths.yaml");
+        sync_custom_model_paths_to(&file, Some(root.to_str().unwrap())).unwrap();
+        assert!(file.exists(), "precondition: a file was written");
+
+        std::fs::remove_dir_all(root.join("vae")).unwrap();
+        let got = refresh_extra_model_paths_to(
+            &file,
+            &RememberedRoot::Folder(root.to_string_lossy().to_string()),
+        );
+        assert_eq!(got, None);
+        assert!(!file.exists(), "the old file must not keep feeding ComfyUI");
+    }
+
+    /// The deliberate part of this change, written down so it is a decision and
+    /// not a surprise: a drive that is not connected at the moment ComfyUI
+    /// starts costs the mapping for that run. Before, ComfyUI would have been
+    /// handed the last good file and looked for models on a drive that is not
+    /// there. It heals itself at the next start with the drive back, and that
+    /// second half is the reason this is acceptable.
+    #[test]
+    fn a_drive_that_is_away_at_start_time_costs_the_mapping_and_gets_it_back() {
+        let root = tmp("away-drive");
+        std::fs::create_dir_all(root.join("vae")).unwrap();
+        let file = tmp("away-drive-out").join("lu_extra_model_paths.yaml");
+        let remembered = RememberedRoot::Folder(root.to_string_lossy().to_string());
+        sync_custom_model_paths_to(&file, Some(root.to_str().unwrap())).unwrap();
+        assert!(file.exists(), "precondition: a file was written");
+
+        std::fs::remove_dir_all(&root).unwrap();
+        assert_eq!(refresh_extra_model_paths_to(&file, &remembered), None);
+        assert!(!file.exists());
+
+        std::fs::create_dir_all(root.join("vae")).unwrap();
+        assert_eq!(
+            refresh_extra_model_paths_to(&file, &remembered),
+            Some(file.clone()),
+            "the mapping has to come back on its own",
+        );
+    }
+
+    /// The one case no test would catch that is not written for it, and the
+    /// only boot at which a user meets this change for the first time: the key
+    /// is not in `config.json` yet, because the build that wrote the file
+    /// never knew it. Deleting the file there would cost the folder exactly
+    /// once, on the launch the user is looking at.
+    #[test]
+    fn the_first_start_after_the_update_keeps_the_file_an_empty_setting_clears_it() {
+        let root = tmp("migration");
+        std::fs::create_dir_all(root.join("loras")).unwrap();
+        let file = tmp("migration-out").join("lu_extra_model_paths.yaml");
+        sync_custom_model_paths_to(&file, Some(root.to_str().unwrap())).unwrap();
+        assert!(file.exists(), "precondition: the older build left a file");
+
+        assert_eq!(
+            refresh_extra_model_paths_to(&file, &RememberedRoot::Missing),
+            Some(file.clone()),
+            "an unknown folder must not throw the file away",
+        );
+        assert!(file.exists());
+
+        // Gegenprobe, und der Unterschied, um den es geht: abgewaehlt ist
+        // etwas anderes als unbekannt, und abgewaehlt heisst weg.
+        assert_eq!(refresh_extra_model_paths_to(&file, &RememberedRoot::Cleared), None);
+        assert!(!file.exists(), "a folder the user cleared kept feeding ComfyUI");
+    }
+
+    /// The folder has to survive a restart, because the start path is the only
+    /// reader and it has no window to ask.
+    #[test]
+    fn the_folder_survives_a_restart_and_an_empty_one_switches_it_off() {
+        let dir = tmp("config-json");
+        let config = dir.join("config.json");
+        assert_eq!(
+            remembered_root_in(&config),
+            RememberedRoot::Missing,
+            "no config file at all",
+        );
+        std::fs::write(&config, br#"{"comfyui_port":8189}"#).unwrap();
+        assert_eq!(
+            remembered_root_in(&config),
+            RememberedRoot::Missing,
+            "a config file without the key",
+        );
+
+        remember_root_in(&config, r"G:\AI\Models");
+        assert_eq!(
+            remembered_root_in(&config),
+            RememberedRoot::Folder(r"G:\AI\Models".to_string()),
+        );
+        let json: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&config).unwrap()).unwrap();
+        assert_eq!(json["comfyui_port"], 8189, "the port setting was overwritten");
+
+        remember_root_in(&config, "  ");
+        assert_eq!(
+            remembered_root_in(&config),
+            RememberedRoot::Cleared,
+            "an empty folder must not come back as a folder named \"\"",
+        );
+        let json: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&config).unwrap()).unwrap();
+        assert_eq!(json["comfyui_port"], 8189);
+
+        // Negativkontrolle: ein naives Schreiben derselben Datei verliert den
+        // Port. Ohne sie bewiese die Zusicherung oben nichts.
+        std::fs::write(
+            &config,
+            serde_json::to_string(&serde_json::json!({ REMEMBERED_ROOT_KEY: "x" })).unwrap(),
+        )
+        .unwrap();
+        let naive: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&config).unwrap()).unwrap();
+        assert!(naive.get("comfyui_port").is_none());
     }
 
     /// Negative control: a missing folder is not an error and not a config.

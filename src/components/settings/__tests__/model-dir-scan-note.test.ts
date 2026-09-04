@@ -74,6 +74,16 @@ describe('the sentence for each verdict', () => {
     )
   })
 
+  // P3, 7.4: ein Ordner ohne Leserecht bekam den Satz vom abgezogenen
+  // Laufwerk. Beides war falsch, und der Nutzer sucht danach an der falschen
+  // Stelle.
+  it('names the missing right instead of blaming the drive', () => {
+    const satz = modelDirScanNote('denied')
+    expect(satz).toContain('not allowed to read that folder')
+    expect(satz).not.toContain('drive disconnected')
+    expect(satz).not.toContain('path missing')
+  })
+
   it('says a path that is no folder is no folder', () => {
     expect(modelDirScanNote('unusable')).toBe('This path is not a folder LU can read.')
   })
@@ -107,6 +117,13 @@ describe('Model Storage shows it under the path', () => {
   it('does not stack two warnings about one broken folder', async () => {
     await noteFor('unreachable')
     expect(screen.queryByText(/Check that the drive is connected/)).toBeNull()
+  })
+
+  it('says one line about a folder without read rights, not two', async () => {
+    expect(await noteFor('denied')).toContain('not allowed to read that folder')
+    // Dieselbe Wache wie eine Zeile hoeher: ein vergessenes scanHidesHandoff
+    // stellt zwei Warnungen ueber denselben Ordner uebereinander.
+    expect(screen.queryByText(/passes/)).toBeNull()
   })
 
   it('says nothing twice about a path that is no folder either', async () => {

@@ -45,7 +45,8 @@
  * das nichts mehr bedient. Ausgerechnet hier faellt auch die Selbstheilung
  * des Absendewegs aus: der ruft `ensureBuiltinEngineAlive` nur hinter
  * `config.managed === true`, und managed ist jetzt false. Also raeumt dieses
- * Modul die Wahl, und der Waehler sagt wieder "Select Model".
+ * Modul die Wahl, der Waehler sagt wieder "Select Model", und wer den Wechsel
+ * nicht selbst im Waehler ausgeloest hat, liest eine Zeile darueber.
  */
 
 import { backendCall, isTauri } from '../api/backend'
@@ -57,6 +58,10 @@ export interface BuiltinSlotView {
   enabled: boolean
   /** True only for the app's own bundled llama.cpp engine. */
   managed?: boolean
+  /** Der Anzeigename des Backends, das den Steckplatz haelt. Fuer die
+   *  Entscheidung selbst bedeutungslos, aber die Zeile, die der Nutzer danach
+   *  liest, nennt den, der uebernommen hat. */
+  name?: string
 }
 
 /**
@@ -156,7 +161,7 @@ export function onLocalSlotChanged(
     }
     return
   }
-  if (builtinSlotHandedToForeignBackend(before, after)) void dropDisplacedEnginePick()
+  if (builtinSlotHandedToForeignBackend(before, after)) void dropDisplacedEnginePick(after?.name)
   if (!isTauri()) return
   cancelPending()
   const mine = generation
@@ -201,41 +206,80 @@ async function bringEngineBack(): Promise<void> {
 }
 
 /**
- * Die Wahl faellt mit dem Steckplatz.
+ * Die Wahl faellt mit dem Steckplatz, und der Nutzer erfaehrt es.
  *
  * Der Chip im Chat nennt nach der Uebergabe weiter das GGUF, das auf 8127
  * lag. Auf dem Port liegt nichts mehr, und die Selbstheilung des Absendewegs
  * haengt hinter `config.managed === true`, das jetzt false ist. Bleibt die
  * Wahl stehen, ist die einzige Antwort auf ein Absenden eine Fremdmeldung
  * ueber eine unbekannte Modell-Kennung. Steht sie nicht mehr, sagt der Waehler
- * "Select Model" und die Eingangsseite sagt, was zu tun ist.
+ * wieder "Select Model".
  *
- * Entschieden wird nach der ZEILE, nicht nach dem Steckplatz. Der Aufrufer
- * darf im selben Durchlauf eine neue Wahl setzen, und genau das tut er:
- * `useModels` gibt den Steckplatz ab und setzt die Zeile des uebernehmenden
- * Backends unmittelbar danach, ohne `await` dazwischen. Diese Funktion liest
- * den Zustand erst nach ihrem ersten `await import(...)`, also mindestens eine
- * Mikrotask spaeter, und findet dann eine LM-Studio-Zeile vor, die sie nichts
- * angeht. Der dynamische Import ist derselbe Ladekreis-Schutz, den auch
- * `bringEngineBack` braucht.
+ * Entschieden wird nach der ZEILE, nicht nach dem Steckplatz, und gelesen wird
+ * sie erst hinter dem ersten `await import(...)`, also mindestens eine
+ * Mikrotask nach dem Steckplatzwechsel. Das deckt genau EINEN der beiden
+ * Klickwege ab, nicht den Aufrufer im Allgemeinen:
+ * `useModels.activateModel` gibt den Steckplatz ab und setzt die Zeile des
+ * uebernehmenden Backends ohne `await` unmittelbar danach, dort findet diese
+ * Funktion also eine fremde Zeile vor, die sie nichts angeht. Der zweite Weg,
+ * die Auto-Ladung im Waehler, laedt das Modell erst in LM Studio und setzt die
+ * Wahl erst hinterher, auf der Box 12,4 s spaeter. Dort faellt die Wahl also
+ * wirklich, und der Waehler steht bis zum Ende der Ladung auf "Select Model".
+ * Das ist richtig so: bis dahin bedient wirklich niemand das GGUF.
+ *
+ * GESAGT wird es aber nur auf dem einen Weg. Wer in den Einstellungen Enable
+ * auf der Standby-Karte drueckt, sieht seinen Chip wechseln, ohne den Waehler
+ * angefasst zu haben, und bekam bisher kein Wort dazu: `activeModel` ist nach
+ * dem Raeumen null, und `replacedBehindTheUsersBack` (lib/active-model-mode)
+ * verlangt einen vorherigen Namen, den es dann nicht mehr gibt. Wer dagegen
+ * selbst eine Zeile des wartenden Backends angeklickt hat, liest die
+ * Wechselzeile ueber genau diesen Vorgang schon; ein zweiter Satz wuerde sie
+ * nur verdraengen. `handbackAwaitsTheUsersPick` trennt die beiden.
+ *
+ * Der dynamische Import ist derselbe Ladekreis-Schutz, den auch
+ * `bringEngineBack` braucht: der providerStore zeigt auf dieses Modul.
  *
  * Geraeumt wird mit `setState`, NICHT ueber `setActiveModel`: an dessen Weg
  * weg von einer Engine-Zeile haengt ein sofortiges `stop_bundled_engine`, und
  * das wuerde die Nachsicht ueberholen, die dieses Modul selbst verwaltet.
  */
-async function dropDisplacedEnginePick(): Promise<void> {
+async function dropDisplacedEnginePick(uebernehmer: string | undefined): Promise<void> {
   try {
     const { useModelStore } = await import('../stores/modelStore')
     const gewaehlt = useModelStore.getState().activeModel
     if (!gewaehlt) return
     const zeile = useModelStore.getState().models.find((m) => m.name === gewaehlt)
     if (!isBuiltinEngineEntry(zeile as unknown as InstalledModelLike | undefined)) return
+    // Zuerst raeumen, dann reden. Die Ansage haengt an einem zweiten
+    // dynamischen Import, und was danach kommt, darf das Raeumen weder
+    // verzoegern noch mit sich reissen, wenn es scheitert.
     useModelStore.setState({ activeModel: null })
     log.info('[builtin-slot] engine lost the local slot, dropped the pick it was serving')
+    void sagenDassDieWahlFiel(gewaehlt, uebernehmer)
   } catch (e) {
     // Wie beim Rueckweg: der Steckplatzwechsel selbst darf daran nicht
     // scheitern. Die naechste Modelliste prueft die Wahl ohnehin erneut.
     log.warn('[builtin-slot] could not drop the pick of the displaced engine', { err: e })
+  }
+}
+
+/**
+ * Die Zeile ueber die gefallene Wahl, aber nur an den, der sie nicht selbst
+ * ausgeloest hat.
+ *
+ * `handbackAwaitsTheUsersPick` ist wahr, solange der Steckplatz noch auf die
+ * Zeile wartet, die der Nutzer im Waehler angeklickt hat. Dann steht die
+ * Wechselzeile ueber genau diesen Vorgang schon auf dem Schirm, und ein
+ * zweiter Satz wuerde sie loeschen statt ergaenzen.
+ */
+async function sagenDassDieWahlFiel(gewaehlt: string, uebernehmer: string | undefined): Promise<void> {
+  try {
+    const { announceChatModelLostItsEngine, handbackAwaitsTheUsersPick } =
+      await import('../api/lu-engine-switch')
+    if (handbackAwaitsTheUsersPick()) return
+    announceChatModelLostItsEngine(gewaehlt, uebernehmer)
+  } catch (e) {
+    log.warn('[builtin-slot] could not say that the pick fell with the slot', { err: e })
   }
 }
 

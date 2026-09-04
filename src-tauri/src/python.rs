@@ -103,24 +103,79 @@ pub fn venv_python_path_named(comfyui_dir: &Path, venv_name: &str) -> PathBuf {
     }
 }
 
-/// Resolve the venv Python for `comfyui_dir` iff it exists. Returns the
-/// path as a String (matching the API that `process::start_comfyui` already
-/// uses for its `bundled_python` / `system_python` slots), or None when
-/// no venv has been created — caller falls back to the system Python.
+/// Where this ComfyUI keeps its packages. Three answers, not two.
 ///
-/// Checks both the classic `venv` and the modern `.venv` directory (issue #51,
-/// adhney): a macOS/Linux ComfyUI installed into `.venv` was previously missed,
-/// so `start_comfyui` fell back to the system Python and crashed with
-/// `ModuleNotFoundError: torch`. `venv` is checked first to preserve the exact
-/// behavior for users whose env LU's own installer created.
-pub fn resolve_comfyui_venv_python(comfyui_dir: &Path) -> Option<String> {
+/// P3 (Windows box, 03.09.2026): `venv\Scripts\python.exe` was renamed and the
+/// launcher never noticed. It knew only "venv" and "no venv", a venv without
+/// its interpreter fell into the second box, and the answer to "no venv" is
+/// "use the system Python". So ComfyUI started on
+/// `C:\Program Files\Python311\python.exe` and died on a torch import out of a
+/// site-packages tree that has nothing to do with this install.
+///
+/// The missing answer is [`ComfyVenv::Broken`]: the packages live in that venv,
+/// so no other interpreter can start this ComfyUI, and falling back is not a
+/// rescue but a guaranteed error message about the wrong environment.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ComfyVenv {
+    /// A venv whose interpreter is there.
+    Usable(String),
+    /// A venv directory without its interpreter. `interpreter` is the file
+    /// that is missing, which is the one fact the user cannot see from
+    /// outside.
+    Broken { venv_dir: PathBuf, interpreter: PathBuf },
+    /// No venv. The normal case on Windows and macOS: `install_comfyui` only
+    /// builds one when the system Python is PEP 668 protected, otherwise the
+    /// requirements go into the system Python and starting from it is right.
+    Absent,
+}
+
+/// Which of the three answers holds for `comfyui_dir`.
+///
+/// Both the classic `venv` and the modern `.venv` are checked (issue #51,
+/// adhney: a macOS/Linux ComfyUI installed into `.venv` was missed and started
+/// on the system Python). `venv` first, so LU's own installer keeps its exact
+/// behaviour. Usable beats Broken beats Absent.
+///
+/// What makes a directory a venv rather than a leftover folder: either its
+/// PEP 405 marker `pyvenv.cfg`, or torch sitting in its site-packages. The
+/// second half is deliberately the same question
+/// [`crate::commands::process::prefix_has_torch`] answers for the
+/// completeness check, because this module answering it differently is the
+/// whole bug: the panel called the install complete (it found torch in the
+/// venv) while the launcher called the venv absent (it found no interpreter).
+/// An empty folder called `venv` is neither, and must not block a start.
+pub fn comfy_venv_state(comfyui_dir: &Path) -> ComfyVenv {
+    let mut broken: Option<ComfyVenv> = None;
     for venv_name in ["venv", ".venv"] {
-        let candidate = venv_python_path_named(comfyui_dir, venv_name);
-        if candidate.exists() {
-            return Some(candidate.to_string_lossy().to_string());
+        let interpreter = venv_python_path_named(comfyui_dir, venv_name);
+        if interpreter.exists() {
+            return ComfyVenv::Usable(interpreter.to_string_lossy().to_string());
+        }
+        if broken.is_some() {
+            continue;
+        }
+        let venv_dir = comfyui_dir.join(venv_name);
+        if venv_dir.join("pyvenv.cfg").exists()
+            || crate::commands::process::prefix_has_torch(&venv_dir)
+        {
+            broken = Some(ComfyVenv::Broken { venv_dir, interpreter });
         }
     }
-    None
+    broken.unwrap_or(ComfyVenv::Absent)
+}
+
+/// The venv Python for `comfyui_dir` iff it is usable, as a String (matching
+/// the API that `process::start_comfyui` uses for its `bundled_python` /
+/// `system_python` slots).
+///
+/// None still means "do not launch from a venv", which is what the installer,
+/// the updater and the custom-node path want. Only the launcher has to tell
+/// Broken from Absent, so only the launcher asks [`comfy_venv_state`].
+pub fn resolve_comfyui_venv_python(comfyui_dir: &Path) -> Option<String> {
+    match comfy_venv_state(comfyui_dir) {
+        ComfyVenv::Usable(p) => Some(p),
+        ComfyVenv::Broken { .. } | ComfyVenv::Absent => None,
+    }
 }
 
 /// Resolve the real Python binary path, filtering out the Microsoft Store stub
@@ -514,6 +569,100 @@ mod tests {
         let resolved = resolve_comfyui_venv_python(&tmp);
         assert!(resolved.is_some(), "expected resolver to find {}", py.display());
         assert!(resolved.unwrap().contains(".venv"));
+    }
+
+    // ── P3: comfy_venv_state, die dritte Antwort ───────────────────────────
+    //
+    // Der Tester hat `venv\Scripts\python.exe` umbenannt und Start gedrueckt.
+    // Die App hat es nicht gemerkt und still
+    // `C:\Program Files\Python311\python.exe` gestartet, weil "venv ohne
+    // Interpreter" und "kein venv" bis dahin dieselbe Antwort waren.
+
+    /// Legt ein venv an, dem genau der Interpreter fehlt. `Lib/site-packages`
+    /// ist die Windows-Form, und `prefix_has_torch` prueft alle Formen auf
+    /// jeder Plattform, also braucht der Test keinen Plattformzweig.
+    fn broken_venv(tmp: &std::path::Path, venv_name: &str, marker: bool, torch: bool) {
+        let venv = tmp.join(venv_name);
+        fs::create_dir_all(&venv).unwrap();
+        if marker {
+            fs::write(venv.join("pyvenv.cfg"), "home = C:\\Program Files\\Python311\n").unwrap();
+        }
+        if torch {
+            fs::create_dir_all(venv.join("Lib").join("site-packages").join("torch")).unwrap();
+        }
+    }
+
+    #[test]
+    fn ein_venv_ohne_interpreter_ist_kaputt_und_nicht_abwesend() {
+        let tmp = crate::os_paths::test_dir("venv-broken");
+        broken_venv(&tmp, "venv", true, true);
+        assert_eq!(
+            comfy_venv_state(&tmp),
+            ComfyVenv::Broken {
+                venv_dir: tmp.join("venv"),
+                interpreter: venv_python_path_named(&tmp, "venv"),
+            },
+            "der Fall des Testers muss von 'kein venv' unterscheidbar sein",
+        );
+        // Der Vertrag der sechs anderen Aufrufer bleibt: kaputt heisst weiter
+        // "starte hier nicht heraus".
+        assert!(resolve_comfyui_venv_python(&tmp).is_none());
+    }
+
+    #[test]
+    fn ein_venv_ohne_marke_aber_mit_torch_ist_auch_kaputt() {
+        // process.rs:628-632 nennt die Form ausdruecklich: manche Werkzeuge
+        // legen site-packages ohne pyvenv.cfg an. Die Vollstaendigkeitspruefung
+        // zaehlt so ein Verzeichnis als fertige Installation, also darf der
+        // Launcher es nicht als abwesend lesen.
+        let tmp = crate::os_paths::test_dir("venv-broken-nomarker");
+        broken_venv(&tmp, "venv", false, true);
+        assert!(matches!(comfy_venv_state(&tmp), ComfyVenv::Broken { .. }));
+    }
+
+    #[test]
+    fn ein_leerer_ordner_namens_venv_ist_kein_venv() {
+        // Negativkontrolle zu den beiden darueber: wer `Broken` am blossen
+        // Ordnernamen festmacht, verweigert hier einen Start, der heute laeuft.
+        let tmp = crate::os_paths::test_dir("venv-empty");
+        broken_venv(&tmp, "venv", false, false);
+        assert_eq!(comfy_venv_state(&tmp), ComfyVenv::Absent);
+        assert!(resolve_comfyui_venv_python(&tmp).is_none());
+    }
+
+    #[test]
+    fn auch_ein_punkt_venv_kann_kaputt_sein() {
+        // Issue #51 noch einmal, eine Ebene tiefer: die uv-Form darf nicht
+        // durch dasselbe Raster fallen wie damals.
+        let tmp = crate::os_paths::test_dir("dotvenv-broken");
+        broken_venv(&tmp, ".venv", true, false);
+        assert_eq!(
+            comfy_venv_state(&tmp),
+            ComfyVenv::Broken {
+                venv_dir: tmp.join(".venv"),
+                interpreter: venv_python_path_named(&tmp, ".venv"),
+            },
+        );
+    }
+
+    #[test]
+    fn ein_benutzbares_venv_gewinnt_weiterhin() {
+        let tmp = crate::os_paths::test_dir("venv-usable-wins");
+        // Ein kaputtes `.venv` daneben, damit die Reihenfolge geprueft wird und
+        // nicht nur der Einzelfall.
+        broken_venv(&tmp, ".venv", true, false);
+        broken_venv(&tmp, "venv", true, true);
+        let py = venv_python_path_named(&tmp, "venv");
+        fs::create_dir_all(py.parent().unwrap()).unwrap();
+        fs::write(&py, "stub").unwrap();
+        assert_eq!(
+            comfy_venv_state(&tmp),
+            ComfyVenv::Usable(py.to_string_lossy().to_string()),
+        );
+        assert_eq!(
+            resolve_comfyui_venv_python(&tmp).as_deref(),
+            Some(py.to_string_lossy().as_ref()),
+        );
     }
 
     // ── is_real_python (Bug P14 — Microsoft Store stub filter) ──────────────

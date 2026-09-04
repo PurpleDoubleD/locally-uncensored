@@ -11,11 +11,13 @@
  * haelt jeden "Models -> X"-Wegweiser im Baum dagegen. Wird ein Reiter noch
  * einmal umbenannt, faellt der Test, nicht der Kunde.
  *
- * Bewusst NICHT abgedeckt: die Formulierung "the X tab". Die gibt es aktuell
- * noch einmal im Baum, in src/lib/constants.ts:349 ("pick bigger models from
- * the Discover tab once you're in.", die Beschreibung des Starter-Modells im
- * Onboarding). Diese Datei liegt ausserhalb dieser Aufgabe. Wer sie faengt,
- * nimmt das Muster hier dazu.
+ * Die zweite Satzform, "the X tab", ist seit der Nachlese dabei. Sie stand in
+ * src/lib/constants.ts:349, in der Beschreibung des Starter-Modells: "pick
+ * bigger models from the Discover tab once you're in." Das ist einer der
+ * ersten Saetze, die ein neuer Kunde ueberhaupt liest, und er nannte denselben
+ * verschwundenen Reiter. Geprueft wird dabei nur gegen Namen, die die
+ * Reiterleiste der Models-Seite frueher getragen hat: "the Create tab" und
+ * "the Code tab" zeigen auf andere Seiten und gehen niemanden hier etwas an.
  *
  * Der Nachbarwaechter fuer die andere Satzform ("Open Models, X and ...")
  * steht in src/lib/__tests__/der-rat-nennt-nur-echte-knoepfe.test.ts.
@@ -66,6 +68,17 @@ function kundentexte(zeile: string): string[] {
 }
 
 const WEGWEISER = /Models\s*(?:→|->|&rarr;)\s*(.+)$/g
+const REITERSATZ = /\bthe ([A-Z][A-Za-z ]*?) tab\b/g
+
+/**
+ * Namen, die die Reiterleiste der Models-Seite frueher getragen hat.
+ *
+ * Ein Kundentext, der einen davon nennt, schickt den Kunden zu einem Reiter,
+ * den es auf der Seite nicht mehr gibt. Kommt der Name eines Tages zurueck,
+ * faellt er hier von allein wieder heraus, weil gegen die echte Leiste
+ * geprueft wird und nicht gegen diese Liste allein.
+ */
+const FRUEHERE_REITER = ['Discover']
 
 describe('der Wegweiser auf die Models-Seite', () => {
   const reiter = reiterBeschriftungen()
@@ -98,6 +111,32 @@ describe('der Wegweiser auf die Models-Seite', () => {
     const treffer = [...alt.matchAll(WEGWEISER)]
     expect(treffer).toHaveLength(1)
     expect(reiter.some((r) => treffer[0][1].startsWith(r))).toBe(false)
+  })
+
+  it('und jeder "the X tab"-Wegweiser genauso', () => {
+    const suender: string[] = []
+    for (const f of [...dateien(src, /\.tsx?$/), ...dateien(rust, /\.rs$/)]) {
+      for (const [i, zeile] of readFileSync(f, 'utf8').split('\n').entries()) {
+        for (const text of kundentexte(zeile)) {
+          for (const treffer of text.matchAll(REITERSATZ)) {
+            const name = treffer[1]
+            if (FRUEHERE_REITER.includes(name) && !reiter.includes(name)) {
+              suender.push(`${f}:${i + 1} nennt "${name}"`)
+            }
+          }
+        }
+      }
+    }
+    expect(suender).toEqual([])
+  })
+
+  // Negativkontrolle: genau der Satz, den ein neuer Kunde im Onboarding las.
+  it('der Satz aus dem Onboarding waere aufgefallen', () => {
+    const alt = "Great to verify your setup; pick bigger models from the Discover tab once you're in."
+    const treffer = [...alt.matchAll(REITERSATZ)]
+    expect(treffer).toHaveLength(1)
+    expect(FRUEHERE_REITER).toContain(treffer[0][1])
+    expect(reiter).not.toContain(treffer[0][1])
   })
 
   it('die drei Meldungen im Bild- und Videoweg zeigen auf "Get new"', () => {

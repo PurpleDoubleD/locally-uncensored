@@ -27,7 +27,7 @@ use std::sync::atomic::Ordering;
 use std::os::windows::process::CommandExt;
 
 use tauri::State;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 use crate::state::AppState;
 use crate::os_error;
@@ -41,7 +41,8 @@ use super::comfy_job::{ComfyJob, COMFY_JOB};
 use super::comfy_job::comfy_job_busy_message;
 use super::pip::pip_install_streaming_with_retry_cancellable;
 use super::torch::plan_pytorch_install;
-use super::venv::{create_comfyui_venv, detect_venv_passengers};
+use super::venv::{create_comfyui_venv, detect_venv_passengers, retire_venv, sweep_retired_venvs};
+use crate::python::venv_python_path;
 #[cfg(target_os = "windows")]
 use super::git::{windows_git_install_hint, windows_git_probe, WindowsGitState};
 #[cfg(target_os = "windows")]
@@ -145,8 +146,8 @@ pub fn repair_comfyui_env(state: State<'_, AppState>) -> Result<serde_json::Valu
         };
 
         // Set when `pip install -r requirements.txt` failed and the run carried
-        // on with LU's own package list. Folder plus reason, so the live log
-        // line and the line the finished run leaves behind agree (A15).
+        // on with the packages LU knows about. Folder plus reason, so the live
+        // log line and the line the finished run leaves behind agree (A15).
         let mut requirements_fallback: Option<(String, &'static str)> = None;
 
         // A16 (A15-2): before anything is deleted and before anything is
@@ -159,10 +160,33 @@ pub fn repair_comfyui_env(state: State<'_, AppState>) -> Result<serde_json::Valu
             return;
         }
 
+        // P3 (04.09.): the repair had exactly one cancel check, and it sat
+        // BEHIND the venv build. Everything before it was a click the app
+        // swallowed. This is the same helper the installer has had all along
+        // (comfy_install.rs), and the checks below are placed the same way:
+        // before each stretch that cannot be interrupted from inside.
+        let cancelled = || cancel_flag.load(Ordering::SeqCst);
+        if cancelled() {
+            update("cancelled", "Repair cancelled before anything was changed.");
+            return;
+        }
+
+        // The rebuild puts about two gigabytes back, and the old venv is now
+        // deleted alongside that instead of before it, so the drive gets less
+        // slack than it used to. Say so before the work starts, exactly as the
+        // installer does; a warning is not a refusal.
+        if let Some(warning) = super::comfy_install::check_install_disk_pressure(&comfy_dir) {
+            update("installing", &warning);
+        }
+
         // A broken venv must go entirely: pip inside it would report the
         // damaged packages as already satisfied, which is the exact dead end
         // this command exists to break.
         let venv_dir = comfy_dir.join("venv");
+        // Where the old venv went, once it has been moved aside. Deleted in the
+        // background further down, and waited on before the download, so the
+        // old copy and the new two gigabytes never fill the drive at once.
+        let mut retired_venv: Option<PathBuf> = None;
         // OI-3: faster-whisper and Piper live in this venv too. Take stock
         // BEFORE the delete, because afterwards there is nothing left to read.
         let passengers = detect_venv_passengers(&venv_dir);
@@ -200,26 +224,120 @@ pub fn repair_comfyui_env(state: State<'_, AppState>) -> Result<serde_json::Valu
                 "installing",
                 "Removing the old venv (models, outputs and custom nodes stay untouched)...",
             );
-            if let Err(e) = std::fs::remove_dir_all(&venv_dir) {
-                update("error", &venv_removal_error(&venv_dir, &e));
-                return;
+            // Moved aside, not walked. Deleting in line was 40000 to 80000
+            // files inside one blocking call that never looks at the cancel
+            // flag, which is where P3's 76 seconds started. The new name is a
+            // sibling, so the same drive, so one metadata operation.
+            match retire_venv(&venv_dir) {
+                Ok(retired) => {
+                    update(
+                        "installing",
+                        "The old venv has been set aside and is being deleted in the background.",
+                    );
+                    retired_venv = Some(retired);
+                }
+                Err(rename_failed) => {
+                    // Windows refuses a rename while a process holds the
+                    // directory itself open or has its working directory in
+                    // it. Then there is no way around walking the tree, but it
+                    // goes on its own thread so the cancel flag still gets
+                    // read every 200 ms.
+                    info!(error = %rename_failed, "venv rename failed, falling back to deleting it in place");
+                    // The interpreter first, and on its own. What the fallback
+                    // leaves behind on a cancel is a half-emptied venv still
+                    // called `venv`, and this one file is what the launcher
+                    // asks about before offering that venv to autostart. Since
+                    // P3 a missing interpreter is answered with a message
+                    // rather than a silent start on some other Python, so what
+                    // this unlink now buys is that the message is the truth.
+                    // One unlink, so it cannot be interrupted.
+                    let _ = std::fs::remove_file(venv_python_path(&comfy_dir));
+                    let doomed = venv_dir.clone();
+                    let worker = std::thread::spawn(move || std::fs::remove_dir_all(&doomed));
+                    while !worker.is_finished() {
+                        if cancelled() {
+                            update(
+                                "cancelled",
+                                "Repair cancelled. The old venv is still being deleted in the background.",
+                            );
+                            return;
+                        }
+                        std::thread::sleep(std::time::Duration::from_millis(200));
+                    }
+                    if let Ok(Err(e)) = worker.join() {
+                        update("error", &venv_removal_error(&venv_dir, &e));
+                        return;
+                    }
+                }
             }
+        }
+
+        // One worker for everything that still has to be walked, in this order:
+        // the folder this run just set aside, then the leftovers of runs that
+        // died between their rename and the end of their delete. One thread and
+        // not two, because two would race each other over the same tree the
+        // moment the sweep listed the folder after this run's rename.
+        let deleting = {
+            let sweep_dir = comfy_dir.clone();
+            std::thread::spawn(move || {
+                if let Some(retired) = retired_venv {
+                    if let Err(e) = std::fs::remove_dir_all(&retired) {
+                        warn!(error = %e, folder = %retired.display(), "the retired venv could not be deleted");
+                    }
+                }
+                sweep_retired_venvs(&sweep_dir);
+            })
+        };
+
+        // The check that was missing. It used to sit behind the venv build, so
+        // a cancel during the delete still wrote the line below and then built
+        // the whole venv before noticing.
+        if cancelled() {
+            update("cancelled", "Repair cancelled.");
+            return;
         }
 
         update(
             "installing",
             "Step 1/4: Creating a fresh isolated venv inside the ComfyUI folder...",
         );
-        let venv_py = match create_comfyui_venv(&comfy_dir, &python_bin) {
+        let venv_py = match create_comfyui_venv(&comfy_dir, &python_bin, Some(&cancel_flag)) {
             Ok(p) => p.to_string_lossy().to_string(),
+            Err(e) if e == "cancelled" => {
+                update("cancelled", "Repair cancelled while the new venv was being created.");
+                return;
+            }
             Err(e) => {
                 update("error", &format!("venv creation failed.\n\n{}", e));
                 return;
             }
         };
-        if cancel_flag.load(Ordering::SeqCst) {
-            update("cancelled", "Repair cancelled.");
-            return;
+
+        // The old venv is still on the drive until that worker finishes, and
+        // the next step puts two gigabytes of PyTorch down beside it. Waiting
+        // here costs nothing when the delete is already through, and when it is
+        // not, waiting is the honest answer: the loop keeps reading the cancel
+        // flag, so the user is never more than 200 ms from leaving.
+        {
+            let mut said = false;
+            while !deleting.is_finished() {
+                if cancelled() {
+                    update(
+                        "cancelled",
+                        "Repair cancelled. The old venv is still being deleted in the background.",
+                    );
+                    return;
+                }
+                if !said {
+                    said = true;
+                    update(
+                        "installing",
+                        "Waiting for the old venv to finish deleting before the download starts...",
+                    );
+                }
+                std::thread::sleep(std::time::Duration::from_millis(200));
+            }
+            let _ = deleting.join();
         }
 
         let (torch_args, gpu_info) = plan_pytorch_install();
@@ -428,8 +546,19 @@ pub fn update_comfyui(state: State<'_, AppState>) -> Result<serde_json::Value, S
     // Prefer the install's venv Python (same preference the launcher uses);
     // refuse without a usable interpreter — a pulled core with stale
     // requirements is worse than no update (frontend package pins move often).
-    let python_bin = crate::python::resolve_comfyui_venv_python(&comfy_dir)
-        .unwrap_or_else(|| state.python_bin.lock().unwrap().clone());
+    // P3: the same third answer the launcher has. Updating into the system
+    // Python while ComfyUI can only ever start out of this venv leaves the
+    // hole exactly where it was, one git pull further along.
+    let python_bin = match crate::python::comfy_venv_state(&comfy_dir) {
+        crate::python::ComfyVenv::Usable(p) => p,
+        crate::python::ComfyVenv::Broken { venv_dir, interpreter } => {
+            return fail(
+                &state,
+                &crate::commands::process::comfy_broken_venv_message(&venv_dir, &interpreter),
+            );
+        }
+        crate::python::ComfyVenv::Absent => state.python_bin.lock().unwrap().clone(),
+    };
     if python_bin.is_empty() || !crate::python::is_real_python(&python_bin) {
         return fail(
             &state,
@@ -454,8 +583,8 @@ pub fn update_comfyui(state: State<'_, AppState>) -> Result<serde_json::Value, S
         };
 
         // Set when `pip install -r requirements.txt` failed and the run carried
-        // on with LU's own package list. Folder plus reason, so the live log
-        // line and the line the finished run leaves behind agree (A15).
+        // on with the packages LU knows about. Folder plus reason, so the live
+        // log line and the line the finished run leaves behind agree (A15).
         let mut requirements_fallback: Option<(String, &'static str)> = None;
 
         #[cfg(target_os = "windows")]
@@ -689,6 +818,57 @@ mod tests {
             ("the precheck call", needle("if let Err(msg) = repair_prech", "eck(&comfy_dir) {")),
             ("the venv step", needle("\"Removing the old venv (models, outputs", " and custom nodes stay untouched)...\",")),
             ("the PyTorch step", needle("\"Downloading PyTorch into the fresh venv", " (~2 GB). Live pip output below.\",")),
+        ] {
+            assert_eq!(
+                src.matches(&n).count(),
+                1,
+                "{what}: the search string finds itself in this test, so its .expect can never fire",
+            );
+        }
+    }
+
+    #[test]
+    fn the_repair_asks_about_cancel_between_the_delete_and_the_venv() {
+        // P3 (04.09.): Cancel during "Removing the old venv" took 75,8 seconds
+        // and the run carried on into step 1/4 anyway. Both halves of that were
+        // one missing line: the only cancel check in this stretch sat BEHIND
+        // `create_comfyui_venv`, so the delete, the step-1/4 log line and the
+        // whole venv build all happened after the click.
+        //
+        // Same shape as the precheck order test above, and for the same reason:
+        // the body is a thread inside a Tauri command, so the order is read out
+        // of this file. Needles split in half so they never match themselves
+        // here, and each one checked to occur exactly once.
+        let src = include_str!("comfy_repair.rs");
+        let needle = |head: &str, tail: &str| format!("{head}{tail}");
+
+        let removal = needle("\"Removing the old venv (models, outputs", " and custom nodes stay untouched)...\",");
+        let check = needle("update(\"cancelled\", \"Repair cance", "lled.\");");
+        let step_one = needle("\"Step 1/4: Creating a fresh isolated venv", " inside the ComfyUI folder...\",");
+        let build = needle("create_comfyui_venv(&comfy_dir, &python_bin,", " Some(&cancel_flag))");
+
+        let at_removal = src.find(&removal).expect("the venv removal step is gone");
+        let at_check = src.find(&check).expect("the repair no longer stops between the delete and the venv build");
+        let at_step_one = src.find(&step_one).expect("the step 1/4 line is gone");
+        let at_build = src.find(&build).expect("the venv build no longer gets the cancel flag");
+
+        assert!(at_removal < at_check, "the cancel check runs before the old venv is dealt with");
+        assert!(at_check < at_step_one, "the cancel check sits behind the step 1/4 line, so a cancelled run still announces it");
+        assert!(at_check < at_build, "the cancel check sits behind the venv build");
+
+        // The old way out has to be gone, not merely bypassed. A second path
+        // that deletes the venv in line would bring the 76 seconds back the
+        // next time somebody edits this function.
+        assert!(
+            !src.contains(&needle("std::fs::remove_dir_all(&venv", "_dir)")),
+            "the blocking in-line delete of the venv is still in this file"
+        );
+
+        for (what, n) in [
+            ("the venv removal step", removal),
+            ("the cancel check", check),
+            ("the step 1/4 line", step_one),
+            ("the venv build", build),
         ] {
             assert_eq!(
                 src.matches(&n).count(),

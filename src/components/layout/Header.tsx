@@ -19,6 +19,7 @@ import { closeDialog, isTopDialog, nextFocusIndex, openDialog } from '../ui/dial
 import { MONOGRAM, MONOGRAM_INVERT } from './brand'
 import type { View } from '../../stores/uiStore'
 import { WheelNav } from '../ui/WheelNav'
+import { modelListIsStale } from '../../lib/model-list-staleness'
 
 /**
  * Die Navigation als Daten, nicht als sechs abgeschriebene Knoepfe.
@@ -69,17 +70,17 @@ export function Header() {
   // App-level model bootstrap. This used to ride on the header ModelSelector,
   // which sat here always-mounted; the picker has moved into the composer
   // (mounted only inside an active chat), so the header now owns the fetch.
-  // Without it a fresh start never populates the list — and setModels' auto-
-  // select of the first chat model never fires, so `activeModel` stays null and
-  // New Chat dead-ends on the "pick a model" page. Refetch on provider changes
-  // too (enable LM Studio / add a key in Settings), mirroring the old picker.
+  // Without it a fresh start never populates the list, setModels' auto-select
+  // of the first chat model never fires, `activeModel` stays null and New Chat
+  // dead-ends on the "pick a model" page. Refetch on provider changes too
+  // (enable LM Studio in Settings, hand the shared slot to another backend),
+  // mirroring the old picker. Welche Aenderung das ist, steht an genau einer
+  // Stelle (lib/model-list-staleness); sie stand hier und im Waehler
+  // wortgleich zweimal und kannte in beiden Fassungen `managed` nicht.
   useEffect(() => { fetchModels() }, [fetchModels])
   useEffect(() => {
     const unsub = useProviderStore.subscribe((state, prev) => {
-      const changed = (Object.keys(state.providers) as Array<keyof typeof state.providers>)
-        .some((id) => state.providers[id]?.enabled !== prev.providers[id]?.enabled
-          || state.providers[id]?.baseUrl !== prev.providers[id]?.baseUrl)
-      if (changed) fetchModels()
+      if (modelListIsStale(state.providers, prev.providers)) fetchModels()
     })
     return () => unsub()
   }, [fetchModels])

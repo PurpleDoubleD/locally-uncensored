@@ -261,8 +261,17 @@ fn install_node_requirements(
     if !reqs.exists() {
         return Ok(());
     }
-    let venv_python = crate::python::resolve_comfyui_venv_python(comfy_dir);
-    let python_bin = venv_python.unwrap_or_else(|| fallback_python.to_string());
+    // P3, dritte Stelle mit derselben Frage: ein venv ohne Interpreter ist
+    // nicht "kein venv". Die Anforderungen des Knotens landeten sonst im
+    // System-Python, aus dem dieses ComfyUI nie startet, und der Knoten fehlt
+    // beim naechsten Lauf trotzdem.
+    let python_bin = match crate::python::comfy_venv_state(comfy_dir) {
+        crate::python::ComfyVenv::Usable(p) => p,
+        crate::python::ComfyVenv::Broken { venv_dir, interpreter } => {
+            return Err(crate::commands::process::comfy_broken_venv_message(&venv_dir, &interpreter));
+        }
+        crate::python::ComfyVenv::Absent => fallback_python.to_string(),
+    };
     if python_bin.is_empty() {
         return Err(format!(
             "Custom node {} cloned, but cannot install requirements: \

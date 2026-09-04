@@ -14,11 +14,16 @@
 //! ist: auf einer PEP-668-Distribution ist es der einzige Weg, überhaupt zu
 //! installieren.
 
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use crate::python::python_command;
 use std::process::Stdio;
+use std::sync::atomic::AtomicBool;
+use std::sync::{Arc, Mutex};
 
+use tracing::warn;
 
+use super::children::{wait_or_cancel, TrackedInstallerChild};
 use crate::os_error;
 use crate::python::venv_python_path;
 use crate::state::AppState;
@@ -59,7 +64,27 @@ pub fn is_pep668_protected(python_bin: &str) -> bool {
     String::from_utf8_lossy(&out.stdout).trim() == "YES"
 }
 
-pub fn create_comfyui_venv(comfyui_dir: &Path, python_bin: &str) -> Result<PathBuf, String> {
+/// Create a venv inside `comfyui_dir/venv` using the system `python_bin`.
+/// Returns the path to the venv's Python interpreter on success. On Arch
+/// boxes that haven't installed the `python-virtualenv` package this can
+/// fail with `No module named venv`, and we surface that with an actionable
+/// hint pointing at the right pacman / apt invocation.
+///
+/// `cancel` is read every 200 ms while the child runs, and it has to be:
+/// `python -m venv` pulls `ensurepip` in, which is tens of seconds on Windows.
+/// P3 (04.09.): cancelling a repair took 76 seconds, and part of that was this
+/// call being sat out to the end because it was a single blocking `output()`.
+///
+/// On a cancel the half-built venv is deleted again before `Err("cancelled")`
+/// goes back. `resolve_comfyui_venv_python` asks only whether the interpreter
+/// file exists, and `python -m venv` writes that file BEFORE it runs
+/// `ensurepip`, so leaving the ruin behind would have autostart launching
+/// ComfyUI out of an env with an empty site-packages.
+pub fn create_comfyui_venv(
+    comfyui_dir: &Path,
+    python_bin: &str,
+    cancel: Option<&Arc<AtomicBool>>,
+) -> Result<PathBuf, String> {
     let venv_dir = comfyui_dir.join("venv");
     // venv is idempotent: re-running on an existing dir just no-ops, but be
     // explicit so the log reads cleanly.
@@ -70,15 +95,48 @@ pub fn create_comfyui_venv(comfyui_dir: &Path, python_bin: &str) -> Result<PathB
 
     let mut cmd = python_command(python_bin);
     cmd.args(["-m", "venv", venv_dir.to_string_lossy().as_ref()])
-        .stdout(Stdio::piped())
+        // Only stderr is ever read. stdout went into a buffer nobody looked at
+        // even before this, and an unread pipe is one more way to block while
+        // we are supposed to be polling the cancel flag.
+        .stdout(Stdio::null())
         .stderr(Stdio::piped());
 
-    let out = cmd
-        .output()
+    let mut child = cmd
+        .spawn()
         .map_err(|e| format!("Could not spawn `python -m venv`: {}", os_error::english(&e)))?;
+    // Same registry every other installer child joins, so closing the app
+    // mid-build does not leave venv and ensurepip resident.
+    let _tracked = TrackedInstallerChild::register(child.id());
 
-    if !out.status.success() {
-        let stderr = String::from_utf8_lossy(&out.stderr);
+    // Drained next to the wait, not after it: a full pipe would stall the
+    // child while the loop below thinks it is still working.
+    let stderr_pipe = child.stderr.take();
+    let stderr_buf = Arc::new(Mutex::new(String::new()));
+    let sink = stderr_buf.clone();
+    let reader = std::thread::spawn(move || {
+        if let Some(mut pipe) = stderr_pipe {
+            let mut text = String::new();
+            let _ = pipe.read_to_string(&mut text);
+            if let Ok(mut slot) = sink.lock() {
+                *slot = text;
+            }
+        }
+    });
+
+    let waited = wait_or_cancel(&mut child, cancel, "`python -m venv`");
+    let _ = reader.join();
+    let stderr = stderr_buf.lock().map(|b| b.clone()).unwrap_or_default();
+
+    let exit_status = match waited {
+        Ok(s) => s,
+        Err(e) if e == "cancelled" => {
+            let _ = std::fs::remove_dir_all(&venv_dir);
+            return Err(e);
+        }
+        Err(e) => return Err(e),
+    };
+
+    if !exit_status.success() {
         let lower = stderr.to_lowercase();
         // Most common Arch / minimal-Python failure: stdlib venv module
         // isn't available because the distro packages it separately.
@@ -108,6 +166,81 @@ pub fn create_comfyui_venv(comfyui_dir: &Path, python_bin: &str) -> Result<PathB
         ));
     }
     Ok(venv_py)
+}
+
+// ── P3 (04.09.): the old venv is moved out of the way, not deleted in line ──
+
+/// The prefix every set-aside venv carries.
+///
+/// It starts with `venv` on purpose so it sorts next to the real one for
+/// anybody reading the folder, and it is NOT `venv` or `.venv`, which is the
+/// whole point: `python.rs::resolve_comfyui_venv_python` looks at exactly
+/// those two names, so a retired folder is invisible to the launcher, to
+/// autostart and to `resolve_lu_python`.
+pub(crate) const RETIRED_VENV_PREFIX: &str = "venv.lu-old-";
+
+/// Move `<comfy>/venv` out of the way and answer where it went.
+///
+/// Deleting it in line was the 76 seconds P3 measured: a venv holding PyTorch
+/// is tens of thousands of files, `remove_dir_all` walks all of them in one
+/// blocking call, and the cancel flag cannot be read inside it. The new name
+/// is a sibling in the same parent, so it is on the same drive, so this is one
+/// metadata operation no matter how much is inside. The deleting happens
+/// afterwards on a worker thread, and the caller is free again the moment this
+/// returns.
+///
+/// Nanoseconds plus our own process id in the name, so two runs never land on
+/// the same folder.
+pub(crate) fn retire_venv(venv_dir: &Path) -> std::io::Result<PathBuf> {
+    let parent = venv_dir.parent().ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "the venv path has no parent directory to move it into",
+        )
+    })?;
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let retired = parent.join(format!(
+        "{}{}-{}",
+        RETIRED_VENV_PREFIX,
+        stamp,
+        std::process::id()
+    ));
+    std::fs::rename(venv_dir, &retired)?;
+    Ok(retired)
+}
+
+/// Delete whatever [`retire_venv`] left lying around.
+///
+/// Quietly, over tracing only: these are folders nobody is looking for, and a
+/// failure to clear one must not colour a repair the user is watching. Every
+/// repair runs it on the same worker that deletes its own retired folder, and
+/// after that one, so an app that died between a rename and the end of its
+/// delete does not keep the space forever and two deleters never meet on the
+/// same tree.
+///
+/// Only names carrying [`RETIRED_VENV_PREFIX`] are touched. This runs inside
+/// the user's ComfyUI folder, next to models, outputs and custom nodes, so the
+/// match being too eager is the one way this could destroy something.
+pub(crate) fn sweep_retired_venvs(comfy_dir: &Path) {
+    let Ok(entries) = std::fs::read_dir(comfy_dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let retired = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .is_some_and(|n| n.starts_with(RETIRED_VENV_PREFIX));
+        if !retired || !path.is_dir() {
+            continue;
+        }
+        if let Err(e) = std::fs::remove_dir_all(&path) {
+            warn!(error = %e, folder = %path.display(), "a retired venv could not be swept");
+        }
+    }
 }
 
 // ── OI-3: the repair must not silently uninstall Voice ──────────────────────
@@ -224,11 +357,6 @@ pub fn resolve_lu_python(state: &AppState) -> String {
     resolved
 }
 
-/// Create a venv inside `comfyui_dir/venv` using the system `python_bin`.
-/// Returns the path to the venv's Python interpreter on success. On Arch
-/// boxes that haven't installed the `python-virtualenv` package this can
-/// fail with `No module named venv` — we surface that with an actionable
-/// hint pointing at the right pacman / apt invocation.
 /// The card the user reads when Repair environment cannot delete the old venv.
 ///
 /// A15, Windows Nachlauf 02.09.: this exact sentence carried the German
@@ -394,7 +522,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&comfy_root);
         std::fs::create_dir_all(&comfy_root).expect("temp dir create");
 
-        let venv_py = create_comfyui_venv(&comfy_root, &fake_python)
+        let venv_py = create_comfyui_venv(&comfy_root, &fake_python, None)
             .expect("create_comfyui_venv should succeed against fake python");
 
         assert!(venv_py.exists(), "venv python at {} should exist", venv_py.display());
@@ -426,7 +554,7 @@ mod tests {
         println!("[live E2E] ✓ nested venv pip runs without PEP 668 block");
 
         // ── Phase 4: idempotency — second create_comfyui_venv must no-op ──
-        let venv_py_again = create_comfyui_venv(&comfy_root, &fake_python)
+        let venv_py_again = create_comfyui_venv(&comfy_root, &fake_python, None)
             .expect("second create_comfyui_venv should idempotently return existing venv");
         assert_eq!(venv_py, venv_py_again);
         println!("[live E2E] ✓ create_comfyui_venv is idempotent");
@@ -477,6 +605,235 @@ mod tests {
         let msg = venv_removal_error(Path::new("/tmp/ComfyUI/venv"), &e);
         assert!(msg.contains("the venv path is not a directory"), "got: {msg}");
         assert!(msg.starts_with("Could not remove the old venv at /tmp/ComfyUI/venv: "), "got: {msg}");
+    }
+
+    // ── P3 (04.09.): cancelling a repair took 76 seconds ──────────────────
+    //
+    // Two blocking calls with no way out sat between the click and the stop:
+    // `remove_dir_all` over a venv holding PyTorch, and `python -m venv`.
+    // These pin the first half. The second half is `wait_or_cancel` in
+    // children.rs, which is where its own tests live.
+
+    /// A folder tree with `dirs` subfolders holding `per_dir` files each.
+    fn tree_with_files(root: &Path, dirs: usize, per_dir: usize) {
+        for d in 0..dirs {
+            let sub = root.join(format!("pkg{d}"));
+            std::fs::create_dir_all(&sub).unwrap();
+            for f in 0..per_dir {
+                std::fs::write(sub.join(format!("mod{f}.py")), b"x").unwrap();
+            }
+        }
+    }
+
+    #[test]
+    fn retire_venv_moves_the_folder_instead_of_emptying_it() {
+        let tmp = tempfile::tempdir().unwrap();
+        let comfy = tmp.path().join("ComfyUI");
+        let venv = comfy.join("venv");
+        tree_with_files(&venv, 3, 4);
+        std::fs::write(venv.join("pyvenv.cfg"), b"home = /usr").unwrap();
+
+        let retired = retire_venv(&venv).expect("the venv could not be set aside");
+
+        assert!(!venv.exists(), "the old venv is still at its old name");
+        assert!(retired.is_dir(), "the retired folder is not there: {}", retired.display());
+        assert_eq!(retired.parent(), Some(comfy.as_path()), "it left the ComfyUI folder");
+        assert!(
+            retired
+                .file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n.starts_with(RETIRED_VENV_PREFIX)),
+            "the retired folder does not carry the prefix: {}",
+            retired.display()
+        );
+        // The whole point: nothing was walked, so nothing was lost. This is
+        // what separates a rename from a delete, and it is what makes it fast.
+        assert!(retired.join("pyvenv.cfg").exists(), "the contents were emptied out");
+        for d in 0..3 {
+            for f in 0..4 {
+                let file = retired.join(format!("pkg{d}")).join(format!("mod{f}.py"));
+                assert!(file.exists(), "a file did not survive: {}", file.display());
+            }
+        }
+    }
+
+    #[test]
+    fn retiring_a_venv_is_orders_of_magnitude_faster_than_deleting_it() {
+        // Self-calibrating rather than a fixed millisecond budget, so it says
+        // the same thing on a fast NVMe and on a tired laptop drive: a delete
+        // pays per file, a rename does not.
+        let tmp = tempfile::tempdir().unwrap();
+        let to_delete = tmp.path().join("delete-me").join("venv");
+        let to_retire = tmp.path().join("retire-me").join("venv");
+        tree_with_files(&to_delete, 40, 100);
+        tree_with_files(&to_retire, 40, 100);
+
+        let t0 = std::time::Instant::now();
+        std::fs::remove_dir_all(&to_delete).unwrap();
+        let deleting = t0.elapsed();
+
+        let t1 = std::time::Instant::now();
+        retire_venv(&to_retire).expect("the venv could not be set aside");
+        let retiring = t1.elapsed();
+
+        assert!(
+            retiring * 10 < deleting,
+            "setting aside took {retiring:?} against a delete of {deleting:?}. If the delete \
+             itself was too quick to measure, the tree is too small: raise the file count."
+        );
+        // And in absolute terms, because the promise to the user is a number:
+        // the cancel budget is five seconds and this step must not eat it.
+        assert!(retiring < std::time::Duration::from_millis(250), "took {retiring:?}");
+    }
+
+    #[test]
+    fn a_retired_venv_is_invisible_to_everything_that_looks_for_one() {
+        // The reason the delete may run in the background at all. If the
+        // launcher could still find the folder, a half-deleted venv would be
+        // offered to `start_comfyui` and autostart as a working environment.
+        let tmp = tempfile::tempdir().unwrap();
+        let comfy = tmp.path().join("ComfyUI");
+        let venv = comfy.join("venv");
+        let site = venv.join("lib").join("python3.12").join("site-packages");
+        std::fs::create_dir_all(site.join("faster_whisper")).unwrap();
+        let interpreter = venv_python_path(&comfy);
+        std::fs::create_dir_all(interpreter.parent().unwrap()).unwrap();
+        std::fs::write(&interpreter, b"#!/bin/sh\n").unwrap();
+
+        // Before: both finders see it, so the assertions below mean something.
+        assert!(crate::python::resolve_comfyui_venv_python(&comfy).is_some());
+        assert_eq!(detect_venv_passengers(&venv).len(), 1);
+
+        retire_venv(&venv).expect("the venv could not be set aside");
+
+        assert!(
+            crate::python::resolve_comfyui_venv_python(&comfy).is_none(),
+            "the launcher still offers a venv that is on its way to the bin"
+        );
+        assert!(
+            detect_venv_passengers(&venv).is_empty(),
+            "the passenger scan still reads the retired venv"
+        );
+    }
+
+    #[test]
+    fn the_sweep_takes_only_the_retired_folders() {
+        // This runs inside the user's ComfyUI folder. A pattern one character
+        // too short takes models with it, so the folders that must SURVIVE
+        // are the point of this test.
+        let tmp = tempfile::tempdir().unwrap();
+        let comfy = tmp.path().join("ComfyUI");
+        for keep in ["venv", "models", "custom_nodes", "output"] {
+            std::fs::create_dir_all(comfy.join(keep)).unwrap();
+        }
+        std::fs::write(comfy.join("requirements.txt"), b"torch\n").unwrap();
+        let gone = [
+            comfy.join(format!("{RETIRED_VENV_PREFIX}1")),
+            comfy.join(format!("{RETIRED_VENV_PREFIX}2")),
+        ];
+        for g in &gone {
+            tree_with_files(g, 2, 2);
+        }
+
+        sweep_retired_venvs(&comfy);
+
+        for g in &gone {
+            assert!(!g.exists(), "a retired venv survived the sweep: {}", g.display());
+        }
+        for keep in ["venv", "models", "custom_nodes", "output"] {
+            assert!(comfy.join(keep).is_dir(), "the sweep took {keep}");
+        }
+        assert!(comfy.join("requirements.txt").exists(), "the sweep took requirements.txt");
+    }
+
+    #[test]
+    fn creating_a_venv_gives_up_on_a_raised_flag_and_leaves_no_ruin() {
+        // The flag is raised before the call, so the outcome is the same on
+        // every machine. That the loop keeps reading it WHILE the child runs
+        // is the other half, and that is pinned deterministically in
+        // children.rs against a child that sleeps two minutes; racing a real
+        // `python -m venv` here would only be flaky.
+        let Some(python) = probe_python() else {
+            eprintln!("no usable Python on this box, skipping the live venv checks");
+            return;
+        };
+        let tmp = tempfile::tempdir().unwrap();
+        let comfy = tmp.path().join("ComfyUI");
+        // Half a venv, the way a killed `python -m venv` leaves one: a folder
+        // with something in it and no interpreter yet. Planted rather than
+        // raced for, because the child dies too fast to build one reliably.
+        let half_built = comfy.join("venv").join("lib");
+        std::fs::create_dir_all(&half_built).unwrap();
+        std::fs::write(half_built.join("half-written"), b"x").unwrap();
+
+        let flag = Arc::new(AtomicBool::new(true));
+        let out = create_comfyui_venv(&comfy, &python, Some(&flag));
+
+        assert_eq!(out.err().as_deref(), Some("cancelled"));
+        // A cancel that leaves the shell behind is worse than no cancel:
+        // `resolve_comfyui_venv_python` asks only whether `venv/bin/python`
+        // exists, `python -m venv` writes that file BEFORE the slow part, and
+        // autostart would then launch ComfyUI out of an empty env.
+        assert!(
+            !comfy.join("venv").exists(),
+            "the cancelled build left its half-finished venv behind"
+        );
+        assert!(
+            crate::python::resolve_comfyui_venv_python(&comfy).is_none(),
+            "the cancelled build left a startable ruin behind"
+        );
+    }
+
+    #[test]
+    #[ignore]
+    fn a_venv_nobody_cancels_is_still_built_and_found() {
+        // The control that has to stay green: a `create_comfyui_venv` that
+        // always answered "cancelled" would pass every test above while
+        // killing Repair and Install outright.
+        //
+        // `#[ignore]` for a reason that is about the product, not about this
+        // test. The venv child now joins `INSTALLER_CHILDREN`, and
+        // `kill_installer_children` walks that whole registry. Every dropped
+        // `AppState` runs `shutdown_subprocesses`, which calls it, and this
+        // test binary builds dozens of `AppState`s in parallel with this
+        // test. The child then dies mid-build and the run reads as
+        // "venv creation failed: " with empty stderr. Correct behaviour on a
+        // real quit, unrunnable next to a hundred simulated ones.
+        //
+        // The everyday guard against "always cancelled" is
+        // `a_child_left_alone_still_runs_to_its_own_end` in children.rs, which
+        // drives the same wait loop with no registry and no Python.
+        //
+        // Run with: cargo test --bins -- --ignored --test-threads=1 a_venv_nobody_cancels
+        let Some(python) = probe_python() else {
+            eprintln!("no usable Python on this box, skipping the live venv checks");
+            return;
+        };
+        let tmp = tempfile::tempdir().unwrap();
+        let comfy = tmp.path().join("ComfyUI");
+        std::fs::create_dir_all(&comfy).unwrap();
+
+        let down = Arc::new(AtomicBool::new(false));
+        let venv_py = create_comfyui_venv(&comfy, &python, Some(&down))
+            .expect("a venv nobody cancelled was not built");
+
+        assert!(venv_py.exists(), "no interpreter at {}", venv_py.display());
+        assert_eq!(
+            crate::python::resolve_comfyui_venv_python(&comfy).as_deref(),
+            Some(venv_py.to_string_lossy().as_ref()),
+            "the launcher does not find the venv that was just built"
+        );
+        // And a second call is still a no-op rather than a rebuild.
+        assert_eq!(
+            create_comfyui_venv(&comfy, &python, None).expect("second call"),
+            venv_py
+        );
+    }
+
+    /// The interpreter to run the two live checks against, or nothing.
+    fn probe_python() -> Option<String> {
+        let bin = crate::python::get_python_bin();
+        (!bin.is_empty() && crate::python::is_real_python(&bin)).then_some(bin)
     }
 
 }

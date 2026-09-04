@@ -1,6 +1,7 @@
 /**
- * One reading of "the local backend did not answer", shared by everyone who
- * talks to a server on this machine or on the LAN.
+ * One reading of "the backend did not answer", shared by every provider that
+ * reaches its server through the Rust proxy: on this machine, on the LAN, or
+ * on a host of the user's own out on the internet.
  *
  * The Rust proxy hands a refused connection back as
  * `Response(503, {"error": "proxy_localhost_stream_chunked: error sending
@@ -12,6 +13,12 @@
  * worse, because it was wrong. With that race closed (see proxy.rs) the real
  * message arrives, and every provider needs the same two answers about it:
  * is this a transport failure against MY host, and what do I say instead.
+ *
+ * The second answer splits by where that host is, so there are two sentences
+ * below and not one. `localBackendUnreachableMessage` talks to somebody who
+ * runs the server himself and can start it; `remoteBackendUnreachableMessage`
+ * talks to somebody whose address may simply be wrong or whose line may be
+ * down. The first question, `isLocalTransportFailure`, is the same for both.
  */
 
 /** The shapes a refused or broken local connection arrives in. */

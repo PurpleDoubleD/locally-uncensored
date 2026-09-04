@@ -121,8 +121,8 @@ interface InstallStatusPayload {
   logs?: string[]
   /** One closing line the backend wants kept after the run. A15, Windows
    *  Nachlauf 02.09.: a ComfyUI requirements.txt pip cannot install is skipped
-   *  and the run finishes on LU's own package list, which used to end in a
-   *  green idle panel that said nothing about the file it passed over. */
+   *  and the run finishes on the packages LU knows about, which used to end in
+   *  a green idle panel that said nothing about the file it passed over. */
   notice?: string
   /** How that line reads: 'ok' for a run that simply worked, 'warn' for one
    *  that finished with something the user has to know. */

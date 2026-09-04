@@ -46,38 +46,53 @@ use super::pip::{
 /// does not know is installed but not probed, which is exactly the behaviour
 /// before this change.
 ///
-/// The list is names only. It pins no version, and a requirements.txt that
-/// stops naming a package stops it being probed.
-pub(crate) const KNOWN_IMPORT_NAMES: &[(&str, &str)] = &[
-    ("torch", "torch"),
-    ("torchvision", "torchvision"),
-    ("torchaudio", "torchaudio"),
-    ("torchsde", "torchsde"),
-    ("numpy", "numpy"),
-    ("einops", "einops"),
-    ("transformers", "transformers"),
-    ("tokenizers", "tokenizers"),
-    ("sentencepiece", "sentencepiece"),
-    ("safetensors", "safetensors"),
-    ("aiohttp", "aiohttp"),
-    ("yarl", "yarl"),
-    ("pyyaml", "yaml"),
-    ("pillow", "PIL"),
-    ("scipy", "scipy"),
-    ("tqdm", "tqdm"),
-    ("psutil", "psutil"),
-    ("alembic", "alembic"),
-    ("sqlalchemy", "sqlalchemy"),
-    ("av", "av"),
-    ("kornia", "kornia"),
-    ("spandrel", "spandrel"),
-    ("soundfile", "soundfile"),
-    ("pydantic", "pydantic"),
-    ("pydantic-settings", "pydantic_settings"),
-    ("requests", "requests"),
-    ("filelock", "filelock"),
-    ("blake3", "blake3"),
-    ("simpleeval", "simpleeval"),
+/// The list is names only, it pins no version, and the third column says
+/// whether the package is probed even when requirements.txt has stopped naming
+/// it. `true` makes this table the floor of the check, which is the whole point
+/// of it: pip buys from requirements.txt, so a check that also reads its target
+/// state from requirements.txt cannot notice a line that is gone from both
+/// halves at once.
+///
+/// `false` means "probe this one only where the file asks for it", and the two
+/// PyTorch side wheels need exactly that. They come from `plan_pytorch_install`
+/// and not from this file, and a trio member in `report.missing` empties the
+/// heal list for the whole run (`dists_to_heal`) and fails it outright
+/// (`probe_verdict`). A floor that demanded torchvision or torchaudio would
+/// turn one absent side wheel into an aborted repair. `torch` itself stays on
+/// the floor because it is the DLL canary and is added first regardless.
+///
+/// Anything added here that not every ComfyUI version ships has to be `false`
+/// too, or the heal step installs a package that core never asked for.
+pub(crate) const KNOWN_IMPORT_NAMES: &[(&str, &str, bool)] = &[
+    ("torch", "torch", true),
+    ("torchvision", "torchvision", false),
+    ("torchaudio", "torchaudio", false),
+    ("torchsde", "torchsde", true),
+    ("numpy", "numpy", true),
+    ("einops", "einops", true),
+    ("transformers", "transformers", true),
+    ("tokenizers", "tokenizers", true),
+    ("sentencepiece", "sentencepiece", true),
+    ("safetensors", "safetensors", true),
+    ("aiohttp", "aiohttp", true),
+    ("yarl", "yarl", true),
+    ("pyyaml", "yaml", true),
+    ("pillow", "PIL", true),
+    ("scipy", "scipy", true),
+    ("tqdm", "tqdm", true),
+    ("psutil", "psutil", true),
+    ("alembic", "alembic", true),
+    ("sqlalchemy", "sqlalchemy", true),
+    ("av", "av", true),
+    ("kornia", "kornia", true),
+    ("spandrel", "spandrel", true),
+    ("soundfile", "soundfile", true),
+    ("pydantic", "pydantic", true),
+    ("pydantic-settings", "pydantic_settings", true),
+    ("requests", "requests", true),
+    ("filelock", "filelock", true),
+    ("blake3", "blake3", true),
+    ("simpleeval", "simpleeval", true),
 ];
 
 /// The comment ComfyUI's own requirements.txt uses to separate the packages a
@@ -129,16 +144,23 @@ pub(crate) struct RequirementLine {
     pub(crate) dist: String,
     /// False below the optional-dependencies comment: reported, never fatal.
     pub(crate) essential: bool,
+    /// The line carries an environment marker, so pip decides whether it
+    /// applies to this machine. Kept rather than dropped: `probe_targets` has
+    /// to see that the file has spoken about the package, or its floor would
+    /// put a Windows only package back on a Linux box.
+    pub(crate) platform_gated: bool,
 }
 
 /// Distribution names a requirements.txt asks for. Options (`-r`, `-e`,
 /// `--index-url`), comments, blank lines and URLs are dropped; version
 /// specifiers and extras are cut off.
 ///
-/// A line carrying an environment marker (`foo ; sys_platform == "win32"`) is
-/// dropped entirely rather than stripped down to its name. pip decides whether
-/// that line applies to this machine, and the probe has no business asking for
-/// a Windows only package on Linux and then calling the environment broken.
+/// A line carrying an environment marker (`foo ; sys_platform == "win32"`)
+/// comes back with `platform_gated` set. pip owns the marker, so the probe
+/// never asks for such a line, and it has no business asking for a Windows only
+/// package on Linux and then calling the environment broken. It is kept rather
+/// than dropped because the floor in `probe_targets` has to be able to tell
+/// "this file never mentions the package" from "this file excludes it here".
 pub(crate) fn parse_requirement_lines(text: &str) -> Vec<RequirementLine> {
     let mut out: Vec<RequirementLine> = Vec::new();
     let mut essential = true;
@@ -153,11 +175,10 @@ pub(crate) fn parse_requirement_lines(text: &str) -> Vec<RequirementLine> {
         if code.is_empty() || code.starts_with('-') {
             continue;
         }
-        // pip owns the marker, so a line that has one is installed but not
-        // probed.
-        if code.contains(';') {
-            continue;
-        }
+        let (code, platform_gated) = match code.split_once(';') {
+            Some((name, _marker)) => (name.trim(), true),
+            None => (code, false),
+        };
         // `name @ url` is still a name; a bare URL is not.
         let head = code.split('@').next().unwrap_or("").trim();
         if head.is_empty() || head.contains("://") {
@@ -170,32 +191,66 @@ pub(crate) fn parse_requirement_lines(text: &str) -> Vec<RequirementLine> {
         if dist.is_empty() || out.iter().any(|l| l.dist == dist) {
             continue;
         }
-        out.push(RequirementLine { dist, essential });
+        out.push(RequirementLine {
+            dist,
+            essential,
+            platform_gated,
+        });
     }
     out
 }
 
-/// What the probe should import for a given requirements.txt. torch always
-/// comes first and always comes along: it is installed in its own step, it is
-/// the one package whose failure is a native library fault rather than a
-/// missing file, and it is the canary for every DLL report in A3.
+/// What the probe should import for a given requirements.txt.
+///
+/// The table is the floor and the file may only add to it. P3, 04.09.: the
+/// tester deleted the simpleeval line from requirements.txt, pressed Repair,
+/// and the check went from 28 packages to 27. pip buys from that file, so the
+/// package was missing from the venv afterwards and the run still finished on
+/// "ComfyUI is ready". The check has to hold a target state of its own, or it
+/// can only ever confirm the shopping list it was handed.
+///
+/// torch always comes first and always comes along: it is installed in its own
+/// step, it is the one package whose failure is a native library fault rather
+/// than a missing file, and it is the canary for every DLL report in A3.
+///
+/// A package that only the floor asks for is never essential. `probe_verdict`
+/// weighs Heal before it weighs essential, so such a package is reinstalled
+/// first and only ends the run in a warning when pip cannot bring it. An older
+/// or forked core that genuinely never needed it can therefore never fail a
+/// repair over it.
 pub(crate) fn probe_targets(requirements: &str) -> Vec<ProbeTarget> {
+    let lines = parse_requirement_lines(requirements);
     let mut out = vec![ProbeTarget {
         dist: "torch".to_string(),
         module: "torch",
         essential: true,
     }];
-    for line in parse_requirement_lines(requirements) {
-        if line.dist == "torch" {
+    for line in &lines {
+        if line.dist == "torch" || line.platform_gated {
             continue;
         }
-        if let Some((_, module)) = KNOWN_IMPORT_NAMES.iter().find(|(d, _)| *d == line.dist) {
+        if let Some(&(_, module, _)) = KNOWN_IMPORT_NAMES.iter().find(|(d, _, _)| *d == line.dist) {
             out.push(ProbeTarget {
-                dist: line.dist,
+                dist: line.dist.clone(),
                 module,
                 essential: line.essential,
             });
         }
+    }
+    for &(dist, module, always) in KNOWN_IMPORT_NAMES {
+        // A file that names the package has the last word, whether it asks for
+        // it or excludes it with a marker.
+        if !always
+            || out.iter().any(|t| t.dist == dist)
+            || lines.iter().any(|l| l.dist == dist)
+        {
+            continue;
+        }
+        out.push(ProbeTarget {
+            dist: dist.to_string(),
+            module,
+            essential: false,
+        });
     }
     out
 }
@@ -603,7 +658,12 @@ fn run_import_probe_bounded(
         let status = install_status.cloned();
         std::thread::spawn(move || {
             for line in BufReader::new(stdout).lines().map_while(Result::ok) {
-                let line = line.trim().to_string();
+                // Vor allem anderen, denn PROBE_FAIL kommt hier heraus und
+                // traegt `str(e)` des Interpreters (P3, 7.3): "ImportError: DLL
+                // load failed while importing _core: Das angegebene Modul wurde
+                // nicht gefunden." Diese Zeile landet woertlich in der
+                // Fehlermeldung, die der Kunde liest.
+                let line = os_error::english_child_text(line.trim()).into_owned();
                 if line.is_empty() {
                     continue;
                 }
@@ -624,7 +684,9 @@ fn run_import_probe_bounded(
         let done = readers_done.clone();
         std::thread::spawn(move || {
             for line in BufReader::new(stderr).lines().map_while(Result::ok) {
-                let line = line.trim().to_string();
+                // Dieselbe Behandlung wie auf stdout: der Absturztext geht
+                // ueber `promote_crash_from_stderr` in dieselbe Meldung.
+                let line = os_error::english_child_text(line.trim()).into_owned();
                 if !line.is_empty() {
                     if let Ok(mut v) = sink.lock() {
                         v.push(line);
@@ -674,9 +736,6 @@ fn run_import_probe_bounded(
 
     let stdout_text = out_lines.lock().map(|v| v.join("\n")).unwrap_or_default();
     let stderr_text = err_lines.lock().map(|v| v.join("\n")).unwrap_or_default();
-    // A localised Windows wording in the interpreter's own words would
-    // otherwise be quoted straight into an English message.
-    let stderr_text = os_error::sanitize_os_wording(&stderr_text).into_owned();
     let survived = exit.map(|s| s.success()).unwrap_or(false);
     let mut report = parse_import_probe(&stdout_text, survived);
     report.timed_out = timed_out;
@@ -700,7 +759,24 @@ pub(super) fn verify_and_heal_environment(
     install_status: &Arc<Mutex<InstallState>>,
     cancel: Option<&Arc<AtomicBool>>,
 ) -> Result<(), String> {
-    let text = fs::read_to_string(requirements).unwrap_or_default();
+    // A file that cannot be read used to become an empty string without a
+    // word, and the check then asked for a single package and called the
+    // environment ready. The floor in `probe_targets` keeps the check whole,
+    // and this says why it is running on the floor alone.
+    let text = match fs::read_to_string(requirements) {
+        Ok(t) => t,
+        Err(e) => {
+            push_install_log(
+                install_status,
+                &format!(
+                    "requirements.txt could not be read ({}), checking the packages LU knows \
+                     about instead.",
+                    os_error::english(&e)
+                ),
+            );
+            String::new()
+        }
+    };
     let targets = probe_targets(&text);
     let modules: Vec<&str> = targets.iter().map(|t| t.module).collect();
     push_install_log(
@@ -789,7 +865,8 @@ mod tests {
     use super::super::pip::VC_REDIST_PAGE;
 
     /// The shape of ComfyUI's own requirements.txt, including the comment that
-    /// splits it and the two names the mods were typing into the ticket.
+    /// splits it, the two names the mods were typing into the ticket, and the
+    /// line P3 took out of the file on 04.09.
     const COMFY_REQUIREMENTS: &str = "comfyui-frontend-package\n\
                                       torch\n\
                                       torchsde\n\
@@ -800,6 +877,7 @@ mod tests {
                                       SQLAlchemy\n\
                                       alembic\n\
                                       av\n\
+                                      simpleeval>=1.0.0\n\
                                       #non essential dependencies:\n\
                                       kornia>=0.7.1\n\
                                       spandrel\n\
@@ -850,14 +928,23 @@ mod tests {
     #[test]
     fn a_line_with_an_environment_marker_is_installed_but_never_probed() {
         // pip owns the marker. Probing a Windows only package on Linux and
-        // then calling the environment broken is a bug we would have shipped.
+        // then calling the environment broken is a bug we would have shipped,
+        // and the floor must not smuggle such a package back in.
         let with_marker = "torch\nsoundfile ; sys_platform == \"win32\"\n";
         let modules: Vec<&str> = probe_targets(with_marker).iter().map(|t| t.module).collect();
-        assert_eq!(modules, vec!["torch"], "a marked line was probed: {modules:?}");
-        // Negative control: the same package without a marker IS probed, so
-        // the rule is about the marker and not about soundfile.
-        let plain: Vec<&str> = probe_targets("torch\nsoundfile\n").iter().map(|t| t.module).collect();
-        assert!(plain.contains(&"soundfile"), "{plain:?}");
+        assert!(!modules.contains(&"soundfile"), "a marked line was probed: {modules:?}");
+        // Negative control, on the one package the table does NOT stand behind
+        // on its own, so the marker rule and the floor cannot cover for each
+        // other: with the marker torchaudio stays out, without it, it is
+        // probed. Run against soundfile this would prove nothing, because the
+        // floor asks for soundfile either way.
+        let gated: Vec<&str> = probe_targets("torch\ntorchaudio ; sys_platform == \"win32\"\n")
+            .iter()
+            .map(|t| t.module)
+            .collect();
+        assert!(!gated.contains(&"torchaudio"), "{gated:?}");
+        let plain: Vec<&str> = probe_targets("torch\ntorchaudio\n").iter().map(|t| t.module).collect();
+        assert!(plain.contains(&"torchaudio"), "{plain:?}");
     }
 
     #[test]
@@ -865,15 +952,138 @@ mod tests {
         // Negative control: guessing would turn a healthy environment into a
         // false alarm and send the customer to Repair environment for nothing.
         let targets = probe_targets("comfyui-workflow-templates\nsome-brand-new-thing\n");
-        let modules: Vec<&str> = targets.iter().map(|t| t.module).collect();
-        assert_eq!(modules, vec!["torch"], "an unknown package was guessed at: {modules:?}");
+        for t in &targets {
+            assert!(
+                KNOWN_IMPORT_NAMES.iter().any(|(d, _, _)| *d == t.dist),
+                "a package the table does not know was probed: {}",
+                t.dist,
+            );
+        }
+        let dists: Vec<&str> = targets.iter().map(|t| t.dist.as_str()).collect();
+        assert!(!dists.contains(&"some-brand-new-thing"), "{dists:?}");
+        assert!(!dists.contains(&"comfyui-workflow-templates"), "{dists:?}");
     }
 
     #[test]
     fn requirements_parsing_drops_the_lines_that_are_not_packages() {
         let reqs = "# a comment\n\n-r other.txt\n--index-url https://example.invalid/simple\nhttps://example.invalid/wheel.whl\ntorch==2.9.1\nPyYAML\nspandrel ; python_version >= \"3.10\"\nkornia[extra]>=0.7\n";
-        let dists: Vec<String> = parse_requirement_lines(reqs).into_iter().map(|l| l.dist).collect();
-        assert_eq!(dists, vec!["torch", "pyyaml", "kornia"], "got {dists:?}");
+        let lines = parse_requirement_lines(reqs);
+        let dists: Vec<&str> = lines.iter().map(|l| l.dist.as_str()).collect();
+        assert_eq!(dists, vec!["torch", "pyyaml", "spandrel", "kornia"], "got {dists:?}");
+        // The marked line keeps its name and its mark: the probe still never
+        // asks for it, and the floor can tell that this file has spoken about
+        // spandrel.
+        let gated: Vec<&str> = lines
+            .iter()
+            .filter(|l| l.platform_gated)
+            .map(|l| l.dist.as_str())
+            .collect();
+        assert_eq!(gated, vec!["spandrel"], "got {gated:?}");
+    }
+
+    #[test]
+    fn a_line_that_disappears_from_the_file_is_still_probed() {
+        // P3, 04.09.: simpleeval taken out of requirements.txt, Repair
+        // pressed, and the check went from 28 packages to 27. pip installs
+        // from the same file, so the package was gone from the venv and the
+        // run still ended on "ComfyUI is ready".
+        let full = probe_targets(COMFY_REQUIREMENTS);
+        let short = probe_targets(&COMFY_REQUIREMENTS.replace("simpleeval>=1.0.0\n", ""));
+        let modules: Vec<&str> = short.iter().map(|t| t.module).collect();
+        assert!(modules.contains(&"simpleeval"), "the check shrank with the file: {modules:?}");
+        assert_eq!(short.len(), full.len(), "{} against {}", short.len(), full.len());
+        // Negative control one, the tester's second attempt: a name the table
+        // does not know does not grow the list either, so this is not "probe
+        // whatever the file says".
+        let added = probe_targets(&format!("{COMFY_REQUIREMENTS}pywin32\n"));
+        assert!(!added.iter().any(|t| t.dist == "pywin32"), "pywin32 became a target");
+        assert_eq!(added.len(), full.len());
+        // Negative control two: the floor is not "the whole table, whatever
+        // the file says" either. A file that excludes a package for this
+        // platform still wins.
+        let gated = probe_targets(&format!("{COMFY_REQUIREMENTS}soundfile ; sys_platform == \"win32\"\n"));
+        assert!(!gated.iter().any(|t| t.dist == "soundfile"), "the floor overrode a marker");
+    }
+
+    #[test]
+    fn a_package_the_file_no_longer_names_is_reinstalled_and_not_just_reported() {
+        // The other half of the tester's run: being probed is worth nothing
+        // unless the heal step really reaches the package.
+        let short = probe_targets(&COMFY_REQUIREMENTS.replace("simpleeval>=1.0.0\n", ""));
+        let report = parse_import_probe(
+            "PROBE_VENV 1\nPROBE_TRY torch\nPROBE_OK torch\n\
+             PROBE_TRY simpleeval\nPROBE_FAIL simpleeval :: ModuleNotFoundError: No module named 'simpleeval'\n\
+             PROBE_DONE\n",
+            true,
+        );
+        assert_eq!(dists_to_heal(&short, &report), vec!["simpleeval"]);
+        assert_eq!(
+            probe_verdict(&short, &report, false),
+            ProbeVerdict::Heal(vec!["simpleeval".to_string()]),
+        );
+        // Negative control one: once the heal has run, the same result is not
+        // another trip round the pip loop.
+        assert!(!matches!(probe_verdict(&short, &report, true), ProbeVerdict::Heal(_)));
+        // Negative control two, and the reason the two PyTorch side wheels are
+        // not on the floor: a missing trio member empties the heal list for
+        // the WHOLE run and fails it outright, so a floor that asked for
+        // torchaudio would turn one absent side wheel into an aborted repair.
+        assert!(!probe_targets("").iter().any(|t| t.dist == "torchaudio"), "torchaudio is on the floor");
+        let trio = parse_import_probe(
+            "PROBE_VENV 1\nPROBE_TRY torchaudio\nPROBE_FAIL torchaudio :: ModuleNotFoundError: No module named 'torchaudio'\nPROBE_DONE\n",
+            true,
+        );
+        let asked = probe_targets("torch\ntorchaudio\n");
+        assert!(dists_to_heal(&asked, &trio).is_empty());
+        assert!(matches!(probe_verdict(&asked, &trio, false), ProbeVerdict::Fail(_)));
+    }
+
+    #[test]
+    fn a_requirements_txt_that_cannot_be_read_does_not_shrink_the_check_to_torch() {
+        // The sharper edge of the same line: an unreadable file became an
+        // empty string, the check asked for one package and the run said
+        // ready. Now it falls back on the whole floor.
+        let targets = probe_targets("");
+        let modules: Vec<&str> = targets.iter().map(|t| t.module).collect();
+        assert_eq!(modules[0], "torch", "{modules:?}");
+        for m in ["sqlalchemy", "yaml", "PIL", "simpleeval"] {
+            assert!(modules.contains(&m), "{m} fell out of the check: {modules:?}");
+        }
+        // Exactly the floor, so a `false` in the table means what it says.
+        for &(dist, module, always) in KNOWN_IMPORT_NAMES {
+            assert_eq!(modules.contains(&module), always, "{dist}");
+        }
+        // And a floor package can never fail a run on its own: torch stays the
+        // one mandatory name, which is what keeps the DLL branch alive.
+        assert!(targets[0].essential, "torch stopped being mandatory");
+        assert!(
+            targets.iter().skip(1).all(|t| !t.essential),
+            "a package only the floor asks for could fail a repair",
+        );
+    }
+
+    #[test]
+    fn a_requirements_file_that_will_not_open_says_so_and_checks_the_floor() {
+        // The read error used to be swallowed by unwrap_or_default(), and the
+        // panel then showed "importing 1 packages" with nothing to explain it.
+        // No interpreter needed: the probe is handed a binary that cannot
+        // start, and what is asserted is the two log lines written before it.
+        let state = Arc::new(Mutex::new(InstallState::default()));
+        let gone = std::env::temp_dir().join("lu-no-such-requirements-abc123.txt");
+        let _ = std::fs::remove_file(&gone);
+        let _ = verify_and_heal_environment("lu-not-a-python-binary", &gone, &state, None);
+        let logs = state.lock().unwrap().logs.join("\n");
+        assert!(logs.contains("requirements.txt could not be read"), "{logs}");
+        let count = format!("importing {} packages", probe_targets("").len());
+        assert!(logs.contains(&count), "the check did not fall back on the floor: {logs}");
+        // Negative control: a file that IS readable says nothing of the kind.
+        let there = std::env::temp_dir().join("lu-a-real-requirements-abc123.txt");
+        std::fs::write(&there, "torch\n").expect("fixture");
+        let second = Arc::new(Mutex::new(InstallState::default()));
+        let _ = verify_and_heal_environment("lu-not-a-python-binary", &there, &second, None);
+        let quiet = second.lock().unwrap().logs.join("\n");
+        let _ = std::fs::remove_file(&there);
+        assert!(!quiet.contains("could not be read"), "{quiet}");
     }
 
     #[test]
@@ -1004,6 +1214,37 @@ mod tests {
             other => panic!("pip is being asked to fix a DLL: {other:?}"),
         };
         assert!(msg.contains("torch"), "{msg}");
+        assert!(msg.contains(VC_REDIST_PAGE), "no way out of the DLL failure: {msg}");
+    }
+
+    #[test]
+    fn ein_probe_fail_mit_deutschem_windows_satz_kommt_englisch_in_der_meldung_an() {
+        // P3, 7.2 und 7.3: der Interpreter schreibt `str(e)` auf stdout, und
+        // auf einem deutschen Windows ist die Haelfte davon deutsch. Diese
+        // Zeile landet woertlich in {reason} der Fail-Meldung.
+        //
+        // Die Zeile mit der Marke steht hier, weil sie ueberall beweisbar ist:
+        // die Umschrift liest die Nummer und schneidet den fremden Satz
+        // strukturell ab. Die Zeile OHNE Nummer (7.3) kann nur das Windows des
+        // Nutzers aufloesen, dafuer steht der Beweis mit Attrappe in
+        // `os_error::tests`.
+        let raw = "PROBE_FAIL torch :: OSError: [WinError 126] Das angegebene Modul wurde nicht \
+                   gefunden. Error loading \
+                   \"C:\\Users\\ddrob\\ComfyUI\\venv\\Lib\\site-packages\\torch\\lib\\c10_cuda.dll\" \
+                   or one of its dependencies.";
+        // Genau der Griff, den der stdout-Leser der Probe tut.
+        let line = os_error::english_child_text(raw).into_owned();
+        let out = format!("PROBE_VENV 1\nPROBE_TRY torch\n{line}\nPROBE_DONE\n");
+        let report = parse_import_probe(&out, true);
+        let msg = match probe_verdict(&probe_targets(COMFY_REQUIREMENTS), &report, false) {
+            ProbeVerdict::Fail(m) => m,
+            other => panic!("{other:?}"),
+        };
+        assert!(!msg.contains("Das angegebene Modul"), "der deutsche Satz steht in der Meldung: {msg}");
+        assert!(msg.contains("the specified module could not be found"), "{msg}");
+        // Und alles, was die Meldung vorher konnte, kann sie weiter.
+        assert!(msg.contains("torch"), "{msg}");
+        assert!(msg.contains("c10_cuda.dll"), "der DLL-Pfad ist verloren gegangen: {msg}");
         assert!(msg.contains(VC_REDIST_PAGE), "no way out of the DLL failure: {msg}");
     }
 

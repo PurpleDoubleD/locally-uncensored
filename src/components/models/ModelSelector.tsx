@@ -25,6 +25,7 @@ import { cloudTeaserModels } from '../../lib/cloud-teaser-models'
 import { splitBackendSwitchRows, needsBackendSwitchHeading, foldedRowsSentence } from '../../lib/lu-engine-rows'
 import { isBuiltinEngineEntry, type InstalledModelLike } from '../../lib/lmstudio-match'
 import type { HandoverSlot } from '../../lib/openai-slot-handover'
+import { modelListIsStale } from '../../lib/model-list-staleness'
 import {
   ensureLuEngineIsChatProvider, announceLuEngineSwitch, LU_ENGINE_SWAP_BUSY_NOTE,
   clearEngineErrorAfterSuccess,
@@ -1041,16 +1042,15 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
     return () => { cancelled = true }
   }, [open])
 
-  // Refetch when any provider's enabled state or baseUrl changes (e.g. user
-  // enables LM Studio / adds Anthropic key in Settings, or the backend
-  // picker activates an OpenAI-compatible provider). Without this the
-  // dropdown stays stuck on whatever providers were enabled at mount time.
+  // Refetch when a provider change makes the list stale (the user enables LM
+  // Studio in Settings, the backend picker activates an OpenAI-compatible
+  // provider, a click hands the shared slot on). Without this the dropdown
+  // stays stuck on whatever providers were enabled at mount time. Die Regel
+  // steht in lib/model-list-staleness, dieselbe, die auch die Kopfleiste
+  // fragt.
   useEffect(() => {
     const unsub = useProviderStore.subscribe((state, prev) => {
-      const changed = (Object.keys(state.providers) as Array<keyof typeof state.providers>)
-        .some(id => state.providers[id]?.enabled !== prev.providers[id]?.enabled
-          || state.providers[id]?.baseUrl !== prev.providers[id]?.baseUrl)
-      if (changed) fetchModels()
+      if (modelListIsStale(state.providers, prev.providers)) fetchModels()
     })
     return () => unsub()
   }, [fetchModels])

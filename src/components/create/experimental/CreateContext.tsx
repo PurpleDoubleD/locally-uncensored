@@ -10,9 +10,9 @@ import { backendCall, isMacOS, isLinux } from '../../../api/backend'
 import { asComfyGpuMode, comfyCpuBannerText, type ComfyCpuBannerFacts } from '../../../lib/comfy-cpu-banner'
 import { installMlxStack } from '../../../api/mlx-install'
 import { useDownloadStore } from '../../../stores/downloadStore'
-import { downloadBundleFiles, waitOrAbort, waitForModelsVisible } from '../../../lib/bundle-install'
+import { downloadBundleFiles, waitOrAbort, waitForModelsVisible, InstallCancelled } from '../../../lib/bundle-install'
 import { ensureLocalFilename } from './loadImage'
-import { comfyStartupError } from './comfyError'
+import { comfyStartupError, COMFY_INSTALLED_BUT_DEAD } from './comfyError'
 import { restartComfyForNewNodes } from '../../../api/comfy-restart'
 import type { CloudQuota } from '../../../lib/render/cloud-jobs'
 
@@ -268,7 +268,19 @@ export function CreateExpProvider({ children }: { children: ReactNode }) {
     let r: 'up' | 'crashed' | 'timeout' | 'missing'
     try {
       r = await startAndAwait(60, onProgress, signal)
-    } catch { r = 'missing' }
+    } catch (e) {
+      // P3: ein Start, der mit einer Meldung scheitert, ist kein fehlendes
+      // ComfyUI. Jedes Err aus start_comfyui landete hier als 'missing' und
+      // damit unten im Download-Zweig: mehrere Gigabyte fuer eine
+      // Installation, die vollstaendig auf der Platte liegt. Seit dem
+      // kaputten venv trifft das einen echten Fall, also entscheidet die
+      // Statusabfrage, ob wirklich etwas fehlt, und die Meldung des Starts
+      // erreicht sonst den Kunden.
+      if (e instanceof InstallCancelled) throw e
+      const st = await backendCall<{ found?: boolean; complete?: boolean }>('comfyui_status').catch(() => null)
+      if (st?.found && st?.complete !== false) throw e
+      r = 'missing'
+    }
     for (;;) {
       if (r === 'up') return
       if (r === 'crashed') {
@@ -286,7 +298,7 @@ export function CreateExpProvider({ children }: { children: ReactNode }) {
         // Der Hinweis aus dem Einordner des Installers, wenn es einen gibt.
         // Der allgemeine Satz ueber die Reparatur gehoert hier nicht hin: der
         // Knopf steht in den Einstellungen, nicht in diesem Ablauf.
-        throw new Error(comfyStartupError(out?.lines, out?.hint))
+        throw new Error(comfyStartupError(COMFY_INSTALLED_BUT_DEAD, out?.lines, out?.hint))
       }
       if (r === 'missing' && !installedNow) {
         installedNow = true
@@ -310,7 +322,7 @@ export function CreateExpProvider({ children }: { children: ReactNode }) {
       // Timeout, or a state we already tried to fix once: report with the
       // real output instead of guessing.
       const out = await backendCall<{ lines?: string[]; hint?: string }>('comfyui_last_output').catch(() => null)
-      throw new Error(comfyStartupError(out?.lines, out?.hint))
+      throw new Error(comfyStartupError(COMFY_INSTALLED_BUT_DEAD, out?.lines, out?.hint))
     }
     // `checkConnection` stand hier, ohne im Rumpf vorzukommen: aufgerufen wird
     // es von `startAndAwait`, das selbst schon davon abhaengt. Der Eintrag war

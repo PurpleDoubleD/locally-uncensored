@@ -42,6 +42,17 @@ describe('#98: die ComfyUI-Umgebung heilt sich selbst', () => {
     expect(src).toMatch(/r === 'missing' && !installedNow/)
   })
 
+  // P3: seit der Launcher einen Start mit kaputtem venv verweigert, trifft
+  // dieser Weg einen echten Fall. Jedes Err aus start_comfyui wurde hier zu
+  // 'missing' und damit zum Download von mehreren Gigabyte fuer eine
+  // Installation, die vollstaendig auf der Platte liegt.
+  it('ein gescheiterter Start ist kein fehlendes ComfyUI', () => {
+    const src = kontext()
+    expect(src, 'jeder Startfehler wird wieder als fehlende Installation gelesen')
+      .not.toMatch(/catch \{ r = 'missing' \}/)
+    expect(src).toMatch(/if \(st\?\.found && st\?\.complete !== false\) throw e/)
+  })
+
   it('die Settings haben einen Repair-Knopf am selben Kommando', () => {
     const src = settings()
     expect(src).toMatch(/Repair environment/)
@@ -49,10 +60,23 @@ describe('#98: die ComfyUI-Umgebung heilt sich selbst', () => {
     expect(installStore()).toMatch(/backendCall\('repair_comfyui_env'\)/)
   })
 
-  it('der Settings-Start meldet einen spaeten Absturz statt still auf Stopped zu kippen', () => {
+  // P3: hier stand ein Test, der nur nachsah, ob die Zeichenketten
+  // `comfyui_last_output` und `envBroken` irgendwo in SettingsPage.tsx
+  // vorkommen. Beides war unter dem einmaligen Blick nach 6 Sekunden wahr, und
+  // genau deshalb galt dieser Defekt als abgedeckt, waehrend ein Absturz nach
+  // 20 Sekunden gar nichts meldete. Was der Startversuch wirklich tut, steht
+  // jetzt in settings/__tests__/ein-spaeter-absturz-wird-noch-gemeldet.test.ts
+  // und laeuft dort gegen die gerenderte Oberflaeche. Hier bleibt der Anker
+  // gegen die Rueckkehr des Einmalblicks.
+  it('der Settings-Start sieht wiederholt hin, nicht einmal nach sechs Sekunden', () => {
     const src = settings()
     expect(src).toMatch(/comfyui_last_output/)
-    expect(src).toMatch(/envBroken/)
+    expect(src).toMatch(/const watchForLateCrash/)
+    expect(src, 'der einmalige Blick nach 6 Sekunden ist zurueck').not.toMatch(/\}, 6000\)/)
+    // Das zweite stille Tor: der Puffer traegt immer die Kopfzeile `[start]`,
+    // also fiel ein Absturz ganz ohne Ausgabe auch dann durch, wenn `exited`
+    // stimmte.
+    expect(src).not.toMatch(/lines\.length > 1/)
   })
 })
 
@@ -74,7 +98,7 @@ describe('Ticket 007: der Rat unter der Ausgabe kommt aus einer Stelle', () => {
 
   it('der Create-Pfad reicht den konkreten Hinweis an den Kunden durch', () => {
     const src = kontext()
-    expect(src).toMatch(/comfyStartupError\(out\?\.lines, out\?\.hint\)/)
+    expect(src).toMatch(/comfyStartupError\(COMFY_INSTALLED_BUT_DEAD, out\?\.lines, out\?\.hint\)/)
     expect(src).toMatch(/hint\?: string/)
   })
 

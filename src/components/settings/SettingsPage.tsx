@@ -19,6 +19,11 @@ import { PersonaPanel } from '../personas/PersonaPanel'
 import { AccountPanel } from '../auth/AccountPanel'
 import { useVoiceStore } from '../../stores/voiceStore'
 import { downloadSuffix } from '../../lib/formatters'
+// Der Satz zum Startfehler kommt fuer beide Oberflaechen aus dieser Stelle
+// (Ticket 007). Statisch geladen, weil ihn der Beobachter unten in dem
+// Augenblick braucht, in dem ein Start gescheitert ist: eine Meldung darf
+// nicht erst darauf warten, dass ein Stueck Programm nachgeladen wird.
+import { comfyStartupError, comfyCrashAdvice, comfyStartThrowText, COMFY_START_FAILED } from '../create/experimental/comfyError'
 
 // AS-09: PIPER_VOICES und CLOUD_TTS_VOICES sind mit dem Abschnitt, der sie
 // benutzt, nach ./SpeechSettings.tsx gezogen.
@@ -321,7 +326,8 @@ export function HfDownloadPathSetting() {
   // same thing in different words. `truncated` is a different matter. The
   // folder IS readable, the walk simply ran out of budget, and what LU hands
   // to ComfyUI is unaffected by that, so both lines belong on screen.
-  const scanHidesHandoff = scan?.status === 'unreachable' || scan?.status === 'unusable'
+  const scanHidesHandoff =
+    scan?.status === 'unreachable' || scan?.status === 'denied' || scan?.status === 'unusable'
 
   // A16 (A14-2a), Windows counter-check 02.09.: the folder was stored on Enter
   // or on blur and on nothing else. Type a path, walk away to another tab or
@@ -476,6 +482,12 @@ export function modelDirScanNote(status: ScannedDir['status'] | null | undefined
   if (status === 'unreachable') {
     return 'This folder cannot be reached right now (drive disconnected or path missing). Models in it are hidden until it is back.'
   }
+  // P3, 7.4: this used to fall into the sentence above, which sent him looking
+  // for an unplugged drive while the drive was plugged in and the path was
+  // spelled right. Rust reports the reason now, so the panel can name it.
+  if (status === 'denied') {
+    return 'LU is not allowed to read that folder. The path is there; the account this app runs as has no access to it. Pick a folder your own account owns, or grant this app access to that one.'
+  }
   if (status === 'unusable') {
     return 'This path is not a folder LU can read.'
   }
@@ -513,6 +525,13 @@ function CustomModelDirNote({ result }: { result: CustomModelDirResult }) {
       </div>
     )
   }
+  if (result.status === 'denied') {
+    return (
+      <div className={`${cls} ${HINWEIS_TEXT.fehler}`}>
+        LU is not allowed to read that folder. The drive is connected and the path is right; the account this app runs as has no access to it. Pick a folder your own account owns, or grant this app access to that one.
+      </div>
+    )
+  }
   if (result.status === 'unsupported') {
     return (
       <div className={`${cls} ${HINWEIS_TEXT.ruhig}`}>
@@ -524,8 +543,8 @@ function CustomModelDirNote({ result }: { result: CustomModelDirResult }) {
   return (
     <div className={`${cls} ${HINWEIS_TEXT.ruhig}`}>
       {result.folders.length > 0
-        ? <>Image and video: LU passes <code className="font-mono">{result.folders.join(', ')}</code> from this folder to ComfyUI. Takes effect the next time LU starts ComfyUI, and only for a ComfyUI that LU starts.</>
-        : <>Image and video models in this folder stay invisible: ComfyUI lists only its own folders. Name the subfolders like ComfyUI does (<code className="font-mono">checkpoints</code>, <code className="font-mono">loras</code>, <code className="font-mono">vae</code>, …) and LU hands them over.</>}
+        ? <>Image and video: LU passes <code className="font-mono">{result.folders.join(', ')}</code> from this folder to ComfyUI. LU re-reads the subfolders every time it starts ComfyUI, so a subfolder you add later arrives with the next start. Only a ComfyUI that LU starts gets them.</>
+        : <>Image and video models in this folder stay invisible: ComfyUI lists only its own folders. Name the subfolders like ComfyUI does (<code className="font-mono">checkpoints</code>, <code className="font-mono">loras</code>, <code className="font-mono">vae</code>, …) and LU hands them over the next time it starts ComfyUI.</>}
     </div>
   )
 }
@@ -748,6 +767,25 @@ export function ComfyUISettings() {
   // stay reachable on `error` too, and the card carries a Dismiss.
   const installIdle = installPhase === 'idle' || installPhase === 'error'
 
+  // Der Beobachter unten liest `running` und `stalled` von hier, statt eine
+  // zweite comfyui_status-Schleife aufzumachen: die Abfrage ist eine
+  // HTTP-Probe mit 3 s Frist, und sie raeumt nebenbei den Kindhandle ab.
+  //
+  // Ein Spiegel und nicht der Zustand selbst, weil der Beobachter zwischen
+  // zwei Renderdurchgaengen tickt: ein setState waere fuer ihn noch nicht da,
+  // und er wuerde auf einer Antwort arbeiten, die schon ueberholt ist.
+  // Geschrieben wird er an den zwei Stellen, die ueber diese beiden Felder
+  // entscheiden, dem Statuspoll und dem Stop-Knopf.
+  const statusNow = useRef<ComfyStatusResponse | null>(null)
+  // Zaehlt die Antworten des Backends, damit der Beobachter eine Antwort von
+  // NACH dem Startklick von der Aufnahme davor unterscheiden kann.
+  const statusTick = useRef(0)
+  // Die Generation des laufenden Startversuchs. Ein zweiter Klick, ein Stop
+  // und das Ummounten zaehlen sie hoch, und ein Beobachter mit einer alten
+  // Nummer sagt nichts mehr.
+  const startWatch = useRef(0)
+  useEffect(() => () => { startWatch.current += 1 }, [])
+
   useEffect(() => {
     let cancelled = false
     const check = async () => {
@@ -755,6 +793,8 @@ export function ComfyUISettings() {
         const { backendCall, setComfyPort, setComfyHost } = await import('../../api/backend')
         const s = await backendCall<ComfyStatusResponse>('comfyui_status')
         if (!cancelled) {
+          statusNow.current = s
+          statusTick.current += 1
           setStatus(s)
           // Mirror backend truth into the frontend URL builder so subsequent
           // fetch() calls hit the right machine immediately, no restart needed.
@@ -775,30 +815,89 @@ export function ComfyUISettings() {
     return () => { cancelled = true; clearInterval(interval) }
   }, [])
 
+  /** Auf den Absturz warten, der nach dem Spawn kommt.
+   *
+   *  P3: eine ComfyUI-Kopie mit fehlendem Modul starb beim Start, und in der
+   *  Oberflaeche kam GAR KEINE Meldung. Rust schaut 2 s zu (process.rs), hier
+   *  stand ein einziges setTimeout ueber 6 s, und ComfyUI importiert 20 bis 60
+   *  Sekunden lang, bevor es den Port bindet. Wer dazwischen stirbt, ist zu
+   *  spaet fuer beide, und danach fragt niemand mehr.
+   *
+   *  Ein Fenster hochzudrehen haette das nur verschoben. Der Beobachter haengt
+   *  jetzt am Startversuch statt an einem Augenblick und hoert auf, sobald
+   *  einer dieser Punkte eintritt:
+   *
+   *  - der Port antwortet (`running`): fertig, keine Meldung,
+   *  - der Start haengt so lange, dass Rust ihn `stalled` nennt: die Zeile
+   *    unter dem Status uebernimmt, und der Beobachter braucht kein eigenes
+   *    Zeitbudget und damit keine zweite Zahl neben COMFY_STARTING_GRACE_SECS,
+   *  - der Nutzer drueckt Stop oder noch einmal Start, oder das Panel geht:
+   *    die Generation stimmt nicht mehr,
+   *  - das Kind ist weg: melden.
+   *
+   *  `exited` allein reicht nicht als Beweis: es ist auch wahr, wenn LU gar
+   *  keinen Prozess haelt, also bei einem adoptierten Waisen und bei einem
+   *  entfernten Host. Deshalb zaehlt nur eine Statusantwort, die NACH diesem
+   *  Startklick eingetroffen ist. */
+  const watchForLateCrash = async (generation: number) => {
+    const { backendCall } = await import('../../api/backend')
+    const tickAtStart = statusTick.current
+    for (;;) {
+      await new Promise(resolve => setTimeout(resolve, 2000))
+      if (startWatch.current !== generation) return
+      // Noch keine frische Statusantwort: `exited` waere jetzt nur die
+      // Aufnahme von vor dem Start.
+      if (statusTick.current <= tickAtStart) continue
+      const s = statusNow.current
+      if (s?.running || s?.stalled) return
+      let out: ComfyLastOutput | null = null
+      try {
+        out = await backendCall<ComfyLastOutput>('comfyui_last_output')
+      } catch { continue }
+      if (startWatch.current !== generation) return
+      if (!out?.exited) continue
+      // Ticket 007: welcher Satz unter die Ausgabe gehoert, entscheidet
+      // comfyCrashAdvice fuer beide Oberflaechen. Vorher stand der
+      // allgemeine Satz hier fest verdrahtet, und der konkrete Hinweis
+      // aus dem Einordner des Installers erreichte den Kunden nie.
+      setStartError(comfyStartupError(COMFY_START_FAILED, out.lines, comfyCrashAdvice(out)))
+      return
+    }
+  }
+
   const handleStart = async () => {
     setStartError('')
+    // Die gruene Zeile eines beendeten Laufs ist keine Aussage mehr ueber das,
+    // was gerade passiert. Sie stand im Testbericht neben einem Start, der
+    // abgestuerzt war, und sagte weiter "ComfyUI is ready".
+    clearInstallNotice()
+    const generation = ++startWatch.current
     try {
       const { backendCall } = await import('../../api/backend')
       await backendCall('start_comfyui')
       setStatus(prev => prev ? { ...prev, starting: true } : null)
-      // GH #98 (joelnewswanger): a crash AFTER the 2s spawn watch used to flip
-      // the panel silently back to Stopped, which read as "the start button
-      // does nothing". Look once, a few seconds in, and say what happened.
-      setTimeout(async () => {
-        try {
-          const out = await backendCall<ComfyLastOutput>('comfyui_last_output')
-          if (out?.exited && Array.isArray(out?.lines) && out.lines.length > 1) {
-            // Ticket 007: welcher Satz unter die Ausgabe gehoert, entscheidet
-            // comfyCrashAdvice fuer beide Oberflaechen. Vorher stand der
-            // allgemeine Satz hier fest verdrahtet, und der konkrete Hinweis
-            // aus dem Einordner des Installers erreichte den Kunden nie.
-            const { comfyStartupError, comfyCrashAdvice } = await import('../create/experimental/comfyError')
-            setStartError(comfyStartupError(out.lines, comfyCrashAdvice(out)))
-          }
-        } catch { /* status polling keeps the panel honest */ }
-      }, 6000)
+      void watchForLateCrash(generation)
     } catch (err) {
-      setStartError(err instanceof Error ? err.message : String(err))
+      // Hier braucht es keine neue Generation: die Nummer ist eine Zeile
+      // weiter oben schon gestiegen, also ist ein Beobachter aus einem
+      // frueheren Versuch bereits abgeloest, und fuer diesen hier wurde nie
+      // einer gestartet.
+      const message = err instanceof Error ? err.message : String(err)
+      // P3, 7.2: ein Absturz binnen der zwei Sekunden, die Rust zuschaut, wirft
+      // hier heraus. Ein Wurf plant keinen Beobachter, also erreichte der Satz
+      // ueber die Visual-C++-Laufzeit den Kunden nur, wenn ComfyUI eine Sekunde
+      // laenger durchgehalten hatte. Derselbe Einordner, dieselbe Route, eine
+      // Zeile spaeter.
+      let out: ComfyLastOutput | null = null
+      try {
+        const { backendCall } = await import('../../api/backend')
+        out = await backendCall<ComfyLastOutput>('comfyui_last_output')
+      } catch {
+        // Ohne die Ausgabe bleibt es bei dem, was der Wurf selbst sagt. Das
+        // ist die Meldung aus `comfy_startup_failure` und die traegt den
+        // Traceback bereits.
+      }
+      setStartError(comfyStartThrowText(message, out))
     }
   }
 
@@ -819,9 +918,15 @@ export function ComfyUISettings() {
 
   const handleStop = async () => {
     setStartError('')
+    // Ohne diese Zeile erfindet der Restart-Knopf einen Absturz: nach einem
+    // Stop haelt LU keinen Prozess mehr, comfyui_last_output antwortet
+    // `exited: true` mit den Zeilen des vorigen Laufs, und der Ringpuffer wird
+    // erst beim naechsten Start geleert.
+    startWatch.current += 1
     try {
       const { backendCall } = await import('../../api/backend')
       await backendCall('stop_comfyui')
+      statusNow.current = statusNow.current ? { ...statusNow.current, running: false } : null
       setStatus(prev => prev ? { ...prev, running: false } : null)
     } catch (e) {
       // Level (c): a stop that failed leaves the panel showing "running", which
@@ -835,6 +940,9 @@ export function ComfyUISettings() {
     if (!customPath.trim()) return
     setPathError('')
     setPathSuccess(false)
+    // Die Zeile nennt einen Ordner. Nach dem Wechsel redet sie ueber eine
+    // andere Installation als die, die im Feld steht.
+    clearInstallNotice()
     try {
       const { backendCall } = await import('../../api/backend')
       await backendCall('set_comfyui_path', { path: customPath.trim() })

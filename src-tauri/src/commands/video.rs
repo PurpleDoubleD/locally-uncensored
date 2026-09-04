@@ -678,11 +678,14 @@ pub fn video_generate(state: &AppState, args: &Value) -> CmdResult {
     // Stdout / stderr pumps → progress slot.
     let p_out = progress.clone();
     let p_err = progress.clone();
+    // Dieselbe Fortschrittskarte wie beim Installer, also dieselbe Regel:
+    // was das Betriebssystem geschrieben hat, steht dort englisch. Was der
+    // Encoder selbst schreibt, bleibt Zeichen fuer Zeichen stehen.
     std::thread::spawn(move || {
         use std::io::{BufRead, BufReader};
         if let Some(s) = stdout {
             for line in BufReader::new(s).lines().map_while(Result::ok) {
-                p_out.log(line);
+                p_out.log(os_error::english_child_text(&line).into_owned());
             }
         }
     });
@@ -690,7 +693,7 @@ pub fn video_generate(state: &AppState, args: &Value) -> CmdResult {
         use std::io::{BufRead, BufReader};
         if let Some(s) = stderr {
             for line in BufReader::new(s).lines().map_while(Result::ok) {
-                p_err.log(line);
+                p_err.log(os_error::english_child_text(&line).into_owned());
             }
         }
     });
@@ -791,14 +794,14 @@ pub(crate) fn run_streamed(slot: &crate::install_state::InstallSlot, cmd: &mut C
     let t1 = std::thread::spawn(move || {
         if let Some(s) = stdout {
             for line in BufReader::new(s).lines().map_while(Result::ok) {
-                so.log(line);
+                so.log(os_error::english_child_text(&line).into_owned());
             }
         }
     });
     let t2 = std::thread::spawn(move || {
         if let Some(s) = stderr {
             for line in BufReader::new(s).lines().map_while(Result::ok) {
-                se.log(line);
+                se.log(os_error::english_child_text(&line).into_owned());
             }
         }
     });

@@ -350,8 +350,12 @@ pub(crate) enum RootStatus {
     /// The deadline or the entry budget ran out. What was found is real, the
     /// list is not complete.
     Truncated,
-    /// `read_dir` on the root itself failed: gone, unplugged, unreadable.
+    /// `read_dir` on the root itself failed: gone, or unplugged.
     Unreachable,
+    /// The folder is there and this account may not read it. Its own answer,
+    /// because "check that the drive is connected" sends the user looking for
+    /// a fault that is not there (P3, 7.4).
+    Denied,
     /// Not a path the OS can resolve on its own: relative, or a shell `~`.
     Unusable,
 }
@@ -362,6 +366,7 @@ impl RootStatus {
             RootStatus::Ok => "ok",
             RootStatus::Truncated => "truncated",
             RootStatus::Unreachable => "unreachable",
+            RootStatus::Denied => "denied",
             RootStatus::Unusable => "unusable",
         }
     }
@@ -437,10 +442,19 @@ pub(crate) fn scan_gguf_roots(roots: &[ScanRoot]) -> ScanOutcome {
             continue;
         }
         // One call answers "is it there and readable" before the walk, so a
-        // dead mount costs one timeout instead of one per directory.
-        if std::fs::read_dir(root.dir).is_err() {
-            statuses.push(RootStatus::Unreachable);
-            continue;
+        // dead mount costs one timeout instead of one per directory. The same
+        // call as the ComfyUI handover makes, so the two verdicts about one
+        // folder cannot drift apart.
+        match crate::commands::custom_models::root_probe(root.dir) {
+            None => {}
+            Some(std::io::ErrorKind::PermissionDenied) => {
+                statuses.push(RootStatus::Denied);
+                continue;
+            }
+            Some(_) => {
+                statuses.push(RootStatus::Unreachable);
+                continue;
+            }
         }
         let mut out = Vec::new();
         let mut sets = GgufSplitSets::new();
@@ -3123,20 +3137,50 @@ mod tests {
         std::fs::remove_dir_all(&gone).unwrap();
         let relative = PathBuf::from("some/relative/models");
 
-        let outcome = scan_gguf_roots(&[
+        // P3, 7.4: ein vierter Root, der da ist und den dieses Konto nicht
+        // lesen darf. Unter Windows laesst sich das in einem Unit-Test nicht
+        // herstellen (eine ACL ohne Leserecht fuer den eigenen Benutzer
+        // braucht eine zweite Identitaet), dort steht der Beweis auf der Box.
+        // Laeuft der Test als root, liest read_dir trotzdem, und dann wird der
+        // Fall ehrlich uebersprungen statt gruen gefaerbt.
+        #[cfg(unix)]
+        let denied = {
+            use std::os::unix::fs::PermissionsExt;
+            let d = scratch("status-denied");
+            std::fs::set_permissions(&d, std::fs::Permissions::from_mode(0o000)).unwrap();
+            d
+        };
+        #[cfg(unix)]
+        let denied_holds = std::fs::read_dir(&denied).is_err();
+
+        let mut roots = vec![
             ScanRoot { dir: &app, max_depth: MAX_SCAN_DEPTH },
             ScanRoot { dir: &gone, max_depth: MAX_CUSTOM_SCAN_DEPTH },
             ScanRoot { dir: &relative, max_depth: MAX_CUSTOM_SCAN_DEPTH },
-        ]);
-        assert_eq!(
-            outcome.statuses,
-            vec![RootStatus::Ok, RootStatus::Unreachable, RootStatus::Unusable],
-        );
+        ];
+        let mut expected = vec![RootStatus::Ok, RootStatus::Unreachable, RootStatus::Unusable];
+        #[cfg(unix)]
+        if denied_holds {
+            roots.push(ScanRoot { dir: &denied, max_depth: MAX_CUSTOM_SCAN_DEPTH });
+            expected.push(RootStatus::Denied);
+        }
+
+        let outcome = scan_gguf_roots(&roots);
+        // Der Gegenpol steht in derselben Liste: der geloeschte Ordner bleibt
+        // unreachable. Ohne ihn haette man beide Faelle auf einen neuen Wert
+        // gelegt und nichts unterschieden.
+        assert_eq!(outcome.statuses, expected);
         // The app folder still answered, which is the point: one bad root is
         // not allowed to cost the list.
         assert_eq!(outcome.models.len(), 1);
         assert_eq!(outcome.models[0].name, "real");
 
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(&denied, std::fs::Permissions::from_mode(0o700));
+            std::fs::remove_dir_all(&denied).ok();
+        }
         std::fs::remove_dir_all(&app).ok();
     }
 

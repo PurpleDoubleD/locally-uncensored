@@ -80,10 +80,21 @@ describe('the Model Storage copy tells the truth', () => {
 
   it('is honest that image and video go through ComfyUI', () => {
     expect(src).toMatch(/passes <code className="font-mono">\{result\.folders\.join/)
-    expect(src).toMatch(/only for a ComfyUI that LU starts/)
+    expect(src).toMatch(/Only a ComfyUI that LU starts gets them/)
+    // P3: the folder is scanned again on every ComfyUI start, so the copy is
+    // allowed to promise the next start. It was not before: the file was
+    // written when the setting changed and never again, and a subfolder
+    // created afterwards never reached ComfyUI at all.
+    expect(src).toMatch(/re-reads the subfolders every time it starts ComfyUI/)
     // And says plainly what happens when the folder is not ComfyUI-shaped,
     // instead of leaving a silent no-op behind.
     expect(src).toMatch(/stay invisible/)
+  })
+
+  // Negative control, and the load-bearing half of the one above: without it
+  // the true sentence could sit next to the false one and both would pass.
+  it('no longer says the setting alone takes effect on the next start', () => {
+    expect(src).not.toMatch(/Takes effect the next time LU starts ComfyUI/)
   })
 
   it('does not promise ComfyUI on a host that never starts one', () => {

@@ -340,11 +340,11 @@ export const ONBOARDING_EMBED_MODEL = {
 }
 
 export const ONBOARDING_MODELS: OnboardingModel[] = [
-  // P4 / LU-Aufgaben: ONBOARDING shows exactly ONE model — the tiny ~400 MB
-  // Qwen 2.5 0.5B starter. The previous list of 22 entries (5–42 GB) was
+  // P4 / LU-Aufgaben: ONBOARDING shows exactly ONE model, the tiny ~400 MB
+  // Qwen 2.5 0.5B starter. The previous list of 22 entries (5 to 42 GB) was
   // pure noise on first launch. Discoverability for everything else lives
-  // in the Model Manager → Discover tab (curated list + HuggingFace
+  // in the Model Manager → Get new tab (curated list + HuggingFace
   // search). Onboarding is "give the user a working chat in 30 seconds";
   // anything heavier comes after they've made it past the wizard.
-  { name: 'qwen2.5-0.5b', label: 'Qwen 2.5 0.5B (Starter)', description: 'Tiny instant-chat model, 400 MB, runs on anything. Great to verify your setup; pick bigger models from the Discover tab once you\'re in.', size: '0.4 GB', vram: '1 GB', vramGB: 1, recommended: true, agent: false, downloadUrl: HF_OB('bartowski/Qwen2.5-0.5B-Instruct-GGUF', 'Qwen2.5-0.5B-Instruct-Q4_K_M.gguf'), filename: 'Qwen2.5-0.5B-Instruct-Q4_K_M.gguf', sizeGB: 0.4 },
+  { name: 'qwen2.5-0.5b', label: 'Qwen 2.5 0.5B (Starter)', description: 'Tiny instant-chat model, 400 MB, runs on anything. Great to verify your setup; pick bigger models from the Get new tab once you\'re in.', size: '0.4 GB', vram: '1 GB', vramGB: 1, recommended: true, agent: false, downloadUrl: HF_OB('bartowski/Qwen2.5-0.5B-Instruct-GGUF', 'Qwen2.5-0.5B-Instruct-Q4_K_M.gguf'), filename: 'Qwen2.5-0.5B-Instruct-Q4_K_M.gguf', sizeGB: 0.4 },
 ]

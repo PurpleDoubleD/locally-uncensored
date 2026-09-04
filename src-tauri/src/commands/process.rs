@@ -244,6 +244,37 @@ pub fn comfy_starting_state(
     }
 }
 
+/// How long a start that is already over waits for the output readers.
+///
+/// Same number and same reason as the probe's settle window in
+/// `env_check::run_import_probe_bounded`.
+const COMFY_READER_SETTLE: std::time::Duration = std::time::Duration::from_millis(500);
+
+/// Wait, briefly, for both output readers to reach the end of their pipe.
+///
+/// The fastest crash is the one that reads as nothing at all. `try_wait` is
+/// asked BEFORE the first sleep of the startup watch, so a torch that dies on a
+/// DLL in 80 ms breaks that loop while the reader threads are still on their
+/// first line. Without this the tail is the `[start]` line alone, the message
+/// carries no reason, and the panel shows a start that failed for no stated
+/// cause: exactly what P3 reported.
+///
+/// The threads are deliberately not joined, for the reason `run_streamed`
+/// gives: a surviving grandchild can hold the pipe open and the join would
+/// never return. A budget that runs out is not an error, it just means the
+/// message is built from what did arrive.
+fn wait_for_output_readers(done: &std::sync::atomic::AtomicU32, budget: std::time::Duration) -> bool {
+    use std::sync::atomic::Ordering;
+    let deadline = std::time::Instant::now() + budget;
+    while done.load(Ordering::Acquire) < 2 {
+        if std::time::Instant::now() >= deadline {
+            return false;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    true
+}
+
 /// The message a start that is already over has to carry.
 ///
 /// The traceback was never the missing part: `capture` has been putting every
@@ -263,9 +294,9 @@ pub fn comfy_startup_failure(
     msg.push_str(").");
     if !has_own_python_env {
         msg.push_str(
-            " This install has no python_embeded and no venv, so it ran on the system Python, \
-             which usually does not have ComfyUI's dependencies. Settings, ComfyUI, Install \
-             builds one.",
+            " This install has no python_embeded and no venv of its own, so it ran on the \
+             system Python, which usually does not have ComfyUI's dependencies. Repair \
+             environment, in Settings, AI Backends, builds one.",
         );
     }
     let lines: Vec<&str> = tail
@@ -283,6 +314,30 @@ pub fn comfy_startup_failure(
         msg.push_str(&lines.join("\n"));
     }
     msg
+}
+
+/// What a start has to say when the venv is there and its interpreter is not.
+///
+/// P3: the tester renamed `venv\Scripts\python.exe`, LU quietly started
+/// `C:\Program Files\Python311\python.exe` instead, and what reached him was a
+/// torch traceback out of a stranger's site-packages plus a generic sentence
+/// about a broken Python environment. Neither named the file that was
+/// actually missing, and no other Python can stand in for this one, because
+/// every package this ComfyUI needs is inside that venv.
+///
+/// Deliberately without any operating-system error text: nothing failed to
+/// open here, a file is simply not there, and `exists()` has no error to pass
+/// on anyway.
+pub fn comfy_broken_venv_message(venv_dir: &Path, interpreter: &Path) -> String {
+    format!(
+        "ComfyUI has its own Python environment at {venv}, but the interpreter inside it is \
+         missing: {py}\n\nLU did not start ComfyUI with a different Python. This install's \
+         packages live in that environment, so any other interpreter would fail on the first \
+         import and report a problem that is not the real one.\n\nRepair environment, in \
+         Settings, AI Backends, rebuilds it. Models, outputs and custom nodes are left alone.",
+        venv = venv_dir.display(),
+        py = interpreter.display(),
+    )
 }
 
 /// Whether a startup crash reads as a broken Python environment (GH #98,
@@ -618,7 +673,12 @@ fn is_comfyui_install_complete_with(comfy_path: &Path, candidate_pythons: &[Stri
 /// probe silently asked about a path on the user's desktop, and the Unix
 /// probe below it was never reached at all, because `Path::new("").parent()`
 /// is `None`.
-fn prefix_has_torch(prefix: &Path) -> bool {
+///
+/// `pub(crate)` since P3: `python::comfy_venv_state` asks the same question to
+/// decide whether a directory without an interpreter is a venv at all. It has
+/// to be the same question, or the launcher and the completeness check go on
+/// disagreeing about what a venv is, which is the bug they had.
+pub(crate) fn prefix_has_torch(prefix: &Path) -> bool {
     if prefix.as_os_str().is_empty() {
         return false;
     }
@@ -1651,12 +1711,24 @@ fn start_comfyui_blocking(state: &AppState) -> Result<serde_json::Value, String>
     // (which is what `state.python_bin` resolves to) never received those
     // packages. Falls back to bundled portable (Windows) or system (Mac /
     // older Linux without PEP 668) when no venv exists.
-    let venv_python = crate::python::resolve_comfyui_venv_python(std::path::Path::new(&comfy_path));
+    // P3: the third answer. A venv whose interpreter is gone used to read as
+    // "no venv", and "no venv" means "system Python" one line down. That is
+    // the silent fallback that started ComfyUI on a foreign interpreter.
+    let venv_state = crate::python::comfy_venv_state(std::path::Path::new(&comfy_path));
+    let has_usable_venv = matches!(venv_state, crate::python::ComfyVenv::Usable(_));
+    let has_own_python_env = bundled_python.is_some() || has_usable_venv;
     let system_python = state.python_bin.lock().unwrap().clone();
-    let python = bundled_python
-        .clone()
-        .or_else(|| venv_python.clone())
-        .unwrap_or(system_python.clone());
+    let python = match (&bundled_python, &venv_state) {
+        // Portable wins over everything: it ships the matching torch wheel,
+        // and a leftover venv beside it must not refuse that start.
+        (Some(p), _) => p.clone(),
+        (None, crate::python::ComfyVenv::Usable(p)) => p.clone(),
+        (None, crate::python::ComfyVenv::Broken { venv_dir, interpreter }) => {
+            error!(venv = %venv_dir.display(), "comfyui venv interpreter missing");
+            return Err(comfy_broken_venv_message(venv_dir, interpreter));
+        }
+        (None, crate::python::ComfyVenv::Absent) => system_python.clone(),
+    };
     let port_str = port.to_string();
     if python.is_empty() {
         return Err(
@@ -1667,7 +1739,7 @@ fn start_comfyui_blocking(state: &AppState) -> Result<serde_json::Value, String>
     }
     if bundled_python.is_some() {
         println!("[ComfyUI] Using bundled portable Python: {}", python);
-    } else if venv_python.is_some() {
+    } else if has_usable_venv {
         println!("[ComfyUI] Using ComfyUI venv Python (PEP 668 install): {}", python);
     } else {
         println!("[ComfyUI] Using system Python: {}", python);
@@ -1736,8 +1808,12 @@ fn start_comfyui_blocking(state: &AppState) -> Result<serde_json::Value, String>
     // tree, so its own extra-model-paths mechanism is the way a LoRA on
     // another drive becomes visible and loadable. Our own file, passed by
     // flag: a hand written extra_model_paths.yaml in the ComfyUI folder is
-    // never read, written or overwritten by us.
-    let extra_paths_file = crate::commands::custom_models::extra_model_paths_arg()
+    // never read, written or overwritten by us. Written HERE and not only when
+    // the setting changes (P3): a subfolder the user creates afterwards used to
+    // be unreachable for ComfyUI forever, because the start path only asked
+    // whether the file existed. Before the spawn below, since ComfyUI reads the
+    // config once at startup.
+    let extra_paths_file = crate::commands::custom_models::refresh_extra_model_paths_arg()
         .map(|p| p.to_string_lossy().to_string());
     if let Some(file) = &extra_paths_file {
         comfy_args.push("--extra-model-paths-config");
@@ -1795,35 +1871,55 @@ fn start_comfyui_blocking(state: &AppState) -> Result<serde_json::Value, String>
             buf.push_back(note.clone());
         }
     }
+    // P3, on a German Windows: `main.py` died with "OSError: [WinError 126] Das
+    // angegebene Modul wurde nicht gefunden." and that sentence went straight
+    // into the panel of an English app. Every message built out of this ring
+    // buffer (`comfy_startup_failure`, `comfyui_last_output` and the two
+    // surfaces behind it) is served in one place, here, where the line is read.
+    // The log above keeps whatever the OS wrote, in whatever language: it is
+    // ours to read and the original wording helps support. Only the line the
+    // user sees is rewritten.
     let capture = |line: String, sink: &Arc<Mutex<std::collections::VecDeque<String>>>| {
         println!("[ComfyUI] {}", line);
         if let Ok(mut buf) = sink.lock() {
             if buf.len() >= 400 {
                 buf.pop_front();
             }
-            buf.push_back(line);
+            buf.push_back(os_error::english_child_text(&line).into_owned());
         }
     };
+    // How many of the two readers have seen their pipe close. The watch below
+    // reads the ring buffer the moment the child is gone, and without this it
+    // reads it before either reader has written a word.
+    let readers_done = Arc::new(std::sync::atomic::AtomicU32::new(0));
     if let Some(stdout) = child.stdout.take() {
         let sink = state.comfy_output.clone();
+        let done = readers_done.clone();
         std::thread::spawn(move || {
             use std::io::{BufRead, BufReader};
             let reader = BufReader::new(stdout);
             for line in reader.lines().map_while(Result::ok) {
                 capture(line, &sink);
             }
+            done.fetch_add(1, std::sync::atomic::Ordering::Release);
         });
+    } else {
+        readers_done.fetch_add(1, std::sync::atomic::Ordering::Release);
     }
 
     if let Some(stderr) = child.stderr.take() {
         let sink = state.comfy_output.clone();
+        let done = readers_done.clone();
         std::thread::spawn(move || {
             use std::io::{BufRead, BufReader};
             let reader = BufReader::new(stderr);
             for line in reader.lines().map_while(Result::ok) {
                 capture(line, &sink);
             }
+            done.fetch_add(1, std::sync::atomic::Ordering::Release);
         });
+    } else {
+        readers_done.fetch_add(1, std::sync::atomic::Ordering::Release);
     }
 
     // A spawn is not a start (E16, measured on the Windows box 2026-08-14).
@@ -1850,17 +1946,13 @@ fn start_comfyui_blocking(state: &AppState) -> Result<serde_json::Value, String>
         watched += COMFY_STARTUP_STEP;
     };
     if let Some(code) = early_exit {
+        wait_for_output_readers(&readers_done, COMFY_READER_SETTLE);
         let tail: Vec<String> = state
             .comfy_output
             .lock()
             .map(|b| b.iter().cloned().collect())
             .unwrap_or_default();
-        let msg = comfy_startup_failure(
-            &python,
-            code,
-            &tail,
-            bundled_python.is_some() || venv_python.is_some(),
-        );
+        let msg = comfy_startup_failure(&python, code, &tail, has_own_python_env);
         error!(python = %python, "comfyui exited during startup");
         *state.comfy_start_at.lock().unwrap() = None;
         return Err(msg);
@@ -2646,19 +2738,32 @@ pub fn auto_start_comfyui(state: &AppState) {
             // creates (Arch / Debian 12+ / Fedora 38+ / Ubuntu 23.04+).
             // Without this auto-start would launch with the system Python
             // that doesn't have torch and crash on first import.
-            let venv_python = crate::python::resolve_comfyui_venv_python(std::path::Path::new(&path));
+            // P3: the same three answers as the manual start. A boot that
+            // silently launches a foreign interpreter is the worse half of
+            // that bug, because there is no panel here to read the traceback
+            // in: the reason only reaches the log.
+            let venv_state = crate::python::comfy_venv_state(std::path::Path::new(&path));
+            let has_usable_venv = matches!(venv_state, crate::python::ComfyVenv::Usable(_));
             let system_python = state.python_bin.lock().unwrap().clone();
-            let python = portable_python
-                .clone()
-                .or_else(|| venv_python.clone())
-                .unwrap_or_else(|| system_python.clone());
+            let python = match (&portable_python, &venv_state) {
+                (Some(p), _) => p.clone(),
+                (None, crate::python::ComfyVenv::Usable(p)) => p.clone(),
+                (None, crate::python::ComfyVenv::Broken { venv_dir, interpreter }) => {
+                    println!(
+                        "[ComfyUI] Auto-start skipped: {}",
+                        comfy_broken_venv_message(venv_dir, interpreter)
+                    );
+                    return;
+                }
+                (None, crate::python::ComfyVenv::Absent) => system_python.clone(),
+            };
             if python.is_empty() {
                 println!("[ComfyUI] Auto-start skipped: no Python available (install via P14 flow)");
                 return;
             }
             if portable_python.is_some() {
                 println!("[ComfyUI] Auto-start using bundled portable Python: {}", python);
-            } else if venv_python.is_some() {
+            } else if has_usable_venv {
                 println!("[ComfyUI] Auto-start using ComfyUI venv Python (PEP 668 install): {}", python);
             }
 
@@ -2669,6 +2774,13 @@ pub fn auto_start_comfyui(state: &AppState) {
             let auto_needs_cpu = auto_decision.needs_cpu;
             // Mirror of start_comfyui: expose the real launch mode to the UI.
             *state.comfy_started_cpu.lock().unwrap() = Some(auto_needs_cpu);
+            // Wie im manuellen Start, und bis P3 fehlte das hier ganz: auf einer
+            // Maschine, auf der LU ComfyUI beim Programmstart selbst hochzieht,
+            // erreichte der Model-Storage-Ordner ComfyUI nie, auch bei
+            // brandaktueller Datei. Vor comfy_args, damit der Autostart dieselbe
+            // Form hat wie der Startpfad und wie port_str weiter oben.
+            let auto_extra = crate::commands::custom_models::refresh_extra_model_paths_arg()
+                .map(|p| p.to_string_lossy().to_string());
             let mut comfy_args: Vec<&str> = vec![
                 "main.py",
                 "--listen", "127.0.0.1",
@@ -2690,6 +2802,11 @@ pub fn auto_start_comfyui(state: &AppState) {
             if !auto_needs_cpu && flash_attention_cached(state, &python) {
                 comfy_args.push("--use-flash-attention");
                 println!("[ComfyUI] Auto-start: flash-attn detected — enabling Flash Attention");
+            }
+            if let Some(file) = &auto_extra {
+                comfy_args.push("--extra-model-paths-config");
+                comfy_args.push(file);
+                println!("[ComfyUI] Auto-start: extra model paths: {}", file);
             }
             let mut cmd = python_command(&python);
             cmd.args(&comfy_args)
@@ -3005,11 +3122,63 @@ mod tests {
         assert!(msg.contains("exit code 1"), "{msg}");
         // And the one sentence that explains why it happened on THIS install.
         assert!(msg.contains("no python_embeded and no venv"), "{msg}");
+        // P3: that sentence used to end on "Settings, ComfyUI, Install builds
+        // one". Install is not offered for an install LU just launched, and it
+        // is not what builds a venv. Repair environment is both.
+        assert!(msg.contains("Repair environment"), "{msg}");
+        assert!(!msg.contains("Install builds one"), "{msg}");
 
         // With a proper environment the guess would be wrong, so it is not made.
         let msg2 = comfy_startup_failure("C:\\ComfyUI\\venv\\Scripts\\python.exe", None, &tail, true);
         assert!(!msg2.contains("no python_embeded"), "{msg2}");
         assert!(msg2.contains("ModuleNotFoundError"), "{msg2}");
+    }
+
+    #[test]
+    fn a_child_that_dies_instantly_still_gets_its_last_words_into_the_message() {
+        // P3, zweiter Fall aus Abschnitt 5: Status ging Stopped, Starting,
+        // Stopped, und in der Oberflaeche stand GAR KEINE Meldung. Das Kind
+        // stirbt an einer DLL in Millisekunden, `try_wait` fragt vor dem ersten
+        // sleep, und der Ringpuffer haelt in diesem Augenblick nur die
+        // [start]-Zeile. Die Nachlauffrist ist der Unterschied zwischen einer
+        // Meldung mit Grund und einer ohne.
+        use std::sync::atomic::{AtomicU32, Ordering};
+        let done = Arc::new(AtomicU32::new(0));
+        let buf: Arc<Mutex<std::collections::VecDeque<String>>> =
+            Arc::new(Mutex::new(std::collections::VecDeque::new()));
+        buf.lock().unwrap().push_back("[start] python main.py --port 8188".to_string());
+        {
+            let done = done.clone();
+            let buf = buf.clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_millis(80));
+                if let Ok(mut b) = buf.lock() {
+                    b.push_back(
+                        "OSError: [WinError 126] the specified module could not be found".to_string(),
+                    );
+                }
+                // Beide Leser am Ende ihrer Rohrleitung.
+                done.fetch_add(2, Ordering::Release);
+            });
+        }
+        assert!(
+            wait_for_output_readers(&done, std::time::Duration::from_secs(2)),
+            "die Frist lief ab, obwohl die Leser fertig geworden sind"
+        );
+        let tail: Vec<String> = buf.lock().unwrap().iter().cloned().collect();
+        let msg = comfy_startup_failure("python", Some(1), &tail, true);
+        assert!(msg.contains("[WinError 126]"), "der Grund fehlt in der Meldung: {msg}");
+    }
+
+    #[test]
+    fn a_reader_that_never_ends_costs_the_budget_and_not_the_start() {
+        // Die Gegenprobe: ein Enkelkind haelt die Rohrleitung offen. Genau
+        // deshalb wird nicht gejoint, und genau deshalb ist die Frist kurz.
+        use std::sync::atomic::AtomicU32;
+        let done = Arc::new(AtomicU32::new(1));
+        let began = std::time::Instant::now();
+        assert!(!wait_for_output_readers(&done, std::time::Duration::from_millis(120)));
+        assert!(began.elapsed() < std::time::Duration::from_secs(1), "die Frist hat nicht gegriffen");
     }
 
     #[test]
@@ -4299,6 +4468,49 @@ mod comfy_adoption_tests {
         );
     }
 
+    /// Beide ComfyUI-Starts muessen den Model-Storage-Ordner uebergeben.
+    ///
+    /// P3: der Boot-Autostart hat --extra-model-paths-config nie angehaengt,
+    /// also erreichte der Ordner ComfyUI auf einer Maschine, auf der LU es
+    /// selbst hochzieht, ueberhaupt nicht. Der Tester konnte das nicht sehen,
+    /// weil auf seiner Box schon ein ComfyUI auf dem Port lief und der
+    /// Autostart deshalb vorher aussteigt. Ein Quelltexttest, weil kein Test
+    /// die Argumentliste erreicht, ohne ein ComfyUI zu starten.
+    #[test]
+    fn both_comfy_start_paths_hand_over_the_model_folder() {
+        let whole = include_str!("process.rs");
+        // Die ausgelieferte Haelfte, wie in utf8_start_waechter: sonst zaehlt
+        // dieser Test seine eigenen Zeichenketten mit.
+        let src = whole.split("#[cfg(test)]").next().expect("die ausgelieferte Haelfte");
+        assert_eq!(
+            src.matches("--extra-model-paths-config").count(),
+            2,
+            "der Schalter steht nicht an beiden Startorten",
+        );
+        for name in ["fn start_comfyui_blocking", "fn auto_start_comfyui"] {
+            let start = src.find(name).unwrap_or_else(|| panic!("{name} ist weg"));
+            let rest = &src[start..];
+            let end = start + rest.find("\n}\n").expect("unterminated fn");
+            let body = &src[start..end];
+            assert!(
+                body.contains("refresh_extra_model_paths_arg("),
+                "{name} schreibt die Datei nicht neu, bevor es ComfyUI startet",
+            );
+            assert!(
+                body.contains("--extra-model-paths-config"),
+                "{name} baut die Datei und uebergibt sie nicht",
+            );
+        }
+        // Und der reine Existenztest von frueher darf nicht zurueckkommen. Der
+        // Name wird zur Laufzeit zusammengesetzt, damit diese Zeile sich nicht
+        // selbst findet, falls die Testhaelfte je mitgelesen wird.
+        let alt = format!("custom_models::{}", "extra_model_paths_arg");
+        assert!(
+            !src.contains(&alt),
+            "der alte Startpfad ist zurueck: er sieht nur nach, ob die Datei da ist",
+        );
+    }
+
     /// Stop must not still be the no-op the finding describes.
     #[test]
     fn stop_no_longer_answers_not_running_without_looking() {
@@ -4317,6 +4529,62 @@ mod comfy_adoption_tests {
             body.contains("kill_pid_tree("),
             "stop_comfyui_blocking finds the orphan and does not stop it"
         );
+    }
+
+    // ── P3: der stille Rueckfall auf ein fremdes Python ────────────────────
+
+    #[test]
+    fn die_meldung_nennt_den_interpreter_und_den_weg_hinaus() {
+        let venv = std::path::Path::new("C:\\Users\\ddrob\\ComfyUI\\venv");
+        let py = venv.join("Scripts").join("python.exe");
+        let msg = comfy_broken_venv_message(venv, &py);
+
+        // Die eine Tatsache, die von aussen niemand sieht.
+        assert!(msg.contains(&py.display().to_string()), "{msg}");
+        assert!(msg.contains(&venv.display().to_string()), "{msg}");
+        // Und der Knopf, der wirklich dasteht: Repair environment zeigt die
+        // Oberflaeche bei found && !running && installIdle.
+        assert!(msg.contains("Repair environment"), "{msg}");
+
+        // Was NICHT drinstehen darf: der allgemeine Satz, den der Tester
+        // stattdessen bekam, und ein Verweis auf Install. Installiert ist
+        // alles, es fehlt eine Datei.
+        assert!(!msg.contains("The Python environment looks broken"), "{msg}");
+        assert!(!msg.contains("Install ComfyUI"), "{msg}");
+    }
+
+    /// Kein Startweg greift noch still zum System-Python.
+    ///
+    /// P3, am laufenden Prozess gemessen: nach dem Umbenennen des
+    /// venv-Interpreters lief `"C:\Program Files\Python311\python.exe"
+    /// main.py`. Die Kette, die das getan hat, stand woertlich zweimal in
+    /// dieser Datei, einmal im Startknopf und einmal im Autostart. Ein
+    /// Quelltextanker, weil kein Test die Startentscheidung erreicht, ohne
+    /// ein ComfyUI zu starten.
+    #[test]
+    fn der_start_greift_an_keiner_stelle_mehr_still_zum_system_python() {
+        let whole = include_str!("process.rs");
+        let src = whole.split("#[cfg(test)]").next().expect("die ausgelieferte Haelfte");
+        for name in ["fn start_comfyui_blocking", "fn auto_start_comfyui"] {
+            let start = src.find(name).unwrap_or_else(|| panic!("{name} ist weg"));
+            let rest = &src[start..];
+            let end = start + rest.find("\n}\n").expect("unterminated fn");
+            let body = &src[start..end];
+            assert!(
+                body.contains("comfy_venv_state("),
+                "{name} kennt weiter nur zwei Antworten auf die venv-Frage",
+            );
+            assert!(
+                body.contains("comfy_broken_venv_message("),
+                "{name} erkennt das kaputte venv und sagt es niemandem",
+            );
+            for kette in ["unwrap_or(system_python", "unwrap_or_else(|| system_python"] {
+                assert!(
+                    !body.contains(kette),
+                    "{name} faellt wieder still auf das System-Python zurueck: {kette}",
+                );
+            }
+        }
     }
 }
 

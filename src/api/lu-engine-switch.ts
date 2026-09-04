@@ -20,6 +20,7 @@ import { useLuEngineSwitchStore } from '../stores/luEngineSwitchStore'
 import { luEngineSwapInFlight } from './lu-engine-swap-lock'
 import { useProviderStore } from '../stores/providerStore'
 import { useModelStore } from '../stores/modelStore'
+import { useUIStore } from '../stores/uiStore'
 import {
   slotHandbackUpdate, standbyOccupant,
   type HandoverSlot, type SlotOccupant,
@@ -204,9 +205,63 @@ function chatModelReplacedNote(gone: string, now: string): string {
  * effect looks, the store already reads the replacement and the rule has
  * nothing left to notice. That case is announced by whoever hands the list in
  * (hooks/useModels), where the before and the after are both still there.
+ *
+ * NICHT der Halt der beiden Nachbarn eine Tuer weiter. Die halten, weil ihr
+ * Satz beim Ansagen noch nicht stimmt: der Steckplatz ist umgehaengt, die Wahl
+ * kommt erst an, wenn das fremde Backend geladen hat, auf der Box nach 12,4
+ * bzw. 16,8 s. Dieser Satz stimmt dagegen im selben Zug, in dem er geschrieben
+ * wird. Beide Tueren haben den Tausch schon vollzogen (`setModels` in
+ * derselben set(), AppShell eine Anweisung spaeter und ohne `await`
+ * dazwischen), er ist also wahr, bevor der erste Bildaufbau ihn zeigen kann.
+ * Ein Halt auf die Wahrheit haette hier nichts zu halten.
+ *
+ * WOHL ABER der Halt auf den Leser. Der gemessene Fall von G1 ist "Provider
+ * LM Studio in den Einstellungen wieder herausgenommen", und die Zeile wird
+ * ueber dem Eingabefeld im Chat und auf der Models-Seite gezeichnet, nicht in
+ * den Einstellungen (`LuEngineSwitchBar`). Sie stand also zwoelf Sekunden lang
+ * auf einer Seite, die es nicht gibt, und war weg, bevor der Kunde in den Chat
+ * zurueckkam und dort ACTIVE neben einer kaputten GGUF-Datei fand. Genau das
+ * war der Befund. `bisJemandHinsehenKann` haelt sie, solange keine Seite offen
+ * ist, die sie zeigt.
  */
 export function announceChatModelReplaced(gone: string, now: string): void {
-  useLuEngineSwitchStore.getState().announce(chatModelReplacedNote(gone, now), 'info')
+  useLuEngineSwitchStore.getState().announce(
+    chatModelReplacedNote(gone, now), 'info', bisJemandHinsehenKann(),
+  )
+}
+
+/**
+ * Was die stehende Zeile sagt, wenn der geteilte lokale Steckplatz an ein
+ * anderes Backend gegangen ist und die Wahl damit hinfaellig war.
+ */
+function chatModelLostItsEngineNote(gone: string, taker: string): string {
+  return `"${displayModelName(gone)}" was served by the LU Engine, and ${taker} has the local slot now, so it is no longer the chat model.`
+}
+
+/**
+ * Die dritte Tuer, und die einzige, die keinen Ersatz zu nennen hat.
+ *
+ * Nach der Uebergabe an ein fremdes Backend raeumt `dropDisplacedEnginePick`
+ * (lib/builtin-slot-eviction) die Wahl, weil auf 8127 nichts mehr liegt. Damit
+ * ist `activeModel` null, und `replacedBehindTheUsersBack` verlangt einen
+ * vorherigen Namen, den es nach dem Raeumen nicht mehr gibt: die Regel liefert
+ * false, und die Zeile fiel aus. Der Nutzer sah seinen Chip wechseln und
+ * bekam kein Wort dazu. Gesagt wird es deshalb dort, wo der alte Name noch
+ * dasteht, im selben Zug wie das Raeumen.
+ *
+ * Kein Halt auf die Wahrheit, aus demselben Grund wie bei
+ * `announceChatModelReplaced`: der Steckplatz ist schon umgehaengt und die
+ * Wahl schon gefallen, wenn dieser Satz geschrieben wird. Er stimmt sofort und
+ * bleibt wahr, auch wenn die naechste Inventarrunde von selbst eine andere
+ * Zeile waehlt. Der Halt auf den Leser dagegen ist hier noch noetiger als
+ * dort: der Knopf, der das ausloest, steht in den Einstellungen, und die Zeile
+ * wird dort nicht gezeichnet.
+ */
+export function announceChatModelLostItsEngine(gone: string, taker: string | null | undefined): void {
+  useLuEngineSwitchStore.getState().announce(
+    chatModelLostItsEngineNote(gone, taker?.trim() || 'another backend'), 'info',
+    bisJemandHinsehenKann(),
+  )
 }
 
 /** What the pick says when it moved the chat backend to `name`. */
@@ -252,9 +307,39 @@ export function announceChatProviderSwitch(name: string, modelName: string): voi
  * Die Frist wird beim Ansagen festgelegt, nicht bei jeder Abfrage, sonst
  * verschiebt sie sich mit jedem Blick und die Zeile bliebe fuer immer stehen.
  */
-function haltenBis(pruefung: () => boolean): () => boolean {
-  const frist = Date.now() + CHAT_PROVIDER_SWITCH_HOLD_MS
-  return () => Date.now() < frist && pruefung()
+function haltenBis(pruefung: () => boolean, frist = CHAT_PROVIDER_SWITCH_HOLD_MS): () => boolean {
+  const ende = Date.now() + frist
+  return () => Date.now() < ende && pruefung()
+}
+
+/** Die Seiten, auf denen `LuEngineSwitchBar` wirklich haengt. */
+const SEITEN_MIT_ZEILE: ReadonlySet<string> = new Set(['chat', 'models'])
+
+/**
+ * Wie lange eine Zeile auf ihren Leser wartet.
+ *
+ * Grosszuegig fuer eine Runde durch die Einstellungen und kurz genug, dass der
+ * Satz noch von etwas handelt, das der Nutzer selbst gerade getan hat. Ein
+ * Deckel muss sein: der Halt sieht im Sekundentakt nach, und ohne Frist liefe
+ * dieser Takt bis zum Ende der Sitzung.
+ */
+export const UNSEEN_NOTE_HOLD_MS = 5 * 60_000
+
+/**
+ * Halten, solange gar keine Seite offen ist, die diese Zeile zeichnet.
+ *
+ * Beide Ansagen ueber eine Wahl, die sich von selbst geaendert hat, werden von
+ * den Einstellungen aus ausgeloest: Provider entfernen, Enable auf der
+ * Standby-Karte. Die Zeile haengt aber ueber dem Eingabefeld im Chat und auf
+ * der Models-Seite. Auf der gewoehnlichen Uhr lief sie also ab, waehrend
+ * niemand sie sehen konnte, und der Nutzer kam in einen Chat zurueck, in dem
+ * ein anderes Modell stand und nichts dazu.
+ */
+function bisJemandHinsehenKann(): () => boolean {
+  return haltenBis(
+    () => !SEITEN_MIT_ZEILE.has(useUIStore.getState().currentView),
+    UNSEEN_NOTE_HOLD_MS,
+  )
 }
 
 /**
@@ -330,6 +415,41 @@ function isStandbyBackendRow(row: InstalledModelLike | null | undefined): boolea
 }
 
 /**
+ * Die Zeile, auf die der Steckplatz gerade wartet, weil der Nutzer sie selbst
+ * angeklickt hat, und wie lange diese Auskunft gilt.
+ */
+let angefragteZeile: { name: string; frist: number } | null = null
+
+/**
+ * Wartet der Steckplatzwechsel noch auf die Zeile, die der Nutzer angeklickt
+ * hat.
+ *
+ * Dieselbe Uebergabe kommt aus zwei ganz verschiedenen Haenden. In den
+ * Einstellungen drueckt jemand Enable auf der Standby-Karte, und der Chip im
+ * Chat wechselt, ohne dass er den Waehler angefasst hat: darueber gehoert ein
+ * Satz. Im Waehler klickt er selbst eine Zeile des wartenden Backends an, und
+ * dann steht die Wechselzeile bereits auf dem Schirm und beschreibt genau
+ * diesen Vorgang. Ein zweiter Satz waere dort nicht nur Laerm, er wuerde den
+ * ersten auch loeschen, denn `announce` raeumt die vorige Zeile weg.
+ *
+ * Sofort gesetzt wird die Wahl dabei nicht immer. `useModels.activateModel`
+ * tut es ohne `await` gleich danach, der Waehler dagegen laedt das Modell
+ * erst in LM Studio, auf der Box gemessene 12,4 s, und setzt sie erst
+ * hinterher. Genau in diesem Fenster faellt die Wahl, und genau dort darf
+ * nichts gesagt werden. Die Frist ist dieselbe, die die Wechselzeile hoechstens
+ * stehen darf: laenger deckt sie nichts mehr zu.
+ */
+export function handbackAwaitsTheUsersPick(): boolean {
+  if (!angefragteZeile) return false
+  const angekommen = useModelStore.getState().activeModel === angefragteZeile.name
+  if (angekommen || Date.now() >= angefragteZeile.frist) {
+    angefragteZeile = null
+    return false
+  }
+  return true
+}
+
+/**
  * Hand the slot back when the picked row belongs to the backend on standby.
  *
  * Returns the name it went back to, so the caller can say it, or null when
@@ -342,6 +462,10 @@ export function handBackChatProviderForRow(row: InstalledModelLike | null | unde
   const slot = providers.openai as HandoverSlot
   const update = slotHandbackUpdate(slot)
   if (!update) return null
+  // Gemerkt, BEVOR der Steckplatz umgehaengt wird: das Schreiben stoesst die
+  // Raeumung der Wahl an, und die fragt gleich nach, aus wessen Hand der
+  // Wechsel kam.
+  angefragteZeile = { name: row?.name ?? '', frist: Date.now() + CHAT_PROVIDER_SWITCH_HOLD_MS }
   setProviderConfig('openai', update)
   return update.name ?? null
 }

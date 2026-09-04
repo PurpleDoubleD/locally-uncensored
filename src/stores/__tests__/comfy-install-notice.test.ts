@@ -1,7 +1,7 @@
 /**
  * A15, Windows Nachlauf 02.09., Befund 5b: a ComfyUI requirements.txt with an
  * invented package on line 1 made `pip install -r` fail, the repair carried on
- * with LU's own package list, and the run ended after 377 seconds on a green
+ * with the packages LU knows about, and the run ended after 377 seconds on a green
  * panel. No error card, no hint, nothing in the log about the file that had
  * been passed over, so the user is left with a ComfyUI that is quietly short of
  * whatever that file asked for.
@@ -28,8 +28,9 @@ const store = () => useComfyInstallStore.getState()
 
 const SKIPPED =
   "The requirements.txt in C:\\Users\\ddrob\\ComfyUI could not be used (pip found no " +
-  'installable version for a package it names), so LU installed its own package list ' +
-  'instead. Anything that file asks for on top of that list is not installed.'
+  'installable version for a package it names), so LU checked the packages it knows ' +
+  'about and installed the ones that were missing. Anything that file asks for on top ' +
+  'of that list is not installed.'
 
 beforeEach(() => {
   store().reset()

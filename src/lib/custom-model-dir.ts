@@ -11,8 +11,10 @@
  * So this is the handover. Rust writes ComfyUI's own extra-model-paths file
  * for the ComfyUI-shaped subfolders it finds and passes it at start; a
  * hand written `extra_model_paths.yaml` in the user's ComfyUI folder is never
- * touched. Two limits are real and the Settings copy names both: a ComfyUI
- * that LU starts, and the next start of it.
+ * touched. One limit is real and the Settings copy names it: only a ComfyUI
+ * that LU starts is handed the folder. The subfolders are scanned again on
+ * every one of those starts, so a subfolder added later arrives with the next
+ * start.
  */
 
 import { backendCall } from '../api/backend'
@@ -22,14 +24,17 @@ import { log } from './logger'
  * What the folder is worth right now.
  *
  * `unusable` is a relative path or a `~` the OS never expands, `unreachable` is
- * a folder LU cannot read (an unplugged drive, a dead network mount). Both used
- * to be silence: no folders, no file, no word about it.
+ * a folder that is not there (an unplugged drive, a dead network mount), and
+ * `denied` is one that is there and closed to the account this app runs as.
+ * All three used to be silence, and the middle two used to be one answer, so a
+ * folder without read rights was reported as a missing drive.
  */
 export type CustomModelDirStatus =
   | 'off'
   | 'ok'
   | 'unusable'
   | 'unreachable'
+  | 'denied'
   /** This host never starts a ComfyUI, so there is nobody to hand the folder
    *  to. The Mac, where local media is MLX. */
   | 'unsupported'

@@ -78,7 +78,7 @@ use super::CREATE_NO_WINDOW;
 /// Best-effort in the other direction too: `None` when `sysinfo` lists no
 /// mount point that is a prefix of `target_dir`, so a probing flake never
 /// blocks a well-meaning install.
-fn check_install_disk_pressure(target_dir: &Path) -> Option<String> {
+pub(crate) fn check_install_disk_pressure(target_dir: &Path) -> Option<String> {
     use sysinfo::Disks;
     let disks = Disks::new_with_refreshed_list();
     // Find the disk that contains the target dir. sysinfo's Disk::mount_point
@@ -284,8 +284,8 @@ pub fn install_comfyui(
         };
 
         // Set when `pip install -r requirements.txt` failed and the run carried
-        // on with LU's own package list. Folder plus reason, so the live log
-        // line and the line the finished run leaves behind agree (A15).
+        // on with the packages LU knows about. Folder plus reason, so the live
+        // log line and the line the finished run leaves behind agree (A15).
         let mut requirements_fallback: Option<(String, &'static str)> = None;
 
         let cancelled = || cancel_flag.load(Ordering::SeqCst);
@@ -450,7 +450,22 @@ pub fn install_comfyui(
         // packages in one interpreter and start another: press Install after a
         // Repair and the requirements land in the system Python while ComfyUI
         // keeps running out of the venv that still has the hole.
-        let existing_venv = crate::python::resolve_comfyui_venv_python(&target_dir);
+        // P3: a venv without its interpreter is not "no venv". Installing past
+        // it would put every package in the system Python while the launcher
+        // refuses to start out of anything else, so the run stops here with
+        // the sentence that names the missing file and the button that fixes
+        // it.
+        let existing_venv = match crate::python::comfy_venv_state(&target_dir) {
+            crate::python::ComfyVenv::Usable(p) => Some(p),
+            crate::python::ComfyVenv::Broken { venv_dir, interpreter } => {
+                update(
+                    "error",
+                    &crate::commands::process::comfy_broken_venv_message(&venv_dir, &interpreter),
+                );
+                return;
+            }
+            crate::python::ComfyVenv::Absent => None,
+        };
         let effective_python = if let Some(venv_py) = existing_venv {
             update(
                 "installing",
@@ -467,7 +482,7 @@ pub fn install_comfyui(
                  pip can install PyTorch + ComfyUI deps without touching your \
                  system Python …",
             );
-            match create_comfyui_venv(&target_dir, &python_bin) {
+            match create_comfyui_venv(&target_dir, &python_bin, Some(&cancel_flag)) {
                 Ok(venv_py) => {
                     let p = venv_py.to_string_lossy().to_string();
                     update(
@@ -475,6 +490,14 @@ pub fn install_comfyui(
                         &format!("venv ready, using {} for the install.", p),
                     );
                     p
+                }
+                // A cancel the user asked for is not a failed install. Without
+                // this arm the new cancel path inside `create_comfyui_venv`
+                // would arrive here as the card "Installing ComfyUI did not
+                // finish", over a run that stopped because they said so.
+                Err(e) if e == "cancelled" => {
+                    update("cancelled", "Install cancelled while the venv was being created.");
+                    return;
                 }
                 Err(e) => {
                     update("error", &format!("venv creation failed.\n\n{}", e));
@@ -769,6 +792,43 @@ mod tests {
         assert!(!comfy_install_looks_finished(torso.path()));
         let real = dir_with(&[".git/", "main.py"]);
         assert!(comfy_install_looks_finished(real.path()));
+    }
+
+    #[test]
+    fn a_cancelled_venv_build_is_not_reported_as_a_failed_install() {
+        // P3 (04.09.): `create_comfyui_venv` can answer "cancelled" now, and
+        // the install's only error arm turns whatever it gets into "venv
+        // creation failed", which the panel shows as "Installing ComfyUI did
+        // not finish." So a cancel the user asked for would arrive as a
+        // failure, on the PEP 668 path where this call lives.
+        //
+        // Read out of the source, like the order guards in comfy_repair.rs,
+        // and with needles split in half for the same reason: written whole
+        // they would match themselves here and the `.expect` could never fire.
+        let src = include_str!("comfy_install.rs");
+        let needle = |head: &str, tail: &str| format!("{head}{tail}");
+
+        let build = needle("create_comfyui_venv(&target_dir, &python_bin,", " Some(&cancel_flag))");
+        let cancelled_arm = needle("\"Install cancelled while the venv", " was being created.\"");
+        let failed_arm = needle("\"venv creation faile", "d.\\n\\n{}\"");
+
+        let at_build = src.find(&build).expect("the install's venv build no longer gets the cancel flag");
+        let at_cancelled = src.find(&cancelled_arm).expect("a cancelled venv build is reported as a failed install");
+        let at_failed = src.find(&failed_arm).expect("the venv failure arm is gone");
+
+        assert!(at_build < at_cancelled, "the cancel arm does not belong to this call");
+        assert!(
+            at_cancelled < at_failed,
+            "the general failure arm comes first, so it swallows the cancel"
+        );
+
+        for (what, n) in [("the venv build", build), ("the cancel arm", cancelled_arm), ("the failure arm", failed_arm)] {
+            assert_eq!(
+                src.matches(&n).count(),
+                1,
+                "{what}: the search string finds itself in this test, so its .expect can never fire",
+            );
+        }
     }
 
 }

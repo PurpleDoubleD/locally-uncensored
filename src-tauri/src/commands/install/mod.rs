@@ -220,7 +220,7 @@ mod tests {
             .nth(1)
             .expect("install_comfyui");
         let venv_at = install_body
-            .find("resolve_comfyui_venv_python")
+            .find("comfy_venv_state")
             .expect("install_comfyui ignores an existing venv");
         let pep_at = install_body
             .find("is_pep668_protected")
@@ -228,6 +228,38 @@ mod tests {
         assert!(
             venv_at < pep_at,
             "the venv is only considered after the PEP 668 branch"
+        );
+    }
+
+    /// Wer Pakete fuer ComfyUI einkauft, stellt die venv-Frage vollstaendig.
+    ///
+    /// P3: `resolve_comfyui_venv_python` kennt zwei Antworten, und ein venv
+    /// ohne Interpreter faellt in dieselbe Schublade wie "hier war nie eines".
+    /// Fuer den Launcher war das der stille Rueckfall auf ein fremdes Python;
+    /// hier ist es dasselbe eine Ebene tiefer, naemlich pip in einen
+    /// Interpreter, aus dem dieses ComfyUI nie startet.
+    #[test]
+    fn every_comfy_install_path_asks_the_full_venv_question() {
+        for name in ["comfy_install.rs", "comfy_repair.rs", "custom_nodes.rs"] {
+            let src = ausgeliefert(datei(name));
+            assert!(
+                !src.contains("resolve_comfyui_venv_python"),
+                "{name}: nimmt die Zwei-Antworten-Frage und faellt an einem kaputten venv vorbei",
+            );
+            assert!(
+                src.contains("comfy_broken_venv_message("),
+                "{name}: erkennt das kaputte venv und sagt es niemandem",
+            );
+        }
+
+        // Die eine bewusste Ausnahme, damit sie nicht beim naechsten Durchgang
+        // als vergessene Stelle wieder auftaucht: `resolve_lu_python` versorgt
+        // Whisper und die Sprachausgabe. Die brauchen irgendein Python mit den
+        // richtigen Paketen, nicht das, aus dem ComfyUI startet, also ist der
+        // Rueckfall dort richtig.
+        assert!(
+            ausgeliefert(datei("venv.rs")).contains("resolve_comfyui_venv_python"),
+            "venv.rs::resolve_lu_python ist umgezogen: pruef, ob die Ausnahme noch gilt",
         );
     }
 

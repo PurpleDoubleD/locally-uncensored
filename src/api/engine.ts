@@ -266,7 +266,10 @@ export function customModelDirs(): string[] {
  *  nobody waited for, as long as the panel says it is partial. */
 export interface ScannedDir {
   path: string
-  status: 'ok' | 'truncated' | 'unreachable' | 'unusable'
+  /** `denied` is its own answer, not a shade of `unreachable`: the folder is
+   *  there and this account may not read it, so telling the user to check the
+   *  cable sends them after a fault that does not exist (P3, 7.4). */
+  status: 'ok' | 'truncated' | 'unreachable' | 'denied' | 'unusable'
 }
 
 // The folders the LAST listing walked, app dir first. Kept here rather than

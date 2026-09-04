@@ -226,6 +226,11 @@ pub fn install_python(state: State<'_, AppState>) -> Result<serde_json::Value, S
                     if let Some(out) = stdout {
                         let reader = BufReader::new(out);
                         for line in reader.lines().map_while(Result::ok) {
+                            // winget ist ein fremder Prozess, seine Zeilen
+                            // stehen in unserer Fortschrittskarte, und ein
+                            // Installationsfehler kommt vom Windows-Installer
+                            // in der Systemsprache.
+                            let line = os_error::english_child_text(&line).into_owned();
                             let trimmed = line.trim();
                             if !trimmed.is_empty() {
                                 if let Ok(mut s) = stdout_state.lock() {
@@ -240,6 +245,7 @@ pub fn install_python(state: State<'_, AppState>) -> Result<serde_json::Value, S
                     if let Some(err) = stderr {
                         let reader = BufReader::new(err);
                         for line in reader.lines().map_while(Result::ok) {
+                            let line = os_error::english_child_text(&line).into_owned();
                             let trimmed = line.trim();
                             if !trimmed.is_empty() {
                                 if let Ok(mut s) = stderr_state.lock() {

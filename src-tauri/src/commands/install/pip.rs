@@ -579,6 +579,14 @@ pub(crate) fn pip_install_streaming_with_retry_raw(
             if let Some(out) = stdout {
                 let reader = BufReader::new(out);
                 for line in reader.lines().map_while(Result::ok) {
+                    // Die Woerter des Betriebssystems sind unsere, auch wenn
+                    // pip sie weitergereicht hat: diese Zeilen stehen in der
+                    // Fortschrittskarte und im snippet, das
+                    // `diagnose_pip_error_inner` an die Meldung haengt. Die
+                    // Marken "winerror 5]", "winerror 126" und "winerror 1114"
+                    // bleiben dabei stehen, `pip_failure_kind` verliert also
+                    // nichts und gewinnt "access is denied" hinzu.
+                    let line = os_error::english_child_text(&line).into_owned();
                     let trimmed = line.trim();
                     if !trimmed.is_empty() {
                         if let Some(bytes) = parse_pip_download_size(trimmed) {
@@ -599,6 +607,10 @@ pub(crate) fn pip_install_streaming_with_retry_raw(
             if let Some(err) = stderr {
                 let reader = BufReader::new(err);
                 for line in reader.lines().map_while(Result::ok) {
+                    // Einmal umgeschrieben, in beide Senken: der Mitschnitt
+                    // entscheidet ueber den Wiederholungsversuch UND liefert
+                    // den Ausschnitt fuer die Fehlermeldung.
+                    let line = os_error::english_child_text(&line).into_owned();
                     if let Ok(mut buf) = stderr_capture_clone.lock() {
                         buf.push_str(&line);
                         buf.push('\n');
@@ -710,10 +722,10 @@ pub(crate) fn pip_install_streaming_with_retry_raw(
 ///
 /// A15, Windows Nachlauf 02.09.: a requirements.txt whose first line named a
 /// package that does not exist made `pip install -r` fail, the run went on with
-/// LU's own package list, and it ended on "Environment repaired" with nothing
-/// said. The fallback itself is right, because a core whose file will not
-/// resolve must not block a rebuild. The silence is not: the user is left with
-/// a ComfyUI missing whatever that file asked for on top of our list.
+/// the packages LU knows about, and it ended on "Environment repaired" with
+/// nothing said. The fallback itself is right, because a core whose file will
+/// not resolve must not block a rebuild. The silence is not: the user is left
+/// with a ComfyUI missing whatever that file asked for on top of our list.
 pub(crate) fn requirements_failure_reason(pip_output: &str) -> &'static str {
     match pip_failure_kind(pip_output) {
         PipFailureKind::NoMatchingWheel => "pip found no installable version for a package it names",
@@ -1246,6 +1258,29 @@ mod tests {
         assert_eq!(pip_failure_kind(text2), PipFailureKind::NativeLoadFailure);
     }
 
+    /// Der Einordner sitzt seit P3 HINTER der Umschrift, also sieht er ab jetzt
+    /// umgeschriebenen Text. Der Test darueber prueft ihn weiter allein und
+    /// bleibt richtig; dieser hier prueft die Reihenfolge.
+    #[test]
+    fn die_umschrift_nimmt_dem_einordner_nichts_und_gibt_ihm_etwas() {
+        // Die Marke bleibt stehen, nur der Satz dahinter wird getauscht, also
+        // findet der Einordner sein Futter unveraendert.
+        let roh = "OSError: [WinError 1114] Eine DLL-Initialisierungsroutine ist fehlgeschlagen.";
+        let umgeschrieben = crate::os_error::english_child_text(roh).into_owned();
+        assert!(umgeschrieben.contains("[WinError 1114]"), "{umgeschrieben}");
+        assert!(!umgeschrieben.contains("Initialisierungsroutine"), "{umgeschrieben}");
+        assert_eq!(pip_failure_kind(&umgeschrieben), PipFailureKind::NativeLoadFailure);
+
+        // Und der Gewinn: ein verweigerter Zugriff wird auf jedem Windows als
+        // solcher gelesen, nicht nur auf einem englischen.
+        let refused = crate::os_error::english_child_text(
+            "ERROR: Could not install packages due to an OSError: [WinError 5] Zugriff verweigert",
+        )
+        .into_owned();
+        assert!(reads_as_refused(&refused.to_lowercase()), "{refused}");
+        assert!(is_permission_denied_pip_error(&refused), "{refused}");
+    }
+
     #[test]
     fn an_access_violation_is_a_native_load_failure() {
         assert_eq!(
@@ -1342,7 +1377,10 @@ mod tests {
         assert_eq!(reason, "pip found no installable version for a package it names");
         let line = requirements_fallback_log("C:\\Users\\ddrob\\ComfyUI", reason);
         assert!(line.starts_with("requirements.txt in C:\\Users\\ddrob\\ComfyUI could not be used ("), "got: {line}");
-        assert!(line.ends_with("installing LU's own package list instead."), "got: {line}");
+        assert!(
+            line.ends_with("checking the packages LU knows about and installing the ones that are missing."),
+            "got: {line}",
+        );
         assert!(line.contains(reason), "got: {line}");
     }
 

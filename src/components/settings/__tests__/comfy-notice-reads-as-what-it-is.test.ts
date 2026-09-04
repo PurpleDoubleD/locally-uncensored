@@ -113,6 +113,38 @@ describe('the closing line can be dismissed', () => {
     expect(useComfyInstallStore.getState().notice).toBe('')
   })
 
+  // P3: im Testbericht stand die gruene Zeile "Repair finished. ComfyUI is
+  // ready." neben einem Start, der gerade abgestuerzt war. Sie beschreibt
+  // einen beendeten Installerlauf und haengt an nichts, was mit einem
+  // ComfyUI-Start zu tun haette, also hat sie jeden Startversuch und jeden
+  // Ordnerwechsel ueberlebt.
+  it('a new start puts the line away, it is not about this attempt', async () => {
+    await panelShowing('Repair finished. ComfyUI is ready.', 'ok')
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Start' })) })
+    expect(screen.queryByTestId('comfy-install-notice')).toBeNull()
+    expect(useComfyInstallStore.getState().notice).toBe('')
+  })
+
+  it('so does pointing the panel at another folder', async () => {
+    await panelShowing('Repair finished. ComfyUI is ready.', 'ok')
+    const feld = screen.getByPlaceholderText('C:\\ComfyUI')
+    await act(async () => { fireEvent.change(feld, { target: { value: 'D:\\Andere\\ComfyUI' } }) })
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Connect' })) })
+    expect(useComfyInstallStore.getState().notice).toBe('')
+  })
+
+  it('but leaving the section and coming back does not', async () => {
+    // Gegengewicht zu den beiden darueber, und der ganze Zweck von A13 und
+    // A15: der Lauf wohnt im Store, damit ein Wechsel des
+    // Einstellungsbereichs nichts wegwirft. Wer die Zeile beim Ummounten
+    // raeumt, hat den alten Fehler zurueck.
+    await panelShowing('Repair finished. ComfyUI is ready.', 'ok')
+    cleanup()
+    render(createElement(ComfyUISettings))
+    await act(async () => { await Promise.resolve(); await Promise.resolve() })
+    expect(screen.getByTestId('comfy-install-notice').textContent).toBe('Repair finished. ComfyUI is ready.')
+  })
+
   it('shows no dismiss control when there is nothing to dismiss', async () => {
     // Negative control: an idle panel with no line carries no stray button.
     render(createElement(ComfyUISettings))

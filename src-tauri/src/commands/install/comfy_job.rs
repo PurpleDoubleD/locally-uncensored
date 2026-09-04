@@ -36,6 +36,15 @@ pub async fn cancel_comfyui_install(app: tauri::AppHandle) -> Result<serde_json:
     .map_err(|e| format!("cancel_comfyui_install task: {e}"))?
 }
 
+/// What the log says the moment Cancel is pressed.
+///
+/// One sentence for all three jobs, because cancel cannot tell them apart:
+/// the only thing it can read is the shared status string, and that says
+/// "installing" whether git is cloning, pip is downloading, an import probe is
+/// running or a folder is being moved aside. A sentence naming a subprocess is
+/// therefore a guess, and P3 caught it guessing wrong.
+pub(crate) const CANCEL_WAIT_LINE: &str = "Cancellation requested. Stopping at the next safe point...";
+
 fn cancel_comfyui_install_blocking(state: &AppState) -> Result<serde_json::Value, String> {
     // OI-7: the flag is still what cancel uses, deliberately. It is scoped to
     // the ComfyUI install — the poll loops that watch it now take the child's
@@ -52,7 +61,14 @@ fn cancel_comfyui_install_blocking(state: &AppState) -> Result<serde_json::Value
         // "Cancelling…" indicator even before the spawn loop notices.
         if s.status == "installing" || s.status == "downloading" {
             s.status = "cancelling".to_string();
-            s.logs.push("Cancellation requested, waiting for the active subprocess to exit...".to_string());
+            // P3 (04.09.): this line used to promise "waiting for the active
+            // subprocess to exit", and the only thing cancel can see is that
+            // status string, which says nothing about what kind of work is
+            // running. During the venv step of a repair there is no subprocess
+            // at all, so the sentence was simply wrong at the moment the user
+            // read it. What every step DOES share is the shape of the answer:
+            // each one stops at its next check.
+            s.logs.push(CANCEL_WAIT_LINE.to_string());
         }
     }
     Ok(serde_json::json!({"status": "cancelling"}))
@@ -182,9 +198,17 @@ pub fn install_comfyui_status(state: State<'_, AppState>) -> Result<serde_json::
 
 
 /// The live log line that names the fallback while it happens.
+///
+/// It says what the run really does, and only since P3 (04.09.) is that worth
+/// saying: the environment check holds its own list of packages
+/// (`KNOWN_IMPORT_NAMES`), imports every one of them and installs back what is
+/// missing. Before that the check read its target state from the same
+/// requirements.txt pip had just failed on, so the old wording, "installing
+/// LU's own package list instead", promised a list that did nothing.
 pub(crate) fn requirements_fallback_log(folder: &str, reason: &str) -> String {
     format!(
-        "requirements.txt in {} could not be used ({}), installing LU's own package list instead.",
+        "requirements.txt in {} could not be used ({}), checking the packages LU knows about and \
+         installing the ones that are missing.",
         folder, reason
     )
 }
@@ -215,8 +239,9 @@ pub(crate) fn finished_notice(
 /// away with the log.
 pub(crate) fn requirements_fallback_notice(folder: &str, reason: &str) -> String {
     format!(
-        "The requirements.txt in {} could not be used ({}), so LU installed its own package \
-         list instead. Anything that file asks for on top of that list is not installed.",
+        "The requirements.txt in {} could not be used ({}), so LU checked the packages it knows \
+         about and installed the ones that were missing. Anything that file asks for on top of \
+         that list is not installed.",
         folder, reason
     )
 }
@@ -292,7 +317,8 @@ mod tests {
             requirements_failure_reason(INVENTED_PACKAGE),
         );
         assert!(notice.contains("C:\\Users\\ddrob\\ComfyUI"), "got: {notice}");
-        assert!(notice.contains("LU installed its own package list instead"), "got: {notice}");
+        assert!(notice.contains("LU checked the packages it knows about"), "got: {notice}");
+        assert!(notice.contains("installed the ones that were missing"), "got: {notice}");
         // The half the report asked for: the user has to learn that ComfyUI is
         // now short of whatever that file wanted.
         assert!(notice.contains("is not installed"), "got: {notice}");
@@ -343,6 +369,59 @@ mod tests {
         // replaced by the warning, which is what a run that finished deserves.
         assert!(line.contains("Repair finished"), "got: {line}");
         assert_eq!(kind, "warn");
+    }
+
+    // ── P3 (04.09.): the line cancel writes must be true in every step ─────
+
+    #[test]
+    fn cancel_does_not_promise_a_subprocess_it_cannot_see() {
+        // The tester cancelled during "Removing the old venv", where no child
+        // process is running at all, and was told LU was waiting for one to
+        // exit. Cancel's only input is the status string, so it cannot know
+        // better; the fix is a sentence that does not claim to.
+        let state = AppState::new();
+        {
+            let mut s = state.install_status.lock().unwrap();
+            s.status = "installing".to_string();
+            s.logs.push("Removing the old venv (models, outputs and custom nodes stay untouched)...".to_string());
+        }
+
+        cancel_comfyui_install_blocking(&state).expect("cancel refused");
+
+        let s = state.install_status.lock().unwrap();
+        assert_eq!(s.status, "cancelling", "the panel was not switched over");
+        let last = s.logs.last().expect("cancel wrote no line at all");
+        assert!(
+            !last.to_lowercase().contains("subprocess"),
+            "cancel still names a subprocess: {last}"
+        );
+        assert!(last.contains("Cancellation requested"), "got: {last}");
+        // And it says what actually happens, so the wait is not a mystery.
+        assert!(last.contains("next safe point"), "got: {last}");
+    }
+
+    #[test]
+    fn cancel_writes_nothing_into_a_run_that_is_not_going() {
+        // The control on the other side. The status guard is what keeps a
+        // stray Cancel from stamping "Cancellation requested" over a finished
+        // run's log, and a test that only reads the sentence would not see it
+        // if that guard were dropped along with the old wording.
+        let state = AppState::new();
+        {
+            let mut s = state.install_status.lock().unwrap();
+            s.status = "complete".to_string();
+            s.logs.push("Repair finished. ComfyUI is ready.".to_string());
+        }
+
+        cancel_comfyui_install_blocking(&state).expect("cancel refused");
+
+        let s = state.install_status.lock().unwrap();
+        assert_eq!(s.status, "complete", "a finished run was marked as cancelling");
+        assert_eq!(
+            s.logs.last().map(String::as_str),
+            Some("Repair finished. ComfyUI is ready."),
+            "cancel wrote into a run that was already over"
+        );
     }
 
 }

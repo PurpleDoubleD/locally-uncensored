@@ -16,11 +16,6 @@ import { shouldLogRepeat } from "../lib/probe-backoff";
 // a dead local backend from filling the console with the same line forever.
 const proxyWarnSeen = new Map<string, number>();
 
-/** Test-only: forget which hosts have already had their warning. */
-export function __resetProxyWarnLogForTests(): void {
-  proxyWarnSeen.clear();
-}
-
 let _invoke: ((cmd: string, args?: Record<string, unknown>) => Promise<unknown>) | null = null;
 
 /** True when running inside a Tauri WebView (.exe), false in browser dev mode */
