@@ -168,7 +168,10 @@ describe('the conversation displays read the conversation, not the picker', () =
   it('NEGATIVE CONTROL: the picker still shows the pick, it was never wrong about that', () => {
     // ModelSelector answers "what does the next message run on". Moving it
     // onto the conversation would have made it lie in the other direction.
+    // Seit G1 (04.09.2026) nennt der Knopf waehrend eines laufenden Wechsels
+    // das angeklickte Modell und dreht den Ring dazu, statt je nach Weg vor
+    // oder nach der Wirklichkeit zu liegen. Die Quelle bleibt die Wahl.
     expect(src('components/models/ModelSelector.tsx'))
-      .toMatch(/const activeDisplayName = activeModel/)
+      .toMatch(/const gezeigtesModell = imWechselZu \?\? activeModel/)
   })
 })

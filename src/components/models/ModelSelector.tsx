@@ -614,6 +614,24 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
   // (distinct from `togglingLms`, the explicit power-button flow). Drives the
   // inline "loading…" state on the row and blocks a second click.
   const [selectingLms, setSelectingLms] = useState<string | null>(null)
+  /**
+   * Das Modell, auf das gerade gewechselt wird, solange der Wechsel laeuft.
+   *
+   * Gegenprobe G1, 04.09.2026, zwei Messreihen ueber je 60 s: der Knopf im
+   * Eingabefeld fuehrt zwei gegenlaeufige Gepflogenheiten. Innerhalb der LU
+   * Engine nennt er bis zu 20,5 s lang das angeklickte Modell, obwohl noch
+   * das alte bedient, also springt er VOR. Ueber eine Providergrenze hinweg
+   * nennt er 12,44 s lang das alte, obwohl der Steckplatz schon uebergeben
+   * ist, also haengt er NACH. "Zwei gegenlaeufige Konventionen im selben
+   * Knopf."
+   *
+   * Eine Gepflogenheit: der Knopf nennt immer das angeklickte Modell, und
+   * solange es noch nicht bedient, dreht sich der Ring daneben. Der Weg ueber
+   * die LU Engine schrieb die Wahl dafuer schon sofort in den Speicher; der
+   * Weg zu einem fremden Backend darf das nicht, weil eine nicht geladene
+   * Kennung dort mit 404 antwortet, und deshalb steht der Name hier.
+   */
+  const [imWechselZu, setImWechselZu] = useState<string | null>(null)
   const [selectError, setSelectError] = useState<string | null>(null)
   // VRAM load state for Ollama rows — parity with `lmsLoaded` above, so
   // every LOCAL model shows a clear on/off load toggle (not just LM Studio).
@@ -790,6 +808,15 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
    */
   const handleSelectModel = async (model: AIModel) => {
     const id = lmsIdOf(model)
+    setImWechselZu(model.name)
+    try {
+      await selectModelInner(model, id)
+    } finally {
+      setImWechselZu(null)
+    }
+  }
+
+  const selectModelInner = async (model: AIModel, id: string) => {
 
     // A16 (A14-3a): a row belonging to the backend our engine displaced hands
     // the slot back to it. First thing in the function, because everything
@@ -1023,9 +1050,15 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
   )
   const activeModelObj = models.find((m) => m.name === activeModel)
   const foldedRows = useModelStore((s) => s.foldedRows)
-  const activeDisplayName = activeModel
-    ? (activeModelObj && 'displayName' in activeModelObj && activeModelObj.displayName) ||
-      displayModelName(activeModel).split(':')[0]
+  // Ein Wechsel laeuft, solange der Waehler einen fuehrt oder das Backend
+  // eines meldet. Beides faerbt den Punkt und dreht den Ring, damit der Name
+  // im Knopf nie ohne Vorbehalt dasteht, wenn er noch nicht bedient.
+  const wechselLaeuft = isModelLoading || imWechselZu !== null
+  const gezeigtesModell = imWechselZu ?? activeModel
+  const gezeigtesObj = models.find((m) => m.name === gezeigtesModell)
+  const activeDisplayName = gezeigtesModell
+    ? (gezeigtesObj && 'displayName' in gezeigtesObj && gezeigtesObj.displayName) ||
+      displayModelName(gezeigtesModell).split(':')[0]
     : 'Select Model'
   const activeType = activeModelObj?.type || 'text'
   // Chat dropdown shows TEXT models only — image/video live in the
@@ -1103,13 +1136,13 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
         // Rezepts mit Leuchtschatten. Das Rezept faerbt die Kante mit dem
         // Akzent, die Aussage steht damit im selben Vokabular wie der Rest
         // der Leiste — und im Accessibility-Baum, wo sie hingehoert.
-        aria-busy={isModelLoading}
+        aria-busy={wechselLaeuft}
         className="lu-control"
       >
         {/* Type indicator dot */}
         <span className={`w-1.5 h-1.5 rounded-full ${
           activeType === 'text' ? 'bg-blue-400' : activeType === 'image' ? 'bg-purple-400' : 'bg-emerald-400'
-        } ${isModelLoading ? 'animate-pulse' : ''}`} />
+        } ${wechselLaeuft ? 'animate-pulse' : ''}`} />
 
         {/* Model name. Keine eigene Textfarbe mehr — sie wird vom Control
             geerbt, sonst haette der Knopf zwei Graustufen in sich. */}
@@ -1118,7 +1151,7 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
         </span>
 
         {/* Chevron / Spinner */}
-        {isModelLoading ? (
+        {wechselLaeuft ? (
           <Loader2 size={10} className="animate-spin" />
         ) : (
           <ChevronDown size={10} className={`transition-transform ${open ? 'rotate-180' : ''}`} />

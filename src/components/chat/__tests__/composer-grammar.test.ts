@@ -582,7 +582,7 @@ describe('der Zustand kommt aus ARIA, nicht aus einer zweiten Klassenkette', () 
   })
 
   it('der Modellwaehler meldet Laden als aria-busy statt als blauem Leuchten', () => {
-    expect(SELECTOR_TRIGGER).toMatch(/aria-busy=\{isModelLoading\}/)
+    expect(SELECTOR_TRIGGER).toMatch(/aria-busy=\{wechselLaeuft\}/)
     expect(SELECTOR_TRIGGER).not.toContain('shadow-[0_0_6px')
   })
 
