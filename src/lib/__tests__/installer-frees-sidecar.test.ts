@@ -35,7 +35,8 @@ const read = (rel: string) => readFileSync(resolve(root, rel), 'utf8')
 const hooks = read('src-tauri/windows/installer-hooks.nsh')
 const engineRs = read('src-tauri/src/commands/engine.rs')
 const conf = JSON.parse(read('src-tauri/tauri.conf.json')) as {
-  bundle?: { externalBin?: string[] }
+  build?: { frontendDist?: string }
+  bundle?: { externalBin?: string[]; resources?: string[] }
 }
 
 // Only the unlock macro. The dormant product-rename macro below it kills the
@@ -167,6 +168,9 @@ describe('an update from before the rename does not leave the old engine behind'
  * Grund sind zwei Gewohnheiten, die einzeln richtig sind: Vite haengt an jeden
  * Brocken einen Hash, ein neuer Build ueberschreibt den alten also nie sondern
  * legt sich daneben, und NSIS kopiert nur, es raeumt nie weg.
+ *
+ * Beides zusammen erklaert, warum der Stapel waechst. Es erklaert nicht, warum
+ * ueberhaupt ein Frontend danebenliegt: das ist der zweite Teil, weiter unten.
  */
 describe('der Installer laesst den alten Frontend-Stapel nicht liegen', () => {
   const preinstall = hooks.slice(hooks.indexOf('!macro NSIS_HOOK_PREINSTALL'))
@@ -207,5 +211,50 @@ describe('der Installer laesst den alten Frontend-Stapel nicht liegen', () => {
     expect(sweep).not.toContain('$DOCUMENTS')
     // Und der Ordner mit den Modellen der Engine schon gar nicht.
     expect(sweep).not.toContain('resources')
+  })
+})
+
+/**
+ * Und der Grund, warum ueberhaupt etwas liegen bleibt: wir haben das Frontend
+ * zweimal ausgeliefert.
+ *
+ * `build.frontendDist` backt die Oberflaeche in die Binaerdatei, das ist der
+ * Weg, den die App geht (`tauri.localhost` liest aus der exe). Daneben stand
+ * `../dist` in `bundle.resources`, seit dem allerersten Tauri-Commit
+ * (bd22a135, Geruest, ohne Begruendung). Das `..` schreibt Tauri als `_up_`,
+ * darum der Ordner mit dem seltsamen Namen. Gelesen hat ihn nie jemand:
+ * `resource_dir()` kommt in diesem Baum genau zweimal vor, einmal fuer
+ * `whisper_server.py` und einmal fuer die Engine.
+ *
+ * Gegenprobe am 04.09.2026 am echten Windows-Build, nicht am Quelltext: den
+ * Ordner beiseite geschoben (er liess sich verschieben, also hielt ihn kein
+ * Prozess offen), App ueber die geplante Aufgabe neu gestartet, CDP nach vier
+ * Sekunden gefragt. Titel „Locally Uncensored", ein Kind unter `#root`, alle
+ * sechs Reiter der Kopfzeile da. Die Kopie ist tot.
+ *
+ * Die beiden Haelften gehoeren zusammen und ersetzen einander nicht: hier
+ * entsteht kein neuer Stapel mehr, und das Aufraeumen oben holt den weg, den
+ * die Aktualisierung von einer aelteren Fassung vorfindet.
+ */
+describe('das Frontend wird einmal ausgeliefert, nicht zweimal', () => {
+  const resources = conf.bundle?.resources ?? []
+
+  it('liegt in der Binaerdatei', () => {
+    expect(conf.build?.frontendDist).toBe('../dist')
+  })
+
+  it('und nicht noch einmal daneben', () => {
+    expect(resources).not.toContain('../dist')
+    // Kein Eintrag klettert aus src-tauri heraus. Jeder, der es taete, laege
+    // wieder unter `_up_` und faenge denselben Stapel von vorne an.
+    for (const r of resources) expect(r).not.toContain('..')
+  })
+
+  it('was wirklich gebraucht wird, bleibt', () => {
+    // Negativkontrolle gegen einen zu breiten Schnitt: `whisper_server.py`
+    // wird ueber `resource_dir()` gelesen, das Loeschen waere kein Aufraeumen
+    // sondern ein kaputtes Diktiergeraet.
+    expect(resources).toContain('resources/whisper_server.py')
+    expect(read('src-tauri/src/commands/whisper.rs')).toContain('.resource_dir()')
   })
 })

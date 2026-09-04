@@ -48,8 +48,7 @@
     "homepage": "https://lu-labs.ai",
     "license": "AGPL-3.0-only",
     "resources": [
-      "resources/whisper_server.py",
-      "../dist"
+      "resources/whisper_server.py"
     ],
     "externalBin": [
       "bin/lu-llama-server"
