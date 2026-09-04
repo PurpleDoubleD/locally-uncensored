@@ -20,6 +20,14 @@ vi.hoisted(() => {
   g.window = Object.assign(g.window ?? {}, { localStorage: ls })
 })
 
+// Der Wirt wird festgenagelt, nicht geraten. `isMacOS()` liest den
+// User-Agent, und im Testlauf meldet dieser Rechner einen Mac: gemessen am
+// 04.09.2026, `isMacOS()` ist hier true, auf einem Linux-Laeufer waere es
+// false. Damit haetten die Faelle weiter unten je nach Maschine ein anderes
+// Ergebnis. Dieser Block beschreibt den ComfyUI-Wirt (Windows und Linux); der
+// Mac hat seine eigene Datei, der-mac-strandet-nicht-auf-einem-werkzeug.
+vi.mock('../../api/mlx-image', () => ({ isMlxImageHost: () => false, MLX_MODEL_PREFIX: 'MLX ' }))
+
 // Mock comfyui before importing the store
 vi.mock('../../api/comfyui', () => ({
   classifyModel: vi.fn((name: string) => {

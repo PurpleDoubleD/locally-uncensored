@@ -15,6 +15,7 @@ import type { ModelType, ClassifiedModel } from '../api/comfyui'
 import { classifyModel } from '../api/comfyui'
 import type { HiresUpscaleMethod } from '../api/hires-fix'
 import { releaseVideoBlobUrl } from '../api/mlx-video'
+import { isMlxImageHost } from '../api/mlx-image'
 // ModelType includes: flux, flux2, zimage, sdxl, sd15, wan, hunyuan, unknown
 
 export type ProgressPhase = 'idle' | 'queued' | 'loading-model' | 'loading-clip' | 'loading-vae' | 'sampling' | 'decoding' | 'complete'
@@ -802,6 +803,24 @@ export const useCreateStore = create<CreateState>()(
           // drop. LOCAL_LANE_OPS is the single source of truth.
           if (s.cloudOp && !LOCAL_LANE_OPS.has(s.cloudOp)) {
             Object.assign(patch, { cloudOp: null, error: null })
+          }
+          // Und auf einem Mac laeuft lokal MLX, nicht ComfyUI. MLX kann weder
+          // Edit noch Cutout noch Animate, `visibleIntents` blendet die drei
+          // dort deshalb aus. Bleibt eine davon gewaehlt, findet die
+          // Werkzeugleiste ihren eigenen Eintrag nicht mehr und steht ohne
+          // Auswahl da. Gemessen am 04.09.2026: erreichbar ohne einen einzigen
+          // Klick in der Leiste, allein ueber den Backend-Schalter.
+          //
+          // Nur wenn wirklich das Grundwerkzeug zu sehen ist: haelt der Nutzer
+          // eine der lokalen Bahnen (Music, Lipsync, Extend, Motion,
+          // Character), bleibt seine Wahl fuer img2img und i2v unangetastet,
+          // damit sie beim Zurueckschalten noch da ist.
+          const opBleibt = ('cloudOp' in patch ? patch.cloudOp : s.cloudOp)
+            || ('utilityOp' in patch ? patch.utilityOp : s.utilityOp)
+          if (isMlxImageHost() && !opBleibt) {
+            if (s.removebg) Object.assign(patch, { removebg: false })
+            if (s.imageSubMode === 'img2img') Object.assign(patch, { imageSubMode: 'text2img' })
+            if (s.videoSubMode === 'i2v') Object.assign(patch, { videoSubMode: 't2v' })
           }
           return patch
         }),
