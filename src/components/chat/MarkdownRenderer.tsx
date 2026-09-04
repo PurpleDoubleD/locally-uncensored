@@ -37,7 +37,7 @@ function loadKatex(): Promise<void> {
       // wird weiter gerendert, die Formel bleibt als Quelltext stehen. Ein
       // erneuter Versuch ist erlaubt, darum das Promise wieder freigeben.
       katexLoad = null
-      log.warn('KaTeX konnte nicht nachgeladen werden; Formeln bleiben roh', { error: err })
+      log.warn('[markdown] KaTeX did not load; formulas stay as source text', { error: err })
     },
   )
   return katexLoad
