@@ -1143,13 +1143,13 @@ fn gguf_header_reason(path: &Path) -> Option<String> {
     datei.read_exact(&mut kopf).ok()?;
     if &kopf[..4] != GGUF_MAGIC {
         return Some(format!(
-            "\"{name}\" does not start with the GGUF marker, so it is not a model file. Open Models, Discover and download it again."
+            "\"{name}\" does not start with the GGUF marker, so it is not a model file. Open Models, Get new and download it again."
         ));
     }
     let version = u32::from_le_bytes([kopf[4], kopf[5], kopf[6], kopf[7]]);
     if version == 0 || version > GGUF_VERSION_UNSINN {
         return Some(format!(
-            "\"{name}\" carries a GGUF version of {version}, which is not a version at all. The file is damaged, most likely a download that did not finish. Open Models, Discover and download it again."
+            "\"{name}\" carries a GGUF version of {version}, which is not a version at all. The file is damaged, most likely a download that did not finish. Open Models, Get new and download it again."
         ));
     }
     None
@@ -1206,7 +1206,7 @@ pub(crate) fn start_failure_message(failure: &StartFailure, port: u16, budget: D
         let hint = if let Some(lib) = stderr_names_a_missing_system_library(&failure.stderr) {
             missing_library_hint(&lib, cfg!(target_os = "linux"))
         } else if stderr_blames_the_model(&failure.stderr) {
-            " The engine refused the model file. Open Models, Discover and install a different quant.".to_string()
+            " The engine could not read the model file. It may be damaged, cut short, or of a type this engine cannot run. Open Models, Get new and download it again, or pick another model.".to_string()
         } else {
             " Reinstall Locally Uncensored if this keeps happening, or pick a different backend in Settings, AI Backends.".to_string()
         };
@@ -3413,7 +3413,7 @@ mod tests {
             "the note sits behind the engine log again:\n{msg}"
         );
         // Und der Satz mit dem Handlungsvorschlag bleibt ganz oben.
-        assert!(msg.find("refused the model file").unwrap() < notiz, "{msg}");
+        assert!(msg.find("could not read the model file").unwrap() < notiz, "{msg}");
     }
 
     #[test]
@@ -3889,7 +3889,7 @@ mod tests {
             stderr: "llama_model_load: error loading model: unknown model architecture 'wanx'".into(),
         };
         let msg = start_failure_message(&f, 8127, Duration::from_secs(60));
-        assert!(msg.contains("refused the model file"), "{msg}");
+        assert!(msg.contains("could not read the model file"), "{msg}");
         assert!(!msg.contains("GPU Layers"), "{msg}");
     }
 
@@ -3918,7 +3918,7 @@ srv    llama_server: exiting due to model loading error";
             stderr: KAPUTTE_GGUF_STDERR.into(),
         };
         let msg = start_failure_message(&f, 8127, Duration::from_secs(60));
-        assert!(msg.contains("refused the model file"), "{msg}");
+        assert!(msg.contains("could not read the model file"), "{msg}");
         assert!(!msg.contains("GPU Layers"), "{msg}");
         assert!(!msg.contains("graphics-card"), "{msg}");
         // The engine's own last words still travel, for a bug report.
@@ -4039,7 +4039,7 @@ srv    llama_server: exiting due to model loading error";
             stderr: KAPUTTE_VERSION_STDERR.into(),
         };
         let msg = start_failure_message(&f, 8127, Duration::from_secs(60));
-        assert!(msg.contains("refused the model file"), "{msg}");
+        assert!(msg.contains("could not read the model file"), "{msg}");
         assert!(!msg.contains("GPU Layers"), "{msg}");
         assert!(!msg.contains("graphics-card"), "{msg}");
     }
@@ -4057,7 +4057,7 @@ srv    llama_server: exiting due to model loading error";
         };
         let msg = start_failure_message(&f, 8127, Duration::from_secs(60));
         assert!(msg.contains("GPU Layers"), "{msg}");
-        assert!(!msg.contains("refused the model file"), "{msg}");
+        assert!(!msg.contains("could not read the model file"), "{msg}");
     }
 
     #[test]

@@ -249,7 +249,7 @@ export function ModelManager() {
             </button>
             <h1 className="text-[0.85rem] font-semibold text-gray-900 dark:text-white">Models</h1>
 
-            {/* Discover / Installed segment — the MLX panel is one list with
+            {/* Get new / Installed segment. The MLX panel is one list with
                 per-model Install/Remove, so the split would switch nothing. */}
             <div className={`ml-2 flex items-center p-0.5 rounded-lg bg-gray-100 dark:bg-white/[0.04] border border-gray-200 dark:border-white/[0.06] ${showMlxPanel ? 'hidden' : ''}`}>
               <button
@@ -391,7 +391,7 @@ export function ModelManager() {
                     onClick={() => setTab('discover')}
                     className="flex items-center gap-1.5 mt-1 px-3 py-1.5 rounded-md bg-gray-900 dark:bg-white/10 hover:bg-gray-800 dark:hover:bg-white/15 text-white t-micro font-medium transition-colors"
                   >
-                    <Sparkles size={11} /> Discover models
+                    <Sparkles size={11} /> Get new models
                   </button>
                 </div>
               ) : filteredModels.length === 0 ? (

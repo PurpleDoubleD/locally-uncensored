@@ -89,7 +89,7 @@ describe('diagnoseBuiltinEngine', () => {
     const d = await diagnoseBuiltinEngine({ repair: true })
     expect(d.ok).toBe(false)
     expect(d.reason).toMatch(/no chat model to load yet/i)
-    expect(d.reason).toMatch(/Models, Discover/i)
+    expect(d.reason).toMatch(/Models, Get new/i)
   })
 
   it('does not count an embedding GGUF as a chat model', async () => {

@@ -243,7 +243,7 @@ async function loadBuiltinModel(modelName: string): Promise<void> {
     // on Windows 10 — they gave up on the built-in engine and moved to
     // Ollama). Say what is actually wrong instead.
     throw new Error(
-      `The LU Engine has no model file named "${bare}". It may have been deleted, moved, or the download did not finish. Open Models, install it again, then pick it in the chat.`,
+      `The LU Engine has no model file named "${bare}". It may have been deleted, moved, or the download did not finish. Open Models, Get new and download it again, then pick it in the chat.`,
     )
   }
 
@@ -457,7 +457,7 @@ export async function diagnoseBuiltinEngine(
       ok: false,
       repaired: false,
       reason:
-        'The LU Engine is installed but has no chat model to load yet. Open Models, Discover and install one, then test again.',
+        'The LU Engine is installed but has no chat model to load yet. Open Models, Get new and install one, then test again.',
     }
   }
 
@@ -483,7 +483,7 @@ export async function diagnoseBuiltinEngine(
     return {
       ok: false,
       repaired: false,
-      reason: `The LU Engine has no model file named "${bare}". It may have been deleted, moved, or the download did not finish. Open Models and install it again.`,
+      reason: `The LU Engine has no model file named "${bare}". It may have been deleted, moved, or the download did not finish. Open Models, Get new and download it again.`,
     }
   }
   try {
