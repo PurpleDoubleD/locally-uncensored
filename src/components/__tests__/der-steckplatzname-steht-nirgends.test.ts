@@ -39,14 +39,25 @@ function alleDateien(ordner: string): string[] {
  * wird, ohne durch `displayModelName` zu gehen.
  *
  * Bewusst eng gefasst: gesucht wird die Ausgabe eines nackten Namensfeldes als
- * JSX-Text oder als title, nicht jede Erwaehnung. Ein Fund ist entweder ein
- * echter Verstoss oder eine Liste, die gar keine Chat-Modelle fuehrt, und dann
- * gehoert die Datei in die Ausnahmeliste darunter, mit Begruendung.
+ * JSX-Text, als title oder als aria-label, nicht jede Erwaehnung. Ein Fund ist
+ * entweder ein echter Verstoss oder eine Liste, die gar keine Chat-Modelle
+ * fuehrt, und dann gehoert die Datei in die Ausnahmeliste darunter, mit
+ * Begruendung.
+ *
+ * Die Traeger- und Feldnamen stehen als zwei Listen da und nicht mehr fest im
+ * Muster. Grund: die erste Fassung kannte vier Traeger und zwei Felder, und
+ * `message.modelId` in der Sprechblase fiel durch beide Raster. Der Tooltip
+ * dort zeigte die rohe Kennung samt Steckplatz weiter, waehrend der sichtbare
+ * Text schon uebersetzt war. Wer eine Liste pflegt, sieht wenigstens, was
+ * abgedeckt ist.
  */
+const TRAEGER = '(?:model|entry|m|sel|message|msg|turn)'
+const FELD = '(?:name|model|modelId)'
 const MUSTER = [
-  />\{(?:model|entry|m|sel)\.(?:name|model)\}</,
-  /title=\{(?:model|entry|m|sel)\.(?:name|model)\}/,
-  /className="[^"]*">\{(?:model|entry|m|sel)\.(?:name|model)\}</,
+  new RegExp(`>\\{${TRAEGER}\\.${FELD}\\}<`),
+  new RegExp(`title=\\{${TRAEGER}\\.${FELD}\\}`),
+  new RegExp(`aria-label=\\{${TRAEGER}\\.${FELD}\\}`),
+  new RegExp(`className="[^"]*">\\{${TRAEGER}\\.${FELD}\\}<`),
 ]
 
 /**

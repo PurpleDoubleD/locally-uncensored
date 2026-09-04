@@ -297,8 +297,14 @@ function MessageBubbleImpl({ message, onRegenerate, onEdit, pendingApprovalId, o
           // Ohne Steckplatz-Praefix: `openai::` ist unsere interne Adresse
           // fuer jedes Backend, das das OpenAI-Protokoll spricht, und stand
           // damit vor jedem lokalen Modellnamen im Chat (Persona P5,
-          // 03./04.09.2026). Der volle Name bleibt im title.
-          <div title={message.modelId} className="t-mono text-gray-500 dark:text-gray-400 pl-1">
+          // 03./04.09.2026).
+          //
+          // Auch im title, seit dem 04.09.2026. Dort stand die rohe Kennung
+          // mit der Begruendung "der volle Name bleibt im title", und das war
+          // der Fehler in einem Wort: der volle Name ist der Modellname, die
+          // Kennung davor ist unsere Adresse. Wer den Zeiger auf der Zeile
+          // ruhen liess, bekam sie zu sehen, obwohl sie ihm nichts sagt.
+          <div title={displayModelName(message.modelId)} className="t-mono text-gray-500 dark:text-gray-400 pl-1">
             {displayModelName(message.modelId)}
           </div>
         )}
