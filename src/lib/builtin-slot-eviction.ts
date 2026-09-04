@@ -154,7 +154,10 @@ async function bringEngineBack(): Promise<void> {
     const { useModelStore } = await import('../stores/modelStore')
     const gewaehlt = useModelStore.getState().activeModel
     if (!gewaehlt) return
-    const { ensureBuiltinEngineAlive } = await import('../api/builtin-ensure')
+    const { ensureBuiltinEngineAlive, builtinSlotSwitchedOff } = await import('../api/builtin-ensure')
+    // Der Nutzer hat die Engine in den Einstellungen ausgeschaltet. Der
+    // Steckplatz gehoert ihr wieder, aber niemand hat sie zurueckgebeten.
+    if (builtinSlotSwitchedOff()) return
     await ensureBuiltinEngineAlive(gewaehlt)
     log.info('[builtin-slot] engine has the local slot again, brought it back')
   } catch (e) {

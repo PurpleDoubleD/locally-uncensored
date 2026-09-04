@@ -29,6 +29,7 @@ import {
   builtinModelMismatchMessage,
   builtinModelNameFromPath,
 } from '../lib/builtin-model-identity'
+import { hostOf, isLocalTransportFailure } from '../lib/local-backend-transport'
 
 interface EngineStatusLite {
   running: boolean
@@ -95,9 +96,8 @@ export function explainDeadEngine(err: unknown, baseUrl: string): unknown {
  */
 export function explainEngineTransportMessage(message: string, baseUrl: string): string | null {
   const msg = String(message ?? '')
-  const host = baseUrl.replace(/^https?:\/\//, '').replace(/\/.*$/, '')
-  const isTransport = /error sending request|connection refused|failed to fetch|ECONNREFUSED|tcp connect|proxy_localhost/i.test(msg)
-  if (!isTransport || !msg.includes(host.split(':')[0])) return null
+  const host = hostOf(baseUrl)
+  if (!isLocalTransportFailure(msg, baseUrl)) return null
   // The raw line still exists for a bug report, it just lives in the app log
   // now instead of in the chat bubble. House rule: no raw Rust error in front
   // of a user.
@@ -110,6 +110,25 @@ export function isManagedBuiltinSlot(): boolean {
   const cfg = useProviderStore.getState().providers.openai
   return !!cfg?.enabled && cfg.managed === true
 }
+
+/**
+ * The built-in slot exists, but the user turned it off in Settings.
+ *
+ * This is the second half of `isManagedBuiltinSlot`, and it matters because the
+ * two false cases mean opposite things. A slot that is not managed at all is
+ * someone else's endpoint and we have nothing to say about it. A managed slot
+ * that is switched off is our engine, deliberately stopped, and a send aimed at
+ * it can only fail. Saying so beats letting the request run into a dead port
+ * and explaining the wreck afterwards.
+ */
+export function builtinSlotSwitchedOff(): boolean {
+  const cfg = useProviderStore.getState().providers.openai
+  return !!cfg && cfg.managed === true && !cfg.enabled
+}
+
+/** What the chat says when the send was aimed at a switched-off engine. */
+export const BUILTIN_SLOT_OFF_MESSAGE =
+  'The LU Engine is switched off in Settings, AI Backends. Turn it back on there, or pick a model from another provider.'
 
 /**
  * Point the managed slot at the port the engine really came up on.
@@ -177,6 +196,12 @@ export async function builtinReloadNeeded(modelName: string): Promise<string | n
  * says, so "the engine is healthy" was never enough to send.
  */
 export async function ensureBuiltinEngineAlive(modelName: string): Promise<void> {
+  // Switched off by hand: nothing here may start it again, and nothing may let
+  // the send through either. Without this the request went to the dead port,
+  // the proxy failure lost its race against the stream's end marker, and the
+  // chat blamed the user's network for a switch the user had flipped
+  // (counter-check P1, 2026-09-04).
+  if (builtinSlotSwitchedOff()) throw new Error(BUILTIN_SLOT_OFF_MESSAGE)
   if (!isManagedBuiltinSlot()) return
   // Self-heal before an error message: a swap the app itself started is still
   // tearing down and restarting llama-server, and a send fired into that gap

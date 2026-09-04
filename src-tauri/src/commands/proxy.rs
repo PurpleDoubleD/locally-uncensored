@@ -978,6 +978,9 @@ async fn pump_proxy_stream(
     first_chunk_grace: Duration,
     sink: &(dyn Fn(Vec<u8>) -> bool + Send + Sync),
 ) -> Result<(), String> {
+    // Lives outside the pump because the EOF marker below has to know whether a
+    // single byte of an answer ever reached the renderer.
+    let mut seen_first_chunk = false;
     let run = async {
         let http_method = method.unwrap_or_else(|| "GET".to_string());
 
@@ -1004,7 +1007,6 @@ async fn pump_proxy_stream(
 
         use futures_util::StreamExt;
         let mut stream = resp.bytes_stream();
-        let mut seen_first_chunk = false;
         loop {
             let window = if seen_first_chunk { idle } else { first_chunk_grace };
             tokio::select! {
@@ -1050,7 +1052,18 @@ async fn pump_proxy_stream(
     // renderer then held the stream open on its 15 s grace timer — Stop looked
     // frozen for fifteen seconds on the proxy-first loopback path, which is the
     // default for the built-in engine, Ollama and LM Studio.
-    sink(Vec::new());
+    //
+    // But NOT when the pump died before a single byte arrived. The marker settles
+    // the renderer's Response as 200 with an empty body, and the real error, which
+    // only reaches JS one tick later on the rejected invoke, is then thrown away
+    // as a late answer. Every unreachable local backend read as "The connection
+    // dropped before the model finished its answer. Check your network and try
+    // again." while the truth was a refused connection on 127.0.0.1 (counter-check
+    // P1, 2026-09-04, LU Engine switched off). A failure with no answer behind it
+    // must travel as a failure.
+    if run.is_ok() || seen_first_chunk {
+        sink(Vec::new());
+    }
 
     run
 }
@@ -1824,13 +1837,24 @@ mod tests {
     }
 
     /// The renderer closes its ReadableStream on the empty chunk and on nothing
-    /// else; the invoke result does not close it. Every path that returned
-    /// without the marker left the reader hanging on a 15 s grace timer, which
-    /// is why Stop looked frozen — and Stop during connect or during the model
-    /// load was exactly such a path. Loopback is proxy-first in Tauri, so this
-    /// is the default route for the built-in engine, Ollama and LM Studio.
+    /// else; the invoke result does not close it. A path that ends without the
+    /// marker leaves the reader hanging on a 15 s grace timer, which is why Stop
+    /// used to look frozen. Loopback is proxy-first in Tauri, so this is the
+    /// default route for the built-in engine, Ollama and LM Studio.
+    ///
+    /// The marker is NOT free, though, and the first version of this test had
+    /// that backwards. It settles the renderer's Response as 200 with an empty
+    /// body. Send it after a failure that produced no answer, and the real
+    /// error, which reaches JS one tick later on the rejected invoke, arrives
+    /// too late and is dropped: every unreachable local backend came out as
+    /// "The connection dropped before the model finished its answer. Check your
+    /// network and try again." (counter-check P1, 2026-09-04, LU Engine
+    /// switched off; the truth was a refused connection on 127.0.0.1). So the
+    /// rule is: end what has an end. A cancel and a finished body have one, and
+    /// so does a stream that died after delivering data. A connect failure and
+    /// a rejected status do not, and they must travel as failures.
     #[test]
-    fn every_exit_path_ends_with_the_eof_marker() {
+    fn the_marker_ends_an_answer_and_never_hides_a_failure() {
         let rt = tokio::runtime::Runtime::new().unwrap();
         rt.block_on(async {
             let short = Duration::from_millis(200);
@@ -1845,6 +1869,7 @@ mod tests {
             assert_eq!(chunks, vec![Vec::<u8>::new()], "cancel must still emit EOF");
 
             // 2. Nothing listening: the failure happens before the first byte.
+            //    No marker, or the refused connection reads as a dropped answer.
             let dead = {
                 let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
                 let p = l.local_addr().unwrap().port();
@@ -1855,9 +1880,10 @@ mod tests {
             let (out, chunks) = pump_and_collect(
                 &format!("http://127.0.0.1:{}/", dead), &token, short, short).await;
             assert!(out.is_err());
-            assert_eq!(chunks.last(), Some(&Vec::<u8>::new()), "connect failure must emit EOF");
+            assert!(chunks.is_empty(), "a refused connection must not look like an ended answer: {chunks:?}");
 
-            // 3. The backend answers, but with an error status.
+            // 3. The backend answers, but with an error status. Same rule: the
+            //    renderer has to see the status and the body, not an empty 200.
             let port = raw_stub(
                 "HTTP/1.1 500 Internal Server Error\r\nContent-Length: 5\r\nConnection: close\r\n\r\nboom",
                 None,
@@ -1866,7 +1892,7 @@ mod tests {
             let (out, chunks) = pump_and_collect(
                 &format!("http://127.0.0.1:{}/", port), &token, short, short).await;
             assert!(out.is_err());
-            assert_eq!(chunks.last(), Some(&Vec::<u8>::new()), "HTTP error must emit EOF");
+            assert!(chunks.is_empty(), "a rejected status must not look like an ended answer: {chunks:?}");
 
             // 4. The ordinary path: chunks, then the marker, in that order.
             let port = raw_stub(
@@ -1879,6 +1905,20 @@ mod tests {
             assert!(out.is_ok(), "{out:?}");
             assert_eq!(chunks.first().map(|c| c.as_slice()), Some(&b"hello"[..]));
             assert_eq!(chunks.last(), Some(&Vec::<u8>::new()));
+
+            // 5. The backend delivers, then goes quiet with the socket open.
+            //    There IS half an answer in the window, so it gets a clean end
+            //    and the reader keeps what it already has.
+            let port = raw_stub(
+                "HTTP/1.1 200 OK\r\nContent-Length: 32\r\n\r\nhalf",
+                Some(Duration::from_secs(2)),
+            ).await;
+            let token = tokio_util::sync::CancellationToken::new();
+            let (out, chunks) = pump_and_collect(
+                &format!("http://127.0.0.1:{}/", port), &token, short, short).await;
+            assert!(out.is_err(), "the idle window has to fire: {out:?}");
+            assert_eq!(chunks.first().map(|c| c.as_slice()), Some(&b"half"[..]));
+            assert_eq!(chunks.last(), Some(&Vec::<u8>::new()), "data seen, so the stream gets an end");
         });
     }
 
@@ -1914,6 +1954,13 @@ mod tests {
     /// token, which for a large GGUF takes minutes. Cutting that at the idle
     /// timeout would break loading rather than protect it, so the window before
     /// the first chunk is its own, much longer one.
+    ///
+    /// When it does run out there is no answer to end, so no marker either, and
+    /// the reason travels as the failure it is. Before 04.09.2026 the marker
+    /// went out anyway, the renderer settled a 200 with an empty body, and the
+    /// sentence about a model that may still be loading was dropped as a late
+    /// answer. What the user read instead was "the connection dropped, check
+    /// your network", on a machine whose network was fine.
     #[test]
     fn silence_before_the_first_chunk_gets_the_model_load_window() {
         let rt = tokio::runtime::Runtime::new().unwrap();
@@ -1931,7 +1978,7 @@ mod tests {
             ).await;
             let err = out.expect_err("the load window has to end eventually too");
             assert!(err.contains("sent nothing"), "wrong reason: {err}");
-            assert_eq!(chunks, vec![Vec::<u8>::new()]);
+            assert!(chunks.is_empty(), "nothing arrived, so there is nothing to end: {chunks:?}");
         });
     }
 

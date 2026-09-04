@@ -22,6 +22,7 @@ import { signalCreditsExhausted } from '../../lib/credits-exhausted'
 import { parseRetryAfter } from '../../lib/http-status'
 import { localFetch, localFetchStream, isPrivateOrLanHost, isDirectFetchAllowed, hostnameOf, ensureProxyAllowsHost, backendCall } from '../backend'
 import { ensureBuiltinEngineAlive, explainDeadEngine, explainEngineTransportMessage, isManagedBuiltinSlot } from '../builtin-ensure'
+import { isLocalTransportFailure, localBackendUnreachableMessage } from '../../lib/local-backend-transport'
 import { applyTemplateContract } from './normalize-system'
 import { clampEffort, hasEffortLadder, DEFAULT_EFFORT } from '../../lib/effort'
 import {
@@ -1482,6 +1483,16 @@ export class OpenAIProvider implements ProviderClient {
         message = friendly
         code = 'network'
       }
+    } else if (
+      isPrivateOrLanHost(hostnameOf(this.baseUrl)) &&
+      isLocalTransportFailure(message, this.baseUrl)
+    ) {
+      // Someone else's server on this machine or on the LAN: LM Studio,
+      // llama.cpp, vLLM, a box in the next room. Same raw proxy line, same
+      // house rule, only the name changes. Nothing to translate for a cloud
+      // endpoint, whose own words are the honest answer.
+      message = localBackendUnreachableMessage(this.config.name, this.baseUrl)
+      code = 'network'
     }
 
     return new ProviderError(message, 'openai', code, res.status, undefined, parseRetryAfter(res))

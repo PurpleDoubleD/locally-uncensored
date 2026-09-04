@@ -11,6 +11,7 @@ import type {
 } from './types'
 import { ProviderError } from './types'
 import { localFetch, localFetchStream, ollamaUrl } from '../backend'
+import { isLocalTransportFailure, localBackendUnreachableMessage } from '../../lib/local-backend-transport'
 import { parseNDJSONStream } from '../stream'
 import { idleAbortGuard, isStreamIdleTimeout, STREAM_IDLE_TIMEOUT_MS } from '../stream-idle'
 import { repairToolCallArgs, extractToolCallsFromContent } from '../../lib/tool-call-repair'
@@ -500,6 +501,16 @@ export class OllamaProvider implements ProviderClient {
     try {
       const { parseOllamaError, chatStyleMessage } = await import('../../lib/ollama-errors')
       const parsed = await parseOllamaError(res, fallback, model)
+      // Ollama is not running, or moved: the proxy's raw line arrives as the
+      // error body and would go straight into the bubble, Rust command name and
+      // all. Caught here rather than in ollama-errors, because only this side
+      // knows which address was asked (04.09.2026, same round as proxy.rs).
+      const wo = this.apiUrl('')
+      if (isLocalTransportFailure(parsed.raw ?? '', wo)) {
+        return new ProviderError(
+          localBackendUnreachableMessage('Ollama', wo), 'ollama', 'network', status, model,
+        )
+      }
       const message = chatStyleMessage(parsed)
       let code = 'network'
       if (parsed.kind === 'missing-blob') code = 'ollama_missing_blob'
