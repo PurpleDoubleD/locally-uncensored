@@ -12,7 +12,6 @@ import { bundledEngineStatus, swapBundledModel, ENGINE_PORT } from '../../api/en
 import { useBuiltinEngineStatus } from '../../hooks/useBuiltinEngineStatus'
 import { enginePortLine } from '../../lib/engine-port'
 import type { BuiltinEngineTuning } from '../../types/settings'
-import { formatCount } from '../../lib/formatters'
 
 type KvType = BuiltinEngineTuning['cacheTypeK']
 
@@ -107,7 +106,13 @@ export function BuiltinEngineSettings() {
         {running ? (
           <>
             Engine running{loadedModel ? <> · <span className="text-gray-300">{loadedModel}</span></> : null}
-            {typeof status?.ctx === 'number' ? <> · ctx {formatCount(status.ctx)}</> : null}
+            {/* Roh, ohne Tausendertrennung, weil das Eingabefeld drei Zeilen
+                tiefer 8192 zeigt und der Hilfetext daneben von 16384 und 32768
+                spricht. Gegenprobe G2, 04.09.2026: dieselbe Zahl stand hier
+                als `ctx 8,192` und dort als `8192`, keine drei Zeilen
+                auseinander. `String` und nicht `toLocaleString`, sonst waere
+                der deutsche Punkt aus dem P2-Befund wieder da. */}
+            {typeof status?.ctx === 'number' ? <> · ctx {String(status.ctx)}</> : null}
           </>
         ) : (
           'Engine not running, settings apply automatically on the next start.'

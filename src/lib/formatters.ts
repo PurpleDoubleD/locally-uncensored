@@ -63,3 +63,25 @@ export function truncate(str: string, maxLength: number): string {
   if (str.length <= maxLength) return str
   return str.slice(0, maxLength) + '...'
 }
+
+/**
+ * Ein Kontextfenster, in EINER Schreibweise.
+ *
+ * Gegenprobe G2, 04.09.2026: derselbe Wert 8192 stand an fuenf Stellen in vier
+ * Schreibweisen da, zwei davon auf demselben Bildschirm. Im Chat war es
+ * gleichzeitig `1.3k/8.2k` auf dem Knopf und `Auto · 8K` in der Klapplade
+ * darunter, also 8192 geteilt durch 1000 neben 8192 geteilt durch 1024. "Wer
+ * den Unterschied las, suchte einen, den es nicht gibt", stand schon in
+ * ContextDropdown, aber die beiden Rechnungen standen weiter nebeneinander.
+ *
+ * Es gewinnt die Kibi-Rechnung, weil die Stufen des Reglers echte
+ * Zweierpotenzen sind: 4096, 8192, 16384 heissen 4K, 8K, 16K und nichts
+ * anderes. Ein krummer Zwischenwert, etwa der Verbrauch, bekommt eine
+ * Nachkommastelle, damit er nicht auf die naechste Stufe gerundet aussieht.
+ */
+export function formatContextWindow(n: number): string {
+  if (n <= 0) return 'Auto'
+  if (n % 1024 === 0) return `${n / 1024}K`
+  if (n < 1024) return String(n)
+  return `${(n / 1024).toFixed(1)}K`
+}

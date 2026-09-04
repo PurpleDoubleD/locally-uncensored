@@ -5,7 +5,7 @@ import { useSendSizeStore } from '../../stores/sendSizeStore'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { shouldAutoCompact, autoCompactHint } from '../../lib/compact-trigger'
 import { newestCompaction, isModelVisible } from '../../lib/run-compact-command'
-import { formatCount } from '../../lib/formatters'
+import { formatCount, formatContextWindow } from '../../lib/formatters'
 
 export function TokenCounter() {
   const activeConversationId = useChatStore((s) => s.activeConversationId)
@@ -72,7 +72,10 @@ export function TokenCounter() {
   const color = ratio > 0.8 ? 'text-red-400' : ratio > 0.5 ? 'text-amber-400' : 'text-gray-500'
   const barColor = ratio > 0.8 ? 'bg-red-500' : ratio > 0.5 ? 'bg-amber-500' : 'bg-gray-500'
 
-  const formatK = (n: number) => n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n)
+  // Dieselbe Schreibweise wie die Klapplade darunter. Vorher stand hier
+  // 8192/1000 und dort 8192/1024, also `8.2k` neben `8K` fuer eine einzige
+  // Zahl (Gegenprobe G2, 04.09.2026).
+  const formatK = formatContextWindow
 
   const source = ctx.provider === 'lmstudio'
     ? "LM Studio loaded context"
