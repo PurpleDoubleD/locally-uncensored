@@ -2,6 +2,7 @@ import { useRef, useState, useCallback } from "react"
 import { markCannotThink } from '../lib/model-compatibility'
 import { v4 as uuid } from "uuid"
 import { useChatStore } from "../stores/chatStore"
+import { errorText } from "../types/json-guards"
 import { endTurnDurably } from "../stores/durability"
 import { useModelStore } from "../stores/modelStore"
 import { useSettingsStore } from "../stores/settingsStore"
@@ -261,7 +262,7 @@ async function runGroupTurn(convId: string, model: string, allModels: string[], 
       useChatStore.getState().updateMessageContent(
         convId,
         assistantMessage.id,
-        refusal ?? `Error from ${model}: ${(err as Error).message || 'Connection failed'}`,
+        refusal ?? `Error from ${model}: ${errorText(err) || 'Connection failed'}`,
       )
     }
   }
@@ -1084,7 +1085,14 @@ export function useChat() {
         // live on ProviderError, so this is a real `instanceof` narrowing
         // instead of three casts through `any` onto whatever was thrown.
         const code = err instanceof ProviderError ? err.code : undefined
-        const rawMessage = err instanceof Error ? err.message : ''
+        // Ein `invoke()`-Fehler aus Tauri ist eine ZEICHENKETTE, kein Error.
+        // Gegenprobe G1, 04.09.2026: der Waehler zeigte zur kaputten GGUF die
+        // ganze Diagnose samt Rat, derselbe Fehler ueber das Absenden nur
+        // "Error: Connection failed" nach 16,9 s. Die Ursache war diese Zeile:
+        // `instanceof Error` ist bei einer Zeichenkette falsch, also blieb der
+        // Text leer und der Notnagel sprang ein. `errorText` liest beide
+        // Formen, so wie der Waehlerweg und der Coding-Agent es laengst tun.
+        const rawMessage = errorText(err)
         const errorMsg = code === 'auth' || code === 'signed_out' || code === 'rate_limit'
           ? rawMessage
           : `Error: ${rawMessage || 'Connection failed'}`

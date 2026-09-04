@@ -2301,7 +2301,7 @@ export function useAgentChat() {
 
     } catch (err) {
       if ((err as Error).name !== 'AbortError') {
-        const errorMsg = (err as Error).message || 'Connection failed'
+        const errorMsg = errorText(err) || 'Connection failed'
         // Bug B3 round 2: a refusal that produced nothing at all (the model's
         // chat template raised, or the backend 400'd) gets its own English
         // sentence instead of the raw Jinja trace under an "Agent error" head.

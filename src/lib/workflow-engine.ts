@@ -6,6 +6,7 @@
  */
 
 import { useModelStore } from '../stores/modelStore'
+import { errorText } from '../types/json-guards'
 import { useSettingsStore } from '../stores/settingsStore'
 import { useMemoryStore } from '../stores/memoryStore'
 // Audit W-T2: hier stand `from '../api/tool-registry'` — der als @deprecated
@@ -156,7 +157,7 @@ export class WorkflowEngine {
         this.callbacks.onComplete(results)
       }
     } catch (err) {
-      const errorMsg = (err as Error).message || 'Workflow execution failed'
+      const errorMsg = errorText(err) || 'Workflow execution failed'
       this.callbacks.onError(errorMsg)
     }
 
@@ -215,7 +216,7 @@ export class WorkflowEngine {
         output: '',
         startedAt,
         completedAt: Date.now(),
-        error: (err as Error).message || 'Step execution failed',
+        error: errorText(err) || 'Step execution failed',
       }
     }
   }

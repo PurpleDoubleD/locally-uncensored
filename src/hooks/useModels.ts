@@ -27,6 +27,7 @@ import {
 import { tryAcquireLuEngineSwap, releaseLuEngineSwap } from '../api/lu-engine-swap-lock'
 import { useLuEngineSwitchStore } from '../stores/luEngineSwitchStore'
 import { useModelStore } from '../stores/modelStore'
+import { errorText } from '../types/json-guards'
 import { useProviderStore } from '../stores/providerStore'
 import { useSettingsStore } from '../stores/settingsStore'
 import { getEnabledProviders, prefixModelName, getProviderIdFromModel } from '../api/providers'
@@ -545,7 +546,7 @@ export function useModels() {
         }
       } catch (err) {
         if ((err as Error).name !== 'AbortError') {
-          updatePullProgress(name, { status: `Error: ${(err as Error).message}` })
+          updatePullProgress(name, { status: `Error: ${errorText(err) || 'the download stopped'}` })
         }
         // On abort (pause): card stays with "Paused" status
       }
