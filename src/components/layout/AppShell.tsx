@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { Header } from './Header'
 import { StaleModelsBanner } from './StaleModelsBanner'
 import { StorageQuotaToast } from './StorageQuotaToast'
@@ -31,7 +31,8 @@ import { STORE_KEYS, IDB_STORE_KEYS, backupStoresIfChanged, flushSyncStoreBackup
 import { idbKeysToRestore, mayReloadForIdbRestore } from '../../lib/idb-restore'
 import { log } from '../../lib/logger'
 import { withDetail } from '../../lib/error-text'
-import { pickForMode } from '../../lib/active-model-mode'
+import { pickForMode, replacedBehindTheUsersBack } from '../../lib/active-model-mode'
+import { announceChatModelReplaced } from '../../api/lu-engine-switch'
 import type { TextChunk } from '../../types/rag'
 import type { Role } from '../../types/chat'
 import { useKeyboardShortcuts } from '../../hooks/useKeyboardShortcuts'
@@ -182,6 +183,7 @@ export function AppShell() {
   // the lu-cloud provider gets enabled, so the reselect must fire again the
   // moment those models land.
   const allModels = useModelStore((s) => s.models)
+  const zuletztModus = useRef(appMode)
   useEffect(() => {
     // Nothing to judge against yet. This guard is the whole of Befund 3 of
     // the abnahme counter-check (2026-08-29): the picked model did not
@@ -212,6 +214,17 @@ export function AppShell() {
     // dropped the moment it is answered, so it never steers a later flip.
     const { pendingCloudModel, setPendingCloudModel } = useUIStore.getState()
     const pick = pickForMode(activeModel, allModels, appMode, pendingCloudModel)
+    // Und wenn dieser Griff die Wahl des Nutzers ersetzt, sagt die App es.
+    // Gegenprobe G1, 04.09.2026: Provider LM Studio wieder herausgenommen, das
+    // gewaehlte Modell ging mit, und die Regel nahm den ersten Eintrag der
+    // Liste. Zweimal war das eine kaputte GGUF-Datei, mit ACTIVE daneben und
+    // nichts auf Port 8127. Ein Moduswechsel ist ausgenommen: den hat der
+    // Nutzer sichtbar selbst umgelegt.
+    const modeFlipped = zuletztModus.current !== appMode
+    zuletztModus.current = appMode
+    if (replacedBehindTheUsersBack(activeModel, pick, modeFlipped)) {
+      announceChatModelReplaced(activeModel!, pick.next!)
+    }
     if (pick.change) setActiveModel(pick.next)
     if (pick.usedRequest) setPendingCloudModel(null)
   }, [appMode, allModels])

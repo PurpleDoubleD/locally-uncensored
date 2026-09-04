@@ -178,6 +178,19 @@ export function ensureLuEngineIsChatProvider(): boolean {
 // standby card's Enable does, with the same sentence in the same status row
 // the outward trip uses.
 
+/**
+ * What the standing row says when the app picked a different chat model on its
+ * own, because the one that was active left the list (G1, 04.09.2026: taking
+ * the LM Studio provider back out).
+ */
+export function chatModelReplacedNote(gone: string, now: string): string {
+  return `"${displayModelName(gone)}" is gone from the model list, so the chat switched to "${displayModelName(now)}".`
+}
+
+export function announceChatModelReplaced(gone: string, now: string): void {
+  useLuEngineSwitchStore.getState().announce(chatModelReplacedNote(gone, now), 'info')
+}
+
 /** What the pick says when it moved the chat backend to `name`. */
 export function chatProviderSwitchNote(name: string): string {
   return `Switched your chat provider to ${name} for this model.`
