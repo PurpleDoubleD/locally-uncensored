@@ -1058,7 +1058,6 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
       ? (s.providers.openai.name ?? null)
       : null,
   )
-  const activeModelObj = models.find((m) => m.name === activeModel)
   const foldedRows = useModelStore((s) => s.foldedRows)
   // Ein Wechsel laeuft, solange der Waehler einen fuehrt oder das Backend
   // eines meldet. Beides faerbt den Punkt und dreht den Ring, damit der Name
@@ -1070,7 +1069,9 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
     ? (gezeigtesObj && 'displayName' in gezeigtesObj && gezeigtesObj.displayName) ||
       shortModelLabel(displayModelName(gezeigtesModell).split(':')[0])
     : 'Select Model'
-  const activeType = activeModelObj?.type || 'text'
+  // Der Punkt folgt demselben Modell wie der Name daneben, sonst haette der
+  // Knopf waehrend eines Wechsels zwei Aussagen in sich.
+  const activeType = gezeigtesObj?.type || 'text'
   // Chat dropdown shows TEXT models only — image/video live in the
   // Create view's own picker. Everything here is grouped by the model
   // FAMILY (Qwen/Gemma/Llama/…), not by provider, because users pick
