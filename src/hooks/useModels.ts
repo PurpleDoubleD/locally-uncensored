@@ -17,14 +17,13 @@ import { runEngineResume } from '../lib/engine-resume-policy'
 import { engineStartIsWorthRetrying } from '../lib/engine-start-failure'
 import { commandIsUnavailable } from '../lib/engine-command-availability'
 import { dropDuplicateLuEngineRows, dropStandbyRowsServedByLuEngine, LU_ENGINE_GROUP, zeileZumEinklappen } from '../lib/lu-engine-rows'
-import { isLmStudioEntry } from '../lib/lmstudio-match'
-import { isBuiltinEngineEntry, type InstalledModelLike } from '../lib/lmstudio-match'
+import { isLmStudioEntry, isBuiltinEngineEntry, type InstalledModelLike } from '../lib/lmstudio-match'
 import {
   ensureLuEngineIsChatProvider, announceLuEngineSwitch, LU_ENGINE_FILE_GONE,
   clearEngineErrorAfterSuccess,
   announceLuEngineSwapBusy, announceLuEngineStartFailure,
   standbyChatBackend, listStandbyBackendModels, handBackChatProviderForRow,
-  announceChatProviderSwitch,
+  announceChatProviderSwitch, announceChatModelReplaced,
 } from '../api/lu-engine-switch'
 import { tryAcquireLuEngineSwap, releaseLuEngineSwap } from '../api/lu-engine-swap-lock'
 import { useModelStore } from '../stores/modelStore'
@@ -480,7 +479,28 @@ export function useModels() {
           ...videoModels.map((m) => toModel(m, 'video') as VideoModel),
         ]
       }
+      // Wer die frische Liste hereingibt, sieht als Einziger das Vorher und
+      // das Nachher.
+      //
+      // `setModels` verwirft eine Wahl, deren Name in der neuen Liste nicht
+      // mehr steht, und nimmt in derselben set() den ersten Chat-Eintrag. Bis
+      // irgendein Effekt danach nachsieht, steht im Store schon der Ersatz,
+      // also kann die Modusregel in AppShell diesen Fall nicht mehr bemerken
+      // und ihre Zeile nie ausloesen. Gegenprobe G1, 04.09.2026: Provider
+      // LM Studio in den Einstellungen wieder herausgenommen, waehrend ein
+      // LM-Studio-Modell gewaehlt war, und die Wahl sprang stumm auf den
+      // ersten Eintrag, zweimal auf eine kaputte GGUF-Datei.
+      //
+      // Ein Moduswechsel kommt hier nicht heraus: der Local/Cloud-Schalter
+      // nimmt der Liste im Store nichts weg, und ohne fehlenden Namen tauscht
+      // `setModels` nichts. Die Zeile erscheint also nur, wenn sich die Liste
+      // unter dem Nutzer bewegt hat.
+      const gewaehltVorher = useModelStore.getState().activeModel
       setModels([...allModels, ...comfyModels])
+      const gewaehltDanach = useModelStore.getState().activeModel
+      if (gewaehltVorher && gewaehltDanach && gewaehltDanach !== gewaehltVorher) {
+        announceChatModelReplaced(gewaehltVorher, gewaehltDanach)
+      }
       // (Die Unterdrueckung fuer no-use-before-define stand hier; die Regel
       // ist in keiner der geerbten Configs an, sie hat nie etwas gemeldet.
       // Function-Hoisting macht den Vorwaertsbezug ohnehin gueltig.)

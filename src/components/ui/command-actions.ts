@@ -14,6 +14,10 @@
 
 import type { ShortcutId } from '../../hooks/useKeyboardShortcuts'
 import type { View } from '../../stores/uiStore'
+// Das Blattmodul und nicht die Sammelstelle `api/providers`: diese Datei laeuft
+// im Test ohne DOM und soll dabei keine Provider-Klassen und keinen Store
+// mitziehen. `model-name.ts` ist reine Zeichenkettenarbeit ohne Laufzeit-Import.
+import { displayModelName } from '../../api/providers/model-name'
 
 export interface Command {
   readonly id: string
@@ -102,8 +106,13 @@ export function buildCommands(ctx: CommandContext): Command[] {
   for (const m of ctx.models) {
     if (m.name === ctx.activeModel) continue
     out.push({
+      // Die Kennung bleibt der volle Speichername, sie muss eindeutig sein.
+      // Die BESCHRIFTUNG nicht: hier stand `Use ${m.name}`, also las die
+      // Palette dem Nutzer unsere interne Steckplatzadresse vor,
+      // "Use openai::Phi-4-mini-instruct-Q4_K_M". Das Praefix sagt ihm nichts
+      // und schiebt den einzigen Teil, den er sucht, nach hinten.
       id: `model:${m.name}`,
-      label: `Use ${m.name}`,
+      label: `Use ${displayModelName(m.name)}`,
       group: GROUP_MODEL,
       run: () => ctx.setActiveModel(m.name),
     })

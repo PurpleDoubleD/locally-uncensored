@@ -5,6 +5,9 @@ import { useSendSizeStore } from '../../stores/sendSizeStore'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { shouldAutoCompact, autoCompactHint } from '../../lib/compact-trigger'
 import { newestCompaction, isModelVisible } from '../../lib/run-compact-command'
+// Dieselbe Schreibweise wie die Klapplade darunter. Vorher stand hier
+// 8192/1000 und dort 8192/1024, also `8.2k` neben `8K` fuer eine einzige Zahl
+// (Gegenprobe G2, 04.09.2026).
 import { formatContextWindow } from '../../lib/formatters'
 import { HINWEIS_TEXT, PUNKT_FARBE } from '../../lib/hinweis'
 
@@ -80,11 +83,6 @@ export function TokenCounter() {
   const color = eng ? HINWEIS_TEXT.fehler : HINWEIS_TEXT.ruhig
   const barColor = eng ? PUNKT_FARBE.kaputt : PUNKT_FARBE.aus
 
-  // Dieselbe Schreibweise wie die Klapplade darunter. Vorher stand hier
-  // 8192/1000 und dort 8192/1024, also `8.2k` neben `8K` fuer eine einzige
-  // Zahl (Gegenprobe G2, 04.09.2026).
-  const formatK = formatContextWindow
-
   const source = ctx.provider === 'lmstudio'
     ? "LM Studio loaded context"
     : ctx.provider === 'ollama'
@@ -99,13 +97,13 @@ export function TokenCounter() {
   // Zahl `82 / 8,192 tokens`. Zwei Schreibweisen fuer denselben Wert, auf
   // einem Bildschirm, eine davon unter dem Mauszeiger der anderen.
   const capNote = capped
-    ? `. Capped: a step sends at most ${formatK(maxTokens)} of this model's ${formatK(ctx.contextWindow)} tokens (Settings, send window), and tool results older than the newest step go out shortened`
+    ? `. Capped: a step sends at most ${formatContextWindow(maxTokens)} of this model's ${formatContextWindow(ctx.contextWindow)} tokens (Settings, send window), and tool results older than the newest step go out shortened`
     : ''
   const title = fill.source === 'built'
-    ? `Last request: ${formatK(usedTokens)} / ${formatK(maxTokens)} tokens, the size of the payload actually built for the last step, tool catalog, decay and compaction included${capNote}`
+    ? `Last request: ${formatContextWindow(usedTokens)} / ${formatContextWindow(maxTokens)} tokens, the size of the payload actually built for the last step, tool catalog, decay and compaction included${capNote}`
     : isReal
-      ? `Context: ${formatK(usedTokens)} / ${formatK(maxTokens)} tokens (${source}), anchored on the model's last reported usage (includes system prompt + tools + RAG); reasoning tokens are not context and aren't counted${capNote}`
-      : `Estimated: ${formatK(usedTokens)} / ${formatK(maxTokens)} tokens (${source}), estimate until the model reports real usage${capNote}`
+      ? `Context: ${formatContextWindow(usedTokens)} / ${formatContextWindow(maxTokens)} tokens (${source}), anchored on the model's last reported usage (includes system prompt + tools + RAG); reasoning tokens are not context and aren't counted${capNote}`
+      : `Estimated: ${formatContextWindow(usedTokens)} / ${formatContextWindow(maxTokens)} tokens (${source}), estimate until the model reports real usage${capNote}`
 
   // ── Wie weit ist es noch bis zur automatischen Kompaktierung ────────────
   //
@@ -171,7 +169,7 @@ export function TokenCounter() {
       {/* `font-mono tabular-nums` war dasselbe Rezept, nur an der Call-Site
           buchstabiert. `.lu-hud-num` ist die eine Stelle, an der es steht. */}
       <span className="text-[0.55rem] lu-hud-num">
-        {formatK(usedTokens)}/{formatK(maxTokens)}
+        {formatContextWindow(usedTokens)}/{formatContextWindow(maxTokens)}
       </span>
     </span>
   )

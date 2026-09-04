@@ -142,7 +142,7 @@ describe('D-S06: eine Kontextanzeige, nicht zwei', () => {
   })
 
   it('der Knopf zeigt „ctx N" nur noch, wenn es keinen Fuellstand gibt', () => {
-    expect(DROPDOWN).toMatch(/\{hasFill \? children : <span>ctx \{fmt\(ctx\.contextWindow\)\}<\/span>\}/)
+    expect(DROPDOWN).toMatch(/\{hasFill \? children : <span>ctx \{formatContextWindow\(ctx\.contextWindow\)\}<\/span>\}/)
   })
 
   it('und die beiden Schreibweisen koennen nicht gleichzeitig auf dem Schirm stehen', () => {

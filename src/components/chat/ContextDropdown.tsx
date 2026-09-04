@@ -10,15 +10,13 @@ import { loadLmStudioModel } from '../../api/lmstudio'
 import { bundledEngineStatus, swapBundledModel } from '../../api/engine'
 import { effectiveContextWindow } from '../../lib/context-window'
 import { useActiveContextWindow } from '../../hooks/useActiveContextWindow'
+// Eine Schreibweise fuer alle Kontextfenster, in lib/formatters. Vorher stand
+// hier eine eigene Rechnung und im Fuellstand daneben eine zweite, und beide
+// zeigten denselben Wert verschieden (Gegenprobe G2, 04.09.2026).
 import { formatContextWindow } from '../../lib/formatters'
 import { ENGINE_DEFAULT_CTX } from '../../lib/builtin-ctx'
 
 const PRESETS = [4096, 8192, 16384, 32768, 65536, 131072]
-
-// Eine Schreibweise fuer alle Kontextfenster, in lib/formatters. Vorher stand
-// hier eine eigene Rechnung und im Fuellstand daneben eine zweite, und beide
-// zeigten denselben Wert verschieden (Gegenprobe G2, 04.09.2026).
-const fmt = formatContextWindow
 
 /**
  * Context-window picker for the active LOCAL model. Sets `contextWindowOverride`
@@ -190,7 +188,7 @@ export function ContextDropdown({ children }: { children?: ReactNode }) {
         {/* Der Fuellstand IST die Beschriftung. Nur wenn es keinen gibt (leerer
             Chat), steht hier wieder das Fenster allein. */}
         <span id={valueId}>
-          {hasFill ? children : <span>ctx {fmt(ctx.contextWindow)}</span>}
+          {hasFill ? children : <span>ctx {formatContextWindow(ctx.contextWindow)}</span>}
         </span>
         <ChevronDown size={8} className={`transition-transform ${open ? 'rotate-180' : ''}`} />
       </button>
@@ -213,18 +211,18 @@ export function ContextDropdown({ children }: { children?: ReactNode }) {
           <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
           <div className="absolute right-0 top-full mt-1 z-50 min-w-[140px] rounded-lg lu-elevated p-1 flex flex-col gap-0.5">
             <button onClick={() => apply(0)} className={rowCls(selected === 0)}>
-              <span>Auto{ctx.provider === 'ollama' ? ` · ${fmt(effectiveContextWindow(ctx.modelMax, 0))}` : ctx.provider === 'builtin' ? ` · ${fmt(ENGINE_DEFAULT_CTX)}` : ''}</span>
+              <span>Auto{ctx.provider === 'ollama' ? ` · ${formatContextWindow(effectiveContextWindow(ctx.modelMax, 0))}` : ctx.provider === 'builtin' ? ` · ${formatContextWindow(ENGINE_DEFAULT_CTX)}` : ''}</span>
               {selected === 0 && <Check size={10} />}
             </button>
             {options.map((p) => (
               <button key={p} onClick={() => apply(p)} className={rowCls(selected === p)}>
-                <span>{fmt(p)}</span>
+                <span>{formatContextWindow(p)}</span>
                 {selected === p && <Check size={10} />}
               </button>
             ))}
             {showMax && (
               <button onClick={() => apply(ctx.modelMax)} className={rowCls(selected === ctx.modelMax)}>
-                <span>{fmt(ctx.modelMax)} · max</span>
+                <span>{formatContextWindow(ctx.modelMax)} · max</span>
                 {selected === ctx.modelMax && <Check size={10} />}
               </button>
             )}

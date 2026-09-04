@@ -778,7 +778,7 @@ async function runHandoff(kind: 'image' | 'video', args: VramHandoffArgs, seq: n
       const models = await getImageModels()
       if (models.length === 0) {
         emitHandoff('error', { kind, detail: 'no image model installed' })
-        return 'Error: No image model installed. Download one from Models → Discover (e.g. "FLUX.1 [schnell] FP8", "Z-Image Turbo", or "Juggernaut XL V9") and try again.'
+        return 'Error: No image model installed. Download one from Models → Get new (e.g. "FLUX.1 [schnell] FP8", "Z-Image Turbo", or "Juggernaut XL V9") and try again.'
       }
       if (typeof args.model === 'string' && args.model) {
         const resolved = resolveModelName(args.model, models)
@@ -799,7 +799,7 @@ async function runHandoff(kind: 'image' | 'video', args: VramHandoffArgs, seq: n
         const i2vModels = models.filter((m) => isI2VModel(m.name))
         if (i2vModels.length === 0) {
           emitHandoff('error', { kind, detail: 'no i2v model installed' })
-          return 'Error: Image-to-video needs an I2V model such as SVD. Install one from Models → Discover (e.g. "SVD-XT 1.1 (Image to Video)"), then try again.'
+          return 'Error: Image-to-video needs an I2V model such as SVD. Install one from Models → Get new (e.g. "SVD-XT 1.1 (Image to Video)"), then try again.'
         }
         if (typeof args.model === 'string' && args.model) {
           const resolved = resolveModelName(args.model, i2vModels)
@@ -821,7 +821,7 @@ async function runHandoff(kind: 'image' | 'video', args: VramHandoffArgs, seq: n
         const t2vModels = models.filter((m) => isT2VCapable(m.name))
         if (t2vModels.length === 0 || backend === 'none') {
           emitHandoff('error', { kind, detail: 'no text-to-video model installed' })
-          return 'Error: No text-to-video model installed. Download one from Models → Discover (e.g. "Wan 2.1 · 1.3B (Lightweight)" for 8 to 10 GB VRAM or "HunyuanVideo 1.5 T2V FP8" for 12+ GB). Or generate an image first and animate it with an I2V model like "SVD-XT 1.1".'
+          return 'Error: No text-to-video model installed. Download one from Models → Get new (e.g. "Wan 2.1 · 1.3B (Lightweight)" for 8 to 10 GB VRAM or "HunyuanVideo 1.5 T2V FP8" for 12+ GB). Or generate an image first and animate it with an I2V model like "SVD-XT 1.1".'
         }
         if (typeof args.model === 'string' && args.model) {
           const resolved = resolveModelName(args.model, t2vModels)

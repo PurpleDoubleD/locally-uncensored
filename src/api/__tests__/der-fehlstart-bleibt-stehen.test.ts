@@ -35,18 +35,21 @@ describe('die Meldung landet in der stehenden Zeile', () => {
     expect(s.tone).toBe('error')
   })
 
-  it('und gibt dieselbe Zeile zurueck, damit das Popover nicht zweimal textet', () => {
+  it('und schreibt genau die Zeile, die der gemeinsame Textbau liefert', () => {
     // Zwei Woerter fuer dieselbe Sache waeren zwei Stellen, an denen sie
-    // auseinanderlaufen koennen.
-    const zurueck = announceLuEngineStartFailure('openai::X', new Error('boom'), false)
-    expect(zurueck).toBe(luEngineStartFailureNote('openai::X', new Error('boom')))
-    expect(useLuEngineSwitchStore.getState().note).toBe(zurueck)
+    // auseinanderlaufen koennen. Die Zeile wurde frueher zusaetzlich
+    // zurueckgegeben; keine der beiden Tueren hat sie je gelesen, und die
+    // stehende Zeile ist ohnehin der Ort, an dem sie ankommen muss.
+    announceLuEngineStartFailure('openai::X', new Error('boom'), false)
+    expect(useLuEngineSwitchStore.getState().note)
+      .toBe(luEngineStartFailureNote('openai::X', new Error('boom')))
   })
 
   it('nennt den verschobenen Steckplatz mit, wenn er verschoben wurde', () => {
-    const zurueck = announceLuEngineStartFailure('openai::X', new Error('boom'), true)
-    expect(zurueck.startsWith(LU_ENGINE_SWITCH_NOTE)).toBe(true)
-    expect(zurueck).toContain('boom')
+    announceLuEngineStartFailure('openai::X', new Error('boom'), true)
+    const note = useLuEngineSwitchStore.getState().note ?? ''
+    expect(note.startsWith(LU_ENGINE_SWITCH_NOTE)).toBe(true)
+    expect(note).toContain('boom')
   })
 
   it('ein Fehler hat keine Selbstloeschuhr', () => {

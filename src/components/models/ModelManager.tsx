@@ -404,7 +404,7 @@ export function ModelManager() {
                     onClick={() => setTab('discover')}
                     className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-gray-100 dark:bg-white/5 border border-gray-200 dark:border-white/10 t-micro text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-white/10 transition-colors"
                   >
-                    <Sparkles size={11} /> Discover {modeMeta.label.toLowerCase()} models
+                    <Sparkles size={11} /> Get new {modeMeta.label.toLowerCase()} models
                   </button>
                 </div>
               ) : (
@@ -492,7 +492,10 @@ export function ModelManager() {
                               }
                               useBusy={usingModel === model.name}
                               // Steht die Engine, darf auch die aktive Zeile
-                              // wieder gestartet werden (Persona P2).
+                              // wieder gestartet werden (Persona P2). Die
+                              // Antwort gilt fuer die Engine, nicht fuer jede
+                              // Zeile: welche davon sie bedient, entscheidet
+                              // die Karte selbst.
                               engineStopped={engineRuht}
                               onDelete={() => setConfirmDelete(model.name)}
                               onInfo={() => handleInfo(model.name)}

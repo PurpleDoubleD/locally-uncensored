@@ -15,6 +15,14 @@
 import { create } from 'zustand'
 import { backendCall } from '../api/backend'
 import { withInstallerOutput } from '../lib/error-text'
+// Every run below reaches Rust through `backendCall`, which hands an invoke()
+// rejection straight on. A Rust `Err(String)` therefore arrives as a plain
+// STRING, not as an Error, so the old `err instanceof Error ? err.message : ...`
+// took the fallback every single time and the user read "Failed to start" while
+// the reason, "winget is not installed on this system", was in hand
+// (counter-check 2026-09-04). `errorText` reads a string, an Error and a
+// `{ message }` alike.
+import { errorText } from '../types/json-guards'
 
 /** Which card the panel draws. `checking` is the Python probe, `python` the
  *  winget install that only some boxes need. */
@@ -260,7 +268,7 @@ export const useComfyInstallStore = create<ComfyInstallState>()((set, get) => {
         try {
           await backendCall('install_python')
         } catch (err) {
-          fail(err instanceof Error ? err.message : 'Could not start Python install')
+          fail(errorText(err) || 'Could not start Python install')
           return
         }
         pythonOk = await new Promise<boolean>((resolve) => {
@@ -312,7 +320,7 @@ export const useComfyInstallStore = create<ComfyInstallState>()((set, get) => {
       try {
         await backendCall('install_comfyui', installPath ? { installPath } : {})
       } catch (err) {
-        fail(err instanceof Error ? err.message : 'Failed to start')
+        fail(errorText(err) || 'Failed to start')
         return
       }
       watch('install')
@@ -323,7 +331,7 @@ export const useComfyInstallStore = create<ComfyInstallState>()((set, get) => {
       try {
         await backendCall('update_comfyui')
       } catch (err) {
-        fail(err instanceof Error ? err.message : 'Failed to start the update')
+        fail(errorText(err) || 'Failed to start the update')
         return
       }
       watch('update')
@@ -334,7 +342,7 @@ export const useComfyInstallStore = create<ComfyInstallState>()((set, get) => {
       try {
         await backendCall('repair_comfyui_env')
       } catch (err) {
-        fail(err instanceof Error ? err.message : 'Failed to start the repair')
+        fail(errorText(err) || 'Failed to start the repair')
         return
       }
       watch('repair')
@@ -351,7 +359,7 @@ export const useComfyInstallStore = create<ComfyInstallState>()((set, get) => {
       } catch (err) {
         // The flag is the only thing that can stop the run. If setting it
         // failed, a button stuck on "Cancelling…" would be the second lie.
-        set({ cancelling: false, error: err instanceof Error ? err.message : 'Could not cancel the run' })
+        set({ cancelling: false, error: errorText(err) || 'Could not cancel the run' })
       }
     },
 

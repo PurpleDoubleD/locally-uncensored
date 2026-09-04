@@ -25,6 +25,9 @@ import {
   parseAnthropicStreamEvent, parseAnthropicMessageResponse, keyForUnindexedBlock,
   isRecord, prop, asString,
 } from './wire'
+import {
+  isLocalTransportFailure, localBackendUnreachableMessage, remoteBackendUnreachableMessage,
+} from '../../lib/local-backend-transport'
 
 // ── Anthropic API Types ────────────────────────────────────────
 //
@@ -217,22 +220,29 @@ export class AnthropicProvider implements ProviderClient {
   }
 
   /**
+   * A backend on this machine or on the LAN, declared by the preset
+   * (`config.isLocal`) or read off the host. It does not decide the transport,
+   * it decides which sentence a dead endpoint gets: telling somebody to start a
+   * server only makes sense when the server is theirs to start.
+   */
+  private get isLanBackend(): boolean {
+    return this.config.isLocal === true || isPrivateOrLanHost(hostnameOf(this.baseUrl))
+  }
+
+  /**
    * Transport decision, same rule the OpenAI provider uses.
    *
    * This provider explicitly supports a custom baseUrl (claude-relay-server,
-   * LiteLLM, opencode-zen — see messagesUrl above), and then always issued a
+   * LiteLLM, opencode-zen, see messagesUrl above), and then always issued a
    * raw webview fetch. In the packaged app that request never leaves the
    * webview: the pinned CSP lists api.anthropic.com and nothing else, and a
    * self-hosted relay adds CORS on top. So the one configuration the code went
-   * out of its way to support was the one that could not work. Anything the CSP
-   * does not name — and every LAN address — takes the Rust proxy instead;
-   * api.anthropic.com itself keeps its direct fetch, unchanged.
+   * out of its way to support was the one that could not work. Every LAN
+   * address, and anything else the CSP does not name, takes the Rust proxy
+   * instead; api.anthropic.com itself keeps its direct fetch, unchanged.
    */
   private get useLocalProxy(): boolean {
-    const host = hostnameOf(this.baseUrl)
-    return this.config.isLocal === true
-      || isPrivateOrLanHost(host)
-      || !isDirectFetchAllowed(host)
+    return this.isLanBackend || !isDirectFetchAllowed(hostnameOf(this.baseUrl))
   }
 
   /**
@@ -727,7 +737,15 @@ export class AnthropicProvider implements ProviderClient {
 
     try {
       const data: unknown = await res.json()
-      const serverMessage = asString(prop(prop(data, 'error'), 'message'))
+      // Two shapes, and only the first one is Anthropic's. `{"error": {"message":
+      // "..."}}` comes from the API; `{"error": "<string>"}` comes from our own
+      // Rust proxy, which is what this provider talks through for every custom
+      // baseUrl. Reading only the nested one dropped the proxy's reason on the
+      // floor and left the bare default line above, so a relay that was simply
+      // not running said nothing but "Request failed" (counter-check
+      // 2026-09-04).
+      const err = prop(data, 'error')
+      const serverMessage = asString(prop(err, 'message')) ?? asString(err)
       if (serverMessage) message = serverMessage
     } catch { /* use default */ }
 
@@ -742,6 +760,18 @@ export class AnthropicProvider implements ProviderClient {
     } else if (res.status === 529) {
       code = 'overloaded'
       message = 'Anthropic API is overloaded. Try again in a few seconds.'
+    }
+
+    // The endpoint was never reached. The proxy hands that back as
+    // Response(503, {"error": "proxy_localhost_stream_chunked: error sending
+    // request for url (...)"}), and a Rust command name has no business in a
+    // chat bubble. Gated on the very getter that chose the proxy, and last in
+    // the chain so a server that answered in real words keeps them.
+    if (this.useLocalProxy && isLocalTransportFailure(message, this.baseUrl)) {
+      message = this.isLanBackend
+        ? localBackendUnreachableMessage(this.config.name, this.baseUrl)
+        : remoteBackendUnreachableMessage(this.config.name, this.baseUrl)
+      code = 'network'
     }
 
     // The throttle's own number, so the agent's retry ladder waits out the real

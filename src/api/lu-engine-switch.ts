@@ -110,8 +110,7 @@ export function luEngineStartFailureNote(modelName: string, reason: unknown): st
 }
 
 /**
- * Write that sentence where it survives, and hand it back for the door it
- * came through.
+ * Write that sentence where it survives.
  *
  * Persona P5 measured this on the real Windows build on 03.09.2026: a click on
  * a broken GGUF, then the picker closed after two seconds, the way a person
@@ -126,14 +125,20 @@ export function luEngineStartFailureNote(modelName: string, reason: unknown): st
  * `switched` folds in the sentence about the moved backend, because a start
  * that failed after the slot was handed over is exactly when both facts
  * matter.
+ *
+ * It used to hand the sentence back as well, for a door that would show it a
+ * second time. There is no such door: the picker closes in the same movement
+ * and must NOT re-print it (see der-waehler-verdeckt-seine-eigene-meldung-
+ * nicht), and the Installed card reads the standing row like everyone else.
+ * A caller that needs the wording without announcing it asks
+ * `luEngineStartFailureNote` directly.
  */
 export function announceLuEngineStartFailure(
   modelName: string, reason: unknown, switched: boolean,
-): string {
+): void {
   const line = luEngineStartFailureNote(modelName, reason)
   const full = switched ? `${LU_ENGINE_SWITCH_NOTE} ${line}` : line
   useLuEngineSwitchStore.getState().announce(full, 'error')
-  return full
 }
 
 /** The shipped address of the engine. The real port is written back by
@@ -184,10 +189,22 @@ export function ensureLuEngineIsChatProvider(): boolean {
  * own, because the one that was active left the list (G1, 04.09.2026: taking
  * the LM Studio provider back out).
  */
-export function chatModelReplacedNote(gone: string, now: string): string {
+function chatModelReplacedNote(gone: string, now: string): string {
   return `"${displayModelName(gone)}" is gone from the model list, so the chat switched to "${displayModelName(now)}".`
 }
 
+/**
+ * Two doors reach this, and they are the two ways the pick can change without
+ * the user touching the picker.
+ *
+ * AppShell asks `replacedBehindTheUsersBack` after the Local/Cloud rule has
+ * run, which covers a pick that no longer fits the mode. It cannot cover the
+ * other one: `setModels` drops a pick whose name is not in the fresh inventory
+ * and takes the first chat row instead, in its own set(), so by the time any
+ * effect looks, the store already reads the replacement and the rule has
+ * nothing left to notice. That case is announced by whoever hands the list in
+ * (hooks/useModels), where the before and the after are both still there.
+ */
 export function announceChatModelReplaced(gone: string, now: string): void {
   useLuEngineSwitchStore.getState().announce(chatModelReplacedNote(gone, now), 'info')
 }
@@ -308,7 +325,7 @@ export function standbyBackendOf(slot: HandoverSlot): SlotOccupant | null {
  * OpenAI-protocol backend shares. The display name is what tells them apart,
  * and it is the same name the standby card carries.
  */
-export function isStandbyBackendRow(row: InstalledModelLike | null | undefined): boolean {
+function isStandbyBackendRow(row: InstalledModelLike | null | undefined): boolean {
   return isRowOfBackend(row, standbyChatBackend()?.name)
 }
 

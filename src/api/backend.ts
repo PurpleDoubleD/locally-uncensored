@@ -278,8 +278,13 @@ export async function localFetchStream(
     const direct = await tryDirect();
     if (direct) return direct;
     if (!isTauri()) {
-      // No proxy to fall back to in plain browser dev mode.
-      return new Response(JSON.stringify({ error: 'Network error' }), { status: 500 });
+      // No proxy to fall back to in plain browser dev mode. The wording is not
+      // decoration: this body is the only thing a provider gets to read, and
+      // `isLocalTransportFailure` needs the address in the text before it may
+      // turn it into a sentence. "Network error" carried neither the address
+      // nor a shape the filter knows, so a web build printed a bare, useless
+      // line where a Tauri build printed a real one.
+      return new Response(JSON.stringify({ error: `error sending request for url (${url}): failed to fetch, no proxy in this build` }), { status: 500 });
     }
   }
 
@@ -292,7 +297,8 @@ export async function localFetchStream(
     const direct = await tryDirect();
     if (direct) return direct;
   }
-  return new Response(JSON.stringify({ error: 'Local backend unreachable (proxy and direct fetch both failed)' }), { status: 503 });
+  // Same reason as above: name the address, in the shape the filter reads.
+  return new Response(JSON.stringify({ error: `error sending request for url (${url}): proxy and direct fetch both failed` }), { status: 503 });
 }
 
 /**

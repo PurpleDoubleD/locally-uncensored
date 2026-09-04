@@ -96,7 +96,7 @@ describe('die vier Komponenten tragen es an ihren zaehlenden Stellen', () => {
   })
 
   it('TokenCounter: der Fuellstand', () => {
-    expect(TOKENS).toMatch(/lu-hud-num">\s*\{formatK\(usedTokens\)\}/)
+    expect(TOKENS).toMatch(/lu-hud-num">\s*\{formatContextWindow\(usedTokens\)\}/)
   })
 })
 

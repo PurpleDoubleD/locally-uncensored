@@ -38,9 +38,18 @@
  * derselbe Tester stand nach Enable und Remove ohne Engine da, auch nach
  * dreimaligem Ansichtswechsel. Der Weg zurueck ist derselbe, den der
  * Absendeweg geht.
+ *
+ * UND DIE WAHL FAELLT MIT. Der Speicher war nur die eine Haelfte: nach der
+ * Uebergabe an ein fremdes Backend steht der Chip im Chat weiter auf dem
+ * GGUF, das auf 8127 lag, und behauptet damit, ein Modell werde antworten,
+ * das nichts mehr bedient. Ausgerechnet hier faellt auch die Selbstheilung
+ * des Absendewegs aus: der ruft `ensureBuiltinEngineAlive` nur hinter
+ * `config.managed === true`, und managed ist jetzt false. Also raeumt dieses
+ * Modul die Wahl, und der Waehler sagt wieder "Select Model".
  */
 
 import { backendCall, isTauri } from '../api/backend'
+import { isBuiltinEngineEntry, type InstalledModelLike } from './lmstudio-match'
 import { log } from './logger'
 
 /** The part of the `openai` slot this decision reads. */
@@ -79,6 +88,29 @@ export function builtinSlotOffloadDecision(
   const has = builtinHoldsLocalSlot(after)
   if (has) return 'cancel'
   return had ? 'schedule' : 'none'
+}
+
+/**
+ * Hat unsere Engine den Steckplatz an ein EINGESCHALTETES fremdes Backend
+ * abgegeben.
+ *
+ * Enger als 'schedule', und die Enge ist der Punkt. Das schlichte Disable auf
+ * der eigenen Engine bleibt draussen (`managed` bleibt true): dafuer gibt es
+ * die Ein-Aus-Invariante im providerStore und den ehrlichen Satz aus
+ * `builtin-ensure`. Und die Gegenrichtung ist strukturell ausgeschlossen,
+ * weil sie 'cancel' ist und diesen Zweig nie erreicht: nimmt die Engine den
+ * Steckplatz zurueck, ist die Wahl genau das Modell, das `bringEngineBack`
+ * gleich laedt, und wer sie dort raeumt, laesst die zurueckgeholte Engine
+ * ohne Modell stehen.
+ *
+ * Pur, damit die Regel ohne Zeitgeber und ohne Store zu lesen ist.
+ */
+export function builtinSlotHandedToForeignBackend(
+  before: BuiltinSlotView | null | undefined,
+  after: BuiltinSlotView | null | undefined,
+): boolean {
+  if (!builtinHoldsLocalSlot(before)) return false
+  return !!after && after.enabled === true && after.managed !== true
 }
 
 // The pending unload. A generation counter rather than a bare handle for the
@@ -124,6 +156,7 @@ export function onLocalSlotChanged(
     }
     return
   }
+  if (builtinSlotHandedToForeignBackend(before, after)) void dropDisplacedEnginePick()
   if (!isTauri()) return
   cancelPending()
   const mine = generation
@@ -164,6 +197,45 @@ async function bringEngineBack(): Promise<void> {
     // Kein Grund, den Steckplatzwechsel scheitern zu lassen. Der Absendeweg
     // versucht dasselbe noch einmal, sobald jemand etwas schreibt.
     log.warn('[builtin-slot] could not bring the engine back', { err: e })
+  }
+}
+
+/**
+ * Die Wahl faellt mit dem Steckplatz.
+ *
+ * Der Chip im Chat nennt nach der Uebergabe weiter das GGUF, das auf 8127
+ * lag. Auf dem Port liegt nichts mehr, und die Selbstheilung des Absendewegs
+ * haengt hinter `config.managed === true`, das jetzt false ist. Bleibt die
+ * Wahl stehen, ist die einzige Antwort auf ein Absenden eine Fremdmeldung
+ * ueber eine unbekannte Modell-Kennung. Steht sie nicht mehr, sagt der Waehler
+ * "Select Model" und die Eingangsseite sagt, was zu tun ist.
+ *
+ * Entschieden wird nach der ZEILE, nicht nach dem Steckplatz. Der Aufrufer
+ * darf im selben Durchlauf eine neue Wahl setzen, und genau das tut er:
+ * `useModels` gibt den Steckplatz ab und setzt die Zeile des uebernehmenden
+ * Backends unmittelbar danach, ohne `await` dazwischen. Diese Funktion liest
+ * den Zustand erst nach ihrem ersten `await import(...)`, also mindestens eine
+ * Mikrotask spaeter, und findet dann eine LM-Studio-Zeile vor, die sie nichts
+ * angeht. Der dynamische Import ist derselbe Ladekreis-Schutz, den auch
+ * `bringEngineBack` braucht.
+ *
+ * Geraeumt wird mit `setState`, NICHT ueber `setActiveModel`: an dessen Weg
+ * weg von einer Engine-Zeile haengt ein sofortiges `stop_bundled_engine`, und
+ * das wuerde die Nachsicht ueberholen, die dieses Modul selbst verwaltet.
+ */
+async function dropDisplacedEnginePick(): Promise<void> {
+  try {
+    const { useModelStore } = await import('../stores/modelStore')
+    const gewaehlt = useModelStore.getState().activeModel
+    if (!gewaehlt) return
+    const zeile = useModelStore.getState().models.find((m) => m.name === gewaehlt)
+    if (!isBuiltinEngineEntry(zeile as unknown as InstalledModelLike | undefined)) return
+    useModelStore.setState({ activeModel: null })
+    log.info('[builtin-slot] engine lost the local slot, dropped the pick it was serving')
+  } catch (e) {
+    // Wie beim Rueckweg: der Steckplatzwechsel selbst darf daran nicht
+    // scheitern. Die naechste Modelliste prueft die Wahl ohnehin erneut.
+    log.warn('[builtin-slot] could not drop the pick of the displaced engine', { err: e })
   }
 }
 

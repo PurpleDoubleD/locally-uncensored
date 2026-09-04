@@ -74,8 +74,14 @@ describe('verdrahtet', () => {
   it('Zaehler und Klapplade rechnen aus derselben Hand', () => {
     const zaehler = lies('components/chat/TokenCounter.tsx')
     const lade = lies('components/chat/ContextDropdown.tsx')
-    expect(zaehler).toContain('const formatK = formatContextWindow')
-    expect(lade).toContain('const fmt = formatContextWindow')
+    // Beim Namen gerufen, ohne Zwischennamen. `const formatK =
+    // formatContextWindow` und `const fmt = formatContextWindow` waren reine
+    // Umbenennungen: zwei alte Namen fuer eine Funktion, jeder eine Stelle
+    // mehr, an der man beim Suchen nach der Schreibweise vorbeilaeuft.
+    expect(zaehler).toContain('{formatContextWindow(usedTokens)}/{formatContextWindow(maxTokens)}')
+    expect(lade).toContain('formatContextWindow(ctx.contextWindow)')
+    expect(zaehler).not.toMatch(/\bconst formatK\b/)
+    expect(lade).not.toMatch(/\bconst fmt\b/)
     // Und keiner von beiden rechnet noch selbst.
     expect(zaehler).not.toContain('(n / 1000).toFixed(1)')
     expect(lade).not.toContain('n % 1024 === 0')
@@ -93,7 +99,7 @@ describe('verdrahtet', () => {
 
   it('und die Vorgabe im Auto-Eintrag ist nicht mehr fest verdrahtet', () => {
     const lade = lies('components/chat/ContextDropdown.tsx')
-    expect(lade).toContain('fmt(ENGINE_DEFAULT_CTX)')
+    expect(lade).toContain('formatContextWindow(ENGINE_DEFAULT_CTX)')
     expect(lade).not.toContain("' · 8K'")
     // Und die Konstante sagt dasselbe wie der Platzhalter im Feld.
     expect(formatContextWindow(ENGINE_DEFAULT_CTX)).toBe('8K')
@@ -125,10 +131,10 @@ describe('der Chat spricht auf beiden Wegen dieselbe Sprache', () => {
     // Der Tooltip und die sichtbare Zeile fassen dieselben zwei Zahlen an.
     const tooltip = quelle.slice(quelle.indexOf('const title ='), quelle.indexOf('const title =') + 900)
     expect(tooltip).not.toContain('formatCount(')
-    expect(tooltip).toContain('formatK(usedTokens)')
-    expect(tooltip).toContain('formatK(maxTokens)')
+    expect(tooltip).toContain('formatContextWindow(usedTokens)')
+    expect(tooltip).toContain('formatContextWindow(maxTokens)')
     // Und die sichtbare Zeile nimmt dieselbe Funktion.
-    expect(quelle).toContain('{formatK(usedTokens)}/{formatK(maxTokens)}')
+    expect(quelle).toContain('{formatContextWindow(usedTokens)}/{formatContextWindow(maxTokens)}')
   })
 
   it('formatContextWindow und die sichtbare Zeile liefern denselben Text', () => {
@@ -137,5 +143,65 @@ describe('der Chat spricht auf beiden Wegen dieselbe Sprache', () => {
       expect(kurz).not.toContain(',')
       expect(kurz.toUpperCase()).toBe(kurz)
     }
+  })
+})
+
+/**
+ * Nachpruefung G4, 04.09.2026: nach der Vereinheitlichung standen immer noch
+ * zwei eigene Rechnungen daneben, beide `Math.round(n / 1024)`.
+ *
+ *   ModelSelector, Werkzeug-Tooltip     "its 6k context window is too small"
+ *   Settings, Gedaechtnis, Budgetzeile  "31K ctx, up to 15 memories injected"
+ *
+ * Die erste schrieb klein k, wo jede andere Stelle gross K schreibt. Die
+ * zweite rundete auf die naechste ganze Stufe: ein 32000er Fenster hiess dort
+ * 31K und ueberall sonst 31.3K, also sah es aus wie ein anderes Modell.
+ *
+ * Dazu die dritte Stelle derselben Sorte: die Klapplade nannte den Vorgabewert
+ * des Motors aus `ENGINE_DEFAULT_CTX`, waehrend der Hook eine Zeile darueber
+ * mit einer eingetippten 8192 weiterrechnete.
+ */
+describe('die letzten eigenen Rechnungen sind weg', () => {
+  // Die Erklaerungen an den geaenderten Stellen zitieren die alte Rechnung,
+  // damit der naechste Leser weiss, was dort stand. Ohne diesen Schnitt
+  // pruefte die Verneinung unten das Zitat statt des Codes.
+  const ohneKommentare = (src: string) =>
+    src.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/^[ \t]*\/\/.*$/gm, ' ')
+
+  it('die alte Rundung und die gemeinsame Funktion sagen wirklich Verschiedenes', () => {
+    // Ohne diesen Fall waere der Rest Kosmetik: er zeigt, dass die beiden
+    // Rechnungen denselben Wert unterschiedlich benennen.
+    const alt = (n: number) => `${Math.round(n / 1024)}K`
+    expect(alt(32000)).toBe('31K')
+    expect(formatContextWindow(32000)).toBe('31.3K')
+    expect(alt(6000)).toBe('6K')
+    expect(formatContextWindow(6000)).toBe('5.9K')
+    // Und auf einer echten Stufe sind sie sich einig, sonst waere die
+    // Umstellung ein Bruch statt einer Vereinheitlichung.
+    expect(alt(8192)).toBe(formatContextWindow(8192))
+  })
+
+  it('der Werkzeug-Tooltip im Waehler rechnet nicht mehr selbst', () => {
+    const src = lies('components/models/ModelSelector.tsx')
+    expect(src).toContain('${formatContextWindow(ctx)} context window')
+    expect(ohneKommentare(src)).not.toContain('Math.round(ctx / 1024)')
+  })
+
+  it('die Budgetzeile im Gedaechtnis auch nicht', () => {
+    const src = lies('components/settings/MemorySettings.tsx')
+    expect(src).toContain('${formatContextWindow(ctx)} ctx, memory injection disabled')
+    expect(src).toContain('${formatContextWindow(ctx)} ctx, up to ${budget.maxMemories}')
+    expect(ohneKommentare(src)).not.toContain('Math.round(ctx / 1024)')
+  })
+
+  it('und der Hook nimmt die Konstante, mit der der Motor wirklich startet', () => {
+    const src = lies('hooks/useActiveContextWindow.ts')
+    expect(src).toContain("import { ENGINE_DEFAULT_CTX } from '../lib/builtin-ctx'")
+    expect(src).toContain('builtinCtx > 0 ? builtinCtx : ENGINE_DEFAULT_CTX')
+    expect(ohneKommentare(src)).not.toContain(': 8192')
+    // Die eingetippte Zahl stand genau hier. Wer die Konstante auf 16384 setzt,
+    // bekaeme sonst eine Klapplade, die 16K sagt, und einen Zaehler, der
+    // weiter durch 8192 teilt.
+    expect(ohneKommentare(src)).not.toContain('builtinCtx > 0 ? builtinCtx : 8192')
   })
 })

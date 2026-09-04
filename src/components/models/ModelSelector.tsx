@@ -10,6 +10,7 @@ import { useUIStore } from '../../stores/uiStore'
 import { unloadAllModels, loadModel, unloadModel, listRunningModels } from '../../api/ollama'
 import { displayModelName, getProviderIdFromModel } from '../../api/providers'
 import { splitForMiddleEllipsis, shortModelLabel } from '../../lib/model-label'
+import { formatContextWindow } from '../../lib/formatters'
 import { activateBuiltinModel, isManagedBuiltinActive } from '../../api/engine'
 import { diagnoseBuiltinEngine } from '../../api/builtin-ensure'
 import { canUseTools, resolveToolSupport, type ToolSupport } from '../../lib/tool-support'
@@ -473,7 +474,11 @@ export function toolBadgeTitle(model: AIModel, support: ToolSupport = 'native'):
     ? 'Drives tools through the prompt, because this model has no native function-calling channel. Agent and Code work'
     : 'Supports tool calling (Agent, Code, and tools in Chat)'
   if (ctx > 0 && ctx < TIGHT_CONTEXT) {
-    return `${how}, but its ${Math.round(ctx / 1024)}k context window is too small for a full Agent or Code tool set`
+    // Eine Schreibweise fuer jedes Kontextfenster, aus lib/formatters. Hier
+    // stand `Math.round(ctx / 1024)}k`: klein geschrieben und gerundet, also
+    // bei 6000 Token "6k" neben dem "5.9K", das jede andere Stelle der
+    // Oberflaeche fuer denselben Wert zeigt.
+    return `${how}, but its ${formatContextWindow(ctx)} context window is too small for a full Agent or Code tool set`
   }
   return how
 }
@@ -843,6 +848,7 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
           return // keep dropdown open; don't activate an unloaded model
         }
         setActiveModel(model.name)
+        clearEngineErrorAfterSuccess()
         setOpen(false)
       } catch {
         setSelectError(`Couldn't load "${displayModelName(model.name)}" into LM Studio. Is the LM Studio server running?`)
@@ -977,6 +983,13 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
 
     // Non-LM-Studio, or an already-loaded LM Studio model: activate now.
     setActiveModel(model.name)
+    // Und die stehende Fehlerzeile ist damit auch erledigt. Sie hat absichtlich
+    // keine Uhr, also war der gewoehnliche Ausgang bisher der einzige Weg aus
+    // dem Waehler, der sie stehen liess: kaputte GGUF anklicken, Banner, dann
+    // im selben Menue ein Ollama-Modell waehlen, und das Banner stand ueber
+    // einem Chat, der laengst wieder antwortete. Der Weg ueber die LU Engine
+    // raeumt sie seit G3, dieser hier nicht.
+    clearEngineErrorAfterSuccess()
     setOpen(false)
   }
 

@@ -34,10 +34,13 @@ describe('der Ladehinweis am Waehlerknopf', () => {
     expect(block).toContain('swapLaeuft')
   })
 
-  it('haengt den Ring und aria-busy an genau diesen Zustand', () => {
-    expect(SRC).toContain('aria-busy={wechselLaeuft}')
-    expect(SRC).toContain('{wechselLaeuft ? (')
-  })
+  // Dass `wechselLaeuft` wirklich am Ring und an `aria-busy` haengt, steht in
+  // der-knopf-nennt-immer-das-angeklickte.test.ts, und zwar gegen den
+  // ausgeschnittenen Rumpf des Knopfes statt gegen die ganze Datei. Hier
+  // standen dieselben zwei Zeichenketten noch einmal, nur schwaecher geprueft:
+  // sie waeren auch gruen geblieben, wenn die Attribute an irgendeinem anderen
+  // Element der Datei gelandet waeren. Diese Datei fragt, WOHER dieser Zustand
+  // seine Wahrheit nimmt, und das ist der Riegel.
 
   it('gilt nur, solange der Knopf ein Modell unseres Steckplatzes nennt', () => {
     // Ein Swap auf der Models-Seite darf keinen Ring an einen Cloud-Namen

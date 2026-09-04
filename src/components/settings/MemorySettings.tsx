@@ -3,6 +3,10 @@ import { Brain, Download, Upload, Trash2, Search, Plus, X, Check, Pencil, Zap, F
 import { useMemoryStore, effectiveMemoryBudget } from '../../stores/memoryStore'
 import { useModelStore } from '../../stores/modelStore'
 import { getModelMaxTokens } from '../../lib/context-compaction'
+// Eine Schreibweise fuer jedes Kontextfenster. Hier stand zweimal
+// `Math.round(ctx / 1024)}K`, eine eigene Rechnung: bei 32000 Token sagte
+// diese Zeile 31K und der Rest der Oberflaeche 31.3K.
+import { formatContextWindow } from '../../lib/formatters'
 import { GlowButton } from '../ui/GlowButton'
 import type { MemoryType, MemoryFile } from '../../types/agent-mode'
 
@@ -62,9 +66,9 @@ export function MemorySettings() {
       const budget = effectiveMemoryBudget(ctx, override)
       const manual = override != null && override > 0 ? ' (manual)' : ''
       if (budget.budgetTokens === 0) {
-        setBudgetLabel(`${Math.round(ctx / 1024)}K ctx, memory injection disabled`)
+        setBudgetLabel(`${formatContextWindow(ctx)} ctx, memory injection disabled`)
       } else {
-        setBudgetLabel(`${Math.round(ctx / 1024)}K ctx, up to ${budget.maxMemories} memories injected${manual}`)
+        setBudgetLabel(`${formatContextWindow(ctx)} ctx, up to ${budget.maxMemories} memories injected${manual}`)
       }
     }).catch(() => { if (!cancelled) setBudgetLabel('') })
     return () => { cancelled = true }

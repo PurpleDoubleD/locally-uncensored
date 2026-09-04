@@ -125,6 +125,13 @@ export const useModelStore = create<ModelState>()(
           // different model in the picker (Befund 3, abnahme counter-check
           // 2026-08-29). The pick has its own guard on the way in and its
           // own moment to be re-checked: the next non-empty list.
+          //
+          // Und getauscht wird hier nicht mehr stumm. Der Tausch steht in
+          // derselben set() wie die neue Liste, also liest jeder Effekt
+          // danach schon den Ersatz und kann nicht mehr erkennen, dass
+          // getauscht wurde. Gesagt wird es deshalb dort, wo beide Seiten
+          // noch dastehen: bei dem, der die Liste hereingibt
+          // (hooks/useModels, announceChatModelReplaced).
           const stillValid =
             !!state.activeModel &&
             (models.length === 0 || models.some((m) => m.name === state.activeModel))

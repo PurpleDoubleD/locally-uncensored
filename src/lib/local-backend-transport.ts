@@ -27,9 +27,15 @@ const TRANSPORT_RE =
  * blamed on this one. And without the port check, the two servers people
  * actually run side by side on 127.0.0.1, our engine on 8127 and Ollama on
  * 11434, are indistinguishable: whoever could not reach one was told to restart
- * the other. The port is only demanded when the message names one at all, so
- * the barer shapes (`ECONNREFUSED 127.0.0.1`, a browser's `Failed to fetch`)
- * still land.
+ * the other.
+ *
+ * The port is optional, the hostname is not. `ECONNREFUSED 127.0.0.1` names a
+ * host and no port and still lands. A bare `Failed to fetch` names neither and
+ * is turned down on purpose: a server may use those same words about a file it
+ * could not read, and swallowing that would replace its own answer with a
+ * sentence about a machine that is in fact running. So everything we produce
+ * ourselves names the address it failed on, see both fallbacks in
+ * `localFetchStream` (api/backend.ts).
  */
 export function isLocalTransportFailure(message: string, baseUrl: string): boolean {
   const msg = String(message ?? '')
@@ -62,4 +68,19 @@ export function hostOf(baseUrl: string): string {
  */
 export function localBackendUnreachableMessage(name: string, baseUrl: string): string {
   return `${name} is not answering on ${hostOf(baseUrl)}. It is either not running, still starting up, or listening on a different address. Start it and send again, or pick a different backend in Settings, AI Backends.`
+}
+
+/**
+ * The same answer for a backend that is NOT on this machine or the LAN.
+ *
+ * The proxy carries more than loopback: every host the pinned CSP does not
+ * know goes through it too, which is every OpenAI or Anthropic compatible
+ * provider a user points at a domain of their own. A refused connection there
+ * arrives in exactly the same raw shape and needs exactly the same
+ * translation, but not the same advice. Out there the address can be a typo
+ * and the line can be down, and telling somebody to start a server they do not
+ * run would be nonsense.
+ */
+export function remoteBackendUnreachableMessage(name: string, baseUrl: string): string {
+  return `${name} is not answering on ${hostOf(baseUrl)}. The request never reached it, so the address may be wrong or the connection may be down. Check the base URL in Settings, AI Backends, and check your network, then send again.`
 }

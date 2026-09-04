@@ -1103,15 +1103,6 @@ fn stderr_blames_the_model_file(stderr: &str) -> bool {
     MARKERS.iter().any(|m| lower.contains(m))
 }
 
-/// One English sentence a user can act on, plus llama-server's own last words
-/// so a bug report still carries them.
-///
-/// GH #118: "did not become healthy" named no cause, and the fresh-install
-/// case named nothing at all because no start was ever attempted. The GPU
-/// hint matters most on new cards: a Blackwell RTX 50-series board with a
-/// driver or engine build that does not know it fails at load time, and
-/// setting GPU Layers to 0 is the one setting in this app that gets the user
-/// chatting anyway.
 /// Der Anfang einer GGUF: die Marke und die Formatversion.
 const GGUF_MAGIC: &[u8; 4] = b"GGUF";
 
@@ -1125,13 +1116,18 @@ const GGUF_MAGIC: &[u8; 4] = b"GGUF";
 /// Die kaputte Datei aus der Messung vom 03.09.2026 meldete 684 680 038.
 const GGUF_VERSION_UNSINN: u32 = 16;
 
-/// Warum diese Datei kein Modell ist, oder None, wenn ihr Kopf in Ordnung ist.
+/// Warum diese Datei keine brauchbare GGUF ist, oder None, wenn ihr Kopf in
+/// Ordnung ist.
+///
+/// `role` benennt die Datei am Satzanfang, weil der Start ZWEI GGUFs braucht:
+/// das Modell und die Sichtdatei daneben. "Download it again" hilft nur, wenn
+/// dabei steht, welche der beiden gemeint ist.
 ///
 /// Liest acht Bytes. Ein Lesefehler ist KEIN Grund: die Datei kann auf einem
 /// langsamen Netzlaufwerk liegen oder gerade geschrieben werden, und dann
 /// soll die Engine es versuchen und ihre eigene Antwort geben, statt dass
 /// diese Vorpruefung sie ersetzt.
-fn gguf_header_reason(path: &Path) -> Option<String> {
+fn gguf_header_reason(path: &Path, role: &str) -> Option<String> {
     use std::io::Read;
     let name = path
         .file_stem()
@@ -1143,16 +1139,47 @@ fn gguf_header_reason(path: &Path) -> Option<String> {
     datei.read_exact(&mut kopf).ok()?;
     if &kopf[..4] != GGUF_MAGIC {
         return Some(format!(
-            "\"{name}\" does not start with the GGUF marker, so it is not a model file. Open Models, Get new and download it again."
+            "{role} \"{name}\" does not start with the GGUF marker, so it is not a GGUF at all. Open Models, Get new and download it again."
         ));
     }
     let version = u32::from_le_bytes([kopf[4], kopf[5], kopf[6], kopf[7]]);
     if version == 0 || version > GGUF_VERSION_UNSINN {
         return Some(format!(
-            "\"{name}\" carries a GGUF version of {version}, which is not a version at all. The file is damaged, most likely a download that did not finish. Open Models, Get new and download it again."
+            "{role} \"{name}\" carries a GGUF version of {version}, which is not a version at all. The file is damaged, most likely a download that did not finish. Open Models, Get new and download it again."
         ));
     }
     None
+}
+
+/// Wie das Modell in einer Meldung der Vorpruefung heisst.
+const GGUF_ROLE_MODEL: &str = "The model file";
+
+/// Wie die Sichtdatei in einer Meldung der Vorpruefung heisst. Sie wird nie
+/// ausgewaehlt, sondern still neben das Modell gelegt, also muss die Meldung
+/// sagen, dass es sie ueberhaupt gibt.
+const GGUF_ROLE_VISION: &str = "The vision file next to this model";
+
+/// Beide GGUFs pruefen, die ein Start braucht, und den Pfad der Sichtdatei
+/// zurueckgeben (None = reines Textmodell).
+///
+/// Das Modell allein reicht nicht. `existing_mmproj` fragt nur `is_file()`,
+/// also Existenz, und ein abgebrochener Download ist eine Datei. Der Pfad
+/// haengt danach als `--mmproj` am llama-server, also stirbt der Start an
+/// einer halben Sichtdatei genauso wie an einem halben Modell, nur eben erst
+/// im Prozess und damit hinter `stop_engine_locked`: die gesunde Engine ist
+/// dann schon abgeraeumt. Beide Koepfe werden deshalb hier gelesen, bevor
+/// irgendetwas angehalten wird.
+fn precheck_model_files(model_path: &str) -> Result<Option<String>, String> {
+    if let Some(grund) = gguf_header_reason(Path::new(model_path), GGUF_ROLE_MODEL) {
+        return Err(grund);
+    }
+    let sicht = existing_mmproj(model_path);
+    if let Some(pfad) = sicht.as_deref() {
+        if let Some(grund) = gguf_header_reason(Path::new(pfad), GGUF_ROLE_VISION) {
+            return Err(grund);
+        }
+    }
+    Ok(sicht)
 }
 
 /// Put `note` directly under the first paragraph, ABOVE the engine's own log.
@@ -1171,6 +1198,15 @@ pub(crate) fn with_note_on_top(message: &str, note: &str) -> String {
     }
 }
 
+/// One English sentence a user can act on, plus llama-server's own last words
+/// so a bug report still carries them.
+///
+/// GH #118: "did not become healthy" named no cause, and the fresh-install
+/// case named nothing at all because no start was ever attempted. The GPU
+/// hint matters most on new cards: a Blackwell RTX 50-series board with a
+/// driver or engine build that does not know it fails at load time, and
+/// setting GPU Layers to 0 is the one setting in this app that gets the user
+/// chatting anyway.
 pub(crate) fn start_failure_message(failure: &StartFailure, port: u16, budget: Duration) -> String {
     let head = if failure.port_taken {
         format!(
@@ -1287,15 +1323,17 @@ fn start_bundled_engine_blocking(
         return Err(format!("Model file not found: {model_path}"));
     }
 
-    // Acht Bytes lesen, bevor irgendetwas angehalten wird. Persona P5 hat am
-    // 03./04.09.2026 am echten Build gemessen, was ein Klick auf eine
+    // Acht Bytes je Datei lesen, bevor irgendetwas angehalten wird. Persona P5
+    // hat am 03./04.09.2026 am echten Build gemessen, was ein Klick auf eine
     // unbrauchbare Datei kostet: die gesunde Engine wird abgeraeumt, zwei
     // Versuche scheitern, die alte wird wieder hochgezogen, und der Nutzer
     // sitzt 7,4 s ohne Chat da. Fuer eine Datei, deren erste acht Bytes schon
     // sagen, dass llama.cpp sie nicht laden wird.
-    if let Some(grund) = gguf_header_reason(Path::new(&model_path)) {
-        return Err(grund);
-    }
+    //
+    // Das Ergebnis ist zugleich der Pfad der Sichtdatei (Projektor aus dem
+    // Discover-Download): vorhanden = multimodal starten, keine = unveraendert
+    // das Text-argv.
+    let mmproj = precheck_model_files(&model_path)?;
 
     // KV-slot directory next to the built-in models (GH #85). Best effort: a
     // failure here only disables slot save/restore, never the engine itself.
@@ -1306,9 +1344,6 @@ fn start_bundled_engine_blocking(
             std::fs::create_dir_all(&dir).ok()?;
             Some(dir.to_string_lossy().to_string())
         });
-    // Vision projector sitting next to the model (written by the Discover
-    // download). Present = start multimodal, absent = unchanged text argv.
-    let mmproj = existing_mmproj(&model_path);
 
     // Already serving this exact argv and healthy → no-op. The argv is the
     // idempotence key: a ctx/KV-quant/flash-attn change restarts the server,
@@ -3955,10 +3990,12 @@ srv    llama_server: exiting due to model loading error";
         let mut kopf = b"GGUF".to_vec();
         kopf.extend_from_slice(&684_680_038u32.to_le_bytes());
         let p = datei_mit("P5-Kaputt-Test-Q4_K_M", &kopf);
-        let grund = gguf_header_reason(&p).expect("der Kopf ist Muell");
+        let grund = gguf_header_reason(&p, GGUF_ROLE_MODEL).expect("der Kopf ist Muell");
         assert!(grund.contains("684680038"), "{grund}");
         assert!(grund.contains("P5-Kaputt-Test-Q4_K_M"), "{grund}");
         assert!(grund.contains("download it again"), "{grund}");
+        // Und die Meldung sagt, WELCHE Datei gemeint ist.
+        assert!(grund.starts_with("The model file "), "{grund}");
         // Und kein Wort ueber die Grafikkarte.
         assert!(!grund.to_lowercase().contains("gpu"), "{grund}");
         let _ = std::fs::remove_file(&p);
@@ -3967,7 +4004,7 @@ srv    llama_server: exiting due to model loading error";
     #[test]
     fn eine_datei_ohne_gguf_marke_ist_kein_modell() {
         let p = datei_mit("Nicht-Ein-Modell", b"PK\x03\x04abcd");
-        let grund = gguf_header_reason(&p).expect("keine Marke");
+        let grund = gguf_header_reason(&p, GGUF_ROLE_MODEL).expect("keine Marke");
         assert!(grund.contains("GGUF marker"), "{grund}");
         let _ = std::fs::remove_file(&p);
     }
@@ -3978,7 +4015,7 @@ srv    llama_server: exiting due to model loading error";
         let mut kopf = b"GGUF".to_vec();
         kopf.extend_from_slice(&3u32.to_le_bytes());
         let p = datei_mit("Gesund-Q4_K_M", &kopf);
-        assert_eq!(gguf_header_reason(&p), None);
+        assert_eq!(gguf_header_reason(&p, GGUF_ROLE_MODEL), None);
         let _ = std::fs::remove_file(&p);
     }
 
@@ -3990,7 +4027,11 @@ srv    llama_server: exiting due to model loading error";
             let mut kopf = b"GGUF".to_vec();
             kopf.extend_from_slice(&v.to_le_bytes());
             let p = datei_mit(&format!("Zukunft-v{v}"), &kopf);
-            assert_eq!(gguf_header_reason(&p), None, "Version {v} wurde verboten");
+            assert_eq!(
+                gguf_header_reason(&p, GGUF_ROLE_MODEL),
+                None,
+                "Version {v} wurde verboten"
+            );
             let _ = std::fs::remove_file(&p);
         }
     }
@@ -4002,15 +4043,15 @@ srv    llama_server: exiting due to model loading error";
         // Engine es versuchen und ihre eigene Antwort geben.
         let fehlt = std::env::temp_dir().join("lu-kopf-gibt-es-nicht.gguf");
         let _ = std::fs::remove_file(&fehlt);
-        assert_eq!(gguf_header_reason(&fehlt), None);
+        assert_eq!(gguf_header_reason(&fehlt, GGUF_ROLE_MODEL), None);
         // Und eine Datei, die kuerzer als acht Bytes ist, ebenso.
         let kurz = datei_mit("Zu-Kurz", b"GGUF");
-        assert_eq!(gguf_header_reason(&kurz), None);
+        assert_eq!(gguf_header_reason(&kurz, GGUF_ROLE_MODEL), None);
         let _ = std::fs::remove_file(&kurz);
     }
 
     #[test]
-    fn der_kopf_wird_vor_dem_halt_der_laufenden_engine_gelesen() {
+    fn beide_koepfe_werden_vor_dem_halt_der_laufenden_engine_gelesen() {
         // Der Sinn der ganzen Pruefung. Steht sie hinter dem Halt, kostet ein
         // Klick auf eine kaputte Datei weiterhin 7,4 s Chat.
         //
@@ -4026,9 +4067,100 @@ srv    llama_server: exiting due to model loading error";
             .split("\nfn ")
             .next()
             .unwrap();
-        let pruefung = wechsel.find("gguf_header_reason(").expect("keine Vorpruefung");
+        let pruefung = wechsel.find("precheck_model_files(").expect("keine Vorpruefung");
         let halt = wechsel.find("stop_engine_locked(state);").expect("kein Halt");
         assert!(pruefung < halt, "die Pruefung steht hinter dem Halt");
+        // Und die Sichtdatei wird nirgends daran vorbei geholt: ein blankes
+        // existing_mmproj im Wechsel waere wieder die reine Existenzfrage.
+        assert!(
+            !wechsel.contains("existing_mmproj("),
+            "die Sichtdatei geht an der Vorpruefung vorbei"
+        );
+    }
+
+    #[test]
+    fn eine_halbe_sichtdatei_haelt_den_wechsel_auf_statt_die_engine() {
+        // Der abgebrochene Projektor-Download. `existing_mmproj` sieht nur,
+        // DASS die Datei da ist; ihr Kopf sagt, dass llama-server sie hinter
+        // --mmproj nicht laden wird. Ohne diese Pruefung faellt der Fehler
+        // erst im Prozess, also nach dem Halt der gesunden Engine.
+        let mut gesund = b"GGUF".to_vec();
+        gesund.extend_from_slice(&3u32.to_le_bytes());
+        let modell = datei_mit("Sicht-Modell-Q4_K_M", &gesund);
+        let sicht = datei_mit("Sicht-Modell-Q4_K_M.mmproj", b"<!DOCTYPE html>");
+        let pfad = modell.to_string_lossy().to_string();
+        let grund = precheck_model_files(&pfad).expect_err("die Sichtdatei ist Muell");
+        assert!(grund.starts_with("The vision file next to this model "), "{grund}");
+        assert!(grund.contains("Sicht-Modell-Q4_K_M.mmproj"), "{grund}");
+        assert!(grund.contains("GGUF marker"), "{grund}");
+        assert!(grund.contains("download it again"), "{grund}");
+        // Kein Wort ueber die Grafikkarte, und das gesunde Modell wird nicht
+        // beschuldigt.
+        assert!(!grund.to_lowercase().contains("gpu"), "{grund}");
+        assert!(!grund.contains("The model file"), "{grund}");
+        let _ = std::fs::remove_file(&modell);
+        let _ = std::fs::remove_file(&sicht);
+    }
+
+    #[test]
+    fn eine_heile_sichtdatei_und_ein_reines_textmodell_kommen_durch() {
+        // Negativkontrolle zum Test darueber: die Vorpruefung sucht Muell,
+        // nicht Anwesenheit. Sie reicht den Pfad weiter, den das argv als
+        // --mmproj braucht, und None heisst reines Textmodell.
+        let mut gesund = b"GGUF".to_vec();
+        gesund.extend_from_slice(&3u32.to_le_bytes());
+        let modell = datei_mit("Heile-Sicht-Q4_K_M", &gesund);
+        let sicht = datei_mit("Heile-Sicht-Q4_K_M.mmproj", &gesund);
+        let pfad = modell.to_string_lossy().to_string();
+        assert_eq!(
+            precheck_model_files(&pfad),
+            Ok(Some(sicht.to_string_lossy().to_string()))
+        );
+        let _ = std::fs::remove_file(&sicht);
+        assert_eq!(precheck_model_files(&pfad), Ok(None));
+        let _ = std::fs::remove_file(&modell);
+    }
+
+    #[test]
+    fn ein_kaputtes_modell_wird_weiter_zuerst_gemeldet() {
+        // Die Reihenfolge in der Vorpruefung: wer ein kaputtes Modell
+        // antippt, soll nicht ueber die Sichtdatei belehrt werden.
+        let modell = datei_mit("Kaputt-Mit-Sicht-Q4_K_M", b"PK\x03\x04abcd");
+        let sicht = datei_mit("Kaputt-Mit-Sicht-Q4_K_M.mmproj", b"PK\x03\x04abcd");
+        let pfad = modell.to_string_lossy().to_string();
+        let grund = precheck_model_files(&pfad).expect_err("das Modell ist Muell");
+        assert!(grund.starts_with("The model file "), "{grund}");
+        let _ = std::fs::remove_file(&modell);
+        let _ = std::fs::remove_file(&sicht);
+    }
+
+    #[test]
+    fn die_begruendung_der_startmeldung_steht_ueber_der_startmeldung() {
+        // Ein neuer Block wurde zwischen den Doc-Kommentar und seine Funktion
+        // geschoben, und die Begruendung fuer die Fehlermeldung des Starts
+        // hing danach an GGUF_MAGIC. Wer bei der Konstanten aufschlug, las
+        // die Begruendung fuer eine Meldung drei Bildschirme weiter unten,
+        // und wer die Meldung aufschlug, fand keine.
+        //
+        // Beide Suchbegriffe stehen auch in diesem Test, aber `split().next()`
+        // nimmt, was VOR dem ersten Vorkommen steht, und das ist die echte
+        // Stelle weit oben in der Datei.
+        let quelle = include_str!("engine.rs");
+        let doc_ueber = |anker: &str| -> String {
+            quelle
+                .split(anker)
+                .next()
+                .unwrap_or("")
+                .rsplit("\n\n")
+                .next()
+                .unwrap_or("")
+                .to_string()
+        };
+        let bei_der_meldung = doc_ueber("pub(crate) fn start_failure_message(");
+        assert!(bei_der_meldung.contains("GH #118"), "{bei_der_meldung}");
+        assert!(bei_der_meldung.contains("GPU Layers"), "{bei_der_meldung}");
+        let bei_der_konstante = doc_ueber("const GGUF_MAGIC:");
+        assert!(!bei_der_konstante.contains("GH #118"), "{bei_der_konstante}");
     }
 
     #[test]

@@ -2,6 +2,7 @@ import type { OllamaModel, PullProgress } from "../types/models"
 import { ollamaUrl, localFetch, localFetchStream, isTauri } from "./backend"
 import { isRecord, prop, asString, asStringArray, asRecordArray } from "./providers/wire"
 import { log } from "../lib/logger"
+import { isLocalTransportFailure, localBackendUnreachableMessage } from "../lib/local-backend-transport"
 
 /**
  * One entry of Ollama's `/api/tags` response.
@@ -130,12 +131,26 @@ export async function warmupOllamaContext(model: string, numCtx: number): Promis
 }
 
 export async function pullModel(name: string, signal?: AbortSignal): Promise<Response> {
-  const res = await localFetchStream(isTauri() ? ollamaUrl("/pull") : "/api/pull", {
+  const url = isTauri() ? ollamaUrl("/pull") : "/api/pull"
+  const res = await localFetchStream(url, {
     method: "POST",
     body: JSON.stringify({ name, stream: true }),
     signal,
   })
-  if (!res.ok) throw new Error("Failed to pull model")
+  if (!res.ok) {
+    // The body was thrown away here, and it is the only place the reason ever
+    // lived: a stopped Ollama makes the proxy answer
+    // Response(503, {"error": "proxy_localhost_stream_chunked: error sending
+    // request ..."}), so the download card said "Failed to pull model" while the
+    // real answer, that nothing is listening, went unread. Read it, and turn the
+    // Rust line into a sentence rather than printing it (04.09.2026).
+    const raw = (await res.text()).trim()
+    throw new Error(
+      isLocalTransportFailure(raw, url)
+        ? localBackendUnreachableMessage("Ollama", url)
+        : `Failed to pull model: HTTP ${res.status}${raw ? ` ${raw}` : ""}`,
+    )
+  }
   return res
 }
 

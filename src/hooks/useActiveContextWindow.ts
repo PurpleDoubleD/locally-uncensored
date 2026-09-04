@@ -8,6 +8,7 @@ import { getModelMaxTokens } from '../lib/context-compaction'
 import { effectiveContextWindow } from '../lib/context-window'
 import { effectiveSendWindow } from '../lib/send-window'
 import { isManagedBuiltinSlot } from '../api/builtin-ensure'
+import { ENGINE_DEFAULT_CTX } from '../lib/builtin-ctx'
 import { bundledEngineStatus, bundledCtxTrain } from '../api/engine'
 
 export type CtxProvider = 'ollama' | 'lmstudio' | 'builtin' | 'cloud' | 'unknown'
@@ -123,7 +124,11 @@ export function useActiveContextWindow(reloadTick = 0): ActiveContext {
         } else {
           // Managed but not up (offloaded / before first send): the next
           // start uses the tuning value, so that IS the honest prediction.
-          const nextCtx = builtinCtx > 0 ? builtinCtx : 8192
+          // Dieselbe Konstante, mit der der Motor wirklich startet
+          // (lib/builtin-ctx). Hier stand 8192 als Zahl: wer die Konstante auf
+          // 16384 setzt, bekaeme sonst eine Klapplade, die 16K sagt, und einen
+          // Zaehler, der weiter durch 8192 teilt.
+          const nextCtx = builtinCtx > 0 ? builtinCtx : ENGINE_DEFAULT_CTX
           setState({
             provider: 'builtin',
             contextWindow: nextCtx,

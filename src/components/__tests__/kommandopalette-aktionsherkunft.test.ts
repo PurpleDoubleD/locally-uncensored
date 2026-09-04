@@ -97,6 +97,39 @@ describe('jeder Eintrag hat eine vorhandene Aktion dahinter', () => {
     expect(ctx.setActiveModel).toHaveBeenCalledWith('qwen3:4b')
   })
 
+  /**
+   * Nachpruefung G4, 04.09.2026: die Zeile hiess
+   * "Use openai::Phi-4-mini-instruct-Q4_K_M". `openai::` ist unsere interne
+   * Adresse des geteilten Steckplatzes, sie steht an keiner anderen Stelle der
+   * Oberflaeche und schiebt den einzigen Teil, den der Nutzer sucht, um elf
+   * Zeichen nach rechts.
+   */
+  it('die Beschriftung nennt das Modell, nicht unsere Steckplatzadresse', () => {
+    const ctx = ctxWith({ models: [{ name: 'openai::Phi-4-mini-instruct-Q4_K_M' }] })
+    const cmds = buildCommands(ctx)
+    const eintrag = byId(cmds, 'model:openai::Phi-4-mini-instruct-Q4_K_M')
+    expect(eintrag?.label).toBe('Use Phi-4-mini-instruct-Q4_K_M')
+    expect(eintrag?.label).not.toContain('openai::')
+    // Die KENNUNG bleibt der volle Name, sonst waeren zwei Backends mit
+    // demselben Modell derselbe Eintrag.
+    expect(eintrag).toBeDefined()
+    // Und geschaltet wird weiter mit dem Speichernamen, nicht mit dem Text.
+    eintrag?.run()
+    expect(ctx.setActiveModel).toHaveBeenCalledWith('openai::Phi-4-mini-instruct-Q4_K_M')
+  })
+
+  it('ein Ollama-Name ohne Praefix bleibt unangetastet', () => {
+    // Die Gegenprobe zum Abschneiden: es darf nicht irgendwo mitten im Namen
+    // schneiden, sondern nur das Slot-Praefix wegnehmen.
+    expect(byId(buildCommands(ctxWith()), 'model:qwen3:4b')?.label).toBe('Use qwen3:4b')
+  })
+
+  it('und gesucht wird nach dem, was dasteht', () => {
+    const cmds = buildCommands(ctxWith({ models: [{ name: 'openai::Phi-4-mini-instruct-Q4_K_M' }] }))
+    expect(matchCommands('phi', cmds).map(c => c.id))
+      .toContain('model:openai::Phi-4-mini-instruct-Q4_K_M')
+  })
+
   it('das bereits aktive Modell bekommt keinen Eintrag, der nichts tut', () => {
     const cmds = buildCommands(ctxWith())
     expect(byId(cmds, 'model:hermes-3')).toBeUndefined()

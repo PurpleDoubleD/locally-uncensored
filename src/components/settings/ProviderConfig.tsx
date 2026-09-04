@@ -493,24 +493,12 @@ export function ProviderSettings() {
                       wieder. Fuer unsere eigene Engine liest der Punkt jetzt
                       dieselbe laufende Schleife wie der Abschnitt darunter, und
                       die beiden koennen nicht mehr zwei Dinge behaupten. */}
-                  {/* Drei Farben, keine vierte (lib/hinweis.ts): Gruen heisst
-                      hier "du kannst chatten", Rot heisst "gemessen und
-                      kaputt", und alles dazwischen ist Grau. "Not running" und
-                      "Reachable, no models" hatten frueher einen eigenen
-                      Bernstein, der sie zu halben Fehlern machte; sie fallen
-                      jetzt mit 'idle' in denselben ruhigen Punkt. */}
-                  <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${
-                    status === 'connected' ? PUNKT_FARBE.an :
-                    status === 'failed' ? PUNKT_FARBE.kaputt :
-                    PUNKT_FARBE.aus
-                  }`} />
+                  <Zustandspunkt status={status} />
                   <span className="text-[0.65rem] text-gray-300 font-medium truncate">{view.label}</span>
                   {config.managed && <span className="text-[0.5rem] px-1 py-0.5 rounded bg-purple-500/15 text-purple-300 shrink-0">DEFAULT</span>}
                   {config.isLocal && <span className="text-[0.5rem] px-1 py-0.5 rounded bg-green-500/10 text-green-400 shrink-0">LOCAL</span>}
                   {!config.isLocal && <span className="text-[0.5rem] px-1 py-0.5 rounded bg-blue-500/10 text-blue-400 shrink-0">CLOUD</span>}
-                  {status === 'connected' && <Wifi size={8} className="text-green-400 shrink-0" />}
-                  {status === 'failed' && <WifiOff size={8} className="text-red-400 shrink-0" />}
-                  {(status === 'stopped' || status === 'no-models') && <WifiOff size={8} className={`${HINWEIS_TEXT.ruhig} shrink-0`} />}
+                  <Zustandssymbol status={status} />
                 </div>
                 <ChevronDown size={10} className={`text-gray-500 transition-transform shrink-0 ${isExpanded ? 'rotate-180' : ''}`} />
               </button>
@@ -858,6 +846,62 @@ const SLOT_TEXTE: Partial<Record<SlotStatus, { text: string; ton: string; testid
     testid: 'provider-no-models',
     title: 'The server answered, but it offers no models, so no chat can run on it yet. Load or download a model in that backend, then press Test again.',
   },
+}
+
+/**
+ * Der farbige Punkt am Anfang der zugeklappten Anbieterzeile.
+ *
+ * Drei Farben, keine vierte (lib/hinweis.ts): Gruen heisst hier "du kannst
+ * chatten", Rot heisst "gemessen und kaputt", und alles dazwischen ist Grau.
+ * "Not running" und "Reachable, no models" hatten frueher einen eigenen
+ * Bernstein, der sie zu halben Fehlern machte; sie fallen jetzt mit 'idle' in
+ * denselben ruhigen Punkt.
+ *
+ * Was die Farbe HEISST, stand nirgends. Der Punkt trug weder `title` noch
+ * `aria-label`, also sah, wer die Zeile nicht aufklappt, einen Farbfleck ohne
+ * Erklaerung, und fuer einen Screenreader gab es ihn gar nicht: die Zustaende
+ * standen nur im Statusfeld im aufgeklappten Koerper. Das Wort kommt deshalb
+ * aus SLOT_TEXTE, derselben Quelle wie dieses Statusfeld. Zwei Woerter fuer
+ * denselben Zustand waeren nur die naechste Luecke.
+ *
+ * Kein Wort heisst kein Anspruch: solange noch niemand gemessen hat ('idle'),
+ * schweigt auch das Statusfeld, und dann bleibt der Punkt eine Farbe ohne
+ * Aussage statt eine Behauptung, die keiner geprueft hat.
+ */
+function Zustandspunkt({ status }: { status: SlotStatus }) {
+  const wort = SLOT_TEXTE[status]?.text
+  return (
+    <span
+      data-testid="provider-dot"
+      role={wort ? 'img' : undefined}
+      aria-label={wort}
+      title={wort}
+      className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+        status === 'connected' ? PUNKT_FARBE.an :
+        status === 'failed' ? PUNKT_FARBE.kaputt :
+        PUNKT_FARBE.aus
+      }`}
+    />
+  )
+}
+
+/**
+ * Das Wifi-Zeichen hinter den Abzeichen derselben Zeile.
+ *
+ * Es sagt dasselbe wie der Punkt am Zeilenanfang, also sagt es der Punkt und
+ * dieses hier bleibt stumm. Es bekommt bewusst KEINEN Namen: lucide setzt
+ * `aria-hidden` von sich aus, solange kein a11y-Merkmal daran haengt, und ein
+ * Name hier wuerde das abschalten und denselben Zustand ein zweites Mal
+ * vorlesen lassen.
+ *
+ * Auswahl und Farbe kommen aus SLOT_TEXTE, damit die zugeklappte Zeile und das
+ * Statusfeld nicht zwei Farbtabellen fuehren, die auseinanderlaufen koennen.
+ */
+function Zustandssymbol({ status }: { status: SlotStatus }) {
+  const wort = SLOT_TEXTE[status]
+  if (!wort) return null
+  const Zeichen = status === 'connected' ? Wifi : WifiOff
+  return <Zeichen size={8} className={`${wort.ton} shrink-0`} />
 }
 
 function Statusfeld({ status }: { status: SlotStatus | undefined }) {

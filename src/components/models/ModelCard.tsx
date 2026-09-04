@@ -6,6 +6,7 @@ import { ContextMenu } from '../ui/ContextMenu'
 import { buildModelCardMenu, type ModelMenuHandlers } from '../ui/menu-actions'
 import { displayModelName } from '../../api/providers/model-name'
 import { splitForMiddleEllipsis } from '../../lib/model-label'
+import { isBuiltinEngineEntry } from '../../lib/lmstudio-match'
 import type { AIModel } from '../../types/models'
 
 interface Props {
@@ -37,6 +38,10 @@ interface Props {
    * Einstellungsfenster den Tod schon nach 2 Sekunden meldete. Nach einem
    * Absturz war ausgerechnet das zuletzt benutzte Modell das einzige, das man
    * von hier aus nicht neu starten konnte.
+   *
+   * Die Angabe gilt fuer die ganze Seite, denn es gibt nur die eine Engine.
+   * Was sie ueber DIESE Zeile aussagt, entscheidet die Karte selbst, siehe
+   * `engineStopped` weiter unten.
    */
   engineStopped?: boolean
   /** While that swap runs. The engine can take seconds to load a cold GGUF. */
@@ -49,7 +54,7 @@ const TYPE_CONFIG = {
   video: { label: 'Video', icon: Video, color: 'text-green-400' },
 }
 
-export function ModelCard({ model, isActive, onSelect, onDelete, onInfo, canDelete = true, onUse, useBusy = false, engineStopped = false }: Props) {
+export function ModelCard({ model, isActive, onSelect, onDelete, onInfo, canDelete = true, onUse, useBusy = false, engineStopped: luEngineRuht = false }: Props) {
   const typeInfo = TYPE_CONFIG[model.type] || TYPE_CONFIG.text
   const TypeIcon = typeInfo.icon
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null)
@@ -59,9 +64,16 @@ export function ModelCard({ model, isActive, onSelect, onDelete, onInfo, canDele
   // also keinen zweiten Aufrufweg, der irgendwann anders werden koennte.
   const actions: ModelMenuHandlers = { select: onSelect, info: onInfo, remove: onDelete }
   // Fremde Kennungen tragen Pfadteile und Dateiendungen mit sich, die kein
-  // Kunde gewaehlt hat. Der Name selbst bleibt unangetastet (lib/model-label),
-  // der volle bleibt im title, denn ein Fehlerbericht braucht ihn.
+  // Kunde gewaehlt hat. Der Name selbst bleibt unangetastet (lib/model-label).
   const { head: nameKopf, tail: nameEnde } = splitForMiddleEllipsis(displayModelName(model.name))
+  // Was die stehende Engine ueber DIESE Zeile aussagt.
+  //
+  // Sie bedient nur ihre eigenen Zeilen. Ollama und LM Studio antworten
+  // weiter, waehrend sie ruht: eine Ollama-Kachel mit "Not running" waere eine
+  // Falschmeldung ueber ein laufendes Backend, und sie traf genau den Kunden,
+  // der die LU Engine nie gestartet hat. Wessen Zeile das ist, beantwortet
+  // dieselbe Funktion, die auf der Models-Seite den Use-Knopf verteilt.
+  const engineStopped = luEngineRuht && isBuiltinEngineEntry(model)
 
   return (
     <>
@@ -180,11 +192,14 @@ export function ModelCard({ model, isActive, onSelect, onDelete, onInfo, canDele
     </div>
 
     {menu && (
+      /* Das aria-label traegt denselben Namen wie Text und title daneben. Ein
+         Screenreader las hier "Actions for openai::Phi-4-mini-instruct-Q4_K_M"
+         vor, samt unserem Steckplatznamen, den kein Kunde gewaehlt hat. */
       <ContextMenu
         items={buildModelCardMenu(actions, { isActive, canDelete })}
         x={menu.x}
         y={menu.y}
-        label={`Actions for ${model.name}`}
+        label={`Actions for ${displayModelName(model.name)}`}
         onClose={() => setMenu(null)}
       />
     )}

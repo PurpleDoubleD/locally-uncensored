@@ -129,4 +129,23 @@ describe('the tooltip says HOW, so the dimmer wrench is explainable', () => {
     // The hermes wording must still be in there, not replaced by the warning.
     expect(toolBadgeTitle(tight, 'hermes')).toMatch(/through the prompt/i)
   })
+
+  /**
+   * Nachpruefung G4, 04.09.2026: die Warnung schrieb das Fenster mit
+   * `Math.round(ctx / 1024)}k`, also klein und auf die naechste ganze Stufe
+   * gerundet. Ein 6000er Fenster hiess hier "6k" und in der Klapplade des
+   * Zaehlers "5.9K", und 6k ist ausgerechnet die Zahl, ab der die Warnung gar
+   * nicht mehr erscheinen wuerde.
+   */
+  it('das Fenster steht in der Schreibweise, die der Rest der Oberflaeche nimmt', async () => {
+    const { toolBadgeTitle } = await import('../ModelSelector')
+    const { formatContextWindow } = await import('../../../lib/formatters')
+    expect(toolBadgeTitle(model({ contextLength: 6000 }), 'native'))
+      .toContain(`${formatContextWindow(6000)} context window`)
+    expect(toolBadgeTitle(model({ contextLength: 6000 }), 'native')).toContain('5.9K context window')
+    // Die alte Rechnung, ausgeschrieben: sie sagte etwas anderes.
+    expect(toolBadgeTitle(model({ contextLength: 6000 }), 'native')).not.toContain('6k context window')
+    // Und auf einer echten Stufe bleibt es die kurze Form.
+    expect(toolBadgeTitle(model({ contextLength: 4096 }), 'native')).toContain('4K context window')
+  })
 })
