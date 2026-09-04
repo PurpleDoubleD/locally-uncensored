@@ -15,8 +15,24 @@
  * Round 7 answered the same question for the window's X (the model stayed in
  * VRAM after the window went to the tray) by routing the hide through
  * `offload_local_models`, the call the switch into Cloud mode makes, after a
- * grace period. This is that answer applied one door further along, with the
- * same call and the same grace period.
+ * grace period. This applied that answer one door further along, with the same
+ * call and the same grace period.
+ *
+ * UND DIE GEGENPROBE G2 (04.09.2026) hat gezeigt, dass "dieselbe Freigabe" an
+ * dieser Tuer zu viel freigibt. `offload_local_models` raeumt Whisper, den
+ * Einbettungsserver auf Port 8128 und die geladenen Ollama-Modelle mit weg.
+ * Gemessen: LM Studio als Provider hinzufuegen, zwanzig Sekunden warten, und
+ * beide `lu-llama-server`-Prozesse sind weg, auch der auf 8128, der mit dem
+ * Chat-Steckplatz nichts zu tun hat. Document Chat arbeitet danach stumm nicht
+ * mehr, und der Server kam in 60 Sekunden nicht von allein wieder.
+ *
+ * Der Steckplatzwechsel heisst nicht "die App hat nichts mehr zu tun", sondern
+ * "die Chat-Engine hat nichts mehr zu tun". Also `stop_bundled_engine`.
+ *
+ * Dazu die Rueckrichtung, ebenfalls aus G2: nach Enable und Remove lief auf
+ * 8127 nichts mehr und startete auch nach dreimaligem Ansichtswechsel nicht
+ * nach. 'cancel' sagte nur eine noch nicht ausgefuehrte Freigabe ab. War sie
+ * schon gelaufen, geschah gar nichts.
  *
  * Run: npx vitest run src/lib/__tests__/displaced-engine-frees-its-memory.test.ts
  */
@@ -63,22 +79,27 @@ describe('THE FIX: the engine that loses the slot lets go of its model', () => {
     onLocalSlotChanged(BUILTIN, JAN)
     expect(backendCall).not.toHaveBeenCalled() // grace period first
     vi.advanceTimersByTime(BUILTIN_SLOT_OFFLOAD_GRACE_MS)
-    expect(backendCall).toHaveBeenCalledWith('offload_local_models', { includeComfyui: false })
+    expect(backendCall).toHaveBeenCalledWith('stop_bundled_engine')
   })
 
-  it('it is the call the cloud switch makes, not a second mechanism', () => {
-    const shell = read('src/components/layout/AppShell.tsx')
-    expect(shell).toMatch(/backendCall\('offload_local_models'\)/)
-    const evict = read('src/lib/builtin-slot-eviction.ts')
-    expect(evict).toMatch(/backendCall\('offload_local_models', \{ includeComfyui: false \}\)/)
-    // and it does NOT reach for a private unload path of its own
-    expect(evict).not.toMatch(/stop_bundled_engine/)
-  })
-
-  it('the ComfyUI checkpoint is left alone, a chat slot is none of its business', () => {
+  it('und NUR die Chat-Engine, nicht die Rundum-Freigabe (Gegenprobe G2)', () => {
     onLocalSlotChanged(BUILTIN, JAN)
     vi.advanceTimersByTime(BUILTIN_SLOT_OFFLOAD_GRACE_MS)
-    expect(backendCall.mock.calls[0][1]).toEqual({ includeComfyui: false })
+    expect(backendCall).toHaveBeenCalledTimes(1)
+    expect(backendCall.mock.calls[0][0]).toBe('stop_bundled_engine')
+    // Der Einbettungsserver, Whisper und die geladenen Ollama-Modelle haben
+    // mit dem Chat-Steckplatz nichts zu tun und bleiben, wo sie sind.
+    // Im ausfuehrbaren Teil steht der Name nicht mehr, nur in der Notiz, die
+    // erklaert, warum er weg ist.
+    const evict = read('src/lib/builtin-slot-eviction.ts')
+    const code = evict.split('\n').filter((z) => !/^\s*(\*|\/\/|\/\*)/.test(z)).join('\n')
+    expect(code).not.toMatch(/offload_local_models/)
+  })
+
+  it('der Cloud-Wechsel behaelt seine Rundum-Freigabe, das ist eine andere Frage', () => {
+    // Dort hat die App wirklich nichts mehr lokal zu tun.
+    const shell = read('src/components/layout/AppShell.tsx')
+    expect(shell).toMatch(/backendCall\('offload_local_models'\)/)
   })
 
   it('a user who swaps straight back pays nothing, the same grace round 7 built', () => {
@@ -103,7 +124,28 @@ describe('THE FIX: the engine that loses the slot lets go of its model', () => {
   it('Disable on the engine itself frees it too, it is the same loss of the slot', () => {
     onLocalSlotChanged(BUILTIN, { enabled: false, managed: true })
     vi.advanceTimersByTime(BUILTIN_SLOT_OFFLOAD_GRACE_MS)
-    expect(backendCall).toHaveBeenCalledWith('offload_local_models', { includeComfyui: false })
+    expect(backendCall).toHaveBeenCalledWith('stop_bundled_engine')
+  })
+
+  it('und kommt zurueck, wenn der Steckplatz zurueckkommt (Gegenprobe G2)', async () => {
+    onLocalSlotChanged(BUILTIN, JAN)
+    vi.advanceTimersByTime(BUILTIN_SLOT_OFFLOAD_GRACE_MS)
+    await vi.advanceTimersByTimeAsync(0)
+    expect(backendCall).toHaveBeenCalledWith('stop_bundled_engine')
+    // Enable auf der Standby-Karte, spaeter Remove: der Steckplatz ist wieder
+    // unserer, und die Engine wird geholt statt liegen gelassen.
+    const evict = read('src/lib/builtin-slot-eviction.ts')
+    expect(evict).toContain('void bringEngineBack()')
+    expect(evict).toContain('ensureBuiltinEngineAlive(gewaehlt)')
+  })
+
+  it('der Rueckweg wird nur nach einer WIRKLICH gelaufenen Freigabe gegangen', () => {
+    // Sonst wuerde jedes Enable auf einer Karte, die den Steckplatz nie
+    // verloren hat, eine Engine anstossen, die laengst laeuft.
+    const evict = read('src/lib/builtin-slot-eviction.ts')
+    const zweig = evict.slice(evict.indexOf("if (decision === 'cancel')"))
+    expect(zweig.slice(0, 300)).toContain('if (entladen)')
+    expect(zweig.slice(0, 300)).toContain('entladen = false')
   })
 
   it('the wiring: every write to the shared slot asks the question, once', () => {
@@ -160,7 +202,6 @@ describe('NEGATIVE CONTROL: nobody else loses their model over this', () => {
     // The lazy reload this leans on is the one a Create render already leans
     // on, and it predates this change.
     const ensure = read('src/api/builtin-ensure.ts')
-    expect(ensure).toMatch(/offload_local_models/)
     expect(ensure).toMatch(/export async function ensureBuiltinEngineAlive/)
   })
 

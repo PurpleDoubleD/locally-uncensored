@@ -13,20 +13,31 @@
  *
  * The same shape as round 7's close-to-tray finding, one door further along:
  * the app agrees the engine has nothing left to do, and the model sits in
- * memory anyway until the process is restarted. Round 7 answered it by routing
- * the hide through `offload_local_models`, the call the switch into Cloud mode
- * already made, after a short grace period so a mis-click costs nothing. This
- * is the same answer for the same question, so it is the same call and the same
- * grace period, not a second mechanism.
+ * memory anyway until the process is restarted. A short grace period so a
+ * mis-click costs nothing, then the engine lets its model go.
  *
  * The trigger is narrow on purpose. Only a slot the app's OWN engine was
  * holding can leave a `lu-llama-server` behind, so only that transition fires:
  * LM Studio replacing Jan frees nothing of ours and must not evict anybody's
  * Ollama residents for nothing.
  *
- * Nothing is lost by unloading. Everything comes back lazily on first use, the
- * way `builtin-ensure.ts` already revives the engine after a Create render did
- * exactly this call.
+ * WAS FREIGEGEBEN WIRD, ist seit der Gegenprobe G2 (04.09.2026) genau eine
+ * Sache: die Chat-Engine. Vorher lief das ueber `offload_local_models`, die
+ * Rundum-Freigabe, die auch der Wechsel in den Cloud-Modus benutzt, und die
+ * raeumt Whisper, den Einbettungsserver auf 8128 und die geladenen
+ * Ollama-Modelle gleich mit weg. Der Tester hat gemessen, was das heisst:
+ * LM Studio als Provider hinzufuegen, und zwanzig Sekunden spaeter ist der
+ * Einbettungsserver tot, der mit dem Chat-Steckplatz nichts zu tun hat, und
+ * Document Chat arbeitet stumm nicht mehr. Der Steckplatzwechsel ist nicht
+ * "die App hat nichts mehr zu tun", sondern "die Chat-Engine hat nichts mehr
+ * zu tun", und `stop_bundled_engine` ist genau das.
+ *
+ * UND ZURUECK. Nimmt unsere Engine den Steckplatz wieder, kommt die Chat-
+ * Engine wieder. Vorher hiess 'cancel' nur "eine noch nicht ausgefuehrte
+ * Freigabe faellt aus"; war die Frist schon abgelaufen, geschah nichts, und
+ * derselbe Tester stand nach Enable und Remove ohne Engine da, auch nach
+ * dreimaligem Ansichtswechsel. Der Weg zurueck ist derselbe, den der
+ * Absendeweg geht.
  */
 
 import { backendCall, isTauri } from '../api/backend'
@@ -86,14 +97,18 @@ function cancelPending(): void {
 }
 
 /**
+ * Ist die Freigabe wirklich gelaufen, oder stand sie nur an.
+ *
+ * Der Unterschied entscheidet, was beim Zurueckgeben des Steckplatzes zu tun
+ * ist: eine abgesagte Freigabe hinterlaesst eine laufende Engine, eine
+ * ausgefuehrte hinterlaesst nichts.
+ */
+let entladen = false
+
+/**
  * Wire the decision to the call. Safe to invoke on every write to the `openai`
  * slot: it does nothing unless the app's own engine actually lost the slot, and
  * nothing at all outside the desktop build.
- *
- * `includeComfyui: false` for the same reason a local render passes it: the
- * image checkpoint has no part in a chat backend change, and freeing it here
- * would buy a slow reload on the next generate for nothing. That is the flag
- * the Create hand-off has always used.
  */
 export function onLocalSlotChanged(
   before: BuiltinSlotView | null | undefined,
@@ -103,6 +118,10 @@ export function onLocalSlotChanged(
   if (decision === 'none') return
   if (decision === 'cancel') {
     cancelPending()
+    if (entladen) {
+      entladen = false
+      void bringEngineBack()
+    }
     return
   }
   if (!isTauri()) return
@@ -111,13 +130,42 @@ export function onLocalSlotChanged(
   pending = setTimeout(() => {
     if (mine !== generation) return
     pending = null
-    backendCall('offload_local_models', { includeComfyui: false })
-      .then(() => log.info('[builtin-slot] engine lost the local slot, released its model'))
+    backendCall('stop_bundled_engine')
+      .then(() => {
+        entladen = true
+        log.info('[builtin-slot] engine lost the local slot, released its model')
+      })
       .catch((e) => log.warn('[builtin-slot] could not release the displaced engine', { err: e }))
   }, BUILTIN_SLOT_OFFLOAD_GRACE_MS)
+}
+
+/**
+ * Die Chat-Engine zurueckholen, nachdem der Steckplatz wieder unserer ist.
+ *
+ * Der Aufruf kommt spaet und dynamisch, weil `builtin-ensure` ueber den
+ * providerStore auf dieses Modul zurueckzeigt. Ein fest verdrahteter Import
+ * waere ein Ladekreis. `ensureBuiltinEngineAlive` ist genau der Weg, den auch
+ * das Absenden einer Nachricht geht: Zustand fragen, Datei suchen, mit der
+ * Feineinstellung des Nutzers starten.
+ */
+async function bringEngineBack(): Promise<void> {
+  if (!isTauri()) return
+  try {
+    const { useModelStore } = await import('../stores/modelStore')
+    const gewaehlt = useModelStore.getState().activeModel
+    if (!gewaehlt) return
+    const { ensureBuiltinEngineAlive } = await import('../api/builtin-ensure')
+    await ensureBuiltinEngineAlive(gewaehlt)
+    log.info('[builtin-slot] engine has the local slot again, brought it back')
+  } catch (e) {
+    // Kein Grund, den Steckplatzwechsel scheitern zu lassen. Der Absendeweg
+    // versucht dasselbe noch einmal, sobald jemand etwas schreibt.
+    log.warn('[builtin-slot] could not bring the engine back', { err: e })
+  }
 }
 
 /** Test-only: forget a pending unload so tests stay isolated. */
 export function __resetBuiltinSlotOffloadForTests(): void {
   cancelPending()
+  entladen = false
 }
