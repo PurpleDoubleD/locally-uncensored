@@ -121,7 +121,14 @@ describe('was ein Nutzer liest, dessen Server nicht mehr startet', () => {
     // Meldung muss ein Beispiel nennen, das wirklich startet. Der Fall
     // darunter prueft zusaetzlich, dass sie das Wort URL gar nicht mehr
     // fuehrt, solange die Konfiguration kein solches Feld hat.
-    expect(satz.toLowerCase()).toContain('npx -y')
+    //
+    // Am 05.09.2026 stand hier `npx -y your-mcp-package`. Ein Tester hat es
+    // woertlich eingetragen und bekam "Server process exited": der Name war
+    // ein Platzhalter und existiert nicht. Jetzt steht dort ein Paket, das am
+    // selben Tag auf der Windows-Box gefahren wurde und zwei Werkzeuge
+    // lieferte.
+    expect(satz).toContain('mcp-server-time')
+    expect(satz.toLowerCase()).not.toContain('your-mcp-package')
   })
 
   it('sie ist Englisch', () => {
@@ -173,6 +180,41 @@ describe('die Oberflaeche verspricht nur, was die App kann', () => {
       expect(platzhalter, `der Platzhalter schlaegt ${tot} vor, das startet nicht mehr`)
         .not.toContain(tot)
     }
+  })
+
+  it('wer zum Aendern geraten wird, findet auch einen Knopf dafuer', () => {
+    // Gefunden am 05.09.2026 von einem Tester, der die App zum ersten Mal
+    // bediente: die Meldung sagte "Change the command to one of those". Die
+    // Zeile trug aber genau zwei Knoepfe, Connect und Remove server, und
+    // Klick, Doppelklick und Rechtsklick oeffneten kein Eingabefeld. Der Rat
+    // verwies auf eine Handlung, die die Oberflaeche nicht anbot, genau wie
+    // der URL-Weg davor.
+    //
+    // Die erste Fassung dieser Wache fragte den STORE nach `updateServer` und
+    // blieb deshalb gruen: die Funktion lag dort seit je fertig und getestet,
+    // sie wurde nur von nirgends gerufen. Eine Wache, die beim Rueckbau nicht
+    // beisst, ist keine. Gefragt wird jetzt die Oberflaeche, denn dort
+    // entscheidet sich, ob der Nutzer den Weg findet.
+    const ui = lies('components', 'settings', 'MCPServerSettings.tsx')
+    const hatKnopf = /title="Edit server"/.test(ui) && /\bupdateServer\(/.test(ui)
+    const satz = notStartableMessage('demo', 'node server.js').toLowerCase()
+    if (/change the command|edit the/.test(satz)) {
+      expect(hatKnopf, 'die Meldung raet zum Aendern, aber die Zeile hat keinen Bearbeiten-Knopf')
+        .toBe(true)
+    } else {
+      // Ohne Knopf muss sie den Weg nennen, den es dann gibt.
+      expect(satz).toMatch(/remove/)
+    }
+  })
+
+  it('der Platzhalter sagt nicht "zum Beispiel", wenn es die einzigen sind', () => {
+    // "Command (e.g. npx, uvx)" liest sich wie zwei Beispiele unter vielen.
+    // Es sind aber die einzigen erlaubten. Derselbe Tester ist darueber
+    // gestolpert: die Einschraenkung erfuhr er erst nach dem Fehlschlag.
+    const ui = lies('components', 'settings', 'MCPServerSettings.tsx')
+    const platzhalter = ui.match(/placeholder="Command[^"]*"/)?.[0] ?? ''
+    expect(platzhalter).not.toMatch(/e\.g\./)
+    for (const s of MCP_STARTER) expect(platzhalter).toContain(s)
   })
 
   it('die Fehlermeldung nennt keinen Ausweg, den es nicht gibt', () => {

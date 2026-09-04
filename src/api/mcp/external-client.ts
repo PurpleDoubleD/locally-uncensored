@@ -549,13 +549,32 @@ export function isStartableMcpCommand(command: string): boolean {
  * kennt `command`, `args` und `env` und kein `url`, und unter api/mcp/ steht
  * weder ein SSE- noch ein HTTP-Transport. Ein Ausweg, den das Produkt nicht
  * hat, ist schlimmer als keiner, weil der Nutzer nach einem Feld sucht, das
- * es nie gab. Jetzt steht dort der Weg, den es wirklich gibt, mit Beispiel.
+ * es nie gab.
+ *
+ * Am 05.09.2026 fiel ein zweiter Ausweg derselben Sorte auf, diesmal von einem
+ * Tester, der die App zum ersten Mal bediente. Der Ersatzsatz sagte "Change the
+ * command to one of those". Aendern konnte man aber nichts: die Zeile trug
+ * genau zwei Knoepfe, "Connect" und "Remove server", und Klick, Doppelklick
+ * und Rechtsklick auf Name oder Befehl oeffneten kein Eingabefeld. Wer sich
+ * vertippt hatte, musste loeschen und alles neu eintippen.
+ *
+ * Statt den Satz um die Luecke herumzuschreiben ist die Luecke geschlossen:
+ * `updateServer` lag im Store bereits fertig und getestet und wurde von
+ * nirgends gerufen. `MCPServerSettings` hat jetzt einen "Edit server"-Knopf,
+ * der genau darauf geht. Der Rat stimmt damit wieder.
+ *
+ * Und das Beispiel `npx -y your-mcp-package` war ein Platzhaltername. Wer ihm
+ * woertlich folgte, bekam "Server process exited", ohne Hinweis darauf, dass
+ * das Paket gar nicht existiert. Die Meldung fuehrte in eine zweite, schlechtere.
+ * Jetzt nennt sie ein Paket, das wirklich startet: `uvx mcp-server-time` wurde
+ * am 05.09. auf der Windows-Box gefahren und lieferte zwei Werkzeuge.
  */
 export function notStartableMessage(name: string, command: string): string {
   return (
     `LU cannot start "${name}": it is set to run \`${command}\`, and LU only starts `
-    + `MCP servers through ${MCP_STARTER.join(' or ')}. Change the command to one of `
-    + `those, for example \`npx -y your-mcp-package\`.`
+    + `MCP servers through ${MCP_STARTER.join(' or ')}. Use the edit button on the `
+    + `server entry to change the command to one of those, for example the command `
+    + `\`uvx\` with the argument \`mcp-server-time\`.`
   )
 }
 
