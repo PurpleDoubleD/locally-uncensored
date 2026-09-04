@@ -91,6 +91,26 @@ export function Sidebar() {
   // (2026-07-30): the buttons existed, but at 10 px and only on hover, and the
   // gesture everyone tries first did nothing at all.
   const [rowMenu, setRowMenu] = useState<{ id: string; x: number; y: number } | null>(null)
+  /**
+   * Was zuletzt geloescht wurde, fuer die Vorlesehilfe.
+   *
+   * Ein Tester hat am 05.09.2026 gemessen, dass nach dem Loeschen NICHTS
+   * zurueckkommt: keine Rueckfrage, kein Rueckgaengig, und der `aria-live`-
+   * Bereich blieb leer. Wer sieht, merkt es an der verschwundenen Zeile. Wer
+   * sich vorlesen laesst, erfaehrt gar nichts, und das wiegt hier schwerer als
+   * sonst: der Tabstopp "Delete chat" folgt unmittelbar auf "Rename chat", ein
+   * Enter zu frueh und der Chat ist weg. Ohne Ansage weiss man nicht einmal,
+   * DASS es passiert ist.
+   */
+  const [zuletztGeloescht, setZuletztGeloescht] = useState<string | null>(null)
+
+  /** Loeschen aus der Liste, mit Ansage. Die automatische Aufraeumung eines
+   *  gescheiterten Fernauftrags geht bewusst nicht hier durch: sie ist keine
+   *  Handlung des Nutzers und braucht keine Rueckmeldung. */
+  const loescheChatMitAnsage = (id: string, titel: string) => {
+    deleteConversation(id)
+    setZuletztGeloescht(titel.trim() || 'Untitled chat')
+  }
 
   const isCodingMode = chatMode === 'codex'
   const isRemoteMode = chatMode === 'remote'
@@ -812,6 +832,11 @@ export function Sidebar() {
             </div>
           </div>
 
+          {/* Nur fuer Vorlesehilfen: sagt an, dass und was geloescht wurde. */}
+          <div role="status" aria-live="polite" className="sr-only">
+            {zuletztGeloescht ? `Deleted chat: ${zuletztGeloescht}` : ''}
+          </div>
+
           {/* Conversations */}
           <div className="flex-1 overflow-y-auto px-[7.5px] pt-1.25 scrollbar-thin">
             {/**
@@ -1059,7 +1084,7 @@ export function Sidebar() {
                         <Edit3 size={16} />
                       </button>
                       <button
-                        onClick={(e) => { e.stopPropagation(); deleteConversation(conv.id) }}
+                        onClick={(e) => { e.stopPropagation(); loescheChatMitAnsage(conv.id, conv.title) }}
                         title="Delete chat"
                         aria-label="Delete chat"
                         className="p-1.25 rounded-[5px] hover:bg-red-500/20 text-gray-500 hover:text-red-400"
@@ -1215,7 +1240,10 @@ export function Sidebar() {
             </button>
             <button
               role="menuitem"
-              onClick={() => { deleteConversation(rowMenu.id); setRowMenu(null) }}
+              onClick={() => {
+                loescheChatMitAnsage(rowMenu.id, useChatStore.getState().conversations.find((c) => c.id === rowMenu.id)?.title ?? '')
+                setRowMenu(null)
+              }}
               className="w-full flex items-center gap-2.5 px-3.75 py-[7.5px] text-red-500 hover:bg-red-500/10"
             >
               <Trash2 size={15} />

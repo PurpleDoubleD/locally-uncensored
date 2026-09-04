@@ -122,7 +122,11 @@ interface ChatState {
    *  chat, and bumping it would jump the chat to the top of the sidebar. */
   setActiveConversationModel: (model: string) => void
   addMessage: (conversationId: string, message: Message) => void
-  /** Append a compaction record (2.6.8). Newest last; only the newest is applied. */
+  /** Append a compaction record (2.6.8). Newest last; every record up to the
+   *  cut is applied, not only the newest. Until 2026-09-05 only the newest one
+   *  went out, and since each run deliberately summarises only what the
+   *  previous one did not cover, a second compaction dropped the first
+   *  section entirely. See `applyStoredCompaction`. */
   recordCompaction: (conversationId: string, record: CompactionRecord) => void
   insertMessageBefore: (conversationId: string, beforeId: string, message: Message) => void
   insertMessagesBefore: (conversationId: string, beforeId: string, messages: Message[]) => void

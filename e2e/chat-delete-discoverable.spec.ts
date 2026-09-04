@@ -289,3 +289,45 @@ test('KF-8: die Zeile heisst „New Chat" und ist trotzdem kein Knopf', async ({
   await expect(page.getByRole('button', { name: /New Chat/i })).toHaveCount(1)
   await expect(page.getByRole('option').filter({ hasText: 'New Chat' })).toHaveCount(1)
 })
+
+/**
+ * Nach dem Loeschen sagt die App an, WAS weg ist.
+ *
+ * Gemessen von einem Tester in der installierten 2.6.8 auf Windows, am
+ * 05.09.2026: ein Klick auf den Muelleimer entfernt die Unterhaltung sofort,
+ * `[role=dialog]` bleibt bei null (keine Rueckfrage), es gibt kein
+ * Rueckgaengig, und der `aria-live`-Bereich blieb leer. Wer sieht, merkt es an
+ * der verschwundenen Zeile. Wer sich vorlesen laesst, erfaehrt nichts.
+ *
+ * Das wiegt hier schwerer als sonst, und der Grund steht weiter oben in dieser
+ * Datei: der Tabstopp "Delete chat" folgt unmittelbar auf "Rename chat" jeder
+ * Zeile. Ein Enter zu frueh und der Chat ist weg. Ohne Ansage weiss ein
+ * Tastaturnutzer nicht einmal, DASS es passiert ist.
+ *
+ * Ob es zusaetzlich eine Rueckfrage oder ein Rueckgaengig geben soll, ist eine
+ * Produktentscheidung und steht auf Davids Liste. Die Ansage ist keine: sie
+ * ist die Mindestauskunft darueber, dass die eigene Handlung gewirkt hat.
+ */
+test('nach dem Loeschen sagt eine Vorlesehilfe, welcher Chat weg ist', async ({ page }) => {
+  await bootWithTwoChats(page)
+
+  const ansage = page.locator('[role="status"][aria-live="polite"]').filter({ hasText: /Deleted chat/ })
+  await expect(ansage, 'vor dem Loeschen darf nichts angesagt werden').toHaveCount(0)
+
+  const { del } = await pointerOnFirstRow(page)
+  await del.click()
+
+  await expect.poll(async () => await rowCount(page), {
+    message: 'die Zeile ist gar nicht verschwunden, dann misst der Rest nichts',
+  }).toBe(1)
+
+  // DER FALL: die Ansage traegt den Titel, nicht nur ein "done".
+  //
+  // Gesucht wird ueber den Text, nicht ueber die Stelle: es gibt mehrere
+  // `role=status`-Bereiche im Fenster (die Motorleiste hat einen eigenen), und
+  // ein Selektor, der sie alle trifft, prueft am Ende keinen davon.
+  await expect(ansage, 'nach dem Loeschen bleibt der aria-live-Bereich leer')
+    .toHaveCount(1, { timeout: 5_000 })
+  await expect(ansage, 'die Ansage nennt den Chat nicht beim Namen')
+    .toContainText(/Deleted chat: .+/)
+})
