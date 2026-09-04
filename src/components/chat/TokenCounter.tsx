@@ -6,6 +6,7 @@ import { useSettingsStore } from '../../stores/settingsStore'
 import { shouldAutoCompact, autoCompactHint } from '../../lib/compact-trigger'
 import { newestCompaction, isModelVisible } from '../../lib/run-compact-command'
 import { formatContextWindow } from '../../lib/formatters'
+import { HINWEIS_TEXT, PUNKT_FARBE } from '../../lib/hinweis'
 
 export function TokenCounter() {
   const activeConversationId = useChatStore((s) => s.activeConversationId)
@@ -56,7 +57,7 @@ export function TokenCounter() {
   // Resolved real context window; fall back to the VRAM-safe default only while
   // the provider probe is still in flight (ctx not resolved yet). On a paid
   // provider the denominator is the SEND window, not the model window: a
-  // 262k-context model whose steps are capped at 64k would otherwise sit green
+  // 262k-context model whose steps are capped at 64k would otherwise sit quiet
   // at 25 percent forever, the red warning would never fire, and every support
   // case would arrive with a healthy meter next to a drained wallet (plan A2,
   // meter honesty).
@@ -69,8 +70,15 @@ export function TokenCounter() {
   const isReal = fill.real && usedTokens === rawUsed
 
   const ratio = maxTokens > 0 ? usedTokens / maxTokens : 0
-  const color = ratio > 0.8 ? 'text-red-400' : ratio > 0.5 ? 'text-amber-400' : 'text-gray-500'
-  const barColor = ratio > 0.8 ? 'bg-red-500' : ratio > 0.5 ? 'bg-amber-500' : 'bg-gray-500'
+  // Zwei Toene, kein dritter (`lib/hinweis.ts`). Bis hierher gab es eine
+  // mittlere Stufe ab 50 Prozent, und die hat nichts gesagt: halbvoll ist der
+  // Normalfall eines laufenden Gespraechs, kein Zwischenfall. Ueber 80 Prozent
+  // wird es eng, das traegt Rot. Alles darunter ist ruhiges Grau. Schrift und
+  // Balken holen sich dieselbe Aussage aus derselben Datei, damit der Balken
+  // nicht eines Tages allein weiterwandert.
+  const eng = ratio > 0.8
+  const color = eng ? HINWEIS_TEXT.fehler : HINWEIS_TEXT.ruhig
+  const barColor = eng ? PUNKT_FARBE.kaputt : PUNKT_FARBE.aus
 
   // Dieselbe Schreibweise wie die Klapplade darunter. Vorher stand hier
   // 8192/1000 und dort 8192/1024, also `8.2k` neben `8K` fuer eine einzige

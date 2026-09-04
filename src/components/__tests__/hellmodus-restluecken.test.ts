@@ -29,6 +29,25 @@
  * Die Kontrastrechnung ist die aus `primary-recipe.test.ts`, jetzt in
  * `./wcag-contrast` — eine Implementierung, zwei Nutzer.
  *
+ * ## Nachtrag 04.09.2026: eine der fuenf Farben gibt es nicht mehr
+ *
+ * Dieser Test hat den Passcode im QR-Modal als `text-amber-700
+ * dark:text-amber-400` festgeschrieben. Das war zum Zeitpunkt richtig: der
+ * Auftrag war der Hellmodus, und amber-700 war das fehlende Hell-Pendant
+ * zu einem Gelb, das damals stehenblieb.
+ *
+ * Seitdem ist die Regel eine andere. `lib/hinweis.ts` kennt zwei Toene,
+ * ruhig und fehler, und Gelb ist keiner davon: es hatte in dieser App
+ * fuenf verschiedene Bedeutungen und damit keine. Der Passcode war der
+ * Sonderfall darunter, weil er gar nichts meldet. Er ist der Wert, den man
+ * abliest und ins Telefon tippt. Ein Wert braucht Kontrast und keinen
+ * Farbton, also traegt er jetzt gray-900 auf Weiss und Weiss im Dunkeln.
+ *
+ * Die Rechnungen von damals bleiben trotzdem stehen, sie sind ja der Grund
+ * fuer die Bauform: was gemessen wurde, wird nicht dadurch falsch, dass
+ * die Farbe geht. Neu dazu kommt die Gegenrichtung, weiter unten: in
+ * diesen Abschnitten darf ueberhaupt kein Gelb mehr auftauchen.
+ *
  * Run: npx vitest run src/components/__tests__/hellmodus-restluecken.test.ts
  */
 import { describe, it, expect } from 'vitest'
@@ -91,8 +110,9 @@ const TW = {
   'red-400': '#f87171',
   'red-600': '#dc2626',
   'red-700': '#b91c1c',
+  // Nur noch fuer die Rechnung von damals. Im Quelltext steht keins von
+  // beiden mehr, das prueft `kein Gelb mehr` weiter unten nach.
   'amber-400': '#fbbf24',
-  'amber-700': '#b45309',
 } as const
 
 describe('die Palette im Test stimmt mit der in index.css ueberein', () => {
@@ -144,7 +164,7 @@ describe('WARUM die Flaeche allein nicht gereicht haette', () => {
     ['green-400', 'LIVE-Zeile im QR-Modal, „Active" in ProviderConfig'],
     ['blue-400', 'Trigger waehrend des Downloads'],
     ['red-400', 'Fehlerzustand'],
-    ['amber-400', 'Passcode im QR-Modal'],
+    ['amber-400', 'Passcode im QR-Modal, so bis 04.09.2026'],
   ]
 
   it.each(DARK_ONLY)('%s faellt auf Weiss durch (%s)', (name) => {
@@ -180,12 +200,22 @@ describe('NACHHER: die Hell-Pendants erreichen AA', () => {
     ['emerald-700', 5.48],
     ['blue-700', 6.7],
     ['red-700', 6.47],
-    ['amber-700', 5.02],
   ]
 
   it.each(HELL)('%s auf Weiss = %s:1', (name, erwartet) => {
     expect(contrast(TW[name], WHITE)).toBeGreaterThanOrEqual(4.5)
     expect(contrast(TW[name], WHITE)).toBeCloseTo(erwartet, 1)
+  })
+
+  it('der Passcode ist gar kein Akzent mehr, sondern der staerkste Kontrast', () => {
+    // Die fuenfte Zeile dieser Liste hiess amber-700 mit 5,02:1. Sie ist
+    // weg, weil der Passcode seit dem 04.09.2026 keine Farbe mehr traegt:
+    // 17,74:1 im Hellmodus und 16,29:1 im Dunkelmodus schlagen jedes
+    // Hell-Pendant, das man ihm haette geben koennen. Ein Passcode meldet
+    // keinen Zustand, er wird abgetippt.
+    expect(QR_MODAL).toContain('text-gray-900 dark:text-white')
+    expect(contrast(TW['gray-900'], WHITE)).toBeCloseTo(17.74, 1)
+    expect(contrast(WHITE, token('color-lu-base'))).toBeCloseTo(16.29, 1)
   })
 
   it('die Nicht-Text-Signale erreichen 3:1 (WCAG 1.4.11)', () => {
@@ -198,7 +228,9 @@ describe('NACHHER: die Hell-Pendants erreichen AA', () => {
 
   it('und die dunkle Seite bleibt unangetastet gut', () => {
     expect(contrast(TW['emerald-400'], token('color-lu-overlay'))).toBeGreaterThanOrEqual(4.5)
-    expect(contrast(TW['amber-400'], token('color-lu-base'))).toBeGreaterThanOrEqual(4.5)
+    // Stand hier als amber-400 auf lu-base (9,76:1). Dieselbe Flaeche,
+    // derselbe Anspruch, nur traegt sie jetzt die Schrift des Passcodes.
+    expect(contrast(WHITE, token('color-lu-base'))).toBeGreaterThanOrEqual(4.5)
   })
 })
 
@@ -258,7 +290,26 @@ describe('kein dunkelmodus-only Akzent mehr in diesen Abschnitten', () => {
     expect(PROVIDER_DROPDOWN).toContain('text-green-700 dark:text-green-400')
     expect(BADGE).toContain('text-emerald-700 dark:text-emerald-400')
     expect(BADGE).toContain('bg-emerald-600 dark:bg-emerald-400')
-    expect(QR_MODAL).toContain('text-amber-700 dark:text-amber-400')
+    expect(QR_MODAL).toContain('text-red-700 dark:text-red-400')
     expect(QR_MODAL).toContain('text-green-700 dark:text-green-400')
+  })
+})
+
+describe('kein Gelb mehr, auch nicht als Schmuck', () => {
+  // Die Gegenrichtung zu allem darueber. Bis zum 04.09.2026 war Gelb der
+  // Sammelplatz fuer alles zwischen gut und kaputt, und genau deshalb
+  // sagte es nichts. `lib/hinweis.ts` kennt seither zwei Toene, ruhig und
+  // fehler. Diese drei Abschnitte hatten je eine Fundstelle: der Passcode
+  // im QR-Modal war die letzte davon.
+  it.each(REGIONEN)('%s: kein amber und kein yellow', (name, region) => {
+    const treffer = [...ohneKommentare(region).matchAll(/(?:amber|yellow)-\d{2,3}/g)].map((m) => m[0])
+    expect(treffer, name).toEqual([])
+  })
+
+  it('und auch nicht im Rest der Sidebar, wo der zweite Passcode steht', () => {
+    // Das QR-Modal ist nur die grosse Fassung. Dieselbe Ziffernfolge steht
+    // im LIVE-Panel der Spalte, ausserhalb der Region oben.
+    expect(ohneKommentare(SIDEBAR)).not.toMatch(/(?:amber|yellow)-\d{2,3}/)
+    expect(SIDEBAR).toContain('text-gray-900 dark:text-white font-mono')
   })
 })

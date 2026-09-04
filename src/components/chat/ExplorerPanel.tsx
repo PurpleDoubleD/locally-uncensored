@@ -66,6 +66,7 @@ import { PlanApprovalBar } from './PlanApprovalBar'
 import { FilePreview } from './FilePreview'
 import { useChatStore } from '../../stores/chatStore'
 import { useTodoStore } from '../../stores/todoStore'
+import { HINWEIS_TEXT } from '../../lib/hinweis'
 
 const fsList: FsList = (args) => backendCall('fs_list', args as unknown as Record<string, unknown>)
 
@@ -405,7 +406,11 @@ function ListingHints({ listing, depth }: { listing: ExplorerListing; depth: num
   return (
     <div style={{ paddingLeft: `${depth * 8 + 4}px` }} className="py-[1px]">
       {listing.truncated && (
-        <p className="text-[0.45rem] text-amber-500/80" data-testid="explorer-truncated">
+        // Ruhiger Ton, nicht Gelb: die Liste ist vollstaendig bis zur Grenze,
+        // sie ist nicht kaputt. Etwas kraeftiger als die Zeile darunter, weil
+        // „hier fehlt der Rest" die groessere der zwei Auskuenfte ist
+        // (`lib/hinweis.ts`).
+        <p className={`text-[0.45rem] ${HINWEIS_TEXT.ruhig}`} data-testid="explorer-truncated">
           shortened, first {FS_LIST_CAP} entries only
         </p>
       )}

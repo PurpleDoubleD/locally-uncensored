@@ -5,6 +5,7 @@ import { useSettingsStore } from '../../stores/settingsStore'
 import { getImageModels, getVideoModels, isI2VModel, isT2VCapable } from '../../api/comfyui'
 import type { AgentToolCall } from '../../types/agent-mode'
 import type { ToolArgs } from '../../api/mcp/types'
+import { Hinweis } from '../ui/Hinweis'
 
 /**
  * Model-Picker UI (v2.5.3, David 2026-06-10). Two faces of one feature:
@@ -199,7 +200,10 @@ export function ChangeModelInline({ kind }: { kind: ModelPickKind }) {
             <div className="flex items-center gap-1 text-[0.55rem] text-gray-500"><Loader2 size={9} className="animate-spin" /> loading models…</div>
           )}
           {loadError && (
-            <div className="text-[0.55rem] text-amber-500">Could not reach ComfyUI, so the model list is unavailable.</div>
+            // Roter Ton, weil hier wirklich etwas fehlgeschlagen ist: ohne
+            // Liste kann niemand waehlen. Gelb hat den Unterschied zwischen
+            // „laedt noch" und „ging schief" eingeebnet (`lib/hinweis.ts`).
+            <Hinweis ton="fehler">Could not reach ComfyUI, so the model list is unavailable.</Hinweis>
           )}
           {models !== null && models.length > 0 && (
             <ModelList

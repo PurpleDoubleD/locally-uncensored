@@ -95,7 +95,10 @@ function classNameMit(src: string, marker: string): string {
 }
 
 describe('D-S18: die zwei verbliebenen Streifen sind EINE Flaeche', () => {
-  const headerFlaeche = flaeche(classNameMit(HEADER, 'h-10 grid'))
+  // 04.09.2026: die Kopfzeile war ein Raster und ist jetzt eine Flex-Zeile
+  // mit absolut gesetzter Mitte (das Drehrad muss hart mittig stehen). An
+  // der FLAECHE, um die es hier geht, aendert das nichts.
+  const headerFlaeche = flaeche(classNameMit(HEADER, 'h-10 flex'))
 
   it('der Header traegt ueberhaupt eine benannte Flaeche', () => {
     expect(headerFlaeche).not.toBe('')
@@ -119,7 +122,7 @@ describe('D-S18: die zwei verbliebenen Streifen sind EINE Flaeche', () => {
   it('NEGATIVKONTROLLE: keine Trennkante und kein Schatten zwischen ihnen', () => {
     // Eine Kante oder ein Schatten waere der Strich, der aus einer Flaeche
     // zwei Baender macht — und damit das Argument dieses Befundes zurueck.
-    const streifen = [classNameMit(HEADER, 'h-10 grid'), ...titlebarStreifen()]
+    const streifen = [classNameMit(HEADER, 'h-10 flex'), ...titlebarStreifen()]
     for (const s of streifen) {
       expect(s, s).not.toMatch(/\bborder-b\b/)
       expect(s, s).not.toMatch(/\bshadow-/)

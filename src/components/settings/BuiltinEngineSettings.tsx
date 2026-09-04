@@ -8,6 +8,7 @@
 import { useRef, useState } from 'react'
 import { Loader2, AlertTriangle, Check, Zap } from 'lucide-react'
 import { useSettingsStore } from '../../stores/settingsStore'
+import { Hinweis } from '../ui/Hinweis'
 import { bundledEngineStatus, swapBundledModel, ENGINE_PORT } from '../../api/engine'
 import { useBuiltinEngineStatus } from '../../hooks/useBuiltinEngineStatus'
 import { enginePortLine } from '../../lib/engine-port'
@@ -66,8 +67,8 @@ export function BuiltinEngineSettings() {
     setApplied(false)
   }
 
-  // llama.cpp constraint: a quantized V-cache requires flash attention — the
-  // server refuses to start otherwise. Warn instead of silently breaking.
+  // llama.cpp constraint: a quantized V-cache requires flash attention, the
+  // server refuses to start otherwise. Say so instead of breaking silently.
   const vQuantNeedsFa = tuning.cacheTypeV !== 'f16' && tuning.flashAttn === 'off'
 
   const running = !!status?.running && !!status.model_path
@@ -94,12 +95,13 @@ export function BuiltinEngineSettings() {
 
   return (
     <div className="space-y-3">
-      <div className="flex items-start gap-2.5 p-2.5 rounded-lg border border-amber-200 dark:border-amber-500/20 bg-amber-50 dark:bg-amber-500/[0.08] text-amber-900 dark:text-amber-200">
-        <Zap size={14} className="mt-0.5 shrink-0" />
-        <div className="text-[0.65rem] leading-relaxed">
-          <strong>Expert settings for the LU Engine.</strong> The defaults match what LU shipped with and are right for most machines. Every start of the engine uses these values; a running engine needs Apply &amp; Restart below.
-        </div>
-      </div>
+      {/* Der klotzigste Fall im ganzen Baum: ein Satz, der nur erklaert, wofuer
+          die Werte hier gut sind, stand in einem gelben Rahmen mit gelber
+          Fuellung und fetter Ueberschrift und sah damit aus wie ein Absturz.
+          Jetzt eine Zeile im ruhigen Ton. Regel: lib/hinweis.ts. */}
+      <Hinweis icon={<Zap size={11} className="shrink-0 mt-[3px]" />}>
+        Expert settings for the LU Engine. The defaults match what LU shipped with and are right for most machines. Every start of the engine uses these values; a running engine needs Apply &amp; Restart below.
+      </Hinweis>
 
       {/* Live status */}
       <div className="text-[0.6rem] text-gray-500">
@@ -183,10 +185,9 @@ export function BuiltinEngineSettings() {
         Memory vs. quality: q8_0 on K+V roughly halves KV-cache memory at near-identical output; q4_0 quarters it but can degrade long-context answers.
       </div>
       {vQuantNeedsFa && (
-        <div className="flex items-start gap-2 p-2 rounded border border-amber-500/25 bg-amber-500/[0.08] text-amber-300">
-          <AlertTriangle size={12} className="mt-0.5 shrink-0" />
-          <span className="text-[0.6rem] leading-relaxed">A quantized V cache requires flash attention — with it off the engine will refuse to start. Switch flash attention to auto or on.</span>
-        </div>
+        <Hinweis ton="fehler" icon={<AlertTriangle size={11} className="shrink-0 mt-[3px]" />}>
+          A quantized V cache requires flash attention. With it off the engine refuses to start, so switch flash attention to auto or on.
+        </Hinweis>
       )}
 
       {/* Threads */}
@@ -254,10 +255,9 @@ export function BuiltinEngineSettings() {
           </button>
         </div>
         {error && (
-          <div className="flex items-start gap-2 p-2 rounded border border-red-500/20 bg-red-500/[0.06] text-red-300">
-            <AlertTriangle size={12} className="mt-0.5 shrink-0" />
-            <span className="text-[0.6rem] leading-relaxed break-all">{error}</span>
-          </div>
+          <Hinweis ton="fehler" className="break-all" icon={<AlertTriangle size={11} className="shrink-0 mt-[3px]" />}>
+            {error}
+          </Hinweis>
         )}
       </div>
     </div>

@@ -8,6 +8,7 @@ import { useToolSupport } from '../../hooks/useToolSupport'
 import { GROUP_CHAT_MAX, isGroupChat, groupChatCandidates } from '../../lib/group-chat'
 import type { CavemanMode } from '../../types/settings'
 import { displayModelName } from '../../api/providers/registry'
+import { HINWEIS_TEXT } from '../../lib/hinweis'
 
 const CAVEMAN_MODES: { value: CavemanMode; label: string; desc: string }[] = [
   { value: 'off', label: 'Off', desc: 'Normal responses' },
@@ -110,7 +111,11 @@ export function PluginsDropdown({
           {anyPluginActive && (
             <div className="flex gap-0.5">
               {chatToolsEnabled && <div className="w-1 h-1 rounded-full bg-blue-400" />}
-              {isCavemanActive && <div className="w-1 h-1 rounded-full bg-amber-400" />}
+              {/* Rosa, nicht mehr Bernstein: die vier Punkte sind Kategorien,
+                  keine Zustaende, und Gelb hat hier nie eine Warnung gemeint.
+                  Blau, Gruen und Violett waren schon vergeben, Rot gehoert
+                  Fehlern. */}
+              {isCavemanActive && <div className="w-1 h-1 rounded-full bg-pink-400" />}
               {isPersonaActive && <div className="w-1 h-1 rounded-full bg-green-400" />}
               {isGroupActive && <div className="w-1 h-1 rounded-full bg-purple-400" />}
             </div>
@@ -149,7 +154,10 @@ export function PluginsDropdown({
                 </button>
               </div>
               {!canUseTools && (
-                <div className="pb-1.5 text-[0.5rem] leading-snug text-amber-600 dark:text-amber-400/90">
+                // Kein Fehler, nur ein Grund: dieses Modell hat keinen
+                // Werkzeugkanal. Ruhiges Grau aus `lib/hinweis.ts` statt des
+                // alten Gelbs, das aussah, als sei etwas schiefgegangen.
+                <div className={`pb-1.5 text-[0.5rem] leading-snug ${HINWEIS_TEXT.ruhig}`}>
                   {reason}
                 </div>
               )}
@@ -164,11 +172,11 @@ export function PluginsDropdown({
                 className="w-full flex items-center justify-between py-1.5 group"
               >
                 <div className="flex items-center gap-1.5">
-                  <Bone size={10} className={isCavemanActive ? 'text-amber-400' : 'text-gray-400'} />
+                  <Bone size={10} className={isCavemanActive ? 'text-pink-400' : 'text-gray-400'} />
                   <span className="t-micro font-medium text-gray-600 dark:text-gray-300">Caveman Mode</span>
                 </div>
                 <div className="flex items-center gap-1">
-                  <span className={`text-[0.55rem] ${isCavemanActive ? 'text-amber-400' : 'text-gray-500'}`}>
+                  <span className={`text-[0.55rem] ${isCavemanActive ? 'text-pink-400' : 'text-gray-500'}`}>
                     {currentCaveman?.label || 'Off'}
                   </span>
                   <ChevronDown size={9} className={`text-gray-500 transition-transform ${cavemanOpen ? 'rotate-180' : ''}`} />
@@ -187,12 +195,12 @@ export function PluginsDropdown({
                           isActive
                             ? mode.value === 'off'
                               ? 'bg-gray-100 dark:bg-white/[0.06] text-gray-700 dark:text-gray-200'
-                              : 'bg-amber-500/10 text-amber-600 dark:text-amber-400'
+                              : 'bg-pink-500/10 text-pink-600 dark:text-pink-400'
                             : 'text-gray-500 hover:bg-gray-50 dark:hover:bg-white/[0.04] hover:text-gray-700 dark:hover:text-gray-300'
                         }`}
                       >
                         <div className="flex items-center gap-1.5">
-                          {isActive && <div className={`w-1 h-1 rounded-full shrink-0 ${mode.value === 'off' ? 'bg-gray-400' : 'bg-amber-400'}`} />}
+                          {isActive && <div className={`w-1 h-1 rounded-full shrink-0 ${mode.value === 'off' ? 'bg-gray-400' : 'bg-pink-400'}`} />}
                           <span className="text-[0.55rem] font-medium">{mode.label}</span>
                         </div>
                         <span className="text-[0.5rem] text-gray-400">{mode.desc}</span>

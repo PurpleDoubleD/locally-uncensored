@@ -157,23 +157,35 @@ describe('the hardware chip', () => {
   })
 })
 
-describe('a healthy ROCm install is not painted as a fault', () => {
+describe('a GPU note is a quiet line, not a fault', () => {
   // hypocritical_rj (help-chat "GPU Detection", 26.08.) opened a thread just to
-  // ask whether the yellow line was a problem. Amber is the colour of "LU could
-  // not confirm this", and a correct install has to stop wearing it.
+  // ask whether the yellow line was a problem.
+  //
+  // The first answer was to keep amber and hang it off the severity the backend
+  // sent, so that a confirmed ROCm install went muted and everything else
+  // stayed yellow. David killed the third colour outright on 04.09.2026 ("kein
+  // gelb mehr ohne farbe"), and with it the reason for the branch: neither note
+  // is a fault. One names the ROCm version and the architecture, the other says
+  // LU could not check the compute layer, and the card is listed, selectable
+  // and usable either way. Two notes that both only inform get one tone, the
+  // quiet one from lib/hinweis.ts, and the severity is not read here any more.
   const settings = () => readFileSync(join(__dirname, '../../components/settings/HardwareSettings.tsx'), 'utf8')
 
-  it('hangs the colour off the severity the backend sent', () => {
-    expect(settings()).toMatch(/g\.note_severity === 'info' \? 'text-gray-500' : 'text-amber-500\/80'/)
+  it('says every note in the one quiet tone', () => {
+    expect(settings()).toMatch(/text-\[0\.55rem\] mt-0\.5 leading-relaxed \$\{HINWEIS_TEXT\.ruhig\}/)
   })
 
-  it('leaves every older note in the warning colour', () => {
-    // NEGATIVE CONTROL: the notes that predate the field carry no severity, and
-    // they are all warnings, so an unknown severity must not fall to the muted
-    // branch. The comparison is against 'info' for exactly that reason.
-    expect(settings()).not.toMatch(/note_severity === 'warn'/)
-    // And the unconditional amber that was here is gone.
-    expect(settings()).not.toMatch(/className="text-\[0\.55rem\] text-amber-500\/80 mt-0\.5/)
+  it('picks that tone from the shared rule instead of writing the colour out', () => {
+    // A copied `text-gray-500` drifts the moment the rule moves. The import is
+    // the proof that this line follows lib/hinweis.ts.
+    expect(settings()).toMatch(/import \{ HINWEIS_TEXT \} from '\.\.\/\.\.\/lib\/hinweis'/)
+  })
+
+  it('has no second branch left to paint anything yellow', () => {
+    // NEGATIVE CONTROL: not the severity read, not the colour, nowhere in the
+    // file. The panel used to open with an amber box of its own as well.
+    expect(settings()).not.toMatch(/g\.note_severity/)
+    expect(settings()).not.toMatch(/amber-|yellow-/)
   })
 })
 

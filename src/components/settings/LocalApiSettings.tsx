@@ -6,6 +6,7 @@ import {
   corsText,
 } from '../../lib/local-api'
 import { InlineToggle } from './InlineToggle'
+import { HINWEIS_TEXT } from '../../lib/hinweis'
 
 /**
  * Die lokale Modell-API zum Ein- und Ausschalten.
@@ -73,10 +74,13 @@ export function LocalApiSettings() {
         </button>
       </div>
 
+      {/* Beide Zeilen halten den Start auf, also tragen sie denselben Ton: wer
+          hier nichts tut, bekommt keine API. Frueher stand die obere in Gelb
+          und die untere in Rot, obwohl beide dasselbe verlangen. */}
       {!startbar.ok && !laeuft && (
-        <div className="t-micro text-amber-500">{startbar.grund}</div>
+        <div className={`t-micro ${HINWEIS_TEXT.fehler}`}>{startbar.grund}</div>
       )}
-      {fehler && <div className="t-micro text-red-400">{fehler}</div>}
+      {fehler && <div className={`t-micro ${HINWEIS_TEXT.fehler}`}>{fehler}</div>}
 
       <div className="grid grid-cols-2 gap-3">
         <label className="t-micro text-gray-500">
@@ -88,7 +92,7 @@ export function LocalApiSettings() {
             disabled={laeuft}
             className="mt-1 w-full bg-black/30 border border-white/10 rounded px-2 py-1 text-xs disabled:opacity-50"
           />
-          {!portUrteil.ok && <span className="block mt-1 text-amber-500">{portUrteil.grund}</span>}
+          {!portUrteil.ok && <span className={`block mt-1 ${HINWEIS_TEXT.fehler}`}>{portUrteil.grund}</span>}
         </label>
         <div className="t-micro text-gray-500">
           Reachable on the network

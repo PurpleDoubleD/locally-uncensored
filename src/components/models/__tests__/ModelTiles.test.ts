@@ -16,14 +16,14 @@ describe('computeFit — per-user hardware hint', () => {
     expect(computeFit(0, 12)).toBe('unknown')
   })
 
-  it('8 GB GPU: small models green, 12B-class tight, 20B-class red', () => {
+  it('8 GB GPU: small models fit, 12B-class tight, 20B-class spills to CPU', () => {
     expect(computeFit(5, 8)).toBe('fits')      // 8B Q4
     expect(computeFit(6.9, 8)).toBe('tight')   // 12B Q4 — loads, little headroom
     expect(computeFit(8, 8)).toBe('tight')     // exactly at VRAM
     expect(computeFit(13, 8)).toBe('big')
   })
 
-  it('12 GB GPU (the dev box): 10 GB quant green, 13 GB tight, 16 GB red', () => {
+  it('12 GB GPU (the dev box): 10 GB quant fits, 13 GB tight, 16 GB spills', () => {
     expect(computeFit(10, 12)).toBe('fits')    // GLM 4.7 Flash IQ2_M
     expect(computeFit(13, 12)).toBe('tight')   // Qwen 3.6 27B Q3
     expect(computeFit(16, 12)).toBe('big')     // 27B Q4
@@ -98,7 +98,23 @@ describe('groupModels — quant collapsing', () => {
 
 /**
  * Ton-Pass (Audit Welle 3): „Too big for your GPU" → „Laeuft auf CPU,
- * langsamer".
+ * langsamer". Seit dem 04.09.2026 haelt derselbe Block auch die mittlere
+ * Stufe fest, und zwar aus einem NEUEN Grund.
+ *
+ * WARUM SICH DIE REGEL GEAENDERT HAT: David, 04.09.2026, „kein gelb mehr ohne
+ * farbe ... nicht so klotzig ueberall die fehlermeldungen und anmerkungen".
+ * Damit hat die App nur noch zwei Toene, ruhig und Fehler, und Bernstein ist
+ * keiner davon mehr (`src/lib/hinweis.ts`). Der Test hat vorher genau das
+ * Gegenteil festgeschrieben: er verlangte in `punkte[1]` ausdruecklich
+ * Bernstein und rechnete den Hellmodus-Kontrast dieses Tons nach. Beides ist
+ * hier nicht geloescht, sondern umgestellt, denn der Sinn bleibt derselbe:
+ * die Leiter muss eine Leiter bleiben und darf keine Stufe in einem
+ * Warnungston tragen. Neu ist nur, welche Toene als Warnung gelten.
+ *
+ * Der Punkt „passt knapp" ist der Fall, an dem das haengt: er sagt, dass das
+ * Modell passt. In der Farbe zu malen, mit der die App bis dahin jede Warnung
+ * gemalt hat, war dieselbe Verwechslung wie „laeuft langsam" in Rot, nur eine
+ * Stufe hoeher.
  *
  * Der Anhang des Audits nennt die Fit-Semantik dieses Grids als eine der
  * fuenf Stellen auf Benchmark-Niveau — mit genau einer Ausnahme: „Genau eine
@@ -107,16 +123,19 @@ describe('groupModels — quant collapsing', () => {
  * stand sie eine Zeile tiefer als angegeben (:33 statt :32) und unveraendert
  * da, samt Label.
  *
- * WAS SICH HIER PRUEFEN LAESST: dass die Fehlerfarbe weg ist, dass das
- * Label nicht mehr verbietet, was der Code ausdruecklich erlaubt, und was
- * die neue Farbe rechnerisch bringt. WAS NICHT: ob Bernstein und Orange auf
- * einem 6px-Punkt nebeneinander unterscheidbar sind. Das ist der eine
- * Punkt, der ins laufende Fenster gehoert — hier steht nur die Zahl.
+ * WAS SICH HIER PRUEFEN LAESST: dass weder die Fehlerfarbe noch der alte
+ * Warnungston in der Leiter stehen, dass das Label nicht mehr verbietet, was
+ * der Code ausdruecklich erlaubt, und was die neuen Farben rechnerisch
+ * bringen. WAS NICHT: ob Blau und Orange auf einem 6px-Punkt nebeneinander
+ * unterscheidbar sind. Das ist der eine Punkt, der ins laufende Fenster
+ * gehoert; hier steht nur die Zahl. (Dass es besser steht als vorher, ist
+ * immerhin argumentierbar: Bernstein und Orange lagen auf dem Farbkreis
+ * nebeneinander, Blau liegt es nicht.)
  *
  * Gelesen wird der Quelltext, weil FIT_META modulprivat ist und es auch
  * bleiben soll: es ist eine Darstellungstabelle, kein Vertrag.
  */
-describe('Ton-Pass: „laeuft langsam" ist kein Fehler', () => {
+describe('Ton-Pass: „laeuft langsam" ist kein Fehler, „passt knapp" keine Warnung', () => {
   const SRC = readFileSync(resolve(__dirname, '../ModelTiles.tsx'), 'utf-8')
     .replace(/\/\*[\s\S]*?\*\//g, ' ')
     .replace(/^\s*\/\/.*$/gm, ' ')
@@ -135,13 +154,25 @@ describe('Ton-Pass: „laeuft langsam" ist kein Fehler', () => {
     expect(zeile).toContain('bg-orange-500/80')
   })
 
-  it('die Leiter bleibt eine Leiter — drei Zustaende, drei Farben', () => {
+  it('die Leiter bleibt eine Leiter: drei Zustaende, drei Farben', () => {
+    // Die mittlere Stufe hiess hier bis zum 04.09.2026 Bernstein. Sie heisst
+    // jetzt Blau, weil die App nur noch zwei Toene kennt und keiner davon
+    // Bernstein ist; die Leiter nennt damit den Ort statt einer Temperatur:
+    // Grafikspeicher, knapp daneben, CPU.
     const punkte = [...SRC.matchAll(/dot: '([^']+)'/g)].map((m) => m[1])
     expect(punkte).toHaveLength(4)
     expect(new Set(punkte).size).toBe(4)
     expect(punkte[0]).toContain('emerald')
-    expect(punkte[1]).toContain('amber')
+    expect(punkte[1]).toContain('sky')
     expect(punkte[2]).toContain('orange')
+  })
+
+  it('keine Stufe traegt mehr den alten Warnungston, nirgends in der Datei', () => {
+    // Der Ton ist nicht nur aus der Leiter raus, er ist aus der Datei raus.
+    // Stuende er zwei Bildschirme tiefer an einem Chip, waere die Regel aus
+    // `src/lib/hinweis.ts` genau so weit weg wie vorher.
+    expect(readFileSync(resolve(__dirname, '../ModelTiles.tsx'), 'utf-8'))
+      .not.toMatch(/amber-|yellow-/)
   })
 
   it('das Label nennt die Folge und verbietet nichts', () => {
@@ -158,9 +189,9 @@ describe('Ton-Pass: „laeuft langsam" ist kein Fehler', () => {
     expect(zeile).not.toMatch(/title: '[^']*slow\.[^']*'/)
   })
 
-  it('der Farbtausch kostet keinen Kontrast (gerechnet, nicht geschaetzt)', () => {
+  it('beide Farbtausche kosten keinen Kontrast (gerechnet, nicht geschaetzt)', () => {
     // Kachelflaeche: `bg-gray-50` hell, `bg-white/[0.03]` ueber #1e1e1e
-    // dunkel. Beide Punkte sind zu 80 % deckend.
+    // dunkel. Alle Punkte sind zu 80 % deckend.
     const kachelDunkel = over('#ffffff', '#1e1e1e', 0.03)
     const vorher = over('#f87171', kachelDunkel, 0.8)   // red-400/80
     const nachher = over('#f97316', kachelDunkel, 0.8)  // orange-500/80
@@ -168,6 +199,15 @@ describe('Ton-Pass: „laeuft langsam" ist kein Fehler', () => {
     expect(contrast(nachher, kachelDunkel)).toBeCloseTo(3.98, 1)
     // Im Dunkelmodus erfuellt der Punkt 1.4.11 vorher wie nachher.
     expect(contrast(nachher, kachelDunkel)).toBeGreaterThanOrEqual(3)
+
+    // Dasselbe fuer die mittlere Stufe. Der alte Ton war heller als der neue,
+    // der Tausch kostet dunkel also etwas; er bleibt ueber 3:1 und gewinnt
+    // dafuer im Hellmodus, wo der alte Ton der schlechteste der Leiter war.
+    const mitteVorher = over('#f59e0b', kachelDunkel, 0.8)   // der alte Warnungston
+    const mitteNachher = over('#0ea5e9', kachelDunkel, 0.8)  // sky-500/80
+    expect(contrast(mitteVorher, kachelDunkel)).toBeCloseTo(5.08, 1)
+    expect(contrast(mitteNachher, kachelDunkel)).toBeCloseTo(4.01, 1)
+    expect(contrast(mitteNachher, kachelDunkel)).toBeGreaterThanOrEqual(3)
   })
 
   it('NEBENBEFUND, ungefixt: im Hellmodus traegt die GANZE Leiter nicht', () => {
@@ -179,7 +219,7 @@ describe('Ton-Pass: „laeuft langsam" ist kein Fehler', () => {
     const hell = '#f9fafb'
     for (const [name, farbe] of [
       ['emerald-500', '#10b981'],
-      ['amber-500', '#f59e0b'],
+      ['sky-500', '#0ea5e9'],
       ['orange-500', '#f97316'],
     ] as const) {
       const c = contrast(over(farbe, hell, 0.8), hell)

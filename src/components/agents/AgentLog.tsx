@@ -5,12 +5,20 @@ import { ToolCallCard } from './ToolCallCard'
 import type { AgentLogEntry } from '../../types/agents'
 import { MOTION_S } from '../ui/motion'
 
+// Fuenf Eintragsarten, fuenf Farben. Nur eine davon ist eine Aussage ueber den
+// Zustand: `error` ist rot. Die anderen vier sortieren, sie bewerten nicht.
+//
+// `action` war gelb, und Gelb neben Rot liest sich wie „fast kaputt", dabei ist
+// eine Aktion der Normalfall dieses Protokolls. Fuchsia, weil es sich von den
+// vier Nachbarn am weitesten unterscheidet: Gedanke und Aktion wechseln sich
+// hier im Sekundentakt ab, und genau die zwei muessen beim Scrollen ohne Lesen
+// auseinanderfallen. Indigo und Fuchsia tun das, Indigo und Violett nicht.
 const typeStyles: Record<AgentLogEntry['type'], { badge: string; bg: string; text: string }> = {
-  thought:     { badge: 'bg-indigo-500/20 text-indigo-300', bg: 'border-l-indigo-500/40', text: 'text-indigo-200' },
-  action:      { badge: 'bg-amber-500/20 text-amber-300',   bg: 'border-l-amber-500/40',  text: 'text-amber-200' },
-  observation: { badge: 'bg-green-500/20 text-green-300',   bg: 'border-l-green-500/40',  text: 'text-green-200' },
-  error:       { badge: 'bg-red-500/20 text-red-300',       bg: 'border-l-red-500/40',    text: 'text-red-200' },
-  user_input:  { badge: 'bg-blue-500/20 text-blue-300',     bg: 'border-l-blue-500/40',   text: 'text-blue-200' },
+  thought:     { badge: 'bg-indigo-500/20 text-indigo-300',   bg: 'border-l-indigo-500/40',  text: 'text-indigo-200' },
+  action:      { badge: 'bg-fuchsia-500/20 text-fuchsia-300', bg: 'border-l-fuchsia-500/40', text: 'text-fuchsia-200' },
+  observation: { badge: 'bg-green-500/20 text-green-300',     bg: 'border-l-green-500/40',   text: 'text-green-200' },
+  error:       { badge: 'bg-red-500/20 text-red-300',         bg: 'border-l-red-500/40',     text: 'text-red-200' },
+  user_input:  { badge: 'bg-blue-500/20 text-blue-300',       bg: 'border-l-blue-500/40',    text: 'text-blue-200' },
 }
 
 const typeLabels: Record<AgentLogEntry['type'], string> = {

@@ -23,8 +23,13 @@ function CodexEventBlockImpl({ event }: Props) {
     error: AlertCircle,
   }
 
+  // Vier Ereignisarten, vier Farben. Das ist eine Einteilung, keine Ampel:
+  // eine Dateiaenderung ist der Normalfall eines Codelaufs und stand trotzdem
+  // in Gelb, also in der Farbe, die im Rest der App Alarm bedeutete. Violett
+  // ist gegen die drei Nachbarn in dieser Tabelle geprueft, Gruen gehoert der
+  // Konsole, Blau dem Denken, Rot dem Fehler.
   const colors = {
-    file_change: 'text-amber-400',
+    file_change: 'text-purple-400',
     terminal_output: 'text-green-400',
     reasoning: 'text-blue-400',
     error: 'text-red-400',

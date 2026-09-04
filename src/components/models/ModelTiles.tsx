@@ -38,19 +38,31 @@ export function computeFit(sizeGB: number | undefined, vramGb: number | null): F
 // "too big" liest sich als Verbot, obwohl `computeFit` ausdruecklich nie
 // blockiert (siehe oben: "Never used to BLOCK a download").
 //
-// Die Leiter bleibt eine Leiter — Folge, nicht Fehlergrad: schnell (emerald)
-// → langsamer (amber) → deutlich langsamer (orange). Orange ist die naechste
-// Stufe derselben warmen Reihe und gehoert keinem der roten Fehlertokens
-// (red-300/400/500/600) an, die die App sonst benutzt.
+// Die Leiter ist eine Folge, kein Fehlergrad. Die mittlere Stufe stand in
+// Bernstein, also in genau dem Ton, mit dem diese App bis zum 04.09.2026 jede
+// Warnung gemalt hat (die Begruendung, warum es diesen Ton nicht mehr gibt,
+// steht in `lib/hinweis.ts`). „Passt knapp" ist keine Warnung: es passt.
+//
+// Damit hoert die Leiter auf, eine Waermeskala zu sein, denn eine Waermeskala
+// braucht in der Mitte Gelb. Sie nennt jetzt den ORT, an dem gerechnet wird:
+// ganz im Grafikspeicher (emerald) → knapp, Teile weichen in den Arbeits-
+// speicher aus (sky) → groesstenteils auf CPU und RAM (orange). Nebenbei
+// gewinnt der 6px-Punkt dabei: Bernstein und Orange sind Nachbarn auf dem
+// Farbkreis und waren auf dieser Groesse kaum zu trennen, Blau liegt von
+// beiden weit weg.
+//
 // Gerechnet auf der Kachelflaeche (`bg-gray-50` hell, `bg-white/[0.03]` ueber
-// #1e1e1e = #252525 dunkel): red-400/80 lag bei 4.05:1 dunkel und 2.20:1 hell,
-// orange-500/80 liegt bei 3.98:1 und 2.24:1 — die Aussage aendert sich, der
-// Kontrast praktisch nicht. (Dass die HELLE Seite fuer die ganze Leiter unter
-// 3:1 liegt, ist ein aelterer, eigener Befund; er betrifft alle vier Punkte
-// gleich und wird hier nicht einseitig fuer einen davon repariert.)
+// #1e1e1e = #252525 dunkel): der alte mittlere Punkt lag bei 5.08:1 dunkel und
+// 1.80:1 hell, sky-500/80 liegt bei 4.01:1 und 2.21:1. Dunkel bleibt 1.4.11
+// erfuellt (>= 3:1), hell wird es sogar etwas besser. Fuer `big` galt dieselbe
+// Rechnung schon beim Ton-Pass: red-400/80 lag bei 4.05:1 dunkel und 2.20:1
+// hell, orange-500/80 liegt bei 3.98:1 und 2.24:1. (Dass die HELLE Seite
+// fuer die ganze Leiter unter 3:1 liegt, ist ein aelterer, eigener Befund; er
+// betrifft alle vier Punkte gleich und wird hier nicht einseitig fuer einen
+// davon repariert.)
 const FIT_META: Record<Fit, { dot: string; label: string; title: string }> = {
   fits: { dot: 'bg-emerald-500/80', label: 'Runs on your PC', title: 'Fits fully in your GPU memory. Fast.' },
-  tight: { dot: 'bg-amber-500/80', label: 'Tight fit', title: 'Barely fits. Parts may spill to RAM and slow it down.' },
+  tight: { dot: 'bg-sky-500/80', label: 'Tight fit', title: 'Barely fits. Parts may spill to RAM and slow it down.' },
   big: { dot: 'bg-orange-500/80', label: 'Runs on CPU, slower', title: 'Bigger than your GPU memory, so most of it runs on CPU and RAM. It works, just slower.' },
   unknown: { dot: 'bg-gray-400 dark:bg-gray-600', label: '', title: 'Hardware not detected yet.' },
 }

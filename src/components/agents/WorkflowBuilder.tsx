@@ -16,10 +16,16 @@ const STEP_TYPE_LABELS: Record<WorkflowStepType, string> = {
   memory_save: 'Save to Memory',
 }
 
+// Sechs Schrittarten, sechs Toenungen. Das ist eine Sortierhilfe und keine
+// Bewertung: eine Bedingung ist nicht gefaehrlicher als eine Schleife. Sie
+// stand trotzdem in Gelb und war damit die einzige Karte, die aussah, als
+// waere etwas mit ihr. Rose ist die Luecke, die dieses Rad noch hat. Orange
+// waere nur eine halbe Drehung vom alten Gelb, und Rot heisst in dieser App
+// kaputt (der Papierkorb rechts in derselben Zeile faerbt sich so).
 const STEP_TYPE_COLORS: Record<WorkflowStepType, string> = {
   prompt: 'border-blue-500/30 bg-blue-500/5',
   tool: 'border-green-500/30 bg-green-500/5',
-  condition: 'border-amber-500/30 bg-amber-500/5',
+  condition: 'border-rose-500/30 bg-rose-500/5',
   loop: 'border-purple-500/30 bg-purple-500/5',
   user_input: 'border-cyan-500/30 bg-cyan-500/5',
   memory_save: 'border-pink-500/30 bg-pink-500/5',

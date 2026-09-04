@@ -57,6 +57,7 @@ import {
   type LmStudioModelDir,
 } from '../../lib/model-storage-rows'
 import { CivitaiApiKeySetting } from './CivitaiApiKeySetting'
+import { HINWEIS_TEXT, PUNKT_FARBE } from '../../lib/hinweis'
 
 // ── User profile picture (Appearance) ───────────────────────────
 // Self-contained like HfDownloadPathSetting. Stores the picture as a
@@ -271,10 +272,18 @@ export function HfDownloadPathSetting() {
   // middle of typing one. A16 counter-check follow-up: with a half typed path
   // owed, a store write from anywhere would have pulled the box back to the
   // stored value under the cursor.
-  useEffect(() => {
-    if (pendingPath.current !== null) return
-    setDraft(override)
-  }, [override])
+  //
+  // Das lief bis 04.09.2026 in einem Effekt und damit NACH dem Zeichnen: der
+  // Kasten zeigte eine Bildfolge lang noch den alten Wert und wurde dann
+  // ueberschrieben, also zwei Durchlaeufe fuer eine Aenderung. Jetzt wird der
+  // Wert waehrend des Renderns nachgezogen, was React fuer genau diesen Fall
+  // vorsieht: der Durchlauf wird verworfen und sofort mit dem neuen Wert
+  // wiederholt, bevor etwas auf dem Schirm landet.
+  const [zuletztGespeichert, setZuletztGespeichert] = useState(override)
+  if (zuletztGespeichert !== override) {
+    setZuletztGespeichert(override)
+    if (pendingPath.current === null) setDraft(override)
+  }
 
   // How the GGUF scan itself fared in that folder. A folder too big to finish
   // within the budget returns a real but partial list, and the only person who
@@ -430,8 +439,11 @@ export function HfDownloadPathSetting() {
           {MACOS_FOLDER_ACCESS_NOTE}
         </div>
       )}
+      {/* Jeder der drei Scan-Saetze endet damit, dass der Nutzer den Pfad
+          aendern muss, damit seine Modelle vollstaendig auftauchen. Das ist
+          kein Nebenbei, also der Fehlerton (lib/hinweis.ts). */}
       {override && scanNote && (
-        <div data-testid="model-dir-scan-note" className="t-micro leading-relaxed text-amber-600 dark:text-amber-400">
+        <div data-testid="model-dir-scan-note" className={`t-micro leading-relaxed ${HINWEIS_TEXT.fehler}`}>
           {scanNote}
         </div>
       )}
@@ -481,31 +493,36 @@ export function modelDirScanNote(status: ScannedDir['status'] | null | undefined
  * would be a lie (Rust answers `unsupported` for that host).
  */
 function CustomModelDirNote({ result }: { result: CustomModelDirResult }) {
+  // Zwei Toene, kein dritter (lib/hinweis.ts). Die ersten beiden Lagen sind
+  // ein Pfad, aus dem nichts gelesen werden kann: da muss jemand ran, also
+  // Fehlerton. Die anderen beiden erklaeren nur, was LU an ComfyUI weitergibt,
+  // und bleiben ruhig. Frueher trugen die ersten beiden Gelb, was sie
+  // zwischen "egal" und "kaputt" haengen liess.
   const cls = "t-micro leading-relaxed"
   if (result.status === 'unusable') {
     return (
-      <div className={`${cls} text-amber-600 dark:text-amber-400`}>
+      <div className={`${cls} ${HINWEIS_TEXT.fehler}`}>
         That is not a full path, so nothing can be read from it. Use a complete path such as <code className="font-mono">C:\AI\Models</code> or <code className="font-mono">/mnt/models</code>. A leading <code className="font-mono">~</code> is a shell shorthand the app does not expand.
       </div>
     )
   }
   if (result.status === 'unreachable') {
     return (
-      <div className={`${cls} text-amber-600 dark:text-amber-400`}>
+      <div className={`${cls} ${HINWEIS_TEXT.fehler}`}>
         LU cannot read that folder. Check that the drive is connected and the path is spelled the way the system spells it.
       </div>
     )
   }
   if (result.status === 'unsupported') {
     return (
-      <div className={`${cls} text-gray-500`}>
+      <div className={`${cls} ${HINWEIS_TEXT.ruhig}`}>
         Chat models in this folder are read. Image and video on the Mac run on Apple MLX, not ComfyUI, so image models in this folder are not picked up. Install those under Local Media (Apple MLX).
       </div>
     )
   }
   if (result.status === 'unknown') return null
   return (
-    <div className={`${cls} text-gray-500`}>
+    <div className={`${cls} ${HINWEIS_TEXT.ruhig}`}>
       {result.folders.length > 0
         ? <>Image and video: LU passes <code className="font-mono">{result.folders.join(', ')}</code> from this folder to ComfyUI. Takes effect the next time LU starts ComfyUI, and only for a ComfyUI that LU starts.</>
         : <>Image and video models in this folder stay invisible: ComfyUI lists only its own folders. Name the subfolders like ComfyUI does (<code className="font-mono">checkpoints</code>, <code className="font-mono">loras</code>, <code className="font-mono">vae</code>, …) and LU hands them over.</>}
@@ -839,7 +856,12 @@ export function ComfyUISettings() {
       <div className="flex items-center justify-between">
         <span className="text-[0.7rem] text-gray-700 dark:text-gray-400">Status</span>
         <div className="flex items-center gap-1.5">
-          <div className={`w-1.5 h-1.5 rounded-full ${status?.running ? 'bg-green-500' : status?.found ? 'bg-orange-500' : 'bg-gray-500'}`} />
+          {/* Derselbe Punkt wie ueberall (lib/hinweis.ts): laeuft ist gruen,
+              antwortet nicht mehr ist rot, alles andere grau. Der Punkt stand
+              hier vorher auf Orange, sobald ComfyUI ueberhaupt gefunden war,
+              und hat damit ein installiertes, gestopptes ComfyUI wie einen
+              Zwischenfall aussehen lassen. */}
+          <div className={`w-1.5 h-1.5 rounded-full ${status?.running ? PUNKT_FARBE.an : status?.stalled ? PUNKT_FARBE.kaputt : PUNKT_FARBE.aus}`} />
           <span className="text-[0.65rem] text-gray-500">
             {status?.running ? 'Running'
               : status?.stalled ? 'Not responding'
@@ -854,8 +876,10 @@ export function ComfyUISettings() {
           {startError}
         </pre>
       )}
+      {/* Ein Start, der nicht ankommt, ist der Fehlerton und nicht der halbe:
+          hier muss jemand ins Protokoll sehen, sonst bleibt ComfyUI stehen. */}
       {status?.stalled && !startError && (
-        <p className="text-[0.55rem] text-amber-400">
+        <p role="alert" className={`text-[0.55rem] ${HINWEIS_TEXT.fehler}`}>
           ComfyUI has been starting for a while without answering on its port. Use Show output below to see what it printed.
         </p>
       )}
@@ -896,8 +920,10 @@ export function ComfyUISettings() {
         </div>
         {hostError && <p className="text-[0.55rem] text-red-400">{hostError}</p>}
         {hostSuccess && <p className="text-[0.55rem] text-green-400">Host saved. Restart ComfyUI to apply.</p>}
+        {/* Nichts ist kaputt: der Nutzer hat einen fremden Host eingetragen
+            und erfaehrt, was LU dort nicht kann. Ruhiger Ton. */}
         {status?.host && !status?.isLocal && (
-          <p className="text-[0.55rem] text-amber-400">Remote ComfyUI, start/stop/install not available from LU. Manage the process on the server.</p>
+          <p className={`text-[0.55rem] ${HINWEIS_TEXT.ruhig}`}>Remote ComfyUI, start/stop/install not available from LU. Manage the process on the server.</p>
         )}
       </div>
 
@@ -993,9 +1019,14 @@ export function ComfyUISettings() {
         )}
         {/* GH #98: a from-source install whose Python env broke (shared system
             Python, dead torch) needs a rebuild, not a re-install — pip reports
-            broken packages as already satisfied. Rebuilds ComfyUI/venv. */}
+            broken packages as already satisfied. Rebuilds ComfyUI/venv.
+
+            Blau, weil es in dieser Knopfreihe noch frei war: Gruen gehoert
+            Start, Rot dem Stop, Lila der Installation, Grau dem Rest. Das Gelb,
+            das hier stand, war keine Warnung, sondern nur die naechste freie
+            Farbe, und es hat den Knopf wie einen Notfall aussehen lassen. */}
         {status?.found && !status?.running && installIdle && (
-          <button onClick={handleRepair} title="Rebuild the Python environment in an isolated venv (~2 GB). Models, outputs and custom nodes are left alone." className="px-2 py-1 rounded text-[0.6rem] bg-amber-500/10 text-amber-400 hover:bg-amber-500/20 transition-colors">
+          <button onClick={handleRepair} title="Rebuild the Python environment in an isolated venv (~2 GB). Models, outputs and custom nodes are left alone." className="px-2 py-1 rounded text-[0.6rem] bg-blue-500/10 text-blue-400 hover:bg-blue-500/20 transition-colors">
             Repair environment
           </button>
         )}
@@ -1036,9 +1067,14 @@ export function ComfyUISettings() {
             <p
               data-testid="comfy-install-notice"
               data-kind={installNoticeKind}
+              // Ein 'warn' entsteht nur dort, wo der Lauf abgebrochen wurde
+              // oder etwas nicht benutzt werden konnte, und jeder dieser
+              // Saetze endet mit "lauf das nochmal". Das ist der Fehlerton,
+              // nicht das Gelb, das frueher hier stand und die Zeile zwischen
+              // fertig und kaputt haengen liess.
               className={`flex-1 t-micro leading-relaxed ${
                 installNoticeKind === 'warn'
-                  ? 'text-amber-500 dark:text-amber-400'
+                  ? HINWEIS_TEXT.fehler
                   : 'text-emerald-600 dark:text-emerald-400'
               }`}
             >
@@ -1146,7 +1182,10 @@ function CodexAgentSettings() {
         label="Allow cloud architect models"
         enabled={settings.codexArchitectAllowCloud}
         onChange={() => updateSettings({ codexArchitectAllowCloud: !settings.codexArchitectAllowCloud })}
-        icon={<Shield size={10} className={settings.codexArchitectAllowCloud ? 'text-amber-400' : 'text-emerald-500'} />}
+        // Cloud erlaubt ist kein Fehler, sondern eine Wahl des Nutzers, also
+        // der ruhige Ton statt des Gelbs, das hier stand. Gruen bleibt die
+        // Aussage "bleibt vollstaendig auf diesem Rechner".
+        icon={<Shield size={10} className={settings.codexArchitectAllowCloud ? HINWEIS_TEXT.ruhig : 'text-emerald-500'} />}
       />
       <p className="text-[0.55rem] text-gray-500 leading-relaxed pl-1">
         Off keeps the architect step fully local. On allows third-party
@@ -2276,10 +2315,15 @@ interface SystemHealthReport {
 }
 
 function ProbeBadge({ probe }: { probe: BackendProbe }) {
+  // "Not running" und "Not installed" sind beide nur ein Nein und tragen
+  // deshalb dasselbe Grau; der Unterschied steht im Wort, nicht in der Farbe.
+  // Das Gelb, das "Not running" frueher trug, hat einen ausgeschalteten
+  // Dienst zu einem halben Fehler gemacht.
+  const RUHIG = 'bg-gray-500/15 text-gray-500 border-gray-500/30'
   const colors: Record<BackendProbe['status'], string> = {
     ok: 'bg-emerald-500/15 text-emerald-500 border-emerald-500/30',
-    unreachable: 'bg-amber-500/15 text-amber-500 border-amber-500/30',
-    not_installed: 'bg-gray-500/15 text-gray-500 border-gray-500/30',
+    unreachable: RUHIG,
+    not_installed: RUHIG,
     error: 'bg-red-500/15 text-red-500 border-red-500/30',
   }
   const labels: Record<BackendProbe['status'], string> = {
@@ -2389,7 +2433,10 @@ function TroubleshootSection() {
             </div>
             <div className="flex items-center justify-between text-[0.65rem]">
               <span className="text-gray-500">Disk free (home)</span>
-              <span className={`font-mono ${report.host.disk_free_gb < 10 ? 'text-amber-400' : 'text-gray-300'}`}>
+              {/* Unter 10 GB passt kein Modell mehr und keine ComfyUI-Umgebung:
+                  das ist der Grund, aus dem der Nutzer diese Seite meist
+                  aufmacht, also der Fehlerton statt des alten Gelbs. */}
+              <span className={`font-mono ${report.host.disk_free_gb < 10 ? HINWEIS_TEXT.fehler : 'text-gray-300'}`}>
                 {report.host.disk_free_gb} GB
               </span>
             </div>

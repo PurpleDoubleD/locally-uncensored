@@ -2,6 +2,7 @@ import { useBenchmarkStore, getLatestSpeed, getLeaderboard } from '../../stores/
 import { useBenchmark } from '../../hooks/useBenchmark'
 import { Zap, Play, Square, Trophy } from 'lucide-react'
 import { displayModelName } from '../../api/providers/registry'
+import { HINWEIS_TEXT } from '../../lib/hinweis'
 
 interface Props {
   modelName: string
@@ -58,7 +59,9 @@ export function BenchmarkLeaderboard() {
 
   return (
     <div className="mt-4 p-3 rounded-lg bg-white/[0.03] border border-white/5">
-      <h3 className="text-[0.7rem] font-semibold text-amber-400 flex items-center gap-1.5 mb-2">
+      {/* Die Ueberschrift war golden, weil ein Pokal daneben steht. Farbe
+          traegt hier nur noch Bedeutung, und „Bestenliste" ist keine. */}
+      <h3 className="text-[0.7rem] font-semibold text-gray-400 flex items-center gap-1.5 mb-2">
         <Trophy size={12} />
         Benchmark Leaderboard
       </h3>
@@ -89,8 +92,12 @@ export function BenchmarkLeaderboard() {
                 </div>
                 <div className="flex items-center flex-wrap gap-x-2 mt-0.5 text-[0.5rem] lu-hud-num text-gray-600">
                   {entry.avgTokens !== null && <span>{entry.avgTokens} tok</span>}
+                  {/* Wie im grossen Brett: gruen nur fuer die volle
+                      Trefferquote, alles darunter ist eine Messung und kein
+                      Zwischenfall, also der ruhige Ton aus `lib/hinweis.ts`.
+                      Rot bleibt der abgeschnittenen Antwort daneben. */}
                   {entry.accuracy !== null && (
-                    <span className={entry.accuracy < 1 ? 'text-amber-400' : 'text-emerald-400'}>
+                    <span className={entry.accuracy < 1 ? HINWEIS_TEXT.ruhig : 'text-emerald-400'}>
                       {Math.round(entry.accuracy * 100)}% correct
                     </span>
                   )}

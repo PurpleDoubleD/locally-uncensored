@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useReducer, useState } from 'react'
 import { Check, Download, Loader2, Mic, Volume2, X } from 'lucide-react'
 import { withInstallerOutput } from '../../lib/error-text'
+import { HINWEIS_TEXT } from '../../lib/hinweis'
 import { backendCall } from '../../api/backend'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { useVoiceStore } from '../../stores/voiceStore'
@@ -292,7 +293,7 @@ export function SpeechSettings() {
       )}
     </div>
     {whisper.installError && (
-      <p className="text-[0.55rem] text-red-400/90 leading-snug">{whisper.installError}</p>
+      <p className={`text-[0.55rem] leading-snug ${HINWEIS_TEXT.fehler}`}>{whisper.installError}</p>
     )}
     {showsHint(whisper) && (
       <p className="text-[0.55rem] text-gray-500 leading-snug">
@@ -323,12 +324,15 @@ export function SpeechSettings() {
       )}
     </div>
     {tts.installError && (
-      <p className="text-[0.55rem] text-red-400/90 leading-snug">{tts.installError}</p>
+      <p className={`text-[0.55rem] leading-snug ${HINWEIS_TEXT.fehler}`}>{tts.installError}</p>
     )}
     {/* #77: read-aloud silently fell back to the system voice while this
-        row showed a healthy green check — surface the recorded reason. */}
+        row showed a healthy green check, so the recorded reason is said here.
+        Rot und nicht mehr Gelb: die gewaehlte Stimme spricht nicht, das ist
+        ein Fehler und keine Zwischenstufe. Die Zeile steht in derselben Form
+        wie der Installationsfehler darueber (lib/hinweis.ts). */}
     {voiceSettings.ttsMode === 'piper' && voiceSettings.ttsFallbackReason && (
-      <p className="text-[0.55rem] text-amber-400/90 leading-snug">
+      <p className={`text-[0.55rem] leading-snug ${HINWEIS_TEXT.fehler}`}>
         {voiceSettings.ttsFallbackReason} If an antivirus quarantined Piper, whitelist it or reinstall the voice below.
       </p>
     )}
@@ -368,7 +372,7 @@ export function SpeechSettings() {
       </select>
     </div>
     {voiceBusy && <p className="text-[0.55rem] text-gray-500 leading-snug">Downloading voice (~63 MB)…</p>}
-    {voiceError && <p className="text-[0.55rem] text-red-400/90 leading-snug">{voiceError}</p>}
+    {voiceError && <p className={`text-[0.55rem] leading-snug ${HINWEIS_TEXT.fehler}`}>{voiceError}</p>}
 
     {/* TTS engine — bundled Piper, or an external OpenAI-compatible HTTP
         endpoint like Kokoro-FastAPI (GitHub #58). */}

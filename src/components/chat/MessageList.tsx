@@ -6,6 +6,7 @@ import { MessageBubble } from './MessageBubble'
 import { WorkingAnchor } from './WorkingAnchor'
 import { CompactBlock } from './CompactBlock'
 import { compactionAnchors } from '../../lib/compact-summary'
+import { Hinweis } from '../ui/Hinweis'
 
 /**
  * Above this many visible messages the transcript stops paying full layout +
@@ -165,16 +166,16 @@ export function MessageList({ isGenerating, isThisChatGenerating, isLoadingModel
             >
               {message.role === 'system' && message.notice ? (
                 // Schlichte Zeile, keine Blase: eine Blase wuerde behaupten,
-                // das Modell habe es gesagt. Dieselbe Form wie im
-                // Code-Verlauf (CodexView, data-testid="codex-notice").
+                // das Modell habe es gesagt. Und kein Kasten mehr darum: der
+                // Rahmen samt gelber Flaeche gab einem Satz das Gewicht eines
+                // Absturzes. Es bleiben die zwei Toene aus `lib/hinweis.ts`,
+                // dieselbe Form wie im Code-Verlauf (CodexView,
+                // data-testid="codex-notice"): `warn` ist das, wo jemand
+                // handeln muss, alles andere ist eine ruhige Bestaetigung.
                 <div className="px-3 py-1" data-testid="chat-notice">
-                  <div className={`flex items-start gap-1.5 px-2 py-1 rounded border t-micro leading-snug ${
-                    message.notice === 'warn'
-                      ? 'border-amber-300/70 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/10 text-amber-900 dark:text-amber-200'
-                      : 'border-gray-200 dark:border-white/10 bg-gray-50/60 dark:bg-white/[0.02] text-gray-500 dark:text-gray-400'
-                  }`}>
+                  <Hinweis ton={message.notice === 'warn' ? 'fehler' : 'ruhig'}>
                     <span className="break-words">{message.content}</span>
-                  </div>
+                  </Hinweis>
                 </div>
               ) : (
               <MessageBubble

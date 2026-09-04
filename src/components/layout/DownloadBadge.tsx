@@ -8,6 +8,7 @@ import { isPermanentDownloadError } from '../../api/discover'
 import { useMlxInstallStore } from '../../stores/mlxInstallStore'
 import { isMlxImageHost } from '../../api/mlx-image'
 import { formatBytes, countLabel } from '../../lib/formatters'
+import { HINWEIS_TEXT, PUNKT_FARBE } from '../../lib/hinweis'
 import { trayAfterPulse, TRAY_CLOSED, NO_PULSE } from '../../lib/download-tray'
 
 function ProgressBar({ progress }: { progress: number }) {
@@ -119,8 +120,11 @@ export function DownloadBadge() {
             {totalActive}
           </span>
         )}
+        {/* Angehalten ist kein halber Fehler, sondern schlicht „laeuft
+            nicht": der Punkt nimmt deshalb `PUNKT_FARBE.aus` und nicht
+            mehr das alte volle Gelb. Begruendung in `lib/hinweis.ts`. */}
         {totalActive === 0 && (textEntries.some(([, s]) => s.paused) || comfyEntries.some(([, d]) => d.status === 'paused')) && (
-          <span className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-yellow-500" />
+          <span className={`absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full ${PUNKT_FARBE.aus}`} />
         )}
       </button>
 
@@ -170,7 +174,7 @@ export function DownloadBadge() {
                       <p className="text-[0.7rem] font-mono text-gray-700 dark:text-gray-300 truncate">{name}</p>
                       <div className="flex items-center gap-0.5 shrink-0">
                         {!state.complete && !state.paused && (
-                          <button onClick={() => pausePull(name)} className="p-0.5 rounded hover:bg-yellow-500/20 text-gray-400 hover:text-yellow-400 transition-colors" title="Pause"><Pause size={11} /></button>
+                          <button onClick={() => pausePull(name)} className="p-0.5 rounded hover:bg-gray-500/15 text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition-colors" title="Pause"><Pause size={11} /></button>
                         )}
                         {state.paused && (
                           <button onClick={() => pullModel(name)} className="p-0.5 rounded hover:bg-green-500/20 text-gray-400 hover:text-green-400 transition-colors" title="Resume"><Play size={11} /></button>
@@ -181,7 +185,7 @@ export function DownloadBadge() {
                     {state.complete ? (
                       <div className="flex items-center gap-1.5 text-green-400"><CheckCircle size={11} /><span className="text-[0.65rem]">Complete</span></div>
                     ) : state.paused ? (
-                      <span className="text-[0.65rem] text-yellow-400">Paused</span>
+                      <span className={`text-[0.65rem] ${HINWEIS_TEXT.ruhig}`}>Paused</span>
                     ) : (
                       <>
                         <p className="text-[0.6rem] text-gray-500 mb-1 truncate">{state.progress.status}</p>
@@ -308,7 +312,7 @@ export function DownloadBadge() {
                                     : d.status === 'paused' ? (
                                       <button
                                         onClick={() => useDownloadStore.getState().resume(id)}
-                                        className="flex items-center gap-0.5 text-yellow-400 hover:text-yellow-300 transition-colors"
+                                        className={`flex items-center gap-0.5 ${HINWEIS_TEXT.ruhig} hover:text-gray-700 dark:hover:text-gray-200 transition-colors`}
                                         title="Resume this download"
                                       >
                                         <Play size={8} />

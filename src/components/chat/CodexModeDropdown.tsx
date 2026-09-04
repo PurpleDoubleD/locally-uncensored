@@ -5,6 +5,7 @@ import { useChatStore } from '../../stores/chatStore'
 import { useCodexStore } from '../../stores/codexStore'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { useGenerationStore } from '../../stores/generationStore'
+import { HINWEIS_TEXT, PUNKT_FARBE } from '../../lib/hinweis'
 import {
   CODEX_MODES, CODEX_MODE_LABELS, CODEX_MODE_SHORT, CODEX_MODE_DESCRIPTIONS,
   resolveCodexMode, type CodexMode,
@@ -30,15 +31,25 @@ const MODE_ICON: Record<CodexMode, typeof ShieldCheck> = {
   plan: ClipboardList,
 }
 
+/**
+ * Die drei Modi sind eine Kategorie, keine Ampel: eine Farbe pro Modus, damit
+ * man den aktiven am Ausloeser erkennt, ohne ihn zu lesen.
+ *
+ * Bypass stand in Gelb und sah damit aus wie eine Dauerwarnung, obwohl im
+ * Betrieb nichts falsch ist, wenn er an ist. Neu ist Blaugruen, und zwar
+ * gegen die drei Farben geprueft, die in dieser Datei sonst noch vorkommen:
+ * Blau gehoert Ask, Violett gehoert Plan, und das Gruen von `PUNKT_FARBE.an`
+ * gehoert dem Punkt, der sagt, dass gerade ein Lauf laeuft.
+ */
 const MODE_ACCENT: Record<CodexMode, string> = {
   ask: 'text-blue-400',
-  bypass: 'text-amber-400',
+  bypass: 'text-teal-400',
   plan: 'text-purple-400',
 }
 
 const MODE_ACTIVE_ROW: Record<CodexMode, string> = {
   ask: 'bg-blue-500/10 text-blue-600 dark:text-blue-400',
-  bypass: 'bg-amber-500/10 text-amber-600 dark:text-amber-400',
+  bypass: 'bg-teal-500/10 text-teal-600 dark:text-teal-400',
   plan: 'bg-purple-500/10 text-purple-600 dark:text-purple-400',
 }
 
@@ -88,14 +99,19 @@ export function CodexModeDropdown({ openUpward = false }: { openUpward?: boolean
         <CurrentIcon size={10} className={`shrink-0 ${MODE_ACCENT[current]}`} />
         <span className={MODE_ACCENT[current]}>{CODEX_MODE_SHORT[current]}</span>
         {pending ? (
-          <span className="text-[0.5rem] text-amber-500">
+          // Der geparkte Modus steht in SEINER Farbe, nicht in einer eigenen:
+          // "then plan" in Violett sagt schon, worauf es hinausgeht. Vorher war
+          // dieses Stueck gelb und behauptete damit einen dritten Zustand.
+          <span className={`text-[0.5rem] ${MODE_ACCENT[pending]}`}>
             {`then ${CODEX_MODE_SHORT[pending]}`}
           </span>
         ) : runActive ? (
           // A run is in flight and nothing is parked yet. Say it on the
           // trigger, not only in the panel, so "applies to the next message" is
-          // visible before the user clicks.
-          <span className="w-1 h-1 shrink-0 rounded-full bg-amber-400" />
+          // visible before the user clicks. Der Punkt sagt "laeuft", also die
+          // gruene Stufe der Ampel aus `lib/hinweis.ts`; gelb hiess hier frueher
+          // weder an noch aus.
+          <span className={`w-1 h-1 shrink-0 rounded-full ${PUNKT_FARBE.an}`} />
         ) : null}
         <ChevronDown size={8} className={`shrink-0 transition-transform ${open ? 'rotate-180' : ''}`} />
       </button>
@@ -111,7 +127,9 @@ export function CodexModeDropdown({ openUpward = false }: { openUpward?: boolean
             ) : (
               <>
                 {runActive && (
-                  <p className="px-3 pb-1 text-[0.5rem] leading-snug text-amber-600 dark:text-amber-400/90">
+                  // Auskunft, kein Alarm: die Wahl geht nicht verloren, sie
+                  // wirkt nur spaeter. Ruhiger Ton aus `lib/hinweis.ts`.
+                  <p className={`px-3 pb-1 text-[0.5rem] leading-snug ${HINWEIS_TEXT.ruhig}`}>
                     A run is in flight. Your pick applies from the next message.
                   </p>
                 )}
@@ -135,7 +153,11 @@ export function CodexModeDropdown({ openUpward = false }: { openUpward?: boolean
                           <span className="flex items-center gap-1">
                             <span className="text-[0.55rem] font-medium">{CODEX_MODE_LABELS[mode]}</span>
                             {isActive && <span className="text-[0.45rem] text-gray-400">active</span>}
-                            {isPending && <span className="text-[0.45rem] text-amber-500">next</span>}
+                            {isPending && (
+                              // Wie am Ausloeser: in der Farbe des Modus, um
+                              // den es geht, nicht in einer Warnfarbe.
+                              <span className={`text-[0.45rem] ${MODE_ACCENT[mode]}`}>next</span>
+                            )}
                           </span>
                           <span className="block text-[0.5rem] leading-snug text-gray-400">
                             {CODEX_MODE_DESCRIPTIONS[mode]}

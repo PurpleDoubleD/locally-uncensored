@@ -32,6 +32,7 @@ import {
   handBackChatProviderForRow, announceChatProviderSwitch, standbyBackendOf,
 } from '../../api/lu-engine-switch'
 import { tryAcquireLuEngineSwap, releaseLuEngineSwap, luEngineSwapInFlight, useLuEngineSwapRunning } from '../../api/lu-engine-swap-lock'
+import { HINWEIS_TEXT } from '../../lib/hinweis'
 import { ModelPickerSkeleton } from '../layout/ViewSkeletons'
 import type { AIModel } from '../../types/models'
 import { MOTION_S } from '../ui/motion'
@@ -1266,10 +1267,15 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
                   {/* An empty picker after the user switched the last backend
                       off in Settings used to say only that, which reads like a
                       machine with nothing installed (Nebenbefund 1, R9
-                      re-measure). The reason and the way back belong here. */}
+                      re-measure). The reason and the way back belong here.
+                      Beide Saetze standen in Gelb. Der Nutzer hat das Backend
+                      selbst ausgeschaltet; das ist kein Zwischenfall, sondern
+                      die Antwort auf „warum ist die Liste leer". Ruhiger Ton
+                      aus `lib/hinweis.ts`, der Knopf darunter traegt den
+                      Weg zurueck. */}
                   {noBackendEnabled ? (
                     <>
-                      <p className="mt-1 t-micro text-amber-300/90 leading-snug text-left">
+                      <p className={`mt-1 t-micro leading-snug text-left ${HINWEIS_TEXT.ruhig}`}>
                         No AI backend is enabled, so there is nothing to list. Open Settings, go to AI Backends, and press Enable on the backend you switched off, or Add Provider.
                       </p>
                       <button
@@ -1280,7 +1286,7 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
                       </button>
                     </>
                   ) : emptyReason && (
-                    <p className="mt-1 t-micro text-amber-300/90 leading-snug text-left">{emptyReason}</p>
+                    <p className={`mt-1 t-micro leading-snug text-left ${HINWEIS_TEXT.ruhig}`}>{emptyReason}</p>
                   )}
                 </div>
               )}
@@ -1427,9 +1433,15 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
                               supportsTools: 'supportsTools' in model ? model.supportsTools : undefined,
                             })
                             if (support === 'none') {
+                              // Das Verbotszeichen stand in Gelb, direkt neben
+                              // dem gruenen Schraubenschluessel: zwei Farben
+                              // fuer „kann Werkzeuge" und „kann keine". Es
+                              // fehlt eine Faehigkeit, es ist nichts kaputt,
+                              // also der ruhige Ton aus `lib/hinweis.ts`. Die
+                              // Aussage traegt die Glyphe, nicht die Farbe.
                               return (
                                 <span
-                                  className="inline-flex items-center shrink-0 text-amber-500/80"
+                                  className={`inline-flex items-center shrink-0 ${HINWEIS_TEXT.ruhig}`}
                                   title="This model does not support tool calling, so Agent and Code mode cannot use it"
                                 >
                                   <Ban size={9} />

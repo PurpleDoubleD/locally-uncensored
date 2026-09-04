@@ -30,6 +30,7 @@ import { runStatusFrom } from '../../lib/run-idle'
 import { isRunQueued } from '../../lib/run-lanes'
 import { isRunStopped } from '../../lib/run-stop'
 import { isActiveCodexStatus } from '../../types/codex'
+import { HINWEIS_TEXT } from '../../lib/hinweis'
 
 /** What the collapsed bar says once the model ticked off every step. Ticking
  *  off a step is not the same as the change being on disk. */
@@ -164,11 +165,13 @@ export function PlanBar({ variant = 'header' }: Props) {
                   // Ein Kreisel, der sich dreht, behauptet Arbeit. Nach dem Ende
                   // des Laufs ist das eine Behauptung ueber nichts: gemessen
                   // drehte er nach dem letzten Wort des Modells unbegrenzt
-                  // weiter. Ohne Lauf steht er still und wird bernsteinfarben,
-                  // wie die Zeile unten, die dasselbe in Worten sagt.
+                  // weiter. Ohne Lauf steht er still und wird ruhig grau, wie
+                  // die Zeile unten, die dasselbe in Worten sagt. (Hier stand
+                  // Bernstein. Ein angehaltener Schritt ist kein halber Fehler,
+                  // siehe `lib/hinweis.ts`.)
                   <Loader2
                     size={10}
-                    className={`shrink-0 mt-[1px] ${runActive ? 'text-blue-400 animate-spin' : 'text-amber-400'}`}
+                    className={`shrink-0 mt-[1px] ${runActive ? 'text-blue-400 animate-spin' : HINWEIS_TEXT.ruhig}`}
                   />
                 ) : (
                   <Circle size={10} className="text-gray-600 shrink-0 mt-[1px]" />
@@ -197,7 +200,7 @@ export function PlanBar({ variant = 'header' }: Props) {
           <Schlusszeile
             testid="plan-all-done"
             Symbol={CheckCircle2}
-            ton={pending > 0 ? 'warnung' : 'gut'}
+            ton={pending > 0 ? 'ruhig' : 'gut'}
             text={planDoneLabel(pending)}
           />
         )}
@@ -210,7 +213,7 @@ export function PlanBar({ variant = 'header' }: Props) {
           <Schlusszeile
             testid="plan-run-stopped"
             Symbol={AlertCircle}
-            ton="warnung"
+            ton="ruhig"
             text={planStoppedLabel(done, todos.length)}
           />
         )}
@@ -227,6 +230,11 @@ export function PlanBar({ variant = 'header' }: Props) {
  * es die Typo-Sperrklinke beschreibt: die zweite entsteht durch Abschreiben
  * der ersten und bringt frische Umgehungen mit. Eine Groessenangabe, ein
  * Abstand, zwei Toene.
+ *
+ * Die zwei Toene sind `gut` (der Plan ist durch) und `ruhig`. Vorher hiess der
+ * zweite `warnung` und war bernsteinfarben, an beiden Stellen zu Unrecht:
+ * weder ein Lauf, der endet, noch eine Aenderung, die auf Freigabe wartet, ist
+ * ein Fehler. Ruhig ist derselbe Ton wie sekundaerer Text, `lib/hinweis.ts`.
  */
 function Schlusszeile({
   testid,
@@ -236,18 +244,14 @@ function Schlusszeile({
 }: {
   testid: string
   Symbol: typeof CheckCircle2
-  ton: 'gut' | 'warnung'
+  ton: 'gut' | 'ruhig'
   text: string
 }) {
-  const warnung = ton === 'warnung'
+  const farbe = ton === 'gut' ? 'text-emerald-400' : HINWEIS_TEXT.ruhig
   return (
-    <div className="px-2 pb-1 flex items-center gap-1.5" data-testid={testid}>
-      <Symbol size={9} className={`${warnung ? 'text-amber-400' : 'text-emerald-400'} shrink-0`} />
-      <span
-        className={`text-[0.55rem] leading-snug ${warnung ? 'text-amber-400/90' : 'text-emerald-400/80'}`}
-      >
-        {text}
-      </span>
+    <div className={`px-2 pb-1 flex items-center gap-1.5 ${farbe}`} data-testid={testid}>
+      <Symbol size={9} className="shrink-0" />
+      <span className="text-[0.55rem] leading-snug">{text}</span>
     </div>
   )
 }

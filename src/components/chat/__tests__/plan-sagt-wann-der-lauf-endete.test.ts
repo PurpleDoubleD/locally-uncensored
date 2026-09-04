@@ -77,7 +77,26 @@ describe('die Leiste fragt beide Laufquellen, nicht nur eine', () => {
   })
 
   it('der Kreisel dreht nur, solange wirklich etwas laeuft', () => {
-    expect(src).toMatch(/runActive \? 'text-blue-400 animate-spin' : 'text-amber-400'/)
+    // Diese Zeile hat frueher die gelbe Fassung des Stillstands festgenagelt:
+    // stand der Lauf, wurde der Kreisel bernsteinfarben, und genau das stand
+    // hier als Muster. Die Regel hat sich am 04.09.2026 geaendert:
+    // David hat jedes Gelb aus der Oberflaeche geworfen, seitdem gibt es zwei
+    // Toene und keinen dritten (`lib/hinweis.ts`), und ein Schritt, an dem
+    // nichts mehr laeuft, ist kein halber Fehler, sondern ruhig. Die Aussage
+    // des Tests ist dieselbe geblieben und haengt jetzt an der Bewegung
+    // statt an der Farbe: es dreht sich nur, was wirklich laeuft.
+    expect(src).toMatch(/runActive \? 'text-blue-400 animate-spin' : HINWEIS_TEXT\.ruhig/)
+    // Und es gibt genau EINE Drehung in der Datei, sonst koennte daneben ein
+    // zweiter Kreisel stehen, den kein Lauf mehr anhaelt.
+    expect(src.match(/animate-spin/g) ?? []).toHaveLength(1)
+  })
+
+  it('die Schlusszeile kennt zwei Toene und keinen dritten', () => {
+    // Der dritte hiess `warnung` und war bernsteinfarben. Weder ein Lauf, der
+    // endet, noch eine Aenderung, die auf Freigabe wartet, ist ein Fehler;
+    // beides ist ruhig, und fertig ist gruen.
+    expect(src).toMatch(/ton: 'gut' \| 'ruhig'/)
+    expect(src).not.toMatch(/(?:amber|yellow)-/)
   })
 })
 

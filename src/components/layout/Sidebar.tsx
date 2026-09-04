@@ -696,9 +696,18 @@ export function Sidebar() {
                 </button>
               ) : null}
 
-              {/* Passcode */}
+              {/* Passcode. Bis zum 04.09.2026 stand er in einem mittleren Gelb,
+                  und das war Schmuck ohne Aussage: Gelb heisst in dieser App
+                  nichts mehr, seit `lib/hinweis.ts` die Toene auf zwei
+                  festgelegt hat. Eine Ersatzfarbe bekommt er trotzdem nicht.
+                  In diesem Panel sind alle Toene schon vergeben (gruen LIVE,
+                  smaragd Tunnel, blau Adresse, rot Stop und abgelaufen), und
+                  Violett gehoert der Cloud. Ein Passcode ist ohnehin kein
+                  Zustand, sondern der Wert, den man abliest und abtippt. Also
+                  der staerkste Kontrast statt eines sechsten Farbtons, in
+                  beiden Modi. */}
               <div className="flex items-center justify-between">
-                <code className="text-[14px] text-amber-400 font-mono tracking-[3.75px] font-bold">{passcode}</code>
+                <code className="text-[14px] text-gray-900 dark:text-white font-mono tracking-[3.75px] font-bold">{passcode}</code>
                 <div className="flex items-center gap-1.25">
                   <button
                     onClick={() => copyToClipboard(passcode, 'panel-passcode')}
@@ -1211,11 +1220,15 @@ export function Sidebar() {
                Verschlimmbesserung, die dort beschrieben steht: die Flaeche
                auf Tokens, und jeder Akzent darin mit Hell-Pendant.
                Vorher im Hellmodus blieb die Flaeche #212121, waehrend der
-               Rescue-Layer die Schrift nach unten drehte — `text-gray-400`
+               Rescue-Layer die Schrift nach unten drehte: `text-gray-400`
                wurde #374151 und stand bei 1,56:1. Nachher 10,31:1.
-               Der Passcode (amber-400, 1,92:1 auf Weiss) traegt jetzt
-               amber-700 mit 5,02:1. Die QR-Kachel ist selbst weiss und
-               verschwaende sonst im weissen Dialog — daher die Kante. */
+               Der Passcode trug damals amber-400 (1,92:1 auf Weiss) und
+               bekam dafuer das Hell-Pendant amber-700. Seit dem 04.09.2026
+               ist er gar nicht mehr farbig, sondern gray-900 auf Weiss und
+               Weiss im Dunkeln: Gelb ist ersatzlos raus, und ein Wert, den
+               man abtippt, braucht Kontrast und keinen Farbton. Die
+               QR-Kachel ist selbst weiss und verschwaende sonst im weissen
+               Dialog, daher die Kante. */
             className="bg-white dark:bg-lu-base border border-gray-200 dark:border-white/10 rounded-[10px] p-6.25 max-w-[450px] w-full flex flex-col items-center gap-3.75 shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           >
@@ -1255,7 +1268,7 @@ export function Sidebar() {
             ) : null}
 
             <div className="flex items-center justify-center gap-3.75 w-full">
-              <code className="text-[30px] font-mono font-bold text-amber-700 dark:text-amber-400 tracking-[10px]">{passcode}</code>
+              <code className="text-[30px] font-mono font-bold text-gray-900 dark:text-white tracking-[10px]">{passcode}</code>
               <button
                 onClick={() => copyToClipboard(passcode, 'modal-passcode')}
                 className="p-[7.5px] rounded-[5px] hover:bg-white/10 text-gray-400 hover:text-white transition-colors"

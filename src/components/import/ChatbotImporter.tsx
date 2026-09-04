@@ -9,7 +9,8 @@
 // curated facts. The Settings copy steers the user accordingly.
 
 import { useState } from 'react'
-import { Upload, FileText, CheckCircle2, AlertTriangle, Loader2, X } from 'lucide-react'
+import { Upload, FileText, CheckCircle2, AlertTriangle, Loader2 } from 'lucide-react'
+import { Hinweis } from '../ui/Hinweis'
 import { parseExportFile, conversationToFile, type NormalisedConversation, type ChatbotPlatform } from '../../lib/parsers/chatbot-export'
 import { useRAG } from '../../hooks/useRAG'
 import { useChatStore } from '../../stores/chatStore'
@@ -145,12 +146,18 @@ export function ChatbotImporter() {
         </div>
       </div>
 
+      {/* Der Fehler stand in einem roten Kasten mit Rahmen und Fuellflaeche.
+          Die Farbe traegt hier schon alles, was der Kasten dazutun sollte;
+          das Kreuz zum Wegklicken bringt <Hinweis> selbst mit. */}
       {error && (
-        <div className="flex items-start gap-2 p-2 rounded border border-red-500/20 bg-red-500/[0.06] text-red-300">
-          <AlertTriangle size={12} className="mt-0.5 shrink-0" />
-          <span className="t-micro whitespace-pre-wrap">{error}</span>
-          <button onClick={() => setError(null)} className="text-red-400 hover:text-red-200 ml-auto"><X size={10} /></button>
-        </div>
+        <Hinweis
+          ton="fehler"
+          icon={<AlertTriangle size={12} className="mt-0.5 shrink-0" />}
+          onDismiss={() => setError(null)}
+          className="whitespace-pre-wrap"
+        >
+          {error}
+        </Hinweis>
       )}
 
       {conversations.length > 0 && (
@@ -224,10 +231,13 @@ export function ChatbotImporter() {
               </span>
             )}
           </div>
+          {/* Diese Zeile war gelb und kursiv, obwohl nichts kaputt ist: sie
+              sagt nur, in welcher Reihenfolge die zwei Schritte gehen. Ruhig,
+              wie jeder Satz, den man wissen darf und nicht sofort braucht. */}
           {!conversationId && (
-            <div className="t-micro text-amber-300 italic">
+            <Hinweis>
               Open or create a chat first, imports attach to the active conversation's RAG store.
-            </div>
+            </Hinweis>
           )}
         </>
       )}

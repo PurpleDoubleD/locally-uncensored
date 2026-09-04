@@ -29,20 +29,25 @@ const CODE = SRC.replace(/\{\/\*[\s\S]*?\*\/\}/g, ' ')
   .replace(/^\s*\/\/.*$/gm, ' ')
 
 /** Der Abschnitt zwischen zwei Markern im Code. */
-const between = (from: string, to: string) => {
-  const a = CODE.indexOf(from)
+const between = (from: string | RegExp, to: string) => {
+  const a = typeof from === 'string' ? CODE.indexOf(from) : CODE.search(from)
   const b = CODE.indexOf(to, a)
   expect(a, `Marker fehlt: ${from}`).toBeGreaterThan(-1)
   expect(b, `Marker fehlt: ${to}`).toBeGreaterThan(a)
   return CODE.slice(a, b)
 }
 
-const NAV = between('<nav aria-label="Main"', '</nav>')
+// Seit dem 04.09.2026 steht die Begruendung der harten Mitte zwischen dem
+// Namen und der Klasse, das Element hat also je Attribut eine Zeile. Der
+// Marker ist deshalb ein Muster und keine feste Zeichenkette: was er pruefen
+// soll, ist ein <nav> mit diesem Namen, nicht dessen Zeilenumbrueche.
+const NAV_MARKE = /<nav\s+aria-label="Main"/
+const NAV = between(NAV_MARKE, '</nav>')
 const RIGHT = CODE.slice(CODE.indexOf('</nav>'), CODE.indexOf('</header>'))
 
 describe('D-S19: der Center-Slot traegt jetzt etwas, und rechts steht weniger', () => {
   it('die Navigation steht in der Mitte, in einem echten <nav>', () => {
-    expect(CODE).toContain('<nav aria-label="Main"')
+    expect(CODE).toMatch(NAV_MARKE)
     expect(NAV).toContain('navTargets.map')
   })
 
@@ -57,13 +62,39 @@ describe('D-S19: der Center-Slot traegt jetzt etwas, und rechts steht weniger', 
     expect(RIGHT).not.toContain('openCompare')
   })
 
-  it('rechts stehen genau vier Dinge, und alle vier sind Zustandsanzeigen', () => {
+  it('rechts stehen nur Zustandsanzeigen und Schalter', () => {
     const komponenten = [...RIGHT.matchAll(/<([A-Z][A-Za-z]*)\s*\/>/g)].map((m) => m[1])
     expect(komponenten).toEqual(['CloudSwitch', 'DownloadBadge', 'UpdateBadge'])
-    // Der vierte ist der Theme-Knopf, der kein eigenes Bauteil ist.
+    // Der Theme-Knopf ist kein eigenes Bauteil und deshalb oben nicht dabei.
     expect(RIGHT).toContain('onClick={toggleTheme}')
-    // Und sonst nichts: kein weiterer Knopf in dieser Gruppe.
-    expect([...RIGHT.matchAll(/<button/g)]).toHaveLength(1)
+  })
+
+  it('und der Stale-Hinweis steht seit dem 04.09.2026 auch hier', () => {
+    // Er stand in der Mitte-Gruppe und schob dort das Drehrad zur Seite,
+    // sobald ein Modell kaputt war. David: "das ausgewaehlte im drehrad ist
+    // immer hardstuck mittig. keine ausnahme."
+    //
+    // Er gehoert ohnehin hierher, denn er zeigt einen ZUSTAND, und genau das
+    // ist die Regel dieser Gruppe. Er bringt zwei eigene Knoepfe mit
+    // (nachladen und wegklicken), und beide haengen an der Bedingung: ohne
+    // kaputtes Modell steht hier nichts.
+    expect(RIGHT).toContain('staleError && (')
+    expect(RIGHT).toContain('onClick={handleRefreshStale}')
+    expect(RIGHT).toContain('aria-label="Dismiss"')
+    expect(NAV).not.toContain('staleError')
+  })
+
+  it('und trotzdem steht rechts keine Navigation, auch nicht als Knopf', () => {
+    // Die Regel dieser Gruppe ist nicht "wenig", sondern "kein Ziel". Ein
+    // Zaehler auf die Knoepfe war die schwaechere Fassung davon: er ging rot,
+    // als ein Zustandsanzeiger mit zwei Bedienelementen dazukam, und waere
+    // gruen geblieben, wenn jemand einen Navigationsknopf gegen einen
+    // anderen getauscht haette.
+    for (const t of ['Chat', 'Create', 'Compare', 'Benchmark', 'Models', 'Settings']) {
+      expect(RIGHT, `${t} steht rechts`).not.toContain(`>${t}<`)
+    }
+    expect(RIGHT).not.toContain('setView(')
+    expect(RIGHT).not.toContain('navClass')
   })
 
   it('die Ziele stehen einmal als Daten da, nicht viermal als JSX', () => {

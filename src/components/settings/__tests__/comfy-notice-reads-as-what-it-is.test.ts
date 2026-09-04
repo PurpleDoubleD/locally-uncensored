@@ -3,8 +3,10 @@
  *
  * A15 review, 03.09., two findings on the closing line a finished run leaves.
  *
- * 1. It was painted amber whatever it said, so "Repair finished. ComfyUI is
- *    ready." arrived in the colour of a warning after an eight minute rebuild.
+ * 1. It carried the warning colour whatever it said, so "Repair finished.
+ *    ComfyUI is ready." arrived as a warning after an eight minute rebuild.
+ *    (That colour was amber then. It is red now, and there is no amber left
+ *    anywhere: see lib/hinweis.ts.)
  * 2. Nothing ever put it away. The section unfolds itself while a line is
  *    standing, so one finished run kept the section open on every visit for the
  *    rest of the session.
@@ -52,11 +54,23 @@ async function panelShowing(notice: string, noticeKind: 'ok' | 'warn') {
 }
 
 describe('the closing line reads as what it is', () => {
+  // Die Farbe der Warnzeile hat sich am 04.09.2026 geaendert, die Aussage
+  // dieses Tests nicht. Bis dahin war 'warn' bernsteinfarben, und dieser Test
+  // pruefte auf `amber`. Gelb ist im ganzen Haus abgeschafft, weil es der
+  // Sammelplatz fuer alles war, was weder gut noch kaputt ist, und damit
+  // nichts mehr aussagte (die Begruendung steht in lib/hinweis.ts). Es gibt
+  // nur noch zwei Toene: ruhiges Grau und rot. Ein 'warn' entsteht hier nur
+  // nach einem Abbruch oder wenn etwas nicht benutzt werden konnte, und jeder
+  // dieser Saetze endet mit "lauf das nochmal", also ist es rot. Geprueft
+  // wird weiterhin dasselbe: die Farbe ist keine Konstante, sie folgt der Art
+  // der Meldung.
   it('a run that worked is not painted as a warning', async () => {
     const line = await panelShowing('Repair finished. ComfyUI is ready.', 'ok')
     expect(line.textContent).toBe('Repair finished. ComfyUI is ready.')
     expect(line.getAttribute('data-kind')).toBe('ok')
+    expect(line.className).not.toContain('red')
     expect(line.className).not.toContain('amber')
+    expect(line.className).toContain('emerald')
   })
 
   it('a run with something to report still is', async () => {
@@ -67,7 +81,9 @@ describe('the closing line reads as what it is', () => {
       'warn',
     )
     expect(line.getAttribute('data-kind')).toBe('warn')
-    expect(line.className).toContain('amber')
+    expect(line.className).toContain('red')
+    expect(line.className).not.toContain('emerald')
+    expect(line.className).not.toContain('amber')
   })
 })
 

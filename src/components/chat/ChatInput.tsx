@@ -12,6 +12,8 @@ import { clampEffort, effortChoices, effortLabel, nextEffort, DEFAULT_EFFORT } f
 import type { AgentToolCall } from '../../types/agent-mode'
 import type { ImageAttachment } from '../../types/chat'
 import { COMPOSER_MAX_W } from './composer-width'
+import { Hinweis } from '../ui/Hinweis'
+import { HINWEIS_TEXT, HINWEIS_ZEILE } from '../../lib/hinweis'
 import { MONOGRAM, MONOGRAM_INVERT } from '../layout/brand'
 
 interface Props {
@@ -428,19 +430,27 @@ export function ChatInput({ onSend, onStop, isGenerating, pendingApproval, onApp
           {/* Non-image attach hint (GH #69). The clip is images-only; PDFs, Word,
               and text files go through the Documents panel so the model can read them. */}
           {docHint && (
-            <div className="flex items-center gap-2 mb-1.5 px-2 py-1 rounded-md bg-amber-500/10 border border-amber-500/20 t-micro text-amber-700 dark:text-amber-300">
-              <span className="flex-1">The clip attaches images. To ask about a PDF, Word, or text file, add it in the Documents panel.</span>
-              {onAttachDocs && (
-                <button
-                  onMouseDown={(e) => { e.preventDefault(); setDocHint(false); onAttachDocs() }}
-                  className="shrink-0 px-1.5 py-0.5 rounded bg-amber-500/20 hover:bg-amber-500/30 text-amber-800 dark:text-amber-200 font-medium transition-colors"
-                >
-                  Open Documents
-                </button>
-              )}
+            // Eine ruhige Zeile statt des gelben Kastens mit dem gelben
+            // Knopf darin: der Clip hat nur nicht das genommen, was der
+            // Nutzer wollte, kaputt ist dabei nichts. Gebaut aus den
+            // Konstanten und nicht aus `<Hinweis>`, weil beide Knoepfe hier
+            // `onMouseDown` mit `preventDefault` brauchen: sonst verliert das
+            // Textfeld beim Wegklicken den Schreibzeiger.
+            <div role="status" className={`${HINWEIS_ZEILE} ${HINWEIS_TEXT.ruhig} mb-1.5 px-1`}>
+              <span className="flex-1 min-w-0">
+                The clip attaches images. To ask about a PDF, Word, or text file, add it in the Documents panel.
+                {onAttachDocs && (
+                  <button
+                    onMouseDown={(e) => { e.preventDefault(); setDocHint(false); onAttachDocs() }}
+                    className="ml-1 underline underline-offset-2 hover:text-gray-700 dark:hover:text-gray-200 transition-colors"
+                  >
+                    Open Documents
+                  </button>
+                )}
+              </span>
               <button
                 onMouseDown={(e) => { e.preventDefault(); setDocHint(false) }}
-                className="shrink-0 text-amber-600/70 hover:text-amber-700 dark:text-amber-400/70 dark:hover:text-amber-300"
+                className="shrink-0 opacity-70 hover:opacity-100 transition-opacity"
                 aria-label="Dismiss"
               >
                 <X size={11} />
@@ -476,10 +486,9 @@ export function ChatInput({ onSend, onStop, isGenerating, pendingApproval, onApp
               Non-blocking (send still works); the runtime error is also mapped
               to friendly copy. gthvidsten, GH Discussion #67. */}
           {images.length > 0 && activeModel && !canSeeImages && (
-            <div className="flex items-start gap-1.5 mb-1.5 px-1 text-[0.55rem] leading-relaxed text-amber-600 dark:text-amber-400">
-              <span className="shrink-0">⚠</span>
-              <span>This model can't read images. Switch to a vision model (Gemma 4, LLaVA, Qwen-VL) to use the attachment.</span>
-            </div>
+            <Hinweis className="mb-1.5 px-1">
+              This model can't read images. Switch to a vision model (Gemma 4, LLaVA, Qwen-VL) to use the attachment.
+            </Hinweis>
           )}
 
           <textarea

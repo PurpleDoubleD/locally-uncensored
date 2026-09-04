@@ -222,8 +222,12 @@ function EraserDemo() {
   return (
     <Stage>
       <div className="relative w-24 h-16 rounded-lg bg-gradient-to-br from-emerald-800/60 to-emerald-600/40">
+        {/* Der Gegenstand, den der Radierer wegnimmt. Er war gelb, ohne dass
+            hier irgendetwas zu warnen waere: reine Deko. Sky gehoert zur
+            Palette dieses Fensters (violet, sky, fuchsia, rose) und ist als
+            volle Flaeche noch an keinen anderen Demo-Gegenstand vergeben. */}
         <motion.div
-          className="absolute left-3 bottom-3 w-6 h-8 rounded-sm bg-amber-400/80"
+          className="absolute left-3 bottom-3 w-6 h-8 rounded-sm bg-sky-300/90"
           animate={{ opacity: [1, 1, 0, 0, 1] }}
           transition={{ ...LOOP, duration: 3, times: [0, 0.35, 0.55, 0.85, 1] }}
         />

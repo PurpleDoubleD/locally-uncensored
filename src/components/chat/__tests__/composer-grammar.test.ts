@@ -172,6 +172,14 @@ function controlClassNames(region: string): string[] {
  * Polsterung, Rahmen, Flaeche, Schriftgroesse/-gewicht, Schatten, Deckung.
  * Layout-Utilities (`flex`, `items-center`, `truncate`) sind erlaubt, sie
  * beschreiben keine Form.
+ *
+ * Die Textfarbe steht hier seit dem 04.09.2026 OHNE Farbliste. Vorher zaehlte
+ * der Ausdruck die Familien einzeln auf: `gray-`, `blue-`, `red-`, `green-`,
+ * `emerald-`, `purple-` und die Gelb-Familie. Diese Liste ist zweimal falsch
+ * geworden: Gelb gibt es in der Oberflaeche gar nicht mehr (`lib/hinweis.ts`
+ * kennt zwei Toene, ruhiges Grau und Rot), und jede Farbe, die noch nicht
+ * aufgezaehlt war, kam an der Pruefung vorbei. `[a-z]+-\d` fasst jede Familie,
+ * auch die, die heute niemand vorhersieht.
  */
 const FORM_LANGUAGE = [
   /\brounded(?:-|\b)/,
@@ -180,7 +188,7 @@ const FORM_LANGUAGE = [
   /(?:^|[\s'"`:])h-(?!full\b)/,
   /(?:^|[\s'"`:])w-(?!full\b)/,
   /(?:^|[\s'"`:])p[xy]?-\d/,
-  /(?:^|[\s'"`:])text-(?:\[|gray-|white\b|black\b|blue-|red-|green-|emerald-|amber-|purple-)/,
+  /(?:^|[\s'"`:])text-(?:\[|white\b|black\b|[a-z]+-\d)/,
   /(?:^|[\s'"`:])font-(?:medium|semibold|bold)\b/,
   /(?:^|[\s'"`:])shadow(?:-|\b)/,
   /(?:^|[\s'"`:])opacity-\d/,

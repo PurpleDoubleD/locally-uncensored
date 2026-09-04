@@ -12,6 +12,7 @@ import { requestGenerationCancel } from '../../api/vram-handoff'
 import { fileUrlToPath, readLocalFileAsBlobUrl, displayableMedia, type MediaRead } from '../../lib/local-media-url'
 import { hiddenFromTranscript } from '../../lib/transcript-visibility'
 import { MOTION_S } from '../ui/motion'
+import { HINWEIS_TEXT } from '../../lib/hinweis'
 
 // F1 (konata3602 commitment 2026-05-23) + render fix (konata3602 bug 2026-06-07)
 // — when image_generate / video_generate / screenshot produce a ComfyUI output,
@@ -311,10 +312,16 @@ function ToolCallBlockImpl({ toolCall, onApprove, onReject }: Props) {
               ))}
             </span>
           )}
+          {/* „Wartet auf Zustimmung" ist eine Entscheidung, kein Zwischenfall,
+              und traegt deshalb den ruhigen Ton (`lib/hinweis.ts`). Gelb hat
+              die Uhr hier neben das rote Fehlerzeichen gestellt, als waere ein
+              offener Werkzeugaufruf ein halber Absturz. Gesehen wird er ueber
+              die Uhr, ueber Approve/Reject darunter und ueber die Rueckfrage
+              am Eingabefeld, nicht ueber die Farbe. */}
           <StatusIcon size={9} className={`shrink-0 ${
             toolCall.status === 'completed' ? 'text-gray-400 dark:text-gray-500' :
             isFailed ? 'text-red-400/60' :
-            isPending ? 'text-amber-400/60' :
+            isPending ? HINWEIS_TEXT.ruhig :
             'text-gray-500'
           } ${isRunning ? 'animate-spin' : ''}`} />
           {toolCall.duration != null && (

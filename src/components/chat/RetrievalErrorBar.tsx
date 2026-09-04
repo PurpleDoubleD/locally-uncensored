@@ -5,27 +5,29 @@
  * green Docs badge, got an answer, and had no way to know the answer had never
  * seen the PDF. This is the composer-side half of the statement; the RAG panel
  * carries the same sentence for whoever has it open.
+ *
+ * Ton `fehler`: die Antwort daneben ist ohne die Dokumente entstanden, da muss
+ * jemand hinsehen. Die Zeile war vorher ein gelber Kasten mit Fuellung, Rahmen
+ * und eigenem Kreuz, also die Bauform einer Warnung ohne deren Farbe. Jetzt
+ * traegt die Farbe die Dringlichkeit und `<Hinweis>` die Form, das Kreuz
+ * inbegriffen. Begruendung in `lib/hinweis.ts`.
  */
-import { AlertTriangle, X } from 'lucide-react'
+import { AlertTriangle } from 'lucide-react'
+import { Hinweis } from '../ui/Hinweis'
 import { useRAGStore } from '../../stores/ragStore'
 
 export function RetrievalErrorBar() {
   const message = useRAGStore((s) => s.retrievalError)
   if (!message) return null
   return (
-    <div
-      data-testid="retrieval-error-bar"
-      className="mx-3 mb-1.5 flex items-start gap-2 px-2 py-1 rounded-md bg-amber-500/10 border border-amber-500/20 t-micro text-amber-700 dark:text-amber-300"
-    >
-      <AlertTriangle size={11} className="shrink-0 mt-0.5" />
-      <span className="flex-1 leading-snug">{message}</span>
-      <button
-        onClick={() => useRAGStore.getState().setRetrievalError(null)}
-        className="shrink-0 text-amber-600/70 hover:text-amber-700 dark:text-amber-400/70 dark:hover:text-amber-300"
-        aria-label="Dismiss"
+    <div data-testid="retrieval-error-bar" className="mx-3 mb-1.5">
+      <Hinweis
+        ton="fehler"
+        icon={<AlertTriangle size={11} className="shrink-0 mt-0.5" />}
+        onDismiss={() => useRAGStore.getState().setRetrievalError(null)}
       >
-        <X size={11} />
-      </button>
+        {message}
+      </Hinweis>
     </div>
   )
 }

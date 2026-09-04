@@ -11,6 +11,7 @@
 // chat, where it would be noise.
 
 import { Users } from 'lucide-react'
+import { Hinweis } from '../ui/Hinweis'
 import { useChatStore } from '../../stores/chatStore'
 import { useProviderStore } from '../../stores/providerStore'
 import { isGroupChat } from '../../lib/group-chat'
@@ -51,18 +52,19 @@ export function GroupCostHint() {
     ? groupModels.filter((m) => m.startsWith('openai::')).length
     : 0
 
+  // Eine Zeile, kein Kasten: der Vervielfacher ist eine Auskunft, kein Alarm.
+  // Vorher trug die Zeile einen gelben Rahmen mit gelber Fuellung und ein
+  // gelbes Symbol, also die Bauform einer Warnung fuer einen Satz, der nur
+  // sagt, was der naechste Enter kostet. Die Begruendung steht in
+  // `lib/hinweis.ts`.
   return (
     <div className={`w-full ${COMPOSER_MAX_W} mx-auto px-3 pb-1 flex justify-center`}>
-      <div className="w-full flex items-center gap-1.5 px-2 py-1 rounded-md border border-amber-500/20 bg-amber-500/[0.04]">
-        <Users size={9} className="text-amber-400 shrink-0" />
-        <span className="text-[0.55rem] uppercase tracking-wider text-gray-500 shrink-0">group</span>
-        <span
-          className="flex-1 min-w-0 truncate t-micro text-gray-700 dark:text-gray-300"
-          title={groupModels.join(', ')}
-        >
+      <Hinweis className="w-full" icon={<Users size={9} className="shrink-0 mt-[3px]" />}>
+        <span className="block truncate" title={groupModels.join(', ')}>
+          <span className="uppercase tracking-wider">group</span>{' '}
           {groupCostHintText(groupModels.length, builtinSpeakers)}
         </span>
-      </div>
+      </Hinweis>
     </div>
   )
 }

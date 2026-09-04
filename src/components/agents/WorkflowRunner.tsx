@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Loader2, Check, X, Circle, Send, Square } from 'lucide-react'
 import { useAgentWorkflowStore } from '../../stores/agentWorkflowStore'
+import { Hinweis } from '../ui/Hinweis'
 import type { StepStatus } from '../../types/agent-workflows'
 
 const STATUS_ICONS: Record<StepStatus | 'waiting', typeof Check> = {
@@ -12,13 +13,17 @@ const STATUS_ICONS: Record<StepStatus | 'waiting', typeof Check> = {
   waiting: Loader2,
 }
 
+// `waiting` war gelb und stand damit zwischen „laeuft" und „kaputt", als gaebe
+// es einen halben Fehler. Es gibt keinen: der Lauf laeuft, er haengt nur an
+// einer Eingabe. Also dieselbe Farbe wie `running`. Was die beiden trennt, ist
+// die Bewegung (Puls statt Drehung) und die Frage, die darunter steht.
 const STATUS_COLORS: Record<StepStatus | 'waiting', string> = {
   pending: 'text-gray-600',
   running: 'text-blue-400 animate-spin',
   completed: 'text-green-400',
   failed: 'text-red-400',
   skipped: 'text-gray-600',
-  waiting: 'text-amber-400 animate-pulse',
+  waiting: 'text-blue-400 animate-pulse',
 }
 
 interface WorkflowRunnerProps {
@@ -132,7 +137,9 @@ export function WorkflowRunner({
       {/* User input prompt */}
       {waitingForInput && (
         <div className="space-y-1.5 pt-1 border-t border-white/5">
-          <p className="t-micro text-amber-400">{waitingForInput}</p>
+          {/* Das ist die Frage an den Nutzer, keine Warnung. Sie gehoert zum
+              Feld darunter und traegt deshalb dessen Textfarbe. */}
+          <p className="t-micro text-gray-200">{waitingForInput}</p>
           <div className="flex gap-1.5">
             <input
               value={inputValue}
@@ -152,11 +159,10 @@ export function WorkflowRunner({
         </div>
       )}
 
-      {/* Error */}
+      {/* Error. Der Kasten um die Zeile ist weg: die rote Schrift sagt schon
+          alles, was Rahmen und Fuellflaeche dazutun sollten. */}
       {execution.error && (
-        <p className="t-micro text-red-400 bg-red-500/5 rounded px-2 py-1 border border-red-500/20">
-          {execution.error}
-        </p>
+        <Hinweis ton="fehler">{execution.error}</Hinweis>
       )}
     </div>
   )

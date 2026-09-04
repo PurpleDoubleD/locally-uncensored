@@ -17,9 +17,15 @@ import { cn } from '../ui/cn'
 // missing, because the R13 screenshot caught a load and the R14 pair caught
 // two samplings. Checked in git: this mapping has not changed since the
 // surface was ported (eaeff304, 2026-07-04), so nothing was lost. The device
-// is said in words, by the yellow banner in the Create tab.
+// is said in words, by the line at the top of the Create tab.
+//
+// Das Chipsymbol und sein Ring waren gelb. Das war Schmuck fuer eine Phase
+// und nie eine Warnung, und genau solche Stellen haben Gelb in der App
+// bedeutungslos gemacht. Jetzt Sky, weil es im Wartekreis noch frei war:
+// Gruen gehoert dem Sampling, der Akzent dem Dekodieren, Grau dem Warten.
+// Die Regel dazu steht in lib/hinweis.ts.
 function phaseIcon(phase: ProgressPhase) {
-  if (phase === 'loading-model' || phase === 'loading-clip' || phase === 'loading-vae') return <Cpu size={20} className="text-amber-300" />
+  if (phase === 'loading-model' || phase === 'loading-clip' || phase === 'loading-vae') return <Cpu size={20} className="text-sky-300" />
   if (phase === 'sampling') return <Sparkles size={20} className="text-green-300" />
   if (phase === 'decoding') return <ImageDown size={20} className="text-lu-accent" />
   return <Sparkles size={20} className="text-gray-400" />
@@ -63,8 +69,8 @@ export function GeneratingView() {
         <div className="relative w-16 h-16">
           {isLoading ? (
             <>
-              <motion.div className="absolute inset-0 rounded-full border border-amber-400/30" animate={{ scale: [1, 1.6], opacity: [0.5, 0] }} transition={{ duration: 3, repeat: Infinity, ease: 'easeOut' }} />
-              <div className="absolute inset-0 rounded-full border border-amber-400/20 flex items-center justify-center">
+              <motion.div className="absolute inset-0 rounded-full border border-sky-400/30" animate={{ scale: [1, 1.6], opacity: [0.5, 0] }} transition={{ duration: 3, repeat: Infinity, ease: 'easeOut' }} />
+              <div className="absolute inset-0 rounded-full border border-sky-400/20 flex items-center justify-center">
                 <motion.div animate={{ rotate: 360 }} transition={{ duration: 3, repeat: Infinity, ease: 'linear' }}>{phaseIcon(progressPhase)}</motion.div>
               </div>
             </>

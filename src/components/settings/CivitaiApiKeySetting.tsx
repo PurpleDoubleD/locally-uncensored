@@ -17,6 +17,7 @@
 import { useEffect, useState } from 'react'
 import { KeyRound, Check, AlertTriangle } from 'lucide-react'
 import { looksLikeAFolderPath, CIVITAI_KEY_PLACEHOLDER, CIVITAI_KEY_LOOKS_WRONG } from '../../lib/civitai-key-shape'
+import { HINWEIS_TEXT, HINWEIS_ZEILE } from '../../lib/hinweis'
 import { useWorkflowStore } from '../../stores/workflowStore'
 import { openExternal } from '../../api/backend'
 
@@ -87,8 +88,15 @@ export function CivitaiApiKeySetting() {
           </button>
         )}
       </div>
+      {/* Rot, nicht mehr Gelb: der Wert wird NICHT gespeichert, es muss also
+          jemand handeln. Die Klassen kommen aus lib/hinweis.ts statt von Hand,
+          die eigene Form nur wegen des `data-testid`, an dem die Tests haengen. */}
       {looksWrong && (
-        <div data-testid="civitai-key-looks-wrong" className="flex items-start gap-1.5 t-micro leading-relaxed text-amber-600 dark:text-amber-400">
+        <div
+          data-testid="civitai-key-looks-wrong"
+          role="alert"
+          className={`${HINWEIS_ZEILE} ${HINWEIS_TEXT.fehler}`}
+        >
           <AlertTriangle size={11} className="shrink-0 mt-0.5" />
           <span>{CIVITAI_KEY_LOOKS_WRONG}</span>
         </div>

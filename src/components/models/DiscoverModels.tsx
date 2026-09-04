@@ -32,6 +32,7 @@ import { ensureLuEngineIsChatProvider, announceLuEngineSwitch } from '../../api/
 import { LuEngineSwitchBar } from '../chat/LuEngineSwitchBar'
 import { resolveTextDownloadTarget } from '../../lib/text-download-target'
 import { hfUrlToOllamaRef, hfUrlToLmStudioSubdir, parseHfUrl, extractGgufQuant, isShardedOrIncompatibleGguf } from '../../lib/hf-to-provider'
+import { HINWEIS_TEXT } from '../../lib/hinweis'
 import { GlassCard } from '../ui/GlassCard'
 import { GlowButton } from '../ui/GlowButton'
 import { ProgressBar } from '../ui/ProgressBar'
@@ -1264,13 +1265,20 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
             <p className="text-[0.7rem] text-gray-500">
               All parts must download into one folder to load as a single model. Make sure you have the disk space, and the RAM/VRAM to actually run it.
             </p>
+            {/* Beide Saetze standen in Gelb, also in der Farbe, mit der die
+                App bis heute alles zwischen „gut" und „kaputt" markiert hat.
+                Keiner von beiden haelt den Download auf: der erste sagt, wie
+                gross das Ding ist, der zweite, in welchem Ordner die Teile
+                landen. Auskunft, kein Alarm, also der ruhige Ton aus
+                `lib/hinweis.ts`. Die Schriftgroesse bleibt die der beiden
+                Saetze darueber, damit der Absatz eine Stimme behaelt. */}
             {confirmDownload.totalGB > 60 && (
-              <p className="text-[0.7rem] text-amber-500">
+              <p className={`text-[0.7rem] ${HINWEIS_TEXT.ruhig}`}>
                 That is very large for a local model. Most consumer GPUs can't run it.
               </p>
             )}
             {confirmDownload.note && (
-              <p className="text-[0.7rem] text-amber-500">{confirmDownload.note}</p>
+              <p className={`text-[0.7rem] ${HINWEIS_TEXT.ruhig}`}>{confirmDownload.note}</p>
             )}
             <div className="flex gap-2 pt-1">
               <GlowButton variant="secondary" onClick={() => setConfirmDownload(null)} className="flex-1">

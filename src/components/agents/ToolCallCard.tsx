@@ -53,8 +53,13 @@ export function ToolCallCard({ toolCall, onApprove, onReject }: Props) {
             {toolCall.status === 'rejected' ? 'rejected' : 'failed'}
           </span>
         )}
+        {/* Die drei Nachbarn oben sind Zustaende des Werkzeugs: laeuft, fertig,
+            fehlgeschlagen. „awaiting approval" ist keiner davon, sondern eine
+            Frage an den Nutzer, und stand trotzdem in Gelb zwischen Blau und
+            Rot. Der Hausakzent sagt „hier bist du dran", ohne einen Defekt zu
+            behaupten; die Antwort liegt als Approve/Reject direkt darunter. */}
         {isPending && (
-          <span className="t-micro text-amber-400 bg-amber-500/10 px-1.5 py-0.5 rounded-full">
+          <span className="t-micro text-lu-accent bg-lu-accent-soft px-1.5 py-0.5 rounded-full">
             awaiting approval
           </span>
         )}

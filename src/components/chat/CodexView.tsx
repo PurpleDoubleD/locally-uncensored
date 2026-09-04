@@ -41,6 +41,8 @@ import { User, Code, Eye, GitBranch, Download, RefreshCw, RotateCcw, Folder, Fol
 import { Fragment, useEffect, useState } from 'react'
 import { checkGitInstalled, openExternal, type GitStatus } from '../../api/backend'
 import { CodexConfirmDialog } from './CodexConfirmDialog'
+import { Hinweis } from '../ui/Hinweis'
+import { HINWEIS_TEXT } from '../../lib/hinweis'
 import { stripModelNoise } from '../../lib/strip-model-noise'
 
 // Code always drives a tool loop, so the aggressive tier applies here.
@@ -172,10 +174,16 @@ export function CodexView() {
           {/* Code-Review Mode badge (B13), makes it impossible to miss
               that the agent is read-only. The toggle itself lives in
               Settings → Codex Agent; clicking the badge jumps you there
-              isn't worth a routing change in v2.5.0. */}
+              isn't worth a routing change in v2.5.0.
+              Das Abzeichen stand in Gelb und las sich damit wie eine Stoerung,
+              obwohl es das Gegenteil meldet: der Agent kann nichts anfassen.
+              Gruen sagt "diese Zusicherung gilt". Es ist keine Ampel, sondern
+              ein Zustandschip, deshalb behaelt es seine Form und wechselt nur
+              den Farbton. Im Kopf daneben ist Gruen frei: der Modellumschalter
+              nimmt Violett, alles andere ist grau. */}
           {codexReviewMode && (
             <span
-              className="flex items-center gap-1 px-1.5 py-0 rounded border border-amber-500/30 text-amber-500 text-[0.55rem] bg-amber-500/[0.04]"
+              className="flex items-center gap-1 px-1.5 py-0 rounded border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 text-[0.55rem] bg-emerald-500/[0.04]"
               title="Code-Review Mode is active. The coding agent will inspect the codebase but won't write files or run commands. Disable in Settings → Coding Agent."
             >
               <Eye size={9} />
@@ -237,16 +245,20 @@ export function CodexView() {
         {/* Git-missing banner (v2.5.0). Codex shells out to git for
             status/diff/commit/log, and without it those tools fail. Minimal,
             dismiss-by-installing: an Install button (opens the platform git
-            download page) + a Recheck button for after the install. */}
+            download page) + a Recheck button for after the install.
+            Ton `fehler`: ohne git fallen echte Werkzeuge aus, und es gibt genau
+            eine Handlung dagegen, die gleich daneben steht. Die gelbe Fuellung
+            und der gelbe Rahmen sind weg, die Linie unten ist die Trennung zum
+            Verlauf und dieselbe wie am Kopf darueber, kein Rahmen um den Satz
+            (`lib/hinweis.ts`). */}
         {gitStatus && !gitStatus.installed && (
-          <div className="flex items-center gap-2 px-3 py-1.5 border-b border-amber-500/20 bg-amber-500/[0.06]">
-            <GitBranch size={12} className="text-amber-500 shrink-0" />
-            <span className="t-micro text-amber-600 dark:text-amber-400/90 flex-1 leading-tight">
+          <div className="flex items-center gap-2 px-3 py-1.5 border-b border-gray-200 dark:border-white/[0.04]">
+            <Hinweis ton="fehler" icon={<GitBranch size={12} className="shrink-0 mt-0.5" />} className="flex-1">
               Git isn't installed. The coding agent needs it for diffs, commits and history.
-            </span>
+            </Hinweis>
             <button
               onClick={() => openExternal(gitStatus.download_url)}
-              className="flex items-center gap-1 px-2 py-0.5 rounded t-micro font-medium bg-amber-500/15 text-amber-600 dark:text-amber-300 hover:bg-amber-500/25 border border-amber-500/30 transition-colors"
+              className="flex items-center gap-1 px-2 py-0.5 rounded t-micro font-medium text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-white/5 transition-colors"
             >
               <Download size={11} /> Install Git
             </button>
@@ -275,8 +287,12 @@ export function CodexView() {
               <p className="text-[0.55rem] text-gray-400 dark:text-gray-600 mt-0.5 max-w-[300px]">
                 Send a coding instruction. The coding agent will read your codebase, write code, and run commands.
               </p>
+              {/* Kein Ordner ist kein Fehler, sondern der Startzustand: der
+                  Agent hat ein Ausweichverzeichnis und arbeitet darin. Die
+                  Zeile stand in gedaempftem Gelb, also in Alarmfarbe fuer eine
+                  Auskunft, und steht jetzt im ruhigen Ton der Absaetze darueber. */}
               {!codexWorkingDir && (
-                <p className="text-[0.55rem] text-amber-500/70 mt-2" data-testid="codex-no-folder-hint">
+                <p className={`text-[0.55rem] mt-2 ${HINWEIS_TEXT.ruhig}`} data-testid="codex-no-folder-hint">
                   No folder picked. The agent works in {fallbackLabel}. Pick a project with
                   "Select folder..." in the file tree panel on the right.
                 </p>
@@ -298,20 +314,23 @@ export function CodexView() {
                 // that says "the file on disk is not the diff you approved"
                 // reached nobody, and an assistant bubble would be the other
                 // wrong answer: it would claim the model said it.
+                // Die beiden Faelle unterscheiden sich im TON, nicht in der
+                // Bauform: die Datei auf der Platte weicht vom genehmigten Diff
+                // ab, da muss jemand hinsehen (rot), oder sie ist genau der
+                // genehmigte Diff (ruhig). Vorher hatten beide einen Kasten,
+                // der gelbe darin sah aus wie ein Absturz (`lib/hinweis.ts`).
                 if (msg.role === 'system' && msg.notice) {
                   const warn = msg.notice === 'warn'
                   return (
                     <div key={msg.id} className="px-3 py-1" data-testid="codex-notice">
-                      <div className={`flex items-start gap-1.5 px-2 py-1 rounded border t-micro leading-snug ${
-                        warn
-                          ? 'border-amber-300/70 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/10 text-amber-900 dark:text-amber-200'
-                          : 'border-gray-200 dark:border-white/10 bg-gray-50/60 dark:bg-white/[0.02] text-gray-500 dark:text-gray-400'
-                      }`}>
-                        {warn
+                      <Hinweis
+                        ton={warn ? 'fehler' : 'ruhig'}
+                        icon={warn
                           ? <AlertTriangle size={10} className="mt-0.5 shrink-0" />
                           : <Check size={10} className="mt-0.5 shrink-0" />}
+                      >
                         <span className="break-words">{msg.content}</span>
-                      </div>
+                      </Hinweis>
                     </div>
                   )
                 }

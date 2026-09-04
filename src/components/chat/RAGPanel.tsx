@@ -18,6 +18,8 @@ import {
   Eraser,
 } from 'lucide-react'
 import { useShallow } from 'zustand/react/shallow'
+import { Hinweis } from '../ui/Hinweis'
+import { HINWEIS_TEXT } from '../../lib/hinweis'
 import { useRAG } from '../../hooks/useRAG'
 import { useRAGStore } from '../../stores/ragStore'
 import { useSettingsStore } from '../../stores/settingsStore'
@@ -33,12 +35,15 @@ interface Props {
 
 const ACCEPT = '.pdf,.docx,.txt'
 
+// Die mittlere Stufe war Gelb, und ein mittelguter Treffer ist keine Warnung,
+// sondern der Normalfall: die meisten Passagen liegen dort. Grau sagt genau
+// das, ohne die Farbe zu verbrauchen, die im Panel dem echten Fehler gehoert.
 function ScoreBadge({ score }: { score: number }) {
   const color =
     score > 0.8
       ? 'bg-green-500/20 text-green-400 border-green-500/30'
       : score > 0.6
-        ? 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30'
+        ? 'bg-gray-500/20 text-gray-500 dark:text-gray-400 border-gray-500/30'
         : 'bg-red-500/20 text-red-400 border-red-500/30'
 
   return (
@@ -286,40 +291,43 @@ function RAGPanelInner({ conversationId, onClose }: { conversationId: string; on
           {laneIsOnThisMachine(lane.lane) ? (
             <p
               data-testid="rag-cloud-privacy"
-              className="t-micro leading-snug text-gray-500 dark:text-gray-400"
+              className={`t-micro leading-snug ${HINWEIS_TEXT.ruhig}`}
             >
               Your documents are indexed on this computer and stay here. Only the passages
               that match your question are sent to the cloud model as context.
             </p>
           ) : (
+            // Derselbe Satz im selben Ton, nur mit dem anderen Ziel. Er stand
+            // vorher in Gelb mit Warndreieck, obwohl nichts kaputt ist: er sagt
+            // nur, wohin der Text geht. Zwei Auskuenfte, die der Nutzer
+            // vergleichen soll, muessen gleich aussehen (`lib/hinweis.ts`).
             <p
               data-testid="rag-cloud-privacy-remote"
-              className="flex items-start gap-1.5 t-micro leading-snug text-amber-600 dark:text-amber-400"
+              className={`t-micro leading-snug ${HINWEIS_TEXT.ruhig}`}
             >
-              <AlertTriangle size={11} className="shrink-0 mt-0.5" />
-              <span>
-                Indexing runs on {lane.endpoint ?? 'your configured Ollama host'}, so the full
-                text of every document you add is sent there. The passages that match your
-                question are then sent to the cloud model as context.
-              </span>
+              Indexing runs on {lane.endpoint ?? 'your configured Ollama host'}, so the full
+              text of every document you add is sent there. The passages that match your
+              question are then sent to the cloud model as context.
             </p>
           )}
         </div>
       )}
 
-      {/* The last turn went out without the documents (review S4). */}
+      {/* The last turn went out without the documents (review S4). Rot und
+          eine Zeile: der Abruf ist wirklich gescheitert, die gelbe Fuellflaeche
+          davor war nur Flaeche (`lib/hinweis.ts`). */}
       {retrievalError && (
         <div className="px-3 pt-2">
-          <div className="flex items-start gap-1.5 p-2 rounded-lg bg-amber-500/10 border border-amber-500/20">
-            <AlertTriangle size={12} className="text-amber-500 shrink-0 mt-0.5" />
-            <span data-testid="rag-retrieval-error" className="t-micro text-amber-600 dark:text-amber-400 leading-tight">
-              {retrievalError}
-            </span>
-          </div>
+          <Hinweis ton="fehler" icon={<AlertTriangle size={12} className="shrink-0 mt-0.5" />}>
+            <span data-testid="rag-retrieval-error">{retrievalError}</span>
+          </Hinweis>
         </div>
       )}
 
-      {/* Context window warning */}
+      {/* Context window warning. Ruhig, denn ein kleines Kontextfenster ist
+          eine Eigenschaft des gewaehlten Modells und kein Zwischenfall. Als
+          gelber Kasten stand die Zeile direkt neben dem echten Abrufsfehler
+          und war genauso laut wie er. */}
       <AnimatePresence>
         {contextWarning && (
           <motion.div
@@ -328,12 +336,7 @@ function RAGPanelInner({ conversationId, onClose }: { conversationId: string; on
             animate={{ opacity: 1, height: 'auto' }}
             exit={{ opacity: 0, height: 0 }}
           >
-            <div className="flex items-start gap-1.5 p-2 rounded-lg bg-yellow-500/10 border border-yellow-500/20">
-              <AlertTriangle size={12} className="text-yellow-500 shrink-0 mt-0.5" />
-              <span className="t-micro text-yellow-400 leading-tight">
-                {contextWarning}
-              </span>
-            </div>
+            <Hinweis>{contextWarning}</Hinweis>
           </motion.div>
         )}
       </AnimatePresence>

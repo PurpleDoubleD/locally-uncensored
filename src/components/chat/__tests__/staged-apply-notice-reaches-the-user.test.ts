@@ -64,14 +64,43 @@ describe('the coding view renders it as a notice, not as the model talking', () 
   })
 
   it('a warn notice looks different from a confirmation', () => {
+    // Hier stand einmal `toContain('amber')`. Das war schon vorher der
+    // schwaechere Test: er nagelte eine Farbe fest statt der Aussage, und die
+    // Farbe hat David am 04.09.2026 aus der ganzen Oberflaeche geworfen
+    // ("kein gelb mehr ohne farbe"). Seitdem gibt es zwei Toene und keinen
+    // dritten (`lib/hinweis.ts`), und welcher der beiden hier steht, ist eine
+    // Frage der Regel, nicht dieses Tests. Was der Test schuldet, ist die
+    // urspruengliche Aussage: die zwei Faelle werden ueberhaupt
+    // unterschieden, und der Satz des Nutzers steht drin.
     const branch = codexView.slice(
       codexView.indexOf("msg.role === 'system' && msg.notice"),
       codexView.indexOf('// Slash commands:'),
     )
     expect(branch).toContain("const warn = msg.notice === 'warn'")
+    // Berechnet allein reicht nicht, die Unterscheidung muss auch etwas
+    // steuern: ohne eine zweite Fundstelle waere `warn` totes Holz.
+    expect((branch.match(/\bwarn\b/g) ?? []).length).toBeGreaterThanOrEqual(2)
     expect(branch).toContain('AlertTriangle')
-    expect(branch).toContain('amber')
     expect(branch).toContain('{msg.content}')
+  })
+})
+
+describe('und im normalen Verlauf steht dieselbe Zeile', () => {
+  // Der Befund oben war fuer den Code-Verlauf aufgeschrieben, die Meldung
+  // erreicht den Nutzer aber auf beiden Oberflaechen. MessageList rendert
+  // sie mit derselben Regel, und ohne diese Wache haette der Umbau vom
+  // 04.09.2026 die eine Seite still auf eine andere Form ziehen koennen.
+  const list = read('../MessageList.tsx')
+
+  it('rendert den Satz als Zeile, nicht als Blase', () => {
+    expect(list).toContain("message.role === 'system' && message.notice")
+    expect(list).toContain('data-testid="chat-notice"')
+    expect(list).toContain('{message.content}')
+  })
+
+  it('nimmt die zwei Toene aus der einen Regel, und keinen dritten', () => {
+    expect(list).toContain("ton={message.notice === 'warn' ? 'fehler' : 'ruhig'}")
+    expect(list).not.toMatch(/(?:amber|yellow)-/)
   })
 })
 

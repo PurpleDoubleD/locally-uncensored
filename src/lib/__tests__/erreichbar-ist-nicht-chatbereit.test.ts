@@ -72,8 +72,27 @@ describe('beide Wege der Anbieterzeile sprechen denselben Spruch', () => {
     // abzuschreiben. Die vierte war eine Abschrift der dritten, und die
     // Typo-Sperrklinke hat das gemerkt, bevor jemand sonst es tat.
     expect(src.match(/function Statusfeld\(/g) ?? []).toHaveLength(1)
-    // Und nicht gruen: Gruen heisst auf dieser Zeile "du kannst chatten".
-    expect(src).toMatch(/status === 'stopped' \|\| status === 'no-models' \? 'bg-amber-500'/)
+  })
+
+  it('eine leere Liste ist nicht gruen und nicht rot, sondern ruhig', () => {
+    // Diese Regel hat sich am 04.09.2026 geaendert, der Sinn nicht. Vorher
+    // stand hier `status === 'stopped' || status === 'no-models' ?
+    // 'bg-amber-500'`, und das pruefte dasselbe: nicht gruen, weil Gruen auf
+    // dieser Zeile "du kannst chatten" heisst, und nicht rot, weil der Server
+    // laeuft. Das Gelb dafuer ist weg, weil es im ganzen Haus der Sammelplatz
+    // fuer alles war, was weder gut noch kaputt ist, und damit nichts mehr
+    // aussagte (die Begruendung steht in lib/hinweis.ts). Der Punkt kennt
+    // jetzt drei Farben, und 'no-models' faellt in die ruhige.
+    expect(src).toMatch(
+      /status === 'connected' \? PUNKT_FARBE\.an :\s*status === 'failed' \? PUNKT_FARBE\.kaputt :\s*PUNKT_FARBE\.aus/,
+    )
+    // Das Wort daneben traegt denselben Ton wie der Punkt.
+    expect(src).toMatch(/text: 'Reachable, no models',\s*ton: HINWEIS_TEXT\.ruhig/)
+    // NEGATIVKONTROLLE: kein Gelb mehr in dieser Datei, in keiner Schreibweise
+    // und auch nicht in einem Kommentar.
+    expect(src).not.toMatch(/amber-|yellow-/)
+    // Und die leere Liste darf sich auch nicht in die Gegenrichtung verirren.
+    expect(src).not.toMatch(/'no-models'[^\n]*(?:green|emerald|red)-/)
   })
 
   it('die gesunde Maschine aus GH #118 bleibt stumm, solange sie steht', () => {

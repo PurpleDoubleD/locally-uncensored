@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
-import { AlertTriangle, Cloud, X } from 'lucide-react'
+import { AlertTriangle, Cloud, Cpu } from 'lucide-react'
 import { useCreateStore, type GalleryItem } from '../../../stores/createStore'
 import { useCloudNoticeStore, CLOUD_RETENTION_DAYS, shouldShowRetentionNotice } from '../../../stores/cloudNoticeStore'
 import { useComfyNoticeStore } from '../../../stores/comfyNoticeStore'
@@ -16,6 +16,7 @@ import { CreatePanel } from './CreatePanel'
 import { Lightbox } from './Lightbox'
 import { AdvancedDrawer } from './AdvancedDrawer'
 import { WorkflowsModal } from '../WorkflowsModal'
+import { Hinweis } from '../../ui/Hinweis'
 import { MaskEditor } from './MaskEditor'
 import { VhsInstallModal } from './VhsInstallModal'
 import { INTENT_MAP, isIntentAvailable } from './intents'
@@ -224,6 +225,11 @@ function CreateExperimentalInner() {
     <div className="relative h-full w-full flex flex-col bg-white dark:bg-[#141414] text-gray-900 dark:text-gray-200 overflow-hidden">
       <IntentBar />
 
+      {/* Die Meldeleiste dieser Oberflaeche: vier Lagen, ZWEI Toene. Rot, wenn
+          jemand handeln muss, sonst gedaempftes Grau, und keine davon in einem
+          Kasten. Drei dieser vier waren gelb gefuellt, mit Rahmen und
+          Warndreieck, so dass ein Satz ueber die Aufbewahrungsdauer und ein
+          Absturz gleich schwer wogen. Regel und Begruendung: lib/hinweis.ts. */}
       <AnimatePresence>
         {banner && (
           <motion.div
@@ -232,15 +238,14 @@ function CreateExperimentalInner() {
             exit={{ height: 0, opacity: 0 }}
             className="overflow-hidden shrink-0"
           >
-            <div className="flex items-center gap-2 px-4 py-2 bg-red-500/10 border-b border-red-500/20 text-red-200 t-body">
-              <AlertTriangle size={14} className="shrink-0" />
-              <span className="flex-1 min-w-0 truncate">{banner}</span>
-              {error && (
-                <button onClick={() => setError(null)} className="shrink-0 text-red-300/70 hover:text-red-100" title="Dismiss">
-                  <X size={14} />
-                </button>
-              )}
-            </div>
+            <Hinweis
+              ton="fehler"
+              icon={<AlertTriangle size={12} className="shrink-0 mt-px" />}
+              onDismiss={error ? () => setError(null) : undefined}
+              className="px-4 py-2"
+            >
+              <span className="block truncate">{banner}</span>
+            </Hinweis>
           </motion.div>
         )}
       </AnimatePresence>
@@ -255,12 +260,17 @@ function CreateExperimentalInner() {
           with a working, correctly detected RTX 3060 that no usable GPU had
           been found, when he had chosen Force CPU himself, and then walking him
           through the AMD route on a machine with no AMD card in it. Same three
-          facts the backend was already sending, now all three read. */}
+          facts the backend was already sending, now all three read.
+
+          Das Chipsymbol statt des Warndreiecks ist der Punkt: hier ist nichts
+          kaputt, es rechnet nur der Prozessor. Der innere span bleibt stehen,
+          weil lib/__tests__/cpu-banner-names-the-real-reason.test.ts genau an
+          ihm prueft, dass diese Leiste den Satz RENDERT und keine vierte
+          Abschrift von ihm traegt. */}
       {backend === 'local' && connected === true && comfyOnCpu && comfyCpuBanner && (
-        <div className="flex items-center gap-2 px-4 py-2 bg-yellow-500/5 border-b border-yellow-500/10 text-yellow-300 text-xs shrink-0">
-          <AlertTriangle size={12} className="shrink-0" />
+        <Hinweis icon={<Cpu size={12} className="shrink-0 mt-px" />} className="px-4 py-2 shrink-0">
           <span>{comfyCpuBanner}</span>
-        </div>
+        </Hinweis>
       )}
 
       {/* Idle outage (R18 Befund 2): ComfyUI died while nobody was rendering
@@ -268,10 +278,7 @@ function CreateExperimentalInner() {
           no button: the render path restarts it and this says so. Nothing is
           started from here — see lib/comfy-idle-watch.ts for why. */}
       {idleNotice && (
-        <div className="flex items-center gap-2 px-4 py-2 bg-yellow-500/5 border-b border-yellow-500/10 text-yellow-300 text-xs shrink-0">
-          <AlertTriangle size={12} className="shrink-0" />
-          <span className="flex-1 min-w-0">{idleNotice}</span>
-        </div>
+        <Hinweis className="px-4 py-2 shrink-0">{idleNotice}</Hinweis>
       )}
 
       {/* Cross-origin block (#75, cinemazverev): a user-managed ComfyUI 0.19+
@@ -286,29 +293,28 @@ function CreateExperimentalInner() {
           holds the X against the cause signature, so the bar cannot return
           after every render the way it did on the box with ComfyUI 0.33.0. */}
       {backend === 'local' && shouldShowCorsNotice(comfyCorsBlocked, corsSignature, corsNoticeDismissedFor) && (
-        <div className="flex items-start gap-2 px-4 py-2 bg-yellow-500/5 border-b border-yellow-500/10 text-yellow-300 text-xs shrink-0">
-          <AlertTriangle size={12} className="shrink-0 mt-0.5" />
-          <span className="flex-1 min-w-0">
-            {corsFixError
-              ? corsFixError
-              : corsFixing
-                ? 'Restarting ComfyUI with the fix… this takes a moment.'
-                : 'Your ComfyUI blocks direct loads (v0.19+), so previews use a slower fallback.'}
-          </span>
+        <Hinweis
+          ton={corsFixError ? 'fehler' : 'ruhig'}
+          icon={corsFixError ? <AlertTriangle size={12} className="shrink-0 mt-px" /> : undefined}
+          onDismiss={() => { setComfyCorsBlocked(false); setCorsFixError(null); dismissCorsNotice(corsSignature) }}
+          className="px-4 py-2 shrink-0"
+        >
+          {corsFixError
+            ? corsFixError
+            : corsFixing
+              ? 'Restarting ComfyUI with the fix… this takes a moment.'
+              : 'Your ComfyUI blocks direct loads (v0.19+), so previews use a slower fallback.'}
           {!corsFixing && (
             <button
               onClick={() => { void fixCorsForMe() }}
               disabled={isGenerating}
               title={isGenerating ? 'Waiting for the current generation to finish' : 'LU restarts ComfyUI with the CORS flag for you'}
-              className="shrink-0 px-2 py-0.5 rounded bg-yellow-500/15 hover:bg-yellow-500/25 text-yellow-200 transition-colors whitespace-nowrap disabled:opacity-40 disabled:cursor-not-allowed"
+              className="ml-1.5 underline underline-offset-2 whitespace-nowrap opacity-80 hover:opacity-100 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed"
             >
               Let me do it for you!
             </button>
           )}
-          <button onClick={() => { setComfyCorsBlocked(false); setCorsFixError(null); dismissCorsNotice(corsSignature) }} className="shrink-0 text-yellow-300/70 hover:text-yellow-100" title="Dismiss">
-            <X size={14} />
-          </button>
-        </div>
+        </Hinweis>
       )}
 
       {/* Cloud gallery retention (David 2026-07-24). Cloud renders live on our
@@ -317,19 +323,16 @@ function CreateExperimentalInner() {
           way out is the explicit "Do not show again", and it stays dismissed
           across updates (persisted in lu_cloud_notice). */}
       {shouldShowRetentionNotice(backend, retentionNoticeSeen) && (
-        <div className="flex items-start gap-2 px-4 py-2 bg-purple-500/5 border-b border-purple-500/10 text-purple-200 text-xs shrink-0">
-          <Cloud size={12} className="shrink-0 mt-0.5" />
-          <span className="flex-1 min-w-0">
-            Cloud results are stored for {CLOUD_RETENTION_DAYS} days and then deleted.
-            Download anything you want to keep from the gallery.
-          </span>
+        <Hinweis icon={<Cloud size={12} className="shrink-0 mt-px" />} className="px-4 py-2 shrink-0">
+          Cloud results are stored for {CLOUD_RETENTION_DAYS} days and then deleted.
+          Download anything you want to keep from the gallery.
           <button
             onClick={() => setRetentionNoticeSeen(true)}
-            className="shrink-0 px-2 py-0.5 rounded bg-purple-500/15 hover:bg-purple-500/25 text-purple-100 transition-colors whitespace-nowrap"
+            className="ml-1.5 underline underline-offset-2 whitespace-nowrap opacity-80 hover:opacity-100 transition-opacity"
           >
             Do not show again
           </button>
-        </div>
+        </Hinweis>
       )}
 
       {/* The viewer (Stage) and the Gallery bubble share ONE row, so they're

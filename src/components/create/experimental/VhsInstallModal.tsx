@@ -1,4 +1,4 @@
-import { Download, FileVideo } from 'lucide-react'
+import { Download } from 'lucide-react'
 import { useCreateStore } from '../../../stores/createStore'
 import { Modal } from '../../ui/Modal'
 
@@ -20,16 +20,19 @@ export function VhsInstallModal() {
   return (
     <Modal open={open} onClose={() => choose('cancel')} title="Install MP4 support?">
       <div className="space-y-4 text-sm text-gray-200">
-        <div className="flex items-start gap-3 p-3 rounded-lg bg-yellow-500/5 border border-yellow-500/15">
-          <FileVideo size={18} className="text-yellow-400 shrink-0 mt-0.5" />
-          <div className="space-y-1.5">
-            <p className="text-yellow-200 font-medium text-[13px]">
-              Your ComfyUI doesn't have <code className="px-1 py-0.5 rounded bg-black/40 text-yellow-300 font-mono text-[11px]">VHS_VideoCombine</code>
-            </p>
-            <p className="text-[11px] text-yellow-100/80 leading-relaxed">
-              Without it, video generation falls back to <code className="font-mono text-[10px] bg-black/40 px-1 rounded">SaveAnimatedWEBP</code> and produces an animated <code className="font-mono text-[10px] bg-black/40 px-1 rounded">.webp</code> file instead of a real <code className="font-mono text-[10px] bg-black/40 px-1 rounded">.mp4</code> video.
-            </p>
-          </div>
+        {/* Der Grund stand frueher in einem gelben Kasten mit Rahmen, Fuellung
+            und Warnsymbol, mitten im Dialog, der ihn ohnehin schon stellt. Der
+            Rahmen war der Dialog, die Fuellung hat nichts getragen, und das
+            Gelb hat aus einer Feststellung eine Stoerung gemacht. Jetzt zwei
+            Zeilen Text: die Feststellung und ihre Folge. Die Regel dazu steht
+            in lib/hinweis.ts. */}
+        <div className="space-y-1.5">
+          <p className="font-medium text-[13px]">
+            Your ComfyUI doesn't have <code className="px-1 py-0.5 rounded bg-black/40 font-mono text-[11px]">VHS_VideoCombine</code>
+          </p>
+          <p className="text-[11px] text-gray-400 leading-relaxed">
+            Without it, video generation falls back to <code className="font-mono text-[10px] bg-black/40 px-1 rounded">SaveAnimatedWEBP</code> and produces an animated <code className="font-mono text-[10px] bg-black/40 px-1 rounded">.webp</code> file instead of a real <code className="font-mono text-[10px] bg-black/40 px-1 rounded">.mp4</code> video.
+          </p>
         </div>
 
         <div className="text-[11px] text-gray-400 leading-relaxed">

@@ -162,13 +162,10 @@ export function AgentModeToggle() {
             transition={{ duration: MOTION_S.base }}
             className="text-center space-y-3"
           >
-            <div className="flex justify-center">
-              <div
-                className="w-3 h-3 rounded-full bg-amber-500 shadow-lg"
-                style={{ boxShadow: '0 0 20px 4px rgba(245, 158, 11, 0.4)' }}
-              />
-            </div>
-
+            {/* Hier leuchtete ein gelber Punkt mit Schein. Er war reine
+                Zierde: ein Zustandspunkt sagt an, aus oder kaputt, und
+                „dieser Dialog ist offen" ist keins davon. Der Titel darunter
+                sagt dasselbe in Worten (`lib/hinweis.ts`). */}
             <h3 className="text-base font-semibold text-white">New Chat Required</h3>
             <p className="text-[12px] text-gray-400 leading-relaxed">
               Agent Mode needs to be active from the start of a conversation to work properly. Start a new chat with Agent Mode enabled.

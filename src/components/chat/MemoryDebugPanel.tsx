@@ -66,9 +66,14 @@ function MemoryPopover({ onClose }: { onClose: () => void }) {
     return () => { cancelled = true }
   }, [activeModel, entries.length])
 
+  // Vier Kategorien, vier Farben. `project` stand auf Gelb, und Gelb ist in
+  // dieser App keine Kategorie mehr, sondern gar nichts (`lib/hinweis.ts`).
+  // Cyan ist die naechste Farbe, die in diesem Panel noch frei war: Blau,
+  // Gruen und Grau haengen an den drei anderen Kategorien, Violett traegt die
+  // Panel-Umrandung, Rot den Loeschknopf.
   const typeColors: Record<string, string> = {
     user: 'text-blue-400', feedback: 'text-green-400',
-    project: 'text-amber-400', reference: 'text-gray-400',
+    project: 'text-cyan-400', reference: 'text-gray-400',
   }
 
   const handleAdd = () => {

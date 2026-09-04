@@ -3,6 +3,7 @@ import { useChatStore } from '../../stores/chatStore'
 import type { ToolCategory } from '../../api/mcp/types'
 import { useToolSupport } from '../../hooks/useToolSupport'
 import { FolderOpen, Terminal, Monitor, Globe, Cpu, Image, Film, GitBranch, Lock } from 'lucide-react'
+import { HINWEIS_TEXT } from '../../lib/hinweis'
 
 // Image AND video generation are LIVE (chat agent → ComfyUI; video unlocked
 // in v2.5.3 — T2V via Wan/Hunyuan/AnimateDiff, I2V via SVD/FramePack). The
@@ -40,7 +41,12 @@ export function PermissionOverrideBar() {
   return (
     <div>
       {!canUseTools && (
-        <div className="px-1.5 py-1 text-[0.5rem] leading-snug text-amber-600 dark:text-amber-400/90">
+        // Ruhiger Ton, kein Alarm: das Modell kann keine Werkzeuge, das ist
+        // eine Eigenschaft und kein Defekt. Vorher stand die Zeile in Gelb und
+        // sah damit aus wie ein Fehler, den jemand beheben muesste. Die Form
+        // kommt aus der Konstante statt aus `<Hinweis>`, weil diese Zeile die
+        // Schriftgroesse der Liste unter ihr traegt (`lib/hinweis.ts`).
+        <div role="status" className={`px-1.5 py-1 text-[0.5rem] leading-snug ${HINWEIS_TEXT.ruhig}`}>
           {reason}
         </div>
       )}

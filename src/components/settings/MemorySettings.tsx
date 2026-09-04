@@ -8,9 +8,14 @@ import type { MemoryType, MemoryFile } from '../../types/agent-mode'
 
 // ── Subtle type indicator (internal, not user-facing) ─────────
 
+// Vier Kategorien, vier Farben, und keine davon sagt etwas ueber gut oder
+// kaputt. `feedback` war gelb und las sich dadurch als Warnung an einem
+// Eintrag, der nur eine Sorte ist. Pink ist in dieser Datei sonst nicht
+// vergeben (Blau, Lila und Gruen stehen schon hier), und es ist weit genug
+// von Rot weg, um nicht wieder nach einem Fehler auszusehen.
 const TYPE_DOT_COLORS: Record<MemoryType, string> = {
   user: 'bg-blue-400',
-  feedback: 'bg-amber-400',
+  feedback: 'bg-pink-400',
   project: 'bg-purple-400',
   reference: 'bg-green-400',
 }
@@ -232,7 +237,10 @@ export function MemorySettings() {
       <div className="space-y-1.5 pb-2 border-b border-gray-200 dark:border-white/5">
         <div className="flex items-center justify-between py-0.5">
           <div className="flex items-center gap-1.5">
-            <Zap size={11} className="text-amber-400" />
+            {/* Dasselbe Grau wie das Archiv-Symbol eine Zeile tiefer: ein
+                Symbol vor einem Schalter ist Schmuck und kein Zustand. Gelb
+                machte aus einer Einstellung eine Warnung. */}
+            <Zap size={11} className="text-gray-500" />
             <span className="text-[0.65rem] text-gray-400">Auto-extract memories</span>
             <span className="text-[0.5rem] text-gray-600">(extra inference)</span>
           </div>

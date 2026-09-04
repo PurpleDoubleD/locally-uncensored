@@ -22,6 +22,7 @@ import { useBuiltinEngineStatus } from '../../hooks/useBuiltinEngineStatus'
 import { reachVerdict, liveSlotStatus, type SlotStatus } from '../../lib/builtin-slot-status'
 import type { ProviderId, ProviderConfig } from '../../api/providers/types'
 import { disabledSlotNote } from '../../lib/disabled-slot-note'
+import { HINWEIS_TEXT, PUNKT_FARBE } from '../../lib/hinweis'
 
 const isTauri = typeof window !== 'undefined' && !!window.__TAURI_INTERNALS__
 
@@ -492,14 +493,16 @@ export function ProviderSettings() {
                       wieder. Fuer unsere eigene Engine liest der Punkt jetzt
                       dieselbe laufende Schleife wie der Abschnitt darunter, und
                       die beiden koennen nicht mehr zwei Dinge behaupten. */}
+                  {/* Drei Farben, keine vierte (lib/hinweis.ts): Gruen heisst
+                      hier "du kannst chatten", Rot heisst "gemessen und
+                      kaputt", und alles dazwischen ist Grau. "Not running" und
+                      "Reachable, no models" hatten frueher einen eigenen
+                      Bernstein, der sie zu halben Fehlern machte; sie fallen
+                      jetzt mit 'idle' in denselben ruhigen Punkt. */}
                   <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${
-                    status === 'connected' ? 'bg-green-500' :
-                    status === 'failed' ? 'bg-red-500' :
-                    // Erreichbar, aber ohne Modell: kein Gruen, weil Gruen hier
-                    // "du kannst chatten" heisst, und kein Rot, weil der Server
-                    // laeuft. Derselbe Bernstein wie "Not running".
-                    status === 'stopped' || status === 'no-models' ? 'bg-amber-500' :
-                    'bg-gray-500'
+                    status === 'connected' ? PUNKT_FARBE.an :
+                    status === 'failed' ? PUNKT_FARBE.kaputt :
+                    PUNKT_FARBE.aus
                   }`} />
                   <span className="text-[0.65rem] text-gray-300 font-medium truncate">{view.label}</span>
                   {config.managed && <span className="text-[0.5rem] px-1 py-0.5 rounded bg-purple-500/15 text-purple-300 shrink-0">DEFAULT</span>}
@@ -507,7 +510,7 @@ export function ProviderSettings() {
                   {!config.isLocal && <span className="text-[0.5rem] px-1 py-0.5 rounded bg-blue-500/10 text-blue-400 shrink-0">CLOUD</span>}
                   {status === 'connected' && <Wifi size={8} className="text-green-400 shrink-0" />}
                   {status === 'failed' && <WifiOff size={8} className="text-red-400 shrink-0" />}
-                  {(status === 'stopped' || status === 'no-models') && <WifiOff size={8} className="text-amber-400 shrink-0" />}
+                  {(status === 'stopped' || status === 'no-models') && <WifiOff size={8} className={`${HINWEIS_TEXT.ruhig} shrink-0`} />}
                 </div>
                 <ChevronDown size={10} className={`text-gray-500 transition-transform shrink-0 ${isExpanded ? 'rotate-180' : ''}`} />
               </button>
@@ -628,9 +631,12 @@ export function ProviderSettings() {
                   </p>
                 )}
 
-                {/* Cloud + auto-extract cost warning */}
+                {/* Cloud + auto-extract cost note. Nichts ist kaputt und
+                    nichts muss jetzt passieren, also ruhig: das ist eine
+                    Folge einer Einstellung, die der Nutzer selbst gesetzt
+                    hat. */}
                 {needsKey && autoExtractEnabled && (
-                  <p className="text-[0.55rem] text-amber-400/80 mt-1 leading-tight">
+                  <p className={`text-[0.55rem] ${HINWEIS_TEXT.ruhig} mt-1 leading-tight`}>
                     Memory auto-extraction runs a secondary inference every 3rd turn, increasing API costs. Disable in Settings &gt; Memory if not needed.
                   </p>
                 )}
@@ -832,20 +838,23 @@ export function ProviderSettings() {
  * Groessenangabe, ein Abstand, vier Saetze.
  *
  * Die Toene sind eine Aussage, kein Geschmack: Gruen heisst auf dieser Zeile
- * "du kannst jetzt chatten". Ein laufender Server ohne Modell ist deshalb
- * bernsteinfarben wie "Not running", nicht gruen und nicht rot.
+ * "du kannst jetzt chatten", Rot heisst "gemessen und kaputt". Ein laufender
+ * Server ohne Modell und eine nie gestartete Engine sind weder das eine noch
+ * das andere, also sind sie ruhig. Beide trugen frueher einen eigenen
+ * Bernstein, und der hat sie zu halben Fehlern gemacht; die Begruendung, warum
+ * es diesen dritten Ton nicht mehr gibt, steht in lib/hinweis.ts.
  */
 const SLOT_TEXTE: Partial<Record<SlotStatus, { text: string; ton: string; testid?: string; title?: string }>> = {
   connected: { text: 'Connected', ton: 'text-green-400' },
   failed: { text: 'Failed', ton: 'text-red-400' },
   stopped: {
     text: 'Not running',
-    ton: 'text-amber-400',
+    ton: HINWEIS_TEXT.ruhig,
     title: 'The engine is installed but not started yet. It starts when you pick a chat model, or when you press Test.',
   },
   'no-models': {
     text: 'Reachable, no models',
-    ton: 'text-amber-400',
+    ton: HINWEIS_TEXT.ruhig,
     testid: 'provider-no-models',
     title: 'The server answered, but it offers no models, so no chat can run on it yet. Load or download a model in that backend, then press Test again.',
   },

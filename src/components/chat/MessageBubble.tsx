@@ -25,6 +25,7 @@ import { buildMessageMenu, type MessageMenuHandlers } from '../ui/menu-actions'
 import { MONOGRAM, MONOGRAM_INVERT } from '../layout/brand'
 import { AVATAR_SLOT } from './avatar-slot'
 import { MOTION_S } from '../ui/motion'
+import { Hinweis } from '../ui/Hinweis'
 
 interface Props {
   message: Message
@@ -474,20 +475,34 @@ function MessageBubbleImpl({ message, onRegenerate, onEdit, pendingApprovalId, o
                       screen has always flagged cut-offs; the chat did not, so a
                       truncated answer read as complete (David 2026-08-08). */}
                   {truncationNotice(message.finishReason) && (
-                    <div className="mt-1 inline-flex items-center gap-1 t-micro text-amber-600/80 dark:text-amber-300/70">
-                      <Scissors size={9} className="shrink-0" />
-                      <span>{truncationNotice(message.finishReason)}</span>
-                    </div>
+                    // Ruhig, nicht laut: die Antwort ist kuerzer als geplant,
+                    // kaputt ist nichts. Die Zeile stand vorher in Gelb und in
+                    // derselben Farbe wie die erfundenen Links darunter, die
+                    // etwas voellig anderes sagen (`lib/hinweis.ts`).
+                    <Hinweis
+                      className="mt-1"
+                      icon={<Scissors size={9} className="mt-0.5 shrink-0" />}
+                    >
+                      {truncationNotice(message.finishReason)}
+                    </Hinweis>
                   )}
                   {/* Z36 finding 3: the model cited links no tool returned and
                       ignored the corrective steer. The answer stays untouched,
                       it is the model's text (G14-2); this labelled app notice
                       names the links that came from nowhere. */}
                   {unbackedLinksNotice(message.unbackedLinks) && (
-                    <div className="mt-1 flex items-start gap-1 t-micro text-amber-600/80 dark:text-amber-300/70">
-                      <Unlink size={9} className="mt-0.5 shrink-0" />
-                      <span>{unbackedLinksNotice(message.unbackedLinks)}</span>
-                    </div>
+                    // Der eine Ton, der hier wirklich Fehler heisst: diese
+                    // Links hat kein Werkzeug geliefert, und wer sie anklickt,
+                    // landet nirgends. Das ist die Zeile, wegen der jemand
+                    // etwas tun muss, also traegt sie Rot statt des alten
+                    // Gelbs, das sie sich mit der Abschneide-Marke teilte.
+                    <Hinweis
+                      ton="fehler"
+                      className="mt-1"
+                      icon={<Unlink size={9} className="mt-0.5 shrink-0" />}
+                    >
+                      {unbackedLinksNotice(message.unbackedLinks)}
+                    </Hinweis>
                   )}
                   {/* A reasoning-only reply used to print a stand-in sentence
                       here ("The model only produced internal reasoning and no
@@ -495,37 +510,38 @@ function MessageBubbleImpl({ message, onRegenerate, onEdit, pendingApprovalId, o
                       David 2026-08-07), and on an agent surface the loop's job
                       is to CONTINUE past such a round (G17), not to explain
                       it. The thinking block above already shows what happened.
-                      The amber card below survives because it is a labelled
-                      app hint with an action, not prose posing as an answer. */}
+                      The hint below survives because it is a labelled app hint
+                      with an action, not prose posing as an answer. It is a
+                      quiet line now, no longer a filled card with a framed
+                      button: nothing is broken here, a switch is simply off,
+                      and one line says so (see `lib/hinweis.ts`). */}
                   {thoughtOnly && thoughtOnlyToolIntent && activeModel && isAgentCompatible(activeModel) && (
-                    <div className="mt-1 flex items-start gap-2 px-2 py-1.5 rounded-md border border-amber-400/30 bg-amber-500/10 t-micro text-amber-700 dark:text-amber-200">
-                      <Wrench size={11} className="mt-0.5 shrink-0" />
-                      <div className="flex-1">
-                        <p className="font-medium">The model spent its whole reply deciding to call a tool, but Agent Mode is off, so it never said anything.</p>
-                        <p className="opacity-80 mt-0.5">Turn Agent Mode on and ask again to let it actually run the tool (search the web, generate media, read files). Its reasoning is in the thinking block above.</p>
-                      </div>
+                    <Hinweis
+                      className="mt-1"
+                      icon={<Wrench size={11} className="mt-0.5 shrink-0" />}
+                    >
+                      The model spent its whole reply deciding to call a tool, but Agent Mode is off, so nothing ran. Its reasoning is in the thinking block above.{' '}
                       <button
                         onClick={() => activeConversationId && toggleAgentMode(activeConversationId)}
-                        className="shrink-0 px-2 py-0.5 rounded border border-amber-400/40 hover:bg-amber-500/20 transition-colors font-medium"
+                        className="font-medium underline underline-offset-2 hover:no-underline"
                       >
                         Enable Agent
                       </button>
-                    </div>
+                    </Hinweis>
                   )}
                   {suggestAgent && (
-                    <div className="mt-2 flex items-start gap-2 px-2 py-1.5 rounded-md border border-amber-400/30 bg-amber-500/10 t-micro text-amber-700 dark:text-amber-200">
-                      <Wrench size={11} className="mt-0.5 shrink-0" />
-                      <div className="flex-1">
-                        <p className="font-medium">This model tried to call a tool, but Agent Mode is off for this chat.</p>
-                        <p className="opacity-80 mt-0.5">Turn it on to let the model actually execute tools (read files, run commands, browse). Until then it'll keep emitting JSON that nothing reads.</p>
-                      </div>
+                    <Hinweis
+                      className="mt-2"
+                      icon={<Wrench size={11} className="mt-0.5 shrink-0" />}
+                    >
+                      This model tried to call a tool, but Agent Mode is off for this chat, so nothing ran and it will keep emitting JSON that nothing reads.{' '}
                       <button
                         onClick={() => activeConversationId && toggleAgentMode(activeConversationId)}
-                        className="shrink-0 px-2 py-0.5 rounded border border-amber-400/40 hover:bg-amber-500/20 transition-colors font-medium"
+                        className="font-medium underline underline-offset-2 hover:no-underline"
                       >
                         Enable Agent
                       </button>
-                    </div>
+                    </Hinweis>
                   )}
                 </div>
               )

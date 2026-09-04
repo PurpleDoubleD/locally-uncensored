@@ -5,6 +5,7 @@ import { useAgentModeStore } from '../../stores/agentModeStore'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { backendCall } from '../../api/backend'
 import type { AgentWorkspace } from '../../types/agent-workspace'
+import { HINWEIS_TEXT } from '../../lib/hinweis'
 
 interface Props {
   open: boolean
@@ -143,6 +144,12 @@ export function AgentWorkspaceDialog({
           </p>
         </div>
 
+        {/* Drei Wahlmoeglichkeiten, drei Farben, und keine davon sagt etwas
+            ueber Gefahr aus: sie halten die Zeilen nur auseinander. Der Ordner
+            trug Gelb und las sich damit wie eine Warnung vor der eigenen
+            Auswahl. Violett war in diesem Dialog noch frei, Gruen und Blau
+            haengen an den beiden Zeilen darueber, Rot am Entfernen-Knopf und
+            an der Fehlerzeile (`lib/hinweis.ts`). */}
         {phase === 'pick' && (
           <div className="space-y-2" data-testid="agent-workspace-options">
             <WorkspaceOption
@@ -165,7 +172,7 @@ export function AgentWorkspaceDialog({
             )}
 
             <WorkspaceOption
-              icon={<Folder size={16} className="text-amber-500" />}
+              icon={<Folder size={16} className="text-purple-500" />}
               title={picking ? 'Opening picker…' : 'Pick a folder…'}
               body="Choose a real directory. The agent edits files in there directly, like the Coding Agent."
               onClick={handlePick}
@@ -174,10 +181,14 @@ export function AgentWorkspaceDialog({
           </div>
         )}
 
+        {/* Der Hauptordner steht jetzt im selben neutralen Rahmen wie die
+            Zusatzordner darunter. Sein gelber Kasten hat einen ausgewaehlten
+            Pfad wie eine Warnmeldung aussehen lassen; unterschieden wird er
+            durch die Beschriftung, nicht durch die Farbe. */}
         {phase === 'extras' && draft?.kind === 'folder' && (
           <div className="space-y-2" data-testid="agent-workspace-extras">
-            <div className="rounded-lg border border-amber-500/30 bg-amber-50/40 dark:bg-amber-500/[0.04] px-3 py-2">
-              <div className="text-[0.55rem] uppercase tracking-widest text-amber-700 dark:text-amber-300/80 mb-0.5">
+            <div className="rounded-lg border border-gray-200 dark:border-white/10 px-3 py-2">
+              <div className={`text-[0.55rem] uppercase tracking-widest ${HINWEIS_TEXT.ruhig} mb-0.5`}>
                 Primary
               </div>
               <div className="text-[0.7rem] font-mono text-gray-800 dark:text-gray-200 truncate">

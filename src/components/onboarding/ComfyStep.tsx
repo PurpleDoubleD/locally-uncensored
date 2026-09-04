@@ -22,9 +22,10 @@
  * nicht ueberfluessig, sie ist genau fuer diesen Moment da.
  */
 import { useEffect, useRef, useState } from 'react'
-import { Loader2, Check, Download, RefreshCw, ArrowRight, ChevronRight, FolderOpen, Image as ImageIcon } from 'lucide-react'
+import { Loader2, Check, Download, RefreshCw, ArrowRight, ChevronRight, FolderOpen, Image as ImageIcon, AlertTriangle } from 'lucide-react'
 import { withInstallerOutput, withDetail } from '../../lib/error-text'
 import { ICON_LG } from '../ui/icon-size'
+import { Hinweis } from '../ui/Hinweis'
 import { ProgressBar } from '../ui/ProgressBar'
 import { backendCall, isMacOS } from '../../api/backend'
 import { formatBytes } from '../../lib/formatters'
@@ -222,6 +223,13 @@ export function ComfyStep({ skin, fleet, step, setStep }: ComfyStepProps) {
     })
   }
 
+  // Die Platzwarnung kommt als Logzeile mit fuehrendem Warndreieck aus
+  // comfy_install.rs. Das Zeichen ist die Markierung IM Protokoll, nicht Teil
+  // des Satzes. Hier wird es abgeschnitten, damit die Zeile ein Symbol traegt
+  // und nicht zwei. Der Ton ist `fehler`, weil unter 5 GB frei die
+  // Installation nicht durchlaeuft und jemand Platz schaffen muss.
+  const diskPressure = comfyInstall.logs.find(l => l.startsWith('⚠'))?.replace(/^⚠\s*/, '')
+
   return (
     <>
       {/* D-S39: hier stand ein nackter 13,8px-Punkt in `bg-purple-400`
@@ -253,13 +261,18 @@ export function ComfyStep({ skin, fleet, step, setStep }: ComfyStepProps) {
           start_comfyui's launcher decision. */}
       {!comfyDetecting && comfyChoices.length > 1 && !comfyFound && (
         <div className="space-y-2 text-left">
-          <div className={`p-2.5 rounded-lg border ${isDark ? 'bg-amber-500/10 border-amber-500/20' : 'bg-amber-50 border-amber-200'}`}>
-            <p className={`text-[0.7rem] font-medium ${isDark ? 'text-amber-200' : 'text-amber-800'}`}>
+          {/* Hier stand ein gelber Kasten mit Rahmen und 10px Polster. Auf dem
+              ersten Bildschirm nach der Installation liest sich das wie ein
+              Defekt, dabei ist es eine Frage: es gibt mehrere Ordner, welcher
+              soll es sein. Jetzt eine Ueberschrift und eine ruhige Zeile
+              darunter, ohne Flaeche. Begruendung in lib/hinweis.ts. */}
+          <div className="space-y-0.5">
+            <p className="text-[0.7rem] font-medium">
               Multiple ComfyUI installs detected
             </p>
-            <p className={`text-[0.6rem] mt-0.5 ${isDark ? 'text-amber-300/80' : 'text-amber-700'}`}>
+            <Hinweis>
               Pick the one you want LU to use. We'll remember your choice, and you can change it later in Settings → ComfyUI.
-            </p>
+            </Hinweis>
           </div>
           <div className="space-y-1.5 max-h-44 overflow-y-auto">
             {comfyChoices.map((c) => (
@@ -272,10 +285,14 @@ export function ComfyStep({ skin, fleet, step, setStep }: ComfyStepProps) {
               >
                 <div className="flex items-center justify-between gap-2">
                   <span className={`text-[0.65rem] font-mono truncate ${isDark ? 'text-gray-200' : 'text-gray-800'}`}>{c.path}</span>
+                  {/* „needs setup" war gelb und stand damit neben „ready" wie
+                      ein halber Defekt. Es ist ein ruhiger Zustand: dieser
+                      Ordner ist da, nur noch nicht fertig. Grau, dieselbe
+                      Entscheidung wie PUNKT_FARBE.aus in lib/hinweis.ts. */}
                   <span className={`text-[0.5rem] px-1.5 py-[1px] rounded shrink-0 ${
                     c.complete
                       ? (isDark ? 'bg-green-500/15 text-green-400' : 'bg-green-100 text-green-700')
-                      : (isDark ? 'bg-amber-500/15 text-amber-300' : 'bg-amber-100 text-amber-700')
+                      : (isDark ? 'bg-white/10 text-gray-300' : 'bg-gray-100 text-gray-600')
                   }`}>
                     {c.complete ? 'ready' : 'needs setup'}
                   </span>
@@ -316,12 +333,13 @@ export function ComfyStep({ skin, fleet, step, setStep }: ComfyStepProps) {
           + git pull + pip install). */}
       {comfyFound && (!comfyFound.found || comfyFound.complete === false) && !isRunning(comfyInstall) && !isRunning(pythonInstall) && !comfyReady && (
         <div className="space-y-2">
+          {/* Auch das war ein gelber Kasten. Der Satz sagt, was da liegt und
+              welcher Knopf es zu Ende bringt. Er informiert, also ruhig und
+              ohne Flaeche. */}
           {comfyFound.found && comfyFound.complete === false && (
-            <div className={`p-2.5 rounded-lg border ${isDark ? 'bg-amber-500/10 border-amber-500/20' : 'bg-amber-50 border-amber-200'} text-left`}>
-              <p className={`text-[0.6rem] ${isDark ? 'text-amber-300' : 'text-amber-800'}`}>
-                Found a previous ComfyUI install at <code className="font-mono">{comfyFound.path}</code> but it's missing PyTorch, looks like a previous install was interrupted. Click below to finish it.
-              </p>
-            </div>
+            <Hinweis className="text-left">
+              Found a previous ComfyUI install at <code className="font-mono">{comfyFound.path}</code> but it's missing PyTorch, looks like a previous install was interrupted. Click below to finish it.
+            </Hinweis>
           )}
           <button
             onClick={async () => {
@@ -480,7 +498,7 @@ export function ComfyStep({ skin, fleet, step, setStep }: ComfyStepProps) {
         </div>
       )}
       {pythonInstall.error && !isRunning(pythonInstall) && (
-        <p className="text-[0.65rem] text-red-400 whitespace-pre-line">{pythonInstall.error}</p>
+        <Hinweis ton="fehler" className="whitespace-pre-line">{pythonInstall.error}</Hinweis>
       )}
 
       {/* Installing progress */}
@@ -549,10 +567,10 @@ export function ComfyStep({ skin, fleet, step, setStep }: ComfyStepProps) {
             </div>
           </div>
           {/* Disk pressure warning (push from Rust side) */}
-          {comfyInstall.logs.some(l => l.startsWith('⚠')) && (
-            <div className={`text-[0.55rem] mb-2 px-2 py-1 rounded ${isDark ? 'bg-amber-500/10 text-amber-300' : 'bg-amber-50 text-amber-800'}`}>
-              {comfyInstall.logs.find(l => l.startsWith('⚠'))}
-            </div>
+          {diskPressure && (
+            <Hinweis ton="fehler" icon={<AlertTriangle size={11} className="mt-[1px] shrink-0" />} className="mb-2 text-left">
+              {diskPressure}
+            </Hinweis>
           )}
           {/* Download progress bar (shown during download phase) */}
           {comfyInstall.logs.some(l => l.includes('Downloading')) && comfyInstall.total > 0 && (
@@ -578,7 +596,7 @@ export function ComfyStep({ skin, fleet, step, setStep }: ComfyStepProps) {
 
       {/* Error */}
       {comfyInstall.error && (
-        <p role="alert" className="text-[0.65rem] text-red-400 whitespace-pre-line">{comfyInstall.error}</p>
+        <Hinweis ton="fehler" className="whitespace-pre-line">{comfyInstall.error}</Hinweis>
       )}
 
       {/* Ready state */}

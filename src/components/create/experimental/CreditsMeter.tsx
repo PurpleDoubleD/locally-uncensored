@@ -7,11 +7,17 @@ import { Tooltip } from '../ui/Tooltip'
 import { openExternal } from '../../../api/backend'
 import { CLOUD_BASE } from '../../../api/cloud/config'
 import { cn } from '../ui/cn'
+import { HINWEIS_TEXT, PUNKT_FARBE } from '../../../lib/hinweis'
 
 // Compact credits meter for the cloud backend: remaining vs monthly budget,
-// plus the cost of the run the user is about to start. One shared pool —
+// plus the cost of the run the user is about to start. One shared pool, so
 // images and clips draw from the same number. At 0 (or not enough for this
 // run) it becomes the upsell chip and the Create button is gated off.
+//
+// Der Balken kennt zwei Zustaende, keinen dritten: er laeuft (gruen) oder er
+// ist so gut wie leer (grau). Der knappe Kontostand war gelb und hat damit
+// wie eine Stoerung ausgesehen, obwohl noch jeder Lauf durchgeht. Leer ist
+// keine Farbe am Balken, sondern der rote Knopf darunter.
 export function CreditsMeter() {
   const { quota } = useCreateExp()
   const intent = useCreateStore((s) => s.intent())
@@ -57,10 +63,19 @@ export function CreditsMeter() {
   const state = meterState(quota, cost, kind, op)
   // A wallet-fixable shortfall (credits, video budget) lands on the credits
   // tab; the training count is a plan property, so that one goes to the plans.
+  //
+  // Der Knopf traegt die Flaeche des Zaehlers daneben und den Fehlerton als
+  // SCHRIFT. Vorher war er gelb gefuellt, also dieselbe Farbe, mit der ein
+  // knapper Kontostand nur informiert hat. Kein Geld mehr zu haben ist kein
+  // Zwischenton: es haelt den Lauf an. Regel in lib/hinweis.ts.
   const upsell = (label: string, tab?: 'credits') => (
     <button
       onClick={() => void openExternal(`${CLOUD_BASE}/pricing${tab ? '?tab=credits' : ''}`)}
-      className="t-control px-2 h-[var(--control-h-sm)] inline-flex items-center rounded-md bg-amber-500/15 text-amber-300 hover:bg-amber-500/25 transition-colors"
+      className={cn(
+        't-control px-2 h-[var(--control-h-sm)] inline-flex items-center rounded-md',
+        'bg-white/[0.04] hover:bg-white/[0.08] transition-colors',
+        HINWEIS_TEXT.fehler,
+      )}
     >
       {label}
     </button>
@@ -95,7 +110,7 @@ export function CreditsMeter() {
       <div className="flex items-center gap-1.5 px-2 h-[var(--control-h-sm)] rounded-md bg-white/[0.04] text-gray-400 t-control">
         <div className="w-12 h-1 rounded-full bg-white/10 overflow-hidden">
           <div
-            className={cn('h-full rounded-full', state.pct > 0.25 ? 'bg-emerald-400/80' : 'bg-amber-400/80')}
+            className={cn('h-full rounded-full', state.pct > 0.25 ? PUNKT_FARBE.an : PUNKT_FARBE.aus)}
             style={{ width: `${state.pct * 100}%` }}
           />
         </div>
