@@ -52,9 +52,12 @@ const refuse = (status = 400) =>
   new Response(JSON.stringify({ error: { message: 'Unexpected reasoning effort high.' } }), { status })
 const okStream = () => new Response('data: {"choices":[{"delta":{"content":"hi"}}]}\n\ndata: [DONE]\n\n', { status: 200 })
 
-const bodyOf = (spy: any, call: number) => JSON.parse(spy.mock.calls[call][1]?.body as string)
+// Die Form, die `vi.spyOn(globalThis, 'fetch')` wirklich hat. Ein `any` an
+// dieser Stelle haette jeden Tippfehler im Zugriff verschluckt.
+type FetchSpy = { mock: { calls: Parameters<typeof fetch>[] } }
+const bodyOf = (spy: FetchSpy, call: number) => JSON.parse(spy.mock.calls[call][1]?.body as string)
 
-async function drain(gen: AsyncGenerator<any>) {
+async function drain(gen: AsyncGenerator<unknown>) {
   for await (const _ of gen) { /* consume, the fetch only happens on first next() */ }
 }
 

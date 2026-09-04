@@ -46,7 +46,10 @@ const okStream = () =>
 /** The passage a user's PDF would contribute after chunking and ranking. */
 const SECRET = 'The service level target for the Bergheim site is 99.95 percent.'
 
-async function drain(gen: AsyncGenerator<any>) {
+/** Eine Nachricht so, wie sie auf der Leitung steht. */
+type Wire = { role: string; content: string }
+
+async function drain(gen: AsyncGenerator<unknown>) {
   for await (const _ of gen) { /* the fetch only happens on the first next() */ }
 }
 
@@ -100,7 +103,7 @@ describe('a cloud request carries the document context', () => {
     expect(String(url)).toContain('/api/inference/v1/chat/completions')
     expect((init.headers as Record<string, string>).Authorization).toBe('Bearer session-token-abc')
 
-    const system = body.messages.find((m: any) => m.role === 'system')
+    const system = body.messages.find((m: Wire) => m.role === 'system')
     expect(system).toBeDefined()
     expect(system.content).toContain(SECRET)
     expect(system.content).toContain('[Source 1]')
@@ -115,7 +118,7 @@ describe('a cloud request carries the document context', () => {
     const systemPrompt = 'You are a terse assistant.'
     const { body, init } = await sendCloudTurn(systemPrompt)
 
-    const system = body.messages.find((m: any) => m.role === 'system')
+    const system = body.messages.find((m: Wire) => m.role === 'system')
     expect(system.content).toBe(systemPrompt)
     expect(String(init.body)).not.toContain('Bergheim site is 99.95')
     expect(String(init.body)).not.toContain('[Source 1]')

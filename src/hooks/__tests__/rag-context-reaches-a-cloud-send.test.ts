@@ -28,7 +28,7 @@ import type { TextChunk } from '../../types/rag'
 
 const retrieveContext = vi.fn()
 vi.mock('../../api/rag', () => ({
-  retrieveContext: (...a: any[]) => retrieveContext(...a),
+  retrieveContext: (...a: unknown[]) => retrieveContext(...a),
   generateEmbeddings: async () => [[0.1, 0.2]],
 }))
 vi.mock('../../api/cloud/supabase', () => ({
@@ -67,7 +67,11 @@ function seed(chunks: TextChunk[]) {
   const convId = useChatStore.getState().createConversation(MODEL, '')
   useChatStore.getState().setActiveConversation(convId)
   useRAGStore.setState({
-    documents: { [convId]: [{ id: 'doc-1', name: 'sla.pdf', size: 1, chunks: chunks.length } as any] },
+    // Ein echtes DocumentMeta. Das `as any`, das hier stand, hat eine falsche
+    // Form verdeckt: `chunks` statt `chunkCount`, kein `type`, kein `addedAt`.
+    documents: {
+      [convId]: [{ id: 'doc-1', name: 'sla.pdf', type: 'pdf', size: 1, addedAt: 0, chunkCount: chunks.length }],
+    },
     chunks,
     ragEnabled: { [convId]: true },
     chunksLoaded: true,
@@ -107,7 +111,10 @@ async function sendAsAgent(text = 'What is the target for Bergheim?') {
   }
 }
 
-const systemOf = (body: any) => body.messages.find((m: any) => m.role === 'system')?.content ?? ''
+/** Eine Nachricht so, wie sie auf der Leitung steht. */
+type Wire = { role: string; content: string }
+const systemOf = (body: { messages: Wire[] } | null) =>
+  body?.messages.find((m) => m.role === 'system')?.content ?? ''
 
 beforeEach(() => {
   retrieveContext.mockReset()
@@ -116,7 +123,7 @@ beforeEach(() => {
   useSettingsStore.setState({
     settings: { ...DEFAULT_SETTINGS, appMode: 'cloud', cavemanMode: 'off' },
   })
-  useProviderStore.setState((s: any) => ({
+  useProviderStore.setState((s) => ({
     providers: {
       ...s.providers,
       'lu-cloud': { ...s.providers['lu-cloud'], enabled: true },

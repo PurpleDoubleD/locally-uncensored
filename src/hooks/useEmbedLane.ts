@@ -27,7 +27,7 @@
  * subscriber leaves, so switching from Cloud to Local does not carry a poll
  * along with it (review points 1 and 2).
  */
-import { useEffect, useState } from 'react'
+import { useCallback, useSyncExternalStore } from 'react'
 import { useRAGStore } from '../stores/ragStore'
 import { embeddingLane, type EmbedLaneInfo } from '../api/embed-availability'
 
@@ -42,10 +42,37 @@ let retryTimer: ReturnType<typeof setTimeout> | null = null
  *  again exists, never by the retry itself. */
 let retryUsed = false
 let listenerArmed = false
-const subscribers = new Set<(v: EmbedLaneInfo | null) => void>()
+const subscribers = new Set<() => void>()
 
 function publish() {
-  for (const fn of subscribers) fn(current)
+  for (const fn of subscribers) fn()
+}
+
+/**
+ * Ein Leser meldet sich an und bekommt seine Abmeldung zurueck.
+ *
+ * Das stand bis 04.09.2026 im Effekt des Hooks und war deshalb an React
+ * gebunden, obwohl nichts daran mit Rendern zu tun hat. Hier ist es das, was
+ * es ist: der Anmeldeteil eines Speichers, der ausserhalb von React lebt.
+ */
+function anmelden(melden: () => void): () => void {
+  // A fresh mount is a fresh reason to look, so it gets its own retry.
+  const fresh = subscribers.size === 0
+  if (fresh) retryUsed = false
+  subscribers.add(melden)
+  if (!listenerArmed) {
+    listenerArmed = true
+    window.addEventListener('lu-models-refresh', onRefresh)
+  }
+  // Never measured yet, or the cache holds a NO and this is a new mount: a
+  // user who left Cloud mode, installed an engine and came back must not read
+  // a stale refusal. A cached YES is kept; nothing about it goes stale in a
+  // way that hurts, and a real change fires lu-models-refresh anyway.
+  if (current === null || (fresh && current.lane === 'none')) void measure()
+  return () => {
+    subscribers.delete(melden)
+    if (subscribers.size === 0) teardown()
+  }
 }
 
 /** Measure once. Concurrent callers share the one round trip. */
@@ -111,32 +138,23 @@ export function __resetEmbedLaneForTests(): void {
  * @returns the lane, or null while it is still unknown.
  */
 export function useEmbedLane(active: boolean): EmbedLaneInfo | null {
-  const [value, setValue] = useState<EmbedLaneInfo | null>(active ? current : null)
-
-  useEffect(() => {
-    if (!active) {
-      setValue(null)
-      return
-    }
-    // A fresh mount is a fresh reason to look, so it gets its own retry.
-    const fresh = subscribers.size === 0
-    if (fresh) retryUsed = false
-    subscribers.add(setValue)
-    if (!listenerArmed) {
-      listenerArmed = true
-      window.addEventListener('lu-models-refresh', onRefresh)
-    }
-    setValue(current)
-    // Never measured yet, or the cache holds a NO and this is a new mount: a
-    // user who left Cloud mode, installed an engine and came back must not read
-    // a stale refusal. A cached YES is kept; nothing about it goes stale in a
-    // way that hurts, and a real change fires lu-models-refresh anyway.
-    if (current === null || (fresh && current.lane === 'none')) void measure()
-    return () => {
-      subscribers.delete(setValue)
-      if (subscribers.size === 0) teardown()
-    }
-  }, [active])
-
-  return active ? value : null
+  // `useSyncExternalStore` und nicht `useState` plus Effekt. Der gemessene Wert
+  // liegt in einem Modul, nicht in React, und genau dafuer ist dieser Haken
+  // gebaut: React fragt den Stand selbst ab, nachdem es sich angemeldet hat,
+  // und es kann waehrend eines unterbrochenen Durchlaufs nicht passieren, dass
+  // zwei Stellen der Oberflaeche verschiedene Antworten zeigen.
+  //
+  // Vorher lag der Wert doppelt: einmal im Modul und einmal in einem
+  // `useState`, das ein Effekt nachzog. Daraus kam die eslint-Meldung
+  // `react-hooks/set-state-in-effect`, und sie hatte recht: jedes Anmelden
+  // zeichnete zweimal, einmal mit dem alten und einmal mit dem neuen Wert.
+  //
+  // `active` false heisst: gar nicht erst anmelden, also auch keine Messung
+  // und keine Rundreise. Der Stand ist dann null, und zwar ohne dass ihn
+  // jemand loeschen muesste.
+  const abonnieren = useCallback(
+    (melden: () => void) => (active ? anmelden(melden) : () => {}),
+    [active],
+  )
+  return useSyncExternalStore(abonnieren, () => (active ? current : null))
 }

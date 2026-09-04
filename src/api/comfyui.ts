@@ -570,9 +570,10 @@ let cachedVRAM: number | null = null
  * for that one `vram_total` is `psutil.virtual_memory().total`. It is system
  * RAM wearing a VRAM field's name.
  */
-function isCpuDevice(dev: any): boolean {
-  const type = String(dev?.type ?? '').trim().toLowerCase()
-  const name = String(dev?.name ?? '').trim().toLowerCase()
+function isCpuDevice(dev: unknown): boolean {
+  const d = (dev ?? {}) as { type?: unknown; name?: unknown }
+  const type = String(d.type ?? '').trim().toLowerCase()
+  const name = String(d.name ?? '').trim().toLowerCase()
   return type === 'cpu' || name === 'cpu' || name.startsWith('cpu:') || name.startsWith('cpu ')
 }
 
@@ -617,7 +618,7 @@ export function pickDeviceVramBytes(
   let best = 0
   for (const dev of devices) {
     if (!opts.unifiedMemory && isCpuDevice(dev)) continue
-    const bytes = (dev as any)?.vram_total
+    const bytes = (dev as { vram_total?: unknown } | null)?.vram_total
     if (typeof bytes === 'number' && Number.isFinite(bytes) && bytes > best) best = bytes
   }
   return best > 0 ? best : null

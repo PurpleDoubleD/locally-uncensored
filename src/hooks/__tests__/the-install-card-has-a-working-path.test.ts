@@ -31,7 +31,7 @@ vi.mock('../../api/embed-availability', () => ({
   EMBED_PROBE_TIMEOUT_MS: 3000,
 }))
 vi.mock('../../api/embed-install', () => ({
-  installBundledEmbedModel: (...a: any[]) => installBundled(...(a as [])),
+  installBundledEmbedModel: (...a: unknown[]) => installBundled(...(a as [])),
 }))
 const connectionArgs: (number | undefined)[] = []
 vi.mock('../../api/ollama', () => ({
@@ -40,7 +40,7 @@ vi.mock('../../api/ollama', () => ({
     return ollamaUp
   },
   getModelContext: async () => 8192,
-  pullModelTauri: (...a: any[]) => pullTauri(...(a as [])),
+  pullModelTauri: (...a: unknown[]) => pullTauri(...(a as [])),
 }))
 vi.mock('../../api/rag', () => ({
   indexDocument: async () => ({ chunks: [] }),
