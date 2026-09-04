@@ -543,12 +543,19 @@ export function isStartableMcpCommand(command: string): boolean {
  * Er nennt den Befehl, den er eingetragen hat, und die zwei, die gehen. Ohne
  * ihn kam Tauris eigene Meldung durch, die von einem Bereich spricht, den
  * niemand konfiguriert hat, und der Nutzer sucht den Fehler bei seinem Server.
+ *
+ * Der Satz endete bis zum 04.09.2026 auf "or run it yourself and connect over
+ * its URL". Diesen Weg gibt es nicht: `MCPServerConfig` (api/mcp/types.ts)
+ * kennt `command`, `args` und `env` und kein `url`, und unter api/mcp/ steht
+ * weder ein SSE- noch ein HTTP-Transport. Ein Ausweg, den das Produkt nicht
+ * hat, ist schlimmer als keiner, weil der Nutzer nach einem Feld sucht, das
+ * es nie gab. Jetzt steht dort der Weg, den es wirklich gibt, mit Beispiel.
  */
 export function notStartableMessage(name: string, command: string): string {
   return (
     `LU cannot start "${name}": it is set to run \`${command}\`, and LU only starts `
-    + `MCP servers through ${MCP_STARTER.join(' or ')}. Point the server at one of those, `
-    + `or run it yourself and connect over its URL.`
+    + `MCP servers through ${MCP_STARTER.join(' or ')}. Change the command to one of `
+    + `those, for example \`npx -y your-mcp-package\`.`
   )
 }
 

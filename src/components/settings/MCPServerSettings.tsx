@@ -199,7 +199,7 @@ export function MCPServerSettings() {
           <input
             value={formCommand}
             onChange={(e) => setFormCommand(e.target.value)}
-            placeholder="Command (e.g. npx, python)"
+            placeholder="Command (e.g. npx, uvx)"
             className="w-full px-2 py-1 rounded bg-white/5 border border-white/10 text-[0.65rem] text-gray-300 placeholder-gray-600 font-mono focus:border-white/20 outline-none"
           />
           <input

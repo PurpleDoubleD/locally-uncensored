@@ -101,13 +101,27 @@ describe('was ein Nutzer liest, dessen Server nicht mehr startet', () => {
     }
   })
 
-  it('die Meldung nennt den eigenen Eintrag und beide Auswege', () => {
+  it('die Meldung nennt den eigenen Eintrag und einen Weg, den es gibt', () => {
     const satz = notStartableMessage('Meine Werkzeuge', 'node server.js')
     expect(satz).toContain('Meine Werkzeuge')
     expect(satz).toContain('node server.js')
     for (const s of MCP_STARTER) expect(satz).toContain(s)
     // Und sie sagt, was man stattdessen tun kann, statt nur Nein.
-    expect(satz.toLowerCase()).toContain('connect over its url')
+    //
+    // Hier stand bis zum 04.09.2026 `toContain('connect over its url')`. Der
+    // Satz bot also einen URL-Anschluss an, und dieser Test hat ihn
+    // festgenagelt. Es gibt ihn nicht: `MCPServerConfig` (api/mcp/types.ts)
+    // kennt `command`, `args` und `env` und kein `url`, und unter api/mcp/
+    // steht weder ein SSE- noch ein HTTP-Transport. Nachgemessen mit
+    // `grep -rn "SSEClientTransport\|StreamableHTTP" src/api/mcp/`: leer.
+    // Damit war das eine Wache, die eine Unwahrheit geschuetzt hat, und der
+    // Nutzer suchte nach einem Feld, das die App nie hatte.
+    //
+    // Der Ersatz ist kein weicheres Kriterium, sondern ein anderes: die
+    // Meldung muss ein Beispiel nennen, das wirklich startet. Der Fall
+    // darunter prueft zusaetzlich, dass sie das Wort URL gar nicht mehr
+    // fuehrt, solange die Konfiguration kein solches Feld hat.
+    expect(satz.toLowerCase()).toContain('npx -y')
   })
 
   it('sie ist Englisch', () => {
@@ -140,5 +154,42 @@ describe('der Start wird vorher abgelehnt, nicht im Fehlschlag', () => {
   it('npx erreicht den Startweg', async () => {
     await expect(klient('npx').connect()).rejects.not.toThrow(/only starts MCP servers/)
     expect(erzeugt.length, 'npx kam nicht bis Command.create').toBeGreaterThan(0)
+  })
+})
+
+describe('die Oberflaeche verspricht nur, was die App kann', () => {
+  const lies = (...teile: string[]) => readFileSync(resolve(__dirname, '..', '..', '..', ...teile), 'utf8')
+
+  it('der Platzhalter im Eingabefeld wirbt fuer kein Kommando, das nicht startet', () => {
+    // Er stand seit 2.6.7 unveraendert auf "Command (e.g. npx, python)". Nach
+    // der Kuerzung der Starterliste ist die Haelfte davon eine Anleitung in
+    // eine Fehlermeldung: wer `python` eintippt, weil das Feld es vorschlaegt,
+    // bekommt notStartableMessage. Ein Vorschlag, den die App ablehnt, ist
+    // schlimmer als gar keiner.
+    const ui = lies('components', 'settings', 'MCPServerSettings.tsx')
+    const platzhalter = ui.match(/placeholder="Command[^"]*"/)?.[0] ?? ''
+    expect(platzhalter, 'kein Command-Platzhalter gefunden').not.toBe('')
+    for (const tot of ['python', 'node', 'docker', 'bun', 'deno']) {
+      expect(platzhalter, `der Platzhalter schlaegt ${tot} vor, das startet nicht mehr`)
+        .not.toContain(tot)
+    }
+  })
+
+  it('die Fehlermeldung nennt keinen Ausweg, den es nicht gibt', () => {
+    // Sie endete auf "or run it yourself and connect over its URL". Es gibt
+    // keinen URL-Weg: MCPServerConfig (api/mcp/types.ts) kennt nur command,
+    // args und env, und unter api/mcp/ steht kein SSE- und kein
+    // HTTP-Transport. Der Satz schickte den Nutzer also in eine Sackgasse und
+    // liess ihn dort nach einem Feld suchen, das die App nie hatte.
+    const typen = lies('api', 'mcp', 'types.ts')
+    const hatUrlFeld = /\burl\??\s*:/.test(typen)
+    const satz = notStartableMessage('demo', 'node server.js')
+    if (!hatUrlFeld) {
+      expect(satz, 'die Meldung verspricht einen URL-Weg, den die Konfiguration nicht kennt')
+        .not.toMatch(/url/i)
+    }
+    // Dass sie den Befehl und die zwei Starter nennt, prueft der Fall
+    // "die Meldung nennt den eigenen Eintrag und einen Weg, den es gibt"
+    // weiter oben. Hier geht es allein um den Weg, den es NICHT gibt.
   })
 })
