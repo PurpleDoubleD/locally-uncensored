@@ -21,7 +21,7 @@ import { MlxMediaSettings } from '../settings/MlxMediaSettings'
 import { backendCall } from '../../api/backend'
 import { customModelDirs } from '../../api/engine'
 import { counterView } from '../../lib/inventory-counter'
-import { groupInstalledByProvider, needsBackendSwitchHeading, LU_ENGINE_GROUP } from '../../lib/lu-engine-rows'
+import { groupInstalledByProvider, needsBackendSwitchHeading, foldedRowsSentence, LU_ENGINE_GROUP } from '../../lib/lu-engine-rows'
 import { isBuiltinEngineEntry } from '../../lib/lmstudio-match'
 import { useBuiltinEngineStatus, engineIsIdle } from '../../hooks/useBuiltinEngineStatus'
 import { LuEngineSwitchBar } from '../chat/LuEngineSwitchBar'
@@ -66,6 +66,7 @@ export function ModelManager() {
   // A14: whether the LU Engine itself is serving the chat. Decides whether its
   // group needs a heading even when it is the only group (review 7).
   const luEngineHoldsChat = useProviderStore(s => s.providers.openai.enabled && s.providers.openai.managed === true)
+  const foldedRows = useModelStore((s) => s.foldedRows)
   // A16 (A14-4a): which row's Use button is mid swap. The engine has to stop,
   // reload a GGUF that can be several gigabytes and come back healthy, and a
   // button that looks idle through all of that gets pressed again.
@@ -427,6 +428,22 @@ export function ModelManager() {
                             backend, so the same line the composer shows stands
                             here too, from the same store. */}
                         <LuEngineSwitchBar />
+                        {/* Gegenprobe G1, 04.09.2026: sobald LM Studio den
+                            Steckplatz haelt, faellt `Qwen3-4B-Q4_K_M`, eine
+                            echte installierte Datei des Kunden von 2,3 GB,
+                            aus dieser Liste weg. Die Seite zeigte "Installed
+                            11" und unter LU ENGINE vier statt fuenf Dateien,
+                            ohne ein Wort. Der Waehler hatte den Satz laengst,
+                            hier fehlte er, und genau hier hat der Kunde
+                            gesucht. Ein Satz, zwei Leser. */}
+                        {foldedRows && (
+                          <p
+                            data-testid="installed-folded-rows"
+                            className="px-1 pt-0.5 text-[0.55rem] text-gray-500 dark:text-gray-500"
+                          >
+                            {foldedRowsSentence(foldedRows)}
+                          </p>
+                        )}
                         {/* A14: grouped by the backend that serves the row, LU
                             Engine first. Its rows are listed here even while
                             Ollama or LM Studio holds the chat, and using one

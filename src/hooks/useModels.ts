@@ -16,7 +16,8 @@ import { cloudModelRow } from '../lib/cloud-model-row'
 import { runEngineResume } from '../lib/engine-resume-policy'
 import { engineStartIsWorthRetrying } from '../lib/engine-start-failure'
 import { commandIsUnavailable } from '../lib/engine-command-availability'
-import { dropDuplicateLuEngineRows, dropStandbyRowsServedByLuEngine } from '../lib/lu-engine-rows'
+import { dropDuplicateLuEngineRows, dropStandbyRowsServedByLuEngine, LU_ENGINE_GROUP, zeileZumEinklappen } from '../lib/lu-engine-rows'
+import { isLmStudioEntry } from '../lib/lmstudio-match'
 import { isBuiltinEngineEntry, type InstalledModelLike } from '../lib/lmstudio-match'
 import {
   ensureLuEngineIsChatProvider, LU_ENGINE_SWITCH_NOTE, LU_ENGINE_FILE_GONE,
@@ -275,6 +276,11 @@ export function useModels() {
       // belongs to whoever holds the slot (lib/lu-engine-rows), and while our
       // engine holds it that is us, so the standby list is the side that gives
       // way (`dropStandbyRowsServedByLuEngine`).
+      // Was in dieser Runde eingeklappt wurde, gleich in welcher Richtung.
+      // Beide Richtungen koennen nie zugleich greifen: unsere Zeilen fallen
+      // nur, wenn LM Studio den Steckplatz haelt, die wartenden Zeilen nur,
+      // wenn unsere Engine ihn haelt.
+      let eingeklappt: { backend: string; count: number; servedBy: string } | null = null
       let standbyRows: CloudModel[] = []
       const standby = managedBuiltin ? standbyChatBackend() : null
       if (standby) {
@@ -349,7 +355,19 @@ export function useModels() {
         // One file, one row: with the folder pointed at ~/.lmstudio/models,
         // LM Studio lists the model over its own API and the folder walk finds
         // the same file. The row that is already serving the chat wins.
-        allModels.push(...dropDuplicateLuEngineRows(bundled, allModels))
+        //
+        // Und was dabei wegfaellt, wird gezaehlt und gesagt, genau wie in der
+        // Gegenrichtung weiter unten. Gegenprobe G1, 04.09.2026: sobald
+        // LM Studio den Steckplatz haelt, verschwand `Qwen3-4B-Q4_K_M`, eine
+        // echte installierte Datei des Kunden von 2,3 GB, aus dem Waehler und
+        // von der Models-Seite, ohne ein Wort.
+        const eigeneBleiben = dropDuplicateLuEngineRows(bundled, allModels)
+        eingeklappt = zeileZumEinklappen(
+          bundled.length - eigeneBleiben.length,
+          LU_ENGINE_GROUP,
+          allModels.find(isLmStudioEntry)?.providerName ?? null,
+        )
+        allModels.push(...eigeneBleiben)
         // Die Chat-Engine wird hoechstens EINMAL je Sitzung von hier aus
         // wiederbelebt, und nur wenn sie den Steckplatz haelt: sie in jeder
         // Runde neu zu starten hiesse, gegen einen Nutzer anzurennen, der sie
@@ -378,14 +396,13 @@ export function useModels() {
         // Waehler 4 zeigt: die drei fehlenden sind Dateien, die unsere Engine
         // gerade selbst bedient. Richtig eingeklappt, nur eben stumm, und
         // fuer den Nutzer sehen drei seiner Modelle verschwunden aus.
-        useModelStore.getState().setFoldedStandby(
-          bleiben.length < standbyRows.length && standby
-            ? { backend: standby.name, count: standbyRows.length - bleiben.length }
-            : null,
-        )
-      } else {
-        useModelStore.getState().setFoldedStandby(null)
+        eingeklappt = zeileZumEinklappen(
+          standbyRows.length - bleiben.length,
+          standby?.name ?? null,
+          LU_ENGINE_GROUP,
+        ) ?? eingeklappt
       }
+      useModelStore.getState().setFoldedRows(eingeklappt)
       const ollamaEnabled = useProviderStore.getState().providers.ollama.enabled
       const hasOllamaModels = allModels.some(m => m.provider === 'ollama')
       if (ollamaEnabled && !hasOllamaModels) {

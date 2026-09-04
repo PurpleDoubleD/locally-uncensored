@@ -380,3 +380,40 @@ export function groupInstalledByProvider<T extends InstalledModelLike>(models: T
   }
   return out
 }
+
+/**
+ * Die eine Zeile fuer beide Richtungen des Einklappens.
+ *
+ * Persona P5 hat die eine Richtung gefunden (LM Studio meldet 7, der Waehler
+ * zeigt 4), Gegenprobe G1 die andere und schwerere: sobald LM Studio den
+ * Steckplatz haelt, faellt eine echte installierte Datei des Kunden von 2,3 GB
+ * aus dem Waehler UND von der Models-Seite, ohne ein Wort, waehrend fuer die
+ * Gegenrichtung ein Satz existierte und angezeigt wurde.
+ *
+ * Beide Richtungen fragen deshalb hier, damit sie nicht wieder auseinander
+ * laufen koennen. Null heisst: nichts eingeklappt, oder der Name dessen, der
+ * es abgibt oder bedient, ist unbekannt. Ohne beide Namen waere der Satz
+ * nicht sagbar, und ein halber Satz ist schlimmer als keiner.
+ */
+export function zeileZumEinklappen(
+  count: number,
+  backend: string | null | undefined,
+  servedBy: string | null | undefined,
+): { backend: string; count: number; servedBy: string } | null {
+  if (count <= 0 || !backend || !servedBy) return null
+  return { backend, count, servedBy }
+}
+
+/**
+ * Der Satz dazu, an einer Stelle fuer alle Oberflaechen.
+ *
+ * Der Waehler hatte ihn, die Models-Seite nicht, und genau dort hat der
+ * Testkunde in G1 die fehlende Datei gesucht: "Installed 11" und unter
+ * LU ENGINE nur noch vier statt fuenf. Ein Satz, zwei Leser.
+ */
+export function foldedRowsSentence(
+  folded: { backend: string; count: number; servedBy: string },
+): string {
+  const wie = folded.count === 1 ? 'model is' : 'models are'
+  return `${folded.count} ${folded.backend} ${wie} listed once, under ${folded.servedBy}, because they are the same file.`
+}

@@ -20,7 +20,7 @@ import { lmStudioSlotUpdate, adoptionReplacesBuiltinEngine } from '../../lib/lms
 import { nextProbeDelayMs } from '../../lib/probe-backoff'
 import { noChatBackendEnabled } from '../../lib/provider-visibility'
 import { cloudTeaserModels } from '../../lib/cloud-teaser-models'
-import { splitBackendSwitchRows, needsBackendSwitchHeading } from '../../lib/lu-engine-rows'
+import { splitBackendSwitchRows, needsBackendSwitchHeading, foldedRowsSentence } from '../../lib/lu-engine-rows'
 import { isBuiltinEngineEntry, type InstalledModelLike } from '../../lib/lmstudio-match'
 import type { HandoverSlot } from '../../lib/openai-slot-handover'
 import {
@@ -1024,7 +1024,7 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
       : null,
   )
   const activeModelObj = models.find((m) => m.name === activeModel)
-  const foldedStandby = useModelStore((s) => s.foldedStandby)
+  const foldedRows = useModelStore((s) => s.foldedRows)
   const activeDisplayName = activeModel
     ? (activeModelObj && 'displayName' in activeModelObj && activeModelObj.displayName) ||
       displayModelName(activeModel).split(':')[0]
@@ -1174,17 +1174,18 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
               </div>
             )}
 
-            {/* Dieselbe Ehrlichkeit eine Zeile weiter: was das wartende
-                Backend anbietet und unsere Engine aus derselben Datei schon
-                bedient, steht nur einmal da. Ohne diesen Satz sieht es aus,
-                als seien Modelle verschwunden (Persona P5, 03./04.09.2026:
-                LM Studio meldet 7, der Waehler zeigt 4). */}
-            {foldedStandby && (
+            {/* Dieselbe Ehrlichkeit eine Zeile weiter, und in BEIDE
+                Richtungen: was zwei Backends aus derselben Datei anbieten,
+                steht nur einmal da. Ohne diesen Satz sehen Modelle
+                verschwunden aus (Persona P5: LM Studio meldet 7, der Waehler
+                zeigt 4. Gegenprobe G1, andere Richtung: eine installierte
+                Datei des Kunden von 2,3 GB faellt kommentarlos weg). */}
+            {foldedRows && (
               <div
-                data-testid="picker-folded-standby"
+                data-testid="picker-folded-rows"
                 className="px-2.5 py-1.5 border-b border-black/5 dark:border-white/[0.06] text-[0.55rem] text-gray-500"
               >
-                {foldedStandby.count} {foldedStandby.backend} {foldedStandby.count === 1 ? 'model is' : 'models are'} listed once, under the LU Engine, because they are the same file.
+                {foldedRowsSentence(foldedRows)}
               </div>
             )}
 

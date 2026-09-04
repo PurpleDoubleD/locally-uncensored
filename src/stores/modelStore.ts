@@ -43,17 +43,26 @@ interface ModelState {
    *  and the first one to finish must not declare the count settled. */
   inventoryRefreshes: number
   /**
-   * Wie viele Zeilen des wartenden Backends eingeklappt wurden, weil unsere
-   * Engine dieselbe Datei schon anbietet, und wessen Zeilen das waren.
+   * Welche Zeilen eingeklappt wurden, weil ein anderes Backend dieselbe Datei
+   * schon anbietet: wessen Zeilen es waren, wie viele, und wer sie stattdessen
+   * bedient.
    *
    * Persona P5, 03./04.09.2026: LM Studio meldete ueber die eigene
    * Schnittstelle 7 Modelle, der Waehler zeigte unter LM STUDIO nur 4. Die
    * drei fehlenden sind genau die, deren Datei auch als LU-Engine-Zeile
    * dasteht. Das Einklappen ist richtig, das Schweigen darueber nicht: fuer
    * den Nutzer sehen drei seiner Modelle einfach verschwunden aus.
+   *
+   * Gegenprobe G1, 04.09.2026: dieselbe Sache in der anderen Richtung, und
+   * dort war es schlimmer. Sobald LM Studio den Steckplatz haelt, faellt
+   * `Qwen3-4B-Q4_K_M` weg, eine echte, installierte Datei des Kunden von
+   * 2,3 GB, aus dem Waehler UND von der Models-Seite. Kein Hinweis, keine
+   * Erklaerung, waehrend fuer die Gegenrichtung ein Satz existierte und
+   * angezeigt wurde. Ein Feld statt zwei, damit die beiden Richtungen nicht
+   * wieder auseinanderlaufen koennen.
    */
-  foldedStandby: { backend: string; count: number } | null
-  setFoldedStandby: (folded: { backend: string; count: number } | null) => void
+  foldedRows: { backend: string; count: number; servedBy: string } | null
+  setFoldedRows: (folded: { backend: string; count: number; servedBy: string } | null) => void
   beginInventoryRefresh: () => void
   endInventoryRefresh: () => void
   setModels: (models: AIModel[]) => void
@@ -295,8 +304,8 @@ export const useModelStore = create<ModelState>()(
         })
       },
 
-      foldedStandby: null,
-      setFoldedStandby: (folded) => set({ foldedStandby: folded }),
+      foldedRows: null,
+      setFoldedRows: (folded) => set({ foldedRows: folded }),
 
       setIsModelLoading: (loading) => set({ isModelLoading: loading }),
       setCategoryFilter: (category) => set({ categoryFilter: category }),
