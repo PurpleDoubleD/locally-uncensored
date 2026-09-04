@@ -952,7 +952,11 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
         // 21 s spaeter, sie stand nur in diesem Kasten, und der Kasten war
         // weg. 7,4 s ohne Engine, zwei Prozessstarts, und 75 s lang keine
         // einzige neue Textzeile auf der Seite.
-        setSelectError(announceLuEngineStartFailure(model.name, e, switched))
+        // NICHT in den Kasten im Menue: das Menue geht in derselben
+        // Bewegung zu, und der Kasten waere ein rotes Aufblitzen fuer die
+        // Dauer der Ausblendung. Die Zeile ueber dem Eingabefeld traegt den
+        // ganzen Text und bleibt stehen.
+        announceLuEngineStartFailure(model.name, e, switched)
         // Und das Menue geht zu, damit die Zeile ueber dem Eingabefeld frei
         // liegt. Gegenprobe G1, 04.09.2026, nachgemessen: das offene Menue
         // verdeckte 331 von 763 Pixeln seines eigenen Banners, also 43

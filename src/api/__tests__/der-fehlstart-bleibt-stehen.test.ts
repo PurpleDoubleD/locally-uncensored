@@ -62,7 +62,11 @@ describe('die Meldung landet in der stehenden Zeile', () => {
 describe('beide Tueren schreiben aus derselben Hand', () => {
   it('der Waehler ruft die gemeinsame Stelle und textet nicht selbst', () => {
     const src = lies('components/models/ModelSelector.tsx')
-    expect(src).toContain('setSelectError(announceLuEngineStartFailure(model.name, e, switched))')
+    expect(src).toContain('announceLuEngineStartFailure(model.name, e, switched)')
+    // Und schreibt seit G1 (04.09.2026) NICHT mehr zusaetzlich in den Kasten
+    // im Menue: das Menue geht in derselben Bewegung zu, der Kasten waere ein
+    // rotes Aufblitzen fuer die Dauer der Ausblendung.
+    expect(src).not.toContain('setSelectError(announceLuEngineStartFailure(')
     // Die alte Fassung schrieb nur in den eigenen Kasten.
     expect(src).not.toContain('setSelectError(luEngineStartFailureNote(')
   })

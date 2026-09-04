@@ -26,7 +26,7 @@ const SRC = readFileSync(resolve(__dirname, '..', 'ModelSelector.tsx'), 'utf8')
 
 /** Der Fangzweig des LU-Engine-Wegs, aus der Quelle geholt. */
 function fangzweig(): string {
-  const at = SRC.indexOf('setSelectError(announceLuEngineStartFailure(')
+  const at = SRC.indexOf('announceLuEngineStartFailure(model.name, e, switched)')
   expect(at).toBeGreaterThan(0)
   const end = SRC.indexOf('} finally {', at)
   expect(end).toBeGreaterThan(at)
@@ -38,6 +38,9 @@ describe('ein gescheiterter Start', () => {
     const zweig = fangzweig()
     expect(zweig).toContain('announceLuEngineStartFailure(model.name, e, switched)')
     expect(zweig).toContain('setOpen(false)')
+    // Und NICHT zusaetzlich in den Kasten im Menue, das waere ein rotes
+    // Aufblitzen fuer die Dauer der Ausblendung.
+    expect(SRC).not.toContain('setSelectError(announceLuEngineStartFailure(')
   })
 
   it('erst schreiben, dann schliessen, sonst steht die Zeile nirgends', () => {
@@ -47,7 +50,7 @@ describe('ein gescheiterter Start', () => {
   })
 
   it('und stellt vorher das alte Modell zurueck', () => {
-    const at = SRC.indexOf('setSelectError(announceLuEngineStartFailure(')
+    const at = SRC.indexOf('announceLuEngineStartFailure(model.name, e, switched)')
     const catchAt = SRC.lastIndexOf('} catch (e) {', at)
     expect(catchAt).toBeGreaterThan(0)
     expect(SRC.slice(catchAt, at)).toContain('setActiveModel(vorherAktiv)')
