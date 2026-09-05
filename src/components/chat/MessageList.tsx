@@ -7,6 +7,7 @@ import { WorkingAnchor } from './WorkingAnchor'
 import { CompactBlock } from './CompactBlock'
 import { compactionAnchors } from '../../lib/compact-summary'
 import { Hinweis } from '../ui/Hinweis'
+import { TRANSCRIPT_MAX_PX } from './composer-width'
 
 /**
  * Above this many visible messages the transcript stops paying full layout +
@@ -153,8 +154,18 @@ export function MessageList({ isGenerating, isThisChatGenerating, isLoadingModel
       }}
     >
       {/* Single wrapper so the hook's ResizeObserver sees ALL content height,
-          anchor included (G33). */}
-      <div ref={contentRef} className="mx-auto w-full max-w-[var(--lu-measure)]">
+          anchor included (G33).
+
+          Die Breite kommt aus `composer-width.ts` und nicht mehr aus
+          `--lu-measure`. David, 05.09.2026: das Transkript stand exakt auf
+          der Spaltenbreite und war damit sogar schmaler als die Promptbox
+          darunter (759 gegen 792,3 gerenderte px am Windows-Bau). Es soll
+          links und rechts um je rund 20 Prozent ueber die Box hinausragen,
+          bei gleicher Mitte. `TRANSCRIPT_MAX_PX` rechnet das aus der Breite
+          der Promptbox aus, damit hier keine zweite Zahl neben der einen
+          steht; als `style`, weil Tailwind Klassennamen scannt und eine
+          gerechnete Breite deshalb keine Regel bekaeme. */}
+      <div ref={contentRef} className="mx-auto w-full" style={{ maxWidth: TRANSCRIPT_MAX_PX }}>
         {visibleMessages
           .map((message, index) => (
             // The wrapper carries the skip hint so MessageBubble keeps owning

@@ -54,3 +54,38 @@
  * einer gepflegt, hier viermal.
  */
 export const COMPOSER_MAX_W = 'max-w-[713px]'
+
+/**
+ * Das Innenpolster des Fensterrahmens, `px-3` links wie rechts.
+ *
+ * COMPOSER_MAX_W deckelt den RAHMEN um das Fenster, nicht das Fenster. Wer
+ * die sichtbare Kante der Promptbox braucht, muss diese 24 abziehen; am
+ * laufenden Windows-Bau (1296x808, --ui-scale 1.15) sind das 819,9 gerenderte
+ * px fuer den Rahmen und 792,3 fuer die Box darin.
+ */
+const COMPOSER_PAD_PX = 24
+
+/** Die sichtbare Breite der Promptbox, in Entwurfspixeln. */
+export const COMPOSER_BOX_PX =
+  Number(COMPOSER_MAX_W.match(/(\d+)/)![1]) - COMPOSER_PAD_PX
+
+/**
+ * Wie breit das Transkript ist, abgeleitet und nicht daneben gestellt.
+ *
+ * David, 05.09.2026: das Transkript stand exakt auf `--lu-measure` (759
+ * gerenderte px) und war damit sogar schmaler als die Promptbox darunter
+ * (792,3). Er will es links und rechts um je rund 20 Prozent ueber die Box
+ * hinausragen sehen, also die 1,4-fache Breite bei gleicher Mitte.
+ *
+ * Die Zahl steht deshalb NICHT als zweite Konstante daneben, sondern faellt
+ * aus der Breite der Promptbox: 689 x 1,4 = 964,6, gerundet 965. Wer oben die
+ * 713 aendert, aendert diese Zahl mit; eine Drift zwischen beiden ist nicht
+ * moeglich.
+ *
+ * Als Zahl und nicht als Tailwind-Klasse: Tailwind SCANNT Klassennamen aus
+ * dem Quelltext und kann nichts rechnen, eine zusammengesetzte Breitenklasse
+ * erzeugt also gar keine Regel. Und eine ausgeschriebene zweite Pixelzahl
+ * waere genau die Doppelung, die der Kopf dieser Datei fuer die vier Leisten
+ * beschreibt. Die Zahl geht deshalb als `style` an das Transkript.
+ */
+export const TRANSCRIPT_MAX_PX = Math.round(COMPOSER_BOX_PX * 1.4)

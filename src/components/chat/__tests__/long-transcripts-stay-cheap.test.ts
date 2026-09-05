@@ -51,10 +51,15 @@ describe('every message stays mounted — no window, no slice', () => {
     expect(anchor).toBeGreaterThan(wrapper)
   })
 
-  it('the measure column is untouched', () => {
-    // W1 introduced this; a virtualisation rewrite is exactly the kind of
-    // change that quietly drops it.
-    expect(list).toContain('max-w-[var(--lu-measure)]')
+  it('the column cap is still there, and it is the derived one', () => {
+    // W1 introduced a cap here; a virtualisation rewrite is exactly the kind
+    // of change that quietly drops it. Since 05.09.2026 the cap is no longer
+    // `--lu-measure`: David asked for a transcript that overhangs the prompt
+    // box by about 20 percent on each side, and that number is derived from
+    // the composer width in composer-width.ts instead of standing next to it.
+    expect(list).toContain('TRANSCRIPT_MAX_PX')
+    expect(list).toContain('mx-auto w-full')
+    expect(list).not.toContain('max-w-[var(--lu-measure)]')
   })
 })
 
