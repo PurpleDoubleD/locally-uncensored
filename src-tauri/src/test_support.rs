@@ -400,6 +400,16 @@ pub(crate) fn park_binary() -> PathBuf {
 /// `the_scan_finds_a_real_process_by_the_argv_lu_would_have_used`, has the same
 /// window and had simply not been unlucky yet. A table whose subject has no argv
 /// is not a table this function should hand out.
+///
+/// ── The fourth check, added 05.09.2026 ──
+///
+/// Linux shows the same fork-to-exec window differently: `/proc/<pid>/cmdline`
+/// of a child that has forked but not yet exec'd is not empty, it is the
+/// PARENT'S argv, verbatim. On a fresh 4-vCPU Ubuntu 22.04 box,
+/// `the_scan_finds_a_real_process_by_the_argv_lu_would_have_used` failed 2 of
+/// 10 full-suite runs with exactly that: the stand-in "carried" nothing but
+/// the path of this test binary. So a subject whose argv equals ours is not
+/// the subject yet, and the table is not handed out.
 #[cfg(unix)]
 pub(crate) fn checked_table(pid: u32) -> Result<sysinfo::System, String> {
     use std::time::{Duration, Instant};
@@ -408,13 +418,15 @@ pub(crate) fn checked_table(pid: u32) -> Result<sysinfo::System, String> {
     let mut attempts = 0usize;
     let mut blind = 0usize;
     let mut speechless = 0usize;
+    let mut unborn = 0usize;
     loop {
         if Instant::now() >= deadline {
             return Err(format!(
                 "no usable process table in 10s ({attempts} attempts, {blind} of them \
                  without this test's own process in them, {speechless} with pid {pid} \
-                 listed but carrying no command line). That is the TEST ENVIRONMENT, \
-                 not the code under test."
+                 listed but carrying no command line, {unborn} with pid {pid} still \
+                 carrying this test's own argv, i.e. forked but not exec'd). That is \
+                 the TEST ENVIRONMENT, not the code under test."
             ));
         }
         if attempts > 0 {
@@ -424,16 +436,21 @@ pub(crate) fn checked_table(pid: u32) -> Result<sysinfo::System, String> {
         }
         attempts += 1;
         let sys = crate::process_util::process_table_with_cmdlines();
-        if sys.process(me).is_none() {
+        let Some(myself) = sys.process(me) else {
             blind += 1;
             continue;
-        }
+        };
         let Some(subject) = sys.process(sysinfo::Pid::from_u32(pid)) else {
             blind += 1;
             continue;
         };
-        if crate::process_util::cmdline_of(subject).is_empty() {
+        let argv = crate::process_util::cmdline_of(subject);
+        if argv.is_empty() {
             speechless += 1;
+            continue;
+        }
+        if pid != std::process::id() && argv == crate::process_util::cmdline_of(myself) {
+            unborn += 1;
             continue;
         }
         return Ok(sys);
