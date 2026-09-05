@@ -213,10 +213,50 @@ mod civitai_auth_tests {
     /// Negative control: every other host and every other status is answered
     /// by `http_error_message` word for word. A dead HuggingFace link must not
     /// send people to the CivitAI setting.
+    /// A gated hub repo is a missing credential, not a dead address.
+    /// OrcaRouter's own GGUF repo answers 401 to everyone without a token
+    /// (measured 2026-09-05); the old text said "trying again cannot help".
+    #[test]
+    fn a_refused_huggingface_download_names_the_token_field_and_keeps_retry() {
+        for status in [401u16, 403] {
+            let msg = download_http_error(
+                "https://huggingface.co/orcarouter/Qwen3.8-27B-Uncensored-GGUF/resolve/main/m.gguf",
+                status,
+                false,
+                "m.gguf",
+            );
+            assert!(msg.contains(&format!("HTTP {status}")), "{msg}");
+            assert!(msg.contains("Settings > AI Backends > Hugging Face token"), "{msg}");
+            assert!(msg.contains("accept its licence"), "{msg}");
+            assert!(!msg.contains(&format!("(HTTP {status})")), "{msg}");
+            assert!(!msg.contains("cannot help"), "{msg}");
+        }
+        let sent = download_http_error("https://hf.co/x/y/resolve/main/m.gguf", 401, true, "m.gguf");
+        assert!(sent.contains("was sent and rejected"), "{sent}");
+        assert!(!sent.contains("add a Hugging Face token"), "{sent}");
+        // A 404 on the hub is still a dead address, brackets and all.
+        let gone = download_http_error("https://huggingface.co/x/y/resolve/main/m.gguf", 404, false, "m.gguf");
+        assert_eq!(gone, http_error_message(404, "m.gguf"));
+    }
+
+    #[test]
+    fn the_hub_host_rule_is_as_strict_as_the_civitai_one() {
+        assert!(super::is_huggingface_host("https://huggingface.co/a/b/resolve/main/m.gguf"));
+        assert!(super::is_huggingface_host("https://HF.co/a/b/resolve/main/m.gguf"));
+        assert!(super::is_huggingface_host("https://cdn-lfs.huggingface.co/x"));
+        assert!(!super::is_huggingface_host("https://huggingface.co.evil.test/x"));
+        assert!(!super::is_huggingface_host("https://evil.test/huggingface.co/x"));
+        // The backslash ends the host in a special scheme: reqwest talks to
+        // evil.test here, so the token must not go out.
+        assert!(!super::is_huggingface_host("https://evil.test\\.huggingface.co/x"));
+        assert!(!super::is_huggingface_host("not a url"));
+    }
+
     #[test]
     fn other_hosts_and_other_statuses_get_no_civitai_hint() {
         for (url, status, sent) in [
-            ("https://huggingface.co/repo/resolve/main/m.gguf", 401u16, false),
+            ("https://huggingface.co/repo/resolve/main/m.gguf", 404u16, false),
+            ("https://example.test/repo/m.gguf", 401, false),
             ("https://civitai.com/api/download/models/1", 404, false),
             ("https://civitai.com/api/download/models/1", 500, true),
         ] {
@@ -742,7 +782,7 @@ pub fn http_error_message(status: u16, filename: &str) -> String {
             "{filename} is not at this address any more (HTTP {status}). The repository was renamed, moved or taken down, so trying again cannot help. Look for a newer version of this model in the Model Manager, or update Locally Uncensored — the address is part of the app's catalog."
         ),
         401 | 403 => format!(
-            "{filename} cannot be downloaded without a HuggingFace login (HTTP {status}). This repository is gated or private: open its page in a browser, accept the licence with your HuggingFace account, and put the file into the model folder by hand. Trying again here cannot help."
+            "{filename} cannot be downloaded without a login at this host (HTTP {status}). The address is gated or private: open it in a browser, sign in, accept any licence, and put the file into the model folder by hand. Trying again here cannot help."
         ),
         429 => format!(
             "The host is rate limiting this download (HTTP {status}). Wait a few minutes, then start {filename} again."
@@ -818,6 +858,16 @@ pub(crate) fn is_civitai_host(url: &str) -> bool {
         || host.ends_with(".civitai.red")
 }
 
+/// Same rule for the Hugging Face hub, the only host the stored Hugging Face
+/// token is ever sent to. `hf.co` is the hub's own short alias.
+pub(crate) fn is_huggingface_host(url: &str) -> bool {
+    let host = match url::Url::parse(url) {
+        Ok(u) => u.host_str().unwrap_or("").to_ascii_lowercase(),
+        Err(_) => return false,
+    };
+    host == "huggingface.co" || host == "hf.co" || host.ends_with(".huggingface.co")
+}
+
 /// What the user reads when a download comes back refused.
 ///
 /// goonerforporn, Discord #bug-reports 2026-08-28: CivitAI downloads ended in a
@@ -833,6 +883,26 @@ pub(crate) fn is_civitai_host(url: &str) -> bool {
 /// key is the one refusal the user can go and fix, so the button has to stay.
 pub(crate) fn download_http_error(url: &str, status: u16, sent_token: bool, filename: &str) -> String {
     let refused = matches!(status, 400 | 401 | 403);
+    // A gated Hugging Face repo (OrcaRouter's own GGUF repo is one) answers
+    // 401 to everyone without an accepted licence and a token. That is not a
+    // dead address, it is a missing credential, so the text names the field
+    // and keeps the status out of the `(HTTP nnn)` shape: the Retry button
+    // has to stay for the moment the token is in.
+    if is_huggingface_host(url) && matches!(status, 401 | 403) {
+        return if sent_token {
+            format!(
+                "Hugging Face refused this download with HTTP {status}. Your Hugging Face token was sent and rejected. \
+                 Check it under Settings > AI Backends > Hugging Face token, and check that you accepted this \
+                 repository's licence on huggingface.co with the same account."
+            )
+        } else {
+            format!(
+                "Hugging Face refused this download with HTTP {status}. This repository is gated or private and needs a \
+                 Hugging Face account: open the repository page on huggingface.co, accept its licence, add a Hugging Face \
+                 token under Settings > AI Backends > Hugging Face token, then start {filename} again."
+            )
+        };
+    }
     if is_civitai_host(url) && refused {
         return if sent_token {
             format!(
@@ -986,10 +1056,15 @@ async fn do_download(
     // the host, which is exactly right: CivitAI hands the file to a signed CDN
     // URL that must not see the key.
     let civitai = is_civitai_host(url);
-    // as_deref, damit der Griff kopierbar bleibt: weiter unten fragt die
-    // Fehlermeldung noch einmal, ob ein Schluessel mitgegangen ist.
-    let sent_token = auth_token.as_deref().filter(|t| !t.trim().is_empty() && civitai);
-    if let Some(t) = sent_token {
+    let civitai_key = auth_token.as_deref().filter(|t| !t.trim().is_empty() && civitai);
+    // The Hugging Face token from Settings goes to the hub and to no other
+    // host: gated repos answer 401 without it, and anonymous hub traffic is
+    // throttled. Same redirect rule as above, the signed CDN URL never sees it.
+    let hf_token = if is_huggingface_host(url) { crate::commands::mlx::hf_token() } else { None };
+    // Kept as a value: weiter unten fragt die Fehlermeldung noch einmal, ob
+    // ein Schluessel mitgegangen ist.
+    let sent_token: Option<String> = civitai_key.map(|t| t.trim().to_string()).or(hf_token);
+    if let Some(t) = sent_token.as_deref() {
         request = request.bearer_auth(t.trim());
     }
 

@@ -126,7 +126,13 @@ describe('D-S26 · was das Raster wirklich kostet', () => {
     // liegt weiterhin am unteren Ende. Neu zu messen waere bei einem Sprung
     // in die Hunderter noetig.
     expect(messeReiter(getMainstreamTextModels()).kacheln).toBe(53)
-    expect(messeReiter(getUncensoredTextModels()).kacheln).toBe(56)
+    //
+    // 56 -> 57 am 05.09.2026, vierte Bewegung. David: „orcarouter ist ein
+    // muss." Die sechs Qwen-3.8-27B-Uncensored-Quants zeigen jetzt auf
+    // bartowskis ungated Requant von OrcaRouters Abliteration (gleiche Gruppe,
+    // keine neue Kachel), und dazu kommt OrcaRouters eigener Ollama-Tag, eine
+    // Kachel fuer sich, weil Ollama-Zeilen keine Gruppe tragen.
+    expect(messeReiter(getUncensoredTextModels()).kacheln).toBe(57)
   })
 
   it('eine Kachel ist rund 28 Elementknoten gross, nicht 300', () => {

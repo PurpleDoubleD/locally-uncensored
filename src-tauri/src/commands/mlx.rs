@@ -58,10 +58,16 @@ static HF_TOKEN: std::sync::RwLock<Option<String>> = std::sync::RwLock::new(None
 /// of reach entirely without a token. HF_HOME stays with the caller: the image
 /// lane shares one cache, the video lane downloads into per-model directories.
 pub(crate) fn apply_hf_token(cmd: &mut Command) {
-    let token = HF_TOKEN.read().ok().and_then(|t| t.clone());
-    if let Some(t) = token {
+    if let Some(t) = hf_token() {
         cmd.env("HF_TOKEN", t);
     }
+}
+
+/// The stored token, for the one other place that talks to the hub directly:
+/// the GGUF downloader in `download.rs`, which sends it as a Bearer header to
+/// huggingface.co and nowhere else.
+pub(crate) fn hf_token() -> Option<String> {
+    HF_TOKEN.read().ok().and_then(|t| t.clone())
 }
 
 /// Store the token from Settings. An empty string clears it, because that is

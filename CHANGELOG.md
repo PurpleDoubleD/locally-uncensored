@@ -12,6 +12,19 @@ engine has a name of its own, the LU Engine.
 
 ### Added
 
+- **OrcaRouter's Qwen 3.8 27B Uncensored, and a Hugging Face token that
+  model downloads use.** The six uncensored 27B rows in the Model Manager now
+  come from OrcaRouter's abliteration (bartowski's ungated GGUF requant of it,
+  vision projector included), and Ollama users get OrcaRouter's own tag with
+  the projector inside. OrcaRouter's original GGUF repo is gated on Hugging
+  Face and answers HTTP 401 to anyone without an accepted licence and a token.
+  A download that runs into that now says so and names the fix instead of
+  "trying again cannot help": accept the licence on the repo page, put a
+  Hugging Face token under Settings, AI Backends, Hugging Face token, and
+  start the download again. That field exists on Windows and Linux now (it
+  lived only inside the Mac media panel), and the token goes to
+  huggingface.co with every model download, which also lifts the throttle
+  the hub puts on anonymous downloads.
 - **An effort control beside the Think button** on a reasoning model. Low,
   Medium and High, with Max on GLM 5.3, set how many tokens a reply may spend
   on thinking. The steps come from the server for each model, so a model that

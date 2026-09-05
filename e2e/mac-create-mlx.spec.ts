@@ -210,9 +210,11 @@ test('mac: saving the HuggingFace token in Settings pushes it to Rust', async ({
 
   await page.getByRole('button', { name: /^Settings$/ }).click()
   await page.getByRole('button', { name: /AI Backends/i }).click()
-  await page.getByRole('button', { name: /Local Media \(Apple MLX\)/i }).click()
+  // 2.6.8: the field left the Mac media panel for a section of its own that
+  // every platform has, because the GGUF downloader sends the token now too.
+  await page.getByRole('button', { name: 'Hugging Face token', exact: true }).click()
 
-  await page.getByLabel('HuggingFace token').fill('hf_e2e_probe')
+  await page.getByLabel('Hugging Face token').fill('hf_e2e_probe')
   await page.getByRole('button', { name: /^Save$/ }).click()
   await expect(page.getByRole('button', { name: /Saved/i })).toBeVisible({ timeout: 10_000 })
 

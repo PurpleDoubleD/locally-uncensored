@@ -20,7 +20,7 @@
 import { useSettingsStore } from '../stores/settingsStore'
 
 export async function pushPersistedChoicesToRust(): Promise<void> {
-  const [{ invoke }, { isMlxImageHost, applyHfToken, HF_TOKEN_ACCOUNT }] = await Promise.all([
+  const [{ invoke }, { applyHfToken, HF_TOKEN_ACCOUNT }] = await Promise.all([
     import('@tauri-apps/api/core'),
     import('../api/mlx-image'),
   ])
@@ -39,8 +39,8 @@ export async function pushPersistedChoicesToRust(): Promise<void> {
   // holds it in memory only, so every boot pushes it down again. Without
   // this, only opening Settings would arm the token, and a model download
   // started from Create, the Model Manager or the wizard would still go out
-  // anonymous and throttled.
-  if (!isMlxImageHost()) return
+  // anonymous and throttled. Every platform: since 2.6.8 the GGUF downloader
+  // sends the token to huggingface.co too, not only the Mac media lane.
   const { secretGet } = await import('../api/backend')
   const stored = await secretGet(HF_TOKEN_ACCOUNT).catch(() => null)
   if (stored) await applyHfToken(stored).catch(() => {})

@@ -62,6 +62,7 @@ import {
   type LmStudioModelDir,
 } from '../../lib/model-storage-rows'
 import { CivitaiApiKeySetting } from './CivitaiApiKeySetting'
+import { HfTokenSetting } from './HfTokenSetting'
 import { HINWEIS_TEXT, PUNKT_FARBE } from '../../lib/hinweis'
 
 // ── User profile picture (Appearance) ───────────────────────────
@@ -2030,6 +2031,12 @@ export function SettingsPage() {
               own now, and the field says what a key looks like. */}
           <Section title="CivitAI API key">
             <CivitaiApiKeySetting />
+          </Section>
+
+          {/* Same reasoning, other hub: the downloader sends this token to
+              huggingface.co, and a gated repository's 401 names this field. */}
+          <Section title="Hugging Face token">
+            <HfTokenSetting />
           </Section>
 
           {builtinManaged && (
