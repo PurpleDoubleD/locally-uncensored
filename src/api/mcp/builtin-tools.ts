@@ -789,14 +789,14 @@ async function executeShellExecute(
   const command = argString(args, 'command').trim()
   if (!command) return 'shell_execute: `command` is required (or pass task: "status" | "list" | "kill").'
 
-  const { rejectShellCommand, commandTimeoutMs, commandKind, isReadOnlyCommand } = await import(
+  const { rejectShellCommand, commandTimeoutMs, commandKind, isReadOnlyCommand, READ_ONLY_SHELL_HINT } = await import(
     '../../lib/shell-command-classify'
   )
   // Read-only turn (/review …): the classifier is the gate now that the typed
   // read-only inspectors are gone. Conservative on purpose: chained commands
   // are refused outright, a read-only mode that can be talked around is none.
   if (isReadOnlyShellTurn(run) && (args.background || !isReadOnlyCommand(command))) {
-    return 'Refused: this turn is read-only (/review, Code-Review Mode or Plan mode). Only inspection commands run here: git status/log/diff/show/blame, ls, cat, pwd. One command, no chaining.'
+    return `Refused: this turn is read-only (/review, Code-Review Mode or Plan mode). ${READ_ONLY_SHELL_HINT}`
   }
 
   // The one refusal that stays hard after the merge: --no-verify on a commit.

@@ -20,6 +20,8 @@
  * cleanly and the ChatInput autocomplete + the hooks share one source.
  */
 
+import { READ_ONLY_SHELL_HINT } from './shell-command-classify'
+
 export interface AgentCommand {
   /** Command word without the leading slash, e.g. "review". */
   name: string
@@ -168,8 +170,25 @@ export function formatDuration(ms: number): string {
   return m ? `${h}h ${m}m` : `${h}h`
 }
 
-/** Read-only commands cannot run shell, so they must be told how to look. */
-const LOOK = 'Read the real code with file_read / file_list / file_search first — never answer from memory. You have no write or shell tools on this turn, so do not plan to use them.'
+/**
+ * Wie ein Nur-Lesen-Zug schauen darf, und zwar genau so weit, wie er es wirklich
+ * darf.
+ *
+ * Der zweite Satz stand bis zum 05.09.2026 als "You have no write or shell
+ * tools on this turn, so do not plan to use them". Seit dem 2.6.6-Werkzeugschnitt
+ * ist das falsch: `shell_execute` UEBERLEBT den Strip mit Absicht
+ * (`allowedInReadOnlyTurn`), weil die frueheren Einzelwerkzeuge git_status,
+ * git_log und git_diff darin aufgegangen sind, und der Executor laesst die
+ * Inspektionsbefehle durch. Ein `/review` ohne Argument prueft "the current
+ * uncommitted changes" und bekam gesagt, es duerfe genau das Werkzeug nicht
+ * anfassen, mit dem es diese Aenderungen ueberhaupt findet.
+ *
+ * Der erlaubte Teil kommt jetzt aus derselben Konstante wie die Ablehnung im
+ * Executor. Modell und Waechter koennen also nicht mehr auseinanderlaufen.
+ */
+const LOOK =
+  'Read the real code with file_read / file_list / file_search first, never answer from memory. ' +
+  `You cannot write files on this turn, and you cannot run arbitrary commands. ${READ_ONLY_SHELL_HINT}`
 
 export const AGENT_COMMANDS: AgentCommand[] = [
   // ── Context ───────────────────────────────────────────────────────────

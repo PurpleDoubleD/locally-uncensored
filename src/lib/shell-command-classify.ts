@@ -69,6 +69,25 @@ const READ_ONLY_PREFIXES = [
 ]
 
 /**
+ * Was ein Nur-Lesen-Zug wirklich darf, in einem Satz.
+ *
+ * Drei Stellen mussten dasselbe wissen und wussten es getrennt: der Waechter
+ * hier, die Ablehnung im Executor und der Vorspann, den `/review` und
+ * Geschwister dem Modell schicken. Der Vorspann sagte am 05.09.2026 noch
+ * "you have no write or shell tools on this turn", was seit dem
+ * 2.6.6-Werkzeugschnitt schlicht falsch ist: `shell_execute` UEBERLEBT den
+ * Strip mit Absicht, weil die frueheren Einzelwerkzeuge (git_status, git_log,
+ * git_diff) darin aufgegangen sind. Ein `/review` der offenen Aenderungen
+ * bekam also gesagt, es duerfe genau das Werkzeug nicht anfassen, mit dem es
+ * die Aenderungen ueberhaupt findet.
+ *
+ * Deshalb steht der Satz jetzt an einer Stelle und wird zweimal gelesen. Wer
+ * die Liste oben aendert, aendert beides mit.
+ */
+export const READ_ONLY_SHELL_HINT =
+  `Only inspection commands run here: ${READ_ONLY_PREFIXES.join(', ')}. One command, no chaining.`
+
+/**
  * `git branch` is not a read: `git branch -D main` deletes a branch and
  * `git branch foo` creates one, so it cannot live in READ_ONLY_PREFIXES,
  * whose match is "prefix + anything" (audit CDX-2). Listing forms stay
