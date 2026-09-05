@@ -161,6 +161,12 @@ engine has a name of its own, the LU Engine.
   window.
 - **Error messages from Windows arrive in English**, and a ComfyUI
   requirements.txt that cannot be used is named instead of silently skipped.
+- **Character training no longer stops at the first step on a Windows machine
+  with more than one GPU.** torch asked for libuv, which the Windows wheels do
+  not carry, and the run died with "use_libuv was requested but PyTorch was
+  build without libuv support". LU now sets USE_LIBUV=0 for every trainer
+  process on Windows. Reported in GitHub #121; nobody here has two GPUs, so
+  this is the documented torch workaround rather than a measured fix.
 
 ## [2.6.7] - 2026-08-31
 

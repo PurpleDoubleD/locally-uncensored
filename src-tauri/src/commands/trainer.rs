@@ -177,9 +177,19 @@ fn active_comfy_dir(state: &AppState) -> Option<PathBuf> {
 /// practice the moment tqdm draws its block-glyph progress bar, which is
 /// exactly when the train step finally has a step total. Force UTF-8 stdio
 /// on every trainer child instead.
+///
+/// The same hook carries the second Windows-only environment fix. GitHub #121
+/// (Z0mbieK, two GPUs, 2026-08-29): the train step died at start with
+/// "use_libuv was requested but PyTorch was build without libuv support".
+/// torch 2.4+ asks for libuv by default when torch.distributed sets up its
+/// store on Windows, and the Windows wheels are built without it. USE_LIBUV=0
+/// is the knob torch itself reads for that; it changes nothing on a single
+/// GPU and nothing outside the trainer's children.
 fn force_python_utf8(cmd: &mut Command) {
     cmd.env("PYTHONIOENCODING", "utf-8");
     cmd.env("PYTHONUTF8", "1");
+    #[cfg(target_os = "windows")]
+    cmd.env("USE_LIBUV", "0");
 }
 
 /// cu121 wheels carry kernels up to sm_90 (Hopper). Blackwell reports
@@ -1971,6 +1981,11 @@ mod tests {
             .collect();
         assert!(envs.contains(&("PYTHONIOENCODING".into(), Some("utf-8".into()))));
         assert!(envs.contains(&("PYTHONUTF8".into(), Some("1".into()))));
+        // GitHub #121: only Windows wheels lack libuv, so only Windows gets the knob.
+        #[cfg(target_os = "windows")]
+        assert!(envs.contains(&("USE_LIBUV".into(), Some("0".into()))));
+        #[cfg(not(target_os = "windows"))]
+        assert!(!envs.iter().any(|(k, _)| k == "USE_LIBUV"));
     }
 
     #[test]
