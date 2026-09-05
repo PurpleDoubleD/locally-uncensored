@@ -4133,14 +4133,32 @@ mod remote_hardening_tests {
         let bin = dir.path().join("cloudflared");
         std::fs::copy(&park, &bin).expect("copy the stand-in");
 
-        let child = Command::new(&bin)
-            .args(["tunnel", "--url", &format!("http://127.0.0.1:{port}")])
-            .stdin(Stdio::piped())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-            .expect("spawn the stand-in");
-        (dir, child)
+        // ETXTBSY on Linux, two runs out of seven on a fresh Ubuntu 22.04
+        // (2026-09-05): while `copy` held the write end of `bin`, another test
+        // thread forked its own stand-in; that child inherits every fd and
+        // only drops the CLOEXEC ones at ITS exec, and the busy check for OUR
+        // exec runs before that. The copy is long closed here, the stale copy
+        // of its fd is not ours to close, so the spawn waits it out.
+        let mut child = None;
+        for _ in 0..200 {
+            match Command::new(&bin)
+                .args(["tunnel", "--url", &format!("http://127.0.0.1:{port}")])
+                .stdin(Stdio::piped())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+            {
+                Ok(c) => {
+                    child = Some(c);
+                    break;
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::ExecutableFileBusy => {
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
+                Err(e) => panic!("spawn the stand-in: {e}"),
+            }
+        }
+        (dir, child.expect("spawn the stand-in: still text-file-busy after two seconds"))
     }
 
     /// The positive end-to-end direction, and the one T-39 depends on: a real,
