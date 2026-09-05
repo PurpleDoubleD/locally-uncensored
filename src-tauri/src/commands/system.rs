@@ -115,12 +115,16 @@ fn screenshot_blocking() -> Result<serde_json::Value, String> {
 /// minutes on a picture of the screen. 20 s is far above a real capture (tens
 /// of milliseconds, seconds at worst on a huge display) and far below the
 /// wait a blocked consent dialog imposes.
+// Only the Windows and macOS capture paths use the deadline; Linux has no
+// capture command yet, and its clippy gate runs with -D warnings.
+#[cfg_attr(not(any(target_os = "windows", target_os = "macos")), allow(dead_code))]
 const SCREENSHOT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20);
 
 /// Run a capture command with a deadline. `Ok(())` only when it exited zero in
 /// time; the process is killed on timeout so no orphan sits on the display
 /// server. Exported for the unit test, which is the only honest way to prove
 /// the deadline fires without a consent dialog to hand.
+#[cfg_attr(not(any(target_os = "windows", target_os = "macos")), allow(dead_code))]
 pub(crate) fn run_capture_bounded(
     mut cmd: std::process::Command,
     max: std::time::Duration,

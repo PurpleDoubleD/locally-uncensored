@@ -4067,7 +4067,11 @@ mod remote_hardening_tests {
     // A shebang's `name()` is the interpreter ("bash" on macOS), not the
     // script, so THAT stand-in cannot impersonate a cloudflared — it carries a
     // real argv and a real name, which is what the three decomposed tests
-    // below need, but not the name the sweep looks for.
+    // below need, but not the name the sweep looks for. Linux differs: there
+    // the kernel takes comm from the script's basename, so the script must
+    // NOT be called `cloudflared` or the sweep finds it by name (measured on
+    // Ubuntu 22.04, where `the_sweep_leaves_a_live_stranger_on_our_port_alone`
+    // failed for exactly that reason).
     //
     // The positive end-to-end direction gets its own stand-in, and the reason
     // it is a different one is worth writing down: SIP kills copies of
@@ -4088,7 +4092,7 @@ mod remote_hardening_tests {
         use std::process::{Command, Stdio};
 
         let dir = tempfile::tempdir().expect("tempdir");
-        let script = dir.path().join("cloudflared");
+        let script = dir.path().join("bystander");
         // `read` is a shell builtin: the process blocks in it without forking,
         // so nothing is left behind when this test drops the pipe.
         std::fs::write(&script, "#!/bin/sh\nread ignored\n").expect("write the stand-in");

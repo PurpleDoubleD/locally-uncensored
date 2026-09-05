@@ -70,6 +70,9 @@ pub const AGENT_WORKSPACE_DIR: &str = "agent-workspace";
 /// hartkodiert, und wer ihn ändert, verwaist alle Schlüssel, die der Nutzer
 /// unter dem alten Namen gespeichert hat. Ein Build mit einem abweichenden
 /// Service-Namen liest und **überschreibt** außerdem fremde Einträge.
+// Only the Windows and macOS keychain paths read this; Linux has no keychain
+// backend yet, and its clippy gate runs with -D warnings.
+#[cfg_attr(not(any(target_os = "windows", target_os = "macos")), allow(dead_code))]
 pub const KEYCHAIN_SERVICE: &str = "com.locallyuncensored.providerkeys";
 
 #[cfg(test)]

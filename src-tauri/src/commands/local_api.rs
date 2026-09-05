@@ -169,7 +169,7 @@ impl SseModellUmschreiber {
         if self.rest.is_empty() {
             return Vec::new();
         }
-        let zeile: Vec<u8> = self.rest.drain(..).collect();
+        let zeile = std::mem::take(&mut self.rest);
         self.zeile_umschreiben(&zeile)
     }
 
