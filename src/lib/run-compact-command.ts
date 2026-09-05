@@ -149,7 +149,17 @@ export async function runCompactForConversation(opts: {
   return { ok: true, record }
 }
 
-/** The newest record, or undefined. Only the newest shapes a payload. */
+/**
+ * The newest record, or undefined.
+ *
+ * NOT for building a payload. That takes the whole chain, because each run
+ * only summarises what the previous one did not cover, and a cut placed by the
+ * newest anchor drops everything the earlier summaries stand for
+ * (`applyStoredCompaction` in `compact-summary.ts`, fixed 04.09.2026). This
+ * function exists for one thing only: `atMessageCount`, which the counter and
+ * the auto trigger read to answer "how much has been said since the last
+ * summary". Both callers are in this file and in `TokenCounter.tsx`.
+ */
 export function newestCompaction(
   compactions: CompactionRecord[] | undefined,
 ): CompactionRecord | undefined {
