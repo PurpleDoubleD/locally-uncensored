@@ -146,6 +146,39 @@ interface UIState {
   setExplorerCollapsed: (collapsed: boolean) => void
 }
 
+/**
+ * Wer von 2.6.7 kommt, verliert seine Gespraechsliste nicht.
+ *
+ * Gemessen am 05.09.2026 im gebauten Programm auf Windows: eine Installation
+ * von 2.6.6 auf 2.6.8, danach das Feld `sidebarOpen` aus dem gespeicherten
+ * Zustand entfernt, so wie es bei einem echten 2.6.7-Kunden aussieht.
+ * Ergebnis nach dem Neuladen: 0 sichtbare Gespraechszeilen, 0 Loeschknoepfe.
+ * Seine 109 Unterhaltungen waren vollstaendig da und keine davon zu sehen.
+ *
+ * Der Grund steht in beiden Baeumen nebeneinander. 2.6.7 hatte
+ * `sidebarOpen: true` und speicherte den Wert NIE (`partialize` kannte dort
+ * nur `explorerWidth` und `explorerCollapsed`). 2.6.8 speichert ihn und
+ * startet mit `false`. Ein Kunde ohne abgelegten Wert bekommt also den neuen
+ * Startwert, und niemand hat ihm gesagt, dass seine Chats hinter einem
+ * unbeschrifteten Symbolknopf liegen.
+ *
+ * Diese Wanderung nimmt die Produktentscheidung NICHT vorweg: eine frische
+ * Installation hat gar keinen gespeicherten Zustand, laeuft hier nie durch und
+ * startet weiterhin schlank. Betroffen ist nur, wer schon einmal da war und
+ * dessen Ansicht sonst still umspringen wuerde.
+ *
+ * Wer den Wert selbst gesetzt hat, behaelt ihn: das `in`-Pruefen unterscheidet
+ * "nie abgelegt" von "auf false abgelegt", und nur der erste Fall wird
+ * angefasst.
+ */
+export function migriereUiZustand(persisted: unknown, version: number): unknown {
+  const alt = persisted as Partial<UIState> | undefined
+  if (alt && version === 0 && !('sidebarOpen' in alt)) {
+    return { ...alt, sidebarOpen: true }
+  }
+  return persisted
+}
+
 export const useUIStore = create<UIState>()(
   persist(
     (set) => ({
@@ -198,6 +231,8 @@ export const useUIStore = create<UIState>()(
     {
       name: 'locally-uncensored-ui',
       storage: safeJSONStorage(),
+      version: 1,
+      migrate: migriereUiZustand,
       // What survives a restart is a stated PREFERENCE, never a leftover of
       // one session. currentView and cloudGateOpen stay out: the app would
       // otherwise reopen on whatever tab was left behind, or come up with the
