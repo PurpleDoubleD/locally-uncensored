@@ -320,27 +320,26 @@ export function Composer({ onOpenAdvanced, onOpenWorkflows }: Props) {
 }
 
 /**
- * Die Reglerzeile steht auf DERSELBEN Kante wie der Prompttext darunter.
+ * Die Reglerzeile steht MITTIG ueber der Promptbox.
  *
- * Bis 2.6.7 stand auf allen vier Rueckgaben von LaneControls
- * `justify-center` — die Knoepfe schwebten mittig ueber einem linksbuendigen
- * Prompt. Gemessen am 01.09.2026 (Chromium 149, 1280x800, gerenderte Pixel):
- * der Composer-Block beginnt bei x=265,1, der Prompttext bei x=282,2, die
- * Quality-Gruppe aber bei x=424,7 — 142,5 px weiter rechts, ohne dass
- * irgendetwas an dieser Kante haengt. Zwei Kanten, wo eine gehoert.
+ * David, 05.09.2026, am Windows-Bau: „die einstellungen ueber der promptbox
+ * sollen immer mittig ueber der promptbox zentriert stehen." Das dreht D-S32
+ * aus 2.6.8 zurueck, und zwar bewusst: dort war die Zeile auf die linke Kante
+ * des Prompttextes gesetzt worden (`justify-start` plus 15px Polster), weil
+ * eine mittige Zeile ueber linksbuendigem Text als zweite Kante gelesen
+ * wurde. David sieht es umgekehrt, und ihm gehoert die Entscheidung.
  *
- * (Der zweite Teil des alten Befundes, `transform: scale(0.7)` auf derselben
- * Zeile, ist mit c7076fca weg und wird von ein-massstab.test.ts bewacht —
- * hier steht nur noch die Ausrichtung.)
+ * Gemessen am laufenden Bau (1296x808, --ui-scale 1.15, gerenderte Pixel):
+ * die Promptbox steht auf Mitte x=648, der Inhalt der Reglerzeile auf x=505,7
+ * (Image) und x=497,4 (Edit), also 142 bis 151 px links daneben.
+ * `justify-center`
+ * legt beide Mitten zusammen; der Kasten der Zeile ist ohnehin schon ein
+ * Geschwister des Promptpanels und damit exakt gleich breit.
  *
- * Die 15px sind kein gewaehlter Wert: das Promptfeld sitzt in einem Panel mit
- * 1px Rand und `px-3.5` = 14px Innenabstand, sein Text beginnt also 15px
- * hinter der Panelkante. Die Reglerzeile ist ein Geschwister dieses Panels mit
- * derselben linken Kante, hat aber selbst keinen Rand — 15px linkes Padding
- * setzt sie exakt auf x=282,2. Beides sind CSS-Pixel unter demselben
- * `--ui-scale`-zoom, die Kanten koennen also nicht auseinanderlaufen.
+ * Die Spezialflaechen der Unterkategorien (SpecialControls) stehen bereits
+ * mittig, das ist hier also die einzige verbliebene Ausnahme.
  */
-const LANE_ROW = 'flex items-center flex-wrap justify-start pl-[15px]'
+const LANE_ROW = 'flex items-center flex-wrap justify-center'
 
 // Quality (proxy over steps) + Aspect (image) + Edit strength (edit).
 // The tuning row above the prompt. It renders exactly the knobs the lane's

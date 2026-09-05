@@ -3,13 +3,18 @@
  * ihren Inhalt verleugnet.
  *
  * D-S32 — die Reglerzeile ueber dem Prompt.
- *   Sie stand auf `justify-center`, der Prompt darunter linksbuendig. Gemessen
- *   am 01.09.2026 (Chromium 149, 1280x800, gerenderte Pixel): Spalte ab
- *   x=265,1, Prompttext ab x=282,2, die Quality-Gruppe aber ab x=424,7 —
- *   142,5 px daneben, ohne dass an dieser Kante etwas haengt. Nach der
- *   Aenderung: x=282,3 gegen x=282,2, also 0,1 px Rundungsdifferenz.
+ *   ZURUECKGEDREHT am 05.09.2026 auf Davids Ansage am Windows-Bau: „die
+ *   einstellungen ueber der promptbox sollen immer mittig ueber der promptbox
+ *   zentriert stehen." Der Audit hatte die Zeile auf die linke Kante des
+ *   Prompttextes gesetzt (`justify-start` plus 15px Polster), weil eine
+ *   mittige Zeile ueber linksbuendigem Text als zweite Kante las. David sieht
+ *   es umgekehrt, und ihm gehoert die Entscheidung; dieser Test bewacht
+ *   seither die Mitte statt der Kante.
+ *   Gemessen vor der Rueckdrehung (1296x808, --ui-scale 1.15, gerenderte
+ *   Pixel): Promptbox-Mitte x=648, Inhalt der Reglerzeile auf x=505,7 (Image)
+ *   und x=497,4 (Edit).
  *   Der zweite Teil des alten Befundes, `transform: scale(0.7)` auf derselben
- *   Zeile, ist mit c7076fca weg — den bewacht `ein-massstab.test.ts`, hier
+ *   Zeile, ist mit c7076fca weg. Den bewacht `ein-massstab.test.ts`, hier
  *   geht es nur um die Ausrichtung.
  *
  * D-S33 — das Negativfeld.
@@ -39,36 +44,34 @@ const SRC = readFileSync(resolve(__dirname, '../Composer.tsx'), 'utf8')
  *  das, was dort stand. */
 const code = SRC.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/^[ \t]*\/\/.*$/gm, ' ')
 
-describe('D-S32: die Reglerzeile steht auf der Kante des Prompts', () => {
-  it('keine Reglerzeile ist mehr zentriert', () => {
-    // `justify-center` stand auf allen DREI Rueckgaben von LaneControls
+describe('D-S32: die Reglerzeile steht mittig ueber der Promptbox', () => {
+  it('keine Reglerzeile steht mehr auf einer eigenen linken Kante', () => {
+    // Die Negativkontrolle des Zustands bis 05.09.2026: `justify-start` plus
+    // ein linkes Polster stand auf allen drei Rueckgaben von LaneControls
     // (Bild, Audio, Video). Eine davon stehen zu lassen waere der halbe Fix.
-    expect(code).not.toMatch(/justify-center/)
+    expect(code).not.toMatch(/justify-start/)
+    expect(code).not.toMatch(/pl-\[15px\]/)
   })
 
-  it('alle Reglerzeilen teilen sich EINE Rezeptkonstante', () => {
+  it('alle Reglerzeilen teilen sich EINE Rezeptkonstante, und die ist zentriert', () => {
     const rezept = code.match(/const LANE_ROW = '([^']+)'/)
     expect(rezept, 'LANE_ROW fehlt in Composer.tsx').toBeTruthy()
-    expect(rezept![1]).toContain('justify-start')
+    expect(rezept![1]).toContain('justify-center')
     // Drei Verwendungen: `{LANE_ROW}` einmal und `cn(LANE_ROW, …)` zweimal.
     const nutzungen = code.match(/LANE_ROW/g) ?? []
     expect(nutzungen.length).toBe(4) // Definition + drei Zeilen
   })
 
-  it('das linke Polster ist Panelrand plus Innenabstand, nicht geraten', () => {
-    const rezept = code.match(/const LANE_ROW = '([^']+)'/)![1]
-    const pl = rezept.match(/pl-\[(\d+)px\]/)
-    expect(pl, 'LANE_ROW ohne linkes Polster').toBeTruthy()
-
-    // Die Gegenrechnung aus der Datei selbst: das Promptpanel hat `border`
-    // (1px) und `px-3.5`. Tailwinds 3.5 sind 0,875rem = 14px.
+  it('die Zeile ist ein Geschwister des Promptpanels, teilt also dessen Mitte', () => {
+    // Warum `justify-center` reicht und keine Zahl noetig ist: Reglerzeile und
+    // Promptpanel liegen in DERSELBEN Spalte (`mx-auto w-full max-w-[…]`),
+    // sind damit gleich breit und haben dieselbe Mitte. Faende das hier nicht
+    // mehr statt, waere die Zentrierung eine Zusage ohne Deckung.
+    const spalte = code.match(/className="mx-auto w-full max-w-\[(\d+)px\] space-y-[\d.]+"/)
+    expect(spalte, 'die gemeinsame Spalte von Reglerzeile und Promptpanel fehlt').toBeTruthy()
     const panel = code.match(/className="rounded-\[var\(--radius-panel\)\][^"]*"/)
     expect(panel, 'Promptpanel nicht gefunden').toBeTruthy()
     expect(panel![0]).toMatch(/\bborder\b/)
-    const feldWrapper = code.match(/className="px-(\d\.?\d?) pt-3"/)
-    expect(feldWrapper, 'Wrapper des Promptfeldes nicht gefunden').toBeTruthy()
-    const innen = Number(feldWrapper![1]) * 4 // Tailwind-Skala: 1 = 0.25rem = 4px
-    expect(Number(pl![1])).toBe(innen + 1)
   })
 })
 
