@@ -8,6 +8,7 @@ import { useAgentModeStore } from '../../stores/agentModeStore'
 import { AgentPanel } from './AgentPanel'
 import { MessageList } from './MessageList'
 import { ChatInput } from './ChatInput'
+import { COMPOSER_MAX_W } from './composer-width'
 import { RAGPanel } from './RAGPanel'
 import { DocsButton } from './DocsButton'
 import { RetrievalErrorBar } from './RetrievalErrorBar'
@@ -462,65 +463,75 @@ export function ChatView() {
                       Der PlanBar bleibt oben, denn `the-prompt-window-is-the-prompt-
                       window.test.ts` verlangt Plan vor Transkript, und er
                       rendert ohnehin `null`, solange es keinen Plan gibt. */}
-                  <div data-testid="chat-session-strip" className="flex items-center gap-1.5 px-2 py-0.5">
-                    <AgentModeToggle />
-                    <AgentWorkspaceBadge />
+                  {/* Auf der Breite der Promptbox, nicht auf der des ganzen
+                      Bereichs. Gemessen am Windows-Bau (1296x808): die Leiste
+                      war 980,9 px breit gegen 792,3 px Promptbox, ragte also
+                      auf jeder Seite 94,3 px darueber hinaus. David,
+                      05.09.2026: gleiche Breite, gleiche Mitte, und nie
+                      breiter. Der Rahmen ist deshalb WOERTLICH der des
+                      Composers, `COMPOSER_MAX_W` plus dessen `px-3`; zwei
+                      eigene Zahlen koennten wieder auseinanderlaufen. */}
+                  <div className={`w-full ${COMPOSER_MAX_W} mx-auto px-3`}>
+                    <div data-testid="chat-session-strip" className="flex items-center gap-1.5 px-2 py-0.5">
+                      <AgentModeToggle />
+                      <AgentWorkspaceBadge />
 
-                    {/* Spacer */}
-                    <div className="flex-1" />
+                      {/* Spacer */}
+                      <div className="flex-1" />
 
-                    {/* EIN Kontextelement statt zwei (D-S06): der Fuellstand
-                        ist die Beschriftung des Fensterwaehlers geworden, statt
-                        dieselbe Zahl 24px daneben ein zweites Mal in einer
-                        anderen Schreibweise zu zeigen. Die Begruendung samt der
-                        beiden Ausweichfaelle steht im Kopf von ContextDropdown. */}
-                    <ContextDropdown><TokenCounter /></ContextDropdown>
+                      {/* EIN Kontextelement statt zwei (D-S06): der Fuellstand
+                          ist die Beschriftung des Fensterwaehlers geworden, statt
+                          dieselbe Zahl 24px daneben ein zweites Mal in einer
+                          anderen Schreibweise zu zeigen. Die Begruendung samt der
+                          beiden Ausweichfaelle steht im Kopf von ContextDropdown. */}
+                      <ContextDropdown><TokenCounter /></ContextDropdown>
 
-                    {/* Small-Model Mode, only relevant when the agent loop (tools)
-                        is active; plain chat has no tool calls to lean out. */}
-                    {isAgentActive && <SmallModelModeToggle />}
+                      {/* Small-Model Mode, only relevant when the agent loop (tools)
+                          is active; plain chat has no tool calls to lean out. */}
+                      {isAgentActive && <SmallModelModeToggle />}
 
-                    {/* Memory, standalone, top-right (moved out of the header model
-                        picker; David 2026-07-11). View / add / delete injected context. */}
-                    <MemoryDebugToggle />
+                      {/* Memory, standalone, top-right (moved out of the header model
+                          picker; David 2026-07-11). View / add / delete injected context. */}
+                      <MemoryDebugToggle />
 
-                    {/* Export */}
-                    <div className="relative">
-                      <button
-                        onClick={() => setExportOpen(!exportOpen)}
-                        className="flex items-center gap-1 px-2 py-0.5 rounded border border-gray-200 dark:border-white/[0.06] hover:border-gray-400 dark:hover:border-white/15 text-gray-500 transition-colors text-[0.55rem]"
-                        title="Export chat"
-                      >
-                        <Download size={10} />
-                      </button>
-                      {exportOpen && (
-                        <>
-                          <div className="fixed inset-0 z-40" onClick={() => setExportOpen(false)} />
-                          <div className="absolute right-0 top-full mt-1 z-50 w-32 rounded-lg bg-white dark:bg-[#1a1a1a] border border-gray-200 dark:border-white/10 shadow-xl py-1">
-                            {(['markdown', 'json'] as const).map(fmt => (
-                              <button
-                                key={fmt}
-                                onClick={async () => {
-                                  const conv = useChatStore.getState().conversations
-                                    .find(c => c.id === activeConversationId)
-                                  setExportOpen(false)
-                                  if (!conv) return
-                                  const result = await exportConversation(conv, fmt)
-                                  if (result.status === 'saved' && result.path) {
-                                    setExportToast(`Saved to ${result.path}`)
-                                  } else if (result.status === 'downloaded') {
-                                    setExportToast(`Downloaded .${fmt === 'markdown' ? 'md' : 'json'}`)
-                                  }
-                                  // status === 'cancelled' → no toast, user closed the dialog
-                                }}
-                                className="w-full text-left px-3 py-1 text-[0.55rem] text-gray-400 hover:bg-white/5 hover:text-gray-200 transition-colors"
-                              >
-                                .{fmt === 'markdown' ? 'md' : fmt}
-                              </button>
-                            ))}
-                          </div>
-                        </>
-                      )}
+                      {/* Export */}
+                      <div className="relative">
+                        <button
+                          onClick={() => setExportOpen(!exportOpen)}
+                          className="flex items-center gap-1 px-2 py-0.5 rounded border border-gray-200 dark:border-white/[0.06] hover:border-gray-400 dark:hover:border-white/15 text-gray-500 transition-colors text-[0.55rem]"
+                          title="Export chat"
+                        >
+                          <Download size={10} />
+                        </button>
+                        {exportOpen && (
+                          <>
+                            <div className="fixed inset-0 z-40" onClick={() => setExportOpen(false)} />
+                            <div className="absolute right-0 top-full mt-1 z-50 w-32 rounded-lg bg-white dark:bg-[#1a1a1a] border border-gray-200 dark:border-white/10 shadow-xl py-1">
+                              {(['markdown', 'json'] as const).map(fmt => (
+                                <button
+                                  key={fmt}
+                                  onClick={async () => {
+                                    const conv = useChatStore.getState().conversations
+                                      .find(c => c.id === activeConversationId)
+                                    setExportOpen(false)
+                                    if (!conv) return
+                                    const result = await exportConversation(conv, fmt)
+                                    if (result.status === 'saved' && result.path) {
+                                      setExportToast(`Saved to ${result.path}`)
+                                    } else if (result.status === 'downloaded') {
+                                      setExportToast(`Downloaded .${fmt === 'markdown' ? 'md' : 'json'}`)
+                                    }
+                                    // status === 'cancelled' → no toast, user closed the dialog
+                                  }}
+                                  className="w-full text-left px-3 py-1 text-[0.55rem] text-gray-400 hover:bg-white/5 hover:text-gray-200 transition-colors"
+                                >
+                                  .{fmt === 'markdown' ? 'md' : fmt}
+                                </button>
+                              ))}
+                            </div>
+                          </>
+                        )}
+                      </div>
                     </div>
                   </div>
 
