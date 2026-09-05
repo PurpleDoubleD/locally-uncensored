@@ -830,14 +830,24 @@ mod tests {
         // Mac, and a PowerShell cold start on Windows is 300-900 ms EACH. In
         // process it is microseconds, so 20 ms fails either spawn path while
         // leaving plenty of room on a loaded box.
-        let started = std::time::Instant::now();
-        for _ in 0..20 {
-            let _ = get_current_time().unwrap();
+        //
+        // The BEST of five batches is what gets judged, not one batch: on a
+        // fresh 4-vCPU Ubuntu box the full suite runs ~1100 tests in parallel,
+        // and a single batch was stalled by the scheduler to 87 ms and 184 ms
+        // in two of five runs (2026-09-05) with nothing spawning at all. A
+        // spawn path is slow in EVERY batch, so the minimum still catches it;
+        // a stall hits one batch and leaves the minimum in the microseconds.
+        let mut best = std::time::Duration::MAX;
+        for _ in 0..5 {
+            let started = std::time::Instant::now();
+            for _ in 0..20 {
+                let _ = get_current_time().unwrap();
+            }
+            best = best.min(started.elapsed());
         }
         assert!(
-            started.elapsed() < std::time::Duration::from_millis(20),
-            "20 calls took {:?} — is something spawning a process again?",
-            started.elapsed()
+            best < std::time::Duration::from_millis(20),
+            "the fastest of five batches of 20 calls took {best:?} — is something spawning a process again?"
         );
     }
 
