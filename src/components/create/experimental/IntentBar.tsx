@@ -88,7 +88,13 @@ export function IntentBar() {
       // jede rem-Laenge dieser Leiste ist ihr altes Mass mal 0,763, in
       // ganzen Pixeln des 16px-Rasters (36px Pille -> 28px, 16px Icon ->
       // 12px = ICON_SM, 12px Label -> 9px).
-      className="px-3 py-[1.5px] [--text-control:9px]"
+      // David, 05.09.2026: die Leiste klebte an der Hauptnavigation. Gemessen
+      // am Windows-Bau (1296x808): 9,2 gerenderte px zwischen Kopfzeilenkante
+      // und Leiste, 10,9 bis zur ersten Pille. `pt-1.5` legt 4,5
+      // Entwurfspixel dazu, gerendert gut 5. Das ist die „minimale
+      // Luftschicht, wenige Pixel, nicht mehr", die er verlangt hat. Unten bleibt es bei
+      // den 1,5px: darunter steht die Buehne, und die stand nie zu eng.
+      className="px-3 pt-1.5 pb-[1.5px] [--text-control:9px]"
     >
       {/* David, 04.09.2026: „das selbe bei create tab ... hard in der mitte."
           `mx-auto` auf einem Blockkasten setzt seine Mitte auf die Mitte des
