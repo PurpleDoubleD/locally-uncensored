@@ -70,7 +70,7 @@ const COMPONENT_SRC = componentFiles().map((f) => codeOnly(readFileSync(f, 'utf8
 const ALL_COMPONENTS = COMPONENT_SRC.join('\n')
 
 /** Der Selektor der Hausregel, einmal, damit die Tests ihn nicht abschreiben. */
-const HOUSE = String.raw`:focus-visible:not\(\[tabindex='-1'\]\):not\(\.lu-primary\)`
+const HOUSE = String.raw`:focus-visible:not\(\[tabindex='-1'\]\):not\(\.lu-primary\):not\(\[data-lu-quiet-focus\]\)`
 
 // ── Die Flaechen, auf denen der Ring wirklich landet ────────────────────
 // `outline-offset: 2px` heisst: der Ring liegt NEBEN dem Control, auf dem
@@ -185,6 +185,31 @@ describe('Punkt 4 — die Ausnahme steht AN der Regel, nicht gegen sie', () => {
 
   it('das Rezept der Composer-Leiste hat keinen eigenen, schwaecheren Ring mehr', () => {
     expect(CODE).not.toMatch(/\.lu-control(?!--|__)[^{\n]*:focus-visible[^{\n]*\{/)
+  })
+
+  it('`data-lu-quiet-focus` traegt GENAU ein Element, und es ist das Promptfenster', () => {
+    // David, 05.09.2026: „wenn man in das nachrichten feld klickt kommt eine
+    // starke lila umrandung, die soll komplett weg." Gemessen am Windows-Bau
+    // an der fokussierten Textarea: `outline: solid 1,739px rgb(160,148,248)`,
+    // also diese Hausregel; `focus:outline-none` (0,2,0) verliert gegen sie
+    // (0,3,0).
+    //
+    // Ein Attribut, das den Ring abschaltet, ist eine geladene Waffe. Deshalb
+    // zaehlt dieser Fall die Traeger: EINER, und zwar der, der seinen Fokus
+    // selbst zeichnet. Wer es an ein zweites Feld haengt, nimmt diesem Feld
+    // seine einzige Fokusanzeige und bekommt hier rot.
+    const traeger = COMPONENT_SRC.filter((s) => /data-lu-quiet-focus/.test(s))
+    expect(traeger).toHaveLength(1)
+    expect(traeger[0]).toMatch(/<textarea\s+data-lu-quiet-focus/)
+  })
+
+  it('und der Ring verschwindet nicht ersatzlos: der Kasten darum zeigt den Fokus', () => {
+    // Die Bedingung, unter der die Ausnahme ueberhaupt zulaessig ist. Faellt
+    // `focus-within` am Composer-Kasten weg, hat das Promptfenster gar keine
+    // Fokusanzeige mehr, und dieser Fall faellt zusammen mit ihr.
+    const input = COMPONENT_SRC.find((s) => /data-lu-quiet-focus/.test(s))!
+    expect(input).toMatch(/focus-within:border-lu-cloud\//)
+    expect(input).toMatch(/focus-within:border-gray-400/)
   })
 })
 
@@ -347,7 +372,7 @@ describe.skipIf(gebaut.css === null)('im gebauten CSS, nicht nur in der Quelle',
    * Zeichen endet.
    */
   const PRESS = /:is\(button,\s*\[role=['"]?button['"]?\]\):not\(:disabled\):not\(\[aria-disabled=['"]?true['"]?\]\):active\{scale:\.97\}/
-  const FOKUSRING = /:focus-visible:not\(\[tabindex="-1"\]\):not\(\.lu-primary\)/
+  const FOKUSRING = /:focus-visible:not\(\[tabindex="-1"\]\):not\(\.lu-primary\):not\(\[data-lu-quiet-focus\]\)/
 
   it('Fokusring und Press-Regel stehen ausserhalb jedes @layer — an JEDER Fundstelle', () => {
     for (const [name, nadel] of [['Fokusring', FOKUSRING], ['Press-Regel', PRESS]] as const) {
@@ -383,7 +408,7 @@ describe.skipIf(gebaut.css === null)('im gebauten CSS, nicht nur in der Quelle',
   })
 
   it('die Ausnahme des Primaer-Rezepts steht nach der Hausregel und ist ungeschichtet', () => {
-    const house = css.indexOf(':focus-visible:not([tabindex="-1"]):not(.lu-primary){outline:2px')
+    const house = css.indexOf(':focus-visible:not([tabindex="-1"]):not(.lu-primary):not([data-lu-quiet-focus]){outline:2px')
     const primary = css.indexOf('.lu-primary:focus-visible{')
     expect(house).toBeGreaterThan(utilitiesEnd)
     expect(primary).toBeGreaterThan(house)
@@ -393,7 +418,7 @@ describe.skipIf(gebaut.css === null)('im gebauten CSS, nicht nur in der Quelle',
     // Ungeschichtet schlaegt geschichtet unabhaengig von der Reihenfolge —
     // aber wenn eine ungeschichtete `outline:none`-Regel dazukaeme, waere
     // genau das die naechste stille Regression.
-    const house = css.indexOf(':focus-visible:not([tabindex="-1"]):not(.lu-primary){outline:2px')
+    const house = css.indexOf(':focus-visible:not([tabindex="-1"]):not(.lu-primary):not([data-lu-quiet-focus]){outline:2px')
     const tail = css.slice(house)
     expect(tail).not.toMatch(/[^-]outline:none/)
   })

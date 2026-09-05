@@ -854,12 +854,28 @@ input[type="range"]::-webkit-slider-thumb {
    (`@layer utilities`) unabhaengig von der Spezifitaet — auch die 67
    `outline-none`-Fundstellen, die den Ring bisher einzeln abgeschaltet
    haben. Deshalb muss keine davon angefasst werden.
+
+   Warum `:not([data-lu-quiet-focus])`: genau daran haengt die EINE Ausnahme,
+   die das Haus kennt, und sie steht an der Regel statt als zweite Regel
+   dagegen. David, 05.09.2026, am Windows-Bau: „wenn man in das nachrichten
+   feld klickt kommt eine starke lila umrandung, die soll komplett weg."
+   Gemessen an der fokussierten Textarea des Chat-Composers: `outline: solid
+   1,739px rgb(160,148,248)` mit 1,739px Abstand, also diese Hausregel. Das
+   `focus:outline-none` der Textarea (0,2,0) verliert gegen sie (0,3,0).
+
+   Es ist die einzige Stelle, an der das Weglassen keinen Fokus verschluckt:
+   die Promptbox zeichnet ihren Fokus SELBST, mit `focus-within:border-*` auf
+   dem Kasten um die Zeile (`border-lu-cloud/40` -> `/70` im Cloud-Modus,
+   `border-gray-200` -> `border-gray-400` sonst). Der Ring lag also als
+   zweiter, staerkerer Rahmen INNERHALB eines Rahmens, der dasselbe schon
+   sagte. Jedes andere Eingabefeld der App behaelt den Ring; wer das Attribut
+   anderswo setzt, nimmt einem Feld seine einzige Fokusanzeige.
    ───────────────────────────────────────────────────────────────────── */
-:focus-visible:not([tabindex='-1']):not(.lu-primary) {
+:focus-visible:not([tabindex='-1']):not(.lu-primary):not([data-lu-quiet-focus]) {
   outline: 2px solid var(--color-lu-accent);
   outline-offset: 2px;
 }
-.light :focus-visible:not([tabindex='-1']):not(.lu-primary) {
+.light :focus-visible:not([tabindex='-1']):not(.lu-primary):not([data-lu-quiet-focus]) {
   outline-color: var(--color-lu-accent-edge);
 }
 

@@ -491,7 +491,14 @@ export function ChatInput({ onSend, onStop, isGenerating, pendingApproval, onApp
             </Hinweis>
           )}
 
+          {/* `data-lu-quiet-focus`: die EINE Ausnahme vom Fokusring des Hauses.
+              Der Kasten um diese Zeile traegt seinen Fokus schon selbst
+              (`focus-within:border-*` weiter oben), der Ring lag als zweiter,
+              staerkerer Rahmen darin. Die Begruendung samt Messung steht an
+              der Regel in index.css; `focus:outline-none` unten allein reicht
+              nicht, es verliert gegen sie. */}
           <textarea
+            data-lu-quiet-focus
             ref={textareaRef}
             value={input}
             onChange={(e) => updateInput(e.target.value)}

@@ -413,7 +413,9 @@ describe('das neutrale Rezept ist genau einmal definiert', () => {
     // 3.37:1 schafft (Rechnung in focus-ring-und-press.test.ts).
     // Die Zusicherung ist damit strenger als vorher: sie verlangt Deckung
     // UND verbietet die Rueckkehr des schwaecheren Sonderwegs.
-    expect(CSS).toMatch(/^:focus-visible:not\(\[tabindex='-1'\]\):not\(\.lu-primary\)\s*\{/m)
+    expect(CSS).toMatch(
+      /^:focus-visible:not\(\[tabindex='-1'\]\):not\(\.lu-primary\):not\(\[data-lu-quiet-focus\]\)\s*\{/m,
+    )
     expect(CSS).not.toMatch(/\.lu-control(?!--|__)[^{\n]*:focus-visible[^{\n]*\{/)
   })
 
