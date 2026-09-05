@@ -110,11 +110,30 @@ describe('D-S02/D-A9: das Zeichen ist da und ist sichtbar', () => {
   })
 })
 
-describe('D-S05: der Block haengt am Composer, nicht in der Mitte der Leere', () => {
-  it('unten verankert statt zentriert', () => {
+describe('D-S05: der Block haengt am Composer, wo einer steht', () => {
+  it('unten verankert im Chat, mittig im Code', () => {
+    // Die Regel von D-S05 ist nicht „unten", sondern „am Composer": ein Block,
+    // der in der Mitte einer leeren Flaeche schwebt, liest als Fleck, unten am
+    // Composer liest er als ein Element mit ihm.
+    //
+    // Im Code-Bereich steht dort aber kein Composer. Der Code-Composer haengt
+    // an CodexView und damit an einer offenen Unterhaltung; dieser Zweig
+    // rendert nur, solange es keine gibt, und `chatMode !== 'codex'` haelt den
+    // Chat-Composer heraus. Der Block klebte deshalb am unteren Fensterrand
+    // und lehnte sich an nichts an. Gemessen am Windows-Bau (1296x808,
+    // 05.09.2026): Blockmitte y=699,9 gegen Bereichsmitte y=445,4, also 254,5
+    // px zu tief. David: „genau mittig."
+    //
+    // Beides steht deshalb hier, und beides an derselben Bedingung.
     const home = VIEW_CODE.slice(VIEW_CODE.indexOf('key="home"'), VIEW_CODE.indexOf('key="chat"'))
-    expect(home).toContain('justify-end')
-    expect(home).not.toContain('justify-center')
+    expect(home).toContain("chatMode === 'codex' ? 'justify-center' : 'justify-end'")
+  })
+
+  it('und der Code-Composer ist wirklich der Grund: er rendert hier nicht', () => {
+    // Die Voraussetzung des Falls darueber, als Quelltext. Faellt sie weg,
+    // steht im Code wieder ein Composer unter dem Block und die Mitte ist die
+    // falsche Wahl.
+    expect(VIEW_CODE).toContain("chatMode !== 'codex' && (")
   })
 
   it('und liegt in derselben Spalte wie Transkript und Composer', () => {

@@ -287,15 +287,26 @@ export function ChatView() {
               //
               // Zur toten Flaeche: kein Layout entfernt Leere, nur Inhalt tut
               // das. Der Block ist deshalb (a) inhaltlich gefuellt, (b) auf die
-              // Spaltenbreite `--lu-measure` gelegt, dieselbe wie Transkript
-              // und Composer (D-A1), und (c) UNTEN verankert statt in der Mitte
-              // zu schweben, damit er mit dem Composer als ein Element liest
+              // Spaltenbreite `--lu-measure` gelegt und (c) im Chat UNTEN
+              // verankert, damit er mit dem Composer als ein Element liest
               // statt als Fleck in einem Feld. Erfundene Beispiel-Prompts als
               // Fuellmaterial habe ich bewusst nicht gebaut: sie waeren Inhalt,
               // den niemand bestellt hat, und der Audit verlangt sie nicht.
+              //
+              // Im Code-Bereich steht er MITTIG, und das ist kein Widerspruch,
+              // sondern dieselbe Regel unter anderer Voraussetzung: dort
+              // rendert dieser Zweig ohne Composer (der Code-Composer haengt an
+              // CodexView und damit an einer offenen Unterhaltung, siehe
+              // `chatMode !== 'codex'` weiter unten). Der Block klebte deshalb
+              // am unteren Fensterrand, ohne dass etwas darunter stand, an das
+              // er sich haette anlehnen koennen. Gemessen am Windows-Bau
+              // (1296x808): Blockmitte y=699,9 gegen Bereichsmitte y=445,4,
+              // also 254,5 px zu tief. David, 05.09.2026: „genau mittig".
               <motion.div
                 key="home"
-                className="flex-1 flex flex-col items-center justify-end min-h-0 px-3 pb-4"
+                className={`flex-1 flex flex-col items-center min-h-0 px-3 pb-4 ${
+                  chatMode === 'codex' ? 'justify-center' : 'justify-end'
+                }`}
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0, y: -20 }}
