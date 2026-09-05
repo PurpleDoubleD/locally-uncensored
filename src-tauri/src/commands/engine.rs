@@ -3153,11 +3153,14 @@ mod tests {
         #[cfg(unix)]
         let denied_holds = std::fs::read_dir(&denied).is_err();
 
+        // Only the unix branch below pushes; Windows clippy runs -D warnings.
+        #[cfg_attr(not(unix), allow(unused_mut))]
         let mut roots = vec![
             ScanRoot { dir: &app, max_depth: MAX_SCAN_DEPTH },
             ScanRoot { dir: &gone, max_depth: MAX_CUSTOM_SCAN_DEPTH },
             ScanRoot { dir: &relative, max_depth: MAX_CUSTOM_SCAN_DEPTH },
         ];
+        #[cfg_attr(not(unix), allow(unused_mut))]
         let mut expected = vec![RootStatus::Ok, RootStatus::Unreachable, RootStatus::Unusable];
         #[cfg(unix)]
         if denied_holds {
