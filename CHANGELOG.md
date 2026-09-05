@@ -80,6 +80,15 @@ engine has a name of its own, the LU Engine.
 
 ### Fixed
 
+- **The prompt box sits in the middle of what belongs to it.** Clicking into
+  the message field no longer draws a thick violet ring around the text line;
+  the soft violet border around the whole box in Cloud mode stays. The row
+  with Agent, context, memory and export lines up with the box instead of the
+  chat edge, the transcript may reach 40% past the box on each side, the
+  "Ask LU anything" landing in Code sits in the middle of the screen, the
+  Quality and Aspect row in Create (and Edit strength and the rest) is
+  centred over the box, and the Create subcategory row has a little air to
+  the main tabs.
 - **A ComfyUI that will not start names the cause.** A missing Visual C++
   runtime, or a graphics driver older than the PyTorch that was installed,
   used to arrive as "the Python environment looks broken" next to a Repair
