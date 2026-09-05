@@ -413,6 +413,55 @@ export function migrateMemoryState(persistedState: unknown, version: number): Me
   return state as MemoryState
 }
 
+/**
+ * One line of the markdown export, taken apart again.
+ *
+ * WHY THIS IS A NAMED CONSTANT WITH A STORY. Until 2026-07-25 the export wrote
+ * the title, a long dash, then the content, and this expression required that
+ * dash. The dash sweep (01a352bf) changed the EXPORT to a comma and left the
+ * expression alone, so from 2.5.9 on the app could no longer read its own
+ * export: the title came back as `**Title**, content ...` and tags, source and
+ * date were dropped on the floor. Nobody noticed, because the only test fed the
+ * OLD format in by hand.
+ *
+ * The separator is therefore a comma OR one of the two old dashes, and those
+ * two are written as code points on purpose: the house rule bans the characters
+ * themselves from this tree, and a character class is no exception.
+ *
+ * The trailing date is only stripped when it follows the `*(source)*` group. A
+ * bare `content, with a comma` keeps its comma, because there is no source to
+ * anchor a date to.
+ */
+const MD_ITEM =
+  /^-\s+(?:\*\*(.+?)\*\*\s*(?:,|[\u2013\u2014])\s*)?(.+?)(?:\s+\[([^\]]+)\])?(?:\s+\*\(([^)]+)\)\*(?:\s*(?:,|[\u2013\u2014])\s*(.+?))?)?$/
+
+/**
+ * The date the export writes: `YYYY-MM-DD`, not a locale string.
+ *
+ * `toLocaleDateString()` produced `9/5/2026` on one machine and `05.09.2026` on
+ * the next, and neither is readable back, so an exported memory always came
+ * home stamped with today. Falls back to today when the entry carries a broken
+ * timestamp, because an export must not throw.
+ */
+function isoTag(ms: number): string {
+  const d = new Date(ms)
+  return Number.isNaN(d.getTime()) ? new Date().toISOString().slice(0, 10) : d.toISOString().slice(0, 10)
+}
+
+/**
+ * The way back. STRICT on purpose: only `YYYY-MM-DD` is read, never a locale
+ * string. `9/5/2026` is the ninth of May in one place and the fifth of
+ * September in another, and a memory dated a wrong day is worse than one dated
+ * today.
+ */
+function isoBack(tag: string | undefined): number | null {
+  const m = tag?.trim().match(/^(\d{4})-(\d{2})-(\d{2})$/)
+  if (!m) return null
+  const ms = Date.parse(`${m[1]}-${m[2]}-${m[3]}T00:00:00Z`)
+  return Number.isNaN(ms) ? null : ms
+}
+
+
 // ── Store ─────────────────────────────────────────────────────
 
 export const useMemoryStore = create<MemoryState>()(
@@ -726,7 +775,7 @@ export const useMemoryStore = create<MemoryState>()(
 
           md += `## ${typeTitles[type]}\n\n`
           for (const entry of typeEntries) {
-            const date = new Date(entry.updatedAt).toLocaleDateString()
+            const date = isoTag(entry.updatedAt)
             md += `- **${entry.title}**, ${entry.content}`
             if (entry.tags.length > 0) md += ` [${entry.tags.join(', ')}]`
             md += ` *(${entry.source})*, ${date}\n`
@@ -756,12 +805,13 @@ export const useMemoryStore = create<MemoryState>()(
             continue
           }
 
-          const itemMatch = line.match(/^-\s+(?:\*\*(.+?)\*\*\s*—\s*)?(.+?)(?:\s+\[(.+?)\])?(?:\s+\*\((.+?)\)\*)?(?:\s+—\s+.+)?$/)
+          const itemMatch = line.match(MD_ITEM)
           if (itemMatch) {
             const title = itemMatch[1] || itemMatch[2].substring(0, 60)
             const content = itemMatch[2].trim()
-            const tags = itemMatch[3] ? itemMatch[3].split(',').map(t => t.trim()) : []
+            const tags = itemMatch[3] ? itemMatch[3].split(',').map(t => t.trim()).filter(Boolean) : []
             const source = itemMatch[4] || 'import'
+            const stand = isoBack(itemMatch[5]) ?? Date.now()
 
             if (content) {
               newEntries.push({
@@ -771,8 +821,8 @@ export const useMemoryStore = create<MemoryState>()(
                 description: content.substring(0, 120),
                 content,
                 tags,
-                createdAt: Date.now(),
-                updatedAt: Date.now(),
+                createdAt: stand,
+                updatedAt: stand,
                 source,
               })
             }
