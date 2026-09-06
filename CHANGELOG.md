@@ -263,7 +263,9 @@ and the built-in engine has a name of its own, the LU Engine.
   ten minutes of caching; the local chat model is paused for the run and
   comes back afterwards, so it no longer squats the memory the recipe needs;
   and a run that still runs out of memory on the card says what to close.
-  Lines from winget stay out of the note under the button.
+  The step counter moves with every training step instead of once per epoch
+  (it used to sit on 0 for twenty minutes). Lines from winget stay out of the
+  note under the button.
 - **AMD on Windows is read from the HIP SDK itself.** The only ROCm probe ran
   rocm-smi, which the Windows SDK does not ship, so an installed ROCm went
   unseen. LU reads HIP_PATH and hipinfo now and names the card architecture,

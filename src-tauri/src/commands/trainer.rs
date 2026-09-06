@@ -24,7 +24,7 @@ use crate::os_error;
 
 use crate::state::AppState;
 use std::fs;
-use std::io::{BufRead, BufReader, Read};
+use std::io::{BufReader, Read};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::Ordering;
@@ -880,6 +880,36 @@ fn pip_with_retry(
     }
 }
 
+/// Feed a child's output to `on_line` one segment at a time, where a segment
+/// ends at a newline OR a carriage return. Progress bars (tqdm) redraw their
+/// line with \r and never send \n until the bar is done, so `BufRead::lines`
+/// delivers a whole epoch of updates as one line, long after they happened.
+fn for_each_progress_line<R: Read>(mut stream: R, mut on_line: impl FnMut(String)) {
+    let mut pending: Vec<u8> = Vec::new();
+    let mut buf = [0u8; 4096];
+    loop {
+        let n = match stream.read(&mut buf) {
+            Ok(0) => break,
+            Ok(n) => n,
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(_) => break,
+        };
+        for &b in &buf[..n] {
+            if b == b'\n' || b == b'\r' {
+                if !pending.is_empty() {
+                    on_line(String::from_utf8_lossy(&pending).into_owned());
+                    pending.clear();
+                }
+            } else {
+                pending.push(b);
+            }
+        }
+    }
+    if !pending.is_empty() {
+        on_line(String::from_utf8_lossy(&pending).into_owned());
+    }
+}
+
 fn run_child(
     mut cmd: Command,
     label: &str,
@@ -915,8 +945,12 @@ fn run_child(
         let run = run.clone();
         let tail = tail.clone();
         handles.push(std::thread::spawn(move || {
-            let reader = BufReader::new(stream);
-            for line in reader.lines().map_while(Result::ok) {
+            // Split on carriage returns as well as newlines: tqdm rewrites its
+            // progress line in place with \r and only ends it with \n at the
+            // end of an epoch, so a reader that waits for \n saw the step
+            // counter jump in blocks of one epoch (measured on the box on
+            // 06.09.2026: "Training 0/400" for 23 minutes, then 48 at a time).
+            for_each_progress_line(stream, |line| {
                 // Der Schwanz dieses Protokolls steht in der Oberflaeche, also
                 // gilt hier dieselbe Regel wie beim Installer: was das
                 // Betriebssystem geschrieben hat, steht englisch da, was der
@@ -924,7 +958,7 @@ fn run_child(
                 let line = os_error::english_child_text(&line).into_owned();
                 let trimmed = line.trim();
                 if trimmed.is_empty() {
-                    continue;
+                    return;
                 }
                 if let Ok(mut t) = tail.lock() {
                     t.push(trimmed.to_string());
@@ -933,7 +967,7 @@ fn run_child(
                     }
                 }
                 if echo == Echo::Quiet {
-                    continue;
+                    return;
                 }
                 // Step counter for the UI meter: musubi/tqdm emit
                 // "steps: NN%|...| 123/1600 [...]" style lines.
@@ -944,7 +978,7 @@ fn run_child(
                     }
                 }
                 push_log(&run, trimmed);
-            }
+            });
         }));
     }
 
@@ -3261,3 +3295,37 @@ mod journey_tests {
     }
 }
 
+#[cfg(test)]
+mod progress_line_tests {
+    use super::*;
+    use std::io::Cursor;
+
+    fn collect(bytes: &[u8]) -> Vec<String> {
+        let mut out = Vec::new();
+        for_each_progress_line(Cursor::new(bytes.to_vec()), |l| out.push(l));
+        out
+    }
+
+    #[test]
+    fn a_carriage_return_ends_a_line_like_a_newline_does() {
+        assert_eq!(collect(b"a\rb\rc\nd"), ["a", "b", "c", "d"]);
+        assert_eq!(collect(b"\r\n\r"), Vec::<String>::new(), "empty segments are not lines");
+        assert_eq!(collect(b"tail without newline"), ["tail without newline"]);
+    }
+
+    #[test]
+    fn every_tqdm_redraw_reaches_the_step_counter() {
+        let stream = b"steps:   0%|          | 0/400 [00:00<?, ?it/s]\rsteps:   0%|          | 1/400 [00:11<1:16:00, 11.4s/it]\rsteps:   0%|          | 2/400 [00:23<1:16:00, 11.4s/it]\n";
+        let steps: Vec<(u64, u64)> = collect(stream).iter().filter_map(|l| parse_step_counter(l)).collect();
+        assert_eq!(steps, [(0, 400), (1, 400), (2, 400)], "each \\r update is its own line");
+    }
+
+    #[test]
+    fn the_child_reader_no_longer_waits_for_a_newline() {
+        let src = include_str!("trainer.rs");
+        let body = &src[src.find("fn run_child(").expect("run_child")..];
+        let body = &body[..body.find("let exit = loop").expect("wait loop")];
+        assert!(body.contains("for_each_progress_line(stream"), "the reader goes through the \\r-aware splitter");
+        assert!(!body.contains(".lines()"), "BufRead::lines would hide tqdm updates until the epoch ends");
+    }
+}
