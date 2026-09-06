@@ -184,43 +184,43 @@
 <section class="models" id="whats-new">
   <div class="container">
     <p class="eyebrow">New in 2.6.8</p>
-    <h2>The <em>effort</em> release.</h2>
-    <p class="section-lead">A reasoning model now has a dial for how much thinking a reply may pay for, GLM 5.3 joined the cloud catalogue, and the built-in engine has a name of its own, the LU Engine. Out now for Windows and Linux, free as always, and the app updates itself.</p>
+    <h2>The <em>compact</em> release.</h2>
+    <p class="section-lead">A long conversation folds its older turns into a summary instead of running out of room, an agent hands work to background agents that run while you carry on, a reasoning model gets a dial for how much thinking a reply may pay for, every local model answers on one OpenAI-compatible address, and the built-in engine has a name of its own, the LU Engine. Out now for Windows and Linux, free as always, and the app updates itself.</p>
     <div class="model-grid">
       <article class="model-card">
         <span class="model-type">CHAT</span>
+        <h3>Compact mode keeps a long chat going</h3>
+        <p>Type /compact and the older turns are folded into a summary the chat model writes itself, in the language of the conversation, while the recent turns stay as they are. Auto-compact is opt-in and announces itself every time it fires, and a second compaction keeps the first.</p>
+        <span class="model-meta">The full conversation stays on disk</span>
+      </article>
+      <article class="model-card">
+        <span class="model-type">AGENT</span>
+        <h3>Background agents, on cloud and local models</h3>
+        <p>In Agent and Code mode the agent hands a self-contained task to a sub-agent that works while you carry on. A panel on the right shows what is running, the main agent is woken when one finishes, and delegating asks no extra question: a sub-agent inherits the permissions of the run that started it.</p>
+        <span class="model-meta">Caps under Settings, Agent, Sub-agents</span>
+      </article>
+      <article class="model-card">
+        <span class="model-type">CHAT</span>
         <h3>Reasoning models get an effort dial</h3>
-        <p>Low, Medium and High sit beside the Think button, with Max on GLM 5.3, and they decide how many tokens a reply may spend on thinking. The steps come from the server for each model, so a model that offers none keeps the plain button it always had.</p>
+        <p>Low, Medium and High sit beside the Think button, with Max on GLM 5.3, and they decide how many tokens a reply may spend on thinking. GLM 5.3 (Pro) and GLM 5.3 Flash (Hosted) joined the cloud catalogue, and the cloud model list keeps one fixed order.</p>
         <span class="model-meta">Low, Medium and High, plus Max on GLM 5.3</span>
       </article>
       <article class="model-card">
-        <span class="model-type">CLOUD</span>
-        <h3>GLM 5.3 arrives, and the list stops shuffling</h3>
-        <p>GLM 5.3 (Pro) and GLM 5.3 Flash (Hosted) joined the cloud catalogue. The provider reorders its own model list on every call, so a new chat opened on whatever came back first. The catalogue order decides now, and a new chat starts on the same model every time.</p>
-        <span class="model-meta">Measured three times, three different orders</span>
+        <span class="model-type">API</span>
+        <h3>One address for every local model</h3>
+        <p>Settings, Local API starts an OpenAI-compatible server on your machine that lists every model from the LU Engine, Ollama and LM Studio under one address, so any tool that talks to OpenAI can talk to your own machine. Localhost by default, LAN if you allow it, always behind a token.</p>
+        <span class="model-meta">Port 8129, off until you start it</span>
       </article>
       <article class="model-card">
         <span class="model-type">ENGINE</span>
         <h3>The built-in engine is the LU Engine</h3>
-        <p>It moves to a free port when 8127 is taken and retries once after a start that fails. A chat model you downloaded stays visible as Installed even while the engine is off, and its tile has a Use button that starts the engine and loads it.</p>
+        <p>It moves to a free port when 8127 is taken and retries once after a start that fails. A chat model you downloaded stays visible as Installed even while the engine is off, its tile has a Use button that starts the engine and loads it, and your own model folder is read, four levels deep.</p>
         <span class="model-meta">Same engine, same models, one name</span>
       </article>
       <article class="model-card">
-        <span class="model-type">MODELS</span>
-        <h3>Your model folder is read, not only written to</h3>
-        <p>Every GGUF in the folder you set turns up under Installed, up to four levels down, whichever backend is serving your chat. Model Storage gives the three backends three named rows instead of one auto-detect field, and the CivitAI API key has a field again.</p>
-        <span class="model-meta">LU Engine, LM Studio and Ollama, each with its own row</span>
-      </article>
-      <article class="model-card">
-        <span class="model-type">HARDWARE</span>
-        <h3>AMD on Windows is read from the HIP SDK</h3>
-        <p>The only ROCm probe ran rocm-smi, which the Windows SDK does not ship, so an installed ROCm went unseen. LU reads HIP_PATH and hipinfo now and names the card architecture. The Model Manager also stopped reporting system RAM as video memory.</p>
-        <span class="model-meta">Researched rather than proven: no RDNA4 card here</span>
-      </article>
-      <article class="model-card">
         <span class="model-type">FIXED</span>
-        <h3>The Mac stops asking for your music library</h3>
-        <p>LU no longer searches your whole home folder for a ComfyUI it never runs there, which is what made macOS ask for Apple Music and Desktop access at first launch. The deb and the rpm name libvulkan1 and libgomp1, the ComfyUI installer checks the environment it built and Repair can be cancelled, the Coding Agent's folder can be removed, and the prompt history in Create can be cleared.</p>
+        <h3>AMD, ComfyUI, Linux packages and the Mac</h3>
+        <p>AMD on Windows is read from the HIP SDK, AMD on Linux reports its memory without ROCm, the deb and the rpm name libvulkan1 and libgomp1, the ComfyUI installer checks the environment it built, and the Mac stopped asking for your music library at first launch. Three uncensored models joined the catalogue, and Ctrl+K opens a command palette.</p>
         <span class="model-meta">Update recommended</span>
       </article>
     </div>

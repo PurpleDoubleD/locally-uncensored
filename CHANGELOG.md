@@ -6,12 +6,76 @@ All notable changes to Locally Uncensored are documented here.
 
 ## [2.6.8] - 2026-09-03
 
-The effort release. A reasoning model gets a dial for how much thinking a
-reply may pay for, GLM 5.3 arrives in the cloud catalogue, and the built-in
-engine has a name of its own, the LU Engine.
+The compact release. A long conversation folds its older turns into a summary
+instead of running out of room, an agent hands work to background agents that
+run while you carry on, a reasoning model gets a dial for how much thinking a
+reply may pay for, every local model answers on one OpenAI-compatible address,
+and the built-in engine has a name of its own, the LU Engine.
 
 ### Added
 
+- **Compact mode.** Type /compact and the older turns of the conversation are
+  folded into a summary while the recent ones stay as they are; a few words
+  after the command say what the summary should focus on. The chat model
+  writes the summary itself, in the language of the conversation, and it is
+  told never to translate, round or reformat a value. A block in the
+  transcript shows how many messages were summarised and how many tokens every
+  following request saves, the full conversation stays on disk, and a second
+  compaction keeps the first one instead of dropping the start of the chat.
+  Auto-compact is opt-in and off by default: set a percentage under Settings,
+  General, Generation and the older turns are summarised once the context is
+  that full, with a note in the transcript every time it fires. On a thinking
+  model the summary is written with thinking off, because with it on the whole
+  budget went into the thinking channel and no summary came out.
+- **Background agents.** In Agent and Code mode the agent can delegate a self-
+  contained task to a sub-agent that works in the background while the main
+  run goes on. A panel on the right lists the running agents, and when one
+  finishes the main agent is woken and continues with the result, whether the
+  chat runs on a cloud model or a local one. Delegating asks no question of
+  its own: a sub-agent inherits the permissions of the run that started it,
+  every tool call it makes still passes the same gate as the main run, and a
+  read-only run stays read-only. A sub-agent that hits its step cap or is
+  cancelled hands back what it gathered on the way, marked as raw material
+  rather than an answer. The caps have their own section under Settings,
+  Agent, Sub-agents.
+- **An effort control beside the Think button** on a reasoning model. Low,
+  Medium and High, with Max on GLM 5.3, set how many tokens a reply may spend
+  on thinking. The steps come from the server for each model, so a model that
+  offers two shows two, and a model with none keeps the plain Think button it
+  always had.
+- **GLM 5.3 (Pro) and GLM 5.3 Flash (Hosted)** in the cloud catalogue.
+- **A Local API.** Settings, Local API starts an OpenAI-compatible server on
+  your machine, port 8129 by default, that lists every local model from the LU
+  Engine, Ollama and LM Studio under one address and streams the answers
+  through, so any tool that talks to OpenAI can talk to your own machine. It
+  listens on localhost unless you allow the LAN, always asks for a token, and
+  the browser origins that may call it are an allow list that starts empty. A
+  tool on that API can also ask which LU tools this machine has, behind the
+  same token.
+- **A command palette on Ctrl+K** over the actions the app already has: the
+  views, the keyboard shortcuts, switching models, the side panel, and Quit
+  once you search for it. Right-click menus follow one pattern across the app.
+- **First-run setup runs in a small window of its own,** centred by the
+  operating system, and the main window appears the moment setup is done.
+- **Three uncensored models that were missing:** Qwen 3.8 27B Heretic, Gemma 4
+  12B Heretic and Qwen3-VL 8B Abliterated, the first uncensored image
+  understanding that fits an 8 GB card. GLM 5.3 is in the local catalogue in
+  the one variant the LU Engine can open; the Flash files carry an
+  architecture llama.cpp does not read yet, so they wait. A catalogue check
+  now reads the file header of every entry so that a model the engine cannot
+  open never gets listed again, and Hunyuan 3 295B left the list for that
+  reason.
+- **The collapsed side panel is an icon rail** with a way back rather than a
+  gap, the chat column can be dragged wider, and a chat title is shown in full
+  instead of cut at 30 characters.
+- **Document Chat works in Cloud mode.** Your files are indexed on your own
+  machine and only the passages that match your question travel with the
+  prompt. If indexing runs on an Ollama you pointed at another machine, the
+  panel says so.
+- **The side panel folds away**, and while it is closed your latest chats sit
+  on the main screen. They belong to the panel again the moment you open it.
+- **A Use button on an Installed tile.** It starts the LU Engine and loads that
+  model, rather than leaving you with a file you cannot reach.
 - **OrcaRouter's Qwen 3.8 27B Uncensored, and a Hugging Face token that
   model downloads use.** The six uncensored 27B rows in the Model Manager now
   come from OrcaRouter's abliteration (bartowski's ungated GGUF requant of it,
@@ -25,20 +89,6 @@ engine has a name of its own, the LU Engine.
   lived only inside the Mac media panel), and the token goes to
   huggingface.co with every model download, which also lifts the throttle
   the hub puts on anonymous downloads.
-- **An effort control beside the Think button** on a reasoning model. Low,
-  Medium and High, with Max on GLM 5.3, set how many tokens a reply may spend
-  on thinking. The steps come from the server for each model, so a model that
-  offers two shows two, and a model with none keeps the plain Think button it
-  always had.
-- **GLM 5.3 (Pro) and GLM 5.3 Flash (Hosted)** in the cloud catalogue.
-- **Document Chat works in Cloud mode.** Your files are indexed on your own
-  machine and only the passages that match your question travel with the
-  prompt. If indexing runs on an Ollama you pointed at another machine, the
-  panel says so.
-- **The side panel folds away**, and while it is closed your latest chats sit
-  on the main screen. They belong to the panel again the moment you open it.
-- **A Use button on an Installed tile.** It starts the LU Engine and loads that
-  model, rather than leaving you with a file you cannot reach.
 - **The Coding Agent's working directory can be removed again.** There is a
   Remove button beside the folder picker and one in the header, both locked
   while a run is going, and picking a different folder moves the current chat
@@ -77,6 +127,26 @@ engine has a name of its own, the LU Engine.
 - **On the Mac, picking a model folder under Desktop, Documents or Downloads
   says up front that macOS will ask once for access to it**, instead of letting
   that dialog arrive out of nowhere on the first scan.
+- **LU starts MCP servers through npx and uvx only.** The app window used to
+  be allowed to launch node, python, deno, bun, docker and the package
+  managers as well. Each of those takes a one line script or hands out the
+  whole disk, so any scripting bug anywhere in the window was code execution
+  on your machine. A server set to run through another launcher is named
+  before the start, with the two launchers that work and the option of
+  starting the server yourself and connecting by URL, and the message has a
+  button that takes you to the entry.
+- **One scale for the whole app.** It was rendered in four at once, an 18.4 px
+  root and three separate zoom factors, so a corner radius in Chat came in
+  five sizes. The light theme got the contrast fixes it was missing, the focus
+  ring passes the contrast rule on every background, the cursor blinks while a
+  reply streams, and Copy says that it copied.
+- **The tabs at the top and the tool row in Create scroll instead of
+  wrapping.** The entry you picked sits in the middle, the ones beside it fade
+  towards the edges, and a click slides your pick to the centre.
+- **A run on a local model waits for the card instead of fighting for it.**
+  Two local runs on one card swap memory back and forth and both end up slower
+  than one, so a second local run queues and starts when the first is done.
+  Cloud runs start at once.
 
 ### Fixed
 
@@ -189,6 +259,33 @@ engine has a name of its own, the LU Engine.
   build without libuv support". LU now sets USE_LIBUV=0 for every trainer
   process on Windows. Reported in GitHub #121; nobody here has two GPUs, so
   this is the documented torch workaround rather than a measured fix.
+- **Coming from 2.6.7 you find your conversation list open, as you left it.**
+  A fresh install now starts with the panel closed, an update inherited that
+  at first, and every existing chat sat behind an unlabelled icon button.
+- **Chat works without a mouse.** The conversation list is a real list you can
+  tab through and open with Enter, a dialog closes on Escape and keeps the
+  focus inside while it is open, a preselected button is never the destructive
+  one, Escape closes every overlay, and animation follows the reduced-motion
+  setting of your system.
+- **The read-only commands tell the model what it may still run.** /review,
+  /plan, /diff and the others said the model had no shell at all, while the
+  inspection commands, git status, git log, git diff and the like, were
+  allowed the whole time, which left /review unable to find the changes it was
+  asked to review.
+- **The Memory section reads its own Markdown export again.** Since 2.5.9 the
+  export wrote a comma between title and body while the import still looked
+  for a dash, so an exported file came back with half a raw line as the title
+  and the tags, source and date gone.
+- **A model you did not pick is announced.** When a provider goes away and the
+  model you had chosen goes with it, the app falls back to the first entry it
+  finds and says so in the status line above the message field. A click on a
+  model that is still loading says what it is waiting for.
+- **A click on a file the LU Engine cannot open no longer costs you the engine
+  that is running.** The first bytes of the file are read before anything is
+  stopped, and a file without the GGUF mark is named and left alone instead of
+  taking down a healthy engine for two failed attempts.
+- **Updates no longer leave the previous frontend behind.** On a machine that
+  has been updating since April this frees around 130 MB and a thousand files.
 
 ## [2.6.7] - 2026-08-31
 
