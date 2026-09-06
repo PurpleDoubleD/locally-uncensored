@@ -1946,6 +1946,17 @@ pub fn start_character_training(
             return;
         }
 
+        // Cancel can arrive while no child is alive: during the environment
+        // probe (a plain Command::output, nothing in pid_slot) or between two
+        // children. The flag alone does nothing then, and the next child
+        // would be spawned only to be killed on its first poll, or, worse,
+        // never noticed. Measured on the box on 06.09.2026: a Cancel 14 s
+        // after Create left the run training on while the UI had gone idle.
+        if cancel_requested(&cancel) {
+            set_status(&run, "cancelled", "cancelled");
+            return;
+        }
+
         // 1) latent cache
         set_status(&run, "running", "Step 1/4: Caching image latents...");
         let mut c1 = Command::new(&vpy_s);
@@ -1959,6 +1970,10 @@ pub fn start_character_training(
             return;
         }
 
+        if cancel_requested(&cancel) {
+            set_status(&run, "cancelled", "cancelled");
+            return;
+        }
         // 2) text-encoder cache (fp8 keeps the 4B Qwen TE inside 12 GB)
         set_status(&run, "running", "Step 2/4: Caching text encoder outputs...");
         let mut c2 = Command::new(&vpy_s);
@@ -1974,6 +1989,10 @@ pub fn start_character_training(
             return;
         }
 
+        if cancel_requested(&cancel) {
+            set_status(&run, "cancelled", "cancelled");
+            return;
+        }
         // 3) the train itself — documented 12 GB combo: fp8 base + block swap
         // + gradient checkpointing + 8-bit optimizer. ComfyUI's model cache
         // would eat the same VRAM the trainer needs — ask it to let go first.
@@ -1996,7 +2015,7 @@ pub fn start_character_training(
                 push_log(&run, &format!("Did not free ComfyUI's VRAM ({target}): {why}"));
             }
         }
-        set_status(&run, "running", &format!("Step 3/4: Training ({steps} steps). This runs for a while, live log below..."));
+        set_status(&run, "running", &format!("Step 3/4: Training ({steps} steps). This runs for a while, the counter follows every step."));
         let accelerate = {
             #[cfg(target_os = "windows")]
             { root.join("venv").join("Scripts").join("accelerate.exe") }
@@ -2031,6 +2050,10 @@ pub fn start_character_training(
             return;
         }
 
+        if cancel_requested(&cancel) {
+            set_status(&run, "cancelled", "cancelled");
+            return;
+        }
         // 4) convert to the Diffusers key layout ComfyUI loads, straight into
         // the loras dir (musubi's documented `--target other` conversion).
         set_status(&run, "running", "Step 4/4: Converting the LoRA for ComfyUI...");
@@ -3350,6 +3373,23 @@ mod progress_line_tests {
         let stream = b"steps:   0%|          | 0/400 [00:00<?, ?it/s]\rsteps:   0%|          | 1/400 [00:11<1:16:00, 11.4s/it]\rsteps:   0%|          | 2/400 [00:23<1:16:00, 11.4s/it]\n";
         let steps: Vec<(u64, u64)> = collect(stream).iter().filter_map(|l| parse_step_counter(l)).collect();
         assert_eq!(steps, [(0, 400), (1, 400), (2, 400)], "each \\r update is its own line");
+    }
+
+    #[test]
+    fn a_cancel_with_no_child_alive_still_ends_the_run_before_the_next_spawn() {
+        // The probe runs Command::output (nothing in pid_slot) and between two
+        // children nothing is alive either, so Cancel there only sets the flag.
+        // Each of the four children is preceded by a check of that flag.
+        let src = include_str!("trainer.rs");
+        let body = &src[src.find("pub fn start_character_training").expect("start fn")..];
+        let body = &body[..body.find("info!(\"character training complete\")").expect("end of the run")];
+        let checks = body.matches("if cancel_requested(&cancel) {").count();
+        assert_eq!(checks, 4, "one cancel check per child, before its spawn");
+        for label in ["\"latent cache\"", "\"text encoder cache\"", "\"training\"", "\"lora convert\""] {
+            let spawn = body.find(label).expect(label);
+            let check = body[..spawn].rfind("if cancel_requested(&cancel) {").expect("a check before the spawn");
+            assert!(body[check..spawn].matches("run_streamed(").count() == 1, "the check right before {label}");
+        }
     }
 
     #[test]

@@ -107,6 +107,8 @@ export function useCreate() {
   // A local character-training run is a Rust child process, not a ComfyUI
   // prompt — cancel() must reach it through its own command.
   const trainingActive = useRef(false)
+  /** Stop pressed while a training run was being set up or running. */
+  const trainingCancelRequested = useRef(false)
 
   // Cleanup on unmount
   useEffect(() => {
@@ -388,6 +390,7 @@ export function useCreate() {
     setError(null)
     setIsGenerating(true)
     trainingActive.current = true
+    trainingCancelRequested.current = false
     // The trainer is a 12 GB recipe on a 12 GB card. A resident chat model
     // (the built-in engine, Ollama, LM Studio) squats 2 to 9 GB of that and
     // the run dies in the text-encoder cache or the first training step with
@@ -410,15 +413,29 @@ export function useCreate() {
       try {
         trainingEviction = await evictChatBackendsForRender()
       } catch { /* VRAM housekeeping is best-effort */ }
+      // Stop pressed during the hand-off: there is no run to cancel yet, and
+      // starting one now would hand the card to a trainer nobody is watching
+      // (the box, 06.09.2026: Cancel 0.6 s after Create, training ran on to
+      // step 27 while the chat model was brought back beside it).
+      if (trainingCancelRequested.current) return
       setProgress(8, 'Starting the training run...')
       await startCharacterTraining(setId, trigger, trigger, state.trainSteps)
+      let cancelRounds = 0
       for (;;) {
         await new Promise((r) => setTimeout(r, 3000))
-        // cancel() already reset the UI; the Rust child got its kill there.
-        if (!useCreateStore.getState().isGenerating) return
+        if (!useCreateStore.getState().isGenerating && !trainingCancelRequested.current) return
         const s = await characterTrainingStatus().catch(() => null)
         if (!s) continue
         if (s.status === 'running') {
+          if (trainingCancelRequested.current) {
+            // Stop was pressed and the backend still reports a run: the
+            // cancel raced the start (the start resets the flag) or landed
+            // in the environment probe. Send it again until the run is
+            // really gone; the card is only given back below, after that.
+            try { await cancelCharacterTraining() } catch { /* next round */ }
+            if (++cancelRounds >= 20) return
+            continue
+          }
           if (s.totalSteps > 0) {
             setProgress(Math.min(95, 10 + Math.round((s.step / s.totalSteps) * 85)), `Training ${s.step}/${s.totalSteps}...`)
           } else {
@@ -1499,6 +1516,9 @@ export function useCreate() {
   const cancel = useCallback(async () => {
     abortRef.current?.abort()
     if (trainingActive.current) {
+      // The run's poll loop reads this: it holds the card until the backend
+      // confirms the run is gone, and re-sends the cancel if it is not.
+      trainingCancelRequested.current = true
       // Best effort, and deliberately not fatal: Stop's real job is the
       // abandonPrompt below. A training cancel that fails must not stop us
       // from taking the render out of the queue — that was the R32 defect
