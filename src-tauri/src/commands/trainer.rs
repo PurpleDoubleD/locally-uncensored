@@ -944,6 +944,7 @@ fn run_child(
     {
         let run = run.clone();
         let tail = tail.clone();
+        let cancel = cancel.clone();
         handles.push(std::thread::spawn(move || {
             // Split on carriage returns as well as newlines: tqdm rewrites its
             // progress line in place with \r and only ends it with \n at the
@@ -951,6 +952,13 @@ fn run_child(
             // counter jump in blocks of one epoch (measured on the box on
             // 06.09.2026: "Training 0/400" for 23 minutes, then 48 at a time).
             for_each_progress_line(stream, |line| {
+                // After a cancel the tree is being killed; what the dying
+                // Python still prints (a KeyboardInterrupt traceback) is not
+                // this run's log. The box showed one under a status of
+                // "cancelled" (06.09.2026).
+                if cancel.load(Ordering::SeqCst) {
+                    return;
+                }
                 // Der Schwanz dieses Protokolls steht in der Oberflaeche, also
                 // gilt hier dieselbe Regel wie beim Installer: was das
                 // Betriebssystem geschrieben hat, steht englisch da, was der
@@ -1022,6 +1030,15 @@ fn run_child(
 
 /// Pull "123/1600" out of a tqdm-ish progress line.
 pub fn parse_step_counter(line: &str) -> Option<(u64, u64)> {
+    // Only the training bar counts. musubi labels it "steps: NN%|...| cur/total
+    // [...]". The weight loader right before it draws a tqdm bar of its own
+    // (521 tensors on the box, 06.09.2026) and the epoch line carries a total
+    // of its own: the meter read "Training 27/521 ... 521/521" for three
+    // minutes against a 400-step run, then fell back to 0/400.
+    let line = line.trim_start();
+    if !line.get(..5).is_some_and(|p| p.eq_ignore_ascii_case("steps")) {
+        return None;
+    }
     // Cheap scan without regex: find "N/M" where both sides are digits and M
     // looks like a step total (>= 10, filters version strings like 2/3).
     let bytes = line.as_bytes();
@@ -2172,7 +2189,11 @@ mod tests {
     #[test]
     fn the_cancel_branch_does_not_join_the_reader_threads() {
         let src = include_str!("trainer.rs");
-        let zweig = src
+        // The reader closure above the wait loop checks the same flag (it
+        // drops what the dying child prints), so anchor on the loop itself.
+        let warte = &src[src.find("fn run_child(").expect("run_child")..];
+        let warte = &warte[warte.find("let exit = loop {").expect("wait loop")..];
+        let zweig = warte
             .split("if cancel.load(Ordering::SeqCst) {")
             .nth(1)
             .expect("cancel branch")
@@ -2604,10 +2625,21 @@ mod tests {
     #[test]
     fn step_counter_parses_tqdm_lines() {
         assert_eq!(parse_step_counter("steps:  8%|▊| 123/1600 [02:10<26:04]"), Some((123, 1600)));
-        assert_eq!(parse_step_counter("epoch 1/16"), Some((1, 16)));
+        assert_eq!(parse_step_counter("steps:   9%|▉         | 35/400 [06:34<1:08:38, 11.28s/it]"), Some((35, 400)));
         assert_eq!(parse_step_counter("no counter here"), None);
         // version-ish fragments with tiny totals are ignored
-        assert_eq!(parse_step_counter("python 3/4 things"), None);
+        assert_eq!(parse_step_counter("steps: python 3/4 things"), None);
+    }
+
+    #[test]
+    fn only_the_training_bar_moves_the_step_counter() {
+        // The DiT loader draws its own tqdm bar right before training starts
+        // (521 tensors on the box, 06.09.2026); for three minutes the meter
+        // counted it up to 521/521 against a 400-step run. Epoch lines carry
+        // a total of their own as well.
+        assert_eq!(parse_step_counter("41/521 [00:10<02:00, 4.0it/s]"), None);
+        assert_eq!(parse_step_counter("Loading: 100%|██████████| 521/521 [02:10<00:00]"), None);
+        assert_eq!(parse_step_counter("epoch 1/16"), None);
     }
 
     #[test]
@@ -3318,6 +3350,20 @@ mod progress_line_tests {
         let stream = b"steps:   0%|          | 0/400 [00:00<?, ?it/s]\rsteps:   0%|          | 1/400 [00:11<1:16:00, 11.4s/it]\rsteps:   0%|          | 2/400 [00:23<1:16:00, 11.4s/it]\n";
         let steps: Vec<(u64, u64)> = collect(stream).iter().filter_map(|l| parse_step_counter(l)).collect();
         assert_eq!(steps, [(0, 400), (1, 400), (2, 400)], "each \\r update is its own line");
+    }
+
+    #[test]
+    fn what_the_dying_child_prints_after_a_cancel_is_not_the_log() {
+        // The box showed a raw KeyboardInterrupt traceback in the live log
+        // under a status of "cancelled" (06.09.2026): the tree was being
+        // killed and the reader kept forwarding its last breaths.
+        let src = include_str!("trainer.rs");
+        let body = &src[src.find("fn run_child(").expect("run_child")..];
+        let body = &body[..body.find("let exit = loop").expect("wait loop")];
+        let reader = &body[body.find("for_each_progress_line(stream").expect("reader")..];
+        let gate = reader.find("if cancel.load(Ordering::SeqCst)").expect("the reader checks the cancel flag");
+        let log = reader.find("push_log(&run, trimmed)").expect("the reader logs");
+        assert!(gate < log, "the cancel check comes before anything reaches the log");
     }
 
     #[test]

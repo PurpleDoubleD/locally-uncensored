@@ -16,7 +16,7 @@ import { useCloudCatalogStore, cloudModelById, modelForOp } from '../../../store
 import { listLoras, deleteLora, type CloudLora } from '../../../api/cloud/loras'
 import {
   characterTrainerStatus, installCharacterTrainer, parseLocalCharacterLora,
-  TRAINER_BASE_FILES, baseDownloadRunning, type TrainerStatus,
+  TRAINER_BASE_FILES, baseDownloadRunning, baseDownloadPercent, type TrainerStatus,
 } from '../../../api/trainer'
 import { startModelDownload, getDownloadProgress } from '../../../api/discover'
 import { useDownloadStore } from '../../../stores/downloadStore'
@@ -300,14 +300,12 @@ function LocalTrainControls() {
         }
       } else {
         const prog = await getDownloadProgress().catch(() => ({} as Record<string, { progress: number; total: number; status: string; filename: string; error?: string }>))
-        const rows = TRAINER_BASE_FILES.map((f) => prog[f.filename]).filter(Boolean)
-        const active = rows.find((r) => r.status === 'downloading' || r.status === 'connecting')
-        if (active) {
-          const pct = active.total > 0 ? Math.round((active.progress / active.total) * 100) : 0
-          setNote(`Downloading ${active.filename} (${pct}%)...`)
+        const pct = baseDownloadPercent(prog)
+        if (pct !== null) {
+          setNote(`Downloading base files (${pct}% of about 19 GB)...`)
           return
         }
-        const failed = rows.find((r) => r.status === 'error')
+        const failed = TRAINER_BASE_FILES.map((f) => prog[f.filename]).find((r) => r?.status === 'error')
         const s = await characterTrainerStatus().catch(() => null)
         if (s) setStatus(s)
         if (failed) {

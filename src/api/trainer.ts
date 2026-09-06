@@ -70,6 +70,23 @@ export function baseDownloadRunning(
   })
 }
 
+/**
+ * Progress over the three base files together, the way the tray sums its
+ * group. The note under the button used to quote the first running file only
+ * ("z_image 3%") while 15 percent of the 19 GB were already on disk (Phase G,
+ * 06.09.2026). null when none of them is moving.
+ */
+export function baseDownloadPercent(
+  progress: Record<string, { progress: number; total: number; status: string } | undefined>,
+): number | null {
+  if (!baseDownloadRunning(progress)) return null
+  const rows = TRAINER_BASE_FILES.flatMap((f) => { const r = progress[f.filename]; return r ? [r] : [] })
+  const total = rows.reduce((a, r) => a + Math.max(r.total, 0), 0)
+  if (total <= 0) return 0
+  const done = rows.reduce((a, r) => a + Math.min(Math.max(r.progress, 0), Math.max(r.total, 0)), 0)
+  return Math.min(100, Math.round((done / total) * 100))
+}
+
 export async function installCharacterTrainer(installPath?: string): Promise<{ status: string }> {
   return backendCall('install_character_trainer', { installPath: installPath ?? null })
 }
