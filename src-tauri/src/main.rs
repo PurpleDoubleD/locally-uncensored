@@ -381,6 +381,7 @@ fn main() {
             commands::engine::kv_slot_action,
             commands::engine::swap_bundled_model,
             commands::engine::list_bundled_models,
+            commands::engine::delete_bundled_model,
             commands::engine::list_importable_models,
             // The user's own model folder, handed to ComfyUI (GH #122)
             commands::custom_models::sync_custom_model_paths,

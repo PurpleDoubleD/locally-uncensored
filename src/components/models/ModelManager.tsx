@@ -19,7 +19,7 @@ import { checkComfyConnection, refreshComfyModels } from '../../api/comfyui'
 import { isMlxImageHost } from '../../api/mlx-image'
 import { MlxMediaSettings } from '../settings/MlxMediaSettings'
 import { backendCall } from '../../api/backend'
-import { customModelDirs } from '../../api/engine'
+import { customModelDirs, deleteBundledModel, stopBundledEngine } from '../../api/engine'
 import { counterView } from '../../lib/inventory-counter'
 import { groupInstalledByProvider, needsBackendSwitchHeading, foldedRowsSentence, LU_ENGINE_GROUP } from '../../lib/lu-engine-rows'
 import { isBuiltinEngineEntry } from '../../lib/lmstudio-match'
@@ -123,7 +123,20 @@ export function ModelManager() {
     fetchModels()
   }, [fetchModels])
 
+  // An LU Engine row is a file on disk, and the file is what the two buttons
+  // on the right act on. .dan_48 (help chat, 2026-09-05, 2.6.7): the row had
+  // no bin and Details asked Ollama, which knows nothing about it, so a
+  // downloaded model could neither be deleted nor found.
+  const luEngineFile = (m: AIModel): m is AIModel & { path: string } =>
+    m.type === 'text' && isBuiltinEngineEntry(m) && 'path' in m && typeof m.path === 'string' && m.path.length > 0
+
   const handleInfo = async (name: string) => {
+    const model = models.find((m: AIModel) => m.name === name)
+    if (model && luEngineFile(model)) {
+      setModelInfo({ name, file: model.path, size: model.size, engine: model.providerName ?? LU_ENGINE_GROUP })
+      setInfoOpen(true)
+      return
+    }
     try {
       const info = await showModel(name)
       setModelInfo({ name, ...info })
@@ -154,6 +167,15 @@ export function ModelManager() {
         setConfirmDelete(null)
         useModelStore.getState().removeInventoryModel(name)
         await refreshComfyModels().catch(() => { /* rescan is best-effort */ })
+        await fetchModels()
+        return
+      }
+      if (model && luEngineFile(model)) {
+        // The loaded file is locked on Windows, so the engine is stopped first
+        // when the row is the active one; the backend refuses otherwise.
+        if (model.name === activeModel) await stopBundledEngine()
+        await deleteBundledModel(model.path)
+        setConfirmDelete(null)
         await fetchModels()
         return
       }
@@ -502,9 +524,11 @@ export function ModelManager() {
                               onInfo={() => handleInfo(model.name)}
                               canDelete={
                                 // Ollama text models via the Ollama API; image/video
-                                // models are ComfyUI files we can delete from disk.
+                                // models are ComfyUI files we can delete from disk;
+                                // an LU Engine row is a GGUF LU can delete itself.
                                 (ollamaEnabled && model.type === 'text' && (!('provider' in model) || model.provider === 'ollama'))
                                 || model.type === 'image' || model.type === 'video'
+                                || luEngineFile(model)
                               }
                             />
                           </motion.div>
@@ -541,6 +565,12 @@ export function ModelManager() {
           Are you sure you want to delete <span className="text-gray-900 dark:text-white font-mono">{confirmDelete}</span>?
           This removes the model file from your disk and frees the space.
         </p>
+        {(() => {
+          const row = models.find((m: AIModel) => m.name === confirmDelete)
+          return row && luEngineFile(row) ? (
+            <p className="t-micro font-mono text-gray-500 dark:text-gray-400 mb-3 break-all" data-testid="delete-file-path">{row.path}</p>
+          ) : null
+        })()}
         <div className="flex gap-2">
           <GlowButton variant="secondary" onClick={() => setConfirmDelete(null)} className="flex-1">
             Cancel

@@ -1884,6 +1884,97 @@ pub async fn list_bundled_models(
     .map_err(|e| format!("list_bundled_models task: {e}"))?
 }
 
+/// Which files go when the user deletes an LU Engine row: the GGUF itself, or
+/// every part of a gguf-split set, and only inside a folder the listing reads
+/// (the app's own models dir, or one named under Model Storage).
+///
+/// .dan_48 (help chat, 2026-09-05, 2.6.7, GTX 1660 Ti with 6 GB): the
+/// Installed list had a bin on Ollama rows and none on LU Engine rows, and
+/// nothing on the page said where the file was, so a model LU had downloaded
+/// could neither be deleted nor found. The path is judged after canonicalize,
+/// so a `..` that walks out of the folder is refused by where it lands.
+pub(crate) fn gguf_delete_plan(path: &Path, roots: &[PathBuf]) -> Result<Vec<PathBuf>, String> {
+    if !path.extension().is_some_and(|e| e.eq_ignore_ascii_case("gguf")) {
+        return Err("Only GGUF model files can be deleted here.".to_string());
+    }
+    let file = std::fs::canonicalize(path)
+        .map_err(|e| format!("That model file could not be found: {}", os_error::english(&e)))?;
+    let inside = roots
+        .iter()
+        .filter_map(|r| std::fs::canonicalize(r).ok())
+        .any(|r| file.starts_with(&r));
+    if !inside {
+        return Err(
+            "LU only deletes models inside its own models folder or a folder named under Model Storage.".to_string(),
+        );
+    }
+    let dir = file.parent().ok_or("That model file has no folder.")?.to_path_buf();
+    let stem = file.file_stem().and_then(|s| s.to_str()).unwrap_or("");
+    let Some((base, _, total)) = split_shard_stem(stem) else {
+        return Ok(vec![file]);
+    };
+    // A split set is one model: every sibling with the same base and total
+    // goes along, whichever part the row pointed at, both digit widths.
+    let mut parts: Vec<PathBuf> = std::fs::read_dir(&dir)
+        .map_err(|e| format!("Could not read the model folder: {}", os_error::english(&e)))?
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.extension().is_some_and(|e| e.eq_ignore_ascii_case("gguf")))
+        .filter(|p| {
+            p.file_stem()
+                .and_then(|s| s.to_str())
+                .and_then(split_shard_stem)
+                .is_some_and(|(b, _, t)| b == base && t == total)
+        })
+        .collect();
+    parts.sort();
+    Ok(parts)
+}
+
+/// Delete an LU Engine row's file(s). The loaded model is refused: on Windows
+/// the mapped file cannot be removed while the engine holds it, and a delete
+/// that half works is worse than one that says why. The frontend stops the
+/// engine first when the row is the active one.
+#[tauri::command]
+pub async fn delete_bundled_model(
+    app: tauri::AppHandle,
+    path: String,
+    extra_dirs: Option<Vec<String>>,
+) -> Result<serde_json::Value, String> {
+    tokio::task::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        let loaded = state
+            .bundled_engine
+            .lock()
+            .unwrap()
+            .as_ref()
+            .map(|e| e.model_path.clone());
+        let same = |a: &str, b: &str| {
+            a == b
+                || matches!(
+                    (std::fs::canonicalize(a), std::fs::canonicalize(b)),
+                    (Ok(x), Ok(y)) if x == y
+                )
+        };
+        if loaded.as_deref().is_some_and(|l| same(l, &path)) {
+            return Err(
+                "This model is loaded in the LU Engine right now. Stop the engine or switch to another model, then delete it.".to_string(),
+            );
+        }
+        let roots = bundled_scan_dirs(&builtin_models_dir()?, &extra_dirs.unwrap_or_default());
+        let files = gguf_delete_plan(Path::new(&path), &roots)?;
+        let mut bytes = 0u64;
+        for f in &files {
+            bytes += std::fs::metadata(f).map(|m| m.len()).unwrap_or(0);
+            std::fs::remove_file(f)
+                .map_err(|e| format!("Could not delete {}: {}", f.display(), os_error::english(&e)))?;
+        }
+        Ok(serde_json::json!({ "deleted": files.len(), "bytes": bytes }))
+    })
+    .await
+    .map_err(|e| format!("delete_bundled_model task: {e}"))?
+}
+
 fn list_bundled_models_blocking(
     state: &AppState,
     extra_dirs: &[String],
@@ -2528,6 +2619,46 @@ pub(crate) fn stop_embed_locked(state: &AppState) -> bool {
 
 #[cfg(test)]
 mod tests {
+    // .dan_48 (help chat, 2026-09-05): the bin on an LU Engine row. What it may
+    // and may not take with it is decided here, on real files.
+    #[test]
+    fn the_delete_plan_takes_the_gguf_or_the_whole_split_and_nothing_outside_the_folder() {
+        let dir = std::env::temp_dir().join(format!("lu-engine-delete-{}", std::process::id()));
+        let outside = std::env::temp_dir().join(format!("lu-engine-delete-outside-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(&outside);
+        let inside = dir.join("inside");
+        std::fs::create_dir_all(&inside).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        let single = inside.join("a.gguf");
+        let text = inside.join("notes.txt");
+        let stranger = outside.join("b.gguf");
+        std::fs::write(&single, b"x").unwrap();
+        std::fs::write(&text, b"x").unwrap();
+        std::fs::write(&stranger, b"x").unwrap();
+        for i in 1..=3 {
+            std::fs::write(inside.join(format!("big-0000{i}-of-00003.gguf")), b"x").unwrap();
+        }
+        std::fs::write(inside.join("other-00001-of-00002.gguf"), b"x").unwrap();
+        let roots = vec![dir.clone()];
+
+        assert_eq!(gguf_delete_plan(&single, &roots).unwrap(), vec![std::fs::canonicalize(&single).unwrap()]);
+        assert!(gguf_delete_plan(&text, &roots).unwrap_err().contains("GGUF"));
+        assert!(gguf_delete_plan(&stranger, &roots).unwrap_err().contains("Model Storage"));
+        // whichever part the row pointed at, the set goes, and only that set
+        let shards = gguf_delete_plan(&inside.join("big-00002-of-00003.gguf"), &roots).unwrap();
+        assert_eq!(shards.len(), 3, "{shards:?}");
+        assert!(shards.iter().all(|p| p.file_name().unwrap().to_str().unwrap().starts_with("big-")));
+        // a path that walks out of the folder is judged by where it lands
+        let sneaky = inside.join("..").join("..").join(outside.file_name().unwrap()).join("b.gguf");
+        assert!(gguf_delete_plan(&sneaky, &roots).is_err());
+        // a file that is gone already is not a plan
+        assert!(gguf_delete_plan(&inside.join("missing.gguf"), &roots).unwrap_err().contains("could not be found"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(&outside);
+    }
+
     use super::*;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
