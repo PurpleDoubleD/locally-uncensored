@@ -28,6 +28,19 @@ describe('the approval card stays reachable', () => {
     expect(src).toMatch(/className="shrink-0 border-b[^"]*" data-testid="staged-changes-panel"/)
   })
 
+  it('keeps Apply all and Reject all outside the scroll cap, so they never scroll away with the diffs', () => {
+    const src = read('../StagedChangesPanel.tsx')
+    const listOpen = src.indexOf('data-testid="staged-changes-list"')
+    const footer = src.indexOf('data-testid="apply-all"')
+    expect(listOpen).toBeGreaterThan(0)
+    expect(footer).toBeGreaterThan(listOpen)
+    // Between the list and the footer the list is closed and a second
+    // `expanded` block opens: the footer is a sibling of the list, not a child.
+    const between = src.slice(listOpen, footer)
+    expect(between).toMatch(/\{expanded && \(\s*<div className="px-1\.5 pb-2">/)
+    expect(src.indexOf('data-testid="reject-all"')).toBeGreaterThan(footer)
+  })
+
   it('gives the transcript a floor so no side panel can squeeze it to nothing', () => {
     const src = read('../CodexView.tsx')
     expect(src).toMatch(/ref=\{scrollRef\} className="flex-1 min-h-\[10rem\] overflow-y-auto[^"]*" data-testid="codex-transcript"/)

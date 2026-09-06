@@ -183,7 +183,15 @@ export function StagedChangesPanel({ chatId }: Props) {
               </div>
             )
           })}
+        </div>
+      )}
 
+      {/* Apply all and Reject all sit OUTSIDE the scroll cap. Inside it they
+          scrolled away with the diffs: with two long files the footer sat
+          under the fold of the list and a click without scrolling hit
+          nothing (t14 on the box, 2026-09-06). */}
+      {expanded && (
+        <div className="px-1.5 pb-2">
           <div className="flex items-center gap-1 pt-0.5">
             <button
               onClick={applyAll}
