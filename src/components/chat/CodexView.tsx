@@ -279,7 +279,7 @@ export function CodexView() {
         <StagedChangesPanel chatId={activeConversationId} />
 
         {/* Messages */}
-        <div ref={scrollRef} className="flex-1 overflow-y-auto scrollbar-thin">
+        <div ref={scrollRef} className="flex-1 min-h-[10rem] overflow-y-auto scrollbar-thin" data-testid="codex-transcript">
           {messages.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-full text-center">
               <Code size={28} className="text-gray-300 dark:text-gray-700 mb-2" />

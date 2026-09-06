@@ -16,6 +16,7 @@
 import { backendCall } from '../api/backend'
 import { useStagedChangesStore, type StagedChange } from '../stores/stagedChangesStore'
 import { useChatStore } from '../stores/chatStore'
+import { resolveChatWorkspaceSlug } from '../api/workspace-slug'
 import { mergeThreeWay } from './three-way-merge'
 
 /**
@@ -75,7 +76,7 @@ const withEol = (text: string, eol: '\r\n' | '\n') =>
  * genuinely is not there still throws on the read and takes the create path.
  */
 async function reconcile(
-  chatId: string,
+  jail: string,
   change: StagedChange,
 ): Promise<{ content: string; merged: number }> {
   const base = change.oldContent ?? ''
@@ -83,7 +84,7 @@ async function reconcile(
   try {
     const res = await backendCall<{ content?: string }>('fs_read', {
       path: change.resolvedPath || change.path,
-      chatId,
+      chatId: jail,
       workingDirectory: change.workingDirectory,
     })
     current = res?.content ?? ''
@@ -108,12 +109,28 @@ async function reconcile(
   )
 }
 
+/**
+ * The sandbox the bridge falls back to when no folder is picked is keyed by
+ * the chat's WORKSPACE SLUG (`resolveChatWorkspaceSlug`), which is what the
+ * run passes as `chatId` on every tool call. Apply used to pass the raw
+ * conversation id instead, so with no folder picked "Apply all" wrote into
+ * `agent-workspace/<conversation id>` while the run had read, listed and
+ * executed in `agent-workspace/<slug>`: the model then found nothing where it
+ * had put it and wrote the files a second time by shell (t10 measurement on
+ * the box, 2026-09-06). Same resolver, same pin, same folder.
+ */
+async function jailFor(chatId: string): Promise<string> {
+  const title = useChatStore.getState().conversations?.find((c) => c.id === chatId)?.title
+  return resolveChatWorkspaceSlug(chatId, title)
+}
+
 export async function applyStagedChange(chatId: string, change: StagedChange): Promise<void> {
-  const { content, merged } = await reconcile(chatId, change)
+  const jail = await jailFor(chatId)
+  const { content, merged } = await reconcile(jail, change)
   const res = await backendCall<{ status?: string; path?: string }>('fs_write', {
     path: change.resolvedPath || change.path,
     content,
-    chatId,
+    chatId: jail,
     workingDirectory: change.workingDirectory,
   })
   // 'saved' and 'unchanged' are both success ('unchanged' = the file already

@@ -99,7 +99,7 @@ export function StagedChangesPanel({ chatId }: Props) {
     // Liste, die auf einen Klick wartet: sie traegt jetzt dieselbe neutrale
     // Haut wie die uebrigen Abschnitte der Spalte, und die Zahl daneben ist
     // das Signal (`lib/hinweis.ts`).
-    <div className="border-b border-gray-200 dark:border-white/[0.04]">
+    <div className="shrink-0 border-b border-gray-200 dark:border-white/[0.04]" data-testid="staged-changes-panel">
       <button
         onClick={() => setExpanded(!expanded)}
         className="w-full flex items-center justify-between px-2 py-1.5 group hover:bg-gray-100/70 dark:hover:bg-white/[0.04] transition-colors"
@@ -118,8 +118,14 @@ export function StagedChangesPanel({ chatId }: Props) {
         </span>
       </button>
 
+      {/* The list scrolls inside a cap of the column. Without the cap two
+          staged files with long diffs took the whole column and the
+          transcript below shrank to zero height, so the shell approval
+          card that followed sat behind the composer with no way to reach
+          it (t10 on the box, 2026-09-06: run parked on "Waiting for your
+          approval" for 15 minutes). */}
       {expanded && (
-        <div className="px-1.5 pb-2 space-y-1.5">
+        <div className="px-1.5 pb-2 space-y-1.5 max-h-[40vh] overflow-y-auto scrollbar-thin" data-testid="staged-changes-list">
           {changes.map((change) => {
             const isApplying = applying.has(change.id)
             return (

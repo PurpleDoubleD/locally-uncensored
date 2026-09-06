@@ -11,6 +11,7 @@
 // caused the prompt. Clearing without allowing would leave the task blocked on
 // a question that will not be asked again, which is not what the phrase means.
 
+import { useEffect, useRef } from 'react'
 import { Terminal } from 'lucide-react'
 import { useCodexConfirmStore } from '../../stores/codexConfirmStore'
 import { useSettingsStore } from '../../stores/settingsStore'
@@ -19,6 +20,15 @@ export function CodexConfirmDialog() {
   const pending = useCodexConfirmStore((s) => s.pending)
   const answer = useCodexConfirmStore((s) => s.answer)
   const updateSettings = useSettingsStore((s) => s.updateSettings)
+  const card = useRef<HTMLDivElement>(null)
+
+  // The card is the one thing the run waits for, so it must be on screen the
+  // moment it exists. The transcript's auto-scroll only follows while the
+  // reader sits near the bottom; a reader who scrolled up to check the plan
+  // never saw the card and the run looked stuck (t10, 2026-09-06).
+  useEffect(() => {
+    if (pending) card.current?.scrollIntoView({ block: 'nearest' })
+  }, [pending])
 
   if (!pending) return null
 
@@ -32,7 +42,7 @@ export function CodexConfirmDialog() {
   }
 
   return (
-    <div className="px-1 py-0.5" data-codex-confirm>
+    <div ref={card} className="px-1 py-0.5" data-codex-confirm>
       <div className="rounded-lg border border-purple-500/20 bg-purple-500/[0.04] px-2 py-1.5">
         <div className="flex items-center gap-1.5 t-micro text-gray-700 dark:text-gray-300">
           <Terminal size={10} className="text-purple-400 shrink-0" />

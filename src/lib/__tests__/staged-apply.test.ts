@@ -15,9 +15,14 @@ vi.mock('../../stores/chatStore', () => ({
 import { backendCall } from '../../api/backend'
 import { applyStagedChange, applyAllStagedChanges } from '../staged-apply'
 import { useStagedChangesStore } from '../../stores/stagedChangesStore'
+import { useAgentModeStore } from '../../stores/agentModeStore'
 
 const fsWrite = backendCall as unknown as ReturnType<typeof vi.fn>
 const CHAT = 'chat-1'
+// The run pins the chat's workspace slug on first use and passes it as the
+// bridge's `chatId` on every tool call; apply has to write through the same
+// name, never the raw conversation id.
+const SLUG = 'coding-agent-chat-1'
 
 const stage = (path: string, over: Record<string, unknown> = {}) =>
   useStagedChangesStore.getState().stage(CHAT, {
@@ -33,6 +38,27 @@ describe('applyStagedChange', () => {
     fsWrite.mockReset()
     addMessage.mockClear()
     useStagedChangesStore.getState().clear(CHAT)
+    useAgentModeStore.setState({ workspaceSlugs: { [CHAT]: SLUG } })
+  })
+
+  // t10 on the box (2026-09-06): with no folder picked, "Apply all" wrote into
+  // agent-workspace/<conversation id> while the run had worked in
+  // agent-workspace/<slug>, so the model found nothing where it had put it
+  // and wrote the files a second time by shell.
+  it('writes into the sandbox the run used (the workspace slug), not the raw conversation id', async () => {
+    fsWrite.mockResolvedValue({ status: 'saved', path: 'NOTES.md' })
+    stage('NOTES.md')
+    await applyStagedChange(CHAT, useStagedChangesStore.getState().list(CHAT)[0])
+
+    expect(fsWrite).toHaveBeenCalledWith('fs_write', {
+      path: 'NOTES.md',
+      content: 'content of NOTES.md',
+      chatId: SLUG,
+      workingDirectory: undefined,
+    })
+    const calls = fsWrite.mock.calls.filter(([cmd]) => cmd === 'fs_read' || cmd === 'fs_write')
+    expect(calls.every(([, args]) => (args as { chatId: string }).chatId === SLUG)).toBe(true)
+    expect(calls.some(([, args]) => (args as { chatId: string }).chatId === CHAT)).toBe(false)
   })
 
   it('writes via fs_write with the stage-time jail root and dequeues the entry', async () => {
@@ -45,7 +71,7 @@ describe('applyStagedChange', () => {
     expect(fsWrite).toHaveBeenCalledWith('fs_write', {
       path: '/proj/gui.py',
       content: 'content of gui.py',
-      chatId: CHAT,
+      chatId: SLUG,
       workingDirectory: '/proj',
     })
     expect(useStagedChangesStore.getState().list(CHAT)).toHaveLength(0)
@@ -186,7 +212,7 @@ describe('applyStagedChange refuses to overwrite a file that moved on', () => {
     expect(fsWrite).toHaveBeenCalledWith('fs_write', {
       path: '/proj/a.py',
       content: 'a\nCHANGED\nc\nadded by another tool',
-      chatId: CHAT,
+      chatId: SLUG,
       workingDirectory: '/proj',
     })
     expect(useStagedChangesStore.getState().list(CHAT)).toHaveLength(0)

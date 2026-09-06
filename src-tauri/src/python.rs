@@ -911,4 +911,23 @@ mod tests {
         assert!(launcher_list_paths("").is_empty());
         assert!(launcher_list_paths("no launcher here\n").is_empty());
     }
+
+    // Ticket 0004, sockenmonster, 2026-09-06: his machine runs the new Python
+    // install manager, whose `py -0p` prints the tag with a bitness suffix in
+    // brackets. The path after the star is what matters, and it is read.
+    #[test]
+    fn the_install_manager_listing_with_its_bracketed_tag_is_read_too() {
+        let listing = "-V:3.14[-64] *   C:\\Users\\milan\\AppData\\Local\\Python\\pythoncore-3.14-64\\python.exe\n";
+        assert_eq!(
+            launcher_list_paths(listing),
+            vec!["C:\\Users\\milan\\AppData\\Local\\Python\\pythoncore-3.14-64\\python.exe"]
+        );
+        // and that Python is outside the trainer's range, so the winget step runs
+        assert!(!crate::commands::trainer::trainer_supports_python("3.14.6"));
+        assert!(crate::commands::trainer::choose_trainer_python(&[(
+            "C:\\Users\\milan\\AppData\\Local\\Python\\pythoncore-3.14-64\\python.exe".to_string(),
+            "3.14.6".to_string(),
+        )])
+        .is_none());
+    }
 }
