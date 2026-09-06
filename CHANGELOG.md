@@ -254,8 +254,10 @@ and the built-in engine has a name of its own, the LU Engine.
   PyTorch whose Windows runtime library is missing gets the Visual C++ runtime
   installed by LU instead of a link; the setup proves that PyTorch loads
   before it calls the environment ready; a card below 12 GB is told so before
-  ten minutes of caching; and a run that runs out of memory on the card says
-  what to close. Lines from winget stay out of the note under the button.
+  ten minutes of caching; the local chat model is paused for the run and
+  comes back afterwards, so it no longer squats the memory the recipe needs;
+  and a run that still runs out of memory on the card says what to close.
+  Lines from winget stay out of the note under the button.
 - **AMD on Windows is read from the HIP SDK itself.** The only ROCm probe ran
   rocm-smi, which the Windows SDK does not ship, so an installed ROCm went
   unseen. LU reads HIP_PATH and hipinfo now and names the card architecture,

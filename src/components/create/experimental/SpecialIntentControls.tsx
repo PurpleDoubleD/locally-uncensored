@@ -395,7 +395,7 @@ function LocalTrainControls() {
       </div>
       {!isGenerating && (
         <div className="t-label text-gray-600 flex items-center gap-1.5">
-          <span>Runs on your GPU and takes a while ({trainSteps} steps). The character lands in your local LoRAs.</span>
+          <span>Runs on your GPU and takes a while ({trainSteps} steps). The local chat model pauses for the run. The character lands in your local LoRAs.</span>
           {/* The run repairs its own environment now (A2), so this is no
               longer the only way out of a broken install. It stays because
               the button used to render ONLY while the environment counted as

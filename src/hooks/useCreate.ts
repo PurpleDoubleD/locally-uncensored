@@ -388,6 +388,13 @@ export function useCreate() {
     setError(null)
     setIsGenerating(true)
     trainingActive.current = true
+    // The trainer is a 12 GB recipe on a 12 GB card. A resident chat model
+    // (the built-in engine, Ollama, LM Studio) squats 2 to 9 GB of that and
+    // the run dies in the text-encoder cache or the first training step with
+    // CUDA out of memory. Same hand-off as a render (Z36): capture what is
+    // resident, save the built-in engine's KV slot, evict, and bring it all
+    // back in the finally below. exclusiveVramMode 'never' skips it.
+    let trainingEviction: RenderEviction | null = null
     try {
       const setId = trigger
       await clearTrainingSet(setId)
@@ -399,6 +406,10 @@ export function useCreate() {
         n += 1
         setProgress(2 + Math.round((n / staged.length) * 5), `Staging photos (${n}/${staged.length})...`)
       }
+      setProgress(7, 'Freeing the card for training (the local chat model pauses until the run ends)...')
+      try {
+        trainingEviction = await evictChatBackendsForRender()
+      } catch { /* VRAM housekeeping is best-effort */ }
       setProgress(8, 'Starting the training run...')
       await startCharacterTraining(setId, trigger, trigger, state.trainSteps)
       for (;;) {
@@ -440,6 +451,9 @@ export function useCreate() {
       trainingActive.current = false
       useCreateStore.getState().setIsGenerating(false)
       useCreateStore.getState().setProgress(0)
+      // The chat model comes back the way it does after a render: fire and
+      // forget, the reload must not hold the Create UI.
+      if (trainingEviction) void restoreChatBackendsAfterRender(trainingEviction)
     }
   }, [])
 
