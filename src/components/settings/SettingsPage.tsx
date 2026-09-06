@@ -1957,7 +1957,7 @@ export function SettingsPage() {
                   <Lock size={12} className="mt-0.5 shrink-0 text-emerald-500" />
                   <div>
                     <p className="text-gray-700 dark:text-gray-300 font-medium mb-0.5">100% local by default.</p>
-                    <p>Chat, agent runs, image &amp; video generation all execute on your machine. No telemetry, no analytics, no model pings home. The only network calls LU makes unless you explicitly opt in are: update checks against GitHub Releases, and cloud provider APIs (OpenAI, Anthropic, etc.) that you configure yourself with your own API keys.</p>
+                    <p>Chat, agent runs, image &amp; video generation all execute on your machine. No telemetry, no analytics, no model pings home. The only network calls LU makes unless you explicitly opt in are: update checks against GitHub Releases, cloud provider APIs (OpenAI, Anthropic, etc.) that you configure yourself with your own API keys, and one anonymous daily count to lu-labs.ai when you press the Cloud switch (which way it was pressed, platform, app version, nothing else).</p>
                   </div>
                 </div>
                 <div className="flex items-start gap-2 pt-1.5">

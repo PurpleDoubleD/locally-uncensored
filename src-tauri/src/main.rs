@@ -456,6 +456,8 @@ fn main() {
             commands::proxy::cancel_model_pull,
             // Cloud "Hosted LU Workflows" waitlist — opt-in email capture
             commands::waitlist::waitlist_submit,
+            // The Cloud switch counts its presses anonymously (funnel.rs)
+            commands::funnel::funnel_ping,
             // B7 (uselu Phase 4 inspiration) — one-shot diagnostic probe
             commands::health::system_health,
             // Audit #01 — the app log file: the frontend mirrors its warn /

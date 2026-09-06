@@ -12,6 +12,7 @@ import { useSettingsStore } from '../../stores/settingsStore'
 import { useUIStore } from '../../stores/uiStore'
 import { useCloudAuthStore, deriveCloudAvailable } from '../../stores/cloudAuthStore'
 import { cloudSwitchClick, CLOUD_ARM_TIMEOUT_MS } from '../../lib/cloud-switch-guard'
+import { reportCloudSwitch } from '../../api/funnel'
 import { cn } from '../create/ui/cn'
 import { MONOGRAM, MONOGRAM_INVERT } from '../layout/brand'
 
@@ -46,7 +47,11 @@ export function CloudSwitch() {
   }, [armedRaw])
 
   const toggle = () => {
-    switch (cloudSwitchClick({ on, available, armed })) {
+    const action = cloudSwitchClick({ on, available, armed })
+    // Counted before it happens, anonymously (api/funnel): which way the
+    // press went is the whole message.
+    reportCloudSwitch(action)
+    switch (action) {
       case 'leave-cloud':
         setArmed(false)
         updateSettings({ appMode: 'local' })

@@ -27,6 +27,7 @@ pub mod trainer;
 pub mod tts;
 pub mod video;
 pub mod waitlist;
+pub mod funnel;
 pub mod whisper;
 
 // ── uselu-compat error helpers ────────────────────────────────────────

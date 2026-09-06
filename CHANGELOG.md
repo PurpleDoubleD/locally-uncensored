@@ -14,6 +14,12 @@ and the built-in engine has a name of its own, the LU Engine.
 
 ### Added
 
+- **The Cloud switch counts its presses anonymously.** Which way it was
+  pressed (gate, armed, into Cloud, back to Local), platform and app version
+  go into a daily count on lu-labs.ai, nothing else. It tells us whether
+  anyone finds the switch; local mode stays silent otherwise, and the privacy
+  text in Settings names the one call.
+
 - **Compact mode.** Type /compact and the older turns of the conversation are
   folded into a summary while the recent ones stay as they are; a few words
   after the command say what the summary should focus on. The chat model
