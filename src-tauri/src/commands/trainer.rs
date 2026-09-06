@@ -1377,6 +1377,19 @@ pub(crate) fn parse_vram_mib(stdout: &str) -> Option<u64> {
 /// The run's own dead ends, named. CUDA out of memory is the one a 12 GB card
 /// hits when something else holds part of it (a browser playing video, a
 /// game, ComfyUI with a model loaded), and the raw traceback says none of that.
+/// Every step of the run ends the same way when its child fails: a cancel
+/// stays a cancel, anything else goes through `training_failure_message`, so
+/// a card that fills up during the latent or text-encoder cache gets the same
+/// named cause and way out as one that fills up in the training step (the
+/// cache steps used to hand the raw Python tail to the note).
+fn end_failed_run(run: &Arc<Mutex<crate::state::InstallState>>, err: &str, vram_mib: Option<u64>) {
+    if err == "cancelled" {
+        set_status(run, "cancelled", err);
+    } else {
+        set_status(run, "error", &training_failure_message(err, vram_mib));
+    }
+}
+
 pub(crate) fn training_failure_message(err: &str, vram_mib: Option<u64>) -> String {
     let low = err.to_ascii_lowercase();
     if low.contains("out of memory") || low.contains("outofmemoryerror") {
@@ -1891,7 +1904,7 @@ pub fn start_character_training(
             "--vae", &vae_s,
         ]);
         if let Err(e) = run_streamed(c1, "latent cache", &run, &cancel, &pid_slot) {
-            set_status(&run, if e == "cancelled" { "cancelled" } else { "error" }, &e);
+            end_failed_run(&run, &e, vram_mib);
             return;
         }
 
@@ -1906,7 +1919,7 @@ pub fn start_character_training(
             "--fp8_llm",
         ]);
         if let Err(e) = run_streamed(c2, "text encoder cache", &run, &cancel, &pid_slot) {
-            set_status(&run, if e == "cancelled" { "cancelled" } else { "error" }, &e);
+            end_failed_run(&run, &e, vram_mib);
             return;
         }
 
@@ -1963,11 +1976,7 @@ pub fn start_character_training(
             "--output_name", &out_name,
         ]);
         if let Err(e) = run_streamed(c3, "training", &run, &cancel, &pid_slot) {
-            if e == "cancelled" {
-                set_status(&run, "cancelled", &e);
-            } else {
-                set_status(&run, "error", &training_failure_message(&e, vram_mib));
-            }
+            end_failed_run(&run, &e, vram_mib);
             return;
         }
 
@@ -1989,7 +1998,7 @@ pub fn start_character_training(
             "--target", "other",
         ]);
         if let Err(e) = run_streamed(c4, "lora convert", &run, &cancel, &pid_slot) {
-            set_status(&run, if e == "cancelled" { "cancelled" } else { "error" }, &e);
+            end_failed_run(&run, &e, vram_mib);
             return;
         }
 
@@ -3184,6 +3193,19 @@ mod journey_tests {
         assert!(small.contains("8 GB"), "{small}");
         assert!(small.contains("12 GB"), "{small}");
         assert!(small.contains("Cloud mode"), "names the way that works: {small}");
+    }
+
+    #[test]
+    fn every_step_of_the_run_ends_a_failure_through_the_same_door() {
+        // A card that fills up during the latent or text-encoder cache used to
+        // hand the raw Python tail to the note; only the training step named
+        // the cause. All four children now end through end_failed_run.
+        let src = include_str!("trainer.rs");
+        let run = &src[src.find("pub fn start_character_training").expect("start fn")..];
+        let run = &run[..run.find("pub fn character_training_status").expect("end of run")];
+        assert_eq!(run.matches("if let Err(e) = run_streamed(c").count(), 4, "the run drives four children");
+        assert_eq!(run.matches("end_failed_run(&run, &e, vram_mib)").count(), 4, "each child failure goes through the helper");
+        assert!(!run.contains("{ \"cancelled\" } else { \"error\" }"), "a raw error still reaches the note");
     }
 
     #[test]
