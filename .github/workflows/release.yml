@@ -259,7 +259,14 @@ jobs:
           # and the input does nothing. The enforce-prerelease job below is what
           # actually holds the promise.
           prerelease: true
-          args: ${{ matrix.args }}
+          # The updater artefacts, and with them latest.json and the .sig files,
+          # are requested HERE, in the one lane that holds the signing key, and
+          # not in the checked-in tauri.conf.json: ci.yml builds that file
+          # without a key (scripts/ci-tauri-build.sh), and a config that asks
+          # for signed artefacts cannot be built by anyone who lacks the key
+          # (a0030ad2, the exit-1-after-bundling defect of v2.6.7). The overlay
+          # is merged on top of the checked-in config by `tauri build`.
+          args: --config src-tauri/tauri.release.conf.json ${{ matrix.args }}
 
   # The promise above, made real for every trigger. Runs after the binaries are
   # attached, so a release published as a full release is put back before

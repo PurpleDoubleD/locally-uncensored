@@ -38,7 +38,6 @@
   },
   "bundle": {
     "active": true,
-    "createUpdaterArtifacts": "v1Compatible",
     "targets": "all",
     "publisher": "PurpleDoubleD",
     "copyright": "Copyright (c) 2026 PurpleDoubleD. Licensed under AGPL-3.0.",

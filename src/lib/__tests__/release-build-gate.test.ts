@@ -15,8 +15,9 @@
  * artefacts while `plugins.updater.pubkey` sat next to it, so the bundler
  * demanded a private key that only the release runner has. Anybody else —
  * contributor, fork, AGPL-3.0 §6 recipient — got exit 1. Fixed in a0030ad2 by
- * removing that one field; `updater-tot-und-unsigniert.test.ts` keeps the
- * config half from coming back.
+ * removing that one field. The release lane asks for the updater artefacts
+ * itself (`--config src-tauri/tauri.release.conf.json`, see the last describe
+ * below); `die-app-heisst-wie-die-app.test.ts` keeps the config half honest.
  *
  * This file keeps the OTHER half from coming back: the reason nobody noticed
  * for a whole release. `.github/workflows/ci.yml` ran `npm run build` (vite),
@@ -159,6 +160,33 @@ describe('ci.yml actually tries to build the product', () => {
     expect(CI_YML).toMatch(/^\s{2}workflow_call:/m)
     expect(jobBlock(RELEASE_YML, 'gate')).toContain('uses: ./.github/workflows/ci.yml')
     expect(jobBlock(RELEASE_YML, 'build-tauri')).toMatch(/^\s*needs:\s*gate\s*$/m)
+  })
+})
+
+describe('the keyless gate and the signed release ask for different things', () => {
+  // Measured 2026-09-06 on a fresh Ubuntu 22.04 box, at 16b2b0f6: with
+  // `bundle.createUpdaterArtifacts` back in the checked-in config (127e73bc),
+  // the gate script bundled deb, rpm and AppImage and then exited 1 on the
+  // signing complaint — the 10bfa0d7 shape exactly. release.yml's build-tauri
+  // sits behind `needs: gate`, so that red would have meant no release assets
+  // at all. The updater artefacts are therefore requested by the release lane
+  // alone, through an overlay the gate never sees.
+  const conf = (rel: string) => JSON.parse(read(rel))
+
+  it('the checked-in configs can be built without a key', () => {
+    for (const f of ['tauri.conf.json', 'tauri.windows.conf.json', 'tauri.linux.conf.json', 'tauri.macos.conf.json']) {
+      expect(conf(`src-tauri/${f}`).bundle?.createUpdaterArtifacts, f).toBeUndefined()
+    }
+  })
+
+  it('the release lane requests the updater artefacts through the overlay', () => {
+    expect(conf('src-tauri/tauri.release.conf.json').bundle?.createUpdaterArtifacts).toBe('v1Compatible')
+    const build = withoutComments(jobBlock(RELEASE_YML, 'build-tauri'))
+    expect(build).toMatch(/^\s*args:\s*--config src-tauri\/tauri\.release\.conf\.json(\s|$)/m)
+  })
+
+  it('and the gate never sees that overlay', () => {
+    expect(withoutComments(jobBlock(CI_YML, 'tauri-build'))).not.toMatch(/tauri\.release\.conf\.json/)
   })
 })
 

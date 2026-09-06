@@ -27,6 +27,9 @@ const basis = lies('tauri.conf.json')
 const windows = lies('tauri.windows.conf.json')
 const linux = lies('tauri.linux.conf.json')
 const macos = lies('tauri.macos.conf.json')
+// Das Overlay, das nur der Release-Lauf auf die Basis legt (release.yml).
+const release = lies('tauri.release.conf.json')
+const releaseYml = readFileSync(resolve(TAURI, '../.github/workflows/release.yml'), 'utf8')
 
 describe('wie das ausgelieferte Programm heisst', () => {
   it('nirgends steht Experiment', () => {
@@ -76,10 +79,19 @@ describe('ob ein Update je ankommt', () => {
     expect(eps.join(' ')).not.toMatch(/\/v?\d+\.\d+\.\d+\//)
   })
 
-  it('der Bau legt die Update-Dateien ueberhaupt an', () => {
+  it('der Release-Bau legt die Update-Dateien an, die Basis fordert sie nicht', () => {
     // Ohne createUpdaterArtifacts entsteht keine latest.json und keine
-    // Signatur, und dann ist der Endpunkt oben eine Adresse ohne Ziel.
-    expect(basis.bundle?.createUpdaterArtifacts).toBe('v1Compatible')
+    // Signatur, und dann ist der Endpunkt oben eine Adresse ohne Ziel. Das
+    // Feld gehoert trotzdem NICHT in die Basis: mit ihm verlangt der Bundler
+    // den privaten Schluessel, den nur der Release-Laeufer hat, und das
+    // keylose Bau-Tor in ci.yml (scripts/ci-tauri-build.sh) geht rot, bevor
+    // release.yml ueberhaupt baut (gemessen 06.09.2026 auf Ubuntu 22.04: deb,
+    // rpm und AppImage fertig, dann Exit 1 mit "no private key"). Deshalb
+    // fordert der Release-Lauf die Artefakte selbst an, per Overlay auf dem
+    // tauri-action-Schritt.
+    expect(basis.bundle?.createUpdaterArtifacts).toBeUndefined()
+    expect(release.bundle?.createUpdaterArtifacts).toBe('v1Compatible')
+    expect(releaseYml).toMatch(/^\s*args:\s*--config src-tauri\/tauri\.release\.conf\.json(\s|$)/m)
   })
 
   it('Ziel und Artefakte gehoeren zusammen', () => {
@@ -89,9 +101,11 @@ describe('ob ein Update je ankommt', () => {
     // und DANACH mit "A public key has been found, but no private key" auf
     // Exit 1 geht (gemessen am 31.08.2026 unter Windows, am 01.09. auf dem
     // Mac). Verboten ist die Kombination, nicht das einzelne Feld.
+    // Geprueft wird, was der Release-Bau wirklich sieht: Basis plus Overlay.
+    const gebuendelt = { ...basis.bundle, ...release.bundle }
     const zielt = (basis.plugins?.updater?.endpoints ?? []).length > 0
-    const signiert = basis.bundle?.createUpdaterArtifacts !== undefined
-      && basis.bundle?.createUpdaterArtifacts !== false
+    const signiert = gebuendelt.createUpdaterArtifacts !== undefined
+      && gebuendelt.createUpdaterArtifacts !== false
     expect(signiert && !zielt, 'Artefakte an, aber kein Ziel').toBe(false)
   })
 

@@ -48,8 +48,10 @@
 # That is the intended reading — "this tree cannot be built by anyone who is not
 # the release runner" is a finding, not a false alarm — but it does mean the
 # release branch has to pass the updater-artifact request to the release build
-# (`tauri build --config …` in release.yml) instead of baking it into the
-# checked-in config. See the report for the human-side task.
+# instead of baking it into the checked-in config. That is what release.yml
+# does: `--config src-tauri/tauri.release.conf.json` on its tauri-action step,
+# a one-field overlay this script never reads (release-build-gate.test.ts
+# holds both halves of that arrangement).
 #
 # WHAT "PASSED" MEANS HERE
 # ------------------------
