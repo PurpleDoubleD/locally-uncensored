@@ -246,6 +246,16 @@ and the built-in engine has a name of its own, the LU Engine.
   there is none, rebuilds an environment that was built from the wrong one,
   and the failure text under the button is no longer cut after one line.
   Discord ticket 0004.
+- **The local trainer no longer hands out instructions.** Every dead end on
+  the way from Set up trainer to a finished character either fixes itself or
+  says exactly what is wrong: the trainer source arrives as an archive, so no
+  git is needed on the machine; the drive is checked for room before the first
+  byte instead of after 2.5 GB; a download that breaks off is retried twice; a
+  PyTorch whose Windows runtime library is missing gets the Visual C++ runtime
+  installed by LU instead of a link; the setup proves that PyTorch loads
+  before it calls the environment ready; a card below 12 GB is told so before
+  ten minutes of caching; and a run that runs out of memory on the card says
+  what to close. Lines from winget stay out of the note under the button.
 - **AMD on Windows is read from the HIP SDK itself.** The only ROCm probe ran
   rocm-smi, which the Windows SDK does not ship, so an installed ROCm went
   unseen. LU reads HIP_PATH and hipinfo now and names the card architecture,

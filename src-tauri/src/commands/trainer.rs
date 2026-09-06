@@ -24,7 +24,7 @@ use crate::os_error;
 
 use crate::state::AppState;
 use std::fs;
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::Ordering;
@@ -39,6 +39,32 @@ const CREATE_NO_WINDOW: u32 = 0x08000000;
 
 const MUSUBI_REPO: &str = "https://github.com/kohya-ss/musubi-tuner.git";
 const MUSUBI_TAG: &str = "v0.3.4";
+
+/// The same tag as a plain archive from GitHub's codeload host. The trainer
+/// used to depend on a git binary for one shallow clone, and a machine without
+/// git ended the setup with "git clone could not start" and a pointer to go
+/// and install git. The archive needs nothing but the network; git stays as
+/// the fallback for the day the archive host is unreachable and git is there.
+fn musubi_archive_url() -> String {
+    format!("https://codeload.github.com/kohya-ss/musubi-tuner/zip/refs/tags/{MUSUBI_TAG}")
+}
+
+/// What a fresh setup writes to the drive: PyTorch and its CUDA libraries are
+/// 2.5 GB compressed and about 5 GB unpacked, pip keeps the download while it
+/// unpacks, and the trainer's own dependencies add a gigabyte. Measured on the
+/// box on 06.09.2026: 5.0 GB in the trainer folder plus 2.4 GB in pip's cache.
+/// Asked before the first byte, because the old check was pip's "No space left
+/// on device" with 2.5 GB already on the way.
+const TRAINER_SETUP_NEEDS_GIB: u64 = 10;
+/// A torch reinstall on top of an existing one: pip holds both copies while
+/// it swaps them (see DISK_NEXT_STEP).
+const TRAINER_REINSTALL_NEEDS_GIB: u64 = 7;
+
+/// The card the documented recipe (fp8 base, block swap, gradient
+/// checkpointing, 8 bit optimizer) was proven on has 12 GB. Below that the run
+/// gets through both cache steps and dies with CUDA out of memory in the first
+/// training step, after ten minutes of work. Asked before the first step.
+const TRAINER_VRAM_FLOOR_MIB: u64 = 11 * 1024;
 
 /// Known Z-Image training-base files, resolved by exact filename from the
 /// trainer root's models dir or the active ComfyUI models tree.
@@ -449,7 +475,7 @@ fn musubi_installed(root: &Path) -> bool {
 /// preflight_verdict below. The trainer package is probed with find_spec
 /// rather than a real import: importing it pulls the whole training stack and
 /// would turn a cheap check into seconds of work and a second CUDA context.
-const TORCH_PREFLIGHT_PY: &str = "import importlib.util\nimport torch\nprint('TORCH_OK', torch.__version__)\ncuda = torch.cuda.is_available()\nprint('CUDA', '1' if cuda else '0')\nif cuda:\n    cap = torch.cuda.get_device_capability(0)\n    print('CAP', cap[0], cap[1])\n    print('ARCHS', ' '.join(torch.cuda.get_arch_list()))\nif importlib.util.find_spec('musubi_tuner') is not None:\n    print('MUSUBI_OK')\n";
+const TORCH_PREFLIGHT_PY: &str = "import importlib.util\nimport torch\nprint('TORCH_OK', torch.__version__)\ncuda = torch.cuda.is_available()\nprint('CUDA', '1' if cuda else '0')\nif cuda:\n    cap = torch.cuda.get_device_capability(0)\n    print('CAP', cap[0], cap[1])\n    print('ARCHS', ' '.join(torch.cuda.get_arch_list()))\n    print('VRAM_MIB', torch.cuda.get_device_properties(0).total_memory // (1024 * 1024))\nif importlib.util.find_spec('musubi_tuner') is not None:\n    print('MUSUBI_OK')\n";
 
 /// What the preflight found. Four failure classes that all used to surface as
 /// a raw error deep inside the run: torch not importable (half install), a
@@ -639,6 +665,9 @@ pub(crate) fn repair_failed_message(after: &Preflight, tail: &str) -> String {
 /// python.org rather than at the button every other failure here names.
 fn already_explained(err: &str) -> bool {
     err.contains("LU finds it on its own")
+        // The room check answers before a byte is downloaded and names the
+        // drive; wrapping it would add "check that you are online" on top.
+        || err.contains("before anything is downloaded")
         // The AMD refusal is the second one: it names the OS wall, says that
         // nothing was downloaded, and pointing at Set up trainer would only
         // walk the customer into the same wall again.
@@ -736,12 +765,128 @@ fn preflight_verdict(exit_ok: bool, stdout: &str, stderr: &str, gpu: Option<&str
 /// Run one child to completion, streaming stdout+stderr lines into the run
 /// state. Registers the child pid so cancel can kill it. Returns Err on
 /// non-zero exit (with the last stderr lines) or on cancel.
+/// Whether a child's own lines go into the log the note under the button
+/// reads. winget prints in the language of the Windows it runs on, and on
+/// the box the note read "Download läuft ..." in an English app while LU
+/// fetched Python 3.12 (06.09.2026). Quiet keeps the tail for the failure
+/// message and lets the caller narrate in English.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Echo {
+    Log,
+    Quiet,
+}
+
 fn run_streamed(
+    cmd: Command,
+    label: &str,
+    run: &Arc<Mutex<crate::state::InstallState>>,
+    cancel: &Arc<std::sync::atomic::AtomicBool>,
+    pid_slot: &Arc<Mutex<Option<u32>>>,
+) -> Result<(), String> {
+    run_child(cmd, label, run, cancel, pid_slot, Echo::Log)
+}
+
+fn run_quiet(
+    cmd: Command,
+    label: &str,
+    run: &Arc<Mutex<crate::state::InstallState>>,
+    cancel: &Arc<std::sync::atomic::AtomicBool>,
+    pid_slot: &Arc<Mutex<Option<u32>>>,
+) -> Result<(), String> {
+    run_child(cmd, label, run, cancel, pid_slot, Echo::Quiet)
+}
+
+/// winget as LU runs it: silent, both agreements accepted so it never waits
+/// for a keypress inside our thread, and quiet (see Echo). A per user package
+/// takes `--scope user` and needs no elevation; a machine wide one (the Visual
+/// C++ runtime) is left without a scope, its installer asks Windows for
+/// elevation on its own.
+pub(crate) fn winget_install_args(id: &str, user_scope: bool) -> Vec<String> {
+    let mut args: Vec<String> = ["install", id, "--silent", "--accept-package-agreements", "--accept-source-agreements"]
+        .iter()
+        .map(|a| a.to_string())
+        .collect();
+    if user_scope {
+        args.push("--scope".to_string());
+        args.push("user".to_string());
+    }
+    args
+}
+
+fn winget_install(
+    id: &str,
+    user_scope: bool,
+    run: &Arc<Mutex<crate::state::InstallState>>,
+    cancel: &Arc<std::sync::atomic::AtomicBool>,
+    pid_slot: &Arc<Mutex<Option<u32>>>,
+) -> Result<(), String> {
+    let mut winget = Command::new("winget");
+    winget.args(winget_install_args(id, user_scope));
+    run_quiet(winget, &format!("winget install {id}"), run, cancel, pid_slot)
+}
+
+fn cancel_requested(cancel: &Arc<std::sync::atomic::AtomicBool>) -> bool {
+    cancel.load(Ordering::SeqCst)
+}
+
+/// Sleeps `secs`, a third of a second at a time, and says whether Cancel came
+/// first.
+fn wait_or_cancel(cancel: &Arc<std::sync::atomic::AtomicBool>, secs: u64) -> bool {
+    let until = std::time::Instant::now() + std::time::Duration::from_secs(secs);
+    while std::time::Instant::now() < until {
+        if cancel_requested(cancel) {
+            return true;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(300));
+    }
+    false
+}
+
+/// A pip run that died on the network, not on the machine. Worth another try
+/// after a pause; every other class comes back identical on a retry.
+pub(crate) fn is_transient_network(err: &str) -> bool {
+    use crate::commands::install::pip::PipFailureKind as K;
+    matches!(
+        crate::commands::install::pip::pip_failure_kind(err),
+        K::Network | K::Timeout | K::RateLimited
+    )
+}
+
+/// The two pip steps are the ones the network can break halfway, and the old
+/// answer to a connection dropped at 2 GB of 2.5 was the dead end sentence.
+/// Two retries after a pause the customer can still cancel, then the sentence.
+fn pip_with_retry(
+    mut build: impl FnMut() -> Command,
+    label: &str,
+    run: &Arc<Mutex<crate::state::InstallState>>,
+    cancel: &Arc<std::sync::atomic::AtomicBool>,
+    pid_slot: &Arc<Mutex<Option<u32>>>,
+) -> Result<(), String> {
+    const RETRIES: u32 = 2;
+    let mut attempt = 0;
+    loop {
+        match run_streamed(build(), label, run, cancel, pid_slot) {
+            Err(e) if e != "cancelled" && attempt < RETRIES && is_transient_network(&e) => {
+                attempt += 1;
+                push_log(run, &format!(
+                    "The download broke off during {label}. Waiting 15 seconds and trying again ({attempt} of {RETRIES})..."
+                ));
+                if wait_or_cancel(cancel, 15) {
+                    return Err("cancelled".to_string());
+                }
+            }
+            other => return other,
+        }
+    }
+}
+
+fn run_child(
     mut cmd: Command,
     label: &str,
     run: &Arc<Mutex<crate::state::InstallState>>,
     cancel: &Arc<std::sync::atomic::AtomicBool>,
     pid_slot: &Arc<Mutex<Option<u32>>>,
+    echo: Echo,
 ) -> Result<(), String> {
     force_python_utf8(&mut cmd);
     cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
@@ -781,18 +926,21 @@ fn run_streamed(
                 if trimmed.is_empty() {
                     continue;
                 }
+                if let Ok(mut t) = tail.lock() {
+                    t.push(trimmed.to_string());
+                    if t.len() > 12 {
+                        t.remove(0);
+                    }
+                }
+                if echo == Echo::Quiet {
+                    continue;
+                }
                 // Step counter for the UI meter: musubi/tqdm emit
                 // "steps: NN%|...| 123/1600 [...]" style lines.
                 if let Some((cur, total)) = parse_step_counter(trimmed) {
                     if let Ok(mut s) = run.lock() {
                         s.download_progress = cur;
                         s.download_total = total;
-                    }
-                }
-                if let Ok(mut t) = tail.lock() {
-                    t.push(trimmed.to_string());
-                    if t.len() > 12 {
-                        t.remove(0);
                     }
                 }
                 push_log(&run, trimmed);
@@ -893,15 +1041,11 @@ pub fn install_character_trainer(
         }
     }
     let root = trainer_root(&app);
+    // An empty or unusable default Python is no longer a reason to stop here:
+    // trainer_base_python surveys the machine and, on Windows, installs 3.12
+    // itself. The old guard sent the customer to Settings for the one case
+    // the setup can now handle on its own.
     let python_bin = state.python_bin.lock().unwrap().clone();
-    if python_bin.is_empty() || !crate::python::is_real_python(&python_bin) {
-        set_status(
-            &state.trainer_install,
-            "error",
-            "No usable Python found. Install Python first (Settings), then retry.",
-        );
-        return Err("no_python".to_string());
-    }
 
     let install = state.trainer_install.clone();
     let cancel = state.trainer_cancel.clone();
@@ -1037,21 +1181,11 @@ fn trainer_base_python(
             "Installing Python 3.12 for the trainer (this machine has {}, the trainer needs {TRAINER_PYTHON_RANGE})...",
             found.iter().map(|(_, v)| v.as_str()).collect::<Vec<_>>().join(" and ")
         ));
-        let mut winget = Command::new("winget");
-        winget.args([
-            "install",
-            "Python.Python.3.12",
-            "--silent",
-            "--accept-package-agreements",
-            "--accept-source-agreements",
-            "--scope",
-            "user",
-        ]);
         winget_tried = true;
-        match run_streamed(winget, "winget python", state, cancel, pid_slot) {
-            Ok(()) => {}
+        match winget_install("Python.Python.3.12", true, state, cancel, pid_slot) {
+            Ok(()) => push_log(state, "Python 3.12 is installed."),
             Err(e) if e == "cancelled" => return Err(e),
-            Err(e) => push_log(state, &e),
+            Err(e) => push_log(state, &format!("winget could not install Python 3.12: {}", useful_tail(&e))),
         }
         // Asked again whatever winget said: its exit code is not the fact
         // that matters, the interpreter on disk is.
@@ -1070,6 +1204,227 @@ fn trainer_base_python(
         ));
     }
     Ok((path, version))
+}
+
+fn musubi_source_marker(root: &Path) -> PathBuf {
+    repo_dir(root).join(".lu-source")
+}
+
+/// The trainer source is there and is the pinned tag: either the archive this
+/// version unpacks (marker file carrying the tag) or a git checkout from an
+/// older LU, which is kept as it is.
+pub(crate) fn musubi_source_present(root: &Path) -> bool {
+    let repo = repo_dir(root);
+    if !repo.join("src").join("musubi_tuner").exists() {
+        return false;
+    }
+    repo.join(".git").exists()
+        || fs::read_to_string(musubi_source_marker(root))
+            .map(|s| s.trim() == MUSUBI_TAG)
+            .unwrap_or(false)
+}
+
+/// Step 1 without a git binary: the tag as an archive, unpacked into place.
+/// git is the fallback, not the requirement, so a machine without it gets the
+/// network sentence when the archive fails, never "install git first".
+fn fetch_musubi_source(
+    root: &Path,
+    state: &Arc<Mutex<crate::state::InstallState>>,
+    status_kind: &str,
+    tag: &str,
+    cancel: &Arc<std::sync::atomic::AtomicBool>,
+    pid_slot: &Arc<Mutex<Option<u32>>>,
+) -> Result<(), String> {
+    set_status(state, status_kind, &format!("{tag} (1/4): getting musubi tuner {MUSUBI_TAG}..."));
+    let archive_err = match download_musubi_archive(root, state, cancel) {
+        Ok(()) => return Ok(()),
+        Err(e) if e == "cancelled" => return Err(e),
+        Err(e) => e,
+    };
+    let mut git = Command::new("git");
+    git.arg("--version");
+    #[cfg(target_os = "windows")]
+    git.creation_flags(CREATE_NO_WINDOW);
+    let has_git = git.output().map(|o| o.status.success()).unwrap_or(false);
+    if !has_git {
+        return Err(format!("Could not download the trainer source: {archive_err}"));
+    }
+    push_log(state, &format!("Could not get the trainer source as an archive ({archive_err}); getting it with git instead."));
+    let _ = fs::remove_dir_all(repo_dir(root));
+    let mut clone = Command::new("git");
+    clone.args(["clone", "--branch", MUSUBI_TAG, "--depth", "1", MUSUBI_REPO])
+        .arg(repo_dir(root));
+    run_streamed(clone, "git clone", state, cancel, pid_slot)
+}
+
+/// Download the tag archive into the trainer root, unpack it, move the one
+/// folder it contains to `<root>/musubi-tuner`, and mark it with the tag.
+/// Cancel is honoured between chunks, and a half download never becomes a
+/// half source: the move happens last.
+fn download_musubi_archive(
+    root: &Path,
+    state: &Arc<Mutex<crate::state::InstallState>>,
+    cancel: &Arc<std::sync::atomic::AtomicBool>,
+) -> Result<(), String> {
+    let url = musubi_archive_url();
+    let zip_path = root.join(format!("musubi-tuner-{MUSUBI_TAG}.zip"));
+    let unpack_dir = root.join(".musubi-unpack");
+    let client = reqwest::blocking::Client::builder()
+        .user_agent("LocallyUncensored/2.6")
+        .connect_timeout(std::time::Duration::from_secs(30))
+        .timeout(std::time::Duration::from_secs(1800))
+        .build()
+        .map_err(|e| format!("HTTP client: {}", os_error::english(&e)))?;
+    let response = client
+        .get(&url)
+        .send()
+        .map_err(|e| os_error::english(&e).to_string())?;
+    if !response.status().is_success() {
+        return Err(format!("HTTP {} from {url}", response.status()));
+    }
+    let mut file = fs::File::create(&zip_path)
+        .map_err(|e| format!("could not write the archive: {}", os_error::english(&e)))?;
+    let mut reader = BufReader::new(response);
+    let mut buf = [0u8; 65536];
+    let mut got: u64 = 0;
+    loop {
+        if cancel_requested(cancel) {
+            drop(file);
+            let _ = fs::remove_file(&zip_path);
+            return Err("cancelled".to_string());
+        }
+        let n = reader
+            .read(&mut buf)
+            .map_err(|e| format!("the download broke off: {}", os_error::english(&e)))?;
+        if n == 0 {
+            break;
+        }
+        std::io::Write::write_all(&mut file, &buf[..n])
+            .map_err(|e| format!("could not write the archive: {}", os_error::english(&e)))?;
+        got += n as u64;
+    }
+    drop(file);
+    push_log(state, &format!("Downloaded the trainer source ({:.1} MB), unpacking it...", got as f64 / 1e6));
+    let _ = fs::remove_dir_all(&unpack_dir);
+    let zipped = fs::File::open(&zip_path)
+        .map_err(|e| format!("could not read the archive: {}", os_error::english(&e)))?;
+    let mut archive = zip::ZipArchive::new(zipped)
+        .map_err(|e| format!("the archive could not be read: {e}"))?;
+    archive
+        .extract(&unpack_dir)
+        .map_err(|e| format!("the archive could not be unpacked: {e}"))?;
+    let inner = fs::read_dir(&unpack_dir)
+        .map_err(|e| format!("could not read the unpacked archive: {}", os_error::english(&e)))?
+        .filter_map(Result::ok)
+        .map(|e| e.path())
+        .find(|p| p.is_dir() && p.join("src").join("musubi_tuner").exists())
+        .ok_or_else(|| "the archive did not contain the trainer source".to_string())?;
+    let repo = repo_dir(root);
+    let _ = fs::remove_dir_all(&repo);
+    fs::rename(&inner, &repo)
+        .map_err(|e| format!("could not move the trainer source into place: {}", os_error::english(&e)))?;
+    fs::write(musubi_source_marker(root), MUSUBI_TAG)
+        .map_err(|e| format!("could not mark the trainer source: {}", os_error::english(&e)))?;
+    let _ = fs::remove_dir_all(&unpack_dir);
+    let _ = fs::remove_file(&zip_path);
+    Ok(())
+}
+
+/// Free room on the drive that holds the trainer folder against what the
+/// setup is about to write, before the first byte. None when there is room.
+pub(crate) fn disk_room_message(root: &Path, free: u64, needed_gib: u64) -> Option<String> {
+    let need = needed_gib.saturating_mul(1024 * 1024 * 1024);
+    if free >= need {
+        return None;
+    }
+    Some(format!(
+        "The drive holding the trainer folder ({}) has {:.1} GB free and the trainer setup needs about {needed_gib} GB before anything is downloaded (PyTorch alone is 2.5 GB and installs with both copies on disk). Free up room on that drive, then press Set up trainer in Character Studio.",
+        root.display(),
+        free as f64 / (1024.0 * 1024.0 * 1024.0)
+    ))
+}
+
+/// A torch that will not load because a Windows runtime library is missing or
+/// its native libraries fail to initialise: the class the Visual C++ runtime
+/// install fixes (ticket 007, falcon bob, on the ComfyUI side).
+pub(crate) fn runtime_library_missing(tail: &str) -> bool {
+    use crate::commands::install::pip::PipFailureKind as K;
+    matches!(
+        crate::commands::install::pip::pip_failure_kind(tail),
+        K::MissingRuntimeLibrary | K::NativeLoadFailure
+    )
+}
+
+/// The card's memory as the probe reports it, against the recipe's floor.
+pub(crate) fn vram_verdict(vram_mib: Option<u64>) -> Option<String> {
+    let mib = vram_mib?;
+    if mib >= TRAINER_VRAM_FLOOR_MIB {
+        return None;
+    }
+    Some(format!(
+        "This card has {:.0} GB of memory and the local training recipe needs 12 GB: it was proven on a 12 GB card with fp8 weights and block swapping, and below that the first training step runs out of memory after both cache steps. Character Studio in Cloud mode trains the same character without this limit.",
+        mib as f64 / 1024.0
+    ))
+}
+
+pub(crate) fn parse_vram_mib(stdout: &str) -> Option<u64> {
+    stdout
+        .lines()
+        .find_map(|l| l.trim().strip_prefix("VRAM_MIB "))
+        .and_then(|v| v.trim().parse().ok())
+}
+
+/// The run's own dead ends, named. CUDA out of memory is the one a 12 GB card
+/// hits when something else holds part of it (a browser playing video, a
+/// game, ComfyUI with a model loaded), and the raw traceback says none of that.
+pub(crate) fn training_failure_message(err: &str, vram_mib: Option<u64>) -> String {
+    let low = err.to_ascii_lowercase();
+    if low.contains("out of memory") || low.contains("outofmemoryerror") {
+        let card = vram_mib
+            .map(|m| format!(" This card has {:.0} GB.", m as f64 / 1024.0))
+            .unwrap_or_default();
+        return format!(
+            "Training ran out of memory on the card.{card} The recipe needs 12 GB free on the card while it runs: close other apps that use it (a browser playing video, a game, ComfyUI with a model loaded), then press Create again. If the card has less than 12 GB, Character Studio in Cloud mode trains the same character without this limit. Last steps: {}",
+            useful_tail(err)
+        );
+    }
+    err.to_string()
+}
+
+struct ProbeOutcome {
+    verdict: Preflight,
+    vram_mib: Option<u64>,
+}
+
+/// One probe for every place that asks whether the environment loads: the end
+/// of a setup, the start of a run, and the check after a repair.
+fn probe_trainer_env(vpy: &Path, gpu: Option<&str>, label: &str) -> ProbeOutcome {
+    let mut probe = Command::new(vpy);
+    probe.args(["-c", TORCH_PREFLIGHT_PY]);
+    force_python_utf8(&mut probe);
+    #[cfg(target_os = "windows")]
+    probe.creation_flags(CREATE_NO_WINDOW);
+    match probe.output() {
+        Ok(out) => {
+            let stdout = String::from_utf8_lossy(&out.stdout);
+            ProbeOutcome {
+                verdict: preflight_verdict(
+                    out.status.success(),
+                    &stdout,
+                    &String::from_utf8_lossy(&out.stderr),
+                    gpu,
+                ),
+                vram_mib: parse_vram_mib(&stdout),
+            }
+        }
+        Err(e) => ProbeOutcome {
+            verdict: Preflight::TorchBroken(format!(
+                "could not run the trainer python ({label}): {}",
+                os_error::english(&e)
+            )),
+            vram_mib: None,
+        },
+    }
 }
 
 /// The four install steps, idempotent by design: an existing checkout and a
@@ -1131,15 +1486,29 @@ fn provision_trainer_env(
 
     let _ = fs::create_dir_all(root.join("models"));
 
-    // 1) pinned clone (releases are the project's own stability advice)
-    if !repo_dir(root).join(".git").exists() {
-        set_status(state, status_kind, &format!("{tag} (1/4): getting musubi tuner {MUSUBI_TAG}..."));
-        let mut clone = Command::new("git");
-        clone.args(["clone", "--branch", MUSUBI_TAG, "--depth", "1", MUSUBI_REPO])
-            .arg(repo_dir(root));
-        run_streamed(clone, "git clone", state, cancel, pid_slot)?;
+    // Room before the first byte. A fresh install writes about 10 GB across
+    // the trainer folder and pip's cache; a reinstall holds two copies of
+    // torch for a moment; a repair that reinstalls nothing needs no room.
+    let force_reinstall = cap.is_some_and(|c| c >= 12) || repairing;
+    let needed_gib = if !torch_installed(root) {
+        TRAINER_SETUP_NEEDS_GIB
+    } else if force_reinstall {
+        TRAINER_REINSTALL_NEEDS_GIB
     } else {
-        push_log(state, "musubi tuner already present, keeping the pinned checkout.");
+        1
+    };
+    if let Some(free) = crate::commands::download::available_space_for(root) {
+        if let Some(msg) = disk_room_message(root, free, needed_gib) {
+            return Err(msg);
+        }
+    }
+
+    // 1) the pinned source (releases are the project's own stability advice),
+    // as an archive, so no git is needed on the machine.
+    if !musubi_source_present(root) {
+        fetch_musubi_source(root, state, status_kind, tag, cancel, pid_slot)?;
+    } else {
+        push_log(state, "musubi tuner already present, keeping the pinned source.");
     }
 
     // 2) venv. Asked as "does its python run, and which one is it", not "is
@@ -1175,23 +1544,70 @@ fn provision_trainer_env(
     // every other NVIDIA card keeps cu121, an AMD card on Linux gets ROCm.
     set_status(state, status_kind, &format!("{tag} (3/4): installing PyTorch into the trainer venv (~2.5 GB, one time)..."));
     push_log(state, &wheel_note);
-    let mut torch = Command::new(&vpy);
     let mut torch_args = vec!["-m", "pip", "install", "--progress-bar", "off", "--no-input"];
     // A finished but WRONG torch satisfies pip and would never be replaced:
     // cu121 on a Blackwell box, or the half install a repair was called for.
-    if cap.is_some_and(|c| c >= 12) || repairing {
+    if force_reinstall {
         torch_args.push("--force-reinstall");
     }
     torch_args.extend(["torch", "torchvision", "--index-url", torch_index]);
-    torch.args(&torch_args);
-    run_streamed(torch, "torch install", state, cancel, pid_slot)?;
+    let vpy_for_torch = vpy.clone();
+    pip_with_retry(
+        || {
+            let mut torch = Command::new(&vpy_for_torch);
+            torch.args(&torch_args);
+            torch
+        },
+        "torch install",
+        state,
+        cancel,
+        pid_slot,
+    )?;
 
     // 4) musubi + deps
     set_status(state, status_kind, &format!("{tag} (4/4): installing the trainer package..."));
-    let mut pkg = Command::new(&vpy);
-    pkg.args(["-m", "pip", "install", "--progress-bar", "off", "--no-input", "-e", "."])
-        .current_dir(repo_dir(root));
-    run_streamed(pkg, "musubi install", state, cancel, pid_slot)?;
+    let vpy_for_pkg = vpy.clone();
+    pip_with_retry(
+        || {
+            let mut pkg = Command::new(&vpy_for_pkg);
+            pkg.args(["-m", "pip", "install", "--progress-bar", "off", "--no-input", "-e", "."])
+                .current_dir(repo_dir(root));
+            pkg
+        },
+        "musubi install",
+        state,
+        cancel,
+        pid_slot,
+    )?;
+
+    // 5) the environment has to LOAD, not just be on disk. A torch whose
+    // native libraries will not start passed every step above and was found
+    // out by the run, ten minutes later, with a traceback and a link to
+    // microsoft.com. On Windows the missing piece is the Visual C++ runtime,
+    // and winget installs it; the customer only has to say yes to Windows.
+    set_status(state, status_kind, &format!("{tag}: checking that PyTorch loads..."));
+    let gpu = training_gpu_label();
+    let venv_exe = venv_python(root);
+    if let Preflight::TorchBroken(first_tail) = probe_trainer_env(&venv_exe, gpu, "after setup").verdict {
+        let mut tail = first_tail;
+        if std::env::consts::OS == "windows" && runtime_library_missing(&tail) {
+            set_status(
+                state,
+                status_kind,
+                "Installing the Microsoft Visual C++ runtime that PyTorch loads (Windows will ask for permission)...",
+            );
+            match winget_install("Microsoft.VCRedist.2015+.x64", false, state, cancel, pid_slot) {
+                Ok(()) => push_log(state, "The Visual C++ runtime is installed."),
+                Err(e) if e == "cancelled" => return Err(e),
+                Err(e) => push_log(state, &format!("LU could not install the Visual C++ runtime: {}", useful_tail(&e))),
+            }
+            match probe_trainer_env(&venv_exe, gpu, "after the runtime install").verdict {
+                Preflight::TorchBroken(again) => tail = again,
+                _ => return Ok(()),
+            }
+        }
+        return Err(format!("PyTorch does not load in the trainer environment.\n{tail}"));
+    }
     Ok(())
 }
 
@@ -1412,28 +1828,11 @@ pub fn start_character_training(
         // install plans from, so the check and the repair cannot disagree
         // about what is in the machine.
         let gpu_label = training_gpu_label();
-        let probe_env = |label: &str| -> Preflight {
-            let mut probe = Command::new(&vpy_s);
-            probe.args(["-c", TORCH_PREFLIGHT_PY]);
-            force_python_utf8(&mut probe);
-            #[cfg(target_os = "windows")]
-            probe.creation_flags(CREATE_NO_WINDOW);
-            match probe.output() {
-                Ok(out) => preflight_verdict(
-                    out.status.success(),
-                    &String::from_utf8_lossy(&out.stdout),
-                    &String::from_utf8_lossy(&out.stderr),
-                    gpu_label,
-                ),
-                Err(e) => Preflight::TorchBroken(format!(
-                    "could not run the trainer python ({label}): {}",
-                    os_error::english(&e)
-                )),
-            }
-        };
 
         set_status(&run, "running", "Checking the training environment...");
-        let verdict = probe_env("first check");
+        let first = probe_trainer_env(&vpy, gpu_label, "first check");
+        let verdict = first.verdict;
+        let mut vram_mib = first.vram_mib;
         if !verdict.is_ok() {
             push_log(&run, &verdict.message());
             push_log(&run, "Repairing it now, no action needed. Your training images and base models are left alone.");
@@ -1457,7 +1856,9 @@ pub fn start_character_training(
             // Only a SECOND failure is a dead end. Report what is still wrong
             // plus the tail of the repair log, so the message names the cause
             // instead of the symptom.
-            let after = probe_env("after repair");
+            let repaired = probe_trainer_env(&vpy, gpu_label, "after repair");
+            let after = repaired.verdict;
+            vram_mib = repaired.vram_mib;
             if !after.is_ok() {
                 let tail = run.lock().ok()
                     .map(|st| st.logs.iter().rev().take(8).rev().cloned().collect::<Vec<_>>().join(" | "))
@@ -1473,6 +1874,12 @@ pub fn start_character_training(
             push_log(&run, "Trainer environment repaired, starting the run.");
         } else {
             env_broken.store(false, Ordering::SeqCst);
+        }
+        // The card's memory, before ten minutes of caching: the recipe is a
+        // 12 GB recipe, and a smaller card dies in the first training step.
+        if let Some(msg) = vram_verdict(vram_mib) {
+            set_status(&run, "error", &msg);
+            return;
         }
 
         // 1) latent cache
@@ -1556,7 +1963,11 @@ pub fn start_character_training(
             "--output_name", &out_name,
         ]);
         if let Err(e) = run_streamed(c3, "training", &run, &cancel, &pid_slot) {
-            set_status(&run, if e == "cancelled" { "cancelled" } else { "error" }, &e);
+            if e == "cancelled" {
+                set_status(&run, "cancelled", &e);
+            } else {
+                set_status(&run, "error", &training_failure_message(&e, vram_mib));
+            }
             return;
         }
 
@@ -2647,3 +3058,184 @@ mod shutdown_tests {
         );
     }
 }
+
+// ── the whole journey, ticket 0004 follow-up (06.09.2026) ───────────────────
+//
+// David's line: the app cannot afford to hand anyone instructions; from the
+// first error to a finished training, everything has to happen in the app.
+// These pin the pieces that replaced a pointer with an action: no git needed,
+// room checked before the first byte, a dropped download retried, the Visual
+// C++ runtime installed instead of linked, winget kept out of the note, the
+// card's memory checked before ten minutes of caching, and the one dead end
+// the run still has (out of memory) named with its way out.
+#[cfg(test)]
+mod journey_tests {
+    use super::*;
+
+    fn fresh_state() -> Arc<Mutex<crate::state::InstallState>> {
+        Arc::new(Mutex::new(crate::state::InstallState::default()))
+    }
+
+    #[test]
+    fn winget_runs_silent_with_both_agreements_and_a_scope_only_for_user_packages() {
+        let user = winget_install_args("Python.Python.3.12", true);
+        assert_eq!(user[..2], ["install", "Python.Python.3.12"]);
+        assert!(user.contains(&"--silent".to_string()));
+        assert!(user.contains(&"--accept-package-agreements".to_string()));
+        assert!(user.contains(&"--accept-source-agreements".to_string()));
+        assert_eq!(user[user.len() - 2..], ["--scope", "user"]);
+        // The Visual C++ runtime only installs machine wide; a scope would
+        // make winget refuse it.
+        let machine = winget_install_args("Microsoft.VCRedist.2015+.x64", false);
+        assert!(!machine.iter().any(|a| a == "--scope"), "{machine:?}");
+        assert!(machine.contains(&"--silent".to_string()));
+    }
+
+    #[test]
+    fn a_quiet_child_keeps_its_tail_for_the_error_and_writes_nothing_into_the_log() {
+        let state = fresh_state();
+        let cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let pid = Arc::new(Mutex::new(None));
+        let mk = || {
+            #[cfg(target_os = "windows")]
+            {
+                let mut c = Command::new("cmd");
+                c.args(["/c", "echo geheim & exit 3"]);
+                c
+            }
+            #[cfg(not(target_os = "windows"))]
+            {
+                let mut c = Command::new("sh");
+                c.args(["-c", "echo geheim; exit 3"]);
+                c
+            }
+        };
+        let err = run_quiet(mk(), "probe", &state, &cancel, &pid).unwrap_err();
+        assert!(err.contains("geheim"), "the tail must survive for the failure message: {err}");
+        assert!(
+            !state.lock().unwrap().logs.iter().any(|l| l.contains("geheim")),
+            "a quiet child's lines must not reach the note under the button"
+        );
+        // Negative control: the streamed variant does put them there.
+        let err = run_streamed(mk(), "probe", &state, &cancel, &pid).unwrap_err();
+        assert!(err.contains("geheim"));
+        assert!(state.lock().unwrap().logs.iter().any(|l| l.contains("geheim")));
+    }
+
+    #[test]
+    fn only_a_network_failure_is_worth_a_retry() {
+        assert!(is_transient_network("torch install failed (exit Some(1)).\nConnectionResetError: connection reset by peer"));
+        assert!(is_transient_network("ReadTimeoutError: read timed out"));
+        assert!(is_transient_network("ERROR: 429 Too Many Requests "));
+        assert!(!is_transient_network("ERROR: No matching distribution found for torch"));
+        assert!(!is_transient_network("OSError: [Errno 28] No space left on device"));
+        assert!(!is_transient_network("cancelled"));
+    }
+
+    #[test]
+    fn the_room_check_answers_before_the_first_byte_and_carries_its_own_way_out() {
+        let root = Path::new("C:\\Users\\d\\musubi");
+        let gib = 1024u64 * 1024 * 1024;
+        let msg = disk_room_message(root, 5 * gib + gib / 2, 10).expect("5.5 GB is not enough for 10");
+        assert!(msg.contains("5.5 GB free"), "{msg}");
+        assert!(msg.contains("about 10 GB"), "{msg}");
+        assert!(msg.contains("Set up trainer"), "{msg}");
+        assert!(msg.contains(&root.display().to_string()), "names the drive: {msg}");
+        // It must not be wrapped in "check that you are online".
+        assert_eq!(install_failed_message(&msg), msg);
+        assert!(disk_room_message(root, 20 * gib, 10).is_none());
+        assert!(disk_room_message(root, 7 * gib, 7).is_none(), "exactly enough is enough");
+    }
+
+    #[test]
+    fn the_source_counts_as_present_for_an_archive_with_the_tag_or_an_older_git_checkout() {
+        let dir = crate::os_paths::test_dir("trainer-source");
+        assert!(!musubi_source_present(&dir), "nothing there yet");
+        let pkg = repo_dir(&dir).join("src").join("musubi_tuner");
+        fs::create_dir_all(&pkg).unwrap();
+        assert!(!musubi_source_present(&dir), "a bare folder without a tag is not the pinned source");
+        fs::write(musubi_source_marker(&dir), "v0.0.1").unwrap();
+        assert!(!musubi_source_present(&dir), "a different tag is not this release");
+        fs::write(musubi_source_marker(&dir), format!("{MUSUBI_TAG}\n")).unwrap();
+        assert!(musubi_source_present(&dir), "the archive of this tag");
+        fs::remove_file(musubi_source_marker(&dir)).unwrap();
+        fs::create_dir_all(repo_dir(&dir).join(".git")).unwrap();
+        assert!(musubi_source_present(&dir), "a git checkout from an older LU is kept");
+        fs::remove_dir_all(&pkg).unwrap();
+        assert!(!musubi_source_present(&dir), "a checkout without the package is not usable");
+    }
+
+    #[test]
+    fn the_archive_url_names_the_pinned_tag_on_the_codeload_host() {
+        let url = musubi_archive_url();
+        assert!(url.starts_with("https://codeload.github.com/kohya-ss/musubi-tuner/zip/refs/tags/"), "{url}");
+        assert!(url.ends_with(MUSUBI_TAG), "{url}");
+    }
+
+    #[test]
+    fn the_probe_reports_the_cards_memory_and_the_floor_is_twelve_gigabytes() {
+        assert!(TORCH_PREFLIGHT_PY.contains("VRAM_MIB"), "the probe script has to print it");
+        assert_eq!(parse_vram_mib("TORCH_OK 2.5.1\nCUDA 1\nCAP 8 6\nARCHS sm_86\nVRAM_MIB 12288\n"), Some(12288));
+        assert_eq!(parse_vram_mib("TORCH_OK 2.5.1\nCUDA 0\n"), None);
+        assert!(vram_verdict(Some(12288)).is_none(), "the box's 12 GB card trains");
+        assert!(vram_verdict(Some(16 * 1024)).is_none());
+        assert!(vram_verdict(None).is_none(), "no card reported is the processor case, handled elsewhere");
+        let small = vram_verdict(Some(8 * 1024)).expect("8 GB is below the floor");
+        assert!(small.contains("8 GB"), "{small}");
+        assert!(small.contains("12 GB"), "{small}");
+        assert!(small.contains("Cloud mode"), "names the way that works: {small}");
+    }
+
+    #[test]
+    fn out_of_memory_in_the_run_is_named_with_its_way_out_and_other_errors_pass_through() {
+        let oom = "training failed (exit Some(1)).\ntorch.OutOfMemoryError: CUDA out of memory. Tried to allocate 512.00 MiB";
+        let msg = training_failure_message(oom, Some(12288));
+        assert!(msg.contains("ran out of memory"), "{msg}");
+        assert!(msg.contains("This card has 12 GB"), "{msg}");
+        assert!(msg.contains("close other apps"), "{msg}");
+        assert!(msg.contains("Cloud mode"), "{msg}");
+        assert!(msg.contains("Last steps:"), "{msg}");
+        let other = "training failed (exit Some(1)).\nKeyError: 'foo'";
+        assert_eq!(training_failure_message(other, Some(12288)), other);
+    }
+
+    #[test]
+    fn the_runtime_library_class_is_the_one_the_visual_cpp_install_fixes() {
+        assert!(runtime_library_missing("ImportError: VCOMP140.DLL was not found"));
+        assert!(runtime_library_missing("OSError: [WinError 1114] initialization routine failed"));
+        assert!(runtime_library_missing("ImportError: DLL load failed while importing _C"));
+        assert!(!runtime_library_missing("ModuleNotFoundError: No module named 'torch'"));
+        assert!(!runtime_library_missing("AssertionError: Torch not compiled with CUDA enabled"));
+    }
+
+    #[test]
+    fn a_torch_that_does_not_load_after_setup_names_the_cause_not_the_network() {
+        // What provision returns when the probe fails on a missing runtime
+        // and the install could not fix it: the wrapper has to pick the
+        // Visual C++ sentence on Windows, and never the network one.
+        use super::next_step_for_log;
+        let err = "PyTorch does not load in the trainer environment.\nImportError: VCOMP140.DLL was not found";
+        let step = next_step_for_log(err, "FALLBACK", "windows");
+        assert!(step.contains("Visual C++"), "{step}");
+        assert!(!install_failed_message(err).contains("Check that you are online"));
+    }
+
+    #[test]
+    fn the_setup_takes_the_paths_that_act_instead_of_pointing() {
+        let src = include_str!("trainer.rs");
+        let body = &src[src.find("fn provision_trainer_env(").expect("provision")..];
+        let body = &body[..body.find("pub fn character_trainer_status").expect("end of provision")];
+        assert!(body.contains("fetch_musubi_source(root, state, status_kind, tag, cancel, pid_slot)?"), "step 1 must go through the archive path");
+        assert!(!body.contains("Command::new(\"git\")"), "provision itself must not require git");
+        assert!(body.contains("disk_room_message(root, free, needed_gib)"), "room is asked before the first byte");
+        assert_eq!(body.matches("pip_with_retry(").count(), 2, "both pip steps retry a dropped download");
+        assert!(body.contains("probe_trainer_env(&venv_exe, gpu, \"after setup\")"), "the setup proves the environment loads");
+        assert!(body.contains("winget_install(\"Microsoft.VCRedist.2015+.x64\", false"), "the runtime is installed, not linked");
+        let base = &src[src.find("fn trainer_base_python(").expect("base")..];
+        let base = &base[..base.find("fn musubi_source_marker").expect("end of base")];
+        assert!(base.contains("winget_install(\"Python.Python.3.12\", true"), "Python comes through the quiet winget path");
+        let code = &src[..src.find("#[cfg(test)]").expect("tests start")];
+        assert!(!code.contains("run_streamed(winget"), "winget lines never stream into the note");
+    }
+}
+

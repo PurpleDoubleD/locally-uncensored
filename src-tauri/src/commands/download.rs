@@ -822,7 +822,7 @@ fn space_shortfall(total: u64, already_on_disk: u64, available: Option<u64>) -> 
 /// Free bytes on the drive that holds `dest`. The longest matching mount point
 /// wins, so a model folder on a mounted volume is measured against that volume
 /// and not against the root it hangs under.
-fn available_space_for(dest: &Path) -> Option<u64> {
+pub(crate) fn available_space_for(dest: &Path) -> Option<u64> {
     let disks = sysinfo::Disks::new_with_refreshed_list();
     disks
         .iter()
