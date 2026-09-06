@@ -169,11 +169,20 @@ mod tests {
     // drive the loop directly, with a real child and no Python needed.
 
     /// A child that will not end on its own inside a test's lifetime.
+    ///
+    /// On Windows this is `ping`, not `timeout`: `timeout` refuses to run when
+    /// its stdin is not a console ("Input redirection is not supported") and
+    /// exits at once, which is exactly what happens under a CI runner and made
+    /// the cancel test below see a child that had already ended (2.6.8 release
+    /// run, 2026-09-06). A local ping with 121 echoes runs for two minutes and
+    /// needs no console at all.
     fn a_child_that_never_ends() -> Child {
         #[cfg(windows)]
         let mut cmd = {
             let mut c = std::process::Command::new("cmd");
-            c.args(["/C", "timeout", "/T", "120", "/NOBREAK"]);
+            c.args(["/C", "ping", "-n", "121", "127.0.0.1"]);
+            c.stdout(std::process::Stdio::null());
+            c.stdin(std::process::Stdio::null());
             c
         };
         #[cfg(not(windows))]

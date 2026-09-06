@@ -648,16 +648,19 @@ mod tests {
     // `echo` works on Linux/macOS; PowerShell's `Write-Output` works on
     // Windows. The spawn path picks the right shell automatically based
     // on `cfg!(target_os = "windows")`.
+    // `echo` is a builtin of cmd and an alias in PowerShell, and a local ping
+    // sleeps without needing a console, so the same two commands run under
+    // whichever shell the platform default resolves to. The PowerShell-only
+    // forms used before (Write-Output, Start-Sleep) came back with exit code 1
+    // on the Windows CI runner, where the test process has no console (2.6.8
+    // release run, 2026-09-06); the tests are about the registry and its
+    // polling, not about one shell's console handling.
     fn echo_cmd(msg: &str) -> String {
-        if cfg!(target_os = "windows") {
-            format!("Write-Output {}", msg)
-        } else {
-            format!("echo {}", msg)
-        }
+        format!("echo {}", msg)
     }
     fn sleep_cmd_30s() -> &'static str {
         if cfg!(target_os = "windows") {
-            "Start-Sleep -Seconds 30"
+            "ping -n 31 127.0.0.1"
         } else {
             "sleep 30"
         }
