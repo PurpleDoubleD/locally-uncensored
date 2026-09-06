@@ -192,6 +192,48 @@ fn force_python_utf8(cmd: &mut Command) {
     cmd.env("USE_LIBUV", "0");
 }
 
+/// The Pythons the trainer can be built with. musubi-tuner v0.3.4 declares
+/// `requires-python >=3.10,<3.13`, and the cu121 wheel index stops at cp312
+/// as well, so anything newer fails at step 3 (cu121) or step 4 (cu128, where
+/// torch itself installs fine and musubi then refuses the interpreter).
+///
+/// Ticket 0004 (sockenmonster, 2026-09-05, after the same wall in August):
+/// LU built the venv from the newest Python on the machine, 3.14.6, because
+/// nothing between "which Python does LU use" and "which Python can the
+/// trainer use" existed. The setup now chooses its own interpreter from this
+/// range, and a venv built from the wrong one is rebuilt, not kept.
+const TRAINER_PYTHON_MINORS: std::ops::RangeInclusive<u32> = 10..=12;
+pub(crate) const TRAINER_PYTHON_RANGE: &str = "3.10, 3.11 or 3.12";
+
+/// `(3, 11)` from "3.11.7", None for anything that is not a version.
+pub(crate) fn python_major_minor(version: &str) -> Option<(u32, u32)> {
+    let mut parts = version.trim().split('.');
+    let major = parts.next()?.parse().ok()?;
+    let minor = parts.next()?.parse().ok()?;
+    Some((major, minor))
+}
+
+pub(crate) fn trainer_supports_python(version: &str) -> bool {
+    matches!(python_major_minor(version), Some((3, minor)) if TRAINER_PYTHON_MINORS.contains(&minor))
+}
+
+/// Which interpreter builds the trainer venv, from `(path, version)` pairs
+/// with LU's default first. The default wins when it fits, so a working
+/// environment is never rebuilt just because a newer Python appeared; otherwise
+/// the newest supported one. None when nothing on the list fits.
+pub(crate) fn choose_trainer_python(candidates: &[(String, String)]) -> Option<(String, String)> {
+    if let Some(first) = candidates.first() {
+        if trainer_supports_python(&first.1) {
+            return Some(first.clone());
+        }
+    }
+    candidates
+        .iter()
+        .filter(|(_, v)| trainer_supports_python(v))
+        .max_by_key(|(_, v)| python_major_minor(v))
+        .cloned()
+}
+
 /// cu121 wheels carry kernels up to sm_90 (Hopper). Blackwell reports
 /// compute capability 12.x, so every RTX 50 card needs the cu128 build.
 /// An unreadable probe keeps the cu121 default.
@@ -537,7 +579,7 @@ const UNIX_NATIVE_NEXT_STEP: &str = "PyTorch is on disk but its native libraries
 /// A wrong wheel, not a broken machine. The setup probes the card again, so it
 /// is the same button and a completely different reason.
 const WHEEL_NEXT_STEP: &str = "The PyTorch that was installed carries no support for the card in this machine, so it can only run on the processor. Press Set up trainer in Character Studio: the setup probes the card again and picks the matching wheel.";
-const PYTHON_VERSION_NEXT_STEP: &str = "No wheel exists for the Python version LU is using here. Install Python 3.10, 3.11 or 3.12 from python.org with 'Add to PATH' checked, then press Set up trainer in Character Studio.";
+const PYTHON_VERSION_NEXT_STEP: &str = "The Python in the trainer environment is one the trainer cannot use (it needs 3.10, 3.11 or 3.12). Press Set up trainer in Character Studio: the setup looks for a matching Python on this machine on its own, installs 3.12 on Windows when there is none, and rebuilds the environment with it.";
 const PERMISSION_NEXT_STEP: &str = "The installer was not allowed to write into the Python folder. Close every open Python, Jupyter or IDE debugger, and if that changes nothing, install Python for your own user instead of for all users, then press Set up trainer in Character Studio.";
 const PEP668_NEXT_STEP: &str = "This Python refuses installs outside a virtual environment and the venv module is missing. Install it from your package manager (python3-venv on Debian and Ubuntu, python-virtualenv on Arch, python3-virtualenv on Fedora), then press Set up trainer in Character Studio.";
 
@@ -558,7 +600,7 @@ pub(crate) fn next_step_for_log(log: &str, fallback: &'static str, os: &str) -> 
             if windows { WINDOWS_NATIVE_NEXT_STEP } else { UNIX_NATIVE_NEXT_STEP }
         }
         K::TorchWithoutGpuSupport => WHEEL_NEXT_STEP,
-        K::NoMatchingWheel => PYTHON_VERSION_NEXT_STEP,
+        K::NoMatchingWheel | K::UnsupportedPython => PYTHON_VERSION_NEXT_STEP,
         K::Permission => PERMISSION_NEXT_STEP,
         K::ExternallyManaged => PEP668_NEXT_STEP,
         K::DiskFull => DISK_NEXT_STEP,
@@ -593,10 +635,10 @@ pub(crate) fn repair_failed_message(after: &Preflight, tail: &str) -> String {
 
 /// An error that is already a finished sentence with its own way out. Wrapping
 /// it would bury that way out under a generic one and quote it back as a log
-/// tail. `no_base_python_message` is the only such case today, and it points at
-/// a different button than every other failure here.
+/// tail. `no_trainer_python_message` is the first such case, and it points at
+/// python.org rather than at the button every other failure here names.
 fn already_explained(err: &str) -> bool {
-    err.contains("Install Python in Settings")
+    err.contains("LU finds it on its own")
         // The AMD refusal is the second one: it names the OS wall, says that
         // nothing was downloaded, and pointing at Set up trainer would only
         // walk the customer into the same wall again.
@@ -909,12 +951,17 @@ pub(crate) enum VenvAction {
 /// venv healed itself by accident: `venv/bin/python` is a symlink, and
 /// `exists()` follows it, so a dead base made the check false.
 ///
-/// The question is therefore whether the interpreter RUNS.
-pub(crate) fn venv_action(python_exists: bool, python_starts: bool) -> VenvAction {
-    match (python_exists, python_starts) {
+/// The question is therefore whether the interpreter RUNS, and since ticket
+/// 0004 also WHICH one it is: `python_version` is None for a venv that does
+/// not start and the version for one that does, and a venv built from a
+/// Python outside the trainer's range is exactly as unusable as a dead one.
+/// It ran fine on sockenmonster's machine, its pip just refused musubi.
+pub(crate) fn venv_action(python_exists: bool, python_version: Option<&str>) -> VenvAction {
+    match (python_exists, python_version) {
         (false, _) => VenvAction::Create,
-        (true, false) => VenvAction::Rebuild,
-        (true, true) => VenvAction::Keep,
+        (true, None) => VenvAction::Rebuild,
+        (true, Some(v)) if !trainer_supports_python(v) => VenvAction::Rebuild,
+        (true, Some(_)) => VenvAction::Keep,
     }
 }
 
@@ -929,28 +976,100 @@ pub(crate) fn venv_create_args(action: VenvAction) -> &'static [&'static str] {
     }
 }
 
-/// Why we are stopping when there is no system Python to build with. A rebuild
-/// deletes the old venv, so it must never start without one: leaving the
-/// customer with no environment at all is worse than the broken one they had.
-pub(crate) fn no_base_python_message(action: VenvAction) -> String {
-    let why = if action == VenvAction::Rebuild {
-        "The trainer environment is still there but its Python does not start any more (the Python it was built from was moved, upgraded or removed), and rebuilding it needs a working Python on this machine."
+/// Why we are stopping when no Python on this machine can build the trainer
+/// venv. `found` is every version that runs here, so the sentence can say what
+/// IS installed instead of asking the customer to guess. Settings > Install
+/// Python is deliberately not the pointer: it short-circuits as soon as any
+/// Python exists, which on a 3.14 machine is exactly the one that cannot help.
+/// The last sentence is the marker `already_explained` looks for.
+pub(crate) fn no_trainer_python_message(found: &[String], os: &str, winget_tried: bool) -> String {
+    let have = if found.is_empty() {
+        "no Python that starts".to_string()
     } else {
-        "Setting up the trainer needs a working Python on this machine."
+        format!("Python {}", found.join(" and "))
     };
-    format!("{why} Install Python in Settings, then start this again.")
+    let get = match os {
+        "windows" if winget_tried => {
+            "LU tried to install Python 3.12 with winget and that did not work. Install Python 3.12 from https://www.python.org/downloads/windows/ (any install option, it does not need to be on PATH)"
+        }
+        "windows" => "Install Python 3.12 from https://www.python.org/downloads/windows/ (any install option, it does not need to be on PATH)",
+        "macos" => "Install it with 'brew install python@3.12' or from https://www.python.org/downloads/macos/",
+        _ => "Install it with your package manager (python3.12 on Debian, Ubuntu and Fedora, python312 from the AUR on Arch)",
+    };
+    format!(
+        "The trainer needs Python {TRAINER_PYTHON_RANGE} and this machine has {have}. {get}, then press Set up trainer in Character Studio. LU finds it on its own."
+    )
 }
 
-/// Cheapest honest check that an interpreter is usable: start it and let it
-/// exit immediately. A venv python whose base is gone never reaches the code,
-/// it aborts during interpreter init, so a non-zero exit is the answer.
-fn python_starts(exe: &Path) -> bool {
-    let mut cmd = Command::new(exe);
-    cmd.args(["-c", "pass"]);
-    force_python_utf8(&mut cmd);
-    #[cfg(target_os = "windows")]
-    cmd.creation_flags(CREATE_NO_WINDOW);
-    cmd.output().map(|o| o.status.success()).unwrap_or(false)
+/// The interpreter that builds `<root>/venv`, decided before a clone and 2.5
+/// GB of wheels. LU's default first, then every other Python on the machine,
+/// each asked for its version; on Windows, when none fits, the same winget
+/// install Settings runs, and the machine is asked again. The winget run is
+/// streamed like every other step so it can be cancelled and read.
+fn trainer_base_python(
+    python_bin: &str,
+    state: &Arc<Mutex<crate::state::InstallState>>,
+    status_kind: &str,
+    cancel: &Arc<std::sync::atomic::AtomicBool>,
+    pid_slot: &Arc<Mutex<Option<u32>>>,
+) -> Result<(String, String), String> {
+    let versioned = |paths: Vec<String>| -> Vec<(String, String)> {
+        let mut seen: Vec<(String, String)> = Vec::new();
+        for p in paths {
+            if !crate::python::is_real_python(&p) || seen.iter().any(|(s, _)| s.eq_ignore_ascii_case(&p)) {
+                continue;
+            }
+            if let Some(v) = crate::python::python_version(&p) {
+                seen.push((p, v));
+            }
+        }
+        seen
+    };
+    let survey = || {
+        let mut paths = vec![python_bin.to_string()];
+        paths.extend(crate::python::python_interpreters());
+        versioned(paths)
+    };
+    let mut found = survey();
+    let mut winget_tried = false;
+    if choose_trainer_python(&found).is_none() && std::env::consts::OS == "windows" {
+        set_status(state, status_kind, &format!(
+            "Installing Python 3.12 for the trainer (this machine has {}, the trainer needs {TRAINER_PYTHON_RANGE})...",
+            found.iter().map(|(_, v)| v.as_str()).collect::<Vec<_>>().join(" and ")
+        ));
+        let mut winget = Command::new("winget");
+        winget.args([
+            "install",
+            "Python.Python.3.12",
+            "--silent",
+            "--accept-package-agreements",
+            "--accept-source-agreements",
+            "--scope",
+            "user",
+        ]);
+        winget_tried = true;
+        match run_streamed(winget, "winget python", state, cancel, pid_slot) {
+            Ok(()) => {}
+            Err(e) if e == "cancelled" => return Err(e),
+            Err(e) => push_log(state, &e),
+        }
+        // Asked again whatever winget said: its exit code is not the fact
+        // that matters, the interpreter on disk is.
+        found = survey();
+    }
+    let versions: Vec<String> = found.iter().map(|(_, v)| v.clone()).collect();
+    let (path, version) = choose_trainer_python(&found)
+        .ok_or_else(|| no_trainer_python_message(&versions, std::env::consts::OS, winget_tried))?;
+    if path != python_bin {
+        let default = found
+            .first()
+            .filter(|(p, _)| p == python_bin)
+            .map_or("none".to_string(), |(_, v)| v.clone());
+        push_log(state, &format!(
+            "Building the trainer environment with Python {version} at {path}: the trainer needs {TRAINER_PYTHON_RANGE}, and LU's default Python here is {default}."
+        ));
+    }
+    Ok((path, version))
 }
 
 /// The four install steps, idempotent by design: an existing checkout and a
@@ -1004,6 +1123,12 @@ fn provision_trainer_env(
     .unwrap_or(candidates[0]);
     let wheel_note = format!("{wheel_note} (wheel index: {torch_index})");
 
+    // Decided second, for the same reason: the interpreter the venv is built
+    // from must be one the wheels and musubi accept, and LU's default Python
+    // is whatever is newest on the machine.
+    let (python_bin, base_version) = trainer_base_python(python_bin, state, status_kind, cancel, pid_slot)?;
+    let python_bin = python_bin.as_str();
+
     let _ = fs::create_dir_all(root.join("models"));
 
     // 1) pinned clone (releases are the project's own stability advice)
@@ -1017,23 +1142,27 @@ fn provision_trainer_env(
         push_log(state, "musubi tuner already present, keeping the pinned checkout.");
     }
 
-    // 2) venv. Asked as "does its python run", not "is the file there": see
-    // venv_action. A dead venv is exactly the state a repair is called for,
-    // and it used to be the one state this step could not fix.
+    // 2) venv. Asked as "does its python run, and which one is it", not "is
+    // the file there": see venv_action. A dead venv is exactly the state a
+    // repair is called for, and it used to be the one state this step could
+    // not fix; a venv from the wrong Python was kept and failed at step 4.
     let vpy_path = venv_python(root);
     let exists = vpy_path.exists();
-    let action = venv_action(exists, exists && python_starts(&vpy_path));
+    let venv_version = if exists {
+        crate::python::python_version(&vpy_path.to_string_lossy())
+    } else {
+        None
+    };
+    let action = venv_action(exists, venv_version.as_deref());
     if action != VenvAction::Keep {
-        // A rebuild deletes what is there, so it may only start once we know
-        // there is something to rebuild WITH. is_real_python filters the
-        // Windows Store stub; starting it is what proves the interpreter the
-        // user still has is the one this venv lost.
-        let base = Path::new(python_bin);
-        if !crate::python::is_real_python(python_bin) || !python_starts(base) {
-            return Err(no_base_python_message(action));
-        }
+        // A rebuild deletes what is there, and it only starts here because
+        // trainer_base_python has already proven there is something to
+        // rebuild WITH.
         if action == VenvAction::Rebuild {
-            push_log(state, "The trainer environment is there but its Python does not start any more. Rebuilding it from scratch, your training images and base models are left alone.");
+            push_log(state, &match venv_version.as_deref() {
+                Some(v) => format!("The trainer environment was built with Python {v}, which the trainer cannot use (it needs {TRAINER_PYTHON_RANGE}). Rebuilding it with Python {base_version}, your training images and base models are left alone."),
+                None => "The trainer environment is there but its Python does not start any more. Rebuilding it from scratch, your training images and base models are left alone.".to_string(),
+            });
         }
         set_status(state, status_kind, &format!("{tag} (2/4): creating the training environment (venv)..."));
         let mut venv = Command::new(python_bin);
@@ -2073,7 +2202,7 @@ mod shutdown_tests {
     #[test]
     fn a_venv_whose_python_no_longer_starts_gets_rebuilt() {
         use super::{venv_action, venv_create_args, VenvAction};
-        assert_eq!(venv_action(true, false), VenvAction::Rebuild);
+        assert_eq!(venv_action(true, None), VenvAction::Rebuild);
         // A rebuild must clear: the old site-packages belongs to an
         // interpreter that no longer exists, and pip would repair on top of it.
         assert_eq!(venv_create_args(VenvAction::Rebuild), ["-m", "venv", "--clear"]);
@@ -2082,13 +2211,104 @@ mod shutdown_tests {
     #[test]
     fn a_working_venv_is_kept_and_a_missing_one_is_created() {
         use super::{venv_action, venv_create_args, VenvAction};
-        assert_eq!(venv_action(true, true), VenvAction::Keep);
-        assert_eq!(venv_action(false, false), VenvAction::Create);
+        assert_eq!(venv_action(true, Some("3.11.7")), VenvAction::Keep);
+        assert_eq!(venv_action(false, None), VenvAction::Create);
         // POSIX: venv/bin/python is a symlink, so a dead base already shows up
         // as absent. That is why this only ever bit Windows.
-        assert_eq!(venv_action(false, true), VenvAction::Create);
+        assert_eq!(venv_action(false, Some("3.12.1")), VenvAction::Create);
         assert_eq!(venv_create_args(VenvAction::Create), ["-m", "venv"]);
         assert_eq!(venv_create_args(VenvAction::Keep), ["-m", "venv"]);
+    }
+
+    // ── ticket 0004: the venv from the wrong Python (sockenmonster) ─────────
+    //
+    // His machine has Python 3.14.6 and nothing older. LU used it for the
+    // venv, torch from cu128 installed fine, and step 4 died on "Package
+    // 'musubi-tuner' requires a different Python: 3.14.6 not in
+    // '<3.13,>=3.10'", which 2.6.7 reported as "check that you are online".
+    // On the next attempt the venv was there and ran, so step 2 kept it, and
+    // the same wall came back on every update since August.
+
+    #[test]
+    fn a_venv_from_a_python_the_trainer_cannot_use_is_rebuilt_not_kept() {
+        use super::{venv_action, VenvAction};
+        assert_eq!(venv_action(true, Some("3.14.6")), VenvAction::Rebuild, "sockenmonster's venv");
+        assert_eq!(venv_action(true, Some("3.13.5")), VenvAction::Rebuild, "the box's newest Python");
+        assert_eq!(venv_action(true, Some("3.9.13")), VenvAction::Rebuild, "too old is as wrong as too new");
+        for v in ["3.10.6", "3.11.7", "3.12.1"] {
+            assert_eq!(venv_action(true, Some(v)), VenvAction::Keep, "{v}");
+        }
+    }
+
+    #[test]
+    fn the_trainer_range_is_the_one_musubi_and_the_cu121_index_agree_on() {
+        use super::trainer_supports_python;
+        assert!(trainer_supports_python("3.10.0"));
+        assert!(trainer_supports_python("3.12.11"));
+        assert!(!trainer_supports_python("3.13.0"));
+        assert!(!trainer_supports_python("3.14.6"));
+        assert!(!trainer_supports_python("3.9.99"));
+        assert!(!trainer_supports_python("4.0.0"));
+        assert!(!trainer_supports_python("Python 3.11"), "not a version, not a match");
+        assert!(!trainer_supports_python(""));
+    }
+
+    #[test]
+    fn the_setup_keeps_lus_python_when_it_fits_and_otherwise_takes_the_newest_that_does() {
+        use super::choose_trainer_python;
+        let pair = |p: &str, v: &str| (p.to_string(), v.to_string());
+        // LU's default fits: kept, even though a newer supported one exists,
+        // so a working venv is never rebuilt because a Python appeared.
+        let got = choose_trainer_python(&[pair("C:\\py311", "3.11.7"), pair("C:\\py312", "3.12.1")]);
+        assert_eq!(got, Some(pair("C:\\py311", "3.11.7")));
+        // sockenmonster: the default is 3.14, and there is a 3.10 and a 3.12
+        // further down the list. The newest that fits wins.
+        let got = choose_trainer_python(&[
+            pair("C:\\py314", "3.14.6"),
+            pair("C:\\py310", "3.10.6"),
+            pair("C:\\py312", "3.12.1"),
+            pair("C:\\py313", "3.13.5"),
+        ]);
+        assert_eq!(got, Some(pair("C:\\py312", "3.12.1")));
+        // Only 3.14: nothing fits, and the caller has to say so or install one.
+        assert_eq!(choose_trainer_python(&[pair("C:\\py314", "3.14.6")]), None);
+        assert_eq!(choose_trainer_python(&[]), None);
+    }
+
+    #[test]
+    fn when_no_python_fits_the_message_names_what_is_there_and_where_to_get_one() {
+        use super::{install_failed_message, no_trainer_python_message, repair_aborted_message, Preflight};
+        let found = vec!["3.14.6".to_string()];
+        let win = no_trainer_python_message(&found, "windows", true);
+        assert!(win.contains("3.10, 3.11 or 3.12"), "{win}");
+        assert!(win.contains("has Python 3.14.6"), "{win}");
+        assert!(win.contains("winget") && win.contains("python.org/downloads/windows"), "{win}");
+        assert!(win.contains("Set up trainer"), "{win}");
+        // Settings > Install Python short-circuits as soon as ANY Python exists,
+        // which on this machine is the one that cannot help.
+        assert!(!win.contains("Settings"), "{win}");
+        let win_no_try = no_trainer_python_message(&found, "windows", false);
+        assert!(!win_no_try.contains("winget"), "{win_no_try}");
+        let linux = no_trainer_python_message(&found, "linux", false);
+        assert!(linux.contains("package manager") && !linux.contains("python.org"), "{linux}");
+        let mac = no_trainer_python_message(&found, "macos", false);
+        assert!(mac.contains("brew install python@3.12"), "{mac}");
+        let none = no_trainer_python_message(&[], "windows", true);
+        assert!(none.contains("no Python that starts"), "{none}");
+        // It carries its own way out, so neither wrapper may bury it.
+        assert_eq!(install_failed_message(&win), win);
+        assert_eq!(repair_aborted_message(&Preflight::TorchBroken("x".into()), &win), win);
+    }
+
+    #[test]
+    fn sockenmonsters_pip_line_is_named_as_a_python_version_problem_not_a_network_one() {
+        use super::install_failed_message;
+        let msg = install_failed_message(
+            "musubi install failed (exit Some(1)).\nERROR: Package 'musubi-tuner' requires a different Python: 3.14.6 not in '<3.13,>=3.10'",
+        );
+        assert!(msg.contains("3.10, 3.11 or 3.12"), "{msg}");
+        assert!(msg.contains("Set up trainer"), "{msg}");
+        assert!(!msg.contains("Check that you are online"), "still the 2.6.7 sentence: {msg}");
     }
 
     /// The probe directory is per-process now (`test_dir` puts the pid and the
@@ -2102,25 +2322,13 @@ mod shutdown_tests {
     /// fixture.
     #[test]
     fn presence_alone_never_counts_as_a_working_interpreter() {
-        use super::python_starts;
+        use crate::python::python_version;
         let dir = crate::os_paths::test_dir("trainer-venv-probe");
         let fake = dir.join("python-not-an-interpreter");
         std::fs::write(&fake, b"pyvenv.cfg points at a home that is gone").unwrap();
         assert!(fake.exists(), "the file is there, which is all the old check asked");
-        assert!(!python_starts(&fake), "but it does not run, which is the question");
-        assert!(!python_starts(&dir.join("nothing-here")));
-    }
-
-    #[test]
-    fn a_rebuild_without_a_base_python_explains_itself_instead_of_wiping_the_venv() {
-        use super::{no_base_python_message, VenvAction};
-        let rebuild = no_base_python_message(VenvAction::Rebuild);
-        assert!(rebuild.contains("does not start any more"));
-        assert!(rebuild.contains("Install Python in Settings"));
-        // The fresh-install case must not claim there is an environment.
-        let create = no_base_python_message(VenvAction::Create);
-        assert!(!create.contains("still there"));
-        assert!(create.contains("Install Python in Settings"));
+        assert_eq!(python_version(&fake.to_string_lossy()), None, "but it does not run, which is the question");
+        assert_eq!(python_version(&dir.join("nothing-here").to_string_lossy()), None);
     }
 
     #[test]
@@ -2132,8 +2340,8 @@ mod shutdown_tests {
         let step2 = &src[src.find("    // 2) venv").expect("step 2 marker")..];
         let step2 = &step2[..step2.find("// 3) torch").expect("step 3 marker")];
         assert!(
-            step2.contains("venv_action(exists, exists && python_starts(&vpy_path))"),
-            "step 2 must decide with venv_action, not with a bare exists()",
+            step2.contains("venv_action(exists, venv_version.as_deref())"),
+            "step 2 must decide with venv_action on the venv's version, not with a bare exists()",
         );
         assert!(
             !step2.contains("if !venv_python(root).exists()"),
@@ -2220,8 +2428,8 @@ mod shutdown_tests {
     /// button. Wrapping it would bury that and quote it back as a log tail.
     #[test]
     fn an_error_that_already_names_its_button_is_left_alone() {
-        use super::{install_failed_message, no_base_python_message, repair_aborted_message, Preflight, VenvAction};
-        let eigen = no_base_python_message(VenvAction::Rebuild);
+        use super::{install_failed_message, no_trainer_python_message, repair_aborted_message, Preflight};
+        let eigen = no_trainer_python_message(&["3.14.6".to_string()], "windows", false);
         assert_eq!(install_failed_message(&eigen), eigen);
         assert_eq!(
             repair_aborted_message(&Preflight::TorchBroken("x".into()), &eigen),

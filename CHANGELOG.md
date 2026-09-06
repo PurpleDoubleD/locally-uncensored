@@ -238,6 +238,14 @@ and the built-in engine has a name of its own, the LU Engine.
 - **Repair environment runs the same check with a time limit and a Cancel
   button that stops it**, and the trainer setup stopped blaming the network for
   failures that had nothing to do with the network.
+- **Character Studio sets itself up on a machine whose Python is too new.**
+  The trainer needs Python 3.10 to 3.12 and LU built its environment from
+  whatever Python was newest, so a machine with 3.14 failed at step 4 of 4 on
+  every update since August, and 2.6.7 called it a network problem. The setup
+  now picks a Python from that range on its own, installs 3.12 on Windows when
+  there is none, rebuilds an environment that was built from the wrong one,
+  and the failure text under the button is no longer cut after one line.
+  Discord ticket 0004.
 - **AMD on Windows is read from the HIP SDK itself.** The only ROCm probe ran
   rocm-smi, which the Windows SDK does not ship, so an installed ROCm went
   unseen. LU reads HIP_PATH and hipinfo now and names the card architecture,

@@ -302,15 +302,17 @@ fn python_via_py_launcher() -> Option<String> {
 
 /// Standard single-version python.org install dirs at the drive root.
 #[cfg(target_os = "windows")]
+const WINDOWS_FIXED_PYTHONS: [&str; 5] = [
+    "C:\\Python313\\python.exe",
+    "C:\\Python312\\python.exe",
+    "C:\\Python311\\python.exe",
+    "C:\\Python310\\python.exe",
+    "C:\\Python39\\python.exe",
+];
+
+#[cfg(target_os = "windows")]
 fn python_in_fixed_paths() -> Option<String> {
-    const COMMON: [&str; 5] = [
-        "C:\\Python313\\python.exe",
-        "C:\\Python312\\python.exe",
-        "C:\\Python311\\python.exe",
-        "C:\\Python310\\python.exe",
-        "C:\\Python39\\python.exe",
-    ];
-    for p in COMMON {
+    for p in WINDOWS_FIXED_PYTHONS {
         if Path::new(p).exists() && verify_python_path(p) {
             println!("[Python] Found at fixed path: {}", p);
             return Some(p.to_string());
@@ -345,7 +347,15 @@ fn python_in_appdata() -> Option<String> {
 /// Scan `base` for `Python3xx\python.exe`, newest version first.
 #[cfg(target_os = "windows")]
 fn scan_python_subdirs(base: &Path, label: &str) -> Option<String> {
-    let entries = std::fs::read_dir(base).ok()?;
+    let path = python_subdirs(base).into_iter().next()?;
+    println!("[Python] Found in {}: {}", label, path);
+    Some(path)
+}
+
+/// Every runnable `Python3xx\python.exe` under `base`, newest version first.
+#[cfg(target_os = "windows")]
+fn python_subdirs(base: &Path) -> Vec<String> {
+    let Ok(entries) = std::fs::read_dir(base) else { return Vec::new() };
     let mut dirs: Vec<_> = entries
         .filter_map(|e| e.ok())
         .filter(|e| {
@@ -354,30 +364,29 @@ fn scan_python_subdirs(base: &Path, label: &str) -> Option<String> {
         })
         .collect();
     dirs.sort_by_key(|e| std::cmp::Reverse(e.file_name()));
-    for dir in dirs {
-        let exe = dir.path().join("python.exe");
-        if exe.exists() {
-            let path = exe.to_string_lossy().to_string();
-            if verify_python_path(&path) {
-                println!("[Python] Found in {}: {}", label, path);
-                return Some(path);
-            }
-        }
-    }
-    None
+    dirs.into_iter()
+        .map(|dir| dir.path().join("python.exe"))
+        .filter(|exe| exe.exists())
+        .map(|exe| exe.to_string_lossy().to_string())
+        .filter(|path| verify_python_path(path))
+        .collect()
 }
 
 /// Miniconda / Anaconda base env in the user profile.
 #[cfg(target_os = "windows")]
-fn python_in_conda() -> Option<String> {
-    let userprofile = std::env::var("USERPROFILE").ok()?;
-    let candidates = [
+fn conda_candidates() -> Vec<PathBuf> {
+    let Ok(userprofile) = std::env::var("USERPROFILE") else { return Vec::new() };
+    vec![
         Path::new(&userprofile).join("miniconda3").join("python.exe"),
         Path::new(&userprofile).join("anaconda3").join("python.exe"),
         Path::new(&userprofile).join("miniconda3").join("Scripts").join("python.exe"),
         Path::new(&userprofile).join("anaconda3").join("Scripts").join("python.exe"),
-    ];
-    for p in candidates {
+    ]
+}
+
+#[cfg(target_os = "windows")]
+fn python_in_conda() -> Option<String> {
+    for p in conda_candidates() {
         if p.exists() {
             let path = p.to_string_lossy().to_string();
             if verify_python_path(&path) {
@@ -387,6 +396,124 @@ fn python_in_conda() -> Option<String> {
         }
     }
     None
+}
+
+/// "3.11.7" for an interpreter that runs, None for a stub or one that dies
+/// during init. The version is asked from the interpreter itself, not read
+/// off a folder name or a pyvenv.cfg, because those describe what was
+/// installed once, not what starts today.
+pub fn python_version(exe: &str) -> Option<String> {
+    let out = python_command(exe)
+        .args(["-c", "import sys;print('%d.%d.%d'%sys.version_info[:3])"])
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let v = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    if v.is_empty() { None } else { Some(v) }
+}
+
+/// Every interpreter this machine has, LU's usual order, duplicates and the
+/// Store stub dropped. `get_python_bin` answers "which Python does LU use";
+/// a lane whose wheels stop at a version has to ask "which Pythons are
+/// there" and pick its own. Until 2.6.8 nobody asked, so a box whose newest
+/// Python was 3.14 built the trainer venv from 3.14 and died at step 4/4
+/// (sockenmonster, Discord, August and ticket 0004 on 2026-09-05).
+///
+/// Nothing here starts an interpreter beyond the `--version` gate the
+/// existing scans apply; the caller asks each hit for its version.
+#[cfg(not(target_os = "windows"))]
+pub fn python_interpreters() -> Vec<String> {
+    let mut found: Vec<String> = Vec::new();
+    for name in crate::os_paths::unix_python_candidates() {
+        let Ok(path) = which::which(name) else { continue };
+        let path = path.to_string_lossy().to_string();
+        if !found.contains(&path) {
+            found.push(path);
+        }
+    }
+    found
+}
+
+/// Windows walks the launcher registry first: `py -0p` lists every
+/// python.org install with its path (PEP 514), whether or not it is on PATH.
+/// Then the same places `get_python_bin` looks, all hits instead of the
+/// first.
+#[cfg(target_os = "windows")]
+pub fn python_interpreters() -> Vec<String> {
+    let mut found: Vec<String> = Vec::new();
+    let mut push = |p: String| {
+        if !p.is_empty()
+            && !p.contains("WindowsApps")
+            && !found.iter().any(|f| f.eq_ignore_ascii_case(&p))
+        {
+            found.push(p);
+        }
+    };
+    let mut launcher = Command::new("py");
+    launcher.arg("-0p");
+    launcher.creation_flags(CREATE_NO_WINDOW);
+    if let Ok(out) = launcher.output() {
+        if out.status.success() {
+            for p in launcher_list_paths(&String::from_utf8_lossy(&out.stdout)) {
+                push(p);
+            }
+        }
+    }
+    let mut where_cmd = Command::new("where");
+    where_cmd.arg("python");
+    where_cmd.creation_flags(CREATE_NO_WINDOW);
+    if let Ok(out) = where_cmd.output() {
+        if out.status.success() {
+            for line in String::from_utf8_lossy(&out.stdout).lines() {
+                push(line.trim().to_string());
+            }
+        }
+    }
+    for p in WINDOWS_FIXED_PYTHONS {
+        if Path::new(p).exists() {
+            push(p.to_string());
+        }
+    }
+    for env_key in ["ProgramFiles", "ProgramW6432", "ProgramFiles(x86)"] {
+        if let Ok(base) = std::env::var(env_key) {
+            for p in python_subdirs(Path::new(&base)) {
+                push(p);
+            }
+        }
+    }
+    if let Ok(localappdata) = std::env::var("LOCALAPPDATA") {
+        for p in python_subdirs(&Path::new(&localappdata).join("Programs").join("Python")) {
+            push(p);
+        }
+    }
+    for p in conda_candidates() {
+        if p.exists() {
+            push(p.to_string_lossy().to_string());
+        }
+    }
+    found
+}
+
+/// The path column of `py -0p`. Lines look like
+/// ` -V:3.13 *        C:\Python313\python.exe` (launcher 3.11 and newer) or
+/// ` -3.11-64 *       C:\Program Files\Python311\python.exe` (older), the
+/// star marks the default, and a path may contain spaces, so everything after
+/// the tag and the optional star is the path.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+pub(crate) fn launcher_list_paths(listing: &str) -> Vec<String> {
+    listing
+        .lines()
+        .map(str::trim)
+        .filter(|l| l.starts_with('-'))
+        .filter_map(|l| {
+            let rest = l[l.find(char::is_whitespace)?..].trim_start();
+            let rest = rest.strip_prefix('*').map_or(rest, str::trim_start);
+            let rest = rest.trim();
+            (!rest.is_empty()).then(|| rest.to_string())
+        })
+        .collect()
 }
 
 /// True iff `bin` looks like a real, runnable Python binary (not the empty
@@ -756,5 +883,32 @@ mod tests {
         fs::create_dir_all(tmp.join("NotPython").join("nested")).unwrap();
         assert!(scan_python_subdirs(&tmp, "test").is_none());
         let _ = fs::remove_dir_all(&tmp);
+    }
+
+    // ── the launcher registry, read for a lane that needs a versioned Python ─
+    //
+    // `py -0p` is the one list on Windows that names every python.org install
+    // with its path whether or not "Add to PATH" was ticked. Both launcher
+    // formats appear in the wild, the default carries a star, and Program
+    // Files puts a space in the path, so the parse must not split on spaces.
+
+    #[test]
+    fn the_launcher_listing_yields_every_path_including_ones_with_spaces() {
+        let listing = " -V:3.13 *        C:\\Python313\\python.exe\n\
+                        -V:3.11          C:\\Program Files\\Python311\\python.exe\n\
+                        -V:3.10          C:\\Users\\d\\AppData\\Local\\Programs\\Python\\Python310\\python.exe\n\
+                        -3.9-64 *        C:\\Python39\\python.exe\n\
+                       Installed Pythons found by py Launcher for Windows\n";
+        assert_eq!(
+            launcher_list_paths(listing),
+            vec![
+                "C:\\Python313\\python.exe",
+                "C:\\Program Files\\Python311\\python.exe",
+                "C:\\Users\\d\\AppData\\Local\\Programs\\Python\\Python310\\python.exe",
+                "C:\\Python39\\python.exe",
+            ]
+        );
+        assert!(launcher_list_paths("").is_empty());
+        assert!(launcher_list_paths("no launcher here\n").is_empty());
     }
 }

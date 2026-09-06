@@ -313,6 +313,11 @@ pub(crate) enum PipFailureKind {
     Permission,
     PipBroken,
     NoMatchingWheel,
+    /// pip found the package and the package refused the interpreter:
+    /// "requires a different Python: 3.14.6 not in '<3.13,>=3.10'". The
+    /// sibling of NoMatchingWheel, one step later, and until ticket 0004 it
+    /// fell through to Unknown and was dressed up as a network problem.
+    UnsupportedPython,
     Unknown,
 }
 
@@ -367,6 +372,8 @@ pub(crate) fn pip_failure_kind(text: &str) -> PipFailureKind {
         PipFailureKind::PipBroken
     } else if lower.contains("could not find a version") {
         PipFailureKind::NoMatchingWheel
+    } else if lower.contains("requires a different python") {
+        PipFailureKind::UnsupportedPython
     } else {
         PipFailureKind::Unknown
     }
@@ -451,6 +458,10 @@ pub(crate) fn pip_failure_hint(kind: PipFailureKind, text: &str) -> String {
         PipFailureKind::NoMatchingWheel =>
             "No matching wheel for your Python version. ComfyUI needs Python \
              3.10, 3.11, or 3.12. Reinstall a supported Python version.".to_string(),
+        PipFailureKind::UnsupportedPython =>
+            "A package refused the Python version it was asked to install into. \
+             ComfyUI needs Python 3.10, 3.11, or 3.12. Install one of those and \
+             set it up again.".to_string(),
         PipFailureKind::Unknown => String::new(),
     }
 }
@@ -729,6 +740,7 @@ pub(crate) fn pip_install_streaming_with_retry_raw(
 pub(crate) fn requirements_failure_reason(pip_output: &str) -> &'static str {
     match pip_failure_kind(pip_output) {
         PipFailureKind::NoMatchingWheel => "pip found no installable version for a package it names",
+        PipFailureKind::UnsupportedPython => "a package it names refuses this Python version",
         PipFailureKind::Network
         | PipFailureKind::Timeout
         | PipFailureKind::Ssl
@@ -1364,6 +1376,8 @@ mod tests {
             ("PermissionError: [Errno 13] Permission denied", PipFailureKind::Permission),
             ("No module named pip", PipFailureKind::PipBroken),
             ("ERROR: Could not find a version that satisfies", PipFailureKind::NoMatchingWheel),
+            // sockenmonster's screenshot, verbatim (Discord, August 2026, ticket 0004).
+            ("ERROR: Package 'musubi-tuner' requires a different Python: 3.14.6 not in '<3.13,>=3.10'", PipFailureKind::UnsupportedPython),
             ("something nobody has seen before", PipFailureKind::Unknown),
         ] {
             assert_eq!(pip_failure_kind(text), kind, "wrong verdict for {text:?}");
